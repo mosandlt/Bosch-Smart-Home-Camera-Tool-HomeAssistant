@@ -220,6 +220,7 @@
             "data": {
               "frigate_endpoints_enabled": "Externe RTSP-Endpunkte aktivieren (Master-Schalter, Standard: aus)",
               "frigate_bind_host": "RTSP-Bind-Host / IP",
+              "frigate_bind_port": "RTSP-Bind-Port",
               "frigate_ip_allowlist": "IP-Zulassungsliste (kommagetrennte CIDRs)",
               "frigate_auth_mode": "Authentifizierungsmodus",
               "frigate_token": "Gemeinsamer Schlüssel / Basic-Auth-Passwort",
@@ -229,6 +230,7 @@
             "data_description": {
               "frigate_endpoints_enabled": "Master-Schalter für alle externen RTSP-Endpunkte. Bei DEAKTIVIERT (Standard) wird kein RTSP-Port geöffnet und keine Bosch-Sitzung gehalten. Bei AKTIVIERT ist der Endpunkt jeder Kamera verfügbar; die Bosch-Stream-Sitzung öffnet sich, wenn der erste Client verbindet, und schließt sich nach dem Leerlauf-Timeout.",
               "frigate_bind_host": "IP-Adresse, an die der RTSP-Server gebunden wird — Voreinstellung wählen oder eigene Adresse eingeben. **127.0.0.1** (localhost, Standard, sicherste Option): Nur der Home-Assistant-Host kann sich verbinden. **0.0.0.0**: Alle LAN-Schnittstellen — erforderlich, wenn Frigate/BlueIris auf einem anderen Host läuft. Oder eine **bestimmte Schnittstellen-IP** eingeben (z. B. 192.168.1.50), um nur diese Netzwerkkarte zu binden. Alles außer localhost ist credential-frei — mit der IP-Zulassungsliste oder einem Token absichern.",
+              "frigate_bind_port": "**0** (Standard): Das Betriebssystem wählt bei jedem HA-Start oder Integrations-Reload einen freien Port — die Sensor-URL ändert sich. Festen Wert setzen (z. B. **8556**), damit die URL bei Neustarts und Einstellungsänderungen stabil bleibt. Bei mehreren Kameras erhält jede Kamera Port, Port+1, … in aufsteigender Kamera-ID-Reihenfolge. Sicherstellen, dass der Port nicht bereits belegt ist.",
               "frigate_ip_allowlist": "Kommagetrennte Liste von IP-Adressen oder CIDR-Bereichen, die sich mit den RTSP-Endpunkten verbinden dürfen. Leer = alle Clients erlaubt. Beispiel: 192.168.1.0/24, 10.0.0.5",
               "frigate_auth_mode": "Optionale Zugangskontrolle für die RTSP-Endpunkte.\n• **keine** (Standard): keine Zugangsdaten erforderlich — auf IP-Zulassungsliste und Netzwerkisolierung verlassen.\n• **Pfad-Token**: Ein gemeinsamer Schlüssel wird an den Stream-URL-Pfad angehängt; Clients müssen ihn angeben.\n• **Basic**: Standard-RTSP-Basic-Auth mit Benutzername und Passwort.",
               "frigate_token": "Gemeinsamer Schlüssel als Pfad-Token (Authentifizierungsmodus: Pfad-Token) oder als Basic-Auth-Passwort (Authentifizierungsmodus: Basic). Leer lassen, um die Zugangskontrolle vollständig zu deaktivieren.",

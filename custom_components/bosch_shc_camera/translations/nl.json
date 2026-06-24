@@ -220,6 +220,7 @@
             "data": {
               "frigate_endpoints_enabled": "Externe RTSP-eindpunten inschakelen (hoofdschakelaar, standaard uit)",
               "frigate_bind_host": "RTSP bind-host / IP",
+              "frigate_bind_port": "RTSP-bindpoort",
               "frigate_ip_allowlist": "IP-allowlist (kommagescheiden CIDR's)",
               "frigate_auth_mode": "Authenticatiemodus",
               "frigate_token": "Gedeeld geheim / Basic-Auth wachtwoord",
@@ -229,6 +230,7 @@
             "data_description": {
               "frigate_endpoints_enabled": "Hoofdschakelaar voor alle externe RTSP-eindpunten. Wanneer UIT (standaard): er wordt geen RTSP-poort geopend en er wordt geen Bosch-sessie bijgehouden. Wanneer AAN: het eindpunt van elke camera is beschikbaar; de Bosch-stroomsessie opent wanneer de eerste client verbinding maakt en sluit na de inactieve time-out.",
               "frigate_bind_host": "IP-adres waaraan de RTSP-server gebonden is — kies een voorinstelling of typ zelf. **127.0.0.1** (localhost, standaard, veiligst): alleen de Home Assistant-host kan verbinding maken. **0.0.0.0**: alle LAN-interfaces — vereist wanneer Frigate/BlueIris op een andere host draait. Of voer een **specifiek interface-IP** in (bijv. 192.168.1.50) om alleen die netwerkkaart te binden. Alles behalve localhost is zonder inloggegevens — combineer het met de IP-allowlist of een token.",
+              "frigate_bind_port": "**0** (standaard): het OS kiest bij elke HA-start of herlaad van de integratie een vrije poort — de sensor-URL verandert. Stel een vaste waarde in (bijv. **8556**) om de URL stabiel te houden bij herstarts en configuratiewijzigingen. Bij meerdere camera’s krijgt elke camera poort, poort+1, … in oplopende volgorde van camera-ID.",
               "frigate_ip_allowlist": "Kommagescheiden lijst van IP-adressen of CIDR-bereiken die verbinding mogen maken. Leeg = elke client toegestaan. Voorbeeld: 192.168.1.0/24, 10.0.0.5",
               "frigate_auth_mode": "Optionele toegangscontrole.\n• none (standaard): geen inloggegevens vereist.\n• path-token: een gedeeld geheim toegevoegd aan het stream-URL-pad.\n• basic: standaard RTSP Basic-Auth met gebruikersnaam en wachtwoord.",
               "frigate_token": "Gedeeld geheim als padtoken (auth-modus: path-token) of Basic-Auth wachtwoord (auth-modus: basic). Leeg laten om de toegangscontrole volledig uit te schakelen.",

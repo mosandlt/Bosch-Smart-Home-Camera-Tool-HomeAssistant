@@ -50,6 +50,7 @@ def _make_coord(**options: object) -> _CoordDouble:
     opts = {
         "frigate_endpoints_enabled": False,
         "frigate_bind_host": "127.0.0.1",
+        "frigate_bind_port": 0,
         "frigate_ip_allowlist": "",
         "frigate_auth_mode": "none",
         "frigate_token": "",
@@ -59,6 +60,7 @@ def _make_coord(**options: object) -> _CoordDouble:
     opts.update(options)
     c = _CoordDouble()
     c.options = opts  # type: ignore[attr-defined]
+    c.data = {CAM_ID: {}}  # type: ignore[attr-defined]
     c._frigate_high_enabled = {}  # type: ignore[attr-defined]
     c._frigate_low_enabled = {}  # type: ignore[attr-defined]
     c._frigate_sticky_port = {}  # type: ignore[attr-defined]
@@ -263,6 +265,57 @@ async def test_sync_retries_ephemeral_on_bind_error() -> None:
     await c.async_sync_frigate_endpoint(CAM_ID)
     assert runner.start_server.call_count == 2
     assert c._frigate_sticky_port[CAM_ID] == 7000  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_fixed_port_uses_base_for_first_cam() -> None:
+    """frigate_bind_port > 0: first (only) camera gets the base port exactly."""
+    c = _make_coord(frigate_endpoints_enabled=True, frigate_bind_port=8556)
+    c._frigate_high_enabled[CAM_ID] = True  # type: ignore[attr-defined]
+    runner = MagicMock()
+    runner.start_server = AsyncMock(return_value=8556)
+    c._frigate_runner = runner  # type: ignore[attr-defined]
+    await c.async_sync_frigate_endpoint(CAM_ID)
+    _, kwargs = runner.start_server.call_args
+    assert kwargs["preferred_port"] == 8556
+    assert c._frigate_sticky_port[CAM_ID] == 8556  # type: ignore[attr-defined]
+
+
+CAM_ID_B = "22222222-2222-2222-2222-222222222222"
+
+
+@pytest.mark.asyncio
+async def test_fixed_port_second_cam_gets_base_plus_one() -> None:
+    """Second camera (sorted cam-ID order) gets base_port + 1."""
+    c = _make_coord(frigate_endpoints_enabled=True, frigate_bind_port=8556)
+    # data has both cams; CAM_ID < CAM_ID_B lexicographically → CAM_ID is idx 0.
+    c.data = {CAM_ID: {}, CAM_ID_B: {}}  # type: ignore[attr-defined]
+    c._frigate_high_enabled[CAM_ID_B] = True  # type: ignore[attr-defined]
+    runner = MagicMock()
+    runner.start_server = AsyncMock(return_value=8557)
+    c._frigate_runner = runner  # type: ignore[attr-defined]
+    await c.async_sync_frigate_endpoint(CAM_ID_B)
+    _, kwargs = runner.start_server.call_args
+    assert kwargs["preferred_port"] == 8557
+
+
+@pytest.mark.asyncio
+async def test_fixed_port_bind_error_no_fallback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Fixed-port collision logs an error and does NOT fall back to ephemeral."""
+    import logging
+
+    c = _make_coord(frigate_endpoints_enabled=True, frigate_bind_port=8556)
+    c._frigate_high_enabled[CAM_ID] = True  # type: ignore[attr-defined]
+    runner = MagicMock()
+    runner.start_server = AsyncMock(side_effect=OSError("port in use"))
+    c._frigate_runner = runner  # type: ignore[attr-defined]
+    with caplog.at_level(logging.ERROR, logger="custom_components.bosch_shc_camera"):
+        await c.async_sync_frigate_endpoint(CAM_ID)
+    assert runner.start_server.call_count == 1  # no retry
+    assert CAM_ID not in c._frigate_sticky_port  # type: ignore[attr-defined]
+    assert "fixed port" in caplog.text
 
 
 # ── _frigate_resolve_inner ───────────────────────────────────────────────────

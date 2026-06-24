@@ -220,6 +220,7 @@
             "data": {
               "frigate_endpoints_enabled": "启用外部 RTSP 端点（主开关，默认关闭）",
               "frigate_bind_host": "RTSP 绑定主机 / IP",
+              "frigate_bind_port": "RTSP 绑定端口",
               "frigate_ip_allowlist": "IP 白名单（逗号分隔的 CIDR）",
               "frigate_auth_mode": "认证模式",
               "frigate_token": "共享密钥 / Basic-Auth 密码",
@@ -229,6 +230,7 @@
             "data_description": {
               "frigate_endpoints_enabled": "所有外部 RTSP 端点的主开关。\n• **关闭**（默认）：不打开任何 RTSP 端口，不保持任何 Bosch 会话。\n• **开启**：每台摄像头的端点可用；Bosch 流媒体会话在第一个客户端连接时打开，并在空闲超时后关闭。",
               "frigate_bind_host": "RTSP 服务器绑定的 IP 地址 — 选择预设或手动输入。**127.0.0.1**（localhost，默认，最安全）：仅 Home Assistant 主机可连接。**0.0.0.0**：所有局域网接口 — 当 Frigate/BlueIris 运行在其他主机上时必须选此项。或输入**特定接口 IP**（如 192.168.1.50）以仅绑定该网卡。除 localhost 外的任何选项均无需凭据 — 请配合 IP 白名单或令牌使用。",
+              "frigate_bind_port": "**0**（默认）：每次 HA 启动或集成重新加载时，系统会选择一个空闲端口——传感器 URL 会变化。设置固定值（如 **8556**）可在重启和设置更改后保持 URL 稳定。多摄像头时，各摄像头依摄像头 ID 升序依次使用 port、port+1……",
               "frigate_ip_allowlist": "允许连接的 IP 地址或 CIDR 范围（逗号分隔）。留空 = 允许任意客户端。示例：192.168.1.0/24, 10.0.0.5",
               "frigate_auth_mode": "可选访问控制。\n• **none**（默认）：无需凭据。\n• **path-token**：将共享密钥附加到流 URL 路径中。\n• **basic**：标准 RTSP Basic-Auth，需要用户名和密码。",
               "frigate_token": "用作路径令牌（认证模式：path-token）或 Basic-Auth 密码（认证模式：basic）的共享密钥。留空则完全禁用访问控制。",

@@ -256,6 +256,10 @@ DEFAULT_OPTIONS = {
     "frigate_basic_user": "frigate",
     # Seconds a session lingers after the last recorder disconnects.
     "frigate_idle_timeout": 60,
+    # Fixed RTSP bind port (0 = OS-assigned ephemeral, changes on restart).
+    # Set to e.g. 8556 to keep the sensor URL stable across HA restarts and
+    # settings changes. Multiple cameras use port, port+1, … (sorted cam-ID order).
+    "frigate_bind_port": 0,
 }
 
 # v2.16.0 dropped the historical "confirm" value (popup dialog) in favour
@@ -266,6 +270,7 @@ AUTO_PLAY_DEFAULT_VALUES = ("lan", "always", "never")
 # ── Frigate / external-recorder persistent RTSP endpoints ─────────────────────
 CONF_FRIGATE_ENDPOINTS_ENABLED = "frigate_endpoints_enabled"
 CONF_FRIGATE_BIND_HOST = "frigate_bind_host"
+CONF_FRIGATE_BIND_PORT = "frigate_bind_port"
 CONF_FRIGATE_IP_ALLOWLIST = "frigate_ip_allowlist"
 CONF_FRIGATE_AUTH_MODE = "frigate_auth_mode"
 CONF_FRIGATE_TOKEN = "frigate_token"  # noqa: S105 # option key name, not a credential

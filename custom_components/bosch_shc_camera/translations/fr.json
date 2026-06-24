@@ -220,6 +220,7 @@
             "data": {
               "frigate_endpoints_enabled": "Activer les endpoints RTSP externes (commutateur principal, désactivé par défaut)",
               "frigate_bind_host": "Hôte / IP de liaison RTSP",
+              "frigate_bind_port": "Port RTSP de liaison",
               "frigate_ip_allowlist": "Liste blanche IP (CIDRs séparés par des virgules)",
               "frigate_auth_mode": "Mode d'authentification",
               "frigate_token": "Secret partagé / Mot de passe Basic-Auth",
@@ -229,6 +230,7 @@
             "data_description": {
               "frigate_endpoints_enabled": "Commutateur principal pour tous les endpoints RTSP externes. DÉSACTIVÉ (défaut) : aucun port RTSP n'est ouvert et aucune session Bosch n'est maintenue. ACTIVÉ : l'endpoint de chaque caméra est disponible ; la session de flux Bosch s'ouvre à la connexion du premier client et se ferme après le délai d'inactivité.",
               "frigate_bind_host": "Adresse IP sur laquelle le serveur RTSP écoute — choisissez un préréglage ou saisissez la vôtre. **127.0.0.1** (localhost, défaut, plus sûr) : seul l'hôte Home Assistant peut se connecter. **0.0.0.0** : toutes les interfaces LAN — requis quand Frigate/BlueIris tourne sur un autre hôte. Ou saisissez une **IP d'interface spécifique** (ex. 192.168.1.50) pour n'écouter que sur cette carte réseau. Toute adresse autre que localhost est sans identifiant — combinez-la avec la liste blanche IP ou un token.",
+              "frigate_bind_port": "**0** (défaut) : l’OS choisit un port libre à chaque démarrage d’HA ou rechargement de l’intégration — l’URL du capteur change. Définissez une valeur fixe (p. ex. **8556**) pour stabiliser l’URL entre redémarrages et modifications de paramètres. Avec plusieurs caméras, chacune obtient port, port+1, … par ordre croissant d’ID caméra.",
               "frigate_ip_allowlist": "Liste d'adresses IP ou de plages CIDR autorisées à se connecter, séparées par des virgules. Vide = tout client autorisé. Exemple : 192.168.1.0/24, 10.0.0.5",
               "frigate_auth_mode": "Contrôle d'accès optionnel. none (défaut) : aucun identifiant requis. path-token : un secret partagé ajouté au chemin de l'URL du flux. basic : RTSP Basic-Auth standard avec nom d'utilisateur et mot de passe.",
               "frigate_token": "Secret partagé utilisé comme token de chemin (mode authentification : path-token) ou mot de passe Basic-Auth (mode authentification : basic). Laisser vide pour désactiver le contrôle d'accès.",

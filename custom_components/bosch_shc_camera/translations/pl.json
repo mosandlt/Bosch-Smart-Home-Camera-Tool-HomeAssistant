@@ -220,6 +220,7 @@
             "data": {
               "frigate_endpoints_enabled": "Włącz zewnętrzne punkty końcowe RTSP (przełącznik główny, domyślnie wyłączony)",
               "frigate_bind_host": "Host / IP nasłuchujący RTSP",
+              "frigate_bind_port": "Port RTSP",
               "frigate_ip_allowlist": "Lista dozwolonych adresów IP (oddzielone przecinkami zakresy CIDR)",
               "frigate_auth_mode": "Tryb uwierzytelnienia",
               "frigate_token": "Wspólny sekret / hasło Basic-Auth",
@@ -229,6 +230,7 @@
             "data_description": {
               "frigate_endpoints_enabled": "Główny przełącznik dla wszystkich zewnętrznych punktów końcowych RTSP. Gdy WYŁĄCZONY (domyślnie): żaden port RTSP nie jest otwierany i żadna sesja Bosch nie jest utrzymywana. Gdy WŁĄCZONY: punkt końcowy każdej kamery jest dostępny; sesja strumienia Bosch otwiera się gdy pierwszy klient się połączy i zamyka po upływie limitu czasu bezczynności.",
               "frigate_bind_host": "Adres IP, na którym nasłuchuje serwer RTSP — wybierz ustawienie wstępne lub wpisz własne. **127.0.0.1** (localhost, domyślnie, najbezpieczniej): tylko host Home Assistant może się połączyć. **0.0.0.0**: wszystkie interfejsy LAN — wymagane gdy Frigate/BlueIris działa na innym hoście. Lub podaj **konkretne IP interfejsu** (np. 192.168.1.50), aby powiązać tylko tę kartę sieciową. Cokolwiek innego niż localhost nie wymaga uwierzytelniania — użyj listy dozwolonych IP lub tokenu.",
+              "frigate_bind_port": "**0** (domyślnie): system operacyjny wybiera wolny port przy każdym uruchomieniu HA lub przeładowaniu integracji — URL czujnika się zmienia. Ustaw stałą wartość (np. **8556**), aby URL pozostawał stabilny po restartach i zmianach ustawień. Przy wielu kamerach każda otrzymuje port, port+1, … w rosnącej kolejności ID kamery.",
               "frigate_ip_allowlist": "Lista oddzielonych przecinkami adresów IP lub zakresów CIDR uprawnionych do połączenia. Puste = zezwalaj każdemu klientowi. Przykład: 192.168.1.0/24, 10.0.0.5",
               "frigate_auth_mode": "Opcjonalna brama dostępu. none (domyślnie): brak wymaganych danych uwierzytelniających. path-token: wspólny sekret dołączany do ścieżki URL strumienia. basic: standardowe RTSP Basic-Auth z nazwą użytkownika i hasłem.",
               "frigate_token": "Wspólny sekret używany jako token ścieżki (tryb uwierzytelnienia: path-token) lub hasło Basic-Auth (tryb uwierzytelnienia: basic). Pozostaw puste, aby całkowicie wyłączyć bramę.",

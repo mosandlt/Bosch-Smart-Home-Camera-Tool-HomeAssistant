@@ -6412,26 +6412,53 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         if self._frigate_runner is None:
             self._frigate_runner = FrontDoorRunner()
         config = self._frigate_config()
-        try:
-            port = await self._frigate_runner.start_server(
-                cam_id,
-                config,
-                self._frigate_resolve_inner,
-                preferred_port=self._frigate_sticky_port.get(cam_id, 0),
-            )
-            self._frigate_sticky_port[cam_id] = port
-        except OSError as err:
-            # Sticky port taken (e.g. after a reload) — retry on an ephemeral port.
-            _LOGGER.warning(
-                "frigate front-door %s: bind on sticky port failed (%s) — using ephemeral",
-                cam_id[:8],
-                err,
-            )
-            self._frigate_sticky_port.pop(cam_id, None)
-            port = await self._frigate_runner.start_server(
-                cam_id, config, self._frigate_resolve_inner
-            )
-            self._frigate_sticky_port[cam_id] = port
+        base_port = int(self.options.get("frigate_bind_port", 0))
+        if base_port > 0:
+            # Fixed-port mode: compute a stable per-camera port from the sorted
+            # list of ALL known cam_ids (sorted → adding a new camera doesn't
+            # shift existing cameras' ports). First cam → base, second → base+1, …
+            sorted_cams = sorted(self.data.keys()) if self.data else [cam_id]
+            idx = sorted_cams.index(cam_id) if cam_id in sorted_cams else 0
+            preferred_port = base_port + idx
+            try:
+                port = await self._frigate_runner.start_server(
+                    cam_id,
+                    config,
+                    self._frigate_resolve_inner,
+                    preferred_port=preferred_port,
+                )
+                self._frigate_sticky_port[cam_id] = port
+            except OSError as err:
+                _LOGGER.error(
+                    "frigate front-door %s: fixed port %d unavailable (%s) — "
+                    "set frigate_bind_port to 0 or pick a free port",
+                    cam_id[:8],
+                    preferred_port,
+                    err,
+                )
+                return
+        else:
+            # Ephemeral mode: use in-session sticky port; fall back on collision.
+            try:
+                port = await self._frigate_runner.start_server(
+                    cam_id,
+                    config,
+                    self._frigate_resolve_inner,
+                    preferred_port=self._frigate_sticky_port.get(cam_id, 0),
+                )
+                self._frigate_sticky_port[cam_id] = port
+            except OSError as err:
+                # Sticky port taken (e.g. after a reload) — retry on an ephemeral port.
+                _LOGGER.warning(
+                    "frigate front-door %s: bind on sticky port failed (%s) — using ephemeral",
+                    cam_id[:8],
+                    err,
+                )
+                self._frigate_sticky_port.pop(cam_id, None)
+                port = await self._frigate_runner.start_server(
+                    cam_id, config, self._frigate_resolve_inner
+                )
+                self._frigate_sticky_port[cam_id] = port
         # Sensors read the new port/state.
         self.async_update_listeners()
 

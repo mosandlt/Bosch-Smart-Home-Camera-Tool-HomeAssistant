@@ -220,6 +220,7 @@
             "data": {
               "frigate_endpoints_enabled": "Enable external RTSP endpoints (master switch, default off)",
               "frigate_bind_host": "RTSP bind host / IP",
+              "frigate_bind_port": "RTSP bind port",
               "frigate_ip_allowlist": "IP allowlist (comma-separated CIDRs)",
               "frigate_auth_mode": "Authentication mode",
               "frigate_token": "Shared secret / Basic-Auth password",
@@ -229,6 +230,7 @@
             "data_description": {
               "frigate_endpoints_enabled": "Master switch for all external RTSP endpoints. When OFF (default), no RTSP port is opened and no Bosch session is held. When ON, each camera's endpoint is available; the Bosch stream session opens when the first client connects and closes after the idle timeout.",
               "frigate_bind_host": "IP address the RTSP server binds to — pick a preset or type your own. **127.0.0.1** (localhost, default, safest): only the Home Assistant host can connect. **0.0.0.0**: all LAN interfaces — needed when Frigate/BlueIris runs on another host. Or enter a **specific interface IP** (e.g. 192.168.1.50) to bind only that network card. Anything other than localhost is credential-free — pair it with the IP allowlist or a token.",
+              "frigate_bind_port": "**0** (default): the OS picks a free port each time HA starts or the integration reloads — the sensor URL changes. Set to a fixed value (e.g. **8556**) to keep the URL stable across restarts and settings changes. With multiple cameras each camera gets port, port+1, … in ascending camera-ID order. Make sure the port is not already in use on your system.",
               "frigate_ip_allowlist": "Comma-separated list of IP addresses or CIDR ranges allowed to connect to the RTSP endpoints. Empty = allow any client. Example: 192.168.1.0/24, 10.0.0.5",
               "frigate_auth_mode": "Optional access gate for the RTSP endpoints.\n• **none** (default): no credentials required — rely on IP allowlist and network isolation.\n• **path-token**: a shared secret is appended to the stream URL path; clients must include it.\n• **basic**: standard RTSP Basic-Auth with username and password.",
               "frigate_token": "Shared secret used as the path token (auth mode: path-token) or as the Basic-Auth password (auth mode: basic). Leave empty to disable the gate entirely.",

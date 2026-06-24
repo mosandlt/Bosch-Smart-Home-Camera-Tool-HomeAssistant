@@ -132,6 +132,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
     "frigate": [
         "frigate_endpoints_enabled",
         "frigate_bind_host",
+        "frigate_bind_port",
         "frigate_ip_allowlist",
         "frigate_auth_mode",
         "frigate_token",
@@ -1135,6 +1136,10 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
+                    vol.Optional(
+                        "frigate_bind_port",
+                        default=int(opts.get("frigate_bind_port", 0)),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=65535)),
                     vol.Optional(
                         "frigate_ip_allowlist",
                         description={
