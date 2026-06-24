@@ -148,7 +148,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.0.0";
+const CARD_VERSION = "14.1.2";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -1541,6 +1541,7 @@ class BoschCameraCard extends HTMLElement {
     // (the user may have moved back onto a WebRTC-capable LAN). 2026-06-23.
     this._preferHlsThisSession = false;
     this._webrtcRecoveryStreak = 0;
+    this._hasEverDecodedFrames = false;
     this._visibilityHandler = () => this._onVisibilityChange();
     document.addEventListener("visibilitychange", this._visibilityHandler);
     // Mobile reload fix: iOS Safari + HA Companion App (WKWebView) do NOT
@@ -6661,17 +6662,12 @@ class BoschCameraCard extends HTMLElement {
      * cellular clients have a public relay path. Failure is non-fatal —
      * fall back to a default STUN so LAN clients still work.
      */
-    // iOS (WKWebView / the HA Companion app) requires a SECURE context for
-    // WebRTC — over a plain http:// LAN URL `RTCPeerConnection` is unavailable or
-    // never negotiates, and HA does NOT auto-fall-back to HLS once a camera
-    // claims WebRTC. So on iOS-over-http, skip WebRTC immediately and let the
-    // caller's catch drop to HLS (which works natively on iOS, even over http)
-    // instead of stalling for the attempt timeout. Desktop browsers over http
-    // keep WebRTC (Chrome doesn't gate RTCPeerConnection on secure context), so
-    // the guard is iOS-specific and won't regress the working LAN-http desktop path.
-    if (this._isIOS() && !window.isSecureContext) {
-      throw new Error("iOS over http: WebRTC needs a secure context — skip to HLS");
-    }
+    // Note: an older guard here threw immediately for iOS+http (insecure context)
+    // to avoid stalling. Both reasons are now obsolete: (1) if RTCPeerConnection
+    // is truly unavailable the next check handles it, and (2) the 5 s timeout +
+    // ICE-failed early-exit handle "never negotiates" without stalling. Removing
+    // the early throw lets iOS Companion App on LAN (http://192.168.x.x) reach
+    // WebRTC instead of instantly falling to HLS. 2026-06-24.
     if (typeof RTCPeerConnection === "undefined") {
       throw new Error("RTCPeerConnection unavailable — skip to HLS");
     }
@@ -6820,9 +6816,13 @@ class BoschCameraCard extends HTMLElement {
     await new Promise((resolve, reject) => {
       webrtcResolve = resolve;
       webrtcReject = reject;
-      // Short attempt on the remote/mobile path so HLS fallback kicks in fast;
-      // normal 5s elsewhere. The ICE attempt doubles as the reachability probe.
-      const attemptMs = this._remoteSkipWebRTC ? 2500 : 5000;
+      // Same 5 s attempt for all paths. True-remote failures (CGNAT/no path)
+      // fire `iceconnectionstatechange: failed` well before 5 s, so HLS kicks
+      // in fast regardless. The 2.5 s shortcut was too aggressive: at home via
+      // an external URL (Cloudflare tunnel / Nabu Casa) ICE still finds local
+      // candidates — offer round-trip + ICE checks easily takes 2–3 s, hitting
+      // the old 2.5 s wall and forcing HLS unnecessarily. 2026-06-24.
+      const attemptMs = 5000;
       const timeout = setTimeout(() => reject(new Error("WebRTC: no track within " + attemptMs + "ms")), attemptMs);
       webrtcTimeout = timeout;
       // A track may already have arrived during the awaits above — the single
@@ -7125,7 +7125,7 @@ class BoschCameraCard extends HTMLElement {
         this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
         return;
       }
-      if (snap.frames > 0) { this._webrtcRecoveryStreak = 0; return; } // decoder is producing frames → alive
+      if (snap.frames > 0) { this._webrtcRecoveryStreak = 0; this._hasEverDecodedFrames = true; return; } // decoder is producing frames → alive
       if (this._webrtcStatsPrev != null) {
         const dBytes = snap.bytes - this._webrtcStatsPrev.bytes;
         if (dBytes <= 0) { this._forceHlsFallback("no RTP bytes (CGNAT cut)"); return; } // RTP not arriving at all → dead now
@@ -7221,7 +7221,11 @@ class BoschCameraCard extends HTMLElement {
     // dead-track path sets the sticky flag itself, so it's excluded here. 2026-06-23
     // (verify-agent: isolate the genuine "reconnect → never renders → reconnect" loop).
     const recVideo = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
-    const neverRendered = !recVideo || recVideo._boschLastFrameAt == null;
+    // _boschLastFrameAt is set via requestVideoFrameCallback, which is NOT available
+    // in iOS WKWebView (Companion App). Use _hasEverDecodedFrames as a fallback —
+    // set by the dead-track watchdog when getStats confirms frames > 0, so iOS
+    // without rVFC still correctly detects "this WebRTC was delivering video". 2026-06-24.
+    const neverRendered = !recVideo || (recVideo._boschLastFrameAt == null && !this._hasEverDecodedFrames);
     if (this._streamTransport === "webrtc" && !this._preferHlsThisSession && neverRendered) {
       this._webrtcRecoveryStreak = (this._webrtcRecoveryStreak || 0) + 1;
       if (this._webrtcRecoveryStreak >= 2) {

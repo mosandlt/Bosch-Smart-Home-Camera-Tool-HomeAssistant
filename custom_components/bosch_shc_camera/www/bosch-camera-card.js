@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.0.0";
+const CARD_VERSION = "14.1.2";
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -1316,6 +1316,7 @@ class BoschCameraCard extends HTMLElement {
     _boschPipCards.add(this);
     this._preferHlsThisSession = false;
     this._webrtcRecoveryStreak = 0;
+    this._hasEverDecodedFrames = false;
     this._visibilityHandler = () => this._onVisibilityChange();
     document.addEventListener("visibilitychange", this._visibilityHandler);
     this._pagehideHandler = () => {
@@ -3129,9 +3130,6 @@ class BoschCameraCard extends HTMLElement {
     }
   }
   async _startWebRTC(video, activateVideo) {
-    if (this._isIOS() && !window.isSecureContext) {
-      throw new Error("iOS over http: WebRTC needs a secure context — skip to HLS");
-    }
     if (typeof RTCPeerConnection === "undefined") {
       throw new Error("RTCPeerConnection unavailable — skip to HLS");
     }
@@ -3239,7 +3237,7 @@ class BoschCameraCard extends HTMLElement {
     await new Promise((resolve, reject) => {
       webrtcResolve = resolve;
       webrtcReject = reject;
-      const attemptMs = this._remoteSkipWebRTC ? 2500 : 5e3;
+      const attemptMs = 5e3;
       const timeout = setTimeout(() => reject(new Error("WebRTC: no track within " + attemptMs + "ms")), attemptMs);
       webrtcTimeout = timeout;
       if (video.srcObject === remoteStream) {
@@ -3432,6 +3430,7 @@ class BoschCameraCard extends HTMLElement {
       }
       if (snap.frames > 0) {
         this._webrtcRecoveryStreak = 0;
+        this._hasEverDecodedFrames = true;
         return;
       }
       if (this._webrtcStatsPrev != null) {
@@ -3505,7 +3504,7 @@ class BoschCameraCard extends HTMLElement {
       if (document.visibilityState === "hidden") return;
     }
     const recVideo = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
-    const neverRendered = !recVideo || recVideo._boschLastFrameAt == null;
+    const neverRendered = !recVideo || recVideo._boschLastFrameAt == null && !this._hasEverDecodedFrames;
     if (this._streamTransport === "webrtc" && !this._preferHlsThisSession && neverRendered) {
       this._webrtcRecoveryStreak = (this._webrtcRecoveryStreak || 0) + 1;
       if (this._webrtcRecoveryStreak >= 2) {
