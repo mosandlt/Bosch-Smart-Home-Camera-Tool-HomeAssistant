@@ -25,6 +25,7 @@ import logging
 import os
 import random
 import re as _re_mod
+import socket
 import ssl
 import threading
 import time
@@ -105,6 +106,13 @@ from .fcm import (
 )
 from .fcm import (
     register_fcm_with_bosch as _fcm_register_fcm_with_bosch,
+)
+from .frigate_endpoint import (
+    QUALITY_HIGH,
+    FrontDoorConfig,
+    FrontDoorRunner,
+    InnerTarget,
+    build_public_url,
 )
 from .rcp import async_update_rcp_data
 from .rcp import get_cached_rcp_session as get_cached_rcp_session  # re-export for tests
@@ -975,6 +983,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # FFmpeg can't handle RTSPS + Digest auth with self-signed certs.
         # The proxy accepts plain TCP and forwards to camera over TLS.
         self._tls_proxy_ports: dict[str, int] = {}  # cam_id → local port
+        # ── Frigate / external-recorder persistent RTSP front-doors ───────────
+        # Per-camera always-on credential-free RTSP endpoint (frigate_endpoint.py).
+        # Owned per-camera by the High/Low BoschFrigate*Switch (RestoreEntity);
+        # the front-door runner binds a sticky port and opens the Bosch session
+        # lazily on the first recorder connect. Default OFF (opt-in).
+        self._frigate_runner: FrontDoorRunner | None = None
+        self._frigate_high_enabled: dict[str, bool] = {}
+        self._frigate_low_enabled: dict[str, bool] = {}
+        self._frigate_sticky_port: dict[
+            str, int
+        ] = {}  # cam_id → stable front-door port
         # Auto-rebuild backoff: monotonic ts of last _on_tls_proxy_died rebuild.
         # Prevents a rebuild storm when the new proxy also immediately dies
         # because the camera is still flapping (WiFi jitter, brief Bosch FW glitch).
@@ -1822,6 +1841,13 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             age = hls_access_age(token)
             if age is not None and age < STREAM_HLS_FRESH_SEC:
                 return True
+        # An external recorder (Frigate/BlueIris) connected to the persistent
+        # front-door is a real consumer the reaper must not tear down.
+        if (
+            self._frigate_runner is not None
+            and self._frigate_runner.active_count(cam_id) > 0
+        ):
+            return True
         count = await self._go2rtc_consumer_count(cam_id)
         # None == go2rtc could not be reached on ANY known port (11984/1984) →
         # we CANNOT confirm the session is idle. Treating that "unknown" as
@@ -6311,6 +6337,145 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         err,
                     )
 
+    # ── Frigate / external-recorder persistent RTSP front-doors ───────────────
+
+    def _frigate_config(self) -> FrontDoorConfig:
+        """Build the front-door config from the integration options."""
+        opts = self.options
+        raw_allow = str(opts.get("frigate_ip_allowlist", "") or "")
+        allowlist = frozenset(p.strip() for p in raw_allow.split(",") if p.strip())
+        return FrontDoorConfig(
+            bind_host=str(opts.get("frigate_bind_host", "127.0.0.1")),
+            ip_allowlist=allowlist,
+            auth_mode=str(opts.get("frigate_auth_mode", "none")),
+            token=str(opts.get("frigate_token", "") or ""),
+            basic_user=str(opts.get("frigate_basic_user", "frigate") or "frigate"),
+            idle_timeout=float(opts.get("frigate_idle_timeout", 60) or 60),
+        )
+
+    def _frigate_url_host(self, bind_host: str) -> str:
+        """Host to embed in the published URL.
+
+        - A specific interface IP (e.g. 192.168.1.50) or 127.0.0.1 is routable
+          as-is and used verbatim.
+        - An all-interfaces bind (0.0.0.0 / :: / empty) isn't routable, so we
+          detect the HA host's primary outbound IPv4 (no packet is sent) instead.
+        """
+        if bind_host not in ("0.0.0.0", "::", ""):  # noqa: S104 # all-interfaces sentinels
+            return bind_host
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(("8.8.8.8", 80))
+            return str(sock.getsockname()[0])
+        except OSError:
+            return "127.0.0.1"
+        finally:
+            sock.close()
+
+    async def _frigate_resolve_inner(self, cam_id: str) -> InnerTarget | None:
+        """Lazily ensure a LOCAL live session + inner TLS proxy for a recorder.
+
+        Returns the inner proxy port + the session's rotating Digest creds, or
+        None when no LOCAL session is available (e.g. REMOTE-only fallback,
+        privacy mode, camera offline) so the front-door drops the client.
+        Credential-free injection only works on the LOCAL path.
+        """
+        await self.try_live_connection(cam_id)
+        live = self._live_connections.get(cam_id, {})
+        if live.get("_connection_type") != "LOCAL":
+            return None
+        port = self._tls_proxy_ports.get(cam_id)
+        user = live.get("_local_user")
+        pwd = live.get("_local_password")
+        if not (port and user and pwd):
+            return None
+        return InnerTarget(port=port, digest_user=str(user), digest_password=str(pwd))
+
+    def _frigate_wanted(self, cam_id: str) -> bool:
+        """True if the feature is enabled AND a High/Low switch is on for cam."""
+        if not self.options.get("frigate_endpoints_enabled", False):
+            return False
+        return bool(
+            self._frigate_high_enabled.get(cam_id)
+            or self._frigate_low_enabled.get(cam_id)
+        )
+
+    async def async_sync_frigate_endpoint(self, cam_id: str) -> None:
+        """Start or stop the front-door for a camera per current switch state."""
+        wanted = self._frigate_wanted(cam_id)
+        if not wanted:
+            if self._frigate_runner is not None and self._frigate_runner.has_server(
+                cam_id
+            ):
+                self._frigate_runner.stop_server(cam_id)
+            return
+        if self._frigate_runner is None:
+            self._frigate_runner = FrontDoorRunner()
+        config = self._frigate_config()
+        try:
+            port = await self._frigate_runner.start_server(
+                cam_id,
+                config,
+                self._frigate_resolve_inner,
+                preferred_port=self._frigate_sticky_port.get(cam_id, 0),
+            )
+            self._frigate_sticky_port[cam_id] = port
+        except OSError as err:
+            # Sticky port taken (e.g. after a reload) — retry on an ephemeral port.
+            _LOGGER.warning(
+                "frigate front-door %s: bind on sticky port failed (%s) — using ephemeral",
+                cam_id[:8],
+                err,
+            )
+            self._frigate_sticky_port.pop(cam_id, None)
+            port = await self._frigate_runner.start_server(
+                cam_id, config, self._frigate_resolve_inner
+            )
+            self._frigate_sticky_port[cam_id] = port
+        # Sensors read the new port/state.
+        self.async_update_listeners()
+
+    def frigate_endpoint_url(self, cam_id: str, quality: str) -> str | None:
+        """Published credential-free RTSP URL for a camera+quality, or None.
+
+        None when the feature is off, the matching High/Low switch is off, or
+        the front-door is not currently bound.
+        """
+        if not self.options.get("frigate_endpoints_enabled", False):
+            return None
+        enabled = (
+            self._frigate_high_enabled
+            if quality == QUALITY_HIGH
+            else self._frigate_low_enabled
+        )
+        if not enabled.get(cam_id):
+            return None
+        if self._frigate_runner is None or not self._frigate_runner.has_server(cam_id):
+            return None
+        port = self._frigate_runner.port(cam_id)
+        if not port:
+            return None
+        config = self._frigate_config()
+        # Use the camera model's session duration (3600s), not the 60s default —
+        # a too-low value can arm a server-side timer that kills the stream.
+        msd = int(self.get_model_config(cam_id).max_session_duration)
+        return build_public_url(
+            self._frigate_url_host(config.bind_host),
+            port,
+            quality,
+            config,
+            max_session_duration=msd,
+        )
+
+    def async_stop_frigate_endpoints(self) -> None:
+        """Tear down all front-doors (integration unload / shutdown)."""
+        if self._frigate_runner is not None:
+            try:
+                self._frigate_runner.stop_all()
+            except Exception as err:  # broad: teardown must never block unload
+                _LOGGER.debug("frigate front-doors stop_all raised: %s", err)
+            self._frigate_runner = None
+
     async def _register_go2rtc_stream(self, cam_id: str, rtsps_url: str) -> bool:
         """Register the Bosch RTSP stream in go2rtc for WebRTC support.
 
@@ -8660,6 +8825,10 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
                 cam_id[:8],
                 err,
             )
+    # Stop all Frigate front-doors (closes listeners + the shared bg loop).
+    stop_frigate = getattr(coord, "async_stop_frigate_endpoints", None)
+    if stop_frigate is not None:
+        stop_frigate()  # self-guarded — never raises
     # Stop all TLS proxies (closes server sockets, terminates threads).
     # Idempotent — _tear_down_live_stream already stopped per-cam proxies,
     # this catches anything left in the port_cache (defensive).

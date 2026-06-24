@@ -303,6 +303,13 @@ async def async_setup_entry(
         # default); user enables in HA UI per camera, then the two stream_url sensors
         # populate. Avoids entity-spam on installs that don't need external recorders.
         entities.append(BoschExternalStreamSwitch(coordinator, cam_id, config_entry))
+        # Frigate / external-recorder persistent credential-free RTSP endpoints.
+        # Two per-camera switches (High = inst=1, Low = inst=2); each publishes
+        # its frigate_url_* sensor and starts the always-on front-door on demand.
+        # Always registered (default OFF, disabled in entity registry), gated by
+        # the global `frigate_endpoints_enabled` option.
+        entities.append(BoschFrigateHighSwitch(coordinator, cam_id, config_entry))
+        entities.append(BoschFrigateLowSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -2341,3 +2348,87 @@ class BoschExternalStreamSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignor
         self.coordinator._external_stream_enabled[self._cam_id] = False
         self.async_write_ha_state()
         self.coordinator.async_update_listeners()
+
+
+class _BoschFrigateEndpointSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc]
+    """Base for the per-camera Frigate persistent-endpoint High/Low switches.
+
+    ON = publish the credential-free always-on RTSP URL sensor for this quality
+    and (re)start the per-camera front-door. The front-door binds a stable port
+    and opens the Bosch LOCAL session lazily when a recorder first connects;
+    credentials are injected by the proxy so the URL stays password-free.
+
+    Gated by the global ``frigate_endpoints_enabled`` option — toggling a switch
+    while the feature is off records the intent (restored later) but starts
+    nothing. State persists across restarts via RestoreEntity.
+    """
+
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:cctv"
+    _attr_entity_category = EntityCategory.CONFIG
+    # Subclasses set: _quality ("high"/"low"), _state_map attr name, translation key.
+    _quality: str = ""
+
+    def _store(self) -> dict[str, bool]:
+        store: dict[str, bool] = (
+            self.coordinator._frigate_high_enabled
+            if self._quality == "high"
+            else self.coordinator._frigate_low_enabled
+        )
+        return store
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self._store().get(self._cam_id, False))
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success  # type: ignore[no-any-return]
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state == "on":
+            self._store()[self._cam_id] = True
+            # Restore the front-door if the global feature is enabled.
+            await self.coordinator.async_sync_frigate_endpoint(self._cam_id)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self._store()[self._cam_id] = True
+        await self.coordinator.async_sync_frigate_endpoint(self._cam_id)
+        self.async_write_ha_state()
+        self.coordinator.async_update_listeners()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self._store()[self._cam_id] = False
+        await self.coordinator.async_sync_frigate_endpoint(self._cam_id)
+        self.async_write_ha_state()
+        self.coordinator.async_update_listeners()
+
+
+class BoschFrigateHighSwitch(_BoschFrigateEndpointSwitch):
+    """Frigate persistent endpoint — High quality (inst=1, main encoder)."""
+
+    _quality = "high"
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name = f"Bosch {self._cam_title} Frigate-Stream High"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_frigate_high"
+        self._attr_translation_key = "frigate_high"
+
+
+class BoschFrigateLowSwitch(_BoschFrigateEndpointSwitch):
+    """Frigate persistent endpoint — Low quality (inst=2, sub-stream)."""
+
+    _quality = "low"
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name = f"Bosch {self._cam_title} Frigate-Stream Low"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_frigate_low"
+        self._attr_translation_key = "frigate_low"

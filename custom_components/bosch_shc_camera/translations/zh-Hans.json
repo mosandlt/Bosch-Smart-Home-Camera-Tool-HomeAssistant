@@ -214,6 +214,28 @@
               "enable_ptz_controls": "开启时：支持水平旋转的摄像头将获得预设位置选择实体（home / 向左 / 向右 / 左后 / 右后）。只有室内 360 摄像头支持旋转。**默认关闭**，不使用 360 摄像头的用户不会看到多余实体。"
             }
           },
+          "frigate": {
+            "name": "外部 RTSP 端点（Frigate / NVR）",
+            "description": "为外部录像机（Frigate、BlueIris、go2rtc）提供持久、无需凭据的 RTSP 端点。每台摄像头的会话按需打开。在此启用主开关；每台摄像头的高/低画质开关将发布流 URL。",
+            "data": {
+              "frigate_endpoints_enabled": "启用外部 RTSP 端点（主开关，默认关闭）",
+              "frigate_bind_host": "RTSP 绑定主机 / IP",
+              "frigate_ip_allowlist": "IP 白名单（逗号分隔的 CIDR）",
+              "frigate_auth_mode": "认证模式",
+              "frigate_token": "共享密钥 / Basic-Auth 密码",
+              "frigate_basic_user": "Basic-Auth 用户名",
+              "frigate_idle_timeout": "空闲会话超时（秒）"
+            },
+            "data_description": {
+              "frigate_endpoints_enabled": "所有外部 RTSP 端点的主开关。\n• **关闭**（默认）：不打开任何 RTSP 端口，不保持任何 Bosch 会话。\n• **开启**：每台摄像头的端点可用；Bosch 流媒体会话在第一个客户端连接时打开，并在空闲超时后关闭。",
+              "frigate_bind_host": "RTSP 服务器绑定的 IP 地址 — 选择预设或手动输入。**127.0.0.1**（localhost，默认，最安全）：仅 Home Assistant 主机可连接。**0.0.0.0**：所有局域网接口 — 当 Frigate/BlueIris 运行在其他主机上时必须选此项。或输入**特定接口 IP**（如 192.168.1.50）以仅绑定该网卡。除 localhost 外的任何选项均无需凭据 — 请配合 IP 白名单或令牌使用。",
+              "frigate_ip_allowlist": "允许连接的 IP 地址或 CIDR 范围（逗号分隔）。留空 = 允许任意客户端。示例：192.168.1.0/24, 10.0.0.5",
+              "frigate_auth_mode": "可选访问控制。\n• **none**（默认）：无需凭据。\n• **path-token**：将共享密钥附加到流 URL 路径中。\n• **basic**：标准 RTSP Basic-Auth，需要用户名和密码。",
+              "frigate_token": "用作路径令牌（认证模式：path-token）或 Basic-Auth 密码（认证模式：basic）的共享密钥。留空则完全禁用访问控制。",
+              "frigate_basic_user": "RTSP Basic-Auth 模式的用户名。仅在认证模式设置为 'basic' 时有效。",
+              "frigate_idle_timeout": "最后一个录像机断开连接后，Bosch 摄像头会话保持的秒数。会话保持活跃以支持即时重连。默认值：30。设为 0 则在无客户端连接时立即关闭。"
+            }
+          },
           "ai": {
             "name": "AI 快照描述",
             "description": "让 Home Assistant 的 AI 描述摄像头看到的内容。需要配置好 AI Task 集成（例如 OpenAI、Google、Anthropic 或本地 Ollama）。注意：根据所选 AI 后端，摄像头图像和可能的个人数据会被发送到云服务，并可能根据该提供商的设置用于训练。如需最大程度保护隐私，请使用本地模型（例如 Ollama）。",
@@ -371,6 +393,12 @@
       },
       "external_stream": {
         "name": "发布外部流 URL"
+      },
+      "frigate_high": {
+        "name": "Frigate 高清流"
+      },
+      "frigate_low": {
+        "name": "Frigate 低清流"
       }
     },
     "number": {
@@ -644,6 +672,12 @@
       },
       "stream_url": {
         "name": "流 URL（主）"
+      },
+      "frigate_url_high": {
+        "name": "Frigate RTSP URL（高清）"
+      },
+      "frigate_url_low": {
+        "name": "Frigate RTSP URL（低清）"
       },
       "stream_url_sub": {
         "name": "流 URL（副）"

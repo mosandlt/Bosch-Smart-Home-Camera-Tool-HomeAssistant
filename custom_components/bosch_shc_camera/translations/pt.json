@@ -214,6 +214,28 @@
               "enable_ptz_controls": "Quando ATIVADO: câmeras com suporte a rotação recebem uma entidade de seleção de posição predefinida (home / esquerda / direita / trás-esquerda / trás-direita). Apenas a câmera interior 360 suporta rotação. **Desativado por padrão** para que usuários sem câmera 360 não vejam entidade desnecessária."
             }
           },
+          "frigate": {
+            "name": "Endpoints RTSP externos (Frigate / NVR)",
+            "description": "Endpoints RTSP persistentes e sem credenciais para gravadores externos (Frigate, BlueIris, go2rtc). A sessão de cada câmera é aberta a pedido. Active o interruptor principal aqui; os interruptores Alta/Baixa qualidade por câmera publicam os URLs dos streams.",
+            "data": {
+              "frigate_endpoints_enabled": "Activar endpoints RTSP externos (interruptor principal, desactivado por defeito)",
+              "frigate_bind_host": "Host / IP de ligação RTSP",
+              "frigate_ip_allowlist": "Lista de IPs permitidos (CIDRs separados por vírgula)",
+              "frigate_auth_mode": "Modo de autenticação",
+              "frigate_token": "Segredo partilhado / password Basic-Auth",
+              "frigate_basic_user": "Nome de utilizador Basic-Auth",
+              "frigate_idle_timeout": "Tempo limite de sessão inactiva (segundos)"
+            },
+            "data_description": {
+              "frigate_endpoints_enabled": "Interruptor principal para todos os endpoints RTSP externos. Quando DESLIGADO (predefinição): nenhuma porta RTSP é aberta e nenhuma sessão Bosch é mantida. Quando LIGADO: o endpoint de cada câmera fica disponível; a sessão de stream Bosch abre quando o primeiro cliente se liga e fecha após o tempo limite de inactividade.",
+              "frigate_bind_host": "Endereço IP ao qual o servidor RTSP se liga — escolha uma opção predefinida ou escreva o seu. **127.0.0.1** (localhost, predefinição, mais seguro): apenas o host do Home Assistant se pode ligar. **0.0.0.0**: todas as interfaces LAN — necessário quando o Frigate/BlueIris corre noutro host. Ou introduza um **IP de interface específico** (ex. 192.168.1.50) para vincular apenas essa placa de rede. Qualquer opção diferente de localhost não requer credenciais — combine com a lista de IPs permitidos ou um token.",
+              "frigate_ip_allowlist": "Lista separada por vírgulas de endereços IP ou intervalos CIDR autorizados a ligar. Vazio = permitir qualquer cliente. Exemplo: 192.168.1.0/24, 10.0.0.5",
+              "frigate_auth_mode": "Porta de acesso opcional. none (predefinição): sem credenciais necessárias. path-token: segredo partilhado acrescentado ao caminho do URL do stream. basic: RTSP Basic-Auth padrão com nome de utilizador e password.",
+              "frigate_token": "Segredo partilhado usado como token de caminho (modo auth: path-token) ou password Basic-Auth (modo auth: basic). Deixe vazio para desactivar completamente a porta de acesso.",
+              "frigate_basic_user": "Nome de utilizador para o modo RTSP Basic-Auth. Usado apenas quando o modo de autenticação está definido como 'basic'.",
+              "frigate_idle_timeout": "Quantos segundos a sessão da câmera Bosch permanece após o último gravador se desligar. Sessão mantida para reconexões instantâneas. Predefinição: 30. Defina como 0 para fechar imediatamente quando não há clientes ligados."
+            }
+          },
           "ai": {
             "name": "Descrição de imagem AI",
             "description": "Deixe a IA do Home Assistant descrever o que a câmera vê. Requer uma integração AI Task configurada (ex: OpenAI, Google, Anthropic ou Ollama local). Nota: dependendo do backend de IA escolhido, imagens da câmera e possivelmente dados pessoais são enviados para um serviço de nuvem e podem ser usados para treinamento. Para máxima privacidade, use um modelo local (ex: Ollama).",
@@ -371,6 +393,12 @@
       },
       "external_stream": {
         "name": "Publicar URL de stream externo"
+      },
+      "frigate_high": {
+        "name": "Stream Frigate Alta"
+      },
+      "frigate_low": {
+        "name": "Stream Frigate Baixa"
       }
     },
     "number": {
@@ -644,6 +672,12 @@
       },
       "stream_url": {
         "name": "URL do stream (principal)"
+      },
+      "frigate_url_high": {
+        "name": "URL RTSP do Frigate (Alta)"
+      },
+      "frigate_url_low": {
+        "name": "URL RTSP do Frigate (Baixa)"
       },
       "stream_url_sub": {
         "name": "URL do stream (sub)"

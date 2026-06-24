@@ -2,6 +2,16 @@
 
 Recent releases. For the full changelog see [`CHANGELOG.md`](../CHANGELOG.md) at the repo root or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases).
 
+## v14.1.0 — 2026-06-24
+
+Minor release — **persistent, credential-free RTSP endpoints for external recorders (Frigate / BlueIris / go2rtc)**. Opt-in per camera.
+
+Recording a Bosch camera in an external NVR was awkward: the camera speaks RTSPS with a self-signed cert and rotating Digest credentials, and its session only exists while something is actively watching — so a recorder polling the URL got *"Connection refused"* whenever the stream was idle (the default, and the state after every restart or hourly session renewal), or a 401 once the credentials rotated. This release adds an always-on RTSP front-door per camera that stays bound on a stable port even when idle, opens the Bosch session on demand when a recorder connects, and performs the Digest authentication itself — so the URL you paste into Frigate needs **no `user:pass@`** and never goes stale.
+
+Everything is configured under *Configure → External Recorder (Frigate)*: a master toggle (default off), the listener bind (`127.0.0.1` localhost-only by default, or `0.0.0.0` for a recorder on another host), an optional IP allowlist, and an optional access gate (path-token or RTSP Basic-Auth). Per camera there are **Frigate-Stream High** (main encoder, `inst=1`) and **Frigate-Stream Low** (sub-stream, `inst=2`) switches; turning one on publishes the ready-to-use URL on the matching **Frigate RTSP URL** sensor. One front-door serves both qualities, and all consumers (recorder + a Lovelace card) share a single camera session, so the limited concurrent-session budget is respected. See the README's *External Recorders* section for a complete Frigate config. No effect at all unless you enable it.
+
+Architecture mirrors the proven ioBroker adapter's lazy front-door + RTSP Digest-injection proxy. The endpoint runs on Home Assistant's event loop (no extra threads), the Digest auth uses the same routine the integration already uses for the working live stream, and access is restricted to LOCAL sessions (credential-free injection is a LAN feature). Live-verified end-to-end on a real Gen2 camera: 1080p H.264 + AAC delivered credential-free over the LAN endpoint. 5498 pytest / 100% coverage on the new code, mypy --strict + ruff + codespell clean, 12 languages translated, three adversarial verify-agent passes (auth-bypass, concurrency, RTSP-correctness) with all findings fixed.
+
 ## v14.0.0 — 2026-06-24
 
 Major release — **Picture-in-Picture now keeps playing when you switch browser tabs**, and the live stream stays connected across a tab switch instead of reconnecting. This fixes the long-standing problem where the floating Picture-in-Picture window (or the live tile) froze after a few minutes in the background and only a full page reload brought it back.

@@ -129,6 +129,15 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
     "ptz": [
         "enable_ptz_controls",
     ],
+    "frigate": [
+        "frigate_endpoints_enabled",
+        "frigate_bind_host",
+        "frigate_ip_allowlist",
+        "frigate_auth_mode",
+        "frigate_token",
+        "frigate_basic_user",
+        "frigate_idle_timeout",
+    ],
     "ai": [
         "enable_ai_description",
         "ai_task_entity",
@@ -643,6 +652,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 CONF_ENABLE_AI_DESCRIPTION,
                 CONF_AI_DESCRIBE_ON_MOTION,
                 CONF_AI_NOTIFY_INCLUDE_DESCRIPTION,
+                "frigate_endpoints_enabled",
             ]:
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
@@ -1091,6 +1101,77 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                         CONF_ENABLE_PTZ_CONTROLS,
                         default=bool(opts.get(CONF_ENABLE_PTZ_CONTROLS, False)),
                     ): bool,
+                }
+            ),
+            {"collapsed": True},
+        )
+
+        sectioned_schema[vol.Required("frigate")] = section(
+            vol.Schema(
+                {
+                    vol.Optional(
+                        "frigate_endpoints_enabled",
+                        default=bool(opts.get("frigate_endpoints_enabled", False)),
+                    ): bool,
+                    vol.Optional(
+                        "frigate_bind_host",
+                        default=str(opts.get("frigate_bind_host", "127.0.0.1")),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            # custom_value=True → the two presets are offered, but
+                            # the user may also type a specific interface IP
+                            # (e.g. 192.168.1.50) to bind to just that NIC.
+                            options=[
+                                SelectOptionDict(
+                                    value="127.0.0.1",
+                                    label="Localhost only (127.0.0.1) — default",
+                                ),
+                                SelectOptionDict(
+                                    value="0.0.0.0",  # noqa: S104 # explicit opt-in LAN-exposure choice
+                                    label="All LAN interfaces (0.0.0.0) — credential-free, use allowlist/token",
+                                ),
+                            ],
+                            custom_value=True,
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        "frigate_ip_allowlist",
+                        description={
+                            "suggested_value": opts.get("frigate_ip_allowlist", "")
+                        },
+                    ): str,
+                    vol.Optional(
+                        "frigate_auth_mode",
+                        default=str(opts.get("frigate_auth_mode", "none")),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(value="none", label="No gate"),
+                                SelectOptionDict(
+                                    value="path_token",
+                                    label="Path token (rtsp://host/<token>/…)",
+                                ),
+                                SelectOptionDict(
+                                    value="basic",
+                                    label="RTSP Basic-Auth (rtsp://user:pass@host/…)",
+                                ),
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        "frigate_token",
+                        description={"suggested_value": opts.get("frigate_token", "")},
+                    ): str,
+                    vol.Optional(
+                        "frigate_basic_user",
+                        default=str(opts.get("frigate_basic_user", "frigate")),
+                    ): str,
+                    vol.Optional(
+                        "frigate_idle_timeout",
+                        default=int(opts.get("frigate_idle_timeout", 60)),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
                 }
             ),
             {"collapsed": True},

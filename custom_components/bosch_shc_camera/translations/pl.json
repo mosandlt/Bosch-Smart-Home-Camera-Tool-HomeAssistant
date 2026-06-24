@@ -214,6 +214,28 @@
               "enable_ptz_controls": "Gdy WŁĄCZONE: kamery obsługujące obrót otrzymują encję wyboru pozycji wstępnej (home / lewo / prawo / tył-lewo / tył-prawo). Tylko kamera wewnętrzna 360 obsługuje obrót. **Domyślnie wyłączone**, aby użytkownicy bez kamery 360 nie widzieli zbędnej encji."
             }
           },
+          "frigate": {
+            "name": "Zewnętrzne punkty końcowe RTSP (Frigate / NVR)",
+            "description": "Trwałe, niewymagające uwierzytelnienia punkty końcowe RTSP dla zewnętrznych rejestratorów (Frigate, BlueIris, go2rtc). Sesja każdej kamery otwierana jest na żądanie. Włącz tutaj przełącznik główny; przełączniki Wysoka/Niska jakość per kamera publikują adresy URL strumieni.",
+            "data": {
+              "frigate_endpoints_enabled": "Włącz zewnętrzne punkty końcowe RTSP (przełącznik główny, domyślnie wyłączony)",
+              "frigate_bind_host": "Host / IP nasłuchujący RTSP",
+              "frigate_ip_allowlist": "Lista dozwolonych adresów IP (oddzielone przecinkami zakresy CIDR)",
+              "frigate_auth_mode": "Tryb uwierzytelnienia",
+              "frigate_token": "Wspólny sekret / hasło Basic-Auth",
+              "frigate_basic_user": "Nazwa użytkownika Basic-Auth",
+              "frigate_idle_timeout": "Limit czasu bezczynności sesji (sekundy)"
+            },
+            "data_description": {
+              "frigate_endpoints_enabled": "Główny przełącznik dla wszystkich zewnętrznych punktów końcowych RTSP. Gdy WYŁĄCZONY (domyślnie): żaden port RTSP nie jest otwierany i żadna sesja Bosch nie jest utrzymywana. Gdy WŁĄCZONY: punkt końcowy każdej kamery jest dostępny; sesja strumienia Bosch otwiera się gdy pierwszy klient się połączy i zamyka po upływie limitu czasu bezczynności.",
+              "frigate_bind_host": "Adres IP, na którym nasłuchuje serwer RTSP — wybierz ustawienie wstępne lub wpisz własne. **127.0.0.1** (localhost, domyślnie, najbezpieczniej): tylko host Home Assistant może się połączyć. **0.0.0.0**: wszystkie interfejsy LAN — wymagane gdy Frigate/BlueIris działa na innym hoście. Lub podaj **konkretne IP interfejsu** (np. 192.168.1.50), aby powiązać tylko tę kartę sieciową. Cokolwiek innego niż localhost nie wymaga uwierzytelniania — użyj listy dozwolonych IP lub tokenu.",
+              "frigate_ip_allowlist": "Lista oddzielonych przecinkami adresów IP lub zakresów CIDR uprawnionych do połączenia. Puste = zezwalaj każdemu klientowi. Przykład: 192.168.1.0/24, 10.0.0.5",
+              "frigate_auth_mode": "Opcjonalna brama dostępu. none (domyślnie): brak wymaganych danych uwierzytelniających. path-token: wspólny sekret dołączany do ścieżki URL strumienia. basic: standardowe RTSP Basic-Auth z nazwą użytkownika i hasłem.",
+              "frigate_token": "Wspólny sekret używany jako token ścieżki (tryb uwierzytelnienia: path-token) lub hasło Basic-Auth (tryb uwierzytelnienia: basic). Pozostaw puste, aby całkowicie wyłączyć bramę.",
+              "frigate_basic_user": "Nazwa użytkownika dla trybu RTSP Basic-Auth. Używana tylko gdy tryb uwierzytelnienia jest ustawiony na 'basic'.",
+              "frigate_idle_timeout": "Ile sekund sesja kamery Bosch utrzymuje się po odłączeniu ostatniego rejestratora. Sesja utrzymywana dla natychmiastowych ponownych połączeń. Domyślnie: 30. Ustaw na 0, aby zamknąć natychmiast gdy brak podłączonych klientów."
+            }
+          },
           "ai": {
             "name": "Opis migawki AI",
             "description": "Pozwól sztucznej inteligencji Home Assistant opisać, co widzi kamera. Wymaga skonfigurowanej integracji AI Task (np. OpenAI, Google, Anthropic lub lokalnego Ollama). Uwaga: w zależności od wybranego backendu AI, obrazy z kamery i ewentualnie dane osobowe są przesyłane do usługi chmurowej i mogą być używane do szkolenia. Dla maksymalnej prywatności użyj modelu lokalnego (np. Ollama).",
@@ -371,6 +393,12 @@
       },
       "external_stream": {
         "name": "Opublikuj zewnętrzny URL strumienia"
+      },
+      "frigate_high": {
+        "name": "Strumień Frigate Wysoki"
+      },
+      "frigate_low": {
+        "name": "Strumień Frigate Niski"
       }
     },
     "number": {
@@ -667,6 +695,12 @@
       },
       "stream_url": {
         "name": "URL strumienia (główny)"
+      },
+      "frigate_url_high": {
+        "name": "URL RTSP Frigate (Wysoki)"
+      },
+      "frigate_url_low": {
+        "name": "URL RTSP Frigate (Niski)"
       },
       "stream_url_sub": {
         "name": "URL strumienia (sub)"

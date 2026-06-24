@@ -1,0 +1,717 @@
+"""Always-on, credential-free RTSP front-door for external recorders (Frigate/BlueIris).
+
+Problem (HA#37, MattSharp + forum requests): the per-camera TLS proxy
+(``tls_proxy.py``) only binds its TCP port while a livestream session is open,
+and the URL it exposes carries inline Digest credentials that rotate roughly
+hourly. An external recorder (Frigate, BlueIris, go2rtc add-on) polls the RTSP
+URL on its own schedule, so whenever the livestream is off — the default, and
+the state after every HA restart, privacy-credential rotation or 60-minute
+session renewal — the recorder gets "Connection refused" or a 401.
+
+This module is the HA analogue of the ioBroker adapter's ``lazy_stream.ts`` +
+``rtsp_auth.ts`` (forum #84538). It adds, per camera, an always-listening
+front-door bound to a stable port that:
+
+  * stays bound regardless of Bosch session state (no more ECONNREFUSED),
+  * opens the Bosch session + inner TLS proxy lazily on the first client
+    connection (``resolve_inner`` callback) and releases it after an idle
+    linger, so the 3-shared-session budget is respected,
+  * speaks RTSP and performs the Digest auth dance itself, so clients receive a
+    **credential-free** URL (``rtsp://host:port/high`` — no ``user:pass@``),
+  * optionally restricts access by client IP (allowlist) and/or a shared
+    secret (path-token or RTSP Basic-auth), all opt-in via the integration
+    options. Default bind is ``127.0.0.1`` (localhost-only).
+
+Architecture: the front-door byte-relays to the existing inner TLS proxy
+(``127.0.0.1:<inner-port>``) which keeps its proven TLS + SETUP→TCP-interleave
+behaviour untouched. Only the Digest ``Authorization:`` header is injected by
+the front-door, using the live session's rotating creds — so the camera-facing
+RTSP URIs are forwarded verbatim (same SDP/control-URL behaviour as the
+direct-FFmpeg path, which is what makes this safe on a LAN bind).
+
+Runs directly on HA's event loop: the listeners are asyncio ``start_server``
+sockets and each relay is an asyncio task, all non-blocking. ``resolve_inner``
+is awaited on the same loop (no thread, no cross-loop bridging).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import ipaddress
+import logging
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
+
+from .auth_utils import _build_digest_header, _parse_digest_challenge
+
+_LOGGER = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+# Auth modes (mirrored in const.py CONF defaults + the options flow selector).
+AUTH_NONE = "none"
+AUTH_PATH_TOKEN = "path_token"  # noqa: S105 # auth-mode name, not a credential
+AUTH_BASIC = "basic"
+
+# Quality selectors → Bosch RTSP ``inst`` query value. High = main encoder
+# (inst=1), Low = sub-stream (inst=2). One front-door serves both: each
+# published URL carries the matching ``inst`` and is forwarded verbatim.
+QUALITY_HIGH = "high"
+QUALITY_LOW = "low"
+_QUALITY_INST = {QUALITY_HIGH: 1, QUALITY_LOW: 2}
+
+# Max time to wait for the inner proxy TCP connect before dropping the client.
+_INNER_CONNECT_TIMEOUT = 10.0
+# Max time to wait for resolve_inner (opening a Bosch session can pre-warm ~25s).
+_RESOLVE_TIMEOUT = 40.0
+# Max time to wait for one inner RTSP response during the auth dance.
+_AUTH_READ_TIMEOUT = 30.0
+# Max bytes for a single RTSP message head (guards against a non-RTSP flood).
+_MAX_HEAD_BYTES = 64 * 1024
+
+
+@dataclass(frozen=True)
+class InnerTarget:
+    """What ``resolve_inner`` returns: the live inner proxy + current creds."""
+
+    port: int
+    digest_user: str
+    digest_password: str
+
+
+# resolve_inner(cam_id) -> awaitable[InnerTarget | None]; None = camera currently
+# unreachable / no session → the front-door drops the client cleanly so the
+# recorder retries later. Runs on the HA event loop (bridged thread-safely).
+ResolveInner = Callable[[str], Coroutine[Any, Any, "InnerTarget | None"]]
+
+
+@dataclass
+class FrontDoorConfig:
+    """Per-integration front-door settings (from the options flow)."""
+
+    bind_host: str = "127.0.0.1"
+    # Empty = allow any client IP. Entries may be plain IPs or CIDR networks.
+    ip_allowlist: frozenset[str] = field(default_factory=frozenset)
+    auth_mode: str = AUTH_NONE
+    # Shared secret: the path segment for AUTH_PATH_TOKEN, the password for
+    # AUTH_BASIC. Empty disables that gate even if the mode is set.
+    token: str = ""
+    basic_user: str = "frigate"
+    # Zero-client linger before signalling idle (caller tears the session down).
+    idle_timeout: float = 60.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pure helpers (exported for unit tests) — ported from ioBroker rtsp_auth.ts.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def find_rtsp_message_end(buf: bytes) -> int:
+    """Return the offset right after ``\\r\\n\\r\\n``, or -1 if not present."""
+    i = buf.find(b"\r\n\r\n")
+    return i + 4 if i >= 0 else -1
+
+
+def parse_request_start_line(buf: bytes) -> tuple[str, str] | None:
+    """Parse ``METHOD uri RTSP/1.x`` from the first line. None on parse error."""
+    eol = buf.find(b"\r\n")
+    first = (buf[:eol] if eol >= 0 else buf).decode("utf-8", errors="replace")
+    parts = first.split()
+    if len(parts) >= 3 and parts[2].upper().startswith("RTSP/") and parts[0].isupper():
+        return parts[0], parts[1]
+    return None
+
+
+def parse_response_status(buf: bytes) -> int | None:
+    """Parse the numeric code from an ``RTSP/1.0 NNN PHRASE`` start line."""
+    eol = buf.find(b"\r\n")
+    first = (buf[:eol] if eol >= 0 else buf).decode("utf-8", errors="replace")
+    parts = first.split()
+    if len(parts) >= 2 and parts[0].upper().startswith("RTSP/") and parts[1].isdigit():
+        return int(parts[1])
+    return None
+
+
+def extract_header(buf: bytes, name: str) -> str | None:
+    """Return the first value of header ``name`` (case-insensitive), or None."""
+    lname = name.lower()
+    for line in buf.decode("utf-8", errors="replace").split("\r\n"):
+        key, sep, value = line.partition(":")
+        if sep and key.strip().lower() == lname:
+            return value.strip()
+    return None
+
+
+def has_authorization_header(buf: bytes) -> bool:
+    """True if the request headers contain an ``Authorization:`` line."""
+    return extract_header(buf, "Authorization") is not None
+
+
+def content_length(buf: bytes) -> int:
+    """Parse ``Content-Length`` (0 when absent or unparseable)."""
+    raw = extract_header(buf, "Content-Length")
+    if raw and raw.isdigit():
+        return int(raw)
+    return 0
+
+
+def inject_auth_header(request: bytes, auth_value: str) -> bytes:
+    """Insert ``Authorization: <value>`` before the blank line ending the head.
+
+    Any existing ``Authorization:`` line is dropped first so a client-supplied
+    (gate) credential never reaches the camera alongside our injected Digest.
+    Caller has verified the buffer ends with ``\\r\\n\\r\\n``.
+    """
+    sep = request.find(b"\r\n\r\n")
+    if sep < 0:
+        return request
+    head = request[:sep].decode("utf-8", errors="replace")
+    tail = request[sep:]
+    kept = [
+        ln
+        for ln in head.split("\r\n")
+        if not ln.split(":", 1)[0].strip().lower() == "authorization"
+    ]
+    kept.append(f"Authorization: {auth_value}")
+    return ("\r\n".join(kept)).encode("utf-8") + tail
+
+
+def ip_allowed(peer_ip: str, allowlist: frozenset[str]) -> bool:
+    """True if ``peer_ip`` is permitted. Empty allowlist = allow all."""
+    if not allowlist:
+        return True
+    try:
+        ip = ipaddress.ip_address(peer_ip)
+    except ValueError:
+        return False
+    # A dual-stack (0.0.0.0) bind reports an IPv4 client as an IPv4-mapped IPv6
+    # address (``::ffff:192.0.2.5``). Match against the real IPv4 too, so an
+    # IPv4 allowlist entry still applies. (forum/verify-agent finding 2026-06-24)
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    for entry in allowlist:
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            if "/" in entry:
+                if ip in ipaddress.ip_network(entry, strict=False):
+                    return True
+            elif ip == ipaddress.ip_address(entry):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def split_path_token(uri: str, token: str) -> tuple[bool, str]:
+    """Validate + strip a leading ``/<token>`` path segment from ``uri``.
+
+    Returns ``(ok, rewritten_uri)``. ``ok`` is False when the token is required
+    but missing/wrong. The rewritten URI has the token segment removed so the
+    camera sees the canonical path (e.g. ``rtsp://h:p/tok/high`` → ``…/high``).
+    """
+    if not token:
+        return True, uri
+    # Work on the path portion only; preserve scheme://host and ?query.
+    scheme_sep = uri.find("://")
+    prefix = ""
+    rest = uri
+    if scheme_sep >= 0:
+        slash = uri.find("/", scheme_sep + 3)
+        if slash < 0:
+            return False, uri
+        prefix = uri[:slash]
+        rest = uri[slash:]
+    query = ""
+    qpos = rest.find("?")
+    if qpos >= 0:
+        query = rest[qpos:]
+        rest = rest[:qpos]
+    segments = [s for s in rest.split("/") if s != ""]
+    if not segments or segments[0] != token:
+        return False, uri
+    remainder = "/" + "/".join(segments[1:])
+    return True, f"{prefix}{remainder}{query}"
+
+
+def check_basic_auth(buf: bytes, user: str, password: str) -> bool:
+    """True if the request carries a matching ``Authorization: Basic`` header."""
+    value = extract_header(buf, "Authorization")
+    if not value:
+        return False
+    scheme, _, b64 = value.partition(" ")
+    if scheme.strip().lower() != "basic":
+        return False
+    try:
+        decoded = base64.b64decode(b64.strip(), validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return decoded == f"{user}:{password}"
+
+
+def build_public_url(
+    url_host: str,
+    port: int,
+    quality: str,
+    config: FrontDoorConfig,
+    *,
+    max_session_duration: int = 60,
+    enableaudio: int = 1,
+    fmtp: int = 1,
+) -> str:
+    """Build the credential-free RTSP URL a recorder should connect to.
+
+    The canonical Bosch path (``/rtsp_tunnel``) + query are embedded so the
+    recorder's request is forwarded verbatim to the camera — the same URI that
+    the direct-FFmpeg path uses, which keeps SDP/control-URL behaviour proven.
+    ``quality`` selects ``inst`` (high=1, low=2). Auth-mode adds an in-URL
+    Basic credential or a leading path-token segment (stripped at the gate).
+    """
+    inst = _QUALITY_INST.get(quality, 1)
+    path = (
+        f"rtsp_tunnel?inst={inst}&enableaudio={enableaudio}"
+        f"&fmtp={fmtp}&maxSessionDuration={max_session_duration}"
+    )
+    cred = ""
+    prefix = ""
+    if config.auth_mode == AUTH_BASIC and config.token:
+        cred = f"{config.basic_user}:{config.token}@"
+    elif config.auth_mode == AUTH_PATH_TOKEN and config.token:
+        prefix = f"{config.token}/"
+    return f"rtsp://{cred}{url_host}:{port}/{prefix}{path}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-connection relay (Digest auth dance + steady injection).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _Relay:
+    """Handles one downstream client ↔ inner-proxy connection."""
+
+    def __init__(
+        self,
+        cam_id: str,
+        client_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+        target: InnerTarget,
+        first_request: bytes,
+    ) -> None:
+        self._cam = cam_id[:8]
+        self._cr = client_reader
+        self._cw = client_writer
+        self._target = target
+        self._first = first_request
+        self._challenge: dict[str, str] | None = None
+        self._ir: asyncio.StreamReader | None = None
+        self._iw: asyncio.StreamWriter | None = None
+
+    async def run(self) -> None:
+        """Connect to the inner proxy, do the auth dance, then pipe both ways."""
+        ir, iw = await asyncio.wait_for(
+            asyncio.open_connection("127.0.0.1", self._target.port),
+            timeout=_INNER_CONNECT_TIMEOUT,
+        )
+        self._ir, self._iw = ir, iw
+        try:
+            if has_authorization_header(self._first):
+                # Back-compat: client supplies its own creds → pure passthrough.
+                iw.write(self._first)
+                await iw.drain()
+            else:
+                await self._auth_dance()
+            await asyncio.gather(
+                self._pipe_client_to_inner(),
+                self._pipe_inner_to_client(),
+            )
+        finally:
+            for w in (iw, self._cw):
+                if not w.is_closing():
+                    w.close()
+
+    async def _read_message(self, reader: asyncio.StreamReader) -> bytes:
+        """Read one full RTSP message head (+body if Content-Length present).
+
+        Bounded by ``_AUTH_READ_TIMEOUT`` so a stalled camera during the auth
+        dance can't pin the connection. A response head exceeding asyncio's
+        64 KB readuntil limit (``LimitOverrunError``) is treated as a protocol
+        error → ConnectionError (caught by ``run``) so both sockets close.
+        """
+        try:
+            head = await asyncio.wait_for(
+                reader.readuntil(b"\r\n\r\n"), timeout=_AUTH_READ_TIMEOUT
+            )
+            body_len = content_length(head)
+            if body_len:
+                head += await asyncio.wait_for(
+                    reader.readexactly(body_len), timeout=_AUTH_READ_TIMEOUT
+                )
+        except (TimeoutError, asyncio.LimitOverrunError) as err:
+            raise ConnectionError(f"inner read failed: {err}") from err
+        return head
+
+    async def _auth_dance(self) -> None:
+        """Probe for the camera's Digest challenge, then resend authenticated."""
+        assert self._ir is not None and self._iw is not None
+        self._iw.write(self._first)
+        await self._iw.drain()
+        resp = await self._read_message(self._ir)
+        status = parse_response_status(resp)
+
+        if status != 401:
+            # Camera accepted without auth (or unexpected) — forward + steady.
+            self._cw.write(resp)
+            await self._cw.drain()
+            return
+
+        www = extract_header(resp, "WWW-Authenticate")
+        if www:
+            try:
+                self._challenge = _parse_digest_challenge(www)
+            except ValueError:
+                self._challenge = None
+        parsed = parse_request_start_line(self._first)
+        if self._challenge and parsed:
+            method, uri = parsed
+            auth = _build_digest_header(
+                method,
+                uri,
+                self._target.digest_user,
+                self._target.digest_password,
+                self._challenge,
+            )
+            self._iw.write(inject_auth_header(self._first, auth))
+            await self._iw.drain()
+            resp2 = await self._read_message(self._ir)
+            # The original 401 is swallowed — never forwarded to the client.
+            self._cw.write(resp2)
+            await self._cw.drain()
+            if parse_response_status(resp2) == 401:
+                # Stale creds (Bosch rotated server-side). Forward the honest
+                # 401 + close so the recorder reconnects with refreshed creds.
+                _LOGGER.debug(
+                    "frigate front-door %s: camera rotated Digest creds — closing for reconnect",
+                    self._cam,
+                )
+                self._challenge = None
+            return
+        # Couldn't compute auth — forward the 401 so the client knows.
+        _LOGGER.warning(
+            "frigate front-door %s: cannot compute Digest challenge, forwarding 401",
+            self._cam,
+        )
+        self._cw.write(resp)
+        await self._cw.drain()
+
+    async def _pipe_client_to_inner(self) -> None:
+        """Forward client→inner, injecting a fresh Authorization per request."""
+        assert self._ir is not None and self._iw is not None
+        buf = b""
+        try:
+            while True:
+                chunk = await self._cr.read(65536)
+                if not chunk:
+                    break
+                buf += chunk
+                buf = await self._drain_requests(buf)
+        except (asyncio.IncompleteReadError, ConnectionError, OSError):
+            pass
+        finally:
+            if not self._iw.is_closing():
+                self._iw.close()
+
+    async def _drain_requests(self, buf: bytes) -> bytes:
+        """Emit every complete request in ``buf``, return the unparsed tail."""
+        assert self._iw is not None
+        while buf:
+            if buf[:1] == b"$":
+                # Interleaved RTP/RTCP binary frame — forward raw, never parse.
+                self._iw.write(buf)
+                await self._iw.drain()
+                return b""
+            end = find_rtsp_message_end(buf)
+            if end < 0:
+                if len(buf) > _MAX_HEAD_BYTES:
+                    # Not RTSP and not interleaved — forward raw to avoid a stall.
+                    self._iw.write(buf)
+                    await self._iw.drain()
+                    return b""
+                return buf
+            req, buf = buf[:end], buf[end:]
+            body = content_length(req)
+            if body:
+                if len(buf) < body:
+                    return req + buf  # body incomplete — wait for more
+                req, buf = req + buf[:body], buf[body:]
+            parsed = parse_request_start_line(req)
+            if parsed and self._challenge:
+                method, uri = parsed
+                try:
+                    auth = _build_digest_header(
+                        method,
+                        uri,
+                        self._target.digest_user,
+                        self._target.digest_password,
+                        self._challenge,
+                    )
+                    self._iw.write(inject_auth_header(req, auth))
+                except (ValueError, KeyError):
+                    self._iw.write(req)
+            else:
+                self._iw.write(req)
+            await self._iw.drain()
+        return b""
+
+    async def _pipe_inner_to_client(self) -> None:
+        """Forward inner→client verbatim (RTP frames, responses)."""
+        assert self._ir is not None
+        try:
+            while True:
+                chunk = await self._ir.read(65536)
+                if not chunk:
+                    break
+                self._cw.write(chunk)
+                await self._cw.drain()
+        except (ConnectionError, OSError):
+            pass
+        finally:
+            if not self._cw.is_closing():
+                self._cw.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Front-door server (one per camera) + shared background-loop runner.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _CameraServer:
+    """One always-on listener for a single camera."""
+
+    def __init__(
+        self,
+        cam_id: str,
+        config: FrontDoorConfig,
+        resolve_inner: ResolveInner,
+        on_active: Callable[[], None] | None,
+        on_idle: Callable[[], None] | None,
+    ) -> None:
+        self.cam_id = cam_id
+        self.config = config
+        self._resolve = resolve_inner
+        self._on_active = on_active
+        self._on_idle = on_idle
+        self._server: asyncio.base_events.Server | None = None
+        self.port = 0
+        self.client_count = 0
+
+    async def start(self, preferred_port: int) -> int:
+        """Bind the listener; returns the bound port."""
+        self._server = await asyncio.start_server(
+            self._handle, self.config.bind_host, preferred_port
+        )
+        self.port = self._server.sockets[0].getsockname()[1]
+        _LOGGER.info(
+            "frigate front-door for %s listening on %s:%d (session opens on demand)",
+            self.cam_id[:8],
+            self.config.bind_host,
+            self.port,
+        )
+        return self.port
+
+    def close(self) -> None:
+        """Stop accepting new connections (synchronous, best-effort)."""
+        if self._server is not None:
+            self._server.close()
+            self._server = None
+
+    async def _handle(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        peer = writer.get_extra_info("peername")
+        peer_ip = peer[0] if peer else ""
+        cam = self.cam_id[:8]
+        if not ip_allowed(peer_ip, self.config.ip_allowlist):
+            _LOGGER.warning(
+                "frigate front-door %s: rejecting client %s (not allowlisted)",
+                cam,
+                peer_ip,
+            )
+            writer.close()
+            return
+
+        self.client_count += 1
+        if self.client_count == 1 and self._on_active is not None:
+            try:
+                self._on_active()
+            except Exception as err:  # caller callback must never kill the listener
+                _LOGGER.debug("frigate front-door %s: on_active raised — %s", cam, err)
+        try:
+            await self._serve(reader, writer, peer_ip)
+        finally:
+            self.client_count -= 1
+            if self.client_count == 0 and self._on_idle is not None:
+                try:
+                    self._on_idle()
+                except Exception as err:  # caller callback must never kill the listener
+                    _LOGGER.debug(
+                        "frigate front-door %s: on_idle raised — %s", cam, err
+                    )
+
+    async def _serve(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, peer_ip: str
+    ) -> None:
+        cam = self.cam_id[:8]
+        try:
+            first = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=30)
+        except (
+            asyncio.IncompleteReadError,
+            asyncio.LimitOverrunError,
+            TimeoutError,
+            OSError,
+        ):
+            writer.close()
+            return
+        body = content_length(first)
+        if body:
+            try:
+                first += await reader.readexactly(body)
+            except (asyncio.IncompleteReadError, OSError):
+                writer.close()
+                return
+
+        parsed = parse_request_start_line(first)
+        if parsed is None:
+            writer.close()
+            return
+        _method, uri = parsed
+
+        # ── Gate auth ────────────────────────────────────────────────────────
+        cfg = self.config
+        if cfg.auth_mode == AUTH_PATH_TOKEN and cfg.token:
+            ok, rewritten = split_path_token(uri, cfg.token)
+            if not ok:
+                _LOGGER.warning(
+                    "frigate front-door %s: bad/missing path token from %s",
+                    cam,
+                    peer_ip,
+                )
+                writer.close()
+                return
+            first = _rewrite_request_uri(first, rewritten)
+        elif cfg.auth_mode == AUTH_BASIC and cfg.token:
+            if not check_basic_auth(first, cfg.basic_user, cfg.token):
+                writer.write(
+                    b'RTSP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic realm="bosch-frigate"\r\n\r\n'
+                )
+                await writer.drain()
+                writer.close()
+                return
+            # Strip the gate header so the inner Digest dance starts clean.
+            first = _strip_authorization(first)
+
+        # ── Resolve the inner session lazily (opens the Bosch session) ──────
+        try:
+            target = await asyncio.wait_for(
+                self._resolve(self.cam_id), timeout=_RESOLVE_TIMEOUT
+            )
+        except (
+            Exception
+        ) as err:  # broad: any resolve failure → drop client, recorder retries
+            _LOGGER.debug("frigate front-door %s: resolve_inner failed — %s", cam, err)
+            target = None
+        if target is None:
+            writer.write(b"RTSP/1.0 503 Service Unavailable\r\n\r\n")
+            try:
+                await writer.drain()
+            except OSError:
+                pass
+            writer.close()
+            return
+
+        relay = _Relay(self.cam_id, reader, writer, target, first)
+        try:
+            await relay.run()
+        except (asyncio.IncompleteReadError, ConnectionError, OSError) as err:
+            _LOGGER.debug("frigate front-door %s: relay ended — %s", cam, err)
+
+
+def _rewrite_request_uri(request: bytes, new_uri: str) -> bytes:
+    """Replace the request-line URI (2nd token) with ``new_uri``."""
+    eol = request.find(b"\r\n")
+    if eol < 0:
+        return request
+    first = request[:eol].decode("utf-8", errors="replace")
+    rest = request[eol:]
+    parts = first.split(" ")
+    if len(parts) < 3:
+        return request
+    parts[1] = new_uri
+    return (" ".join(parts)).encode("utf-8") + rest
+
+
+def _strip_authorization(request: bytes) -> bytes:
+    """Remove any ``Authorization:`` line from the request head."""
+    sep = request.find(b"\r\n\r\n")
+    if sep < 0:
+        return request
+    head = request[:sep].decode("utf-8", errors="replace")
+    tail = request[sep:]
+    kept = [
+        ln
+        for ln in head.split("\r\n")
+        if ln.split(":", 1)[0].strip().lower() != "authorization"
+    ]
+    return ("\r\n".join(kept)).encode("utf-8") + tail
+
+
+class FrontDoorRunner:
+    """Hosts every camera's front-door server directly on the HA event loop.
+
+    The servers are plain asyncio ``start_server`` listeners and the per-client
+    relays are asyncio tasks — all on the loop they are created from (HA's). No
+    background thread, so there is no cross-loop bridging to block or leak; the
+    lazy ``resolve_inner`` is awaited directly on the same loop.
+    """
+
+    def __init__(self) -> None:
+        self._servers: dict[str, _CameraServer] = {}
+
+    async def start_server(
+        self,
+        cam_id: str,
+        config: FrontDoorConfig,
+        resolve_inner: ResolveInner,
+        preferred_port: int = 0,
+        on_active: Callable[[], None] | None = None,
+        on_idle: Callable[[], None] | None = None,
+    ) -> int:
+        """Start (or restart) the front-door for ``cam_id``; returns the port."""
+        self.stop_server(cam_id)
+        server = _CameraServer(cam_id, config, resolve_inner, on_active, on_idle)
+        port = await server.start(preferred_port)
+        self._servers[cam_id] = server
+        return port
+
+    def stop_server(self, cam_id: str) -> None:
+        """Close the listener for ``cam_id`` (sync — stops accepting at once)."""
+        server = self._servers.pop(cam_id, None)
+        if server is not None:
+            server.close()
+
+    def active_count(self, cam_id: str) -> int:
+        server = self._servers.get(cam_id)
+        return server.client_count if server is not None else 0
+
+    def has_server(self, cam_id: str) -> bool:
+        return cam_id in self._servers
+
+    def port(self, cam_id: str) -> int:
+        server = self._servers.get(cam_id)
+        return server.port if server is not None else 0
+
+    def stop_all(self) -> None:
+        for cam_id in list(self._servers):
+            self.stop_server(cam_id)

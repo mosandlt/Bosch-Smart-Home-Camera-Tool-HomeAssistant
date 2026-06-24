@@ -214,6 +214,28 @@
               "enable_ptz_controls": "When ON: cameras with pan support get a pan-preset select entity (home / left / right / back-left / back-right). Only the indoor 360 camera exposes pan. **Off by default** so users without a 360 camera see no stray entity."
             }
           },
+          "frigate": {
+            "name": "External RTSP Endpoints (Frigate / NVR)",
+            "description": "Persistent, credential-free RTSP endpoints for external recorders (Frigate, BlueIris, go2rtc). Each camera's session opens on demand. Enable the master switch here; per-camera High/Low-quality switches publish the stream URLs.",
+            "data": {
+              "frigate_endpoints_enabled": "Enable external RTSP endpoints (master switch, default off)",
+              "frigate_bind_host": "RTSP bind host / IP",
+              "frigate_ip_allowlist": "IP allowlist (comma-separated CIDRs)",
+              "frigate_auth_mode": "Authentication mode",
+              "frigate_token": "Shared secret / Basic-Auth password",
+              "frigate_basic_user": "Basic-Auth username",
+              "frigate_idle_timeout": "Idle session timeout (seconds)"
+            },
+            "data_description": {
+              "frigate_endpoints_enabled": "Master switch for all external RTSP endpoints. When OFF (default), no RTSP port is opened and no Bosch session is held. When ON, each camera's endpoint is available; the Bosch stream session opens when the first client connects and closes after the idle timeout.",
+              "frigate_bind_host": "IP address the RTSP server binds to — pick a preset or type your own. **127.0.0.1** (localhost, default, safest): only the Home Assistant host can connect. **0.0.0.0**: all LAN interfaces — needed when Frigate/BlueIris runs on another host. Or enter a **specific interface IP** (e.g. 192.168.1.50) to bind only that network card. Anything other than localhost is credential-free — pair it with the IP allowlist or a token.",
+              "frigate_ip_allowlist": "Comma-separated list of IP addresses or CIDR ranges allowed to connect to the RTSP endpoints. Empty = allow any client. Example: 192.168.1.0/24, 10.0.0.5",
+              "frigate_auth_mode": "Optional access gate for the RTSP endpoints.\n• **none** (default): no credentials required — rely on IP allowlist and network isolation.\n• **path-token**: a shared secret is appended to the stream URL path; clients must include it.\n• **basic**: standard RTSP Basic-Auth with username and password.",
+              "frigate_token": "Shared secret used as the path token (auth mode: path-token) or as the Basic-Auth password (auth mode: basic). Leave empty to disable the gate entirely.",
+              "frigate_basic_user": "Username for RTSP Basic-Auth mode. Only used when authentication mode is set to 'basic'.",
+              "frigate_idle_timeout": "How many seconds the Bosch camera session lingers after the last recorder disconnects. The session is kept alive so reconnects are instant. Default: 30. Set to 0 to close the session immediately when no client is connected."
+            }
+          },
           "ai": {
             "name": "AI Snapshot Description",
             "description": "Let Home Assistant's AI describe what the camera sees. Requires a configured AI Task integration (e.g. OpenAI, Google, Anthropic, or local Ollama). Note: depending on the chosen AI backend, camera images and possibly personal data are sent to a cloud service and may — subject to that provider's settings — be used for training. For maximum privacy, use a local model (e.g. Ollama).",
@@ -305,6 +327,12 @@
       },
       "external_stream": {
         "name": "Publish external stream URL"
+      },
+      "frigate_high": {
+        "name": "Frigate stream High"
+      },
+      "frigate_low": {
+        "name": "Frigate stream Low"
       }
     },
     "sensor": {
@@ -316,6 +344,12 @@
       },
       "stream_url": {
         "name": "Stream URL (main)"
+      },
+      "frigate_url_high": {
+        "name": "Frigate RTSP URL (High)"
+      },
+      "frigate_url_low": {
+        "name": "Frigate RTSP URL (Low)"
       },
       "stream_url_sub": {
         "name": "Stream URL (sub)"

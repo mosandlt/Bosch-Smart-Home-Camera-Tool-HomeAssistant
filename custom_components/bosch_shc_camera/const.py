@@ -236,12 +236,43 @@ DEFAULT_OPTIONS = {
     # before AUTO analyses are allowed. Empty = no condition gate.
     "ai_active_condition_entity": "",
     "ai_active_condition_state": "not_home",
+    # ── Frigate / external-recorder persistent RTSP endpoints ─────────────────
+    # Opt-in always-on, credential-free RTSP front-door per camera (see
+    # frigate_endpoint.py). Master switch; per-camera High/Low switches gate
+    # which quality URLs are published. Default OFF.
+    "frigate_endpoints_enabled": False,
+    # Bind host for the front-door listener. "127.0.0.1" = localhost-only
+    # (default, safest); "0.0.0.0" = reachable from the whole LAN (needed when
+    # the recorder runs on another host — credential-free, so pair with the
+    # IP allowlist and/or a token).
+    "frigate_bind_host": "127.0.0.1",
+    # Comma-separated client IPs / CIDRs allowed to connect. Empty = allow any.
+    "frigate_ip_allowlist": "",
+    # Gate auth: "none" | "path_token" | "basic". With a token set, path_token
+    # serves rtsp://host:port/<token>/rtsp_tunnel?…, basic serves
+    # rtsp://user:pass@host:port/… . Empty token disables the gate.
+    "frigate_auth_mode": "none",
+    "frigate_token": "",
+    "frigate_basic_user": "frigate",
+    # Seconds a session lingers after the last recorder disconnects.
+    "frigate_idle_timeout": 60,
 }
 
 # v2.16.0 dropped the historical "confirm" value (popup dialog) in favour
 # of an inline tap-to-reveal overlay. Stale "confirm" values from v12.8.0
 # collapse to "lan" at the read site in camera.py.
 AUTO_PLAY_DEFAULT_VALUES = ("lan", "always", "never")
+
+# ── Frigate / external-recorder persistent RTSP endpoints ─────────────────────
+CONF_FRIGATE_ENDPOINTS_ENABLED = "frigate_endpoints_enabled"
+CONF_FRIGATE_BIND_HOST = "frigate_bind_host"
+CONF_FRIGATE_IP_ALLOWLIST = "frigate_ip_allowlist"
+CONF_FRIGATE_AUTH_MODE = "frigate_auth_mode"
+CONF_FRIGATE_TOKEN = "frigate_token"  # noqa: S105 # option key name, not a credential
+CONF_FRIGATE_BASIC_USER = "frigate_basic_user"
+CONF_FRIGATE_IDLE_TIMEOUT = "frigate_idle_timeout"
+FRIGATE_BIND_VALUES = ("127.0.0.1", "0.0.0.0")  # noqa: S104 # 0.0.0.0 is an explicit opt-in LAN-exposure choice
+FRIGATE_AUTH_VALUES = ("none", "path_token", "basic")
 
 # ── Webhook delivery ──────────────────────────────────────────────────────────
 CONF_ENABLE_WEBHOOK_DELIVERY = "enable_webhook_delivery"

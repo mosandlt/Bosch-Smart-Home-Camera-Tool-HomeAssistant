@@ -214,6 +214,28 @@
               "enable_ptz_controls": "Quando ATTIVO: le telecamere con supporto di rotazione ottengono un'entità di selezione della posizione predefinita (home / sinistra / destra / dietro-sinistra / dietro-destra). Solo la telecamera interna 360 supporta la rotazione. **Disattivato per impostazione predefinita** in modo che gli utenti senza telecamera 360 non vedano entità superflue."
             }
           },
+          "frigate": {
+            "name": "Endpoint RTSP esterni (Frigate / NVR)",
+            "description": "Endpoint RTSP persistenti e senza credenziali per registratori esterni (Frigate, BlueIris, go2rtc). La sessione di ogni telecamera si apre su richiesta. Abilitare l'interruttore principale qui; gli interruttori Alta/Bassa qualità per telecamera pubblicano gli URL degli stream.",
+            "data": {
+              "frigate_endpoints_enabled": "Abilita endpoint RTSP esterni (interruttore principale, disattivato per impostazione predefinita)",
+              "frigate_bind_host": "Host / IP di binding RTSP",
+              "frigate_ip_allowlist": "Lista di indirizzi IP consentiti (CIDR separati da virgola)",
+              "frigate_auth_mode": "Modalità di autenticazione",
+              "frigate_token": "Segreto condiviso / password Basic-Auth",
+              "frigate_basic_user": "Nome utente Basic-Auth",
+              "frigate_idle_timeout": "Timeout sessione inattiva (secondi)"
+            },
+            "data_description": {
+              "frigate_endpoints_enabled": "Interruttore principale per tutti gli endpoint RTSP esterni. Quando DISATTIVO (predefinito): nessuna porta RTSP viene aperta e nessuna sessione Bosch viene mantenuta. Quando ATTIVO: l'endpoint di ogni telecamera è disponibile; la sessione stream Bosch si apre quando si connette il primo client e si chiude allo scadere del timeout di inattività.",
+              "frigate_bind_host": "Indirizzo IP a cui si lega il server RTSP — scegli un'opzione predefinita o inserisci la tua. **127.0.0.1** (localhost, predefinito, più sicuro): solo l'host di Home Assistant può connettersi. **0.0.0.0**: tutte le interfacce LAN — necessario quando Frigate/BlueIris è in esecuzione su un altro host. Oppure inserisci un **IP di interfaccia specifico** (es. 192.168.1.50) per vincolare solo quella scheda di rete. Qualsiasi valore diverso da localhost è senza credenziali — abbinalo alla lista di IP consentiti o a un token.",
+              "frigate_ip_allowlist": "Elenco separato da virgole di indirizzi IP o intervalli CIDR autorizzati a connettersi. Vuoto = consenti qualsiasi client. Esempio: 192.168.1.0/24, 10.0.0.5",
+              "frigate_auth_mode": "Controllo di accesso opzionale.\n• none (predefinito): nessuna credenziale richiesta.\n• path-token: un segreto condiviso aggiunto al percorso dell'URL dello stream.\n• basic: autenticazione RTSP Basic-Auth standard con nome utente e password.",
+              "frigate_token": "Segreto condiviso usato come token nel percorso (modalità auth: path-token) o come password Basic-Auth (modalità auth: basic). Lasciare vuoto per disabilitare il controllo di accesso.",
+              "frigate_basic_user": "Nome utente per la modalità RTSP Basic-Auth. Utilizzato solo quando la modalità di autenticazione è impostata su 'basic'.",
+              "frigate_idle_timeout": "Quanti secondi la sessione della telecamera Bosch rimane attiva dopo la disconnessione dell'ultimo registratore. La sessione viene mantenuta per riconnessioni immediate. Predefinito: 30. Impostare a 0 per chiudere immediatamente quando nessun client è connesso."
+            }
+          },
           "ai": {
             "name": "Descrizione snapshot IA",
             "description": "Lascia che l'IA di Home Assistant descriva ciò che la telecamera vede. Richiede un'integrazione AI Task configurata (es. OpenAI, Google, Anthropic o Ollama locale). Nota: a seconda del backend IA scelto, le immagini della telecamera e possibilmente i dati personali vengono inviati a un servizio cloud e potrebbero essere usati per il training. Per la massima privacy, usare un modello locale (es. Ollama).",
@@ -371,6 +393,12 @@
       },
       "external_stream": {
         "name": "Pubblica URL stream esterno"
+      },
+      "frigate_high": {
+        "name": "Stream Frigate Alta"
+      },
+      "frigate_low": {
+        "name": "Stream Frigate Bassa"
       }
     },
     "number": {
@@ -667,6 +695,12 @@
       },
       "stream_url": {
         "name": "URL stream (principale)"
+      },
+      "frigate_url_high": {
+        "name": "URL RTSP Frigate (Alta)"
+      },
+      "frigate_url_low": {
+        "name": "URL RTSP Frigate (Bassa)"
       },
       "stream_url_sub": {
         "name": "URL stream (sub)"

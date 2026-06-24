@@ -46,6 +46,7 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
 - [Architecture](#architecture)
   - [Network Connectivity](#network-connectivity) — required ports, VLAN/subnet pitfalls
 - [Streaming & Reliability](#streaming--reliability)
+- [External Recorders (Frigate / BlueIris / go2rtc)](#external-recorders-frigate--blueiris--go2rtc) — persistent credential-free RTSP endpoint
 - [Quality Scale: Platinum](#quality-scale-platinum)
 - [Features](#features)
   - [Entities](#entities)
@@ -544,6 +545,63 @@ The card's HLS.js configuration is tuned to prevent HA's stream component from k
 - **SRI integrity hash** — hls.js is loaded from jsdelivr with a pinned `hls.js@1.6.16` + matching `sha384`. Any drift (jsdelivr patch release) blocks the load instead of running an unverified bundle.
 
 The player buffer profile is independent of the **Response** info field on the card, which shows the Bosch-API server-side `bufferingTime` hint (~500 ms LOCAL, ~1000 ms REMOTE) and is unrelated to the client-side hls.js buffer.
+
+## External Recorders (Frigate / BlueIris / go2rtc)
+
+Want to record your Bosch camera in **Frigate**, **BlueIris** or feed it into a standalone **go2rtc**? The integration can expose a **persistent, credential-free RTSP endpoint** per camera.
+
+Why this is needed: the camera speaks RTSPS (RTSP over TLS) with self-signed certs + rotating Digest credentials, and its session only exists while something is watching. The endpoint solves both: it stays bound on a stable port even when idle (no more *"Connection refused"*), opens the camera session on demand when your recorder connects, and injects the Digest auth itself — so the URL you paste needs **no `user:pass@`** and never goes stale.
+
+### Enable it
+
+1. **Settings → Devices & Services → Bosch Smart Home Camera → Configure → External Recorder (Frigate)** and turn **Enable Frigate endpoints** on.
+2. Set the **RTSP bind host** — pick a preset from the dropdown or type your own IP:
+   - **`127.0.0.1`** (localhost) — default, safest. Use this when your recorder runs *on the same host* as Home Assistant.
+   - **`0.0.0.0`** — all LAN interfaces; required when the recorder runs on **another machine**.
+   - **A specific interface IP** (e.g. `192.168.1.50`) — bind to just that network card on a multi-homed host. Type it straight into the field.
+   - Anything other than localhost is credential-free, so pair it with the **IP allowlist** and/or a **token** (see below).
+3. Per camera, enable the **`Frigate-Stream High`** and/or **`Frigate-Stream Low`** switch (they're hidden by default — enable the entity, then turn it on). **High** = main encoder (1080p, `inst=1`); **Low** = sub-stream (`inst=2`, lighter for detection).
+4. The matching **`Frigate RTSP URL (High/Low)`** sensor now holds the ready-to-use URL, e.g.
+   `rtsp://192.168.1.10:8600/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=3600`
+
+The Bosch session opens the moment your recorder connects and is released again (idle linger) once it disconnects — so it respects the camera's limited concurrent-session budget. One endpoint serves both High and Low; multiple consumers (e.g. Frigate + a Lovelace card) share a single camera connection.
+
+### Optional access control (all in Settings)
+
+| Option | Effect |
+| --- | --- |
+| **IP allowlist** | Comma-separated client IPs / CIDRs allowed to connect. Empty = allow any. |
+| **Auth mode: Path token** | URL becomes `rtsp://host:port/<token>/rtsp_tunnel?…` — wrong/missing token is refused. |
+| **Auth mode: Basic-Auth** | URL becomes `rtsp://user:pass@host:port/rtsp_tunnel?…` (standard RTSP Basic). |
+| **Idle timeout** | Seconds the camera session lingers after the last recorder disconnects. |
+
+> **Security note:** with `0.0.0.0` the stream is reachable credential-free by anything on your LAN. Restrict it with the allowlist and/or a token, or keep the default `127.0.0.1` and run your recorder on the HA host.
+
+### Frigate example
+
+Point Frigate's bundled go2rtc at the HA endpoint, then read it back for detect + record over a single connection:
+
+```yaml
+go2rtc:
+  streams:
+    Front_Door:
+      - rtsp://<HA-IP>:8600/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=3600
+
+cameras:
+  Front_Door:
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/Front_Door   # Frigate's OWN embedded go2rtc
+          input_args: preset-rtsp-restream
+          roles: [detect, record, audio]
+      output_args:
+        record: preset-record-generic-audio-copy
+    detect:
+      width: 640
+      height: 360
+```
+
+Copy the exact `rtsp://…` from the sensor (the port is assigned per camera). Bosch RTSP is TCP-only, so `preset-rtsp-restream` (which forces `-rtsp_transport tcp`) is required. Both `detect` and `record` share one input — Frigate downscales for detection, so you usually don't need the Low sub-stream.
 
 ## Quality Scale: Platinum
 
@@ -2094,11 +2152,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.0.0** — see the GitHub release page for full notes:
-[**v14.0.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.0.0)
+Latest: **v14.1.0** — see the GitHub release page for full notes:
+[**v14.1.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.1.0)
 
 | Version | Highlights |
 |---|---|
+| **v14.1.0** | **Record your Bosch camera in Frigate, BlueIris or go2rtc — with a persistent, credential-free RTSP endpoint.** Opt-in per camera, the integration now exposes an always-on RTSP URL you can paste straight into an external recorder: no `user:pass@`, and it no longer disappears when nobody is watching (the camera session opens on demand and the rotating Digest auth is handled for you). Enable it under *Configure → External Recorder (Frigate)*, pick *localhost-only* (default) or *whole-LAN* binding, optionally lock it down with an IP allowlist or a path-token / Basic-Auth, then turn on the per-camera *Frigate-Stream High/Low* switch and copy the URL from the matching sensor. See the [External Recorders](#external-recorders-frigate--blueiris--go2rtc) guide for a ready-to-use Frigate config. No effect unless you enable it. |
 | **v14.0.0** | **Picture-in-Picture now keeps playing when you switch browser tabs.** Previously the floating Picture-in-Picture window (and the live tile) froze after a few minutes in the background and only a page reload brought it back. The real cause was in Home Assistant's frontend: after a tab is hidden for five minutes it suspends the connection and removes the dashboard from the page to save resources, tearing down every card — including the live video and its floating window. The card now asks Home Assistant to keep running in the background for as long as a Picture-in-Picture window is open (the same mechanism as the *Keep running in background* profile option) and restores your setting when you close it, so the floating stream keeps playing no matter how long the tab stays in the background. Also: an ordinary tab switch keeps the WebRTC connection alive and resumes instantly instead of reconnecting; the card no longer runs a recovery while Picture-in-Picture is open that could itself freeze the window; and stopping the stream or turning on privacy mode now tears down cleanly and can't be silently revived. Card-only — no config changes. |
 | **v13.6.0** | **Cross-platform reliability round — iOS Picture-in-Picture, smarter stream recovery, and a credential-exposure fix.** Picture-in-Picture now works on iPhone and iPad (Safari); live-stream sound unmutes on the first tap; a page restored from the browser's back/forward cache reliably offers tap-to-play on iOS instead of failing silently; and returning to the app on Android no longer opens a duplicate stream. The live-stream RTSP URL — which embeds local camera credentials — is no longer exposed through the camera entity's attributes (recorder history, REST API, logbook); update recommended. Diagnostics no longer freeze on a camera left on a 24/7 live view, plus a round of reconnect/teardown and audio robustness fixes across Chrome, Safari, Firefox and Edge on macOS, Windows, iOS, Android and Linux. |
 | **v13.5.17** | **Live-stream sound, tab-switch resilience, and quieter controls.** A reliability-focused card release hardened across Chrome, Safari, Firefox and Edge on macOS, Windows, iOS, Android and Linux. Sound no longer comes back muted after an automatic reconnect, a stray Tab/arrow keypress can't silently drop it, and a brief buffering pause re-arms one-click sound recovery. The stream now recovers when you return to a backgrounded tab or restore the page from the browser's back/forward cache (it used to come back frozen). The audio and Picture-in-Picture buttons now appear when the stream starts and hide when it stops instead of sitting greyed over a snapshot, and the card corners no longer flicker. The Bosch cloud maintenance banner can be dismissed with an ×, and privacy mode now shows the last live snapshot time (`privacy_stale_source: event` restores the old behaviour). Card-only — no config changes. |

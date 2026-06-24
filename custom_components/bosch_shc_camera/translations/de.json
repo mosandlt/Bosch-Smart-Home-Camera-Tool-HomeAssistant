@@ -214,6 +214,28 @@
               "enable_ptz_controls": "Bei aktivierter Option zeigen Kameras mit Pan-Funktion eine Pan-Preset-Auswahl (Home / Links / Rechts / Hinten-Links / Hinten-Rechts). Nur die 360-Innenkamera unterstützt Pan. **Standardmäßig deaktiviert** — Nutzer ohne 360-Kamera sehen keine überflüssige Entität."
             }
           },
+          "frigate": {
+            "name": "Externe RTSP-Endpunkte (Frigate / NVR)",
+            "description": "Dauerhafte, credential-freie RTSP-Endpunkte für externe Recorder (Frigate, BlueIris, go2rtc). Die Kamera-Sitzung wird bei Bedarf geöffnet. Master-Schalter hier aktivieren; kameraspezifische Hoch-/Niedrig-Qualitäts-Schalter veröffentlichen die Stream-URLs.",
+            "data": {
+              "frigate_endpoints_enabled": "Externe RTSP-Endpunkte aktivieren (Master-Schalter, Standard: aus)",
+              "frigate_bind_host": "RTSP-Bind-Host / IP",
+              "frigate_ip_allowlist": "IP-Zulassungsliste (kommagetrennte CIDRs)",
+              "frigate_auth_mode": "Authentifizierungsmodus",
+              "frigate_token": "Gemeinsamer Schlüssel / Basic-Auth-Passwort",
+              "frigate_basic_user": "Basic-Auth-Benutzername",
+              "frigate_idle_timeout": "Leerlauf-Sitzungs-Timeout (Sekunden)"
+            },
+            "data_description": {
+              "frigate_endpoints_enabled": "Master-Schalter für alle externen RTSP-Endpunkte. Bei DEAKTIVIERT (Standard) wird kein RTSP-Port geöffnet und keine Bosch-Sitzung gehalten. Bei AKTIVIERT ist der Endpunkt jeder Kamera verfügbar; die Bosch-Stream-Sitzung öffnet sich, wenn der erste Client verbindet, und schließt sich nach dem Leerlauf-Timeout.",
+              "frigate_bind_host": "IP-Adresse, an die der RTSP-Server gebunden wird — Voreinstellung wählen oder eigene Adresse eingeben. **127.0.0.1** (localhost, Standard, sicherste Option): Nur der Home-Assistant-Host kann sich verbinden. **0.0.0.0**: Alle LAN-Schnittstellen — erforderlich, wenn Frigate/BlueIris auf einem anderen Host läuft. Oder eine **bestimmte Schnittstellen-IP** eingeben (z. B. 192.168.1.50), um nur diese Netzwerkkarte zu binden. Alles außer localhost ist credential-frei — mit der IP-Zulassungsliste oder einem Token absichern.",
+              "frigate_ip_allowlist": "Kommagetrennte Liste von IP-Adressen oder CIDR-Bereichen, die sich mit den RTSP-Endpunkten verbinden dürfen. Leer = alle Clients erlaubt. Beispiel: 192.168.1.0/24, 10.0.0.5",
+              "frigate_auth_mode": "Optionale Zugangskontrolle für die RTSP-Endpunkte.\n• **keine** (Standard): keine Zugangsdaten erforderlich — auf IP-Zulassungsliste und Netzwerkisolierung verlassen.\n• **Pfad-Token**: Ein gemeinsamer Schlüssel wird an den Stream-URL-Pfad angehängt; Clients müssen ihn angeben.\n• **Basic**: Standard-RTSP-Basic-Auth mit Benutzername und Passwort.",
+              "frigate_token": "Gemeinsamer Schlüssel als Pfad-Token (Authentifizierungsmodus: Pfad-Token) oder als Basic-Auth-Passwort (Authentifizierungsmodus: Basic). Leer lassen, um die Zugangskontrolle vollständig zu deaktivieren.",
+              "frigate_basic_user": "Benutzername für den RTSP-Basic-Auth-Modus. Wird nur verwendet, wenn der Authentifizierungsmodus auf 'Basic' gesetzt ist.",
+              "frigate_idle_timeout": "Wie viele Sekunden die Bosch-Kamera-Sitzung nach dem Trennen des letzten Recorders aktiv bleibt. Die Sitzung wird aufrechterhalten, damit Wiederverbindungen sofort erfolgen. Standard: 30. Bei 0 wird die Sitzung sofort geschlossen, wenn kein Client verbunden ist."
+            }
+          },
           "ai": {
             "name": "KI-Snapshot-Beschreibung",
             "description": "Lässt die KI von Home Assistant beschreiben, was die Kamera sieht. Erfordert eine konfigurierte „AI Task\"-Integration (z. B. OpenAI, Google, Anthropic oder lokal über Ollama). Hinweis: Je nach gewähltem KI-Backend werden Kamerabilder und ggf. personenbezogene Daten an einen Cloud-Dienst übertragen und können dort – abhängig von dessen Einstellungen – zu Trainingszwecken verwendet werden. Für maximalen Datenschutz ein lokales Modell (z. B. Ollama) verwenden.",
@@ -371,6 +393,12 @@
       },
       "external_stream": {
         "name": "Externe Stream-URL veröffentlichen"
+      },
+      "frigate_high": {
+        "name": "Frigate-Stream Hoch"
+      },
+      "frigate_low": {
+        "name": "Frigate-Stream Niedrig"
       }
     },
     "number": {
@@ -655,6 +683,12 @@
       },
       "stream_url": {
         "name": "Stream-URL (Haupt)"
+      },
+      "frigate_url_high": {
+        "name": "Frigate RTSP-URL (Hoch)"
+      },
+      "frigate_url_low": {
+        "name": "Frigate RTSP-URL (Niedrig)"
       },
       "stream_url_sub": {
         "name": "Stream-URL (Sub)"

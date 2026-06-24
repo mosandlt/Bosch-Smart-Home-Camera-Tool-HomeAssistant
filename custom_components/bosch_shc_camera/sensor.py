@@ -159,6 +159,8 @@ async def async_setup_entry(
     for cam_id in coordinator.data:
         entities.append(BoschStreamUrlSensor(coordinator, cam_id, config_entry))
         entities.append(BoschStreamUrlSubSensor(coordinator, cam_id, config_entry))
+        entities.append(BoschFrigateUrlHighSensor(coordinator, cam_id, config_entry))
+        entities.append(BoschFrigateUrlLowSensor(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -1681,6 +1683,55 @@ class BoschStreamUrlSubSensor(_BoschStreamUrlSensorBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_stream_url_sub_{cam_id.lower()}"
         self._attr_translation_key = "stream_url_sub"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+
+class _BoschFrigateUrlSensorBase(_BoschSensorBase):
+    """Credential-free always-on RTSP URL for an external recorder (Frigate).
+
+    Returns None unless the global ``frigate_endpoints_enabled`` option is on,
+    the matching per-camera High/Low switch is on, and the front-door is bound.
+    The URL needs no ``user:pass@`` — the front-door injects Digest auth toward
+    the camera. Paste it straight into Frigate's go2rtc / ffmpeg input.
+    """
+
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:cctv"
+    _quality: str = "high"
+
+    @property
+    def native_value(self) -> str | None:
+        url: str | None = self.coordinator.frigate_endpoint_url(
+            self._cam_id, self._quality
+        )
+        return url
+
+
+class BoschFrigateUrlHighSensor(_BoschFrigateUrlSensorBase):
+    """Frigate persistent endpoint URL — High quality (inst=1)."""
+
+    _quality = "high"
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id = f"bosch_shc_frigate_url_high_{cam_id.lower()}"
+        self._attr_translation_key = "frigate_url_high"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+
+class BoschFrigateUrlLowSensor(_BoschFrigateUrlSensorBase):
+    """Frigate persistent endpoint URL — Low quality (inst=2)."""
+
+    _quality = "low"
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id = f"bosch_shc_frigate_url_low_{cam_id.lower()}"
+        self._attr_translation_key = "frigate_url_low"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
 

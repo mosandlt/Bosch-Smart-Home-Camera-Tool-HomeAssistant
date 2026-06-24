@@ -260,6 +260,7 @@ class TestHasActiveConsumer:
             _camera_entities={CAM: cam_entity},
             _nvr_processes={CAM: object()} if nvr else {},
             _go2rtc_consumer_count=AsyncMock(return_value=go2rtc_count),
+            _frigate_runner=None,
         )
 
     @pytest.mark.asyncio
@@ -325,6 +326,7 @@ class TestHasActiveConsumer:
             _camera_entities={},
             _nvr_processes={},
             _go2rtc_consumer_count=AsyncMock(return_value=1),
+            _frigate_runner=None,
         )
         assert await BoschCameraCoordinator._has_active_consumer(c, CAM) is True
 
