@@ -275,8 +275,8 @@ class TestFcmPushStatusNameAndUid:
         from custom_components.bosch_shc_camera.sensor import BoschFcmPushStatusSensor
 
         s = BoschFcmPushStatusSensor(stub_coord, CAM_ID, stub_entry)
-        # FCM sensor is global (not per-cam), name reflects that
-        assert "FCM Push Status" in s.name
+        # v14.2.2 — name resolved from translation key at runtime
+        assert s._attr_translation_key == "push_status"
 
     def test_unique_id(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.sensor import BoschFcmPushStatusSensor

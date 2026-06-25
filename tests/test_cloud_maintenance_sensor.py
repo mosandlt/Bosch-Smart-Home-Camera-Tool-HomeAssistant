@@ -58,7 +58,8 @@ def _make_sensor(
 class TestCloudMaintenanceSensorMetadata:
     def test_identity_props(self):
         s = _make_sensor(None)
-        assert s.name == "Bosch Cloud Wartung"
+        # v14.2.2 — name resolved from translation key at runtime (not _attr_name)
+        assert s._attr_translation_key == "cloud_maintenance"
         assert s.unique_id == "bosch_shc_camera_cloud_maintenance"
         # Always-on availability — sensor must stay readable during cloud outage.
         assert s.available is True

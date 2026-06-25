@@ -39,16 +39,15 @@ def stub_entry():
 
 
 def test_refresh_button_construction(stub_coord, stub_entry):
-    """Refresh button instantiates with the expected unique_id + name."""
+    """Refresh button instantiates with the expected unique_id + translation_key."""
     from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
     btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
     assert btn._attr_unique_id.startswith("bosch_shc_refresh_")
     assert btn._attr_translation_key == "refresh_snapshot"
-    # v12.3.0 — `_attr_name` is the bare suffix; HA prepends the device
-    # name automatically via `_attr_has_entity_name=True`. The cam title
-    # lives only in `device_info["name"]`.
-    assert btn._attr_name == "Refresh Snapshot"
+    # v14.2.2 — _attr_name is None; HA resolves the entity name from
+    # translations/en.json via _attr_translation_key at runtime.
+    assert getattr(btn, "_attr_name", None) is None
 
 
 def test_refresh_button_device_info(stub_coord, stub_entry):
