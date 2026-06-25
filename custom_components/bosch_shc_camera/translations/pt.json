@@ -401,6 +401,12 @@
       },
       "frigate_low": {
         "name": "Stream Frigate Baixa"
+      },
+      "glass_break_detection": {
+        "name": "Detecção de Quebra de Vidro"
+      },
+      "fire_alarm_detection": {
+        "name": "Detecção de Alarme de Fumo"
       }
     },
     "number": {

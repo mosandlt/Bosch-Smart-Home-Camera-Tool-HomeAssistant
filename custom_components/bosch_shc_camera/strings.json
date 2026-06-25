@@ -335,6 +335,12 @@
       },
       "frigate_low": {
         "name": "Frigate stream Low"
+      },
+      "glass_break_detection": {
+        "name": "Glass Break Detection"
+      },
+      "fire_alarm_detection": {
+        "name": "Smoke Alarm Detection"
       }
     },
     "sensor": {

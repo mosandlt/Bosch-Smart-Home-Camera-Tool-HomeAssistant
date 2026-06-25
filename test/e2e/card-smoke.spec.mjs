@@ -1974,16 +1974,18 @@ test("offline camera hides the control pill bar in fullscreen", async ({ page })
   expect(r.display, "control pill bar is hidden in fullscreen while offline").toBe("none");
 });
 
-// 2026-06-17: WebRTC over a plain-http LAN URL is broken in the iOS Companion app
-// (WKWebView needs a secure context) and HA does NOT auto-fall-back to HLS once a
-// camera claims WebRTC. _startWebRTC must bail fast on iOS+insecure so the caller
-// drops to HLS. Desktop http keeps WebRTC (not iOS). Source pin.
-test("WebRTC bails fast on iOS over an insecure context (source pin)", () => {
+// 2026-06-24: The old iOS+http guard (isSecureContext + _isIOS()) was REMOVED — it
+// caused the Companion App on LAN (http://192.168.x.x) to instantly bail to HLS.
+// Only the RTCPeerConnection-unavailable guard remains; the 5 s timeout + dead-track
+// watchdog handle stalls gracefully. Source pins for this intentional removal.
+test("_startWebRTC no longer has an iOS+http early-throw (source pin)", () => {
   const idx = CARD_SRC.indexOf("async _startWebRTC(");
   expect(idx, "_startWebRTC exists").toBeGreaterThan(-1);
   const body = CARD_SRC.slice(idx, idx + 1900);
-  expect(body, "guards on isSecureContext").toContain("isSecureContext");
-  expect(body, "iOS-specific guard (won't regress desktop http)").toContain("_isIOS()");
+  // The only remaining early guard is RTCPeerConnection undefined — no iOS-specific throw
+  expect(body, "RTCPeerConnection guard still present").toContain("RTCPeerConnection");
+  // isSecureContext guard intentionally removed — must not regress
+  expect(body, "isSecureContext guard must not come back (breaks iOS LAN WebRTC)").not.toContain("isSecureContext");
 });
 
 // 2026-06-17: trigger_snapshot fired for ALL cameras (no entity_id), so an
@@ -2254,7 +2256,18 @@ test("recovery streak only counts when the dying stream never rendered (no 60-mi
   const recBody = CARD_SRC.slice(recStart, CARD_SRC.indexOf("_stopLiveVideo() {", recStart));
   expect(recBody.includes("const neverRendered"), "streak gated on neverRendered").toBe(true);
   expect(recBody.includes("_boschLastFrameAt == null"), "neverRendered keys off the rVFC frame timestamp").toBe(true);
+  // iOS WKWebView has no requestVideoFrameCallback so _boschLastFrameAt is always null.
+  // _hasEverDecodedFrames (set by getStats in the dead-track watchdog) is the fallback.
+  expect(recBody.includes("_hasEverDecodedFrames"), "neverRendered has iOS fallback via _hasEverDecodedFrames").toBe(true);
   expect(recBody.includes("&& neverRendered"), "streak increment requires neverRendered").toBe(true);
+});
+
+test("dead-track watchdog sets _hasEverDecodedFrames when getStats sees frames (iOS rVFC fallback)", () => {
+  const start = CARD_SRC.indexOf("_armWebrtcDeadTrackWatchdog(video) {");
+  const body = CARD_SRC.slice(start, CARD_SRC.indexOf("_forceHlsFallback(reason) {", start));
+  // When getStats reports frames > 0, watchdog must set _hasEverDecodedFrames so that
+  // neverRendered stays false on iOS WKWebView (no requestVideoFrameCallback).
+  expect(body.includes("this._hasEverDecodedFrames = true"), "watchdog sets _hasEverDecodedFrames on frames > 0").toBe(true);
 });
 
 test("native iOS HLS load watchdog: armed on the native path, cleared on teardown", () => {

@@ -2,6 +2,12 @@
 
 Recent releases. Full changelog: [`CHANGELOG.md`](../CHANGELOG.md) or [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases).
 
+## v14.2.0 — 2026-06-25
+
+Minor release — **glass-break and smoke/fire-alarm sound detection for Gen2 cameras with Audio-Plus**.
+
+Two new switch entities appear for any Gen2 camera that advertises audio-analysis support (`featureSupport.sound`): *Glass-Break Detection* and *Smoke/Fire-Alarm Detection*. Toggling either switch writes both fields to the camera's `audioDetectionConfig` endpoint in a single PUT, so changing one never accidentally clears the other. State is polled in the slow tier and protected by the standard write-lock guard, so an optimistic toggle isn't overwritten by a mid-propagation poll. Availability mirrors the intrusion-detection switch (Gen2-only, privacy-mode guard on writes). Translations in all 11 languages. No change to stream, card, or any other entity. 5498 pytest, mypy --strict + ruff + codespell clean.
+
 ## v14.1.2 — 2026-06-24
 
 Patch — **WebRTC now works in the iOS Home Assistant Companion App on your home Wi-Fi**.

@@ -401,6 +401,12 @@
       },
       "frigate_low": {
         "name": "Strumień Frigate Niski"
+      },
+      "glass_break_detection": {
+        "name": "Wykrywanie Stłuczenia Szyby"
+      },
+      "fire_alarm_detection": {
+        "name": "Wykrywanie Alarmu Pożarowego"
       }
     },
     "number": {

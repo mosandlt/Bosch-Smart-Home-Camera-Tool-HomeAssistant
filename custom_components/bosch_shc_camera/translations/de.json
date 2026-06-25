@@ -401,6 +401,12 @@
       },
       "frigate_low": {
         "name": "Frigate-Stream Niedrig"
+      },
+      "glass_break_detection": {
+        "name": "Glasbruch-Erkennung"
+      },
+      "fire_alarm_detection": {
+        "name": "Rauchmelder-Erkennung"
       }
     },
     "number": {

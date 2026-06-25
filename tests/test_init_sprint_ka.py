@@ -155,6 +155,8 @@ def _make_coord(**overrides):
         _motion_light_cache={},
         _ambient_lighting_cache={},
         _global_lighting_cache={},
+        _audio_detection_cache={},
+        _audio_detection_set_at={},
         # Write-lock
         _WRITE_LOCK_SECS=30.0,
         # Feature / protocol

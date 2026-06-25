@@ -401,6 +401,12 @@
       },
       "frigate_low": {
         "name": "Flux Frigate Basse"
+      },
+      "glass_break_detection": {
+        "name": "Détection de bris de verre"
+      },
+      "fire_alarm_detection": {
+        "name": "Détection d'alarme incendie"
       }
     },
     "number": {

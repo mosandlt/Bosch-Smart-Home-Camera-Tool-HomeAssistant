@@ -401,6 +401,12 @@
       },
       "frigate_low": {
         "name": "Frigate-stream Laag"
+      },
+      "glass_break_detection": {
+        "name": "Glasbreukdetectie"
+      },
+      "fire_alarm_detection": {
+        "name": "Rookmelderdetectie"
       }
     },
     "number": {

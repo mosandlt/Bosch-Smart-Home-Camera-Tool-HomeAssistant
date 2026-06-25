@@ -274,6 +274,17 @@ async def async_setup_entry(
             entities.append(
                 BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, "audio")
             )
+        # Gen2 Audio-Plus sound analytics — glass-break + fire/smoke detection
+        # (cloud audioDetectionConfig). Gated on featureSupport.sound; the entity
+        # stays unavailable until the camera returns the config (the feature is
+        # Audio-Plus subscription-dependent). 2026-06-22.
+        if get_model_config(hw_version).generation >= 2 and has_sound:
+            entities.append(
+                BoschGlassBreakDetectionSwitch(coordinator, cam_id, config_entry)
+            )
+            entities.append(
+                BoschFireAlarmDetectionSwitch(coordinator, cam_id, config_entry)
+            )
         # Gen2 Indoor II — alarm system (integrated 75 dB siren)
         if hw_version in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
             entities.append(
@@ -1820,6 +1831,91 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self._set_intrusion(False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Audio-Plus sound analytics (Gen2): glass-break + fire/smoke alarm detection
+# Cloud API: GET/PUT /v11/video_inputs/{id}/audioDetectionConfig
+# Payload model: {"detectGlassBreak": bool, "detectFireAlarm": bool} — BOTH fields
+# are always sent, so toggling one preserves the other. 2026-06-22.
+# ─────────────────────────────────────────────────────────────────────────────
+class _BoschAudioDetectionSwitchBase(_BoschSwitchBase):
+    """Base for the two audioDetectionConfig toggles (glass-break / fire alarm)."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _field: str = ""  # "detectGlassBreak" | "detectFireAlarm" (set by subclass)
+
+    @property
+    def _config(self) -> dict[str, Any]:
+        return self.coordinator._audio_detection_cache.get(self._cam_id, {})  # type: ignore[no-any-return]
+
+    @property
+    def is_on(self) -> bool | None:
+        val = self._config.get(self._field)
+        return bool(val) if val is not None else None
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
+            and bool(self._config)
+        )
+
+    async def _set_detection(self, value: bool) -> None:
+        # /audioDetectionConfig rejects writes while privacy is ON (same as the
+        # other camera-config endpoints) — warn the user visibly.
+        if await _warn_if_privacy_on(self, self._attr_name or "Audio detection"):
+            return
+        cfg = dict(self._config)
+        if not cfg:
+            return
+        cfg[self._field] = value
+        success = await self.coordinator.async_put_camera(
+            self._cam_id, "audioDetectionConfig", cfg
+        )
+        if success:
+            self.coordinator._audio_detection_cache[self._cam_id] = cfg
+            # Guard the next slow-tier poll from reverting the optimistic value
+            # while the cloud write is still propagating.
+            self.coordinator._audio_detection_set_at[self._cam_id] = time.monotonic()
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._set_detection(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._set_detection(False)
+
+
+class BoschGlassBreakDetectionSwitch(_BoschAudioDetectionSwitchBase):
+    """Switch: glass-break sound detection (Gen2 Audio-Plus)."""
+
+    _field = "detectGlassBreak"
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name = f"Bosch {self._cam_title} Glasbruch-Erkennung"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_glass_break_detection"
+        self._attr_icon = "mdi:glass-fragile"
+        self._attr_translation_key = "glass_break_detection"
+
+
+class BoschFireAlarmDetectionSwitch(_BoschAudioDetectionSwitchBase):
+    """Switch: smoke/fire-alarm sound detection (Gen2 Audio-Plus)."""
+
+    _field = "detectFireAlarm"
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_name = f"Bosch {self._cam_title} Rauchmelder-Erkennung"
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_fire_alarm_detection"
+        self._attr_icon = "mdi:smoke-detector"
+        self._attr_translation_key = "fire_alarm_detection"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

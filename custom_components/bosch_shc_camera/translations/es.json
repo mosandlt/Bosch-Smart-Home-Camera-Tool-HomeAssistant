@@ -401,6 +401,12 @@
       },
       "frigate_low": {
         "name": "Frigate stream Baja"
+      },
+      "glass_break_detection": {
+        "name": "Detección de rotura de vidrio"
+      },
+      "fire_alarm_detection": {
+        "name": "Detección de alarma de humo"
       }
     },
     "number": {

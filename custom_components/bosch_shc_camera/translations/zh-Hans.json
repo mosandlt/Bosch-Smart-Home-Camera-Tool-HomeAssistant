@@ -401,6 +401,12 @@
       },
       "frigate_low": {
         "name": "Frigate 低清流"
+      },
+      "glass_break_detection": {
+        "name": "玻璃破碎检测"
+      },
+      "fire_alarm_detection": {
+        "name": "烟雾报警检测"
       }
     },
     "number": {

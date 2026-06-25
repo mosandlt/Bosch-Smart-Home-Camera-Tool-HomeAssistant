@@ -401,6 +401,12 @@
       },
       "frigate_low": {
         "name": "Потік Frigate Низька"
+      },
+      "glass_break_detection": {
+        "name": "Виявлення Розбиття Скла"
+      },
+      "fire_alarm_detection": {
+        "name": "Виявлення Пожежної Сигналізації"
       }
     },
     "number": {

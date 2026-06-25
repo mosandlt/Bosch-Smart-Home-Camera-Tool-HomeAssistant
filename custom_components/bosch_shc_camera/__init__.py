@@ -917,6 +917,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._lighting_options_cache: dict[str, dict[str, Any]] = {}
         # Intrusion detection config cache — keyed by cam_id, from GET /intrusionDetectionConfig (Gen2 only)
         self._intrusion_config_cache: dict[str, dict[str, Any]] = {}
+        # Audio detection config cache — keyed by cam_id, from GET /audioDetectionConfig
+        # (Gen2 Audio-Plus). Contains: detectGlassBreak, detectFireAlarm (both bool).
+        self._audio_detection_cache: dict[str, dict[str, Any]] = {}
         # Alarm settings cache — from GET /alarm_settings (Gen2 Indoor II only).
         # Contains: alarmMode, alarmDelayInSeconds, alarmActivationDelaySeconds,
         #          preAlarmMode, preAlarmDelayInSeconds
@@ -965,6 +968,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._intrusion_config_set_at: dict[
             str, float
         ] = {}  # intrusionDetectionConfig write
+        self._audio_detection_set_at: dict[
+            str, float
+        ] = {}  # audioDetectionConfig write (glass-break / fire-alarm)
         self._motion_set_at: dict[str, float] = {}  # motion sensitivity write
         self._alarm_settings_set_at: dict[str, float] = {}  # alarm_settings write
         self._WRITE_LOCK_SECS = (
@@ -3476,6 +3482,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 "lighting/ambient",
                                 "lighting",
                                 "intrusionDetectionConfig",
+                                "audioDetectionConfig",
                             ]
                         )
                     # Gen2 Indoor II-only endpoints (alarm system + power-LED).
@@ -3604,6 +3611,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 cam_id_key, self._intrusion_config_set_at
                             ):
                                 self._intrusion_config_cache[cam_id_key] = (
+                                    ep_data if isinstance(ep_data, dict) else {}
+                                )
+                        elif ep == "audioDetectionConfig":
+                            # Glass-break / fire-alarm sound detection (Gen2
+                            # Audio-Plus). Skip cache overwrite within the
+                            # write-lock window so an optimistic toggle isn't
+                            # reverted by a slow-tier poll before cloud catches up.
+                            if not self._is_write_locked(
+                                cam_id_key, self._audio_detection_set_at
+                            ):
+                                self._audio_detection_cache[cam_id_key] = (
                                     ep_data if isinstance(ep_data, dict) else {}
                                 )
                         elif ep == "alarm_settings":
