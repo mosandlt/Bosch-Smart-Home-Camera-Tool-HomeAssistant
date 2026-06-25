@@ -11,11 +11,6 @@ smbprotocol>=1.10.0,<2
 # Transitive CVE pin: idna 3.14 → CVE-2026-45409 (fixed 3.15). HA core does not
 # constrain idna, so pin it directly here.
 idna>=3.15
-# Transitive CVE pins (2026-06-25 security scan):
-# pyjwt <2.13.0 → PYSEC-2026-175/176/177/178/179 (algorithm confusion + SSRF + DoS)
-pyjwt>=2.13.0
-# cryptography <48.0.1 → GHSA-537c-gmf6-5ccf (OpenSSL in bundled wheels)
-cryptography>=48.0.1
 
 # Lint / type / security tooling (frontend-checks + CI)
 ruff==0.15.15
