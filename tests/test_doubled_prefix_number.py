@@ -188,7 +188,7 @@ def _make_pre_alarm_delay(coord_indoor, entry):
 def test_no_doubled_bosch_prefix_outdoor(factory, coord, entry):
     """_attr_name must not start with 'Bosch ' for outdoor-coord classes."""
     entity = factory(coord, entry)
-    name = entity._attr_name
+    name = getattr(entity, "_attr_name", None)
     assert name is None or not name.startswith("Bosch "), (
         f"{type(entity).__name__}._attr_name={name!r} still has 'Bosch ' prefix"
     )
@@ -236,7 +236,7 @@ def test_has_entity_name_true_outdoor(factory, coord, entry):
 def test_no_doubled_bosch_prefix_indoor(factory, coord_indoor, entry):
     """_attr_name must not start with 'Bosch ' for indoor-coord classes."""
     entity = factory(coord_indoor, entry)
-    name = entity._attr_name
+    name = getattr(entity, "_attr_name", None)
     assert name is None or not name.startswith("Bosch "), (
         f"{type(entity).__name__}._attr_name={name!r} still has 'Bosch ' prefix"
     )

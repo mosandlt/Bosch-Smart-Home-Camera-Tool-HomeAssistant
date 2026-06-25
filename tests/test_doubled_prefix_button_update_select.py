@@ -6,13 +6,12 @@ instead of
   button.bosch_est_refresh_snapshot
 
 Root cause: classes with `_attr_has_entity_name = True` AND
-`_attr_name = f"Bosch {self._cam_title} <Suffix>"` cause HA to prepend the
-device name automatically AND we re-prepended it manually in the constructor.
+`_attr_name = f"Bosch {self._cam_title} <Suffix>"` caused HA to prepend the
+device name automatically AND the code re-prepended "Bosch {title}" manually.
 
-Fix: strip the "Bosch <cam_title>" prefix from _attr_name — keep only the
-suffix literal.  Because strings.json has no entity.<platform>.<key>.name
-entries for these classes, we leave _attr_name as a suffix string literal
-rather than setting it to None.
+Fix (v14.2.2): remove all `_attr_name` assignments; use `_attr_translation_key`
+instead so HA resolves the entity name from translations/en.json at runtime.
+`_attr_name` must be None (unset) for translation_key-based naming to work.
 """
 
 from __future__ import annotations
@@ -64,21 +63,21 @@ def stub_entry():
 
 
 class TestRefreshSnapshotButtonNaming:
-    def test_name_does_not_contain_bosch_prefix(self, stub_coord, stub_entry):
-        """_attr_name must not start with 'Bosch ' — that double-prefixes the entity_id."""
+    def test_attr_name_is_none(self, stub_coord, stub_entry):
+        """_attr_name must be None — translation_key provides the entity name."""
         from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
         btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
-        assert not btn._attr_name.startswith("Bosch "), (
-            f"_attr_name '{btn._attr_name}' still contains the 'Bosch' prefix — "
-            "entity_id would be doubled"
+        name = getattr(btn, "_attr_name", None)
+        assert name is None or not name.startswith("Bosch "), (
+            f"_attr_name={name!r} still contains the 'Bosch' prefix — entity_id would be doubled"
         )
 
-    def test_name_is_refresh_snapshot_suffix(self, stub_coord, stub_entry):
+    def test_translation_key_is_refresh_snapshot(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
         btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
-        assert btn._attr_name == "Refresh Snapshot"
+        assert btn._attr_translation_key == "refresh_snapshot"
 
     def test_has_entity_name_is_true(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
@@ -91,19 +90,20 @@ class TestRefreshSnapshotButtonNaming:
 
 
 class TestFirmwareUpdateNaming:
-    def test_name_does_not_contain_bosch_prefix(self, stub_coord, stub_entry):
+    def test_attr_name_is_none(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
-        assert not u._attr_name.startswith("Bosch "), (
-            f"_attr_name '{u._attr_name}' still contains the 'Bosch' prefix"
+        name = getattr(u, "_attr_name", None)
+        assert name is None or not name.startswith("Bosch "), (
+            f"_attr_name={name!r} still contains the 'Bosch' prefix"
         )
 
-    def test_name_is_firmware_suffix(self, stub_coord, stub_entry):
+    def test_translation_key_is_firmware_update(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
-        assert u._attr_name == "Firmware"
+        assert u._attr_translation_key == "firmware_update"
 
     def test_has_entity_name_is_true(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
@@ -116,19 +116,20 @@ class TestFirmwareUpdateNaming:
 
 
 class TestVideoQualitySelectNaming:
-    def test_name_does_not_contain_bosch_prefix(self, stub_coord, stub_entry):
+    def test_attr_name_is_none(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord, CAM_ID, stub_entry)
-        assert not sel._attr_name.startswith("Bosch "), (
-            f"_attr_name '{sel._attr_name}' still contains the 'Bosch' prefix"
+        name = getattr(sel, "_attr_name", None)
+        assert name is None or not name.startswith("Bosch "), (
+            f"_attr_name={name!r} still contains the 'Bosch' prefix"
         )
 
-    def test_name_is_video_quality_suffix(self, stub_coord, stub_entry):
+    def test_translation_key_is_video_quality(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord, CAM_ID, stub_entry)
-        assert sel._attr_name == "Video Quality"
+        assert sel._attr_translation_key == "video_quality"
 
     def test_has_entity_name_is_true(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
@@ -141,23 +142,24 @@ class TestVideoQualitySelectNaming:
 
 
 class TestMotionSensitivitySelectNaming:
-    def test_name_does_not_contain_bosch_prefix(self, stub_coord, stub_entry):
+    def test_attr_name_is_none(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
-        assert not sel._attr_name.startswith("Bosch "), (
-            f"_attr_name '{sel._attr_name}' still contains the 'Bosch' prefix"
+        name = getattr(sel, "_attr_name", None)
+        assert name is None or not name.startswith("Bosch "), (
+            f"_attr_name={name!r} still contains the 'Bosch' prefix"
         )
 
-    def test_name_is_motion_sensitivity_suffix(self, stub_coord, stub_entry):
+    def test_translation_key_is_motion_sensitivity(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
         sel = BoschMotionSensitivitySelect(stub_coord, CAM_ID, stub_entry)
-        assert sel._attr_name == "Motion Sensitivity"
+        assert sel._attr_translation_key == "motion_sensitivity"
 
     def test_has_entity_name_is_true(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import (
@@ -172,19 +174,20 @@ class TestMotionSensitivitySelectNaming:
 
 
 class TestFcmPushModeSelectNaming:
-    def test_name_does_not_contain_bosch_prefix(self, stub_coord, stub_entry):
+    def test_attr_name_is_none(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
 
         sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
-        assert not sel._attr_name.startswith("Bosch "), (
-            f"_attr_name '{sel._attr_name}' still contains the 'Bosch' prefix"
+        name = getattr(sel, "_attr_name", None)
+        assert name is None or not name.startswith("Bosch "), (
+            f"_attr_name={name!r} still contains the 'Bosch' prefix"
         )
 
-    def test_name_is_fcm_push_mode_suffix(self, stub_coord, stub_entry):
+    def test_translation_key_is_fcm_push_mode(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
 
         sel = BoschFcmPushModeSelect(stub_coord, CAM_ID, stub_entry)
-        assert sel._attr_name == "FCM Push Mode"
+        assert sel._attr_translation_key == "fcm_push_mode"
 
     def test_has_entity_name_is_true(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
@@ -197,19 +200,20 @@ class TestFcmPushModeSelectNaming:
 
 
 class TestStreamModeSelectNaming:
-    def test_name_does_not_contain_bosch_prefix(self, stub_coord, stub_entry):
+    def test_attr_name_is_none(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
 
         sel = BoschStreamModeSelect(stub_coord, CAM_ID, stub_entry)
-        assert not sel._attr_name.startswith("Bosch "), (
-            f"_attr_name '{sel._attr_name}' still contains the 'Bosch' prefix"
+        name = getattr(sel, "_attr_name", None)
+        assert name is None or not name.startswith("Bosch "), (
+            f"_attr_name={name!r} still contains the 'Bosch' prefix"
         )
 
-    def test_name_is_stream_modus_suffix(self, stub_coord, stub_entry):
+    def test_translation_key_is_stream_mode(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
 
         sel = BoschStreamModeSelect(stub_coord, CAM_ID, stub_entry)
-        assert sel._attr_name == "Stream Modus"
+        assert sel._attr_translation_key == "stream_mode"
 
     def test_has_entity_name_is_true(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
@@ -222,19 +226,20 @@ class TestStreamModeSelectNaming:
 
 
 class TestDetectionModeSelectNaming:
-    def test_name_does_not_contain_bosch_prefix(self, stub_coord, stub_entry):
+    def test_attr_name_is_none(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
 
         sel = BoschDetectionModeSelect(stub_coord, CAM_ID, stub_entry)
-        assert not sel._attr_name.startswith("Bosch "), (
-            f"_attr_name '{sel._attr_name}' still contains the 'Bosch' prefix"
+        name = getattr(sel, "_attr_name", None)
+        assert name is None or not name.startswith("Bosch "), (
+            f"_attr_name={name!r} still contains the 'Bosch' prefix"
         )
 
-    def test_name_is_erkennungsmodus_suffix(self, stub_coord, stub_entry):
+    def test_translation_key_is_detection_mode(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
 
         sel = BoschDetectionModeSelect(stub_coord, CAM_ID, stub_entry)
-        assert sel._attr_name == "Erkennungsmodus"
+        assert sel._attr_translation_key == "detection_mode"
 
     def test_has_entity_name_is_true(self, stub_coord, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect

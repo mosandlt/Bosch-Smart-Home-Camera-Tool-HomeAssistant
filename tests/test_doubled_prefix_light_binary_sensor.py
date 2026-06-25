@@ -89,7 +89,7 @@ def stub_entry():
 
 def _no_doubled_prefix(entity) -> bool:
     """Return True when _attr_name is None or does not start with 'Bosch '."""
-    name = entity._attr_name
+    name = getattr(entity, "_attr_name", None)
     return name is None or not name.startswith("Bosch ")
 
 
