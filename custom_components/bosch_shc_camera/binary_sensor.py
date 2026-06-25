@@ -208,7 +208,6 @@ class BoschMotionBinarySensor(_BoschBinarySensorBase):
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Motion"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_binary"
         self._attr_translation_key = "motion"
 
@@ -244,7 +243,6 @@ class BoschAudioAlarmBinarySensor(_BoschBinarySensorBase):
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Audio Alarm"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_audio_alarm_binary"
         self._attr_translation_key = "audio_alarm_binary"
 
@@ -280,7 +278,6 @@ class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
         entry: ConfigEntry,
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Person Detected"
         self._attr_unique_id = f"bosch_shc_cam_{cam_id}_person_detected"
         self._attr_translation_key = "person_detected"
 

@@ -723,7 +723,6 @@ class BoschFcmPushStatusSensor(_BoschSensorBase):
       - "disabled"  — FCM push not enabled in options
     """
 
-    _attr_name = "Bosch Camera FCM Push Status"
     _attr_unique_id = "bosch_shc_camera_fcm_push_status"
     _attr_icon = "mdi:bell-ring-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -769,7 +768,6 @@ class BoschCloudMaintenanceSensor(_BoschSensorBase):
     cameras are unavailable.
     """
 
-    _attr_name = "Bosch Cloud Wartung"
     _attr_unique_id = "bosch_shc_camera_cloud_maintenance"
     _attr_icon = "mdi:cloud-alert"
     _attr_entity_category = EntityCategory.DIAGNOSTIC

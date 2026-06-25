@@ -116,7 +116,6 @@ class BoschPanNumber(_BoschEntityBase, NumberEntity):  # type: ignore[misc]
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._pan_limit = pan_limit
-        self._attr_name = "Pan Position"
         self._attr_unique_id = f"bosch_shc_pan_{cam_id.lower()}"
         self._attr_native_min_value = -pan_limit
         self._attr_native_max_value = pan_limit
@@ -179,7 +178,6 @@ class BoschSpeakerLevelNumber(_BoschEntityBase, NumberEntity):  # type: ignore[m
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Speaker Level"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_speaker_level"
         self._attr_translation_key = "speaker_level"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -247,7 +245,6 @@ class BoschAudioVolumeNumber(_BoschEntityBase, NumberEntity):  # type: ignore[mi
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Audio Volume"
         self._attr_unique_id = f"bosch_shc_audio_volume_{cam_id.lower()}"
         self._attr_translation_key = "audio_volume"
 
@@ -294,7 +291,6 @@ class BoschFrontLightIntensityNumber(_BoschEntityBase, NumberEntity):  # type: i
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Front Light Intensity"
         self._attr_unique_id = f"bosch_shc_front_light_intensity_{cam_id.lower()}"
         self._attr_translation_key = "front_light_intensity"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -353,7 +349,6 @@ class BoschLensElevationNumber(_BoschGen2NumberBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Lens Elevation"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_lens_elevation"
         self._attr_translation_key = "lens_elevation"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -395,7 +390,6 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Microphone Level"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_mic_level"
         self._attr_translation_key = "microphone_level"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -460,7 +454,6 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Farbtemperatur Frontlicht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_white_balance"
         self._wb_value: float | None = None
         self._attr_translation_key = "white_balance"
@@ -591,7 +584,6 @@ class BoschTopLedBrightnessNumber(_BoschLedBrightnessBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Helligkeit Oberes Licht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_top_led_brightness"
         self._attr_icon = "mdi:arrow-up-bold"
         self._attr_translation_key = "top_led_brightness"
@@ -605,7 +597,6 @@ class BoschBottomLedBrightnessNumber(_BoschLedBrightnessBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Helligkeit Unteres Licht"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_bottom_led_brightness"
         self._attr_icon = "mdi:arrow-down-bold"
         self._attr_translation_key = "bottom_led_brightness"
@@ -628,7 +619,6 @@ class BoschMotionLightSensitivityNumber(_BoschGen2NumberBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Bewegungslicht Empfindlichkeit"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_light_sensitivity"
         self._attr_translation_key = "motion_light_sensitivity"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -677,7 +667,6 @@ class BoschDarknessThresholdNumber(_BoschGen2NumberBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Dunkelheitsschwelle"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_darkness_threshold"
         self._attr_translation_key = "darkness_threshold"
 
@@ -731,7 +720,6 @@ class BoschPowerLedBrightnessNumber(_BoschGen2NumberBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Power-LED"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_power_led_brightness"
         self._attr_translation_key = "power_led_brightness"
 
@@ -788,7 +776,7 @@ class _BoschAlarmDelayBase(_BoschGen2NumberBase):
         # Without this guard the write silently fails — the cache isn't updated, so
         # native_value re-reads the old value and HA's verify-timeout fires.
         if _is_gen2_indoor(self) and await _warn_if_privacy_on(
-            self, "Sirenen-/Alarm-Einstellung"
+            self, "Alarm Settings"
         ):
             return
         cfg[self._field] = round(value)
@@ -819,7 +807,6 @@ class BoschAlarmDelayNumber(_BoschAlarmDelayBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Sirenen-Dauer"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_delay"
         self._attr_translation_key = "alarm_delay"
 
@@ -837,7 +824,6 @@ class BoschAlarmActivationDelayNumber(_BoschAlarmDelayBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Alarm-Verzögerung"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_activation_delay"
         self._attr_translation_key = "alarm_activation_delay"
 
@@ -856,7 +842,6 @@ class BoschPreAlarmDelayNumber(_BoschAlarmDelayBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Pre-Alarm Dauer"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_prealarm_delay"
         self._attr_translation_key = "pre_alarm_delay"
 
@@ -888,7 +873,6 @@ class BoschIntrusionSensitivityNumber(_BoschGen2NumberBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Einbruch-Empfindlichkeit"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intrusion_sensitivity"
         self._attr_translation_key = "intrusion_sensitivity"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -950,7 +934,6 @@ class BoschIntrusionDistanceNumber(_BoschGen2NumberBase):
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Einbruch-Erkennungsreichweite"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intrusion_distance"
         self._attr_translation_key = "intrusion_distance"
         self._attr_entity_category = EntityCategory.CONFIG

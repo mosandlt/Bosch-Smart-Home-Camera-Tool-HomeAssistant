@@ -54,7 +54,6 @@ class BoschRefreshSnapshotButton(_BoschEntityBase, ButtonEntity):  # type: ignor
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Refresh Snapshot"
         self._attr_unique_id = f"bosch_shc_refresh_{cam_id.lower()}"
         self._attr_icon = "mdi:camera-refresh"
         self._attr_translation_key = "refresh_snapshot"

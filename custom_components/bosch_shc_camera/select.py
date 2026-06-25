@@ -114,7 +114,6 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
         cam_info = cam_data.get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
         self._entry = entry
-        self._attr_name = "Video Quality"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_video_quality"
         self._attr_translation_key = "video_quality"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -203,7 +202,6 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
         cam_info = cam_data.get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
 
-        self._attr_name = "Motion Sensitivity"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_sensitivity_select"
         self._attr_translation_key = "motion_sensitivity"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -249,7 +247,7 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
             _LOGGER.warning("Invalid motion sensitivity option: %s", option)
             return
         if _is_gen2_indoor(self) and await _warn_if_privacy_on(
-            self, "Bewegungsempfindlichkeit"
+            self, "Motion Sensitivity"
         ):
             return
         api_value = SENSITIVITY_TO_API[option]
@@ -300,7 +298,6 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[m
         super().__init__(coordinator)
         self._cam_id = cam_id
         self._entry = entry
-        self._attr_name = "FCM Push Mode"
         self._attr_unique_id = "bosch_shc_camera_fcm_push_mode"
         self._attr_translation_key = "fcm_push_mode"
 
@@ -383,7 +380,6 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
         self._entry = entry
         cam_info = coordinator.data.get(cam_id, {}).get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
-        self._attr_name = "Stream Modus"
         self._attr_unique_id = "bosch_shc_camera_stream_mode"
         self._attr_translation_key = "stream_mode"
 
@@ -442,7 +438,6 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
         cam_data = coordinator.data.get(cam_id, {})
         cam_info = cam_data.get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
-        self._attr_name = "Erkennungsmodus"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_detection_mode"
         self._attr_translation_key = "detection_mode"
         self._attr_entity_category = EntityCategory.CONFIG
@@ -483,7 +478,7 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
     async def async_select_option(self, option: str) -> None:
         if option not in DETECTION_MODE_OPTIONS:
             return
-        if await _warn_if_privacy_on(self, "Erkennungsmodus"):
+        if await _warn_if_privacy_on(self, "Detection Mode"):
             return
         api_value = DETECTION_TO_API[option]
         cfg = dict(self.coordinator._intrusion_config_cache.get(self._cam_id, {}))
@@ -540,7 +535,6 @@ class BoschPanPresetSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mis
         cam_info = cam_data.get("info", {})
         self._cam_title = cam_info.get("title", cam_id)
 
-        self._attr_name = "Pan Preset"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_pan_preset"
         self._attr_translation_key = "pan_preset"
 

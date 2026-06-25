@@ -41,7 +41,6 @@ class BoschFirmwareUpdate(_BoschEntityBase, UpdateEntity):  # type: ignore[misc]
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
-        self._attr_name = "Firmware"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_firmware_update"
         self._attr_translation_key = "firmware_update"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC

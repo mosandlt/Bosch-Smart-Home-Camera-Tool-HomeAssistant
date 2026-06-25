@@ -23,7 +23,7 @@
       },
       "reauth_confirm": {
         "title": "Re-authenticate Bosch Smart Home Camera",
-        "description": "Your Bosch Cloud token has expired and cannot be refreshed automatically. Click **Submit** to log in again — your existing configuration (entities, automations, options) is preserved.",
+        "description": "Your Bosch Cloud token has expired and cannot be refreshed automatically. This usually happens when the refresh token was invalidated on Bosch's side.\n\nClick **Submit** to open the Bosch SingleKey ID login in your browser. After login you'll be redirected back to Home Assistant automatically and your existing configuration (entities, automations, options) will be preserved.",
         "submit": "Submit"
       },
       "reconfigure": {
@@ -32,16 +32,16 @@
         "submit": "Submit"
       }
     },
-    "abort": {
-      "already_configured": "Already configured.",
-      "reauth_successful": "Re-authentication successful — your Bosch Smart Home Camera integration has been updated with a fresh token.",
-      "reconfigure_successful": "Reconfiguration successful — your Bosch Smart Home Camera integration has been updated with a fresh token."
-    },
     "error": {
       "invalid_redirect_url": "No auth code found in the URL.",
       "token_exchange_failed": "Login failed — the code may have expired. Try again.",
       "cannot_connect": "Cannot connect to Bosch servers.",
       "timeout": "Connection timed out."
+    },
+    "abort": {
+      "already_configured": "Already configured.",
+      "reauth_successful": "Re-authentication successful — your Bosch Smart Home Camera integration has been updated with a fresh token. All entities, automations, and options are preserved.",
+      "reconfigure_successful": "Reconfiguration successful — your Bosch Smart Home Camera integration has been updated with a fresh token. All entities, automations, and options are preserved."
     }
   },
   "options": {
@@ -74,17 +74,17 @@
               "enable_sensors": "Sensors (Status, WiFi, Firmware, Events)",
               "enable_snapshot_button": "Switches & Buttons (Stream, Privacy, Light)",
               "enable_binary_sensors": "Motion / Audio alarm sensors",
-              "enable_intercom": "Intercom (two-way audio)",
               "motion_active_window": "Motion sensor: active window (seconds)",
+              "enable_intercom": "Intercom (two-way audio)",
               "auto_play_default": "Card auto-play default"
             },
             "data_description": {
               "enable_snapshots": "Show the latest motion-triggered JPEG as a camera entity in HA.",
               "enable_sensors": "Create sensor entities for camera status, WiFi signal, firmware, events today, last event, etc.",
               "enable_snapshot_button": "Create switch and button entities: Live Stream, Audio, Privacy Mode, Camera Light, Notifications, Refresh.",
-              "enable_binary_sensors": "Create binary sensors that turn ON for 30 seconds after a motion or audio alarm event. Useful for automations.",
+              "enable_binary_sensors": "Create binary sensors that turn ON for the configured active window after a motion or audio alarm event. Useful for automations.",
+              "motion_active_window": "How many seconds the motion/audio/person binary sensors stay ON after an event. Default: 90 s. Increase for slower automations; decrease for faster reset. Range: 10–300 s.",
               "enable_intercom": "Enable the intercom (two-way audio) switch entity. Disabled by default. Allows sending audio to the camera speaker.",
-              "motion_active_window": "How long (seconds) the motion binary sensor stays ON after a motion event. Range 10-300, default 90. Lower values give more granular automation triggers; higher values avoid flapping during sustained motion.",
               "auto_play_default": "Controls whether the live stream auto-reveals when the Lovelace card loads. Per-card YAML `auto_play` overrides this.\n• **LAN only** (recommended): auto-reveal on the home network; on remote the stream is pre-initialized in the background and a tap-to-reveal overlay covers the video until you tap.\n• **Always**: auto-reveal in every session.\n• **Tap-to-reveal**: pre-initialize the stream and show the overlay in every session — you always tap once to actually display the video."
             }
           },
@@ -247,7 +247,7 @@
               "enable_ai_description": "Enable AI snapshot descriptions",
               "ai_task_entity": "AI Task entity (optional)",
               "ai_describe_language": "Response language",
-              "ai_describe_prompt": "Description prompt (prompt tuning)",
+              "ai_describe_prompt": "Description prompt",
               "ai_describe_on_motion": "Auto-describe on motion/person events",
               "ai_notify_include_description": "Add AI description to event notifications",
               "ai_cooldown_seconds": "Minimum seconds between auto analyses (per camera)",
@@ -261,14 +261,14 @@
               "enable_ai_description": "When enabled, a snapshot-description service and a per-camera AI description sensor become available. Requires Home Assistant 2025.8+ with at least one AI Task entity configured.",
               "ai_task_entity": "Select a specific AI Task entity to use. Leave empty to use HA's preferred default.",
               "ai_describe_language": "Language the AI responds in. Select from the list or type any language name (e.g. Português, Русский). Default: Deutsch.",
-              "ai_describe_prompt": "The base prompt sent to the AI with each snapshot. A language directive is appended automatically. Customize to focus on what matters for your camera.",
+              "ai_describe_prompt": "The prompt sent to the AI with each snapshot. Customize to focus on what matters for your camera.",
               "ai_describe_on_motion": "Runs an AI description on every motion/person event and updates the AI description SENSOR (for dashboards & automations). Does NOT add text to push notifications. 30-second debounce per camera.",
               "ai_notify_include_description": "Adds the AI description directly INTO the event push notification on your phone (the motion/person snapshot alert). Requires event notifications to be configured. Also updates the sensor. Rate-limited by cooldown + daily budget.",
               "ai_cooldown_seconds": "Per-camera minimum time between automatic AI analyses (notify-include and on-motion). Manual describe_snapshot calls ignore this. Default 60 s; 0 disables the cooldown.",
               "ai_max_per_day": "Maximum automatic AI analyses across all cameras per day (resets at midnight). Protects against burning AI credits on busy days. Default 100; 0 = unlimited.",
               "ai_active_time_start": "Start of the AI activation window (24h format, e.g. 08:00). Leave both fields empty to disable time gating. Overnight windows are supported (e.g. 22:00 start / 06:00 end).",
               "ai_active_time_end": "End of the AI activation window (24h format, e.g. 22:00). Leave both fields empty to disable time gating.",
-              "ai_active_condition_entity": "Entity whose state gates automatic AI analyses. E.g. a presence group or person entity. Leave empty to disable condition gating. If the entity is unavailable or unknown, AI is blocked (conservative).",
+              "ai_active_condition_entity": "Entity whose state gates automatic AI analyses. E.g. a presence group or person entity. Leave empty to disable condition gating. If the entity is unavailable or unknown, AI is blocked (conservative). Example: zone.home with state 0 means nobody is home (zones count people, 0 = empty). Or use a person group entity with state not_home.",
               "ai_active_condition_state": "State the condition entity must be in to allow AI analyses. Default: not_home (AI only runs when nobody is home). Examples: home, on, off, away."
             }
           },
@@ -310,9 +310,10 @@
     "error": {
       "invalid_redirect_url": "No auth code found. Paste the full URL.",
       "token_exchange_failed": "Login failed — code expired. Try again.",
-      "cannot_connect": "Cannot connect to Bosch servers.",
-      "invalid_ip_address": "Invalid IP address — enter a valid IPv4 or IPv6 address.",
-      "invalid_ip_allowlist": "Invalid allowlist entry — use comma-separated IP addresses or CIDR ranges (e.g. 192.168.1.0/24)."
+      "cannot_connect": "Cannot connect to Bosch servers."
+    },
+    "abort": {
+      "migration_started": "Migration started — please complete the Reconfigure flow on the integration card."
     }
   },
   "entity": {
@@ -322,8 +323,71 @@
       }
     },
     "switch": {
+      "live_stream": {
+        "name": "Live Stream"
+      },
+      "audio": {
+        "name": "Audio"
+      },
+      "camera_light": {
+        "name": "Camera Light"
+      },
+      "front_light": {
+        "name": "Front Light"
+      },
+      "wallwasher": {
+        "name": "Wallwasher"
+      },
+      "privacy_mode": {
+        "name": "Privacy Mode"
+      },
+      "notifications": {
+        "name": "Notifications"
+      },
+      "motion_detection": {
+        "name": "Motion Detection"
+      },
+      "record_sound": {
+        "name": "Record Sound"
+      },
+      "auto_follow": {
+        "name": "Auto Follow"
+      },
+      "intercom": {
+        "name": "Intercom"
+      },
       "privacy_sound": {
         "name": "Privacy Sound"
+      },
+      "timestamp_overlay": {
+        "name": "Timestamp Overlay"
+      },
+      "status_led": {
+        "name": "Status LED"
+      },
+      "motion_light": {
+        "name": "Motion Light"
+      },
+      "ambient_light": {
+        "name": "Ambient Light"
+      },
+      "soft_light_fading": {
+        "name": "Soft Light Fading"
+      },
+      "intrusion_detection": {
+        "name": "Intrusion Detection"
+      },
+      "image_rotation_180": {
+        "name": "Rotate Image 180°"
+      },
+      "alarm_system_arm": {
+        "name": "Alarm System"
+      },
+      "alarm_mode": {
+        "name": "Siren"
+      },
+      "pre_alarm": {
+        "name": "Pre-Alarm"
       },
       "panic_alarm": {
         "name": "Trigger Siren"
@@ -347,12 +411,285 @@
         "name": "Smoke Alarm Detection"
       }
     },
+    "number": {
+      "pan_position": {
+        "name": "Pan Position"
+      },
+      "speaker_level": {
+        "name": "Speaker Level"
+      },
+      "audio_volume": {
+        "name": "Audio Volume"
+      },
+      "front_light_intensity": {
+        "name": "Front Light Intensity"
+      },
+      "lens_elevation": {
+        "name": "Lens Elevation"
+      },
+      "microphone_level": {
+        "name": "Microphone Level"
+      },
+      "white_balance": {
+        "name": "Front Light Color Temperature"
+      },
+      "top_led_brightness": {
+        "name": "Top LED Brightness"
+      },
+      "bottom_led_brightness": {
+        "name": "Bottom LED Brightness"
+      },
+      "motion_light_sensitivity": {
+        "name": "Motion Light Sensitivity"
+      },
+      "darkness_threshold": {
+        "name": "Darkness Threshold"
+      },
+      "power_led_brightness": {
+        "name": "Power LED Brightness"
+      },
+      "alarm_delay": {
+        "name": "Siren Duration"
+      },
+      "alarm_activation_delay": {
+        "name": "Alarm Activation Delay"
+      },
+      "pre_alarm_delay": {
+        "name": "Pre-Alarm Duration"
+      },
+      "intrusion_sensitivity": {
+        "name": "Intrusion Detection Sensitivity"
+      },
+      "intrusion_distance": {
+        "name": "Intrusion Detection Range"
+      }
+    },
+    "button": {
+      "refresh_snapshot": {
+        "name": "Refresh Snapshot"
+      }
+    },
+    "select": {
+      "video_quality": {
+        "name": "Video Quality",
+        "state": {
+          "auto": "Auto",
+          "high": "High (30 Mbps)",
+          "low": "Low (1.9 Mbps)"
+        }
+      },
+      "motion_sensitivity": {
+        "name": "Motion Sensitivity",
+        "state": {
+          "super_high": "Super High",
+          "high": "High",
+          "medium_high": "Medium High",
+          "medium_low": "Medium Low",
+          "low": "Low",
+          "off": "Off"
+        }
+      },
+      "fcm_push_mode": {
+        "name": "FCM Push Mode",
+        "state": {
+          "auto": "FCM Push",
+          "polling": "Polling"
+        }
+      },
+      "stream_mode": {
+        "name": "Stream Mode",
+        "state": {
+          "auto": "Auto (Local → Cloud)",
+          "local": "Local Only",
+          "remote": "Cloud Only"
+        }
+      },
+      "detection_mode": {
+        "name": "Detection Mode",
+        "state": {
+          "all_motions": "All Motions",
+          "only_humans": "Persons Only",
+          "zones": "Zones"
+        }
+      },
+      "pan_preset": {
+        "name": "Pan Preset",
+        "state": {
+          "home": "Home (Centre)",
+          "left": "Left (−60°)",
+          "right": "Right (+60°)",
+          "back_left": "Back Left (−120°)",
+          "back_right": "Back Right (+120°)"
+        }
+      }
+    },
+    "binary_sensor": {
+      "motion": {
+        "name": "Motion"
+      },
+      "audio_alarm_binary": {
+        "name": "Audio Alarm"
+      },
+      "person_detected": {
+        "name": "Person Detected"
+      },
+      "lan_reachable": {
+        "name": "LAN Reachable"
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "Firmware"
+      }
+    },
+    "light": {
+      "top_led_light": {
+        "name": "Top LED"
+      },
+      "bottom_led_light": {
+        "name": "Bottom LED"
+      },
+      "front_light_entity": {
+        "name": "Front Light"
+      }
+    },
     "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "online": "Online",
+          "offline": "Offline",
+          "updating": "Firmware update",
+          "session_limit": "Session limit",
+          "unknown": "Unknown"
+        }
+      },
+      "last_event": {
+        "name": "Last Event"
+      },
+      "events_today": {
+        "name": "Events Today"
+      },
+      "wifi_signal": {
+        "name": "WiFi Signal"
+      },
+      "firmware_version": {
+        "name": "Firmware Version"
+      },
+      "ambient_light": {
+        "name": "Ambient Light"
+      },
+      "led_dimmer": {
+        "name": "LED Dimmer"
+      },
+      "clock_offset": {
+        "name": "Clock Offset"
+      },
+      "motion_sensitivity": {
+        "name": "Motion Sensitivity"
+      },
+      "last_event_type": {
+        "name": "Last Event Type",
+        "state": {
+          "movement": "Movement",
+          "person": "Person",
+          "audio_alarm": "Audio Alarm",
+          "trouble": "Trouble",
+          "trouble_disconnect": "Trouble (Disconnect)",
+          "trouble_reconnect": "Trouble (Reconnect)",
+          "none": "None"
+        }
+      },
+      "movement_events_today": {
+        "name": "Movement Events Today"
+      },
+      "audio_events_today": {
+        "name": "Audio Events Today"
+      },
+      "push_status": {
+        "name": "FCM Push Status",
+        "state": {
+          "fcm_push": "FCM Push (instant)",
+          "polling": "Polling (fallback)",
+          "disabled": "Disabled"
+        }
+      },
+      "cloud_maintenance": {
+        "name": "Bosch Cloud Maintenance",
+        "state": {
+          "active": "Maintenance in progress",
+          "scheduled": "Maintenance scheduled",
+          "past": "Most recent maintenance",
+          "recent": "Recent announcement",
+          "unknown": "No time window info",
+          "idle": "No maintenance info"
+        }
+      },
+      "unread_events": {
+        "name": "Unread Events"
+      },
       "commissioned": {
         "name": "Commissioned"
       },
+      "schedule_rules": {
+        "name": "Schedule Rules"
+      },
+      "alarm_catalog": {
+        "name": "Alarm Catalog"
+      },
+      "motion_zones": {
+        "name": "Motion Zones"
+      },
+      "tls_cert": {
+        "name": "TLS Certificate"
+      },
+      "network_services": {
+        "name": "Network Services"
+      },
+      "iva_analytics": {
+        "name": "IVA Analytics"
+      },
+      "privacy_masks": {
+        "name": "Privacy Masks"
+      },
+      "ambient_schedule": {
+        "name": "Ambient Light Schedule",
+        "state": {
+          "disabled": "Disabled",
+          "dusk_to_dawn": "Dusk to Dawn",
+          "manual": "Manual"
+        }
+      },
+      "alarm_state": {
+        "name": "Alarm State",
+        "state": {
+          "active": "Armed",
+          "inactive": "Disarmed",
+          "unknown": "Unknown",
+          "system_managed_armed": "Armed (System)",
+          "system_managed_disarmed": "Disarmed (System)",
+          "armed_away": "Armed Away",
+          "armed_stay": "Armed Stay",
+          "disarmed": "Disarmed"
+        }
+      },
+      "stream_status": {
+        "name": "Stream Status",
+        "state": {
+          "idle": "Idle",
+          "warming_up": "Warming Up",
+          "connecting": "Connecting",
+          "streaming": "Streaming (LAN)",
+          "streaming_remote": "Streaming (Cloud)"
+        }
+      },
       "nvr_state": {
-        "name": "Mini-NVR State"
+        "name": "Mini-NVR State",
+        "state": {
+          "idle": "Idle",
+          "recording": "Recording",
+          "error": "Error"
+        }
       },
       "stream_url": {
         "name": "Stream URL (main)"
@@ -483,7 +820,7 @@
         },
         "instructions": {
           "name": "Instructions",
-          "description": "Custom prompt override for the AI (replaces ai_describe_prompt for this call). The language directive is still appended automatically."
+          "description": "Custom prompt for the AI. Overrides ai_describe_prompt option for this call."
         },
         "language": {
           "name": "Language",
