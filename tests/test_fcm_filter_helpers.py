@@ -1,12 +1,12 @@
 """Coverage tests for the FCM noise-filter helpers in `fcm.py`.
 
-Targets the public helpers used by the coordinator's watchdog:
-- ``get_recent_fcm_error_count`` — counts shared timestamps within a window.
-- ``reset_fcm_error_counter`` — clears the shared list after self-heal.
+Targets the public helpers used by the FCM supervisor:
+- ``get_recent_fcm_creds_staleness_count`` — counts staleness timestamps within a window.
+- ``reset_fcm_creds_staleness_counter`` — clears the staleness list after hard-heal.
 - ``_install_fcm_noise_filter`` — idempotent install on both loggers.
 
-These touch shared module state via ``_FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS``,
-so each test snapshots + restores the list to stay order-independent.
+Shared state lives in ``_FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS``;
+each test snapshots + restores it to stay order-independent.
 """
 
 from __future__ import annotations
@@ -21,52 +21,49 @@ from custom_components.bosch_shc_camera import fcm
 from custom_components.bosch_shc_camera.fcm import (
     _FCMNoiseFilter,
     _install_fcm_noise_filter,
-    get_recent_fcm_error_count,
-    reset_fcm_error_counter,
+    get_recent_fcm_creds_staleness_count,
+    reset_fcm_creds_staleness_counter,
 )
 
 
 @pytest.fixture(autouse=True)
 def _isolate_shared_state():
-    """Snapshot + restore both shared lists + logger filters so tests cannot
-    leak filter installs into other test modules."""
-    prev_ts = list(_FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS)
+    """Snapshot + restore staleness timestamps + logger filters between tests."""
+    prev_ts = list(_FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS)
     lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
     bosch_logger = logging.getLogger("custom_components.bosch_shc_camera.fcm")
     prev_lib = list(lib_logger.filters)
     prev_bosch = list(bosch_logger.filters)
     yield
-    _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS[:] = prev_ts
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS[:] = prev_ts
     lib_logger.filters[:] = prev_lib
     bosch_logger.filters[:] = prev_bosch
 
 
-class TestErrorCountHelpers:
+class TestCredsStatenessHelpers:
     def test_count_zero_on_empty_list(self):
-        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
-        # L118 — early-return branch when there are no timestamps at all.
-        assert get_recent_fcm_error_count() == 0
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+        assert get_recent_fcm_creds_staleness_count() == 0
 
     def test_count_within_window(self):
         now = time.monotonic()
-        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS[:] = [
-            now - 200.0,  # in window
-            now - 50.0,  # in window
-            now - 900.0,  # outside default 300s window
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS[:] = [
+            now - 200.0,   # in default 600s window
+            now - 50.0,    # in window
+            now - 700.0,   # outside window
         ]
-        assert get_recent_fcm_error_count() == 2
+        assert get_recent_fcm_creds_staleness_count() == 2
 
     def test_count_custom_window(self):
         now = time.monotonic()
-        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS[:] = [now - 30.0, now - 90.0]
-        # 60s window catches one; default 300s would catch both.
-        assert get_recent_fcm_error_count(window_seconds=60.0) == 1
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS[:] = [now - 30.0, now - 90.0]
+        # 60s window catches one; default 600s would catch both.
+        assert get_recent_fcm_creds_staleness_count(window_seconds=60.0) == 1
 
     def test_reset_clears_list(self):
-        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS[:] = [1.0, 2.0, 3.0]
-        # L126 — `reset_fcm_error_counter()` clears the shared list.
-        reset_fcm_error_counter()
-        assert _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS == []
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS[:] = [1.0, 2.0, 3.0]
+        reset_fcm_creds_staleness_counter()
+        assert _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS == []
 
 
 class TestInstallNoiseFilter:
@@ -88,19 +85,15 @@ class TestInstallNoiseFilter:
         f = _FCMNoiseFilter()
         lib_logger.filters[:] = [f]
         bosch_logger.filters[:] = []
-        # L153 — branch that addFilter(f) to the bosch logger.
         _install_fcm_noise_filter()
         assert f in bosch_logger.filters
-        # Only one shared instance — not a second one.
         bosch_fcm = [g for g in bosch_logger.filters if isinstance(g, _FCMNoiseFilter)]
         assert bosch_fcm == [f]
 
 
 class TestFailureMarkers:
-    """v12.8.4: filter now also fires on PHONE_REGISTRATION_ERROR / "Unable to
-    establish subscription" / "Unable to complete gcm auth request" so the
-    watchdog's trigger-(b) catches Google-side registration storms, not only
-    library-side connectivity drops."""
+    """Creds-staleness markers must record to _SHARED_STALENESS_TIMESTAMPS;
+    connectivity-only markers must dedupe but NOT record there."""
 
     def _make_record(self, msg: str) -> logging.LogRecord:
         return logging.LogRecord(
@@ -113,51 +106,58 @@ class TestFailureMarkers:
             exc_info=None,
         )
 
-    def test_phone_registration_error_records_timestamp(self):
+    def test_phone_registration_error_records_staleness_timestamp(self):
         f = _FCMNoiseFilter()
-        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
-        # First instance passes through (last_passed = -inf) and records a ts.
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
         passed = f.filter(
             self._make_record(
                 "GCM register request attempt 1 out of 2 has failed with Error=PHONE_REGISTRATION_ERROR"
             )
         )
         assert passed is True
-        assert len(_FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS) == 1
+        assert len(_FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS) == 1
 
-    def test_unable_to_complete_gcm_auth_records_timestamp(self):
+    def test_unable_to_complete_gcm_auth_records_staleness_timestamp(self):
         f = _FCMNoiseFilter()
-        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
         f.filter(
             self._make_record(
                 "Unable to complete gcm auth request after 2 tries, last error was Error=PHONE_REGISTRATION_ERROR"
             )
         )
-        assert len(_FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS) == 1
+        assert len(_FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS) == 1
 
-    def test_unable_to_establish_subscription_records_timestamp(self):
+    def test_unable_to_establish_subscription_records_staleness_timestamp(self):
         f = _FCMNoiseFilter()
-        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
         f.filter(
             self._make_record(
                 "FCM registration failed: Unable to establish subscription with Google Cloud Messaging."
             )
         )
-        assert len(_FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS) == 1
+        assert len(_FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS) == 1
 
-    def test_unrelated_message_does_not_record_timestamp(self):
-        """Non-failure messages must pass through untouched (no ts recorded)."""
+    def test_connectivity_error_does_not_record_staleness_timestamp(self):
+        """'Unexpected exception during read' is deduplicated but NOT a staleness marker."""
         f = _FCMNoiseFilter()
-        _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+        passed = f.filter(
+            self._make_record("Unexpected exception during read")
+        )
+        assert passed is True  # first occurrence passes through
+        assert _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS == []
+
+    def test_unrelated_message_passes_through_untouched(self):
+        """Non-failure messages pass through without recording any timestamp."""
+        f = _FCMNoiseFilter()
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
         passed = f.filter(self._make_record("FCM push listener started"))
         assert passed is True
-        assert _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS == []
+        assert _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS == []
 
 
 class TestPatchClassImportError:
     def test_returns_none_when_library_missing(self):
-        # Force the inner `from firebase_messaging import …` to fail.
-        # ``builtins.__import__`` is wrapped so only firebase_messaging blows up.
         import builtins as _bi
 
         real = _bi.__import__
@@ -167,7 +167,6 @@ class TestPatchClassImportError:
                 raise ImportError("simulated absence")
             return real(name, *a, **kw)
 
-        # L202-L203 — `_patch_class()` ImportError fallback returns None.
         with patch("builtins.__import__", side_effect=_fake):
             result = fcm._QuietFcmPushClient._patch_class()
         assert result is None

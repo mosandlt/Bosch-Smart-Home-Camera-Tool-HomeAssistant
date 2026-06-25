@@ -114,6 +114,7 @@ def _make_coord(**overrides):
         _fcm_running=False,
         _fcm_healthy=True,
         _fcm_client=None,
+        _fcm_supervisor_task=None,
         # Camera data caches
         _hw_version={},
         _cached_status={},
@@ -377,15 +378,16 @@ class TestFirstTickDetection:
 
 
 class TestFcmWatchdog:
-    """Lines 1338-1357: FCM health detection via FcmPushClient.is_started().
+    """FCM supervisor heartbeat in _async_update_data.
 
-    When FCM is running + healthy but is_started() returns False → _fcm_healthy
-    must be flipped to False.  When FCM is not running → _fcm_healthy unchanged.
+    The watchdog no longer monitors is_started() directly — that is the
+    supervisor task's responsibility. The watchdog only ensures the supervisor
+    task is alive, spawning a new one when it is None or done().
     """
 
     @pytest.mark.asyncio
-    async def test_fcm_dead_client_sets_healthy_false(self):
-        """_fcm_running=True, _fcm_healthy=True, is_started()=False → _fcm_healthy=False."""
+    async def test_fcm_dead_listener_spawns_supervisor(self):
+        """Dead listener (is_started=False) + no supervisor task → watchdog spawns supervisor."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         fcm_client = MagicMock()
@@ -395,9 +397,10 @@ class TestFcmWatchdog:
             _fcm_running=True,
             _fcm_healthy=True,
             _fcm_client=fcm_client,
+            _fcm_supervisor_task=None,
             options={"enable_fcm_push": True},
         )
-        coord._first_tick_done = True  # skip first-tick suppression
+        coord._first_tick_done = True
 
         session = _make_session(
             {
@@ -407,11 +410,18 @@ class TestFcmWatchdog:
             }
         )
 
-        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
+        with (
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
+            patch(
+                "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+                new_callable=AsyncMock,
+            ) as mock_ensure,
+        ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert coord._fcm_healthy is False, (
-            "_fcm_healthy must be False when is_started() returns False"
+        assert mock_ensure.called, (
+            "Watchdog must spawn supervisor when task is None — "
+            "the supervisor will detect the dead listener and restart it"
         )
 
     @pytest.mark.asyncio
@@ -479,25 +489,13 @@ class TestFcmWatchdog:
         )
 
     @pytest.mark.asyncio
-    async def test_fcm_dead_triggers_self_heal(self):
-        """is_started()=False must ALSO trigger async_self_heal_fcm_push.
-
-        Regression for the recovery gap: before this fix the coordinator only
-        flagged _fcm_healthy=False on silent death and then sat in
-        fcm_running=True/healthy=False forever, because the error-storm
-        self-heal branch required _fcm_healthy=True and never ran after the
-        flag was already flipped. The user had to restart HA manually.
-        """
+    async def test_fcm_supervisor_spawned_when_task_is_none(self):
+        """Watchdog must spawn the supervisor task when _fcm_supervisor_task is None."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        fcm_client = MagicMock()
-        fcm_client.is_started = MagicMock(return_value=False)
-
         coord = _make_coord(
-            _fcm_running=True,
-            _fcm_healthy=True,
-            _fcm_client=fcm_client,
             options={"enable_fcm_push": True},
+            _fcm_supervisor_task=None,
         )
         coord._first_tick_done = True
 
@@ -512,45 +510,30 @@ class TestFcmWatchdog:
         with (
             patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
             patch(
-                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
-            ) as mock_heal,
+                "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+                new_callable=AsyncMock,
+            ) as mock_ensure,
         ):
-            mock_heal.return_value = (
-                None  # coroutine target — async_create_task in stub closes it
-            )
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert coord._fcm_healthy is False, "silent death still flips healthy=False"
-        assert mock_heal.called, (
-            "fcm_dead must trigger async_self_heal_fcm_push so the listener "
-            "recovers without a HA restart"
-        )
-        assert coord._fcm_last_self_heal == pytest.approx(time.monotonic(), abs=2.0), (
-            "_fcm_last_self_heal must be updated to start the 30-min cool-down"
+        assert mock_ensure.called, (
+            "Watchdog must call _fcm_async_ensure_supervisor when "
+            "_fcm_supervisor_task is None so FCM self-heals without HA restart"
         )
 
     @pytest.mark.asyncio
-    async def test_fcm_dead_self_heal_cool_down(self):
-        """A second silent death within 30 min must NOT trigger a second heal.
-
-        Cool-down is 1800 s. Set _fcm_last_self_heal to "5 min ago" → the second
-        is_started()=False detection should not schedule another self-heal task.
-        """
+    async def test_fcm_supervisor_not_respawned_when_running(self):
+        """Watchdog must NOT spawn a second supervisor when the task is already alive."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        fcm_client = MagicMock()
-        fcm_client.is_started = MagicMock(return_value=False)
+        running_task = MagicMock(spec=asyncio.Task)
+        running_task.done = MagicMock(return_value=False)
 
         coord = _make_coord(
-            _fcm_running=True,
-            _fcm_healthy=True,
-            _fcm_client=fcm_client,
             options={"enable_fcm_push": True},
+            _fcm_supervisor_task=running_task,
         )
         coord._first_tick_done = True
-        coord._fcm_last_self_heal = (
-            time.monotonic() - 300.0
-        )  # 5 min ago — still in cool-down
 
         session = _make_session(
             {
@@ -563,18 +546,15 @@ class TestFcmWatchdog:
         with (
             patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
             patch(
-                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
-            ) as mock_heal,
+                "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+                new_callable=AsyncMock,
+            ) as mock_ensure,
         ):
-            mock_heal.return_value = None
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert coord._fcm_healthy is False, (
-            "healthy still flipped — flag update is independent of cool-down"
-        )
-        assert not mock_heal.called, (
-            "cool-down must suppress a second self-heal within 30 min "
-            "to avoid tearing FCM down on every coordinator tick"
+        assert not mock_ensure.called, (
+            "Watchdog must not spawn a second supervisor while the task is alive "
+            "(done()=False) — that would create duplicate listeners"
         )
 
 

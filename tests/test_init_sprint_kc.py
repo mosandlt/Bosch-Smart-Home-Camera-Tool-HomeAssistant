@@ -59,6 +59,7 @@ def _make_coord_full(cam_id: str = CAM_A, **overrides):
         _fcm_running=False,
         _fcm_healthy=True,
         _fcm_client=None,
+        _fcm_supervisor_task=None,
         _last_status=time_mod.monotonic(),  # recent → skip status
         _last_events=float("-inf"),  # stale → run events
         _last_slow=time_mod.monotonic(),  # recent → skip slow by default
@@ -984,58 +985,67 @@ class TestFcmDeliveryDeathWatchdog:
         assert coord._fcm_healthy is True
 
     @pytest.mark.asyncio
-    async def test_watchdog_routes_force_flag_to_heal(self):
-        """A preset `_fcm_force_hard_heal` makes the watchdog schedule a self-heal
-        regardless of socket liveness (covers the force-hard watchdog branch)."""
+    async def test_watchdog_spawns_supervisor_when_force_hard_set(self):
+        """When _fcm_force_hard_heal=True and no supervisor running, watchdog
+        spawns the supervisor so it can handle the hard-heal on its next iteration."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_full(
             options={"enable_fcm_push": True},
             _fcm_running=True,
             _fcm_healthy=True,
-            _fcm_force_hard_heal=True,  # preset — watchdog must act on it
-            _fcm_last_self_heal=float("-inf"),  # cooldown satisfied
-            _fcm_self_heal_failures=0,
-            _last_events=time_mod.monotonic(),  # skip the event poll → isolate watchdog
+            _fcm_force_hard_heal=True,
+            _fcm_supervisor_task=None,  # no supervisor running
+            _last_events=time_mod.monotonic(),
         )
         session = _session_for_cam(_make_cam_entry(CAM_A), events=[])
-        with patch(
-            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
-            new=AsyncMock(return_value=session),
+
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+                new_callable=AsyncMock,
+            ) as mock_ensure,
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert coord._fcm_last_self_heal != float("-inf"), (
-            "force-hard flag must trigger heal_needed → schedules async_self_heal"
+        assert mock_ensure.called, (
+            "Watchdog must spawn supervisor when _fcm_force_hard_heal=True — "
+            "supervisor handles the hard-heal on its next iteration"
         )
 
     @pytest.mark.asyncio
-    async def test_force_hard_overrides_exhausted_ladder(self):
-        """Issue #36 core: when the self-heal ladder is exhausted (paused until
-        restart), a delivery-death force-hard flag must RESET the ladder and heal
-        anyway — otherwise the integration stays dead exactly as #36 reported."""
-        from custom_components.bosch_shc_camera import (
-            SELF_HEAL_COOLDOWNS_SEC,
-            BoschCameraCoordinator,
-        )
+    async def test_no_exhaustion_block_in_supervisor_model(self):
+        """With the supervisor model there is no exhausted-ladder pause:
+        supervisor always retries. Verify that even after many failures the
+        watchdog still spawns the supervisor when it is None."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_full(
             options={"enable_fcm_push": True},
-            _fcm_running=True,
-            _fcm_healthy=True,
+            _fcm_running=False,
+            _fcm_healthy=False,
             _fcm_force_hard_heal=True,
-            _fcm_last_self_heal=float("-inf"),  # cooldown satisfied
-            _fcm_self_heal_failures=len(SELF_HEAL_COOLDOWNS_SEC),  # ladder exhausted
-            _fcm_self_heal_paused_logged=True,
-            _last_events=time_mod.monotonic(),  # skip event poll → isolate watchdog
+            _fcm_supervisor_task=None,
+            _last_events=time_mod.monotonic(),
         )
         session = _session_for_cam(_make_cam_entry(CAM_A), events=[])
-        with patch(
-            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
-            new=AsyncMock(return_value=session),
+
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+                new_callable=AsyncMock,
+            ) as mock_ensure,
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert coord._fcm_last_self_heal != float("-inf"), (
-            "force-hard must break the exhausted-ladder pause and schedule a heal"
+        assert mock_ensure.called, (
+            "Supervisor model has no exhaustion pause — watchdog always spawns supervisor"
         )

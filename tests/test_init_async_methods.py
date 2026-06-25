@@ -201,7 +201,7 @@ class TestFcmWrappers:
 
         coord = _make_coord()
         with patch(
-            "custom_components.bosch_shc_camera._fcm_async_start_fcm_push",
+            "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
             new=AsyncMock(return_value=None),
         ) as m:
             await BoschCameraCoordinator.async_start_fcm_push(coord)
@@ -213,7 +213,7 @@ class TestFcmWrappers:
 
         coord = _make_coord()
         with patch(
-            "custom_components.bosch_shc_camera._fcm_async_stop_fcm_push",
+            "custom_components.bosch_shc_camera._fcm_async_stop_supervisor",
             new=AsyncMock(return_value=None),
         ) as m:
             await BoschCameraCoordinator.async_stop_fcm_push(coord)

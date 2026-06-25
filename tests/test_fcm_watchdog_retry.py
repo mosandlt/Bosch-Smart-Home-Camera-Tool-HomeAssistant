@@ -1,32 +1,28 @@
-"""Regression tests for the FCM watchdog retry path (v12.8.3).
+"""Tests for the FCM supervisor watchdog behavior in _async_update_data.
 
-User incident 2026-05-21: FCM listener silent-died, self-heal fired once, the
-fresh `checkin_or_register()` failed with PHONE_REGISTRATION_ERROR (Google
-rate-limited the user's public IP for a few hours). After the failed self-heal
-`_fcm_running` stayed False and the watchdog blocked every subsequent retry
-because the trigger required `_fcm_running=True`. FCM stayed dead until the
-user reloaded the integration manually — even though Google would have
-accepted the registration ~30 min later.
+With the supervisor model (v14.3.0+), the watchdog no longer manages cool-downs
+or schedules self-heals directly. Instead it just ensures the supervisor task is
+alive, spawning a new one when it is None or done(). The supervisor handles all
+retry/backoff/soft/hard-heal logic internally.
 
-These tests pin the third self-heal trigger added in v12.8.3:
-  (c) `enable_fcm_push=True` + `_fcm_running=False` + cool-down expired
-      → re-attempt self-heal (which restarts FCM from scratch).
+These tests replace the old v12.8.3 retry tests which tested the now-removed
+self-heal ladder. The invariants being pinned:
+  (1) FCM not running + supervisor=None → watchdog spawns supervisor
+  (2) FCM running + supervisor already alive → watchdog does NOT spawn again
+  (3) FCM disabled → watchdog never spawns supervisor
+  (4) Healthy listener + supervisor running → no extra spawn
 """
 
 from __future__ import annotations
 
 import asyncio
 import threading
-import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Reuse helpers from the existing sprint_ka test module — they build the same
-# coordinator + session stubs used by the original watchdog tests, so the new
-# tests behave identically except for the configured pre-conditions.
-from tests.test_init_sprint_ka import (  # type: ignore[import-not-found]
+from tests.test_init_sprint_ka import (
     _PATCH_SESSION,
     _make_coord,
     _make_resp,
@@ -38,15 +34,17 @@ _PATCH_CLOUD_SESSION = (
 )
 
 
-class TestFcmWatchdogRetryAfterFailedSelfHeal:
-    """v12.8.3: third self-heal trigger — retry after a failed previous heal."""
+class TestFcmWatchdogSupervisorSpawn:
+    """Watchdog in _async_update_data must start/not-start the supervisor correctly."""
 
     @pytest.mark.asyncio
-    async def test_not_running_with_cooldown_expired_triggers_retry(self):
-        """`_fcm_running=False` + `enable_fcm_push=True` + cool-down OK → self-heal fires.
+    async def test_not_running_supervisor_none_spawns_supervisor(self):
+        """FCM enabled + supervisor=None → watchdog spawns supervisor.
 
-        Default `_fcm_last_self_heal = float('-inf')` means cool-down is always
-        satisfied after the first tick following a failed heal.
+        Equivalent to the old v12.8.3 "trigger (c)" test: FCM not running after
+        a failed previous start (e.g. PHONE_REGISTRATION_ERROR). In the supervisor
+        model the watchdog doesn't manage cooldowns — it just ensures the task exists.
+        The supervisor handles backoff and retry internally.
         """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -54,8 +52,8 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
             _fcm_running=False,
             _fcm_healthy=False,
             _fcm_client=None,
+            _fcm_supervisor_task=None,
             options={"enable_fcm_push": True},
-            _fcm_last_self_heal=float("-inf"),
         )
         coord._first_tick_done = True
 
@@ -71,35 +69,36 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
             patch(_PATCH_SESSION, return_value=session),
             patch(_PATCH_CLOUD_SESSION, new=AsyncMock(return_value=session)),
             patch(
-                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
-            ) as mock_heal,
+                "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+                new_callable=AsyncMock,
+            ) as mock_ensure,
         ):
-            mock_heal.return_value = None
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert mock_heal.called, (
-            "Watchdog must retry self-heal when FCM is enabled but not running "
-            "(previous self-heal failed, e.g. PHONE_REGISTRATION_ERROR)"
-        )
-        assert coord._fcm_last_self_heal == pytest.approx(time.monotonic(), abs=2.0), (
-            "`_fcm_last_self_heal` must be updated to start a new 30 min cool-down"
+        assert mock_ensure.called, (
+            "Watchdog must spawn supervisor when FCM is enabled but supervisor is None "
+            "(previous start failed — supervisor will retry with backoff)"
         )
 
     @pytest.mark.asyncio
-    async def test_not_running_within_cooldown_no_retry(self):
-        """`_fcm_running=False` + cool-down NOT expired → no self-heal.
+    async def test_supervisor_already_running_no_respawn(self):
+        """Supervisor already alive (done()=False) → watchdog must NOT spawn again.
 
-        Pins the cool-down behavior for the retry path so a busy coordinator
-        loop cannot hammer Google's GCM endpoint while the rate-limit holds.
+        Replaces the old "within cooldown no retry" test: if the supervisor is
+        already running (doing its backoff sleep between retries), the watchdog
+        must not create a duplicate.
         """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        running_task = MagicMock(spec=asyncio.Task)
+        running_task.done = MagicMock(return_value=False)
 
         coord = _make_coord(
             _fcm_running=False,
             _fcm_healthy=False,
             _fcm_client=None,
+            _fcm_supervisor_task=running_task,
             options={"enable_fcm_push": True},
-            _fcm_last_self_heal=time.monotonic() - 300.0,  # 5 min ago — still cool-down
         )
         coord._first_tick_done = True
 
@@ -115,24 +114,22 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
             patch(_PATCH_SESSION, return_value=session),
             patch(_PATCH_CLOUD_SESSION, new=AsyncMock(return_value=session)),
             patch(
-                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
-            ) as mock_heal,
+                "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+                new_callable=AsyncMock,
+            ) as mock_ensure,
         ):
-            mock_heal.return_value = None
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert not mock_heal.called, (
-            "Cool-down must suppress the retry path so we don't hammer Google "
-            "while the GCM rate-limit holds"
+        assert not mock_ensure.called, (
+            "Watchdog must NOT spawn a second supervisor while one is already running "
+            "— the running supervisor handles its own retry backoff"
         )
 
     @pytest.mark.asyncio
-    async def test_not_running_with_fcm_disabled_no_retry(self):
-        """`_fcm_running=False` + `enable_fcm_push=False` → no self-heal.
+    async def test_fcm_disabled_no_supervisor_spawn(self):
+        """enable_fcm_push=False → watchdog must NEVER spawn supervisor.
 
-        The user explicitly disabled FCM — the retry path must not override
-        that preference, otherwise toggling FCM off in Options would still
-        trigger background registration attempts.
+        The user explicitly disabled FCM — the watchdog must not override that.
         """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -140,8 +137,8 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
             _fcm_running=False,
             _fcm_healthy=False,
             _fcm_client=None,
+            _fcm_supervisor_task=None,
             options={"enable_fcm_push": False},
-            _fcm_last_self_heal=float("-inf"),
         )
         coord._first_tick_done = True
 
@@ -157,35 +154,38 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
             patch(_PATCH_SESSION, return_value=session),
             patch(_PATCH_CLOUD_SESSION, new=AsyncMock(return_value=session)),
             patch(
-                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
-            ) as mock_heal,
+                "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+                new_callable=AsyncMock,
+            ) as mock_ensure,
         ):
-            mock_heal.return_value = None
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert not mock_heal.called, (
-            "Retry path must respect `enable_fcm_push=False` — the user opted "
-            "out of FCM, so the watchdog must not try to bring it back"
+        assert not mock_ensure.called, (
+            "Watchdog must NOT spawn supervisor when enable_fcm_push=False — "
+            "the user opted out of FCM"
         )
 
     @pytest.mark.asyncio
-    async def test_running_and_healthy_does_not_fall_into_retry_branch(self):
-        """When FCM is up and healthy, no path (including the new retry) fires.
+    async def test_healthy_listener_with_running_supervisor_no_extra_spawn(self):
+        """Happy path: FCM running + healthy + supervisor running → nothing extra spawned.
 
-        Sanity check that adding branch (c) did not regress the happy path —
-        a healthy listener must NOT trigger self-heal.
+        Sanity check that a healthy FCM state with a live supervisor doesn't
+        trigger a redundant supervisor spawn.
         """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        running_task = MagicMock(spec=asyncio.Task)
+        running_task.done = MagicMock(return_value=False)
 
         fcm_client = MagicMock()
-        fcm_client.is_started = MagicMock(return_value=True)  # healthy
+        fcm_client.is_started = MagicMock(return_value=True)
 
         coord = _make_coord(
             _fcm_running=True,
             _fcm_healthy=True,
             _fcm_client=fcm_client,
+            _fcm_supervisor_task=running_task,
             options={"enable_fcm_push": True},
-            _fcm_last_self_heal=float("-inf"),
         )
         coord._first_tick_done = True
 
@@ -201,14 +201,10 @@ class TestFcmWatchdogRetryAfterFailedSelfHeal:
             patch(_PATCH_SESSION, return_value=session),
             patch(_PATCH_CLOUD_SESSION, new=AsyncMock(return_value=session)),
             patch(
-                "custom_components.bosch_shc_camera.fcm.async_self_heal_fcm_push"
-            ) as mock_heal,
-            patch(
-                "custom_components.bosch_shc_camera.fcm.get_recent_fcm_error_count",
-                return_value=0,
-            ),
+                "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+                new_callable=AsyncMock,
+            ) as mock_ensure,
         ):
-            mock_heal.return_value = None
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert not mock_heal.called, "Healthy listener must not trigger self-heal"
+        assert not mock_ensure.called, "Healthy listener with running supervisor must not trigger extra spawn"

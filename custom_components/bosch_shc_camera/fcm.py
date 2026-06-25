@@ -65,18 +65,22 @@ _LOGGER = logging.getLogger(__name__)
 
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
-# A soft-heal restarts the FCM listener while REUSING the persisted GCM
-# credentials (same token). It revives the TCP/SSL session but cannot fix the
-# case where Google has silently stopped DELIVERING to our token — the socket
-# reports is_started()=True yet no push ever arrives. Field report 2026-06-09:
-# the watchdog soft-healed every few hours, each one "succeeding" at the socket
-# level, while no notification was actually delivered until the user rebooted
-# HA. Once this many soft-heals happen WITHOUT a real push arriving between them
-# (coordinator._fcm_soft_heal_streak), the next heal escalates to a hard
-# self-heal (purge creds + fresh registration → new token) — the programmatic
-# equivalent of the reboot. The streak resets to 0 the moment a real push lands
-# (_on_fcm_push) or a hard-heal completes.
-SOFT_HEAL_ESCALATION_THRESHOLD = 3
+# Supervisor backoff ladder (seconds). The supervisor task waits this long
+# between failed listener start/restart attempts. Step 0 (5 s) covers a
+# transient connection drop after a push was received; later steps handle
+# persistent Google registration problems. Resets to 0 after a successful
+# push arrives so a quick recovery doesn't block the next outage detection.
+FCM_SUPERVISOR_BACKOFF_SEC: tuple[float, ...] = (5.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0)
+
+# How often the supervisor polls is_started() while the listener is running.
+# 10 s means a listener death is detected within 10 s, not 60 s (the old
+# coordinator-tick cadence). Short enough to be reactive; long enough to avoid
+# spinning the event loop.
+FCM_SUPERVISOR_POLL_SEC = 10.0
+
+# After this many consecutive soft-restarts WITHOUT a real push arriving, the
+# next restart escalates to a hard-heal (credential purge + re-register).
+FCM_SUPERVISOR_SOFT_HEAL_MAX = 3
 
 # Proactive Bosch-CBS re-registration cadence (issue #36). The integration used
 # to skip the POST /v11/devices forever as long as the FCM token was unchanged.
@@ -112,17 +116,9 @@ class _FCMNoiseFilter(logging.Filter):
     """
 
     _DEDUP_WINDOW_SECONDS = 300.0
-    _SHARED_ERROR_TIMESTAMPS: ClassVar[list[float]] = []  # any failure marker
     _SHARED_STALENESS_TIMESTAMPS: ClassVar[
         list[float]
     ] = []  # only creds-rejection markers
-
-    # Connectivity-loop markers: WAN blip / SSL reset. Library lib retries; our
-    # watchdog notices via is_started()=False or ≥3 in 5 min. Credentials are
-    # typically STILL VALID for these — only the TCP/SSL session died.
-    _CONNECTIVITY_MARKERS = (
-        "Unexpected exception during read",  # library reconnect loop
-    )
 
     # Credential-rejection markers: Google's gcm_register() endpoint returned
     # PHONE_REGISTRATION_ERROR (only path that emits this — see
@@ -137,7 +133,13 @@ class _FCMNoiseFilter(logging.Filter):
         "Unable to establish subscription",  # fcm.py's wrapper for the above
     )
 
-    # Union of both — used by the watchdog's trigger-(b) (≥3 errors in 5 min).
+    # Connectivity-loop marker: WAN blip / SSL reset. Tracked only for log
+    # deduplication — NOT used for health decisions (the supervisor detects
+    # listener death via is_started()=False, so error counting is unnecessary).
+    _CONNECTIVITY_MARKERS = (
+        "Unexpected exception during read",  # library reconnect loop
+    )
+
     _FAILURE_MARKERS = _CONNECTIVITY_MARKERS + _CREDS_STALENESS_MARKERS
 
     def __init__(self) -> None:
@@ -156,17 +158,9 @@ class _FCMNoiseFilter(logging.Filter):
         # recursion that doesn't help triage.
         record.exc_info = None
         record.exc_text = None
-        # Record timestamp so the coordinator's FCM watchdog can detect a
-        # persistent-failure loop (≥3 errors in 5 min) and self-heal by
-        # purging the stale persisted credentials in entry data. Keep only
-        # the last 10 timestamps so the list never grows unbounded on a
-        # cleanly-running install (the watchdog only ever needs the 3 most
-        # recent in the dedup window).
         now = time.monotonic()
-        self._SHARED_ERROR_TIMESTAMPS.append(now)
-        del self._SHARED_ERROR_TIMESTAMPS[:-10]
-        # Separately track creds-rejection markers so the two-stage self-heal
-        # can decide soft (preserve creds) vs hard (purge + re-register) —
+        # Track creds-rejection markers so the supervisor can decide
+        # soft (preserve creds) vs hard (purge + re-register) —
         # PHONE_REGISTRATION_ERROR in the window means creds are genuinely
         # stale, otherwise it's a connectivity-only blip.
         if any(marker in msg for marker in self._CREDS_STALENESS_MARKERS):
@@ -177,20 +171,6 @@ class _FCMNoiseFilter(logging.Filter):
             return False
         self._last_passed = now
         return True
-
-
-def get_recent_fcm_error_count(window_seconds: float = 300.0) -> int:
-    """How many ``Unexpected exception during read`` errors fired in the
-    last ``window_seconds`` according to the filter's shared timestamp list.
-
-    Coordinator's FCM watchdog uses this to detect a persistent reconnect
-    loop and trigger ``async_self_heal_fcm_push`` — clearing stale creds and
-    forcing fresh ``checkin_or_register()``.
-    """
-    if not _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS:
-        return 0
-    cutoff = time.monotonic() - window_seconds
-    return sum(1 for ts in _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS if ts >= cutoff)
 
 
 def get_recent_fcm_creds_staleness_count(window_seconds: float = 600.0) -> int:
@@ -211,11 +191,28 @@ def get_recent_fcm_creds_staleness_count(window_seconds: float = 600.0) -> int:
     return sum(1 for ts in _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS if ts >= cutoff)
 
 
-def reset_fcm_error_counter() -> None:
-    """Clear both shared timestamp lists. Called by self-heal after the
-    recovery cycle so the next 5-min window starts fresh."""
-    _FCMNoiseFilter._SHARED_ERROR_TIMESTAMPS.clear()
+def reset_fcm_creds_staleness_counter() -> None:
+    """Clear the creds-staleness timestamp list after a hard-heal registration."""
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+
+
+def reset_fcm_error_counter() -> None:
+    """Backward-compat shim used by tests; delegates to reset_fcm_creds_staleness_counter."""
+    reset_fcm_creds_staleness_counter()
+
+
+async def async_start_fcm_push(coordinator: Any) -> None:
+    """Backward-compat shim; production code uses async_ensure_fcm_supervisor.
+
+    Lazy-inits _fcm_start_lock, then delegates to _async_start_fcm_push_locked.
+    Used by legacy tests that target the inner lock-and-start logic directly.
+    """
+    lock = getattr(coordinator, "_fcm_start_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        coordinator._fcm_start_lock = lock
+    async with lock:
+        await _async_start_fcm_push_locked(coordinator)
 
 
 def _install_fcm_noise_filter() -> None:
@@ -458,50 +455,54 @@ async def fetch_firebase_config(hass: HomeAssistant) -> dict[str, str]:
 # ── FCM start / stop ────────────────────────────────────────────────────────
 
 
-async def async_start_fcm_push(coordinator: Any) -> None:
-    """Start the FCM push listener for near-instant motion/audio event detection.
+async def async_ensure_fcm_supervisor(coordinator: Any) -> None:
+    """Start the FCM supervisor task if FCM is enabled and not already running.
 
-    Flow:
-      1. Register with Google FCM (get a device token)
-      2. Register the token with Bosch CBS (POST /v11/devices)
-      3. Listen for silent push notifications from Bosch
-      4. On push -> immediately fetch events -> fire HA events + update sensors
-
-    FCM credentials are stored in the config entry data and reused across restarts.
-    The push is a silent wake-up signal (no payload) — event data comes from /v11/events.
-
-    Concurrency: serialised by `coordinator._fcm_start_lock`. Without it the
-    setup-time `async_start_fcm_push` and the watchdog's first self-heal
-    could race — both pass the `_fcm_running=False` check, both call
-    `checkin_or_register()`, two device tokens get registered with Bosch
-    CBS in 2 s, and the first client's listener dies with
-    "NoneType is not subscriptable" inside `_login()` because its
-    credentials dict was overwritten by the second registration. (Live bug
-    2026-05-21.) The lock collapses the race: only the first caller does
-    the real start, the second observes `_fcm_running=True` and returns.
+    This is the single entry point for FCM lifecycle management. The supervisor
+    task keeps the push listener alive with automatic restart and exponential
+    backoff — call sites no longer need to manage heals or cool-downs.
+    Idempotent: safe to call while the supervisor is already running.
     """
-    # Defensive: real coordinators set the lock in __init__; test stubs
-    # (SimpleNamespace) often skip it. Lazy-create so legacy tests don't break.
-    lock = getattr(coordinator, "_fcm_start_lock", None)
-    if lock is None:
-        lock = asyncio.Lock()
-        coordinator._fcm_start_lock = lock
-    async with lock:
-        await _async_start_fcm_push_locked(coordinator)
-
-
-async def _async_start_fcm_push_locked(coordinator: Any) -> None:
-    if coordinator._fcm_running:
+    if not coordinator.options.get("enable_fcm_push", False):
         return
+    sup = getattr(coordinator, "_fcm_supervisor_task", None)
+    if sup is not None and not sup.done():
+        return
+    coordinator._fcm_supervisor_task = coordinator.hass.async_create_task(
+        _async_run_fcm_supervisor(coordinator),
+        name="bosch_shc_camera_fcm_supervisor",
+    )
+
+
+async def async_stop_fcm_supervisor(coordinator: Any) -> None:
+    """Cancel the FCM supervisor task, then stop the push listener."""
+    sup = getattr(coordinator, "_fcm_supervisor_task", None)
+    if sup is not None and not sup.done():
+        sup.cancel()
+        try:
+            await sup
+        except (asyncio.CancelledError, Exception):
+            pass
+        coordinator._fcm_supervisor_task = None
+    await async_stop_fcm_push(coordinator)
+
+
+async def _async_start_fcm_push_locked(coordinator: Any) -> bool:
+    """Start the FCM push listener. Caller must hold `coordinator._fcm_start_lock`.
+
+    Returns True if the listener started successfully, False otherwise.
+    """
+    if coordinator._fcm_running:
+        return True
     if not coordinator.options.get("enable_fcm_push", False):
         _LOGGER.debug("FCM push disabled in options")
-        return
+        return False
 
     try:
         from firebase_messaging import FcmRegisterConfig
     except ImportError:
         _LOGGER.warning("firebase-messaging not installed — FCM push disabled")
-        return
+        return False
 
     # Use our patched subclass that fixes the upstream state-machine bug (issue #33):
     # it sets run_state=RESETTING before the error-log decision so transient WAN
@@ -509,7 +510,7 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> None:
     FcmPushClient = _get_fcm_push_client_class()
     if FcmPushClient is None:
         _LOGGER.warning("firebase-messaging not installed — FCM push disabled")
-        return
+        return False
 
     # FcmPushClientConfig landed in firebase-messaging 0.4; guard defensively
     # so older installs still start (without the hardening).
@@ -637,12 +638,6 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> None:
                 coordinator._fcm_healthy = True
                 coordinator._fcm_started_at = time.monotonic()
                 coordinator._fcm_push_mode = "auto"
-                # BUG-3 fix: reset soft-heal streak ONLY on confirmed successful
-                # start.  Resetting before the attempt (old code in
-                # _async_hard_heal_locked) silently zeroed the counter on every
-                # hard-heal even when the new registration subsequently failed,
-                # causing the watchdog to restart the ladder from 0.
-                coordinator._fcm_soft_heal_streak = 0
             _LOGGER.info(
                 "FCM push listener started — near-instant event detection active"
             )
@@ -659,19 +654,17 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> None:
 
     if push_mode == "polling":
         _LOGGER.info("FCM push mode set to 'polling' — using standard API polling only")
-        return
+        return False
 
-    # "auto" — try FCM with the OSS-sanctioned key; on failure the integration
-    # automatically falls back to standard polling (no extra code path needed —
-    # async_get_events_polling runs unconditionally on the coordinator tick).
-    if not await _try_fcm():
-        # Healthy degradation: standard API polling runs unconditionally on the
-        # coordinator tick, and the FCM watchdog keeps retrying registration in
-        # the background → INFO, not WARNING.
+    # "auto" — try FCM with the OSS-sanctioned key; on failure the supervisor
+    # will retry automatically (see _async_run_fcm_supervisor backoff ladder).
+    result = await _try_fcm()
+    if not result:
         _LOGGER.info(
             "FCM registration failed — falling back to standard polling "
-            "(the watchdog will keep retrying FCM in the background)"
+            "(supervisor will retry with exponential backoff)"
         )
+    return result
 
 
 async def register_fcm_with_bosch(coordinator: Any) -> bool:
@@ -838,177 +831,148 @@ async def async_stop_fcm_push(coordinator: Any) -> None:
         _LOGGER.info("FCM push listener stopped")
 
 
-async def async_self_heal_fcm_push(coordinator: Any) -> None:
-    """Two-stage FCM self-heal: soft (preserve creds) → hard (purge) fallback.
+async def _async_run_fcm_supervisor(coordinator: Any) -> None:
+    """FCM supervisor loop — keeps the push listener alive indefinitely.
 
-    BACKGROUND
-    ----------
-    `firebase_messaging.checkin_or_register()` has two paths:
-      1. Credentials present → `gcm_check_in(android_id, security_token)` —
-         lightweight refresh against the GCM checkin endpoint. Never returns
-         PHONE_REGISTRATION_ERROR.
-      2. No credentials → `gcm_register()` — full fresh registration against
-         the GCM register endpoint. THIS is the only path that can return
-         PHONE_REGISTRATION_ERROR (server-side transient, hours-long).
+    Replaces the watchdog + self-heal state machine. This task runs for the
+    entire lifetime of the HA config entry. On each iteration it:
+      1. Decides whether a hard-heal (credential purge + fresh registration)
+         is needed (delivery-death flag, 3+ consecutive soft-only restarts,
+         or PHONE_REGISTRATION_ERROR in the creds-staleness window).
+      2. Starts the FCM listener inside the start-lock.
+      3. Polls `is_started()` every FCM_SUPERVISOR_POLL_SEC seconds.
+      4. When the listener dies, waits FCM_SUPERVISOR_BACKOFF_SEC[failures]
+         before the next attempt (resets to 0 if a real push arrived).
 
-    Our previous self-heal purged credentials unconditionally on every
-    watchdog trigger, forcing path 2 even when the only problem was a TCP
-    blip. Result: PHONE_REGISTRATION_ERROR cascades that paused the heal
-    ladder for 24h while polling-fallback took over.
-
-    DECISION
-    --------
-    Soft-heal (no purge, no risk of PHONE_REGISTRATION_ERROR) when:
-      - persisted `fcm_credentials` exist AND
-      - no `PHONE_REGISTRATION_ERROR`/`Unable to complete gcm auth` marker
-        fired in the last 10 min.
-
-    Hard-heal (purge + fresh register, current behavior) when:
-      - no persisted credentials (first install, or prior hard-heal didn't
-        finish), OR
-      - creds-rejection markers seen recently (Google genuinely rejected
-        our stored android_id / security_token — refresh path would just
-        fail too).
-
-    SOFT-HEAL ESCALATION
-    --------------------
-    If soft-heal completes but `_fcm_running` stays False, escalate to
-    hard-heal in the same call — keeps the watchdog's failure counter
-    accurate.
-
-    Called by the coordinator's FCM watchdog at most once per cool-down
-    period. The user does NOT need to remove + re-add the integration.
+    Root-cause context (2026-06-25): `firebase-messaging 0.4.5` bug #33
+    causes the listener to terminate permanently after SSL timeout / 3
+    sequential errors. PR #36 (merged main, not yet on PyPI) fixes this.
+    The supervisor ensures recovery regardless of library version.
     """
-    # Acquire the same lock used by `async_start_fcm_push` so a self-heal
-    # cannot race with the setup-time start (two checkin_or_register() calls
-    # in 2 s otherwise registered two device tokens and orphaned the first
-    # listener — live bug 2026-05-21). The lock spans the full
-    # stop/purge/restart cycle so the partial state never leaks to another
-    # caller. Lazy-init covers SimpleNamespace test stubs.
-    lock = getattr(coordinator, "_fcm_start_lock", None)
-    if lock is None:
-        lock = asyncio.Lock()
-        coordinator._fcm_start_lock = lock
-    async with lock:
-        # Delivery-death override (issue #36): the event-poll path proved push
-        # is not delivering even though the socket looked alive. A soft-heal
-        # (socket reconnect) cannot fix that — only a fresh registration +
-        # re-POST to Bosch /v11/devices can. Go straight to hard-heal.
-        if getattr(coordinator, "_fcm_force_hard_heal", False):
+    failures = 0    # consecutive restarts WITHOUT a push received
+    soft_streak = 0  # consecutive soft-only restarts (no hard-heal between)
+
+    _LOGGER.debug("FCM supervisor started")
+
+    while True:
+        push_ts_before = coordinator._fcm_last_push
+
+        # ── Decide heal strategy ────────────────────────────────────────────
+        force_hard = getattr(coordinator, "_fcm_force_hard_heal", False)
+        needs_hard = (
+            force_hard
+            or soft_streak >= FCM_SUPERVISOR_SOFT_HEAL_MAX
+            or get_recent_fcm_creds_staleness_count(600.0) > 0
+            or not coordinator._entry.data.get("fcm_credentials")
+        )
+
+        if force_hard:
             coordinator._fcm_force_hard_heal = False
-            _LOGGER.warning(
-                "FCM self-heal (hard): push delivery confirmed dead by polling — "
-                "purging credentials and re-registering with Bosch CBS"
-            )
-            await _async_hard_heal_locked(coordinator)
-            return
 
-        creds_stale_count = get_recent_fcm_creds_staleness_count(600.0)
-        has_creds = bool(coordinator._entry.data.get("fcm_credentials"))
+        if needs_hard:
+            if force_hard:
+                reason = "polling confirmed delivery dead"
+            elif soft_streak >= FCM_SUPERVISOR_SOFT_HEAL_MAX:
+                reason = f"{soft_streak} soft-restarts without a push — delivery likely dead"
+            elif get_recent_fcm_creds_staleness_count(600.0) > 0:
+                reason = "PHONE_REGISTRATION_ERROR in last 10 min — creds stale"
+            else:
+                reason = "no persisted credentials"
+            _LOGGER.info("FCM supervisor: hard-heal (%s) — purging credentials", reason)
 
-        if creds_stale_count > 0 or not has_creds:
-            reason = (
-                f"{creds_stale_count} PHONE_REGISTRATION_ERROR-class marker(s) "
-                "in last 10 min — creds genuinely stale"
-                if creds_stale_count > 0
-                else "no persisted credentials — fresh registration required"
-            )
-            _LOGGER.warning("FCM self-heal (hard): %s", reason)
-            await _async_hard_heal_locked(coordinator)
-            return
+            async with coordinator._fcm_start_lock:
+                await async_stop_fcm_push(coordinator)
+                new_data = {
+                    k: v
+                    for k, v in coordinator._entry.data.items()
+                    if not k.startswith("fcm_")
+                }
+                purged = sorted(set(coordinator._entry.data) - set(new_data))
+                coordinator.hass.config_entries.async_update_entry(
+                    coordinator._entry, data=new_data
+                )
+                _LOGGER.info(
+                    "FCM supervisor: purged %d entry-data keys: %s", len(purged), purged
+                )
+            reset_fcm_creds_staleness_counter()
+            soft_streak = 0
 
-        # Repeated soft-heals that restart the socket but never restore real
-        # push DELIVERY (no FCM push received between them) mean Google has
-        # stopped delivering to our token — only a fresh registration recovers
-        # (matches what an HA reboot does). Escalate before wasting another
-        # no-op soft restart. See SOFT_HEAL_ESCALATION_THRESHOLD.
-        soft_streak = getattr(coordinator, "_fcm_soft_heal_streak", 0)
-        if soft_streak >= SOFT_HEAL_ESCALATION_THRESHOLD:
-            _LOGGER.warning(
-                "FCM self-heal (soft → hard): %d soft-heals without a real push "
-                "— socket reconnects but delivery is dead, forcing fresh "
-                "registration",
-                soft_streak,
-            )
-            await _async_hard_heal_locked(coordinator)
-            return
+        # ── Start listener ─────────────────────────────────────────────────
+        started = False
+        try:
+            lock = getattr(coordinator, "_fcm_start_lock", None)
+            if lock is None:
+                lock = asyncio.Lock()
+                coordinator._fcm_start_lock = lock
+            async with lock:
+                started = await _async_start_fcm_push_locked(coordinator)
+        except asyncio.CancelledError:
+            _LOGGER.debug("FCM supervisor cancelled during start")
+            break
+        except Exception:
+            _LOGGER.exception("FCM supervisor: listener start raised exception")
 
-        # Soft-heal path: stop + restart, REUSE persisted credentials.
-        # Library's checkin_or_register() will hit gcm_check_in() (lightweight
-        # refresh) instead of gcm_register() (the PHONE_REGISTRATION_ERROR
-        # source). See module-level _CREDS_STALENESS_MARKERS docstring.
-        _LOGGER.info(
-            "FCM self-heal (soft): listener died but creds look valid — "
-            "reconnecting without purge (avoids PHONE_REGISTRATION_ERROR path)"
-        )
-        await async_stop_fcm_push(coordinator)
-        reset_fcm_error_counter()
-        # FCM intentionally disabled in options — stop is the right outcome;
-        # do NOT proceed to start (would no-op) and do NOT fall through to
-        # the escalation branch below (would purge valid credentials).
-        if not coordinator.options.get("enable_fcm_push", False):
-            return
-        await _async_start_fcm_push_locked(coordinator)
-
-        if getattr(coordinator, "_fcm_running", False):
-            # Listener restarted at the socket level. Whether DELIVERY actually
-            # resumed is unknown until a real push arrives (_on_fcm_push resets
-            # the streak to 0). Count this soft-heal so a run of socket-only
-            # recoveries eventually escalates to a fresh registration instead of
-            # silently soft-healing forever (live bug 2026-06-09: needed reboot).
-            coordinator._fcm_soft_heal_streak = soft_streak + 1
+        if not started:
+            failures += 1
+            soft_streak += 1
+            delay = FCM_SUPERVISOR_BACKOFF_SEC[min(failures - 1, len(FCM_SUPERVISOR_BACKOFF_SEC) - 1)]
             _LOGGER.info(
-                "FCM self-heal (soft): listener restarted (streak %d/%d — "
-                "escalates to fresh registration if no real push arrives)",
-                coordinator._fcm_soft_heal_streak,
-                SOFT_HEAL_ESCALATION_THRESHOLD,
+                "FCM supervisor: start failed — retry in %.0fs (attempt #%d)",
+                delay,
+                failures,
             )
-            # Reset the cool-down ladder — socket recovered fast.
-            if hasattr(coordinator, "_fcm_self_heal_failures"):
-                coordinator._fcm_self_heal_failures = 0
-                coordinator._fcm_self_heal_paused_logged = False
-            return
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                break
+            continue
 
-        # Soft-heal didn't bring the listener back. Escalate to hard-heal in
-        # the same call — the watchdog's counter increment already happened.
-        _LOGGER.warning(
-            "FCM self-heal (soft → hard): soft restart did not start the "
-            "listener — escalating to credential purge"
-        )
-        await _async_hard_heal_locked(coordinator)
+        # ── Listener running — poll until it dies ──────────────────────────
+        _LOGGER.debug("FCM supervisor: listener up — polling every %.0fs", FCM_SUPERVISOR_POLL_SEC)
+        try:
+            while True:
+                fcm_client = coordinator._fcm_client
+                if fcm_client is None or not fcm_client.is_started():
+                    break
+                await asyncio.sleep(FCM_SUPERVISOR_POLL_SEC)
+        except asyncio.CancelledError:
+            await async_stop_fcm_push(coordinator)
+            _LOGGER.debug("FCM supervisor: cancelled while listener was running")
+            break
 
+        _LOGGER.info("FCM supervisor: listener terminated (is_started()=False)")
+        await async_stop_fcm_push(coordinator)
 
-async def _async_hard_heal_locked(coordinator: Any) -> None:
-    """Hard self-heal: purge ALL fcm_* keys + fresh checkin_or_register().
+        # ── Choose backoff ─────────────────────────────────────────────────
+        push_received = coordinator._fcm_last_push > push_ts_before
+        if push_received:
+            # Listener was delivering — transient drop; fast restart, reset counters.
+            failures = 0
+            soft_streak = 0
+            delay = FCM_SUPERVISOR_BACKOFF_SEC[0]
+            _LOGGER.info(
+                "FCM supervisor: transient drop (had pushes) — fast restart in %.0fs",
+                delay,
+            )
+        else:
+            failures += 1
+            soft_streak += 1
+            delay = FCM_SUPERVISOR_BACKOFF_SEC[min(failures - 1, len(FCM_SUPERVISOR_BACKOFF_SEC) - 1)]
+            _LOGGER.info(
+                "FCM supervisor: no pushes since last start — retry in %.0fs "
+                "(failure #%d, soft streak %d/%d)",
+                delay,
+                failures,
+                soft_streak,
+                FCM_SUPERVISOR_SOFT_HEAL_MAX,
+            )
 
-    Caller MUST hold ``coordinator._fcm_start_lock``. This is the original
-    self-heal behavior — used when credentials are absent OR proven stale by
-    recent PHONE_REGISTRATION_ERROR markers (see `async_self_heal_fcm_push`).
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            break
 
-    Live bug 2026-05-21: leaving fcm_config / fcm_registered_device_type
-    behind caused a permanent PHONE_REGISTRATION_ERROR loop — only purging
-    EVERY key beginning with `fcm_` recovered FCM in the field.
-    """
-    await async_stop_fcm_push(coordinator)
-    # BUG-3 fix: do NOT reset _fcm_soft_heal_streak here.  If the fresh
-    # checkin_or_register() inside _async_start_fcm_push_locked fails, the
-    # streak stays intact so the next watchdog tick doesn't silently restart
-    # the soft-heal ladder from 0.  The streak is reset inside
-    # _async_start_fcm_push_locked on SUCCESSFUL start (line ~619), and by
-    # _on_fcm_push when a real push arrives.
-    new_data = {
-        k: v for k, v in coordinator._entry.data.items() if not k.startswith("fcm_")
-    }
-    purged = sorted(set(coordinator._entry.data) - set(new_data))
-    coordinator.hass.config_entries.async_update_entry(
-        coordinator._entry,
-        data=new_data,
-    )
-    _LOGGER.info("FCM self-heal: purged %d entry-data keys: %s", len(purged), purged)
-    reset_fcm_error_counter()
-    if coordinator.options.get("enable_fcm_push", False):
-        # Call the locked variant directly — we already hold the lock.
-        await _async_start_fcm_push_locked(coordinator)
+    _LOGGER.debug("FCM supervisor stopped")
 
 
 async def _async_persist_fcm_creds(coordinator: Any, creds: dict[str, Any]) -> None:
@@ -1042,9 +1006,6 @@ def _on_fcm_push(
             return
         coordinator._fcm_last_push = time.monotonic()
         coordinator._fcm_healthy = True
-        # A real push proves DELIVERY works — any pending soft-heal escalation
-        # is moot, so reset the streak (see SOFT_HEAL_ESCALATION_THRESHOLD).
-        coordinator._fcm_soft_heal_streak = 0
     _LOGGER.info(
         "FCM push received (id=%s, from=%s) — fetching events",
         persistent_id,

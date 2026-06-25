@@ -399,14 +399,8 @@ class TestFcmStartLockLazyInit:
         )
 
     @pytest.mark.asyncio
-    async def test_self_heal_lazy_init_creates_lock_when_missing(self):
-        """async_self_heal_fcm_push must lazy-init _fcm_start_lock when missing.
-
-        Exercises lines 784-785: coordinator has no _fcm_start_lock (SimpleNamespace
-        test stub) → lazy-init creates and stores a new Lock before acquiring it.
-        The inner body is short-circuited via _async_hard_heal_locked mock so the
-        test doesn't need a full coordinator.
-        """
+    async def test_async_start_fcm_push_shim_lazy_init(self):
+        """async_start_fcm_push shim must lazy-init _fcm_start_lock when missing."""
         _install_firebase_module()
         import custom_components.bosch_shc_camera.fcm as fcm_mod
 
@@ -416,27 +410,16 @@ class TestFcmStartLockLazyInit:
             _entry=SimpleNamespace(data={}),
             hass=MagicMock(),
             _fcm_running=False,
-            # No _fcm_start_lock — simulates SimpleNamespace test stub
         )
         assert not hasattr(coord, "_fcm_start_lock")
 
-        with (
-            patch.object(
-                fcm_mod, "get_recent_fcm_creds_staleness_count", return_value=0
-            ),
-            patch.object(fcm_mod, "async_stop_fcm_push", new=AsyncMock()),
-            patch.object(fcm_mod, "reset_fcm_error_counter"),
-            patch.object(fcm_mod, "async_start_fcm_push", new=AsyncMock()),
+        with patch.object(
+            fcm_mod, "_async_start_fcm_push_locked", new=AsyncMock(return_value=False)
         ):
-            # Provide enough for the inner body to short-circuit (no creds → hard heal)
-            with patch.object(
-                fcm_mod, "_async_hard_heal_locked", new=AsyncMock(return_value=None)
-            ):
-                await fcm_mod.async_self_heal_fcm_push(coord)
+            await fcm_mod.async_start_fcm_push(coord)
 
-        # Lines 784-785: lazy-init must have run
         assert hasattr(coord, "_fcm_start_lock"), (
-            "coordinator._fcm_start_lock must be set by async_self_heal_fcm_push (lines 784-785)"
+            "async_start_fcm_push shim must lazy-init _fcm_start_lock"
         )
         assert isinstance(coord._fcm_start_lock, asyncio.Lock)
 

@@ -273,7 +273,7 @@ class TestPeriodicReRegistration:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _make_heal_coord(entry_data: dict) -> SimpleNamespace:
+def _make_heal_coord(entry_data: dict, force_hard: bool = True) -> SimpleNamespace:
     coord = SimpleNamespace()
     coord._entry = SimpleNamespace(data=dict(entry_data))
     coord.hass = SimpleNamespace(
@@ -281,56 +281,75 @@ def _make_heal_coord(entry_data: dict) -> SimpleNamespace:
     )
     coord.options = {"enable_fcm_push": True}
     coord._fcm_start_lock = asyncio.Lock()
-    coord._fcm_force_hard_heal = True
+    coord._fcm_force_hard_heal = force_hard
+    coord._fcm_last_push = float("-inf")
+    coord._fcm_running = False
+    coord._fcm_healthy = False
     return coord
 
 
 @pytest.mark.asyncio
 class TestForceHardHeal:
-    async def test_force_flag_routes_to_hard_heal_and_clears(self) -> None:
-        """`_fcm_force_hard_heal=True` → hard-heal even with valid creds and no
-        staleness markers, and the flag is consumed (one-shot)."""
+    async def test_supervisor_clears_force_hard_flag_and_purges_creds(self) -> None:
+        """`_fcm_force_hard_heal=True` → supervisor purges fcm_* creds and clears flag."""
         from custom_components.bosch_shc_camera import fcm
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
 
         _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
         coord = _make_heal_coord(
-            {"fcm_credentials": {"gcm": "x"}, "fcm_registered_token": "tok"}
+            {"fcm_credentials": {"gcm": "x"}, "fcm_registered_token": "tok", "other": "y"},
+            force_hard=True,
         )
-        hard = AsyncMock()
-        with patch.object(fcm, "_async_hard_heal_locked", hard):
-            await fcm.async_self_heal_fcm_push(coord)
-        hard.assert_awaited_once_with(coord)
-        assert coord._fcm_force_hard_heal is False
 
-    async def test_no_force_flag_takes_normal_path(self) -> None:
-        """Without the flag the normal soft/hard decision still runs (here: soft,
-        valid creds + no staleness markers) — force-heal must not hijack it."""
+        with (
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+            patch.object(fcm, "_async_start_fcm_push_locked", new=AsyncMock(return_value=False)),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            await asyncio.sleep(0.05)  # let one iteration run (hard-heal + failed start)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert coord._fcm_force_hard_heal is False, (
+            "_fcm_force_hard_heal must be cleared after supervisor hard-heal"
+        )
+        update_call = coord.hass.config_entries.async_update_entry.call_args
+        assert update_call is not None, "async_update_entry must be called during hard-heal"
+        new_data = update_call.kwargs.get("data") or update_call[1].get("data") or update_call[0][1]
+        assert "fcm_credentials" not in new_data, "fcm_* keys must be purged on hard-heal"
+
+    async def test_no_force_flag_skips_hard_heal(self) -> None:
+        """Without _fcm_force_hard_heal=True and no staleness markers, supervisor
+        takes the soft path — async_update_entry (cred-purge) is NOT called."""
         from custom_components.bosch_shc_camera import fcm
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
 
         _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
-        coord = _make_heal_coord({"fcm_credentials": {"gcm": "x"}})
-        coord._fcm_force_hard_heal = False
-        coord._fcm_running = False
-        coord._fcm_soft_heal_streak = 0
-        hard = AsyncMock()
-        stop = AsyncMock()
+        coord = _make_heal_coord(
+            {"fcm_credentials": {"gcm": "x"}, "fcm_registered_token": "tok"},
+            force_hard=False,
+        )
 
-        # A clean soft-heal: the (mocked) start brings the listener back up, so
-        # async_self_heal_fcm_push takes the soft path and does NOT escalate.
-        def _start(c: object) -> None:
-            c._fcm_running = True  # type: ignore[attr-defined]
-
-        start = AsyncMock(side_effect=_start)
         with (
-            patch.object(fcm, "_async_hard_heal_locked", hard),
-            patch.object(fcm, "async_stop_fcm_push", stop),
-            patch.object(fcm, "_async_start_fcm_push_locked", start),
-            patch.object(fcm, "reset_fcm_error_counter", MagicMock()),
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "get_recent_fcm_creds_staleness_count", return_value=0),
+            patch.object(fcm, "_async_start_fcm_push_locked", new=AsyncMock(return_value=False)),
         ):
-            await fcm.async_self_heal_fcm_push(coord)
-        hard.assert_not_awaited()
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        coord.hass.config_entries.async_update_entry.assert_not_called(), (
+            "Soft path must not purge creds (async_update_entry must not be called)"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

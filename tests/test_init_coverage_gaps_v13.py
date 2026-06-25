@@ -44,34 +44,33 @@ PROXY_URL = "proxy-12345.bosch.example.com"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Lines 1897-1903: FCM watchdog stable-window resets failure counter
+# FCM supervisor watchdog: supervisor-model behavior in _async_update_data
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestFcmWatchdogStableWindowReset:
-    """Lines 1897-1903: After recovery, if FCM stays healthy for
-    SELF_HEAL_SUCCESS_WINDOW_SEC, failure counter is reset to 0."""
+    """Supervisor model: watchdog spawns supervisor when None, does not track
+    failure counters or stable-window resets (that's the supervisor's job)."""
 
     @pytest.mark.asyncio
-    async def test_stable_window_resets_failure_counter(self):
-        """failures > 0 + _fcm_running + _fcm_healthy + last_heal old enough
-        → failure counter reset to 0 (lines 1897-1903)."""
-        from custom_components.bosch_shc_camera import (
-            SELF_HEAL_SUCCESS_WINDOW_SEC,
-            BoschCameraCoordinator,
-        )
+    async def test_healthy_fcm_supervisor_running_not_respawned(self):
+        """FCM healthy + supervisor task running → watchdog must NOT spawn another.
 
-        # last_heal was > SELF_HEAL_SUCCESS_WINDOW_SEC seconds ago
-        past_heal = time.monotonic() - (SELF_HEAL_SUCCESS_WINDOW_SEC + 10)
+        Replaces the old stable-window reset test: in the supervisor model there
+        are no _fcm_self_heal_failures on the coordinator — the supervisor loop
+        manages its own failure counter internally.
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        running_task = MagicMock(spec=asyncio.Task)
+        running_task.done = MagicMock(return_value=False)
 
         coord = _make_coord_ka(
             options={"enable_fcm_push": True},
             _fcm_running=True,
             _fcm_healthy=True,
             _fcm_client=None,
-            _fcm_last_self_heal=past_heal,
-            _fcm_self_heal_failures=3,
-            _fcm_self_heal_paused_logged=True,
+            _fcm_supervisor_task=running_task,
         )
         coord._first_tick_done = True
 
@@ -85,50 +84,46 @@ class TestFcmWatchdogStableWindowReset:
 
         with (
             patch(_PATCH_SESSION, return_value=session),
-            patch(f"{MODULE}.fcm.async_self_heal_fcm_push", new=AsyncMock()),
+            patch(
+                "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+                new_callable=AsyncMock,
+            ) as mock_ensure,
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        # Lines 1901-1903: counter reset to 0, paused_logged cleared
-        assert coord._fcm_self_heal_failures == 0, (
-            "failure counter must be reset to 0 after stable window (line 1901)"
-        )
-        assert coord._fcm_self_heal_paused_logged is False, (
-            "paused_logged must be cleared after stable window (line 1902)"
+        assert not mock_ensure.called, (
+            "Watchdog must NOT respawn supervisor when it is already running"
         )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Lines 1910-1917: FCM watchdog ladder exhausted → pause + log once
+# FCM supervisor watchdog: done() task triggers respawn
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestFcmWatchdogLadderExhausted:
-    """Lines 1910-1917: When failures >= len(SELF_HEAL_COOLDOWNS_SEC),
-    the heal ladder is exhausted — log warning once, set cool_down_ok=False."""
+    """Supervisor model: no exhausted-ladder pause. A done() supervisor task
+    is always respawned regardless of how many times it failed before."""
 
     @pytest.mark.asyncio
-    async def test_paused_log_fires_once_when_ladder_exhausted(self):
-        """failures at max + paused_logged=False → warning logged once (line 1911).
-        Second call: paused_logged=True → warning NOT logged again.
+    async def test_done_supervisor_task_is_respawned(self):
+        """Supervisor task done()=True → watchdog spawns a fresh supervisor.
+
+        Replaces the old ladder-exhausted test: in the supervisor model there
+        is no pause or exhaustion state — a dead supervisor is always restarted.
         """
-        from custom_components.bosch_shc_camera import (
-            SELF_HEAL_COOLDOWNS_SEC,
-            BoschCameraCoordinator,
-        )
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        dead_task = MagicMock(spec=asyncio.Task)
+        dead_task.done = MagicMock(return_value=True)
 
         coord = _make_coord_ka(
             options={"enable_fcm_push": True},
             _fcm_running=False,
             _fcm_healthy=False,
             _fcm_client=None,
-            _fcm_last_self_heal=time.monotonic() - 1,  # recent → cool_down NOT met yet
-            _fcm_self_heal_failures=len(SELF_HEAL_COOLDOWNS_SEC),  # ladder exhausted
+            _fcm_supervisor_task=dead_task,
         )
-        # Don't set _fcm_self_heal_paused_logged so getattr fallback is False
-        if hasattr(coord, "_fcm_self_heal_paused_logged"):
-            del coord._fcm_self_heal_paused_logged
-
         coord._first_tick_done = True
 
         session = _make_session(
@@ -139,27 +134,18 @@ class TestFcmWatchdogLadderExhausted:
             }
         )
 
-        logged_warnings = []
-
         with (
             patch(_PATCH_SESSION, return_value=session),
-            patch(f"{MODULE}.fcm.async_self_heal_fcm_push", new=AsyncMock()),
-            patch(f"{MODULE}._LOGGER") as mock_log,
+            patch(
+                "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+                new_callable=AsyncMock,
+            ) as mock_ensure,
         ):
-            mock_log.warning.side_effect = lambda *a, **k: logged_warnings.append(a)
             await BoschCameraCoordinator._async_update_data(coord)
 
-        # Lines 1911-1916: warning fired, paused_logged set to True
-        assert getattr(coord, "_fcm_self_heal_paused_logged", False) is True, (
-            "_fcm_self_heal_paused_logged must be set after first exhausted-ladder tick"
-        )
-        paused_warnings = [
-            w
-            for w in logged_warnings
-            if "pausing" in str(w).lower() or "consecutive failures" in str(w).lower()
-        ]
-        assert paused_warnings, (
-            "Must log ladder-exhausted warning on first tick (line 1911)"
+        assert mock_ensure.called, (
+            "Watchdog must respawn supervisor when done()=True — "
+            "no exhaustion pause in the supervisor model"
         )
 
 
