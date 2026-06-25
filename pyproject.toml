@@ -30,14 +30,12 @@ module = [
     "homeassistant.*",
     "voluptuous.*",
     "aiohttp.*",
-    "yarl.*",
     "firebase_messaging.*",
     "smbprotocol.*",
     "smbclient",
     "smbclient.*",
-    "google.*",
     "cryptography.*",
-    "OpenSSL.*",
+    "PIL.*",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"
@@ -85,3 +83,69 @@ max-complexity = 40
 
 [tool.ruff.lint.isort]
 known-first-party = ["custom_components"]
+
+[tool.pylint.MASTER]
+persistent = false
+jobs = 2
+
+[tool.pylint.BASIC]
+class-const-naming-style = "any"
+
+[tool.pylint.REPORTS]
+score = false
+
+[tool.pylint."MESSAGES CONTROL"]
+enable = [
+  "use-symbolic-message-instead",
+]
+disable = [
+  # ruff already enforces these — disable to avoid duplicate CI noise
+  "format",
+  "wrong-import-order",
+  "line-too-long",
+  "unused-import",        # ruff F401
+  "unused-variable",      # ruff F841
+  "cell-var-from-loop",   # ruff B023
+  # mypy already enforces these
+  "import-error",
+  "no-member",
+  "unexpected-keyword-arg",
+  # genuine HA entity/coordinator false positives
+  # pylint_home_assistant (HA core's private plugin) would handle these;
+  # without it they fire on every standard HA pattern.
+  "abstract-method",                # HA base classes intentionally leave methods abstract
+  "access-member-before-definition",# entity attrs set in async_added_to_hass not __init__
+  "attribute-defined-outside-init", # same
+  "broad-exception-caught",         # async coordinators catch broadly to survive network errors
+  "cyclic-import",                  # HA component loading creates inherent cycles
+  "duplicate-code",                 # HA entity boilerplate is intentionally similar
+  "global-statement",               # module-level registries (_bosch_audio_registry etc.)
+  "import-outside-toplevel",        # circular-import avoidance (see ruff E402 exemptions)
+  "not-context-manager",            # HA async protocols lack __enter__/__exit__
+  "possibly-used-before-assignment",# HA async branching patterns
+  "protected-access",               # coordinator<->entity cross-access is HA pattern
+  "redefined-outer-name",           # lazy imports to break cycles (see ruff E402 exemptions)
+  "reimported",                     # same symbol imported lazily in multiple scopes
+  "too-many-ancestors",             # HA entity hierarchy is 5-6 levels deep
+  "try-except-raise",               # `except asyncio.CancelledError: raise` is standard
+  "unused-argument",                # HA callback signatures are fixed by the API
+  "useless-import-alias",           # `import x as x` is mypy --no-implicit-reexport re-export
+  "wrong-import-position",          # late imports for circular-import avoidance
+  # project conventions
+  "invalid-name",               # HA uses CONFIG_SCHEMA, _WRITE_LOCK_SECS etc.
+  "locally-disabled",           # inline disables are deliberate and documented
+  "missing-class-docstring",    # typing enforced by mypy --strict; docstrings optional
+  "missing-function-docstring", # same
+  "too-few-public-methods",     # small dataclass-like helpers are intentional
+  "too-many-instance-attributes", # coordinator holds inherently large state
+  # complexity metrics — coordinator is inherently large; these fire by design
+  "too-many-arguments",
+  "too-many-boolean-expressions",
+  "too-many-branches",
+  "too-many-locals",
+  "too-many-nested-blocks",
+  "too-many-positional-arguments",
+  "too-many-public-methods",
+  "too-many-return-statements",
+  "too-many-statements",
+]

@@ -32,16 +32,21 @@ class _StubCoord(SimpleNamespace):
 
 
 def _make_coord(**overrides) -> _StubCoord:
+    from custom_components.bosch_shc_camera import get_options
+
+    _entry = SimpleNamespace(
+        data={"bearer_token": "tok-AAA", "refresh_token": "rfr-BBB"},
+        options={"debug": False, "scan_interval": 60},
+    )
     base = dict(
         data={},
         _session_stale={},
         _stream_warming=set(),
-        _entry=SimpleNamespace(
-            data={"bearer_token": "tok-AAA", "refresh_token": "rfr-BBB"},
-            options={"debug": False, "scan_interval": 60},
-        ),
+        _entry=_entry,
         _refreshed_token=None,
         _refreshed_refresh=None,
+        # mirrors BoschCameraCoordinator.__init__: snapshot taken at construction
+        _options_snapshot=get_options(_entry),
     )
     base.update(overrides)
     return _StubCoord(**base)
@@ -158,14 +163,20 @@ def test_refresh_token_in_memory_override() -> None:
 
 
 def test_options_property_merges_defaults() -> None:
-    """coord.options returns DEFAULT_OPTIONS overlaid by entry.options."""
-    from custom_components.bosch_shc_camera import BoschCameraCoordinator
+    """coord.options returns the construction-time snapshot: DEFAULT_OPTIONS + entry.options.
+
+    In production, options change only via _async_options_updated → async_reload →
+    new coordinator with a fresh snapshot. Post-construction mutation of entry.options
+    is test-only and intentionally NOT reflected (no stale-read risk in production).
+    """
+    from custom_components.bosch_shc_camera import BoschCameraCoordinator, get_options
     from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
 
-    coord = _make_coord()
-    coord._entry.options = {"interval_status": 999}
+    # Pass options at construction time — snapshot is taken then, as in real __init__
+    entry = SimpleNamespace(data={}, options={"interval_status": 999})
+    coord = _make_coord(_entry=entry, _options_snapshot=get_options(entry))
     opts = BoschCameraCoordinator.options.fget(coord)
     assert opts["interval_status"] == 999
-    # Default keys must still be present
+    # Default keys must still be present in the merged snapshot
     for key in DEFAULT_OPTIONS:
         assert key in opts

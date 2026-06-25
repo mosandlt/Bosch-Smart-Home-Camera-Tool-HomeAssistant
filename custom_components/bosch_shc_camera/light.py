@@ -33,6 +33,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import CLOUD_API, DOMAIN  # type: ignore[attr-defined]
 from .cloud_ssl import async_get_bosch_cloud_session
+from .guards import _warn_if_privacy_on
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -393,8 +394,6 @@ class _BoschRgbLedLight(_BoschLightBase):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         # Privacy mode blocks /lighting/switch PUT with HTTP 443 — warn the user.
-        from .switch import _warn_if_privacy_on  # local import: avoid module cycle
-
         if await _warn_if_privacy_on(self, "RGB-Licht"):
             return
         self._load_state_from_cache()
@@ -548,8 +547,6 @@ class BoschFrontLight(_BoschLightBase):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         # Privacy mode blocks /lighting/switch PUT with HTTP 443 — warn the user.
-        from .switch import _warn_if_privacy_on  # local import: avoid module cycle
-
         if await _warn_if_privacy_on(self, "Frontlicht"):
             return
         self._load_state_from_cache()

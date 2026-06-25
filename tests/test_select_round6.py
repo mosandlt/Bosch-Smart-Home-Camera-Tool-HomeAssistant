@@ -279,11 +279,11 @@ class TestMotionSensitivitySelect:
         }
         with (
             patch(
-                "custom_components.bosch_shc_camera.switch._is_gen2_indoor",
+                "custom_components.bosch_shc_camera.select._is_gen2_indoor",
                 return_value=False,
             ),
             patch(
-                "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+                "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
                 AsyncMock(return_value=False),
             ),
         ):
@@ -301,11 +301,11 @@ class TestMotionSensitivitySelect:
         sel = self._make(put_return=False)
         with (
             patch(
-                "custom_components.bosch_shc_camera.switch._is_gen2_indoor",
+                "custom_components.bosch_shc_camera.select._is_gen2_indoor",
                 return_value=False,
             ),
             patch(
-                "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+                "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
                 AsyncMock(return_value=False),
             ),
         ):
@@ -318,11 +318,11 @@ class TestMotionSensitivitySelect:
         sel = self._make()
         with (
             patch(
-                "custom_components.bosch_shc_camera.switch._is_gen2_indoor",
+                "custom_components.bosch_shc_camera.select._is_gen2_indoor",
                 return_value=True,
             ),
             patch(
-                "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+                "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
                 AsyncMock(return_value=True),
             ),
         ):
@@ -478,7 +478,7 @@ class TestDetectionModeSelect:
             put_return=True,
         )
         with patch(
-            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
             AsyncMock(return_value=False),
         ):
             await sel.async_select_option("only_humans")
@@ -494,7 +494,7 @@ class TestDetectionModeSelect:
             put_return=False,
         )
         with patch(
-            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
             AsyncMock(return_value=False),
         ):
             await sel.async_select_option("only_humans")
@@ -512,7 +512,7 @@ class TestDetectionModeSelect:
         """Empty config cache → return early without PUT."""
         sel = self._make(intrusion_cache={})
         with patch(
-            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
             AsyncMock(return_value=False),
         ):
             await sel.async_select_option("only_humans")
@@ -523,7 +523,7 @@ class TestDetectionModeSelect:
         """Privacy mode ON → returns early, no PUT."""
         sel = self._make(intrusion_cache={CAM_ID: {"detectionMode": "ALL_MOTIONS"}})
         with patch(
-            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
             AsyncMock(return_value=True),
         ):
             await sel.async_select_option("only_humans")

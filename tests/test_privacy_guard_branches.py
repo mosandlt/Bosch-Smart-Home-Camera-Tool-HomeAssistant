@@ -103,7 +103,7 @@ class TestRgbLedLightPrivacyGuard:
         entity = self._make_top_led(coord)
 
         with patch(
-            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            "custom_components.bosch_shc_camera.light._warn_if_privacy_on",
             new=AsyncMock(return_value=True),
         ):
             await entity.async_turn_on()
@@ -118,7 +118,7 @@ class TestRgbLedLightPrivacyGuard:
         entity = self._make_top_led(coord)
 
         with patch(
-            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            "custom_components.bosch_shc_camera.light._warn_if_privacy_on",
             new=AsyncMock(return_value=False),
         ):
             await entity.async_turn_on()
@@ -168,7 +168,7 @@ class TestFrontLightPrivacyGuard:
         entity = self._make_front_light(coord)
 
         with patch(
-            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            "custom_components.bosch_shc_camera.light._warn_if_privacy_on",
             new=AsyncMock(return_value=True),
         ):
             await entity.async_turn_on()
@@ -183,7 +183,7 @@ class TestFrontLightPrivacyGuard:
         entity = self._make_front_light(coord)
 
         with patch(
-            "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+            "custom_components.bosch_shc_camera.light._warn_if_privacy_on",
             new=AsyncMock(return_value=False),
         ):
             await entity.async_turn_on()

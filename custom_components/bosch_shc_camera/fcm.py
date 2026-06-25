@@ -427,7 +427,7 @@ def _get_fcm_push_client_class() -> type | None:
 
 
 # Firebase Cloud Messaging — push notifications from Bosch CBS
-FCM_SENDER_ID = "404630424405"
+FCM_SENDER_ID = "404630424405"  # public app-level identifier — same in every Android APK; intentional in source
 
 
 # ── Firebase config ──────────────────────────────────────────────────────────

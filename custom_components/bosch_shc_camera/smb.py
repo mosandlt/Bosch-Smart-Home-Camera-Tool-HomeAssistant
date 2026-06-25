@@ -252,7 +252,8 @@ def sync_smb_upload(
     """
     protocol = (coordinator.options.get("upload_protocol") or "smb").lower()
     if protocol == "ftp":
-        return _sync_ftp_upload(coordinator, data, token, prefetched_image)
+        _sync_ftp_upload(coordinator, data, token, prefetched_image)
+        return
 
     opts = coordinator.options
     server = opts.get("smb_server", "").strip()
@@ -269,9 +270,7 @@ def sync_smb_upload(
         return
 
     try:
-        import smbclient  # noqa: F401
         from smbclient import (
-            mkdir,  # noqa: F401  # imported to assert availability of the SMB API surface
             open_file,
             register_session,
         )
@@ -296,7 +295,7 @@ def sync_smb_upload(
         return
 
     for cam_id, cam_data in data.items():
-        cam_name = cam_data["info"].get("title", cam_id)
+        cam_name = _safe_name(cam_data["info"].get("title", cam_id))
         ev_list = cam_data.get("events", [])
         _LOGGER.debug("SMB upload: %s has %d events", cam_name, len(ev_list))
 
@@ -396,6 +395,11 @@ def sync_smb_upload(
             clip_url = ev.get("videoClipUrl")
             clip_status = ev.get("videoClipUploadStatus", "")
             if clip_url and clip_status == "Done":
+                if not _is_safe_bosch_url(clip_url):
+                    _LOGGER.warning(
+                        "SMB: skipping clip with non-Bosch URL: %s", clip_url
+                    )
+                    continue
                 smb_path = f"{smb_folder}\\{file_base}.mp4"
                 try:
                     smb_stat(smb_path)
@@ -403,7 +407,7 @@ def sync_smb_upload(
                 except OSError:
                     try:
                         total = 0
-                        req_obj = urllib.request.Request(  # noqa: S310 # Bosch cloud clip URL, https+bearer; from Bosch API response (not user-supplied)
+                        req_obj = urllib.request.Request(  # noqa: S310 # Bosch cloud clip URL, https+bearer; guarded by _is_safe_bosch_url above
                             clip_url, headers={"Authorization": f"Bearer {token}"}
                         )
                         with urllib.request.urlopen(  # noqa: S310 # Bosch cloud clip URL, https+bearer; from Bosch API response (not user-supplied)
@@ -463,7 +467,8 @@ def sync_smb_cleanup(coordinator: BoschCameraCoordinator) -> None:
     """Delete files on the SMB or FTP share that are older than smb_retention_days."""
     protocol = (coordinator.options.get("upload_protocol") or "smb").lower()
     if protocol == "ftp":
-        return _sync_ftp_cleanup(coordinator)
+        _sync_ftp_cleanup(coordinator)
+        return
     try:
         from smbclient import register_session, remove, scandir
         from smbclient import stat as smb_stat
@@ -650,7 +655,7 @@ def _sync_ftp_upload(
 
     try:
         for cam_id, cam_data in data.items():
-            cam_name = cam_data["info"].get("title", cam_id)
+            cam_name = _safe_name(cam_data["info"].get("title", cam_id))
             ev_list = cam_data.get("events", [])
             _LOGGER.debug("FTP upload: %s has %d events", cam_name, len(ev_list))
 

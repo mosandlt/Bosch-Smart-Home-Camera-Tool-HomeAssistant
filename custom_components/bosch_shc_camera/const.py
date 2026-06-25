@@ -102,6 +102,9 @@ STREAM_IDLE_REAP_CHECK_SEC = 30  # reaper poll interval
 # cf_unbuffer.hls_access_age + __init__.py _has_active_consumer.
 STREAM_HLS_FRESH_SEC = 30
 
+DEFAULT_AI_DESCRIBE_PROMPT = "Du bist eine Überwachungskamera-Assistenz. Melde NUR sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere, Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes erkennbar ist, sage das kurz, z. B.: Keine sicherheitsrelevanten Beobachtungen."
+DEFAULT_AI_DESCRIBE_LANGUAGE = "Deutsch"
+
 DEFAULT_OPTIONS = {
     "scan_interval": 60,
     "interval_status": 300,
@@ -214,8 +217,8 @@ DEFAULT_OPTIONS = {
     # sensor holding the last AI-generated description.
     "enable_ai_description": False,
     "ai_task_entity": "",  # empty → HA chooses the preferred ai_task entity
-    "ai_describe_prompt": "Du bist eine Überwachungskamera-Assistenz. Melde NUR sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere, Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes erkennbar ist, sage das kurz, z. B.: Keine sicherheitsrelevanten Beobachtungen.",
-    "ai_describe_language": "Deutsch",
+    "ai_describe_prompt": DEFAULT_AI_DESCRIBE_PROMPT,
+    "ai_describe_language": DEFAULT_AI_DESCRIBE_LANGUAGE,
     "ai_describe_on_motion": False,
     # Append the AI snapshot description to the event push notification
     # ("Stage 2" snapshot alert). Opt-in (default off). Rate-limited by the
@@ -260,6 +263,9 @@ DEFAULT_OPTIONS = {
     # Set to e.g. 8556 to keep the sensor URL stable across HA restarts and
     # settings changes. Multiple cameras use port, port+1, … (sorted cam-ID order).
     "frigate_bind_port": 0,
+    # Max simultaneous recorder clients per camera front-door (anti-flood).
+    # Default 8 covers typical Frigate multi-sub-stream setups with headroom.
+    "frigate_max_connections": 8,
 }
 
 # v2.16.0 dropped the historical "confirm" value (popup dialog) in favour
@@ -276,6 +282,7 @@ CONF_FRIGATE_AUTH_MODE = "frigate_auth_mode"
 CONF_FRIGATE_TOKEN = "frigate_token"  # noqa: S105 # option key name, not a credential
 CONF_FRIGATE_BASIC_USER = "frigate_basic_user"
 CONF_FRIGATE_IDLE_TIMEOUT = "frigate_idle_timeout"
+CONF_FRIGATE_MAX_CONNECTIONS = "frigate_max_connections"
 FRIGATE_BIND_VALUES = ("127.0.0.1", "0.0.0.0")  # noqa: S104 # 0.0.0.0 is an explicit opt-in LAN-exposure choice
 FRIGATE_AUTH_VALUES = ("none", "path_token", "basic")
 
@@ -307,5 +314,3 @@ CONF_AI_ACTIVE_TIME_START = "ai_active_time_start"
 CONF_AI_ACTIVE_TIME_END = "ai_active_time_end"
 CONF_AI_ACTIVE_CONDITION_ENTITY = "ai_active_condition_entity"
 CONF_AI_ACTIVE_CONDITION_STATE = "ai_active_condition_state"
-DEFAULT_AI_DESCRIBE_PROMPT = "Du bist eine Überwachungskamera-Assistenz. Melde NUR sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere, Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes erkennbar ist, sage das kurz, z. B.: Keine sicherheitsrelevanten Beobachtungen."
-DEFAULT_AI_DESCRIBE_LANGUAGE = "Deutsch"

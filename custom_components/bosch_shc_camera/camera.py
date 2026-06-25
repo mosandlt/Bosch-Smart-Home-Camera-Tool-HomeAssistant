@@ -54,6 +54,10 @@ from .const import (
     TIMEOUT_SNAP,
 )
 from .mjpeg_snapshot import fetch_mjpeg_snapshot
+from .models import (
+    get_display_name,
+    get_model_config,
+)  # [S4] hoisted: avoid per-call import binding on hot path
 from .snapshot_store import load_snapshot, save_snapshot
 from .switch import _redact_rtsp_creds
 
@@ -159,8 +163,6 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         self._attr_unique_id = f"bosch_shc_cam_{cam_id.lower()}"
         self._model = info.get("hardwareVersion", "CAMERA")
         self._hw_version = info.get("hardwareVersion", "")
-        from .models import get_display_name
-
         self._model_name = get_display_name(self._hw_version)
         self._fw = info.get("firmwareVersion", "")
         self._mac = info.get("macAddress", "")
@@ -182,11 +184,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             # triggers a live refresh on schedule.  Using float('-inf') would
             # trigger an immediate re-fetch; instead back-date by one full
             # snapshot_interval so the first refresh fires normally.
-            from .const import DEFAULT_OPTIONS
-
-            opts = get_options(self._entry)
+            # [S7] IMAGE_REFRESH_INTERVAL == DEFAULT_OPTIONS["snapshot_interval"] == 1800;
+            # direct read avoids inline import + full dict copy (once-per-restart path)
             snap_interval = float(
-                int(opts.get("snapshot_interval", DEFAULT_OPTIONS["snapshot_interval"]))
+                int(
+                    self._entry.options.get("snapshot_interval", IMAGE_REFRESH_INTERVAL)
+                )
             )
             self._last_image_fetch = time.monotonic() - snap_interval
             _LOGGER.debug(
@@ -215,9 +218,11 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # Interval: snapshot_interval option (default 1800 s / 30 min).
         elif not is_now_streaming:
             now = time.monotonic()
-            opts = get_options(self._entry)
+            # [S3] Read single key directly — avoids full dict(DEFAULT_OPTIONS)+update() copy
             proactive_interval = float(
-                int(opts.get("snapshot_interval", IMAGE_REFRESH_INTERVAL))
+                int(
+                    self._entry.options.get("snapshot_interval", IMAGE_REFRESH_INTERVAL)
+                )
             )
             if now - self._last_image_fetch >= proactive_interval:
                 self.hass.async_create_task(self._async_trigger_image_refresh(delay=0))
@@ -562,12 +567,14 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         latest = events[0] if events else {}
         live = cam_data.get("live", {})
         rtsps_url = live.get("rtspsUrl", live.get("rtspUrl", ""))
+        # [S2] Evaluate is_streaming once — property does a dict lookup each time
+        is_streaming = self.is_streaming
         # Stream status for dashboard display
         fell_back = self.coordinator._stream_fell_back.get(self._cam_id, False)
         err_count = self.coordinator._stream_error_count.get(self._cam_id, 0)
         if self.coordinator.is_stream_warming(self._cam_id):
             stream_status = "warming_up"
-        elif self.is_streaming:
+        elif is_streaming:
             stream_status = "streaming (REMOTE fallback)" if fell_back else "streaming"
         elif self._cam_id in self.coordinator._live_connections:
             stream_status = "connecting"
@@ -580,7 +587,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             "camera_id": self._cam_id,
             "status": cam_data.get("status", "UNKNOWN"),
             "stream_status": stream_status,
-            "streaming_state": "active" if self.is_streaming else "idle",
+            "streaming_state": "active" if is_streaming else "idle",  # [S2] local var
             "last_event": latest.get("timestamp", "")[:19],
             "event_type": latest.get("eventType", ""),
             "model_name": self._model_name,
@@ -605,16 +612,16 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         if bt is not None:
             attrs["buffering_time_ms"] = bt
             attrs["connection_type"] = live_conn.get("_connection_type", "REMOTE")
+        # [S2] Single get_options() call for all option reads in this method
+        entry_opts = get_options(self._entry)
         # Player-side buffer profile — read by the Lovelace card to configure
         # hls.js. Mode → (liveSyncDurationCount, liveMaxLatencyDurationCount,
         # maxBufferLength, lowLatencyMode) is mapped client-side.
-        attrs["live_buffer_mode"] = get_options(self._entry).get(
-            "live_buffer_mode", "balanced"
-        )
+        attrs["live_buffer_mode"] = entry_opts.get("live_buffer_mode", "balanced")
         # Card auto-play default — collapses any non-canonical value to "lan"
         # so a typo or stale option from a previous version never disables
         # stream start. Per-card YAML `auto_play` still overrides this.
-        mode = get_options(self._entry).get("auto_play_default", "lan")
+        mode = entry_opts.get("auto_play_default", "lan")
         attrs["auto_play_default"] = mode if mode in AUTO_PLAY_DEFAULT_VALUES else "lan"
         # Camera-side timestamp overlay (burned-in date/time, bottom-right of
         # the video frame). The card reads this to hide its own last-event
@@ -779,10 +786,14 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             v_half = uv_plane[:, 1::2]  # shape (180, 160)
             u = np.repeat(u_half, 2, axis=1) - 128.0  # (180, 320)
             v = np.repeat(v_half, 2, axis=1) - 128.0  # (180, 320)
-            r = np.clip(y + 1.402 * v, 0, 255).astype(np.uint8)
-            g = np.clip(y - 0.344136 * u - 0.714136 * v, 0, 255).astype(np.uint8)
-            b = np.clip(y + 1.772 * u, 0, 255).astype(np.uint8)
-            rgb = np.stack([r, g, b], axis=2)
+            # [S6] Pre-allocate single float32 output; single np.clip pass on the
+            # whole array instead of 3 separate clip+astype chains (saves 4 temp arrays)
+            rgb_f = np.empty((180, 320, 3), dtype=np.float32)
+            rgb_f[:, :, 0] = y + 1.402 * v  # R
+            rgb_f[:, :, 1] = y - 0.344136 * u - 0.714136 * v  # G
+            rgb_f[:, :, 2] = y + 1.772 * u  # B
+            np.clip(rgb_f, 0, 255, out=rgb_f)
+            rgb = rgb_f.astype(np.uint8)
             img = Image.fromarray(rgb, mode="RGB")
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=85)
@@ -886,9 +897,10 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             jpeg = self._cached_image or self._PLACEHOLDER_JPEG
         # Apply 180° rotation if the user enabled it via the Bild 180° drehen
         # switch (ceiling-mounted indoor cameras). Skip the placeholder JPEG.
-        rotate = bool(
-            getattr(self.coordinator, "_image_rotation_180", {}).get(self._cam_id)
-        )
+        # [S5] Use None default instead of {} to avoid allocating a throwaway dict
+        # on every call when the attribute exists (production path always has it).
+        _rot_cache = getattr(self.coordinator, "_image_rotation_180", None)
+        rotate = bool(_rot_cache and _rot_cache.get(self._cam_id))
         if rotate and jpeg is not self._PLACEHOLDER_JPEG and jpeg:
             jpeg = await self.hass.async_add_executor_job(_rotate_jpeg_180, jpeg)
         return jpeg
@@ -945,11 +957,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # the coordinator from the most recent PUT /connection.
         # Estimated latency: ~150-300 ms on LAN (vs ~500-1500 ms cloud-proxy).
         # Falls through silently on any error — existing paths take over.
-        opts = get_options(self._entry)
-        if opts.get("use_mjpeg_snapshot", False):
-            from .models import get_model_config
-
-            model_cfg = get_model_config(self._hw_version)
+        # [S1] Check the flag directly on entry.options before allocating the merged
+        # options dict — avoids dict(DEFAULT_OPTIONS)+update() on every image call
+        # (default is False, so this fast-path fires for all standard installs).
+        if self._entry.options.get("use_mjpeg_snapshot", False):
+            opts = get_options(self._entry)  # full merge only when feature is enabled
+            model_cfg = get_model_config(self._hw_version)  # [S4] module-level import
             if model_cfg.generation >= 2:
                 creds = self.coordinator._local_creds_cache.get(self._cam_id)
                 # cbs creds rotate ~60 s after each PUT /connection without
@@ -1306,20 +1319,19 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                                 ev.get("timestamp", "")[:19],
                             )
                             return self._cached_image
-                        elif resp.status == 401:
+                        if resp.status == 401:
                             _LOGGER.warning(
                                 "%s: token expired — update via integration options",
                                 self._display_name,
                             )
                             return self._cached_image
-                        else:
-                            # e.g. 403/404/410 = expired URL — try next event
-                            _LOGGER.debug(
-                                "%s: event snapshot HTTP %d @ %s — trying next",
-                                self._display_name,
-                                resp.status,
-                                ev.get("timestamp", "")[:19],
-                            )
+                        # e.g. 403/404/410 = expired URL — try next event
+                        _LOGGER.debug(
+                            "%s: event snapshot HTTP %d @ %s — trying next",
+                            self._display_name,
+                            resp.status,
+                            ev.get("timestamp", "")[:19],
+                        )
             except (TimeoutError, aiohttp.ClientError) as err:
                 _LOGGER.debug("%s: event snapshot error: %s", self._display_name, err)
 

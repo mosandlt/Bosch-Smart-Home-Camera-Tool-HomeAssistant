@@ -25,9 +25,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN  # type: ignore[attr-defined]
+from .base import _BoschEntityBase
+from .guards import _is_gen2_indoor, _warn_if_privacy_on
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=False)
 
 
-class BoschPanNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
+class BoschPanNumber(_BoschEntityBase, NumberEntity):  # type: ignore[misc]
     """Number entity to control the pan position of the 360 camera."""
 
     _attr_has_entity_name = True
@@ -114,20 +114,8 @@ class BoschPanNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
     def __init__(
         self, coordinator: Any, cam_id: str, entry: ConfigEntry, pan_limit: int
     ) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry = entry
+        super().__init__(coordinator, cam_id, entry)
         self._pan_limit = pan_limit
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model = info.get("hardwareVersion", "CAMERA")
-        from .models import get_display_name
-
-        self._model_name = get_display_name(self._model)
-        self._fw = info.get("firmwareVersion", "")
-        self._mac = info.get("macAddress", "")
-
         self._attr_name = "Pan Position"
         self._attr_unique_id = f"bosch_shc_pan_{cam_id.lower()}"
         self._attr_native_min_value = -pan_limit
@@ -138,17 +126,6 @@ class BoschPanNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
         self._attr_icon = "mdi:pan-horizontal"
         self._attr_translation_key = "pan_position"
         self._attr_entity_category = EntityCategory.CONFIG
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return {
-            "identifiers": {(DOMAIN, self._cam_id)},
-            "name": f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model": self._model_name,
-            "sw_version": self._fw,
-            "connections": {("mac", self._mac)} if self._mac else set(),
-        }
 
     def _rotation_180(self) -> bool:
         """Return True if the camera is configured as ceiling-mounted (image
@@ -181,7 +158,7 @@ class BoschPanNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
+class BoschSpeakerLevelNumber(_BoschEntityBase, NumberEntity):  # type: ignore[misc]
     """Number entity to control the intercom speaker volume (0–100).
 
     Reads from coordinator._audio_cache[cam_id]["speakerLevel"].
@@ -201,34 +178,11 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry = entry
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model = info.get("hardwareVersion", "CAMERA")
-        from .models import get_display_name
-
-        self._model_name = get_display_name(self._model)
-        self._fw = info.get("firmwareVersion", "")
-        self._mac = info.get("macAddress", "")
-
+        super().__init__(coordinator, cam_id, entry)
         self._attr_name = "Speaker Level"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_speaker_level"
         self._attr_translation_key = "speaker_level"
         self._attr_entity_category = EntityCategory.CONFIG
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return {
-            "identifiers": {(DOMAIN, self._cam_id)},
-            "name": f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model": self._model_name,
-            "sw_version": self._fw,
-            "connections": {("mac", self._mac)} if self._mac else set(),
-        }
 
     @property
     def native_value(self) -> float | None:
@@ -269,7 +223,7 @@ class BoschSpeakerLevelNumber(CoordinatorEntity, NumberEntity):  # type: ignore[
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschAudioVolumeNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
+class BoschAudioVolumeNumber(_BoschEntityBase, NumberEntity):  # type: ignore[misc]
     """Card playback volume (0–100 %) for this camera's live audio.
 
     Virtual preference — there is NO Bosch API for volume (loudness is a browser
@@ -292,33 +246,10 @@ class BoschAudioVolumeNumber(CoordinatorEntity, NumberEntity):  # type: ignore[m
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry = entry
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model = info.get("hardwareVersion", "CAMERA")
-        from .models import get_display_name
-
-        self._model_name = get_display_name(self._model)
-        self._fw = info.get("firmwareVersion", "")
-        self._mac = info.get("macAddress", "")
-
+        super().__init__(coordinator, cam_id, entry)
         self._attr_name = "Audio Volume"
         self._attr_unique_id = f"bosch_shc_audio_volume_{cam_id.lower()}"
         self._attr_translation_key = "audio_volume"
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return {
-            "identifiers": {(DOMAIN, self._cam_id)},
-            "name": f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model": self._model_name,
-            "sw_version": self._fw,
-            "connections": {("mac", self._mac)} if self._mac else set(),
-        }
 
     @property
     def native_value(self) -> float:
@@ -345,7 +276,7 @@ class BoschAudioVolumeNumber(CoordinatorEntity, NumberEntity):  # type: ignore[m
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschFrontLightIntensityNumber(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
+class BoschFrontLightIntensityNumber(_BoschEntityBase, NumberEntity):  # type: ignore[misc]
     """Number entity: front light brightness (0–100%).
 
     Maps to frontLightIntensity (0.0–1.0) in PUT /v11/video_inputs/{id}/lighting_override.
@@ -362,34 +293,11 @@ class BoschFrontLightIntensityNumber(CoordinatorEntity, NumberEntity):  # type: 
     _attr_has_entity_name = True
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry = entry
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model = info.get("hardwareVersion", "CAMERA")
-        from .models import get_display_name
-
-        self._model_name = get_display_name(self._model)
-        self._fw = info.get("firmwareVersion", "")
-        self._mac = info.get("macAddress", "")
-
+        super().__init__(coordinator, cam_id, entry)
         self._attr_name = "Front Light Intensity"
         self._attr_unique_id = f"bosch_shc_front_light_intensity_{cam_id.lower()}"
         self._attr_translation_key = "front_light_intensity"
         self._attr_entity_category = EntityCategory.CONFIG
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return {
-            "identifiers": {(DOMAIN, self._cam_id)},
-            "name": f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model": self._model_name,
-            "sw_version": self._fw,
-            "connections": {("mac", self._mac)} if self._mac else set(),
-        }
 
     @property
     def native_value(self) -> float | None:
@@ -421,35 +329,11 @@ class BoschFrontLightIntensityNumber(CoordinatorEntity, NumberEntity):  # type: 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class _BoschGen2NumberBase(CoordinatorEntity, NumberEntity):  # type: ignore[misc]
+class _BoschGen2NumberBase(_BoschEntityBase, NumberEntity):  # type: ignore[misc]
     """Base class for Gen2-only number entities."""
 
     _attr_entity_registry_enabled_default = True
     _attr_has_entity_name = True
-
-    def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry = entry
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model = info.get("hardwareVersion", "CAMERA")
-        from .models import get_display_name
-
-        self._model_name = get_display_name(self._model)
-        self._fw = info.get("firmwareVersion", "")
-        self._mac = info.get("macAddress", "")
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return {
-            "identifiers": {(DOMAIN, self._cam_id)},
-            "name": f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model": self._model_name,
-            "sw_version": self._fw,
-            "connections": {("mac", self._mac)} if self._mac else set(),
-        }
 
 
 class BoschLensElevationNumber(_BoschGen2NumberBase):
@@ -529,8 +413,6 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
         )
 
     async def async_set_native_value(self, value: float) -> None:
-        from .switch import _is_gen2_indoor, _warn_if_privacy_on
-
         if _is_gen2_indoor(self) and await _warn_if_privacy_on(
             self, "Mikrofon-Lautstärke"
         ):
@@ -544,6 +426,21 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
                 "microphoneLevel"
             ] = round(value)
         self.async_write_ha_state()
+
+
+_LIGHT_SW_DEFAULT: dict[str, Any] = {
+    "brightness": 0,
+    "color": None,
+    "whiteBalance": 0.0,
+}
+
+
+def _lighting_switch_body(cached: dict[str, Any]) -> dict[str, Any]:
+    """Build full lighting/switch PUT body from cache (API requires all 3 groups)."""
+    return {
+        k: cached.get(k, _LIGHT_SW_DEFAULT)
+        for k in ("frontLightSettings", "topLedLightSettings", "bottomLedLightSettings")
+    }
 
 
 class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
@@ -594,20 +491,7 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
         """Set white balance for front light — sends FULL body (API requirement)."""
         wb = round(value, 2)
         cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
-        body = {
-            "frontLightSettings": cached.get(
-                "frontLightSettings",
-                {"brightness": 0, "color": None, "whiteBalance": 0.0},
-            ),
-            "topLedLightSettings": cached.get(
-                "topLedLightSettings",
-                {"brightness": 0, "color": None, "whiteBalance": 0.0},
-            ),
-            "bottomLedLightSettings": cached.get(
-                "bottomLedLightSettings",
-                {"brightness": 0, "color": None, "whiteBalance": 0.0},
-            ),
-        }
+        body = _lighting_switch_body(cached)
         body["frontLightSettings"] = {
             **body["frontLightSettings"],
             "whiteBalance": wb,
@@ -671,22 +555,8 @@ class _BoschLedBrightnessBase(_BoschGen2NumberBase):
     async def async_set_native_value(self, value: float) -> None:
         """Set brightness — sends FULL body with all 3 groups (API requirement)."""
         brightness = round(value)
-        # Read current state from cache, update only our group
         cached = self.coordinator._lighting_switch_cache.get(self._cam_id, {})
-        body = {
-            "frontLightSettings": cached.get(
-                "frontLightSettings",
-                {"brightness": 0, "color": None, "whiteBalance": 0.0},
-            ),
-            "topLedLightSettings": cached.get(
-                "topLedLightSettings",
-                {"brightness": 0, "color": None, "whiteBalance": 0.0},
-            ),
-            "bottomLedLightSettings": cached.get(
-                "bottomLedLightSettings",
-                {"brightness": 0, "color": None, "whiteBalance": 0.0},
-            ),
-        }
+        body = _lighting_switch_body(cached)
         body[self._led_key] = {**body[self._led_key], "brightness": brightness}
         # Route through the coordinator's universal writer (401 → token-refresh
         # + retry) instead of a raw Bearer PUT that silently failed on an
@@ -917,8 +787,6 @@ class _BoschAlarmDelayBase(_BoschGen2NumberBase):
         # Privacy mode blocks /alarm_settings PUT with HTTP 443 on Gen2 Indoor cameras.
         # Without this guard the write silently fails — the cache isn't updated, so
         # native_value re-reads the old value and HA's verify-timeout fires.
-        from .switch import _is_gen2_indoor, _warn_if_privacy_on  # local to avoid cycle
-
         if _is_gen2_indoor(self) and await _warn_if_privacy_on(
             self, "Sirenen-/Alarm-Einstellung"
         ):

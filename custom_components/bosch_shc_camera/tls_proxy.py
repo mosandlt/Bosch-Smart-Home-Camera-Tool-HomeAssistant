@@ -199,7 +199,7 @@ def start_tls_proxy(
                 except Exception:  # pragma: no cover — daemon-thread close-race  # noqa: S110 # best-effort pipe socket close on teardown, failure non-actionable
                     pass
 
-            def _pipe(
+            def _pipe(  # pylint: disable=dangerous-default-value
                 src: socket.socket,
                 dst: socket.socket,
                 rewrite_transport: bool = False,
@@ -231,11 +231,11 @@ def start_tls_proxy(
                                 .decode("utf-8", errors="replace")
                                 .replace("\r\n", "\\r\\n")
                             )
-                            # Redact Digest/Authorization credentials — the RTSP
-                            # auth headers carry the computed Digest response and
-                            # must never land in the debug log.
+                            # Redact auth headers — Authorization carries the
+                            # computed Digest response; WWW-Authenticate carries
+                            # realm/nonce from the camera challenge.
                             preview = re.sub(
-                                r"(?i)(Authorization:)[^\\]*",
+                                r"(?i)(Authorization:|WWW-Authenticate:)[^\\]*",
                                 r"\1 <redacted>",
                                 preview,
                             )

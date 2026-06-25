@@ -84,6 +84,7 @@ def test_frigate_config_parses_options() -> None:
         frigate_token="secret",
         frigate_basic_user="rec",
         frigate_idle_timeout=120,
+        frigate_max_connections=16,
     )
     cfg = c._frigate_config()
     assert isinstance(cfg, FrontDoorConfig)
@@ -93,6 +94,7 @@ def test_frigate_config_parses_options() -> None:
     assert cfg.token == "secret"
     assert cfg.basic_user == "rec"
     assert cfg.idle_timeout == 120.0
+    assert cfg.max_connections == 16
 
 
 # ── _frigate_url_host ────────────────────────────────────────────────────────
@@ -515,3 +517,156 @@ async def test_frigate_url_sensor_none(stub_entry) -> None:
         last_update_success=True,
     )
     assert BoschFrigateUrlHighSensor(coord, CAM_ID, stub_entry).native_value is None
+
+
+# ── HA#37 regression: _frigate_resolve_inner must not call try_live_connection
+#    when a LOCAL session is already active (Gen2 FW rotates creds on every PUT)
+
+
+@pytest.mark.asyncio
+async def test_resolve_inner_skips_try_live_when_local_active() -> None:
+    """Bug: unconditional try_live_connection → cred rotation → stream drop loop.
+
+    When a LOCAL session is already active, _frigate_resolve_inner must NOT call
+    try_live_connection (which issues PUT /connection, rotating Digest creds on
+    Gen2 FW 9.40.25+). Confirms HA#37 fix.
+    """
+    c = _make_coord()
+    c.try_live_connection = AsyncMock(return_value={})  # type: ignore[attr-defined]
+    c._live_connections = {  # type: ignore[attr-defined]
+        CAM_ID: {
+            "_connection_type": "LOCAL",
+            "_local_user": "u",
+            "_local_password": "p",
+        }
+    }
+    c._tls_proxy_ports = {CAM_ID: 12345}  # type: ignore[attr-defined]
+    target = await c._frigate_resolve_inner(CAM_ID)
+    assert target == InnerTarget(12345, "u", "p")
+    # Must NOT have called try_live_connection — doing so rotates Gen2 creds.
+    c.try_live_connection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resolve_inner_opens_session_when_no_local() -> None:
+    """When no LOCAL session exists, _frigate_resolve_inner must call try_live_connection."""
+    c = _make_coord()
+
+    async def _set_local(_cam_id: str, **_kw: object) -> dict:
+        c._live_connections[_cam_id] = {  # type: ignore[attr-defined]
+            "_connection_type": "LOCAL",
+            "_local_user": "u",
+            "_local_password": "p",
+        }
+        return {}
+
+    c.try_live_connection = AsyncMock(side_effect=_set_local)  # type: ignore[attr-defined]
+    c._live_connections = {}  # type: ignore[attr-defined]  # no session yet
+    c._tls_proxy_ports = {CAM_ID: 54321}  # type: ignore[attr-defined]
+    target = await c._frigate_resolve_inner(CAM_ID)
+    assert target == InnerTarget(54321, "u", "p")
+    c.try_live_connection.assert_called_once_with(CAM_ID)
+
+
+# ── frigate_max_connections option ──────────────────────────────────────────
+
+
+def test_frigate_config_max_connections_default() -> None:
+    """frigate_max_connections defaults to 8 when the option is absent."""
+    c = _make_coord()
+    cfg = c._frigate_config()
+    assert cfg.max_connections == 8
+
+
+def test_frigate_config_max_connections_custom() -> None:
+    """frigate_max_connections is read from options and forwarded to FrontDoorConfig."""
+    c = _make_coord(frigate_max_connections=4)
+    cfg = c._frigate_config()
+    assert cfg.max_connections == 4
+
+
+def test_front_door_config_max_connections_field() -> None:
+    """FrontDoorConfig.max_connections is honoured by _CameraServer semaphore size."""
+    from custom_components.bosch_shc_camera.frigate_endpoint import _CameraServer
+
+    cfg = FrontDoorConfig(max_connections=3)
+    # Instantiate with dummy callbacks — the server socket is not bound here.
+    server = _CameraServer(CAM_ID, cfg, AsyncMock(), None, None)
+    # Semaphore value equals max_connections.
+    assert server._sem._value == 3  # type: ignore[attr-defined]
+
+
+# ── HIGH/LOW quality isolation: each switch controls only its own URL ─────────
+
+
+def _make_running_coord(**extra_opts: object) -> object:
+    """Coordinator with feature on + fake runner bound on port 8600."""
+    c = _make_coord(frigate_endpoints_enabled=True, **extra_opts)
+    c._frigate_runner = SimpleNamespace(  # type: ignore[attr-defined]
+        has_server=lambda _c: True,
+        port=lambda _c: 8600,
+    )
+    return c
+
+
+def test_frigate_switch_always_available(stub_entry) -> None:
+    """Frigate switch must be always available (not tied to coordinator success).
+
+    Root cause of HA#37 'Unknown' URL: when the camera went offline, the switch
+    became 'unavailable'; RestoreEntity saved that state; after restart
+    async_get_last_state() returned 'unavailable' (not 'on'), so the front-door
+    was never restarted and the URL sensor stayed 'Unknown' permanently.
+
+    Fix: switch.available always returns True — it is a CONFIG entity, not a
+    status entity.
+    """
+    from custom_components.bosch_shc_camera.switch import BoschFrigateHighSwitch
+
+    coord = SimpleNamespace(
+        data={CAM_ID: {"info": {"title": "T", "hardwareVersion": "HOME_Eyes_Outdoor"}}},
+        last_update_success=False,  # coordinator failed — camera offline
+    )
+    sw = BoschFrigateHighSwitch(coord, CAM_ID, stub_entry)
+    assert sw.available is True  # Must be True even when coordinator is failing
+
+
+def test_high_switch_on_only_exposes_high_url() -> None:
+    """High switch ON → high URL returned; low URL is None (inst=2 not enabled)."""
+    c = _make_running_coord()
+    c._frigate_high_enabled[CAM_ID] = True  # type: ignore[attr-defined]
+    # low not set → falsy
+    high_url = c.frigate_endpoint_url(CAM_ID, "high")
+    low_url = c.frigate_endpoint_url(CAM_ID, "low")
+    assert high_url is not None and "inst=1" in high_url
+    assert low_url is None
+
+
+def test_low_switch_on_only_exposes_low_url() -> None:
+    """Low switch ON → low URL returned; high URL is None (inst=1 not enabled)."""
+    c = _make_running_coord()
+    c._frigate_low_enabled[CAM_ID] = True  # type: ignore[attr-defined]
+    # high not set → falsy
+    high_url = c.frigate_endpoint_url(CAM_ID, "high")
+    low_url = c.frigate_endpoint_url(CAM_ID, "low")
+    assert high_url is None
+    assert low_url is not None and "inst=2" in low_url
+
+
+def test_both_switches_on_exposes_both_urls() -> None:
+    """Both HIGH and LOW switches ON → both quality URLs are returned."""
+    c = _make_running_coord()
+    c._frigate_high_enabled[CAM_ID] = True  # type: ignore[attr-defined]
+    c._frigate_low_enabled[CAM_ID] = True  # type: ignore[attr-defined]
+    high_url = c.frigate_endpoint_url(CAM_ID, "high")
+    low_url = c.frigate_endpoint_url(CAM_ID, "low")
+    assert high_url is not None and "inst=1" in high_url
+    assert low_url is not None and "inst=2" in low_url
+
+
+def test_high_switch_off_hides_high_url_even_when_low_on() -> None:
+    """Turning HIGH switch OFF hides its URL; LOW switch state is unaffected."""
+    c = _make_running_coord()
+    c._frigate_high_enabled[CAM_ID] = False  # type: ignore[attr-defined]
+    c._frigate_low_enabled[CAM_ID] = True  # type: ignore[attr-defined]
+    assert c.frigate_endpoint_url(CAM_ID, "high") is None
+    assert c.frigate_endpoint_url(CAM_ID, "low") is not None

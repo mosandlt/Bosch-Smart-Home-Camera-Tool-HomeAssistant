@@ -225,7 +225,8 @@
               "frigate_auth_mode": "Authentication mode",
               "frigate_token": "Shared secret / Basic-Auth password",
               "frigate_basic_user": "Basic-Auth username",
-              "frigate_idle_timeout": "Idle session timeout (seconds)"
+              "frigate_idle_timeout": "Idle session timeout (seconds)",
+              "frigate_max_connections": "Max concurrent recorder connections per camera"
             },
             "data_description": {
               "frigate_endpoints_enabled": "Master switch for all external RTSP endpoints. When OFF (default), no RTSP port is opened and no Bosch session is held. When ON, each camera's endpoint is available; the Bosch stream session opens when the first client connects and closes after the idle timeout.",
@@ -235,7 +236,8 @@
               "frigate_auth_mode": "Optional access gate for the RTSP endpoints.\n• **none** (default): no credentials required — rely on IP allowlist and network isolation.\n• **path-token**: a shared secret is appended to the stream URL path; clients must include it.\n• **basic**: standard RTSP Basic-Auth with username and password.",
               "frigate_token": "Shared secret used as the path token (auth mode: path-token) or as the Basic-Auth password (auth mode: basic). Leave empty to disable the gate entirely.",
               "frigate_basic_user": "Username for RTSP Basic-Auth mode. Only used when authentication mode is set to 'basic'.",
-              "frigate_idle_timeout": "How many seconds the Bosch camera session lingers after the last recorder disconnects. The session is kept alive so reconnects are instant. Default: 30. Set to 0 to close the session immediately when no client is connected."
+              "frigate_idle_timeout": "How many seconds the Bosch camera session lingers after the last recorder disconnects. The session is kept alive so reconnects are instant. Default: 30. Set to 0 to close the session immediately when no client is connected.",
+              "frigate_max_connections": "Maximum number of simultaneous recorder connections per camera front-door. Connections beyond this limit are rejected immediately. Default: 8. Raise if you have many sub-streams or simultaneous viewers; lower to reduce load on the HA host."
             }
           },
           "ai": {
@@ -308,7 +310,9 @@
     "error": {
       "invalid_redirect_url": "No auth code found. Paste the full URL.",
       "token_exchange_failed": "Login failed — code expired. Try again.",
-      "cannot_connect": "Cannot connect to Bosch servers."
+      "cannot_connect": "Cannot connect to Bosch servers.",
+      "invalid_ip_address": "Invalid IP address — enter a valid IPv4 or IPv6 address.",
+      "invalid_ip_allowlist": "Invalid allowlist entry — use comma-separated IP addresses or CIDR ranges (e.g. 192.168.1.0/24)."
     }
   },
   "entity": {

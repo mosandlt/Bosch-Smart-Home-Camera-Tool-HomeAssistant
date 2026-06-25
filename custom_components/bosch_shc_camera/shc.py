@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -39,6 +40,20 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
+
+# SSLContext is stateless after init — safe to cache and share across requests
+_SHC_SSL_CONTEXTS: dict[tuple[str, str], ssl.SSLContext] = {}
+
+
+def _get_shc_ssl_ctx(cert_path: str, key_path: str) -> ssl.SSLContext:
+    key = (cert_path, key_path)
+    if key not in _SHC_SSL_CONTEXTS:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.load_cert_chain(cert_path, key_path)  # may raise; not cached on failure
+        _SHC_SSL_CONTEXTS[key] = ctx
+    return _SHC_SSL_CONTEXTS[key]
 
 
 # ── SHC availability helpers ────────────────────────────────────────────────
@@ -111,8 +126,6 @@ async def async_shc_request(
     Requires shc_ip, shc_cert_path, shc_key_path in options.
     Tracks SHC health -- marks offline after repeated failures.
     """
-    import ssl
-
     opts = coordinator.options
     shc_ip = opts.get("shc_ip", "").strip()
     cert_path = opts.get("shc_cert_path", "").strip()
@@ -121,20 +134,33 @@ async def async_shc_request(
         return None
 
     try:
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        ctx.load_cert_chain(cert_path, key_path)
+        ctx = _get_shc_ssl_ctx(cert_path, key_path)
     except Exception as err:
         _LOGGER.warning("SHC TLS setup failed (check cert/key paths): %s", err)
+        _SHC_SSL_CONTEXTS.pop((cert_path, key_path), None)
         _shc_mark_failure(coordinator)
         return None
+
+    # Reuse connector across calls — avoids a new TLS handshake per request
+    _connector_key = (cert_path, key_path)
+    _cached_conn: aiohttp.TCPConnector | None = getattr(
+        coordinator, "_shc_connector", None
+    )
+    if (
+        _cached_conn is None
+        or _cached_conn.closed
+        or getattr(coordinator, "_shc_connector_key", None) != _connector_key
+    ):
+        _cached_conn = aiohttp.TCPConnector(ssl=ctx)
+        coordinator._shc_connector = _cached_conn
+        coordinator._shc_connector_key = _connector_key
 
     url = f"https://{shc_ip}:8444/smarthome{path}"
     headers = {"api-version": "3.2", "Content-Type": "application/json"}
     try:
-        connector = aiohttp.TCPConnector(ssl=ctx)
-        async with aiohttp.ClientSession(connector=connector) as s:
+        async with aiohttp.ClientSession(
+            connector=_cached_conn, connector_owner=False
+        ) as s:
             async with asyncio.timeout(10):
                 if method == "GET":
                     async with s.get(url, headers=headers) as r:
@@ -166,6 +192,91 @@ async def async_shc_request(
 # ── SHC state polling ────────────────────────────────────────────────────────
 
 
+async def _update_one_camera_shc_state(
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    cam: dict[str, Any],
+    shc_devices: list[dict[str, Any]],
+) -> None:
+    """Fetch and cache SHC CameraLight + PrivacyMode state for a single camera."""
+    title = cam.get("info", {}).get("title", "").lower().strip()
+
+    device_id = None
+    for dev in shc_devices:
+        if dev.get("name", "").lower().strip() == title:
+            device_id = dev.get("id")
+            break
+    if not device_id:
+        _LOGGER.debug("SHC: no device found matching camera title '%s'", title)
+        return
+
+    entry = coordinator._shc_state_cache.setdefault(
+        cam_id,
+        {
+            "device_id": device_id,
+            "camera_light": None,
+            "privacy_mode": None,
+        },
+    )
+    entry["device_id"] = device_id
+
+    # Fetch CameraLight service state (SHC is authoritative)
+    svc = await async_shc_request(
+        coordinator, "GET", f"/devices/{device_id}/services/CameraLight"
+    )
+    if isinstance(svc, dict):
+        val = svc.get("state", {}).get("value", "")
+        new_light = val.upper() == "ON"
+        # Honor _light_set_at write-lock — same race as privacy_mode.
+        # Without this, a fresh user-toggle can be overwritten by a
+        # stale SHC reading within the cloud's eventual-consistency
+        # window. Fixed 2026-05-05.
+        light_lock = coordinator._light_set_at.get(cam_id)
+        ttl = getattr(coordinator, "_WRITE_LOCK_SECS", 0)
+        light_locked = light_lock is not None and (time.monotonic() - light_lock) < ttl
+        old_light = entry.get("camera_light")
+        if light_locked and old_light is not None and old_light != new_light:
+            _LOGGER.debug(
+                "camera_light write-lock active for %s — keeping cached "
+                "%s, ignoring SHC value %s",
+                cam_id[:8],
+                old_light,
+                new_light,
+            )
+        else:
+            entry["camera_light"] = new_light
+
+    # Fetch PrivacyMode service state (SHC is authoritative)
+    svc = await async_shc_request(
+        coordinator, "GET", f"/devices/{device_id}/services/PrivacyMode"
+    )
+    if isinstance(svc, dict):
+        val = svc.get("state", {}).get("value", "")
+        new_priv = val.upper() == "ENABLED"
+        # Honor the _privacy_set_at write-lock (same pattern that
+        # __init__.py:1690 already respects for the cloud fetcher).
+        # Without this guard the SHC fetcher overwrites a fresh
+        # user-toggle within the cloud's eventual-consistency window
+        # → first OFF-toggle visibly reverts to ON until the next
+        # user click forces the issue. Fixed 2026-05-05.
+        lock_ts = coordinator._privacy_set_at.get(cam_id)
+        ttl = getattr(coordinator, "_WRITE_LOCK_SECS", 0)
+        locked = lock_ts is not None and (time.monotonic() - lock_ts) < ttl
+        old_priv = entry.get("privacy_mode")
+        if locked and old_priv is not None and old_priv != new_priv:
+            _LOGGER.debug(
+                "privacy_mode write-lock active for %s — keeping cached "
+                "value %s, ignoring SHC value %s (lock_age=%.1fs ttl=%.1fs)",
+                cam_id[:8],
+                old_priv,
+                new_priv,
+                time.monotonic() - lock_ts if lock_ts is not None else 0.0,
+                ttl,
+            )
+        else:
+            entry["privacy_mode"] = new_priv
+
+
 async def async_update_shc_states(
     coordinator: BoschCameraCoordinator, data: dict[str, Any]
 ) -> None:
@@ -191,86 +302,12 @@ async def async_update_shc_states(
     if not shc_devices:
         return
 
-    for cam_id, cam in data.items():
-        title = cam.get("info", {}).get("title", "").lower().strip()
-
-        # Match SHC device by name (case-insensitive)
-        device_id = None
-        for dev in shc_devices:
-            if dev.get("name", "").lower().strip() == title:
-                device_id = dev.get("id")
-                break
-        if not device_id:
-            _LOGGER.debug("SHC: no device found matching camera title '%s'", title)
-            continue
-
-        entry = coordinator._shc_state_cache.setdefault(
-            cam_id,
-            {
-                "device_id": device_id,
-                "camera_light": None,
-                "privacy_mode": None,
-            },
-        )
-        entry["device_id"] = device_id
-
-        # Fetch CameraLight service state (SHC is authoritative)
-        svc = await async_shc_request(
-            coordinator, "GET", f"/devices/{device_id}/services/CameraLight"
-        )
-        if isinstance(svc, dict):
-            val = svc.get("state", {}).get("value", "")
-            new_light = val.upper() == "ON"
-            # Honor _light_set_at write-lock — same race as privacy_mode.
-            # Without this, a fresh user-toggle can be overwritten by a
-            # stale SHC reading within the cloud's eventual-consistency
-            # window. Fixed 2026-05-05.
-            light_lock = coordinator._light_set_at.get(cam_id)
-            ttl = getattr(coordinator, "_WRITE_LOCK_SECS", 0)
-            light_locked = (
-                light_lock is not None and (time.monotonic() - light_lock) < ttl
-            )
-            old_light = entry.get("camera_light")
-            if light_locked and old_light is not None and old_light != new_light:
-                _LOGGER.debug(
-                    "camera_light write-lock active for %s — keeping cached "
-                    "%s, ignoring SHC value %s",
-                    cam_id[:8],
-                    old_light,
-                    new_light,
-                )
-            else:
-                entry["camera_light"] = new_light
-
-        # Fetch PrivacyMode service state (SHC is authoritative)
-        svc = await async_shc_request(
-            coordinator, "GET", f"/devices/{device_id}/services/PrivacyMode"
-        )
-        if isinstance(svc, dict):
-            val = svc.get("state", {}).get("value", "")
-            new_priv = val.upper() == "ENABLED"
-            # Honor the _privacy_set_at write-lock (same pattern that
-            # __init__.py:1690 already respects for the cloud fetcher).
-            # Without this guard the SHC fetcher overwrites a fresh
-            # user-toggle within the cloud's eventual-consistency window
-            # → first OFF-toggle visibly reverts to ON until the next
-            # user click forces the issue. Fixed 2026-05-05.
-            lock_ts = coordinator._privacy_set_at.get(cam_id)
-            ttl = getattr(coordinator, "_WRITE_LOCK_SECS", 0)
-            locked = lock_ts is not None and (time.monotonic() - lock_ts) < ttl
-            old_priv = entry.get("privacy_mode")
-            if locked and old_priv is not None and old_priv != new_priv:
-                _LOGGER.debug(
-                    "privacy_mode write-lock active for %s — keeping cached "
-                    "value %s, ignoring SHC value %s (lock_age=%.1fs ttl=%.1fs)",
-                    cam_id[:8],
-                    old_priv,
-                    new_priv,
-                    time.monotonic() - lock_ts if lock_ts is not None else 0.0,
-                    ttl,
-                )
-            else:
-                entry["privacy_mode"] = new_priv
+    await asyncio.gather(
+        *[
+            _update_one_camera_shc_state(coordinator, cam_id, cam, shc_devices)
+            for cam_id, cam in data.items()
+        ]
+    )
 
 
 # ── SHC setters ──────────────────────────────────────────────────────────────
@@ -424,6 +461,7 @@ async def async_cloud_set_privacy_mode(
         try:
             async with asyncio.timeout(10):
                 async with session.put(url, json=body, headers=headers) as resp:
+                    _token_refreshed = False
                     if resp.status == 401:
                         # Token expired -- refresh and retry once
                         _LOGGER.info(
@@ -432,6 +470,7 @@ async def async_cloud_set_privacy_mode(
                         try:
                             token = await coordinator._ensure_valid_token()
                             headers["Authorization"] = f"Bearer {token}"
+                            _token_refreshed = True
                         except Exception:  # noqa: S110 # token refresh failed; fall through to local SHC path
                             pass  # fall through to SHC
                     if resp.status in (200, 201, 204):
@@ -462,7 +501,7 @@ async def async_cloud_set_privacy_mode(
                         if not enabled:
                             _schedule_privacy_off_snapshot(coordinator, cam_id)
                         return True
-                    if resp.status == 401:
+                    if resp.status == 401 and _token_refreshed:
                         # Retry with refreshed token
                         async with asyncio.timeout(10):
                             async with session.put(

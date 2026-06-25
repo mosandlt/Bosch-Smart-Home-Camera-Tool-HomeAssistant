@@ -23,8 +23,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import BoschCameraCoordinator, get_options
+from . import BoschCameraCoordinator
 from .const import CONF_ENABLE_PTZ_CONTROLS, DOMAIN
+from .guards import _is_gen2_indoor, _warn_if_privacy_on
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -247,8 +248,6 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
         if option not in MOTION_SENSITIVITY_OPTIONS:
             _LOGGER.warning("Invalid motion sensitivity option: %s", option)
             return
-        from .switch import _is_gen2_indoor, _warn_if_privacy_on
-
         if _is_gen2_indoor(self) and await _warn_if_privacy_on(
             self, "Bewegungsempfindlichkeit"
         ):
@@ -329,7 +328,7 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[m
 
     @property
     def current_option(self) -> str:
-        mode = get_options(self._entry).get("fcm_push_mode", "auto")
+        mode = self._entry.options.get("fcm_push_mode", "auto")  # [S7] direct read
         return mode if mode in FCM_PUSH_MODE_OPTIONS else "auto"
 
     async def async_select_option(self, option: str) -> None:
@@ -405,7 +404,9 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
         """Return the current stream mode key."""
         mode = self.coordinator._stream_type_override
         if mode is None:
-            mode = get_options(self._entry).get("stream_connection_type", "local")
+            mode = self._entry.options.get(
+                "stream_connection_type", "local"
+            )  # [S7] direct read
         return mode if mode in STREAM_MODE_OPTIONS else "local"
 
     async def async_select_option(self, option: str) -> None:
@@ -482,8 +483,6 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
     async def async_select_option(self, option: str) -> None:
         if option not in DETECTION_MODE_OPTIONS:
             return
-        from .switch import _warn_if_privacy_on
-
         if await _warn_if_privacy_on(self, "Erkennungsmodus"):
             return
         api_value = DETECTION_TO_API[option]

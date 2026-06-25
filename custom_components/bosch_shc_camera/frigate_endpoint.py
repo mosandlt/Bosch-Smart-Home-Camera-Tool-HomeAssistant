@@ -38,11 +38,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import ipaddress
 import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
+from urllib.parse import quote as _urlquote
 
 from .auth_utils import _build_digest_header, _parse_digest_challenge
 
@@ -70,6 +72,8 @@ _RESOLVE_TIMEOUT = 40.0
 _AUTH_READ_TIMEOUT = 30.0
 # Max bytes for a single RTSP message head (guards against a non-RTSP flood).
 _MAX_HEAD_BYTES = 64 * 1024
+# Max concurrent clients per camera front-door (guards against connection floods).
+_MAX_CONCURRENT_CLIENTS = 8
 
 
 @dataclass(frozen=True)
@@ -101,6 +105,8 @@ class FrontDoorConfig:
     basic_user: str = "frigate"
     # Zero-client linger before signalling idle (caller tears the session down).
     idle_timeout: float = 60.0
+    # Max simultaneous recorder clients per camera (anti-flood guard).
+    max_connections: int = 8
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -231,7 +237,7 @@ def split_path_token(uri: str, token: str) -> tuple[bool, str]:
         query = rest[qpos:]
         rest = rest[:qpos]
     segments = [s for s in rest.split("/") if s != ""]
-    if not segments or segments[0] != token:
+    if not segments or not hmac.compare_digest(segments[0], token):
         return False, uri
     remainder = "/" + "/".join(segments[1:])
     return True, f"{prefix}{remainder}{query}"
@@ -249,7 +255,7 @@ def check_basic_auth(buf: bytes, user: str, password: str) -> bool:
         decoded = base64.b64decode(b64.strip(), validate=True).decode("utf-8")
     except (ValueError, UnicodeDecodeError):
         return False
-    return decoded == f"{user}:{password}"
+    return hmac.compare_digest(decoded, f"{user}:{password}")
 
 
 def build_public_url(
@@ -278,9 +284,9 @@ def build_public_url(
     cred = ""
     prefix = ""
     if config.auth_mode == AUTH_BASIC and config.token:
-        cred = f"{config.basic_user}:{config.token}@"
+        cred = f"{_urlquote(config.basic_user, safe='')}:{_urlquote(config.token, safe='')}@"
     elif config.auth_mode == AUTH_PATH_TOKEN and config.token:
-        prefix = f"{config.token}/"
+        prefix = f"{_urlquote(config.token, safe='')}/"
     return f"rtsp://{cred}{url_host}:{port}/{prefix}{path}"
 
 
@@ -504,6 +510,7 @@ class _CameraServer:
         self._on_active = on_active
         self._on_idle = on_idle
         self._server: asyncio.base_events.Server | None = None
+        self._sem = asyncio.Semaphore(self.config.max_connections)
         self.port = 0
         self.client_count = 0
 
@@ -542,6 +549,17 @@ class _CameraServer:
             writer.close()
             return
 
+        if self._sem.locked():
+            _LOGGER.warning(
+                "frigate front-door %s: connection cap (%d) reached, rejecting %s",
+                cam,
+                self.config.max_connections,
+                peer_ip,
+            )
+            writer.close()
+            return
+        await self._sem.acquire()
+
         self.client_count += 1
         if self.client_count == 1 and self._on_active is not None:
             try:
@@ -551,6 +569,7 @@ class _CameraServer:
         try:
             await self._serve(reader, writer, peer_ip)
         finally:
+            self._sem.release()
             self.client_count -= 1
             if self.client_count == 0 and self._on_idle is not None:
                 try:

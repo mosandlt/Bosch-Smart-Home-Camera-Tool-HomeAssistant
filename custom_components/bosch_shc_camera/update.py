@@ -13,9 +13,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .base import _BoschEntityBase
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,41 +33,18 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=False)
 
 
-class BoschFirmwareUpdate(CoordinatorEntity, UpdateEntity):  # type: ignore[misc]
+class BoschFirmwareUpdate(_BoschEntityBase, UpdateEntity):  # type: ignore[misc]
     """Update entity showing camera firmware status."""
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_has_entity_name = True
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._cam_id = cam_id
-        self._entry = entry
-
-        info = coordinator.data.get(cam_id, {}).get("info", {})
-        self._cam_title = info.get("title", cam_id)
-        self._model = info.get("hardwareVersion", "CAMERA")
-        from .models import get_display_name
-
-        self._model_name = get_display_name(self._model)
-        self._fw = info.get("firmwareVersion", "")
-        self._mac = info.get("macAddress", "")
-
+        super().__init__(coordinator, cam_id, entry)
         self._attr_name = "Firmware"
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_firmware_update"
         self._attr_translation_key = "firmware_update"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return {
-            "identifiers": {(DOMAIN, self._cam_id)},
-            "name": f"Bosch {self._cam_title}",
-            "manufacturer": "Bosch",
-            "model": self._model_name,
-            "sw_version": self._fw,
-            "connections": {("mac", self._mac)} if self._mac else set(),
-        }
 
     @property
     def installed_version(self) -> str | None:

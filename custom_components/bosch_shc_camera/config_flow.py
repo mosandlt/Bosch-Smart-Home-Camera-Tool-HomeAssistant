@@ -19,6 +19,7 @@ OAuth2 details:
 import asyncio
 import base64
 import hashlib
+import ipaddress
 import json
 import logging
 import secrets
@@ -138,6 +139,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "frigate_token",
         "frigate_basic_user",
         "frigate_idle_timeout",
+        "frigate_max_connections",
     ],
     "ai": [
         "enable_ai_description",
@@ -249,9 +251,9 @@ KEYCLOAK_BASE = (
     "/auth/realms/home_auth_provider/protocol/openid-connect"
 )
 CLIENT_ID = "oss_residential_app"
-CLIENT_SECRET = base64.b64decode(
-    "RjFqWnpzRzVOdHc3eDJWVmM4SjZxZ3NuaXNNT2ZhWmc="
-).decode()
+CLIENT_SECRET = (
+    base64.b64decode("RjFqWnpzRzVOdHc3eDJWVmM4SjZxZ3NuaXNNT2ZhWmc=").decode()
+)  # public OSS client credential — identical in every Android APK, not rotatable by us
 SCOPES = "email offline_access profile openid"
 REDIRECT_URI = "https://my.home-assistant.io/redirect/oauth"
 REDIRECT_URI_MANUAL = "https://www.bosch.com/boschcam"
@@ -623,6 +625,8 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
         )
         is_legacy_client = current_client == "residential_app"
 
+        errors: dict[str, str] = {}
+
         if user_input is not None:
             # HA's section() helper nests fields under the section key; flatten
             # back to the legacy single-dict shape before any further handling.
@@ -658,39 +662,59 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 if k in user_input:
                     user_input[k] = bool(user_input[k])
 
-            if migrate_to_oss:
-                # Merge submitted changes on top of existing opts so that
-                # suggested_value fields absent from user_input are preserved.
+            bind_host = str(user_input.get("frigate_bind_host", "")).strip()
+            if bind_host:
+                try:
+                    ipaddress.ip_address(bind_host)
+                except ValueError:
+                    errors["frigate_bind_host"] = "invalid_ip_address"
+            allowlist_raw = str(user_input.get("frigate_ip_allowlist", "")).strip()
+            if allowlist_raw:
+                for _token in (
+                    t.strip() for t in allowlist_raw.split(",") if t.strip()
+                ):
+                    try:
+                        ipaddress.ip_network(_token, strict=False)
+                    except ValueError:
+                        errors["frigate_ip_allowlist"] = "invalid_ip_allowlist"
+                        break
+
+            if not errors:
+                if migrate_to_oss:
+                    # Merge submitted changes on top of existing opts so that
+                    # suggested_value fields absent from user_input are preserved.
+                    merged = {**opts, **user_input}
+                    # Persist any other option changes first so they survive reauth
+                    self.hass.config_entries.async_update_entry(
+                        self._config_entry,
+                        options=merged,
+                    )
+                    # Use HA's native reauth trigger — scheduled as a task so the
+                    # options dialog closes before the reauth flow registers
+                    # (prevents UI race with stacked dialogs). async_start_reauth
+                    # is a coroutine in HA 2022.7+, so it must be awaited or
+                    # wrapped in a task.
+                    self.hass.async_create_task(
+                        self._config_entry.async_start_reauth(self.hass)
+                    )
+                    return self.async_abort(reason="migration_started")
+
+                # Merge submitted changes on top of existing opts so that fields
+                # using only suggested_value (no default=) that the user did not
+                # edit are absent from user_input but still preserved in the saved
+                # options dict.  Bug: without this merge, unedited suggested_value
+                # fields revert to DEFAULT_OPTIONS defaults on every save.
                 merged = {**opts, **user_input}
-                # Persist any other option changes first so they survive reauth
-                self.hass.config_entries.async_update_entry(
-                    self._config_entry,
-                    options=merged,
-                )
-                # Use HA's native reauth trigger — scheduled as a task so the
-                # options dialog closes before the reauth flow registers
-                # (prevents UI race with stacked dialogs). async_start_reauth
-                # is a coroutine in HA 2022.7+, so it must be awaited or
-                # wrapped in a task.
-                self.hass.async_create_task(
-                    self._config_entry.async_start_reauth(self.hass)
-                )
-                return self.async_abort(reason="migration_started")
 
-            # Merge submitted changes on top of existing opts so that fields
-            # using only suggested_value (no default=) that the user did not
-            # edit are absent from user_input but still preserved in the saved
-            # options dict.  Bug: without this merge, unedited suggested_value
-            # fields revert to DEFAULT_OPTIONS defaults on every save.
-            merged = {**opts, **user_input}
+                if force_relogin:
+                    self._pending_options = merged
+                    self._verifier, challenge = _pkce_pair()
+                    self._auth_url = _build_auth_url(
+                        challenge, secrets.token_urlsafe(16)
+                    )
+                    return await self.async_step_relogin_show()
 
-            if force_relogin:
-                self._pending_options = merged
-                self._verifier, challenge = _pkce_pair()
-                self._auth_url = _build_auth_url(challenge, secrets.token_urlsafe(16))
-                return await self.async_step_relogin_show()
-
-            return self.async_create_entry(title="", data=merged)
+                return self.async_create_entry(title="", data=merged)
 
         has_refresh = bool(self._config_entry.data.get("refresh_token", ""))
 
@@ -1177,6 +1201,17 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                         "frigate_idle_timeout",
                         default=int(opts.get("frigate_idle_timeout", 60)),
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+                    vol.Optional(
+                        "frigate_max_connections",
+                        default=int(opts.get("frigate_max_connections", 8)),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=1,
+                            max=64,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
                 }
             ),
             {"collapsed": True},
@@ -1315,6 +1350,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(sectioned_schema),
+            errors=errors,
             description_placeholders={
                 "token_status": "active (auto-renews)"
                 if has_refresh

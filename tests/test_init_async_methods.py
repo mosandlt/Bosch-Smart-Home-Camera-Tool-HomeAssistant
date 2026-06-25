@@ -62,13 +62,17 @@ def _make_coord(**overrides):
             pass
         return MagicMock(spec=asyncio.Task)
 
+    _default_entry = SimpleNamespace(
+        data={"bearer_token": "tok-A", "refresh_token": "rfr-B"},
+        options={},
+    )
     base = dict(
-        _entry=SimpleNamespace(
-            data={"bearer_token": "tok-A", "refresh_token": "rfr-B"},
-            options={},
-        ),
+        _entry=_default_entry,
         _refreshed_token=None,
         _refreshed_refresh=None,
+        _options_snapshot={
+            "scan_interval": 60
+        },  # mirrors coordinator __init__ snapshot
         _camera_entities={},
         _live_connections={},
         _live_opened_at={},
@@ -1319,17 +1323,19 @@ class TestCoordinatorProperties:
         assert BoschCameraCoordinator.refresh_token.fget(coord) == "rfr-B"
 
     def test_options_property_uses_get_options(self):
+        """options returns the construction-time snapshot (merged DEFAULT_OPTIONS + entry.options).
+
+        Since _async_options_updated always triggers async_reload on real option
+        changes, _options_snapshot is valid for the coordinator's entire lifetime.
+        """
         from custom_components.bosch_shc_camera import (
             BoschCameraCoordinator,
             get_options,
         )
 
-        coord = _make_coord()
-        coord._entry = SimpleNamespace(
-            data={},
-            options={"scan_interval": 42},
-        )
-        assert BoschCameraCoordinator.options.fget(coord) == get_options(coord._entry)
+        entry = SimpleNamespace(data={}, options={"scan_interval": 42})
+        coord = _make_coord(_entry=entry, _options_snapshot=get_options(entry))
+        assert BoschCameraCoordinator.options.fget(coord) == get_options(entry)
 
 
 # ── _token_still_valid pure check ────────────────────────────────────────

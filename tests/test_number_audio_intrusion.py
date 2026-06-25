@@ -303,11 +303,11 @@ class TestBoschMicrophoneLevelNumber:
 
         with (
             mock.patch(
-                "custom_components.bosch_shc_camera.switch._is_gen2_indoor",
+                "custom_components.bosch_shc_camera.number._is_gen2_indoor",
                 return_value=True,
             ),
             mock.patch(
-                "custom_components.bosch_shc_camera.switch._warn_if_privacy_on",
+                "custom_components.bosch_shc_camera.number._warn_if_privacy_on",
                 new_callable=AsyncMock,
                 return_value=True,
             ),

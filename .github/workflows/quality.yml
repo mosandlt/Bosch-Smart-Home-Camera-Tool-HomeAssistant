@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   python-quality:
-    name: ruff · mypy · codespell · pip-audit
+    name: ruff · mypy · codespell · pylint · pip-audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -32,6 +32,8 @@ jobs:
         run: mypy
       - name: codespell
         run: codespell custom_components/ scripts/ src/ tests/
+      - name: pylint
+        run: pylint --rcfile=pyproject.toml custom_components/bosch_shc_camera
       - name: pip-audit (our manifest deps)
         run: |
           python3 -c "import json;print(chr(10).join(json.load(open('custom_components/bosch_shc_camera/manifest.json'))['requirements']))" > /tmp/our_reqs.txt

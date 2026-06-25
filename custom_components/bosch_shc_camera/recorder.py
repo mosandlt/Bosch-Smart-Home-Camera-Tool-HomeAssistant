@@ -523,7 +523,7 @@ async def create_motion_clip(
 
     def _write_concat() -> None:
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-        with open(concat_file, "w") as f:
+        with open(concat_file, "w", encoding="utf-8") as f:
             f.write(concat_content)
 
     try:

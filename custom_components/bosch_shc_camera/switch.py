@@ -53,6 +53,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import BoschCameraCoordinator, get_options
 from .cloud_ssl import async_get_bosch_cloud_session
 from .const import CLOUD_API, DOMAIN, STREAM_START_SKIPPED
+from .guards import _INDOOR_HW, _is_gen2_indoor, _warn_if_privacy_on
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -84,65 +85,6 @@ def _redact_rtsp_creds(url: str) -> str:
             parsed.fragment,
         )
     )
-
-
-_GEN2_INDOOR_HW = {"HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"}
-_INDOOR_HW = {"INDOOR", "CAMERA_360", "HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"}
-
-
-def _is_gen2_indoor(entity: Any) -> bool:
-    """Return True if the entity's camera is a Gen2 Indoor model."""
-    hw = (
-        entity.coordinator.data.get(entity._cam_id, {})
-        .get("info", {})
-        .get("hardwareVersion", "")
-    )
-    return hw in _GEN2_INDOOR_HW
-
-
-async def _warn_if_privacy_on(entity: Any, feature_name: str) -> bool:
-    """Show a persistent notification when the user tries to change a
-    privacy-gated setting while privacy mode is ON. Returns True if the
-    write was blocked.
-
-    The Bosch cloud API returns HTTP 443 "sh:camera.in.privacy.mode" on
-    reads and writes to /intrusionDetectionConfig, /zones, /privateAreas,
-    /motion, and some lighting endpoints while the camera is in privacy
-    mode. Without a guard the write silently fails in the logs; with this
-    guard the user sees a clear notification explaining why.
-    """
-    coordinator = entity.coordinator
-    cam_id = entity._cam_id
-    cache = coordinator._shc_state_cache.get(cam_id, {})
-    privacy_on = bool(cache.get("privacy_mode"))
-    if not privacy_on:
-        return False
-    cam_title = coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
-    _LOGGER.warning(
-        "%s write blocked for %s — camera is in privacy mode (HTTP 443 would follow).",
-        feature_name,
-        cam_title,
-    )
-    try:
-        await entity.hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": f"{feature_name} — Kamera im Privacy-Mode",
-                "message": (
-                    f"Die Einstellung **{feature_name}** für **{cam_title}** kann nicht "
-                    f"geändert werden, solange der Privacy-Mode aktiv ist.\n\n"
-                    f"Die Kamera liefert in diesem Zustand `HTTP 443 sh:camera.in.privacy.mode` "
-                    f"auf Schreibzugriffe. Schalte zuerst den Privacy-Mode aus "
-                    f"(`switch.bosch_{cam_title.lower()}_privacy_mode`) und versuche es erneut."
-                ),
-                "notification_id": f"bosch_privacy_blocked_{cam_id}",
-            },
-            blocking=False,
-        )
-    except Exception as err:
-        _LOGGER.debug("persistent_notification create failed: %s", err)
-    return True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2479,7 +2421,14 @@ class _BoschFrigateEndpointSwitch(_BoschSwitchBase, RestoreEntity):  # type: ign
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success  # type: ignore[no-any-return]
+        # Always available — this is a CONFIG entity representing user intent
+        # (expose this camera to Frigate), not a status that depends on the
+        # camera being reachable. Tying available to last_update_success caused
+        # the switch to be saved as "unavailable" when the camera went offline;
+        # RestoreEntity would then restore with state="unavailable" rather than
+        # "on"/"off", and the Frigate URL sensor would stay "Unknown" permanently
+        # after a restart (HA#37).
+        return True
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

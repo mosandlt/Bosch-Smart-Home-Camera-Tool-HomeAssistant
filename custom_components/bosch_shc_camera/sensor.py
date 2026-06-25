@@ -221,20 +221,15 @@ class BoschCameraStatusSensor(_BoschSensorBase):
     can use this single sensor to drive both visibility and alerting.
     """
 
+    _attr_options: ClassVar[list[str]] = _STATUS_SENSOR_OPTIONS
+    _attr_device_class = SensorDeviceClass.ENUM
+
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_status_{cam_id.lower()}"
         self._attr_translation_key = "status"
-        self._attr_options = [
-            "online",
-            "offline",
-            "updating",
-            "session_limit",
-            "unknown",
-        ]
-        self._attr_device_class = SensorDeviceClass.ENUM
 
     @property
     def native_value(self) -> str:
@@ -728,19 +723,13 @@ class BoschFcmPushStatusSensor(_BoschSensorBase):
       - "disabled"  — FCM push not enabled in options
     """
 
+    _attr_name = "Bosch Camera FCM Push Status"
+    _attr_unique_id = "bosch_shc_camera_fcm_push_status"
     _attr_icon = "mdi:bell-ring-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "push_status"
     _attr_options: ClassVar[list[str]] = ["fcm_push", "polling", "disabled"]
     _attr_device_class = SensorDeviceClass.ENUM
-
-    @property
-    def name(self) -> str:
-        return "Bosch Camera FCM Push Status"
-
-    @property
-    def unique_id(self) -> str:
-        return "bosch_shc_camera_fcm_push_status"
 
     @property
     def native_value(self) -> str:
@@ -780,6 +769,8 @@ class BoschCloudMaintenanceSensor(_BoschSensorBase):
     cameras are unavailable.
     """
 
+    _attr_name = "Bosch Cloud Wartung"
+    _attr_unique_id = "bosch_shc_camera_cloud_maintenance"
     _attr_icon = "mdi:cloud-alert"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "cloud_maintenance"
@@ -792,14 +783,6 @@ class BoschCloudMaintenanceSensor(_BoschSensorBase):
         "idle",
     ]
     _attr_device_class = SensorDeviceClass.ENUM
-
-    @property
-    def name(self) -> str:
-        return "Bosch Cloud Wartung"
-
-    @property
-    def unique_id(self) -> str:
-        return "bosch_shc_camera_cloud_maintenance"
 
     @property
     def available(self) -> bool:
@@ -973,6 +956,7 @@ class BoschAlarmCatalogSensor(_BoschSensorBase):
     """
 
     _attr_icon = "mdi:alarm-light"
+    _attr_native_unit_of_measurement = "types"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
@@ -989,10 +973,6 @@ class BoschAlarmCatalogSensor(_BoschSensorBase):
         if alarms is None:
             return None
         return len(alarms)
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return "types"
 
     @property
     def available(self) -> bool:
@@ -1022,6 +1002,7 @@ class BoschMotionZonesSensor(_BoschSensorBase):
     """
 
     _attr_icon = "mdi:vector-square"
+    _attr_native_unit_of_measurement = "zones"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
@@ -1045,10 +1026,6 @@ class BoschMotionZonesSensor(_BoschSensorBase):
         # Fallback to RCP
         zones = self.coordinator._rcp_motion_zones_cache.get(self._cam_id, [])
         return len(zones)
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return "zones"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1134,6 +1111,7 @@ class BoschNetworkServicesSensor(_BoschSensorBase):
     """
 
     _attr_icon = "mdi:server-network"
+    _attr_native_unit_of_measurement = "services"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
@@ -1150,10 +1128,6 @@ class BoschNetworkServicesSensor(_BoschSensorBase):
         if services is None:
             return None
         return len(services)
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return "services"
 
     @property
     def available(self) -> bool:
@@ -1177,6 +1151,7 @@ class BoschIvaCatalogSensor(_BoschSensorBase):
     """
 
     _attr_icon = "mdi:brain"
+    _attr_native_unit_of_measurement = "modules"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
@@ -1193,10 +1168,6 @@ class BoschIvaCatalogSensor(_BoschSensorBase):
         if modules is None:
             return None
         return len(modules)
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return "modules"
 
     @property
     def available(self) -> bool:
@@ -1227,6 +1198,7 @@ class BoschPrivateAreasSensor(_BoschSensorBase):
     """
 
     _attr_icon = "mdi:eye-off"
+    _attr_native_unit_of_measurement = "masks"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
@@ -1246,10 +1218,6 @@ class BoschPrivateAreasSensor(_BoschSensorBase):
         # Gen1 cloud privacy masks
         cloud_masks = self.coordinator._cloud_privacy_masks_cache.get(self._cam_id, [])
         return len(cloud_masks)
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return "masks"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

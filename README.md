@@ -574,6 +574,8 @@ The Bosch session opens the moment your recorder connects and is released again 
 | **Auth mode: Path token** | URL becomes `rtsp://host:port/<token>/rtsp_tunnel?…` — wrong/missing token is refused. |
 | **Auth mode: Basic-Auth** | URL becomes `rtsp://user:pass@host:port/rtsp_tunnel?…` (standard RTSP Basic). |
 | **Idle timeout** | Seconds the camera session lingers after the last recorder disconnects. |
+| **Fixed RTSP port** | Set (e.g. `8556`) to keep the sensor URL stable across HA restarts. Each camera gets the next port (base, base+1, …). |
+| **Max concurrent connections** | Max simultaneous recorder clients per camera (default `8`). Raise for many sub-streams; lower to reduce load. |
 
 > **Security note:** with `0.0.0.0` the stream is reachable credential-free by anything on your LAN. Restrict it with the allowlist and/or a token, or keep the default `127.0.0.1` and run your recorder on the HA host.
 

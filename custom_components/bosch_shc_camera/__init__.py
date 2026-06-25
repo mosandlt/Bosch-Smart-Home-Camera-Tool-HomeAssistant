@@ -115,11 +115,15 @@ from .frigate_endpoint import (
     build_public_url,
 )
 from .rcp import async_update_rcp_data
-from .rcp import get_cached_rcp_session as get_cached_rcp_session  # re-export for tests
+from .rcp import (
+    get_cached_rcp_session as get_cached_rcp_session,  # re-export: mypy --no-implicit-reexport
+)
 from .smb import (
     sync_smb_cleanup,
 )
-from .smb import sync_smb_upload as sync_smb_upload  # re-export for tests/consumers
+from .smb import (
+    sync_smb_upload as sync_smb_upload,  # re-export: mypy --no-implicit-reexport
+)
 from .tls_proxy import pre_warm_rtsp, start_tls_proxy, stop_all_proxies, stop_tls_proxy
 
 _LOGGER = logging.getLogger(__name__)
@@ -1960,7 +1964,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
     @property
     def options(self) -> dict[str, Any]:
-        return get_options(self._entry)
+        # [S7] _options_snapshot is valid for this coordinator's lifetime:
+        # _async_options_updated always calls async_reload on real option changes,
+        # rebuilding the coordinator with fresh options. No stale-read risk.
+        return self._options_snapshot
 
     # ── Token renewal ─────────────────────────────────────────────────────────
     def _token_still_valid(self, min_remaining: int = 60) -> bool:
@@ -3862,8 +3869,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 and _announce is not None
                 and _compute is not None
             ):
-                for _cam_id in data:
-                    _cam_data = data[_cam_id]
+                for _cam_id, _cam_data in data.items():
                     new_status = _compute(_cam_id, _cam_data)
                     self.hass.async_create_task(_announce(_cam_id, new_status))
 
@@ -4668,8 +4674,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
         try:
             hq, inst = self.get_quality_params(cam_id)
-            opts = get_options(self._entry)
-            conn_type_pref = self._stream_type_override or opts.get(
+            # [S7] Direct key read — opts only used for this one key; avoids full dict copy
+            conn_type_pref = self._stream_type_override or self._entry.options.get(
                 "stream_connection_type", "local"
             )
             if conn_type_pref == "local":
@@ -5291,7 +5297,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     name=f"bosch_nvr_stop_{cam_id[:8]}",
                                 )
                         return result
-                    elif resp.status == 401:
+                    if resp.status == 401:
                         # Still 401 after the in-place token refresh for THIS
                         # candidate. Don't abort the whole call — in AUTO mode
                         # (candidates=[LOCAL, REMOTE]) a LOCAL 401 (camera
@@ -6369,6 +6375,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             token=str(opts.get("frigate_token", "") or ""),
             basic_user=str(opts.get("frigate_basic_user", "frigate") or "frigate"),
             idle_timeout=float(opts.get("frigate_idle_timeout", 60) or 60),
+            max_connections=int(opts.get("frigate_max_connections", 8) or 8),
         )
 
     def _frigate_url_host(self, bind_host: str) -> str:
@@ -6397,9 +6404,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         None when no LOCAL session is available (e.g. REMOTE-only fallback,
         privacy mode, camera offline) so the front-door drops the client.
         Credential-free injection only works on the LOCAL path.
+
+        Only opens a new session when there is no active LOCAL session — calling
+        try_live_connection() unconditionally would issue a PUT /connection on
+        Gen2 FW 9.40.25+, rotating Digest credentials and destroying the running
+        TLS proxy port every time a recorder reconnects (HA#37 stream-drop loop).
         """
-        await self.try_live_connection(cam_id)
         live = self._live_connections.get(cam_id, {})
+        if live.get("_connection_type") != "LOCAL":
+            await self.try_live_connection(cam_id)
+            live = self._live_connections.get(cam_id, {})
         if live.get("_connection_type") != "LOCAL":
             return None
         port = self._tls_proxy_ports.get(cam_id)
@@ -7563,10 +7577,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         q = self.get_quality(cam_id)
         if q == "high":
             return True, 1  # primary encoder, max quality (~30 Mbps)
-        elif q == "low":
+        if q == "low":
             return False, 4  # low-bandwidth stream (~1.9 Mbps)
-        else:  # "auto"
-            return False, 2  # iOS default, balanced (~7.5 Mbps)
+        return False, 2  # "auto" — iOS default, balanced (~7.5 Mbps)
 
     def motion_settings(self, cam_id: str) -> dict[str, Any]:
         """Return motion detection settings dict, or empty dict."""
@@ -7929,10 +7942,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # doesn't go through the entity-translation pipeline).
     try:
         last_hint_version = entry.options.get("feedback_hint_version", "")
-        if (
-            last_hint_version != _INTEGRATION_VERSION
-            and _INTEGRATION_VERSION != "unknown"
-        ):
+        if _INTEGRATION_VERSION not in (last_hint_version, "unknown"):
             _disc_url = "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/discussions"
             _iss_url = "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues"
             _lang_messages: dict[str, tuple[str, str]] = {

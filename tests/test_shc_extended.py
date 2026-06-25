@@ -311,25 +311,27 @@ class TestShcFetcherWriteLockCheck:
 
     def test_privacy_set_at_honored_in_fetcher(self):
         src = (SRC / "shc.py").read_text()
-        fetcher_start = src.find("async def async_update_shc_states")
-        assert fetcher_start != -1
+        # Write-lock logic lives in the per-camera helper extracted from
+        # async_update_shc_states — check that function instead.
+        fetcher_start = src.find("async def _update_one_camera_shc_state")
+        assert fetcher_start != -1, "_update_one_camera_shc_state not found in shc.py"
         fetcher_end = src.find("\nasync def ", fetcher_start + 1)
         body = (
             src[fetcher_start:fetcher_end] if fetcher_end != -1 else src[fetcher_start:]
         )
         assert "_privacy_set_at" in body, (
-            "async_update_shc_states must check _privacy_set_at before writing — "
+            "_update_one_camera_shc_state must check _privacy_set_at before writing — "
             "without it the SHC poll always overwrites the privacy cache (BUG-4)"
         )
 
     def test_light_set_at_honored_in_fetcher(self):
         src = (SRC / "shc.py").read_text()
-        fetcher_start = src.find("async def async_update_shc_states")
-        assert fetcher_start != -1
+        fetcher_start = src.find("async def _update_one_camera_shc_state")
+        assert fetcher_start != -1, "_update_one_camera_shc_state not found in shc.py"
         fetcher_end = src.find("\nasync def ", fetcher_start + 1)
         body = (
             src[fetcher_start:fetcher_end] if fetcher_end != -1 else src[fetcher_start:]
         )
         assert "_light_set_at" in body, (
-            "async_update_shc_states must check _light_set_at — same race shape as BUG-4"
+            "_update_one_camera_shc_state must check _light_set_at — same race shape as BUG-4"
         )
