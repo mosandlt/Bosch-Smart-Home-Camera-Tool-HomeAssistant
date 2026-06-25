@@ -5,6 +5,25 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.3.0] - 2026-06-26
+
+A reliability rewrite of the FCM push logic, replacing the old watchdog + self-heal state machine with a single, self-restarting supervisor task.
+
+### Reliability improvements
+
+- **FCM supervisor replaces the watchdog + self-heal ladder.** The previous design used a cool-down ladder (`SELF_HEAL_COOLDOWNS_SEC`) with jitter, a soft-heal streak counter, and a separate `async_self_heal_fcm_push` function called from the coordinator watchdog. It was hard to reason about and could get stuck in the "ladder exhausted" state requiring an HA restart. Replaced by `_async_run_fcm_supervisor` — a single asyncio Task that loops forever, polls `is_started()` every 10 s, and restarts with clean exponential backoff `(5, 30, 60, 120, 300, 600, 1800 s)`.
+- **Soft vs. hard heal without a ladder.** Soft heal (stop + restart the listener, preserve credentials) is tried first. After 3 consecutive soft failures, or when Google signals a credential rejection (`PHONE_REGISTRATION_ERROR`), the supervisor escalates automatically to a hard heal: purge all `fcm_*` entry-data keys and run a fresh `checkin_or_register()`.
+- **Delivery-death detection still works.** The `_fcm_force_hard_heal` flag set by the push-delivery detector is now read directly by the supervisor on its next poll tick and triggers an immediate hard heal; the flag is cleared after acting.
+- **Coordinator watchdog simplified.** The watchdog in `_async_update_data` now has one job: if the supervisor task is `None` or done, spawn it. No more ladder checks, no more cool-down state.
+
+### Internal / tests
+
+- Deleted `test_fcm_self_heal.py` (22 tests for the removed `async_self_heal_fcm_push` function).
+- `_SHARED_ERROR_TIMESTAMPS` removed from `_FCMNoiseFilter`; replaced by `_SHARED_STALENESS_TIMESTAMPS` which tracks only credential-rejection markers (not general connectivity errors).
+- `reset_fcm_error_counter()` and `async_start_fcm_push()` kept as backward-compat shims so external callers don't break.
+
+Addresses #36 (motion stuck on "Clear" when FCM push silently dies).
+
 ## [v13.7.1] - 2026-06-17
 
 A patch focused on snapshot/image display, plus one security fix.
