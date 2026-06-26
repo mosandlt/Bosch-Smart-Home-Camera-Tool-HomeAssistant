@@ -476,10 +476,10 @@ async def async_ensure_fcm_supervisor(coordinator: Any) -> None:
     sup = getattr(coordinator, "_fcm_supervisor_task", None)
     if sup is not None and not sup.done():
         return
-    coordinator._fcm_supervisor_task = coordinator.hass.async_create_task(
+    coordinator._fcm_supervisor_task = asyncio.ensure_future(
         _async_run_fcm_supervisor(coordinator),
-        name="bosch_shc_camera_fcm_supervisor",
     )
+    coordinator._fcm_supervisor_task.set_name("bosch_shc_camera_fcm_supervisor")
 
 
 async def async_stop_fcm_supervisor(coordinator: Any) -> None:
