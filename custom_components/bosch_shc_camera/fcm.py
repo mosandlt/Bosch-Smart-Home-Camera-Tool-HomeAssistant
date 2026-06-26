@@ -945,10 +945,10 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
         )
         try:
             while True:
+                await asyncio.sleep(FCM_SUPERVISOR_POLL_SEC)
                 fcm_client = coordinator._fcm_client
                 if fcm_client is None or not fcm_client.is_started():
                     break
-                await asyncio.sleep(FCM_SUPERVISOR_POLL_SEC)
         except asyncio.CancelledError:
             await async_stop_fcm_push(coordinator)
             _LOGGER.debug("FCM supervisor: cancelled while listener was running")
