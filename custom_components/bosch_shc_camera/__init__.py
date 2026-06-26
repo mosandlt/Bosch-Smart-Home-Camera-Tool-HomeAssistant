@@ -80,6 +80,9 @@ from .fcm import (
     _write_file as _fcm_write_file,
 )
 from .fcm import (
+    async_ensure_fcm_supervisor as _fcm_async_ensure_supervisor,
+)
+from .fcm import (
     async_handle_fcm_push as _fcm_async_handle_fcm_push,
 )
 from .fcm import (
@@ -87,9 +90,6 @@ from .fcm import (
 )
 from .fcm import (
     async_send_alert as _fcm_async_send_alert,
-)
-from .fcm import (
-    async_ensure_fcm_supervisor as _fcm_async_ensure_supervisor,
 )
 from .fcm import (
     async_stop_fcm_supervisor as _fcm_async_stop_supervisor,
@@ -775,7 +775,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._fcm_force_hard_heal: bool = False
         # The supervisor asyncio.Task that keeps the FCM listener alive. Created
         # by async_ensure_fcm_supervisor; cancelled by async_stop_fcm_supervisor.
-        self._fcm_supervisor_task: asyncio.Task | None = None
+        self._fcm_supervisor_task: asyncio.Task[None] | None = None
         # Serialises every FCM start/stop/self-heal so the setup-time start
         # and the watchdog's self-heal can't run concurrently. Live bug
         # 2026-05-21: without the lock the initial async_start_fcm_push from

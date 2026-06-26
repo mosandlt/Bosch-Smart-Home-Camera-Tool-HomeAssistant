@@ -48,9 +48,9 @@ class TestCredsStatenessHelpers:
     def test_count_within_window(self):
         now = time.monotonic()
         _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS[:] = [
-            now - 200.0,   # in default 600s window
-            now - 50.0,    # in window
-            now - 700.0,   # outside window
+            now - 200.0,  # in default 600s window
+            now - 50.0,  # in window
+            now - 700.0,  # outside window
         ]
         assert get_recent_fcm_creds_staleness_count() == 2
 
@@ -141,9 +141,7 @@ class TestFailureMarkers:
         """'Unexpected exception during read' is deduplicated but NOT a staleness marker."""
         f = _FCMNoiseFilter()
         _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
-        passed = f.filter(
-            self._make_record("Unexpected exception during read")
-        )
+        passed = f.filter(self._make_record("Unexpected exception during read"))
         assert passed is True  # first occurrence passes through
         assert _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS == []
 

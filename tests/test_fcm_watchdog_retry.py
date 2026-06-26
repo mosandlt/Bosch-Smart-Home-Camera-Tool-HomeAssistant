@@ -207,4 +207,6 @@ class TestFcmWatchdogSupervisorSpawn:
         ):
             await BoschCameraCoordinator._async_update_data(coord)
 
-        assert not mock_ensure.called, "Healthy listener with running supervisor must not trigger extra spawn"
+        assert not mock_ensure.called, (
+            "Healthy listener with running supervisor must not trigger extra spawn"
+        )

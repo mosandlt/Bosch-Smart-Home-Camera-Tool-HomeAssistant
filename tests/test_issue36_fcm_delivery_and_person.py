@@ -297,17 +297,25 @@ class TestForceHardHeal:
 
         _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
         coord = _make_heal_coord(
-            {"fcm_credentials": {"gcm": "x"}, "fcm_registered_token": "tok", "other": "y"},
+            {
+                "fcm_credentials": {"gcm": "x"},
+                "fcm_registered_token": "tok",
+                "other": "y",
+            },
             force_hard=True,
         )
 
         with (
             patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
             patch.object(fcm, "reset_fcm_creds_staleness_counter"),
-            patch.object(fcm, "_async_start_fcm_push_locked", new=AsyncMock(return_value=False)),
+            patch.object(
+                fcm, "_async_start_fcm_push_locked", new=AsyncMock(return_value=False)
+            ),
         ):
             task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
-            await asyncio.sleep(0.05)  # let one iteration run (hard-heal + failed start)
+            await asyncio.sleep(
+                0.05
+            )  # let one iteration run (hard-heal + failed start)
             task.cancel()
             try:
                 await task
@@ -318,9 +326,17 @@ class TestForceHardHeal:
             "_fcm_force_hard_heal must be cleared after supervisor hard-heal"
         )
         update_call = coord.hass.config_entries.async_update_entry.call_args
-        assert update_call is not None, "async_update_entry must be called during hard-heal"
-        new_data = update_call.kwargs.get("data") or update_call[1].get("data") or update_call[0][1]
-        assert "fcm_credentials" not in new_data, "fcm_* keys must be purged on hard-heal"
+        assert update_call is not None, (
+            "async_update_entry must be called during hard-heal"
+        )
+        new_data = (
+            update_call.kwargs.get("data")
+            or update_call[1].get("data")
+            or update_call[0][1]
+        )
+        assert "fcm_credentials" not in new_data, (
+            "fcm_* keys must be purged on hard-heal"
+        )
 
     async def test_no_force_flag_skips_hard_heal(self) -> None:
         """Without _fcm_force_hard_heal=True and no staleness markers, supervisor
@@ -337,7 +353,9 @@ class TestForceHardHeal:
         with (
             patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
             patch.object(fcm, "get_recent_fcm_creds_staleness_count", return_value=0),
-            patch.object(fcm, "_async_start_fcm_push_locked", new=AsyncMock(return_value=False)),
+            patch.object(
+                fcm, "_async_start_fcm_push_locked", new=AsyncMock(return_value=False)
+            ),
         ):
             task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
             await asyncio.sleep(0.05)
@@ -347,8 +365,9 @@ class TestForceHardHeal:
             except asyncio.CancelledError:
                 pass
 
-        coord.hass.config_entries.async_update_entry.assert_not_called(), (
-            "Soft path must not purge creds (async_update_entry must not be called)"
+        (
+            coord.hass.config_entries.async_update_entry.assert_not_called(),
+            ("Soft path must not purge creds (async_update_entry must not be called)"),
         )
 
 

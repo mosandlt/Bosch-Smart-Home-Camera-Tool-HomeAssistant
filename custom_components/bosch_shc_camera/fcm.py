@@ -70,7 +70,15 @@ CLOUD_API = "https://residential.cbs.boschsecurity.com"
 # transient connection drop after a push was received; later steps handle
 # persistent Google registration problems. Resets to 0 after a successful
 # push arrives so a quick recovery doesn't block the next outage detection.
-FCM_SUPERVISOR_BACKOFF_SEC: tuple[float, ...] = (5.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0)
+FCM_SUPERVISOR_BACKOFF_SEC: tuple[float, ...] = (
+    5.0,
+    30.0,
+    60.0,
+    120.0,
+    300.0,
+    600.0,
+    1800.0,
+)
 
 # How often the supervisor polls is_started() while the listener is running.
 # 10 s means a listener death is detected within 10 s, not 60 s (the old
@@ -481,7 +489,7 @@ async def async_stop_fcm_supervisor(coordinator: Any) -> None:
         sup.cancel()
         try:
             await sup
-        except (asyncio.CancelledError, Exception):
+        except (asyncio.CancelledError, Exception):  # noqa: S110 — intentional silent cancel
             pass
         coordinator._fcm_supervisor_task = None
     await async_stop_fcm_push(coordinator)
@@ -849,7 +857,7 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
     sequential errors. PR #36 (merged main, not yet on PyPI) fixes this.
     The supervisor ensures recovery regardless of library version.
     """
-    failures = 0    # consecutive restarts WITHOUT a push received
+    failures = 0  # consecutive restarts WITHOUT a push received
     soft_streak = 0  # consecutive soft-only restarts (no hard-heal between)
 
     _LOGGER.debug("FCM supervisor started")
@@ -873,7 +881,9 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
             if force_hard:
                 reason = "polling confirmed delivery dead"
             elif soft_streak >= FCM_SUPERVISOR_SOFT_HEAL_MAX:
-                reason = f"{soft_streak} soft-restarts without a push — delivery likely dead"
+                reason = (
+                    f"{soft_streak} soft-restarts without a push — delivery likely dead"
+                )
             elif get_recent_fcm_creds_staleness_count(600.0) > 0:
                 reason = "PHONE_REGISTRATION_ERROR in last 10 min — creds stale"
             else:
@@ -915,7 +925,9 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
         if not started:
             failures += 1
             soft_streak += 1
-            delay = FCM_SUPERVISOR_BACKOFF_SEC[min(failures - 1, len(FCM_SUPERVISOR_BACKOFF_SEC) - 1)]
+            delay = FCM_SUPERVISOR_BACKOFF_SEC[
+                min(failures - 1, len(FCM_SUPERVISOR_BACKOFF_SEC) - 1)
+            ]
             _LOGGER.info(
                 "FCM supervisor: start failed — retry in %.0fs (attempt #%d)",
                 delay,
@@ -928,7 +940,9 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
             continue
 
         # ── Listener running — poll until it dies ──────────────────────────
-        _LOGGER.debug("FCM supervisor: listener up — polling every %.0fs", FCM_SUPERVISOR_POLL_SEC)
+        _LOGGER.debug(
+            "FCM supervisor: listener up — polling every %.0fs", FCM_SUPERVISOR_POLL_SEC
+        )
         try:
             while True:
                 fcm_client = coordinator._fcm_client
@@ -957,7 +971,9 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
         else:
             failures += 1
             soft_streak += 1
-            delay = FCM_SUPERVISOR_BACKOFF_SEC[min(failures - 1, len(FCM_SUPERVISOR_BACKOFF_SEC) - 1)]
+            delay = FCM_SUPERVISOR_BACKOFF_SEC[
+                min(failures - 1, len(FCM_SUPERVISOR_BACKOFF_SEC) - 1)
+            ]
             _LOGGER.info(
                 "FCM supervisor: no pushes since last start — retry in %.0fs "
                 "(failure #%d, soft streak %d/%d)",
