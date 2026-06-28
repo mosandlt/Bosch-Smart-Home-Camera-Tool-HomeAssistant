@@ -50,17 +50,32 @@ def _make_mock_entry(
     )
 
 
+def _frontend_context():
+    """Return a patch context for hass_frontend if it is NOT already installed.
+
+    In CI requirements_test.txt ships home-assistant-frontend which provides the
+    real hass_frontend; using a stub there breaks static-path registration.  Locally
+    (where hass_frontend is absent) the stub is required to avoid ImportError when
+    HA's flow manager loads the `my` integration dependency chain.
+    """
+    from contextlib import contextmanager, nullcontext
+    from pathlib import Path
+
+    try:
+        import hass_frontend
+
+        return nullcontext()
+    except ImportError:
+        fake = ModuleType("hass_frontend")
+        fake.where = MagicMock(return_value=Path("/fake"))  # type: ignore[attr-defined]
+        return patch.dict(sys.modules, {"hass_frontend": fake})
+
+
 async def test_reauth_confirm_shows_form(
     hass: HomeAssistant,
 ) -> None:
     """Triggering reauth shows the confirm form before re-running OAuth."""
-    # HA's flow manager loads the integration domain to get the flow handler,
-    # which triggers my→frontend→hass_frontend. Stub hass_frontend to avoid it.
-    from pathlib import Path
-
-    fake_frontend = ModuleType("hass_frontend")
-    fake_frontend.where = MagicMock(return_value=Path("/fake"))  # type: ignore[attr-defined]
-    with patch.dict(sys.modules, {"hass_frontend": fake_frontend}):
+    with _frontend_context():
         entry = _make_mock_entry()
         entry.add_to_hass(hass)
         result = await hass.config_entries.flow.async_init(
@@ -79,11 +94,7 @@ async def test_reconfigure_shows_form(
     hass: HomeAssistant,
 ) -> None:
     """Reconfigure flow shows the confirm form."""
-    from pathlib import Path
-
-    fake_frontend = ModuleType("hass_frontend")
-    fake_frontend.where = MagicMock(return_value=Path("/fake"))  # type: ignore[attr-defined]
-    with patch.dict(sys.modules, {"hass_frontend": fake_frontend}):
+    with _frontend_context():
         entry = _make_mock_entry()
         entry.add_to_hass(hass)
         result = await hass.config_entries.flow.async_init(
