@@ -8,6 +8,8 @@ defusedxml>=0.7.1
 types-defusedxml
 firebase-messaging>=0.4.5,<1
 smbprotocol>=1.10.0,<2
+numpy>=2.0
+Pillow>=10.0
 # Transitive CVE pin: idna 3.14 → CVE-2026-45409 (fixed 3.15). HA core does not
 # constrain idna, so pin it directly here.
 idna>=3.15
