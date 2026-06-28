@@ -225,7 +225,8 @@
               "frigate_auth_mode": "Modo de autenticación",
               "frigate_token": "Secreto compartido / Contraseña Basic-Auth",
               "frigate_basic_user": "Nombre de usuario Basic-Auth",
-              "frigate_idle_timeout": "Tiempo de espera de sesión inactiva (segundos)"
+              "frigate_idle_timeout": "Tiempo de espera de sesión inactiva (segundos)",
+              "frigate_max_connections": "Máx. conexiones de grabadora simultáneas por cámara"
             },
             "data_description": {
               "frigate_endpoints_enabled": "Interruptor principal para todos los endpoints RTSP externos. DESACTIVADO (predeterminado): no se abre ningún puerto RTSP y no se mantiene ninguna sesión Bosch. ACTIVADO: el endpoint de cada cámara está disponible; la sesión de stream Bosch se abre cuando se conecta el primer cliente y se cierra tras el tiempo de espera de inactividad.",
@@ -235,7 +236,8 @@
               "frigate_auth_mode": "Puerta de acceso opcional. none (predeterminado): no se requieren credenciales. path-token: un secreto compartido añadido a la ruta de la URL del stream. basic: RTSP Basic-Auth estándar con nombre de usuario y contraseña.",
               "frigate_token": "Secreto compartido usado como token de ruta (modo autenticación: path-token) o contraseña Basic-Auth (modo autenticación: basic). Dejar vacío para desactivar la puerta de acceso.",
               "frigate_basic_user": "Nombre de usuario para el modo RTSP Basic-Auth. Solo se usa cuando el modo de autenticación está establecido en 'basic'.",
-              "frigate_idle_timeout": "Cuántos segundos permanece activa la sesión de la cámara Bosch tras la desconexión del último grabador. La sesión se mantiene activa para reconexiones instantáneas. Predeterminado: 30. Establecer en 0 para cerrar inmediatamente cuando no haya clientes conectados."
+              "frigate_idle_timeout": "Cuántos segundos permanece activa la sesión de la cámara Bosch tras la desconexión del último grabador. La sesión se mantiene activa para reconexiones instantáneas. Predeterminado: 30. Establecer en 0 para cerrar inmediatamente cuando no haya clientes conectados.",
+              "frigate_max_connections": "Número máximo de conexiones de grabadora simultáneas por puerta de enlace de cámara. Las conexiones que superen este límite se rechazarán inmediatamente. Valor predeterminado: 8. Aumente si tiene muchos sub-flujos o visualizadores simultáneos; reduzca para disminuir la carga en el host de HA."
             }
           },
           "ai": {
@@ -308,7 +310,9 @@
     "error": {
       "invalid_redirect_url": "No se ha encontrado el código de autorización. Pegar la URL completa.",
       "token_exchange_failed": "Inicio de sesión fallido — el código ha caducado. Volver a intentarlo.",
-      "cannot_connect": "No es posible conectar con los servidores de Bosch."
+      "cannot_connect": "No es posible conectar con los servidores de Bosch.",
+      "invalid_ip_address": "Dirección IP no válida — introduzca una dirección IPv4 o IPv6 válida.",
+      "invalid_ip_allowlist": "Entrada de lista de permitidos no válida — use direcciones IP o rangos CIDR separados por comas (p.ej. 192.168.1.0/24)."
     },
     "abort": {
       "migration_started": "Migración iniciada — completar el flujo de Reconfigurar en la tarjeta de la integración."

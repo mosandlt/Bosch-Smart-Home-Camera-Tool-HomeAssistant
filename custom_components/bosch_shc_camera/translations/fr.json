@@ -225,7 +225,8 @@
               "frigate_auth_mode": "Mode d'authentification",
               "frigate_token": "Secret partagé / Mot de passe Basic-Auth",
               "frigate_basic_user": "Nom d'utilisateur Basic-Auth",
-              "frigate_idle_timeout": "Délai d'expiration de session inactive (secondes)"
+              "frigate_idle_timeout": "Délai d'expiration de session inactive (secondes)",
+              "frigate_max_connections": "Nbre max. de connexions enregistreur simultanées par caméra"
             },
             "data_description": {
               "frigate_endpoints_enabled": "Commutateur principal pour tous les endpoints RTSP externes. DÉSACTIVÉ (défaut) : aucun port RTSP n'est ouvert et aucune session Bosch n'est maintenue. ACTIVÉ : l'endpoint de chaque caméra est disponible ; la session de flux Bosch s'ouvre à la connexion du premier client et se ferme après le délai d'inactivité.",
@@ -235,7 +236,8 @@
               "frigate_auth_mode": "Contrôle d'accès optionnel. none (défaut) : aucun identifiant requis. path-token : un secret partagé ajouté au chemin de l'URL du flux. basic : RTSP Basic-Auth standard avec nom d'utilisateur et mot de passe.",
               "frigate_token": "Secret partagé utilisé comme token de chemin (mode authentification : path-token) ou mot de passe Basic-Auth (mode authentification : basic). Laisser vide pour désactiver le contrôle d'accès.",
               "frigate_basic_user": "Nom d'utilisateur pour le mode RTSP Basic-Auth. Utilisé uniquement quand le mode d'authentification est réglé sur 'basic'.",
-              "frigate_idle_timeout": "Durée (en secondes) pendant laquelle la session de la caméra Bosch reste active après la déconnexion du dernier enregistreur. La session est maintenue pour les reconnexions instantanées. Défaut : 30. Mettre à 0 pour fermer immédiatement quand aucun client n'est connecté."
+              "frigate_idle_timeout": "Durée (en secondes) pendant laquelle la session de la caméra Bosch reste active après la déconnexion du dernier enregistreur. La session est maintenue pour les reconnexions instantanées. Défaut : 30. Mettre à 0 pour fermer immédiatement quand aucun client n'est connecté.",
+              "frigate_max_connections": "Nombre maximum de connexions enregistreur simultanées par porte d'entrée de caméra. Les connexions dépassant cette limite sont immédiatement rejetées. Valeur par défaut : 8. Augmenter si vous avez de nombreux sous-flux ou visionneuses simultanées ; réduire pour diminuer la charge sur l'hôte HA."
             }
           },
           "ai": {
@@ -308,7 +310,9 @@
     "error": {
       "invalid_redirect_url": "Aucun code d'autorisation trouvé. Coller l'URL complète.",
       "token_exchange_failed": "Connexion échouée — code expiré. Réessayer.",
-      "cannot_connect": "Impossible de se connecter aux serveurs Bosch."
+      "cannot_connect": "Impossible de se connecter aux serveurs Bosch.",
+      "invalid_ip_address": "Adresse IP invalide — saisissez une adresse IPv4 ou IPv6 valide.",
+      "invalid_ip_allowlist": "Entrée de liste d'autorisation invalide — utilisez des adresses IP ou plages CIDR séparées par des virgules (ex. 192.168.1.0/24)."
     },
     "abort": {
       "migration_started": "Migration démarrée — veuillez compléter le flux Reconfigurer sur la carte d'intégration."

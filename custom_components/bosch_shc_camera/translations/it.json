@@ -225,7 +225,8 @@
               "frigate_auth_mode": "Modalità di autenticazione",
               "frigate_token": "Segreto condiviso / password Basic-Auth",
               "frigate_basic_user": "Nome utente Basic-Auth",
-              "frigate_idle_timeout": "Timeout sessione inattiva (secondi)"
+              "frigate_idle_timeout": "Timeout sessione inattiva (secondi)",
+              "frigate_max_connections": "Max connessioni registratore simultanee per telecamera"
             },
             "data_description": {
               "frigate_endpoints_enabled": "Interruttore principale per tutti gli endpoint RTSP esterni. Quando DISATTIVO (predefinito): nessuna porta RTSP viene aperta e nessuna sessione Bosch viene mantenuta. Quando ATTIVO: l'endpoint di ogni telecamera è disponibile; la sessione stream Bosch si apre quando si connette il primo client e si chiude allo scadere del timeout di inattività.",
@@ -235,7 +236,8 @@
               "frigate_auth_mode": "Controllo di accesso opzionale.\n• none (predefinito): nessuna credenziale richiesta.\n• path-token: un segreto condiviso aggiunto al percorso dell'URL dello stream.\n• basic: autenticazione RTSP Basic-Auth standard con nome utente e password.",
               "frigate_token": "Segreto condiviso usato come token nel percorso (modalità auth: path-token) o come password Basic-Auth (modalità auth: basic). Lasciare vuoto per disabilitare il controllo di accesso.",
               "frigate_basic_user": "Nome utente per la modalità RTSP Basic-Auth. Utilizzato solo quando la modalità di autenticazione è impostata su 'basic'.",
-              "frigate_idle_timeout": "Quanti secondi la sessione della telecamera Bosch rimane attiva dopo la disconnessione dell'ultimo registratore. La sessione viene mantenuta per riconnessioni immediate. Predefinito: 30. Impostare a 0 per chiudere immediatamente quando nessun client è connesso."
+              "frigate_idle_timeout": "Quanti secondi la sessione della telecamera Bosch rimane attiva dopo la disconnessione dell'ultimo registratore. La sessione viene mantenuta per riconnessioni immediate. Predefinito: 30. Impostare a 0 per chiudere immediatamente quando nessun client è connesso.",
+              "frigate_max_connections": "Numero massimo di connessioni registratore simultanee per il front-door della telecamera. Le connessioni oltre questo limite vengono rifiutate immediatamente. Predefinito: 8. Aumentare se si hanno molti sub-stream o visualizzatori simultanei; ridurre per diminuire il carico sull'host HA."
             }
           },
           "ai": {
@@ -308,7 +310,9 @@
     "error": {
       "invalid_redirect_url": "Nessun codice di autorizzazione trovato. Incollare l'URL completo.",
       "token_exchange_failed": "Accesso non riuscito — codice scaduto. Riprovare.",
-      "cannot_connect": "Impossibile connettersi ai server Bosch."
+      "cannot_connect": "Impossibile connettersi ai server Bosch.",
+      "invalid_ip_address": "Indirizzo IP non valido — inserire un indirizzo IPv4 o IPv6 valido.",
+      "invalid_ip_allowlist": "Voce allowlist non valida — usare indirizzi IP o intervalli CIDR separati da virgola (es. 192.168.1.0/24)."
     },
     "abort": {
       "migration_started": "Migrazione avviata — completare il flusso Riconfigura nella card dell'integrazione."

@@ -9,10 +9,13 @@ Covers Quality-Scale Bronze rule `config-flow-test-coverage`. Verifies:
 
 from __future__ import annotations
 
-from unittest.mock import patch
+import sys
+from types import ModuleType
+from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -33,35 +36,63 @@ async def test_user_flow_aborts_when_already_configured(
     assert result["reason"] == "single_instance_allowed"
 
 
+def _make_mock_entry(
+    state: ConfigEntryState = ConfigEntryState.NOT_LOADED,
+) -> MockConfigEntry:
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title="Bosch Smart Home Camera",
+        data={"bearer_token": "tok", "refresh_token": "rtok"},
+        options={},
+        unique_id=DOMAIN,
+        version=1,
+        state=state,
+    )
+
+
 async def test_reauth_confirm_shows_form(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+    hass: HomeAssistant,
 ) -> None:
     """Triggering reauth shows the confirm form before re-running OAuth."""
-    mock_config_entry.add_to_hass(hass)
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={
-            "source": config_entries.SOURCE_REAUTH,
-            "entry_id": mock_config_entry.entry_id,
-        },
-        data=mock_config_entry.data,
-    )
+    # HA's flow manager loads the integration domain to get the flow handler,
+    # which triggers my→frontend→hass_frontend. Stub hass_frontend to avoid it.
+    from pathlib import Path
+
+    fake_frontend = ModuleType("hass_frontend")
+    fake_frontend.where = MagicMock(return_value=Path("/fake"))  # type: ignore[attr-defined]
+    with patch.dict(sys.modules, {"hass_frontend": fake_frontend}):
+        entry = _make_mock_entry()
+        entry.add_to_hass(hass)
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
+            data=entry.data,
+        )
     assert result["type"] == "form"
     assert result["step_id"] == "reauth_confirm"
 
 
 async def test_reconfigure_shows_form(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+    hass: HomeAssistant,
 ) -> None:
     """Reconfigure flow shows the confirm form."""
-    mock_config_entry.add_to_hass(hass)
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={
-            "source": config_entries.SOURCE_RECONFIGURE,
-            "entry_id": mock_config_entry.entry_id,
-        },
-    )
+    from pathlib import Path
+
+    fake_frontend = ModuleType("hass_frontend")
+    fake_frontend.where = MagicMock(return_value=Path("/fake"))  # type: ignore[attr-defined]
+    with patch.dict(sys.modules, {"hass_frontend": fake_frontend}):
+        entry = _make_mock_entry()
+        entry.add_to_hass(hass)
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": entry.entry_id,
+            },
+        )
     assert result["type"] == "form"
     assert result["step_id"] == "reconfigure"
 

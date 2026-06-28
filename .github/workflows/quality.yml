@@ -38,3 +38,5 @@ jobs:
         run: |
           python3 -c "import json;print(chr(10).join(json.load(open('custom_components/bosch_shc_camera/manifest.json'))['requirements']))" > /tmp/our_reqs.txt
           pip-audit -r /tmp/our_reqs.txt
+      - name: Translation completeness
+        run: python3 scripts/check-translations.py

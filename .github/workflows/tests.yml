@@ -29,5 +29,5 @@ jobs:
       - name: Install test dependencies
         run: pip install -r requirements_test.txt
 
-      - name: Run pytest
-        run: pytest tests/ --timeout=30 -q
+      - name: Run pytest with coverage
+        run: pytest tests/ --timeout=30 -q --cov custom_components/bosch_shc_camera --cov-fail-under=100

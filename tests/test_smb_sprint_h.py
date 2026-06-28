@@ -887,6 +887,33 @@ class TestFtpSafeUrlGuard:
 
         mock_urlopen.assert_not_called()
 
+    def test_unsafe_smb_clip_url_skipped(self):
+        """Non-Bosch videoClipUrl in SMB upload is warned + skipped (lines 399-402)."""
+        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
+        coord = _smb_upload_coord()
+        fake_smb = _fake_smb()
+        URLLIB_REQUEST = f"{MODULE}.urllib.request"
+        with (
+            patch.dict(sys.modules, {"smbclient": fake_smb}),
+            patch(f"{MODULE}.smb_makedirs"),
+            patch(f"{URLLIB_REQUEST}.urlopen") as mock_urlopen,
+        ):
+            ev = {
+                "timestamp": "2026-05-07T10:00:00Z",
+                "eventType": "MOVEMENT",
+                "id": "EVID1234ABCD",
+                "imageUrl": None,
+                "videoClipUrl": "https://evil.example.com/steal.mp4",
+                "videoClipUploadStatus": "Done",
+            }
+            data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": [ev]}}
+            sync_smb_upload(coord, data, "tok")
+
+        # Non-Bosch clip URL is rejected → no urlopen, no open_file
+        mock_urlopen.assert_not_called()
+        fake_smb.open_file.assert_not_called()
+
 
 # ── Regression: enable-toggle guard inside each smb.py function ──────────────
 

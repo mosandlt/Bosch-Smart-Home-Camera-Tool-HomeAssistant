@@ -225,7 +225,8 @@
               "frigate_auth_mode": "Tryb uwierzytelnienia",
               "frigate_token": "Wspólny sekret / hasło Basic-Auth",
               "frigate_basic_user": "Nazwa użytkownika Basic-Auth",
-              "frigate_idle_timeout": "Limit czasu bezczynności sesji (sekundy)"
+              "frigate_idle_timeout": "Limit czasu bezczynności sesji (sekundy)",
+              "frigate_max_connections": "Maks. jednoczesnych połączeń rejestratora na kamerę"
             },
             "data_description": {
               "frigate_endpoints_enabled": "Główny przełącznik dla wszystkich zewnętrznych punktów końcowych RTSP. Gdy WYŁĄCZONY (domyślnie): żaden port RTSP nie jest otwierany i żadna sesja Bosch nie jest utrzymywana. Gdy WŁĄCZONY: punkt końcowy każdej kamery jest dostępny; sesja strumienia Bosch otwiera się gdy pierwszy klient się połączy i zamyka po upływie limitu czasu bezczynności.",
@@ -235,7 +236,8 @@
               "frigate_auth_mode": "Opcjonalna brama dostępu. none (domyślnie): brak wymaganych danych uwierzytelniających. path-token: wspólny sekret dołączany do ścieżki URL strumienia. basic: standardowe RTSP Basic-Auth z nazwą użytkownika i hasłem.",
               "frigate_token": "Wspólny sekret używany jako token ścieżki (tryb uwierzytelnienia: path-token) lub hasło Basic-Auth (tryb uwierzytelnienia: basic). Pozostaw puste, aby całkowicie wyłączyć bramę.",
               "frigate_basic_user": "Nazwa użytkownika dla trybu RTSP Basic-Auth. Używana tylko gdy tryb uwierzytelnienia jest ustawiony na 'basic'.",
-              "frigate_idle_timeout": "Ile sekund sesja kamery Bosch utrzymuje się po odłączeniu ostatniego rejestratora. Sesja utrzymywana dla natychmiastowych ponownych połączeń. Domyślnie: 30. Ustaw na 0, aby zamknąć natychmiast gdy brak podłączonych klientów."
+              "frigate_idle_timeout": "Ile sekund sesja kamery Bosch utrzymuje się po odłączeniu ostatniego rejestratora. Sesja utrzymywana dla natychmiastowych ponownych połączeń. Domyślnie: 30. Ustaw na 0, aby zamknąć natychmiast gdy brak podłączonych klientów.",
+              "frigate_max_connections": "Maksymalna liczba jednoczesnych połączeń rejestratora na front-door kamery. Połączenia przekraczające ten limit są natychmiast odrzucane. Domyślnie: 8. Zwiększ przy wielu sub-streamach lub jednoczesnych widzach; zmniejsz, aby zmniejszyć obciążenie hosta HA."
             }
           },
           "ai": {
@@ -308,7 +310,9 @@
     "error": {
       "invalid_redirect_url": "Nie znaleziono kodu autoryzacji. Wklej pełny URL.",
       "token_exchange_failed": "Logowanie nieudane — kod wygasł. Spróbuj ponownie.",
-      "cannot_connect": "Nie można połączyć się z serwerami Bosch."
+      "cannot_connect": "Nie można połączyć się z serwerami Bosch.",
+      "invalid_ip_address": "Nieprawidłowy adres IP — podaj prawidłowy adres IPv4 lub IPv6.",
+      "invalid_ip_allowlist": "Nieprawidłowy wpis allowlist — użyj adresów IP lub zakresów CIDR oddzielonych przecinkami (np. 192.168.1.0/24)."
     },
     "abort": {
       "migration_started": "Migracja rozpoczęta — ukończ przepływ Ponownej konfiguracji na karcie integracji."

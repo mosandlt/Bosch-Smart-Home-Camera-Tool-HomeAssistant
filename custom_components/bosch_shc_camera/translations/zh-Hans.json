@@ -225,7 +225,8 @@
               "frigate_auth_mode": "认证模式",
               "frigate_token": "共享密钥 / Basic-Auth 密码",
               "frigate_basic_user": "Basic-Auth 用户名",
-              "frigate_idle_timeout": "空闲会话超时（秒）"
+              "frigate_idle_timeout": "空闲会话超时（秒）",
+              "frigate_max_connections": "每摄像头最大并发录像机连接数"
             },
             "data_description": {
               "frigate_endpoints_enabled": "所有外部 RTSP 端点的主开关。\n• **关闭**（默认）：不打开任何 RTSP 端口，不保持任何 Bosch 会话。\n• **开启**：每台摄像头的端点可用；Bosch 流媒体会话在第一个客户端连接时打开，并在空闲超时后关闭。",
@@ -235,7 +236,8 @@
               "frigate_auth_mode": "可选访问控制。\n• **none**（默认）：无需凭据。\n• **path-token**：将共享密钥附加到流 URL 路径中。\n• **basic**：标准 RTSP Basic-Auth，需要用户名和密码。",
               "frigate_token": "用作路径令牌（认证模式：path-token）或 Basic-Auth 密码（认证模式：basic）的共享密钥。留空则完全禁用访问控制。",
               "frigate_basic_user": "RTSP Basic-Auth 模式的用户名。仅在认证模式设置为 'basic' 时有效。",
-              "frigate_idle_timeout": "最后一个录像机断开连接后，Bosch 摄像头会话保持的秒数。会话保持活跃以支持即时重连。默认值：30。设为 0 则在无客户端连接时立即关闭。"
+              "frigate_idle_timeout": "最后一个录像机断开连接后，Bosch 摄像头会话保持的秒数。会话保持活跃以支持即时重连。默认值：30。设为 0 则在无客户端连接时立即关闭。",
+              "frigate_max_connections": "每个摄像头前门允许的最大并发录像机连接数。超出此限制的连接将立即被拒绝。默认值：8。如有大量子流或同时观看者，请增大此值；若需减少HA主机负载，请减小此值。"
             }
           },
           "ai": {
@@ -308,7 +310,9 @@
     "error": {
       "invalid_redirect_url": "未找到授权码。请粘贴完整 URL。",
       "token_exchange_failed": "登录失败 — 授权码已过期。请重试。",
-      "cannot_connect": "无法连接至 Bosch 服务器。"
+      "cannot_connect": "无法连接至 Bosch 服务器。",
+      "invalid_ip_address": "无效的 IP 地址 — 请输入有效的 IPv4 或 IPv6 地址。",
+      "invalid_ip_allowlist": "无效的允许列表条目 — 请使用逗号分隔的 IP 地址或 CIDR 范围（例如 192.168.1.0/24）。"
     },
     "abort": {
       "migration_started": "迁移已启动 — 请在集成卡片上完成重新配置流程。"

@@ -225,7 +225,8 @@
               "frigate_auth_mode": "Authenticatiemodus",
               "frigate_token": "Gedeeld geheim / Basic-Auth wachtwoord",
               "frigate_basic_user": "Basic-Auth gebruikersnaam",
-              "frigate_idle_timeout": "Time-out inactieve sessie (seconden)"
+              "frigate_idle_timeout": "Time-out inactieve sessie (seconden)",
+              "frigate_max_connections": "Max. gelijktijdige recorderverbindingen per camera"
             },
             "data_description": {
               "frigate_endpoints_enabled": "Hoofdschakelaar voor alle externe RTSP-eindpunten. Wanneer UIT (standaard): er wordt geen RTSP-poort geopend en er wordt geen Bosch-sessie bijgehouden. Wanneer AAN: het eindpunt van elke camera is beschikbaar; de Bosch-stroomsessie opent wanneer de eerste client verbinding maakt en sluit na de inactieve time-out.",
@@ -235,7 +236,8 @@
               "frigate_auth_mode": "Optionele toegangscontrole.\n• none (standaard): geen inloggegevens vereist.\n• path-token: een gedeeld geheim toegevoegd aan het stream-URL-pad.\n• basic: standaard RTSP Basic-Auth met gebruikersnaam en wachtwoord.",
               "frigate_token": "Gedeeld geheim als padtoken (auth-modus: path-token) of Basic-Auth wachtwoord (auth-modus: basic). Leeg laten om de toegangscontrole volledig uit te schakelen.",
               "frigate_basic_user": "Gebruikersnaam voor RTSP Basic-Auth modus. Alleen gebruikt wanneer de authenticatiemodus is ingesteld op 'basic'.",
-              "frigate_idle_timeout": "Hoeveel seconden de Bosch-camerasessie actief blijft nadat de laatste recorder verbroken heeft. Sessie actief gehouden voor directe herverbinding. Standaard: 30. Stel in op 0 om direct te sluiten wanneer er geen client verbonden is."
+              "frigate_idle_timeout": "Hoeveel seconden de Bosch-camerasessie actief blijft nadat de laatste recorder verbroken heeft. Sessie actief gehouden voor directe herverbinding. Standaard: 30. Stel in op 0 om direct te sluiten wanneer er geen client verbonden is.",
+              "frigate_max_connections": "Maximum aantal gelijktijdige recorderverbindingen per camera-voordeur. Verbindingen boven deze limiet worden direct geweigerd. Standaard: 8. Verhoog als u veel sub-streams of gelijktijdige kijkers heeft; verlaag om de belasting op de HA-host te verminderen."
             }
           },
           "ai": {
@@ -308,7 +310,9 @@
     "error": {
       "invalid_redirect_url": "Geen autorisatiecode gevonden. Plak de volledige URL.",
       "token_exchange_failed": "Aanmelden mislukt — code verlopen. Probeer opnieuw.",
-      "cannot_connect": "Verbinding met Bosch-servers mislukt."
+      "cannot_connect": "Verbinding met Bosch-servers mislukt.",
+      "invalid_ip_address": "Ongeldig IP-adres — voer een geldig IPv4- of IPv6-adres in.",
+      "invalid_ip_allowlist": "Ongeldige allowlist-invoer — gebruik kommagescheiden IP-adressen of CIDR-bereiken (bijv. 192.168.1.0/24)."
     },
     "abort": {
       "migration_started": "Migratie gestart — voltooi de herconfiguratieflow op de integratiekaart."
