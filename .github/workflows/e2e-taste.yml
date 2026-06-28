@@ -25,7 +25,7 @@ jobs:
           cache: npm
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Build card bundle
@@ -34,6 +34,6 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/hasstest-venv
-          key: hasstest-venv-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: hasstest-venv-${{ runner.os }}-py3.14-${{ hashFiles('package-lock.json') }}
       - name: hass-taste-test (real HA loads the card)
         run: npm run test:taste
