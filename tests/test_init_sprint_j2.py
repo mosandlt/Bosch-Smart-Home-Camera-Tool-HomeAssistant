@@ -660,7 +660,9 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = float("-inf")  # sentinel: must be inf so CI uptime (~200s) doesn't trigger rate-limit
+        coord._last_schemes_refresh = float(
+            "-inf"
+        )  # sentinel: must be inf so CI uptime (~200s) doesn't trigger rate-limit
 
         with patch.dict(
             "sys.modules", {"homeassistant.components.camera.webrtc": None}
@@ -677,7 +679,9 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = float("-inf")  # sentinel: CI uptime <600s would skip otherwise
+        coord._last_schemes_refresh = float(
+            "-inf"
+        )  # sentinel: CI uptime <600s would skip otherwise
 
         fake_providers_key = object()
 
@@ -814,7 +818,9 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = float("-inf")  # sentinel: CI uptime <600s would skip otherwise
+        coord._last_schemes_refresh = float(
+            "-inf"
+        )  # sentinel: CI uptime <600s would skip otherwise
 
         provider = MagicMock()
         provider._rest_client = MagicMock()
