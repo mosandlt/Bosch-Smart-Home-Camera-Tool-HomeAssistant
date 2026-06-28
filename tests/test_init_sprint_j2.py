@@ -660,7 +660,7 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = 0.0
+        coord._last_schemes_refresh = float("-inf")  # sentinel: must be inf so CI uptime (~200s) doesn't trigger rate-limit
 
         with patch.dict(
             "sys.modules", {"homeassistant.components.camera.webrtc": None}
@@ -668,8 +668,8 @@ class TestEnsureGo2rtcSchemesFresh:
             # None in sys.modules causes ImportError on 'from ... import'
             await BoschCameraCoordinator._ensure_go2rtc_schemes_fresh(coord)
 
-        # No crash, no attribute side-effects beyond _last_schemes_refresh staying 0
-        assert coord._last_schemes_refresh == 0.0
+        # No crash, no attribute side-effects — _last_schemes_refresh unchanged (returned before update)
+        assert coord._last_schemes_refresh == float("-inf")
 
     @pytest.mark.asyncio
     async def test_empty_providers_returns_early(self):
@@ -677,7 +677,7 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = 0.0
+        coord._last_schemes_refresh = float("-inf")  # sentinel: CI uptime <600s would skip otherwise
 
         fake_providers_key = object()
 
@@ -692,8 +692,8 @@ class TestEnsureGo2rtcSchemesFresh:
         ):
             await BoschCameraCoordinator._ensure_go2rtc_schemes_fresh(coord)
 
-        # Timestamp NOT updated because we returned before that line
-        assert coord._last_schemes_refresh == 0.0
+        # Timestamp NOT updated because we returned before that line (empty providers)
+        assert coord._last_schemes_refresh == float("-inf")
 
     @pytest.mark.asyncio
     async def test_provider_without_rest_client_skipped(self):
@@ -814,7 +814,7 @@ class TestEnsureGo2rtcSchemesFresh:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord()
-        coord._last_schemes_refresh = 0.0
+        coord._last_schemes_refresh = float("-inf")  # sentinel: CI uptime <600s would skip otherwise
 
         provider = MagicMock()
         provider._rest_client = MagicMock()
