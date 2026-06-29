@@ -5,6 +5,18 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.3.1] - 2026-06-29
+
+Patch — **stops the diagnostic entities from bloating the recorder database** (reported in #39).
+
+### Database optimization
+
+- **Volatile and large diagnostic attributes are no longer recorded.** Several diagnostic entities carried attributes that either changed on every coordinator/drain tick (`last_push_seconds_ago`, `last_fetched_seconds_ago`, `last_check_seconds_ago`, `write_grace_seconds_left`, the NVR drain counters) or held large card-only data (motion-zone / privacy-mask coordinate lists, rule and analytics-module lists, rotating stream/proxy URLs). Home Assistant's recorder hashes each state's attributes into the shared `state_attributes` table, so a value that changes every tick minted a brand-new row every tick — ballooning the database. The most visible offender was the *Event Detection* (`fcm_push_status`) sensor.
+- These attributes are now marked `_unrecorded_attributes`, so they **stay fully visible live in the UI** but are excluded from history. Each affected entity's `state_attributes` footprint collapses from thousands of unique rows to a single shared row. Existing oversized history is reclaimed by the recorder's normal purge.
+- No change to any entity's state, availability, streaming, or card behavior.
+
+5524 pytest / mypy --strict / ruff / codespell clean.
+
 ## [v14.3.0] - 2026-06-26
 
 A reliability rewrite of the FCM push logic, replacing the old watchdog + self-heal state machine with a single, self-restarting supervisor task.

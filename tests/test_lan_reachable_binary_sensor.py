@@ -129,3 +129,11 @@ class TestExtraStateAttributes:
         assert attrs["last_check_seconds_ago"] == 5
         assert attrs["write_grace_seconds_left"] == 20
         assert attrs["camera_id"] == CAM_ID
+
+    def test_volatile_attrs_are_unrecorded(self, stub_coord, stub_entry):
+        """HA#39: both freshness fields change every tick → exclude them from
+        the recorder so `state_attributes` does not bloat. They are still
+        emitted live (asserted above); only their recording is suppressed."""
+        s = _make(stub_coord, stub_entry)
+        assert "last_check_seconds_ago" in s._unrecorded_attributes
+        assert "write_grace_seconds_left" in s._unrecorded_attributes

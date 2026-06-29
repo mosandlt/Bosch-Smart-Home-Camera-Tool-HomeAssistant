@@ -313,6 +313,13 @@ class BoschLanReachableBinarySensor(_BoschBinarySensorBase):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "lan_reachable"
     _attr_entity_registry_enabled_default = True
+    # Both freshness fields are monotonic-derived → they change on every
+    # coordinator tick while the on/off state stays put. Recording them spawns
+    # a new `state_attributes` row each tick and bloats the DB (HA#39). Keep
+    # them visible live, but never historize them.
+    _unrecorded_attributes = frozenset(
+        {"last_check_seconds_ago", "write_grace_seconds_left"}
+    )
 
     def __init__(
         self,

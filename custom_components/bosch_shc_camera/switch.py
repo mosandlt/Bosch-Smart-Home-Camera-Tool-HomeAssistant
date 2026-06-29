@@ -283,6 +283,10 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
     restarts (intent is not RestoreEntity-persisted).
     """
 
+    # The (redacted) RTSP/proxy URLs rotate on every reconnect — recording
+    # them churns the `state_attributes` table with no history value (HA#39).
+    _unrecorded_attributes = frozenset({"rtsps_url", "proxy_snap_url"})
+
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:

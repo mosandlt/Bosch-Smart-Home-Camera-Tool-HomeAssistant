@@ -306,6 +306,25 @@ class TestFcmPushStatusSensor:
         s = BoschFcmPushStatusSensor(stub_coord, CAM_ID, stub_entry)
         assert s.native_value == "polling"
 
+    def test_volatile_attr_is_unrecorded(self, stub_coord, stub_entry):
+        """HA#39: `last_push_seconds_ago` changes every tick → must be excluded
+        from the recorder so the `state_attributes` table does not bloat.
+        The attribute must still be EMITTED live (only its recording is
+        suppressed), so assert both: present in extra_state_attributes AND
+        listed in _unrecorded_attributes."""
+        import time as _time
+
+        from custom_components.bosch_shc_camera.sensor import BoschFcmPushStatusSensor
+
+        stub_coord.options = {"enable_fcm_push": True}
+        stub_coord._fcm_healthy = True
+        stub_coord._fcm_running = True
+        stub_coord._fcm_push_mode = "auto"
+        stub_coord._fcm_last_push = _time.monotonic()
+        s = BoschFcmPushStatusSensor(stub_coord, CAM_ID, stub_entry)
+        assert "last_push_seconds_ago" in s.extra_state_attributes
+        assert "last_push_seconds_ago" in s._unrecorded_attributes
+
 
 # ── BoschAmbientLightSensor ──────────────────────────────────────────────
 

@@ -729,6 +729,13 @@ class BoschFcmPushStatusSensor(_BoschSensorBase):
     _attr_translation_key = "push_status"
     _attr_options: ClassVar[list[str]] = ["fcm_push", "polling", "disabled"]
     _attr_device_class = SensorDeviceClass.ENUM
+    # `last_push_seconds_ago` is recomputed from a monotonic clock on every
+    # property read, so it changes on every coordinator tick even while the
+    # state stays "fcm_push". Recording it spawns a fresh `state_attributes`
+    # row each tick and bloats the DB (HA#39). Keep it visible live, but never
+    # historize it. See https://developers.home-assistant.io/blog/2023/09/20/
+    # excluding-state-attributes-from-recording/.
+    _unrecorded_attributes = frozenset({"last_push_seconds_ago"})
 
     @property
     def native_value(self) -> str:
@@ -781,6 +788,10 @@ class BoschCloudMaintenanceSensor(_BoschSensorBase):
         "idle",
     ]
     _attr_device_class = SensorDeviceClass.ENUM
+    # `last_fetched_seconds_ago` is monotonic-derived → changes every tick.
+    # Keep it live but unrecorded so it does not bloat `state_attributes`
+    # (HA#39). The stable window fields (title/link/dates) stay recorded.
+    _unrecorded_attributes = frozenset({"last_fetched_seconds_ago"})
 
     @property
     def available(self) -> bool:
@@ -903,6 +914,9 @@ class BoschRulesCountSensor(_BoschSensorBase):
     _attr_native_unit_of_measurement = "rules"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
+    # `rules` is a list of rule dicts purely for card display; recording it
+    # spends a large `state_attributes` blob with zero history value (HA#39).
+    _unrecorded_attributes = frozenset({"rules"})
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
@@ -957,6 +971,9 @@ class BoschAlarmCatalogSensor(_BoschSensorBase):
     _attr_native_unit_of_measurement = "types"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
+    # `alarm_details` duplicates the full RCP catalog as a big list; keep the
+    # small `alarm_types`/`categories` recorded but never the blob (HA#39).
+    _unrecorded_attributes = frozenset({"alarm_details"})
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
@@ -1002,6 +1019,11 @@ class BoschMotionZonesSensor(_BoschSensorBase):
     _attr_icon = "mdi:vector-square"
     _attr_native_unit_of_measurement = "zones"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Coordinate lists for card overlay only — never historize the blobs
+    # (HA#39). The *_count fields stay recorded.
+    _unrecorded_attributes = frozenset(
+        {"zones", "coordinates", "cloud_zones", "gen2_zones"}
+    )
     _attr_entity_registry_enabled_default = False
 
     def __init__(
@@ -1152,6 +1174,9 @@ class BoschIvaCatalogSensor(_BoschSensorBase):
     _attr_native_unit_of_measurement = "modules"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
+    # Module lists for card display only — never historize the blobs (HA#39).
+    # `active_count` stays recorded.
+    _unrecorded_attributes = frozenset({"modules", "active_modules"})
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
@@ -1199,6 +1224,9 @@ class BoschPrivateAreasSensor(_BoschSensorBase):
     _attr_native_unit_of_measurement = "masks"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
+    # Mask coordinate lists for card overlay only — never historize the blobs
+    # (HA#39). The *_count fields stay recorded.
+    _unrecorded_attributes = frozenset({"cloud_privacy_masks", "gen2_private_areas"})
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
@@ -1472,6 +1500,12 @@ class BoschNvrStateSensor(_BoschSensorBase):
     """
 
     _attr_entity_registry_enabled_default = False
+    # These fields are recomputed every 30 s drain tick while recording, so
+    # they churn the recorder with no history value (HA#39). Keep them live;
+    # never historize them. `target`/`error`/`user_intent` stay recorded.
+    _unrecorded_attributes = frozenset(
+        {"last_segment_age_s", "last_tick_ts", "pending_uploads", "failed_uploads"}
+    )
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry

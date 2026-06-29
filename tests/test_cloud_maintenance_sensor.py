@@ -102,3 +102,15 @@ class TestCloudMaintenanceSensorValue:
         monkeypatch.setattr(_time, "monotonic", lambda: 1042.0)
         attrs = _make_sensor(mw, last_fetch=float("-inf")).extra_state_attributes
         assert "last_fetched_seconds_ago" not in attrs
+
+    def test_volatile_attr_is_unrecorded(self, monkeypatch):
+        """HA#39: `last_fetched_seconds_ago` changes every tick → exclude it
+        from the recorder so `state_attributes` does not bloat. Emitted live,
+        recording suppressed."""
+        mw = _window(active=True)
+        import time as _time
+
+        monkeypatch.setattr(_time, "monotonic", lambda: 1042.0)
+        s = _make_sensor(mw, last_fetch=1000.0)
+        assert "last_fetched_seconds_ago" in s.extra_state_attributes
+        assert "last_fetched_seconds_ago" in s._unrecorded_attributes

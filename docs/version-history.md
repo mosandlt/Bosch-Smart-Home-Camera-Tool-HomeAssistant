@@ -2,6 +2,12 @@
 
 Recent releases. Full changelog: [`CHANGELOG.md`](../CHANGELOG.md) or [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases).
 
+## v14.3.1 — 2026-06-29
+
+Patch — **stops diagnostic entities from bloating the recorder database** (#39).
+
+Several diagnostic entities carried attributes that changed on every coordinator/drain tick (`last_push_seconds_ago`, `last_fetched_seconds_ago`, `last_check_seconds_ago`, `write_grace_seconds_left`, NVR drain counters) or held large card-only blobs (motion-zone/privacy-mask coordinate lists, rule/analytics-module lists, rotating stream/proxy URLs). HA's recorder hashes each state's attributes into the shared `state_attributes` table, so a per-tick-changing value minted a fresh row every tick — the reported bloat on the *Event Detection* (`fcm_push_status`) sensor. These attributes are now `_unrecorded_attributes`: still visible live, excluded from history, collapsing each entity's `state_attributes` footprint to a single shared row. No state/availability/stream/card change. 5524 pytest / mypy --strict / ruff / codespell clean.
+
 ## v14.2.0 — 2026-06-25
 
 Minor release — **glass-break and smoke/fire-alarm sound detection for Gen2 cameras with Audio-Plus**.
