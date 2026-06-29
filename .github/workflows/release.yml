@@ -1,6 +1,11 @@
 name: Release
 
 # Creates a GitHub Release on tag push (vX.Y.Z).
+# GATE: the release is only published AFTER the required CI workflows
+# (Tests, Quality, Validate, Secret scan) have concluded SUCCESS on the same
+# commit. If any required workflow fails, the release job fails and no
+# release is created. This closes the gap where the tag-triggered release
+# published in parallel with — and independently of — the test suite.
 # Release notes are extracted from the matching ## [vX.Y.Z] section in CHANGELOG.md.
 # Falls back to GitHub's auto-generated notes if no matching section is found.
 
@@ -22,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v6
         with:
@@ -34,6 +40,48 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: echo "tag=${INPUT_TAG:-$REF_NAME}" >> "$GITHUB_OUTPUT"
 
+      # GATE — block the release until the required CI workflows pass on this
+      # exact commit. Polls the Actions API; a workflow that concludes in any
+      # non-success terminal state aborts the release immediately.
+      - name: Require CI to pass on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          # Workflow FILE names (space-free) → robust against display-name spaces.
+          REQUIRED: "tests.yml quality.yml validate.yml secret-scan.yml"
+        run: |
+          deadline=$(( $(date +%s) + 2400 ))   # 40 min ceiling
+          while :; do
+            pending=""
+            for wf in $REQUIRED; do
+              out=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$wf" \
+                --commit "$SHA" --limit 1 \
+                --json conclusion,status \
+                --jq '.[0] | (.conclusion // "none") + " " + (.status // "none")' \
+                2>/dev/null || true)
+              [ -z "$out" ] && out="none none"
+              concl=${out%% *}
+              echo "  $wf -> conclusion=$concl"
+              case "$concl" in
+                success) ;;
+                failure|cancelled|timed_out|startup_failure|action_required)
+                  echo "::error::$wf concluded '$concl' on $SHA — refusing to release"
+                  exit 1 ;;
+                *) pending="$pending $wf" ;;
+              esac
+            done
+            if [ -z "$pending" ]; then
+              echo "All required CI workflows passed on $SHA."
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Timed out waiting for required CI:$pending"
+              exit 1
+            fi
+            echo "Waiting for:$pending"
+            sleep 25
+          done
+
       - name: Extract release notes from CHANGELOG.md
         id: notes
         env:
@@ -42,6 +90,10 @@ jobs:
           VERSION="${TAG#v}"
           awk "/^## \[v${VERSION}\]/{flag=1; next} /^## /{flag=0} flag" CHANGELOG.md \
             > /tmp/release-notes.md
+          # First non-empty content line of the section → human title summary.
+          SUMMARY=$(awk "/^## \[v${VERSION}\]/{f=1; next} /^## /{f=0} f && NF {print; exit}" CHANGELOG.md \
+            | sed -E 's/\*\*//g; s/^(Patch|Minor|Major)[[:space:]]+[—-]+[[:space:]]*//')
+          echo "summary=${SUMMARY}" >> "$GITHUB_OUTPUT"
           if [ ! -s /tmp/release-notes.md ]; then
             echo "No CHANGELOG entry found for v${VERSION} — falling back to auto-notes."
             echo "fallback=true" >> "$GITHUB_OUTPUT"
@@ -54,18 +106,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.tag.outputs.tag }}
           FALLBACK: ${{ steps.notes.outputs.fallback }}
+          SUMMARY: ${{ steps.notes.outputs.summary }}
         run: |
-          TITLE="${TAG#v}"
+          # Keep the leading "v" and append the CHANGELOG one-liner when present,
+          # so titles read "v14.3.1 — <summary>" like hand-authored releases.
+          TITLE="$TAG"
+          [ -n "$SUMMARY" ] && TITLE="$TAG — $SUMMARY"
           NOTES_FLAG="--notes-file /tmp/release-notes.md"
           [ "$FALLBACK" = "true" ] && NOTES_FLAG="--generate-notes"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" \
+              --latest \
               $NOTES_FLAG
           else
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" \
+              --latest \
               $NOTES_FLAG
           fi
