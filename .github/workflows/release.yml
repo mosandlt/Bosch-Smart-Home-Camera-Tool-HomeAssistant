@@ -1,0 +1,71 @@
+name: Release
+
+# Creates a GitHub Release on tag push (vX.Y.Z).
+# Release notes are extracted from the matching ## [vX.Y.Z] section in CHANGELOG.md.
+# Falls back to GitHub's auto-generated notes if no matching section is found.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v14.3.0)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: echo "tag=${INPUT_TAG:-$REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          awk "/^## \[v${VERSION}\]/{flag=1; next} /^## /{flag=0} flag" CHANGELOG.md \
+            > /tmp/release-notes.md
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "No CHANGELOG entry found for v${VERSION} — falling back to auto-notes."
+            echo "fallback=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "fallback=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          FALLBACK: ${{ steps.notes.outputs.fallback }}
+        run: |
+          TITLE="${TAG#v}"
+          NOTES_FLAG="--notes-file /tmp/release-notes.md"
+          [ "$FALLBACK" = "true" ] && NOTES_FLAG="--generate-notes"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              $NOTES_FLAG
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              $NOTES_FLAG
+          fi
