@@ -6545,7 +6545,25 @@ class BoschCameraCard extends HTMLElement {
               }
             }
           } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            hls.recoverMediaError();
+            // recoverMediaError() re-attaches media at the same position; a
+            // persistently corrupt segment (backend rewarm / proxy mid-rotation)
+            // can re-fault immediately and loop forever, silently frozen, never
+            // escalating. Bound it like NETWORK_ERROR above, then fall through to
+            // a full reconnect that fetches fresh backend creds. (bug-hunt 2026-07-01)
+            this._hlsMediaErrorCount = (this._hlsMediaErrorCount || 0) + 1;
+            if (this._hlsMediaErrorCount <= 3) {
+              hls.recoverMediaError();
+            } else {
+              this._hlsMediaErrorCount = 0;
+              console.warn("bosch-camera-card: hls.js fatal MEDIA_ERROR persists, reconnecting", data);
+              this._reconnectingLiveVideo = true;
+              this._stopLiveVideo();
+              if (this._isStreaming && this._isStreaming()) {
+                setTimeout(() => { if (!this.isConnected) return; this._reconnectingLiveVideo = false; this._reconnectAfterStreamDrop(); }, 2000);
+              } else {
+                this._reconnectingLiveVideo = false;
+              }
+            }
           } else {
             console.warn("bosch-camera-card: hls.js fatal error, reconnecting", data);
             // Flag as reconnect so PiP survives the cycle
@@ -7098,23 +7116,36 @@ class BoschCameraCard extends HTMLElement {
     const FIRST_POLL_MS = 2500;  // give ICE + the first keyframe a head start
     const POLL_MS       = 2000;
     const MAX_MS        = 9000;  // hard deadline: no verdict + no frame by here → HLS
-    const startedAt = performance.now();
+    // Deadline counts VISIBLE time only. A backgrounded tab pauses <video>
+    // decode (framesDecoded stays flat) without the transport being dead, so
+    // wall-clock time spent hidden must NOT count toward the "0 frames decoded
+    // = dead" deadline — otherwise a quick alt-tab right after opening the
+    // camera trips a false HLS fallback on return, contradicting this
+    // watchdog's own "can't false-fire while hidden" invariant. (bug-hunt 2026-07-01)
+    let visibleElapsed = 0;
+    let lastTick = performance.now();
     const poll = async () => {
       this._webrtcFirstFrameTimer = null;
       if (!this.isConnected || !this._liveVideoActive) return;
       if (this._streamTransport !== "webrtc") return;            // already switched to HLS
       if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
       // Backgrounded mid-connect: don't risk a thread-suspend false positive — just
-      // keep re-arming until the user returns or a real frame lands.
+      // keep re-arming until the user returns or a real frame lands. Drop lastTick
+      // so the hidden gap is never added to visibleElapsed when we resume.
       if (document.visibilityState !== "visible") {
+        lastTick = null;
         this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
         return;
       }
+      // Visible: accrue only the interval since the last visible tick toward the deadline.
+      const nowTs = performance.now();
+      if (lastTick != null) visibleElapsed += nowTs - lastTick;
+      lastTick = nowTs;
       // A real presented frame = unambiguously alive.
       if (video._boschLastFrameAt != null) { this._webrtcRecoveryStreak = 0; return; }
       const snap = await this._webrtcStatsSnapshot();
       if (!this.isConnected || !this._liveVideoActive || this._streamTransport !== "webrtc") return; // raced
-      const pastDeadline = performance.now() - startedAt >= MAX_MS;
+      const pastDeadline = visibleElapsed >= MAX_MS;
       if (snap == null) {
         // No video inbound-rtp report yet — AMBIGUOUS: a getStats-less browser on a
         // perfectly healthy stream looks identical to a dead one here. Never fall
