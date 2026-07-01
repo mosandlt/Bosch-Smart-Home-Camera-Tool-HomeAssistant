@@ -513,6 +513,9 @@ class _CameraServer:
         self._sem = asyncio.Semaphore(self.config.max_connections)
         self.port = 0
         self.client_count = 0
+        # Pending zero-client idle-linger task (see _idle_linger). Wired to the
+        # frigate_idle_timeout option. (bug-hunt 2026-07-01)
+        self._idle_task: asyncio.Task[None] | None = None
 
     async def start(self, preferred_port: int) -> int:
         """Bind the listener; returns the bound port."""
@@ -530,6 +533,9 @@ class _CameraServer:
 
     def close(self) -> None:
         """Stop accepting new connections (synchronous, best-effort)."""
+        if self._idle_task is not None and not self._idle_task.done():
+            self._idle_task.cancel()
+        self._idle_task = None
         if self._server is not None:
             self._server.close()
             self._server = None
@@ -561,23 +567,54 @@ class _CameraServer:
         await self._sem.acquire()
 
         self.client_count += 1
-        if self.client_count == 1 and self._on_active is not None:
-            try:
-                self._on_active()
-            except Exception as err:  # caller callback must never kill the listener
-                _LOGGER.debug("frigate front-door %s: on_active raised — %s", cam, err)
+        if self.client_count == 1:
+            # New activity cancels any pending idle-linger teardown.
+            if self._idle_task is not None and not self._idle_task.done():
+                self._idle_task.cancel()
+            self._idle_task = None
+            if self._on_active is not None:
+                try:
+                    self._on_active()
+                except Exception as err:  # caller callback must never kill the listener
+                    _LOGGER.debug(
+                        "frigate front-door %s: on_active raised — %s", cam, err
+                    )
         try:
             await self._serve(reader, writer, peer_ip)
         finally:
             self._sem.release()
             self.client_count -= 1
             if self.client_count == 0 and self._on_idle is not None:
-                try:
-                    self._on_idle()
-                except Exception as err:  # caller callback must never kill the listener
-                    _LOGGER.debug(
-                        "frigate front-door %s: on_idle raised — %s", cam, err
-                    )
+                # Linger config.idle_timeout seconds of continuous zero clients
+                # before signalling idle, so a recorder that briefly reconnects
+                # (segment boundary, go2rtc restream re-open) doesn't thrash the
+                # on-demand session. idle_timeout <= 0 → signal immediately
+                # ("0 = close immediately", as documented). This wires the
+                # previously-dead frigate_idle_timeout option. (bug-hunt 2026-07-01)
+                if self._idle_task is not None and not self._idle_task.done():
+                    self._idle_task.cancel()
+                self._idle_task = asyncio.create_task(self._idle_linger())
+
+    async def _idle_linger(self) -> None:
+        """Wait config.idle_timeout of continuous zero-client idle, then fire
+        on_idle. Cancelled and replaced the instant a new client connects."""
+        try:
+            if self.config.idle_timeout > 0:
+                await asyncio.sleep(self.config.idle_timeout)
+        except asyncio.CancelledError:
+            return
+        self._idle_task = None
+        # A client may have arrived (and left) again during the sleep; only
+        # signal if we are genuinely still idle.
+        if self.client_count == 0 and self._on_idle is not None:
+            try:
+                self._on_idle()
+            except Exception as err:  # caller callback must never kill the listener
+                _LOGGER.debug(
+                    "frigate front-door %s: on_idle raised — %s",
+                    self.cam_id[:8],
+                    err,
+                )
 
     async def _serve(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, peer_ip: str

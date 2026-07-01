@@ -900,16 +900,20 @@ async def test_on_active_callback_exception_does_not_kill_connection(runner):
 
 
 async def test_on_idle_callback_exception_does_not_crash(runner):
-    """on_idle raising must not propagate (lines 544-547)."""
+    """on_idle raising inside the idle-linger must not propagate. idle_timeout=0
+    so on_idle fires promptly after the client disconnects (bug-hunt 2026-07-01)."""
+
+    idle_ran = asyncio.Event()
 
     def _boom_idle():
+        idle_ran.set()
         raise RuntimeError("on_idle exploded")
 
     async with FakeCamera() as cam:
         target = InnerTarget(cam.port, "user", "pass")
         port = await runner.start_server(
             "camTTTTTT",
-            FrontDoorConfig(),
+            FrontDoorConfig(idle_timeout=0),
             _resolver(target),
             on_idle=_boom_idle,
         )
@@ -917,6 +921,57 @@ async def test_on_idle_callback_exception_does_not_crash(runner):
             port, b"DESCRIBE rtsp://127.0.0.1/rtsp_tunnel RTSP/1.0\r\nCSeq: 1\r\n\r\n"
         )
         assert resp.startswith(b"RTSP/1.0 200 OK")
+        # on_idle fired (idle_timeout=0) and its exception was swallowed — no crash.
+        await asyncio.wait_for(idle_ran.wait(), timeout=5.0)
+
+
+async def test_idle_timeout_zero_fires_on_idle_after_last_client(runner):
+    """C5 (bug-hunt 2026-07-01): frigate_idle_timeout now actually drives the
+    front-door. With idle_timeout=0 on_idle is signalled promptly once the last
+    recorder client disconnects (previously the option was a dead no-op)."""
+
+    idle_called = asyncio.Event()
+
+    def _on_idle():
+        idle_called.set()
+
+    async with FakeCamera() as cam:
+        target = InnerTarget(cam.port, "user", "pass")
+        port = await runner.start_server(
+            "camIDLE00",
+            FrontDoorConfig(idle_timeout=0),
+            _resolver(target),
+            on_idle=_on_idle,
+        )
+        resp = await _client_request(
+            port, b"DESCRIBE rtsp://127.0.0.1/rtsp_tunnel RTSP/1.0\r\nCSeq: 1\r\n\r\n"
+        )
+        assert resp.startswith(b"RTSP/1.0 200 OK")
+        await asyncio.wait_for(idle_called.wait(), timeout=5.0)
+
+
+async def test_idle_linger_cancelled_on_reconnect_does_not_signal():
+    """C5 (bug-hunt 2026-07-01): a pending idle-linger is cancelled when a new
+    client connects, so a recorder that briefly reconnects (segment boundary)
+    doesn't get its on-demand session torn down."""
+    from custom_components.bosch_shc_camera.frigate_endpoint import _CameraServer
+
+    calls: list[int] = []
+    server = _CameraServer(
+        "camRECON0",
+        FrontDoorConfig(idle_timeout=100),  # long linger so it won't fire on its own
+        _resolver(None),
+        None,  # on_active
+        lambda: calls.append(1),  # on_idle
+    )
+    server.client_count = 0
+    # Arm the linger exactly as _handle does when the last client leaves.
+    server._idle_task = asyncio.create_task(server._idle_linger())
+    await asyncio.sleep(0)  # let it start and reach the 100s sleep
+    # Simulate a reconnect: _handle's active branch cancels the pending linger.
+    server._idle_task.cancel()
+    await asyncio.sleep(0)
+    assert calls == []  # on_idle never fired — the teardown was averted
 
 
 # ─────────────────────────────────────────────────────────────────────────────

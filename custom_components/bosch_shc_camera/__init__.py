@@ -6253,6 +6253,35 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             or self._frigate_low_enabled.get(cam_id)
         )
 
+    def _frigate_on_idle(self, cam_id: str) -> None:
+        """Front-door for cam_id has had zero recorder clients for the configured
+        frigate_idle_timeout. Tear down the on-demand LOCAL session it opened —
+        but ONLY if no OTHER consumer (a live card view, Cast, Mini-NVR) is still
+        using it; otherwise do nothing and let the generic idle reaper handle
+        teardown when everyone leaves. Runs as a background task because on_idle
+        is a synchronous loop callback. (bug-hunt 2026-07-01 — wires the
+        previously-dead frigate_idle_timeout option.)
+        """
+
+        async def _maybe_teardown() -> None:
+            if await self._has_active_consumer(cam_id):
+                return  # a live view / recording still needs the session
+            live = self._live_connections.get(cam_id)
+            if not live or live.get("_connection_type") != "LOCAL":
+                return  # nothing LOCAL to tear down
+            _LOGGER.info(
+                "frigate front-door %s idle for frigate_idle_timeout — tearing "
+                "down on-demand LOCAL session",
+                cam_id[:8],
+            )
+            await self._tear_down_live_stream(cam_id)
+
+        task = self.hass.async_create_task(
+            _maybe_teardown(), f"bosch_shc_camera_frigate_idle_{cam_id[:8]}"
+        )
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
     async def async_sync_frigate_endpoint(self, cam_id: str) -> None:
         """Start or stop the front-door for a camera per current switch state."""
         wanted = self._frigate_wanted(cam_id)
@@ -6279,6 +6308,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     config,
                     self._frigate_resolve_inner,
                     preferred_port=preferred_port,
+                    on_idle=lambda: self._frigate_on_idle(cam_id),
                 )
                 self._frigate_sticky_port[cam_id] = port
             except OSError as err:
@@ -6298,6 +6328,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     config,
                     self._frigate_resolve_inner,
                     preferred_port=self._frigate_sticky_port.get(cam_id, 0),
+                    on_idle=lambda: self._frigate_on_idle(cam_id),
                 )
                 self._frigate_sticky_port[cam_id] = port
             except OSError as err:
@@ -6309,7 +6340,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 )
                 self._frigate_sticky_port.pop(cam_id, None)
                 port = await self._frigate_runner.start_server(
-                    cam_id, config, self._frigate_resolve_inner
+                    cam_id,
+                    config,
+                    self._frigate_resolve_inner,
+                    on_idle=lambda: self._frigate_on_idle(cam_id),
                 )
                 self._frigate_sticky_port[cam_id] = port
         # Sensors read the new port/state.
