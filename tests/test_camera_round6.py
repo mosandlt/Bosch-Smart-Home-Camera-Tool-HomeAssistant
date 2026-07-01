@@ -414,6 +414,42 @@ class TestRemoteProxy401:
             "must also clear _live_opened_at when renewal fails"
         )
 
+    @pytest.mark.asyncio
+    async def test_401_above_ttl_renewal_coalesced_keeps_connection(self):
+        """C1 regression (bug-hunt 2026-07-01): 401 + expired + try_live_connection
+        returns STREAM_START_SKIPPED (another start is already in flight) must NOT
+        clear _live_connections/_live_opened_at — that would delete the concurrent
+        renewal's fresh session and kill the stream plus any Frigate front-door
+        reading its creds. Only a genuine renewal FAILURE (falsy non-sentinel)
+        clears. STREAM_START_SKIPPED is falsy, so before the fix it fell into the
+        401/403 clear branch."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+        from custom_components.bosch_shc_camera.const import STREAM_START_SKIPPED
+
+        coord = _live_conn(opened_before=70.0)
+        coord.try_live_connection = AsyncMock(return_value=STREAM_START_SKIPPED)
+        cam = _make_camera(coord=coord, _cached_image=b"\xff\xd8old")
+
+        session = MagicMock()
+        session.get.return_value = _resp_cm(
+            401, body=b"Unauthorized", content_type="text/html"
+        )
+        coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
+
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await BoschCamera._async_camera_image_impl(cam)
+
+        coord.try_live_connection.assert_awaited_once_with(CAM_ID)
+        assert CAM_ID in coord._live_connections, (
+            "coalesced start (STREAM_START_SKIPPED) must NOT clear _live_connections"
+        )
+        assert CAM_ID in coord._live_opened_at, (
+            "coalesced start must NOT clear _live_opened_at"
+        )
+
 
 # ── 4. TimeoutError / ClientError → RCP thumbnail fallback ───────────────────
 

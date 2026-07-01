@@ -943,23 +943,51 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
         _LOGGER.debug(
             "FCM supervisor: listener up — polling every %.0fs", FCM_SUPERVISOR_POLL_SEC
         )
+        forced_heal = False
         try:
             while True:
                 await asyncio.sleep(FCM_SUPERVISOR_POLL_SEC)
                 fcm_client = coordinator._fcm_client
                 if fcm_client is None or not fcm_client.is_started():
                     break
+                if getattr(coordinator, "_fcm_force_hard_heal", False):
+                    # Silent-delivery-death: the poll-based fallback detected a
+                    # camera event FCM never delivered while is_started() still
+                    # reports True. Break out NOW so the top-of-loop hard-heal
+                    # fires promptly — otherwise the forced flag is only re-read
+                    # once the client independently dies, which in this exact
+                    # scenario (the whole reason the flag exists) may not happen
+                    # for a long time, or ever. (bug-hunt 2026-07-01)
+                    forced_heal = True
+                    _LOGGER.info(
+                        "FCM supervisor: forced hard-heal requested while listener "
+                        "still reported started — restarting to purge credentials"
+                    )
+                    break
         except asyncio.CancelledError:
             await async_stop_fcm_push(coordinator)
             _LOGGER.debug("FCM supervisor: cancelled while listener was running")
             break
 
-        _LOGGER.info("FCM supervisor: listener terminated (is_started()=False)")
+        if forced_heal:
+            _LOGGER.info("FCM supervisor: listener stopped for forced hard-heal")
+        else:
+            _LOGGER.info("FCM supervisor: listener terminated (is_started()=False)")
         await async_stop_fcm_push(coordinator)
 
         # ── Choose backoff ─────────────────────────────────────────────────
         push_received = coordinator._fcm_last_push > push_ts_before
-        if push_received:
+        if forced_heal:
+            # A hard-heal was explicitly requested (delivery-death watchdog).
+            # Restart fast so the top-of-loop credential purge happens promptly
+            # instead of sitting on an escalated backoff delay. The flag is left
+            # set for the top of the loop to consume. (bug-hunt 2026-07-01)
+            delay = FCM_SUPERVISOR_BACKOFF_SEC[0]
+            _LOGGER.info(
+                "FCM supervisor: applying forced hard-heal — fast restart in %.0fs",
+                delay,
+            )
+        elif push_received:
             # Listener was delivering — transient drop; fast restart, reset counters.
             failures = 0
             soft_streak = 0

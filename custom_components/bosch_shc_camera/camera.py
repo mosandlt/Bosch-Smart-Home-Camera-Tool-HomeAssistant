@@ -1102,7 +1102,22 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         age,
                     )
                     new_live = await self.coordinator.try_live_connection(self._cam_id)
-                    if new_live:
+                    if new_live is STREAM_START_SKIPPED:
+                        # Another start for this camera is already in flight — it
+                        # will publish the session. This is NOT a failure and the
+                        # in-flight start owns _live_connections/_live_opened_at:
+                        # popping here would delete a concurrent renewal's fresh
+                        # session and kill the stream + any Frigate front-door
+                        # reading its creds. Leave the state untouched. This was
+                        # the one snapshot-recovery call site missing the
+                        # `is STREAM_START_SKIPPED` guard used at camera.py play_stream
+                        # and switch.py turn-on. (bug-hunt 2026-07-01)
+                        _LOGGER.debug(
+                            "%s: snapshot renewal coalesced into an in-progress "
+                            "start — keeping live session",
+                            self._display_name,
+                        )
+                    elif new_live:
                         new_proxy_url = new_live.get("proxyUrl", "")
                         if new_proxy_url:
                             try:

@@ -1788,18 +1788,45 @@ class _BoschAudioDetectionSwitchBase(_BoschSwitchBase):
         # other camera-config endpoints) — warn the user visibly.
         if await _warn_if_privacy_on(self, "Audio detection"):
             return
-        cfg = dict(self._config)
-        if not cfg:
-            return
-        cfg[self._field] = value
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "audioDetectionConfig", cfg
-        )
-        if success:
-            self.coordinator._audio_detection_cache[self._cam_id] = cfg
-            # Guard the next slow-tier poll from reverting the optimistic value
-            # while the cloud write is still propagating.
-            self.coordinator._audio_detection_set_at[self._cam_id] = time.monotonic()
+        # Serialize the read-modify-write per camera. audioDetectionConfig
+        # REQUIRES both fields in every PUT, so toggling glass-break and
+        # fire-alarm concurrently (a single scene targeting both switches) would
+        # each build their body from a pre-toggle snapshot and re-send the OTHER
+        # field's stale value — reverting it in cache AND on the camera. The lock
+        # makes each write read a cache that already holds the sibling's result,
+        # and we merge only our own field back (never the whole entry).
+        # (bug-hunt 2026-07-01)
+        locks = getattr(self.coordinator, "_audio_detection_locks", None)
+        if locks is None:
+            locks = {}
+            self.coordinator._audio_detection_locks = locks
+        lock = locks.get(self._cam_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            locks[self._cam_id] = lock
+        async with lock:
+            # Snapshot INSIDE the lock so it reflects a sibling write that just
+            # completed.
+            cfg = dict(self._config)
+            if not cfg:
+                return
+            cfg[self._field] = value
+            success = await self.coordinator.async_put_camera(
+                self._cam_id, "audioDetectionConfig", cfg
+            )
+            if success:
+                # Merge only our own field into the live cache rather than
+                # overwriting the whole entry, so a concurrent sibling toggle
+                # isn't clobbered.
+                cur = self.coordinator._audio_detection_cache.setdefault(
+                    self._cam_id, {}
+                )
+                cur[self._field] = value
+                # Guard the next slow-tier poll from reverting the optimistic
+                # value while the cloud write is still propagating.
+                self.coordinator._audio_detection_set_at[self._cam_id] = (
+                    time.monotonic()
+                )
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:

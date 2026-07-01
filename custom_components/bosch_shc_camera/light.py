@@ -282,55 +282,79 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
         token = self.coordinator.token
         if not token:
             return False
-        # Build full body: start with current state, then apply updates
-        body = self._get_current_state()
-        for key, val in updates.items():
-            if key in body:
-                body[key] = {**body[key], **val}  # merge, not replace
-            else:
-                body[key] = val
-        session = await async_get_bosch_cloud_session(self.hass)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
-        try:
-            async with asyncio.timeout(10):
-                async with session.put(
-                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
-                    headers=headers,
-                    json=body,
-                ) as resp:
-                    if resp.status in (200, 201, 204):
-                        # Update cache with response body (200/201) OR fall back to
-                        # the optimistic local `body` we sent (204 No Content).
-                        #
-                        # BUG-FIX 2026-05-28: The /lighting/switch endpoint returns
-                        # 204 No Content (empty body). The old code called resp.json()
-                        # which raised → except swallowed it → cache was never updated
-                        # → _load_state_from_cache() kept reading brightness=0 → is_on
-                        # stayed False even after a successful write.
-                        try:
-                            rsp = await resp.json(content_type=None)
-                            if rsp and isinstance(rsp, dict):
-                                self.coordinator._lighting_switch_cache[
-                                    self._cam_id
-                                ] = rsp
-                            else:
-                                # Empty JSON or non-dict → treat as no-content, use body
-                                self.coordinator._lighting_switch_cache[
-                                    self._cam_id
-                                ] = body
-                        except Exception:
-                            # 204 No Content or unparseable → update cache from sent body
-                            self.coordinator._lighting_switch_cache[self._cam_id] = body
-                        return True
-                    _LOGGER.warning(
-                        "lighting/switch HTTP %d for %s", resp.status, self._cam_id[:8]
-                    )
-        except Exception as err:
-            _LOGGER.warning("lighting/switch error for %s: %s", self._cam_id[:8], err)
-        return False
+        # Serialize the read-modify-write per camera. /lighting/switch REQUIRES
+        # the full 3-group body in every PUT, so two concurrent sibling writes
+        # (e.g. a scene toggling Top + Bottom LED, or Front + white-balance) that
+        # each build their body from a pre-write cache snapshot would each
+        # re-send the OTHER group's stale value — reverting it both in the cache
+        # AND on the actual camera. The lock makes each write build its body from
+        # a cache that already contains the prior write's result, and we merge
+        # only the changed group(s) back (never the whole entry). Matches the
+        # merge-only-own-key fix number.py already got in 2026-06-02.
+        # (bug-hunt 2026-07-01)
+        locks = getattr(self.coordinator, "_lighting_switch_locks", None)
+        if locks is None:
+            locks = {}
+            self.coordinator._lighting_switch_locks = locks
+        lock = locks.get(self._cam_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            locks[self._cam_id] = lock
+        async with lock:
+            # Build full body INSIDE the lock so it reflects any sibling write
+            # that just completed.
+            body = self._get_current_state()
+            for key, val in updates.items():
+                if key in body:
+                    body[key] = {**body[key], **val}  # merge, not replace
+                else:
+                    body[key] = val
+            session = await async_get_bosch_cloud_session(self.hass)
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            try:
+                async with asyncio.timeout(10):
+                    async with session.put(
+                        f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
+                        headers=headers,
+                        json=body,
+                    ) as resp:
+                        if resp.status in (200, 201, 204):
+                            # /lighting/switch returns 204 No Content (empty body);
+                            # 200/201 would carry authoritative JSON. Prefer the
+                            # server body when present, else the optimistic `body`
+                            # we sent. (BUG-FIX 2026-05-28: the old resp.json() on a
+                            # 204 raised → swallowed → cache never updated → is_on
+                            # stuck False.)
+                            try:
+                                rsp = await resp.json(content_type=None)
+                            except Exception:
+                                rsp = None
+                            authoritative = (
+                                rsp if (rsp and isinstance(rsp, dict)) else body
+                            )
+                            # Merge ONLY the group(s) we changed into the live
+                            # cache — never overwrite the whole entry, or a sibling
+                            # group written concurrently would be clobbered.
+                            cur = self.coordinator._lighting_switch_cache.setdefault(
+                                self._cam_id, {}
+                            )
+                            for key in updates:
+                                if key in authoritative:
+                                    cur[key] = authoritative[key]
+                            return True
+                        _LOGGER.warning(
+                            "lighting/switch HTTP %d for %s",
+                            resp.status,
+                            self._cam_id[:8],
+                        )
+            except Exception as err:
+                _LOGGER.warning(
+                    "lighting/switch error for %s: %s", self._cam_id[:8], err
+                )
+            return False
 
     async def _put_switch_endpoint(self, endpoint: str, enabled: bool) -> bool:
         """Send PUT /lighting/switch/front or /topdown."""

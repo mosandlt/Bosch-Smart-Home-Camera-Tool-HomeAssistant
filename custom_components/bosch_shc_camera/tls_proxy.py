@@ -85,8 +85,13 @@ def start_tls_proxy(
                     (cam_host, cam_port), timeout=TIMEOUT_TLS_PROXY_CONNECT
                 )
                 # TCP keep-alive: prevent OS from dropping idle connections.
-                raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                # SO_KEEPALIVE joins the platform-specific opts in the same
+                # guard — an OSError here is a benign keep-alive tuning failure,
+                # not a connect failure, so it must not fall through to the
+                # outer except and be miscounted toward the circuit breaker.
+                # (bug-hunt 2026-07-01)
                 try:
+                    raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                     raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
                     raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
                     raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
@@ -158,9 +163,14 @@ def start_tls_proxy(
                     break
                 continue
 
-            # TCP keep-alive on client socket too (FFmpeg side)
-            client.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            # TCP keep-alive on client socket too (FFmpeg side). SO_KEEPALIVE was
+            # previously OUTSIDE this try — an OSError (e.g. FFmpeg already closed
+            # its end) propagated out of the accept loop and silently killed the
+            # daemon proxy thread while _proxy_servers/port_cache still reported
+            # it alive, bypassing the on_proxy_died rebuild signal. Guard it too.
+            # (bug-hunt 2026-07-01)
             try:
+                client.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)

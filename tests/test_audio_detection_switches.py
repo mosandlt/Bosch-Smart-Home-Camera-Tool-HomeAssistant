@@ -9,6 +9,7 @@ privacy-mode write guard.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -121,3 +122,36 @@ async def test_no_write_when_cache_empty():
     sw = _make(FIRE, coord)
     await sw.async_turn_on()
     coord.async_put_camera.assert_not_awaited()
+
+
+# ── C4 regression: concurrent sibling toggles must not clobber ────────────
+async def test_concurrent_glass_and_fire_no_clobber():
+    """bug-hunt 2026-07-01: audioDetectionConfig requires BOTH fields in every
+    PUT, so a scene toggling glass-break and fire-alarm at once used to have the
+    later write re-send the other field's pre-toggle value — reverting it in
+    cache AND on the camera. The per-camera lock + merge-only-own-field must make
+    the later write read the sibling's committed result and preserve both."""
+    coord = _coord({"detectGlassBreak": False, "detectFireAlarm": False})
+    put_bodies: list[dict] = []
+
+    async def _slow_put(cid, ep, body):
+        # Yield so the sibling task starts and blocks on the lock before we
+        # commit — exactly the interleaving that used to clobber.
+        await asyncio.sleep(0)
+        put_bodies.append(dict(body))
+        return True
+
+    coord.async_put_camera = AsyncMock(side_effect=_slow_put)
+    glass = _make(GLASS, coord)
+    fire = _make(FIRE, coord)
+
+    await asyncio.gather(glass.async_turn_on(), fire.async_turn_on())
+
+    cache = coord._audio_detection_cache[CAM_ID]
+    # Neither toggle reverted the other in the cache.
+    assert cache["detectGlassBreak"] is True
+    assert cache["detectFireAlarm"] is True
+    # The second (serialized) PUT body carried the first write's committed value,
+    # so it did not revert the sibling on the camera either.
+    assert put_bodies[-1]["detectGlassBreak"] is True
+    assert put_bodies[-1]["detectFireAlarm"] is True

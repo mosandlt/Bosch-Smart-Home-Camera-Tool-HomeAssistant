@@ -657,3 +657,81 @@ async def test_front_door_rejects_client_when_connection_cap_reached() -> None:
 
     # Restore semaphore so it isn't leaked.
     server._sem.release()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# fcm.py — C2 regression (bug-hunt 2026-07-01): inner poll loop must honor
+# _fcm_force_hard_heal even while the listener still reports is_started()==True
+# (the silent-delivery-death case the flag exists for).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_supervisor_inner_poll_breaks_on_forced_hard_heal() -> None:
+    """When the delivery-death watchdog sets _fcm_force_hard_heal while the
+    listener still reports is_started()==True, the inner poll loop must break
+    promptly so the top-of-loop hard-heal fires — it must NOT wait for an
+    independent socket death that, in this exact scenario, may never come.
+
+    Before the fix the inner loop only exited on is_started()==False, so with a
+    listener that stays 'started' the supervisor never re-read the flag: the
+    forced hard-heal never happened (here: the second start / credential purge
+    below never occurs, so start_calls stays 1 and the assertion fails). The
+    sleep-call safety net prevents a regressed loop from hanging the test."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    coord = _make_supervisor_coord_with_lock(
+        {"fcm_credentials": {"gcm": "x"}}, force_hard=False
+    )
+
+    # Listener stays "started" — the silent-delivery-death case.
+    fcm_client = MagicMock()
+    fcm_client.is_started.return_value = True
+    coord._fcm_client = fcm_client
+
+    start_calls = 0
+
+    async def _start(_coord: object) -> bool:
+        nonlocal start_calls
+        start_calls += 1
+        if start_calls == 1:
+            return True  # listener "up" → enter the inner poll loop
+        # Second start == the forced hard-heal restart. Terminate the supervisor.
+        raise asyncio.CancelledError()
+
+    sleep_calls = 0
+
+    async def _sleep(*_a: object, **_k: object) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls == 1:
+            # First sleep is inside the inner poll loop: simulate the watchdog
+            # flagging delivery death while the listener still reports started.
+            coord._fcm_force_hard_heal = True
+        elif sleep_calls > 50:
+            # Safety net: a regressed inner loop that never breaks would spin
+            # here forever — abort so the test FAILS (on start_calls) not hangs.
+            raise asyncio.CancelledError()
+
+    with (
+        patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+        patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+        patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+        patch("asyncio.sleep", new=_sleep),
+    ):
+        task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert task.done()
+    # The listener never stopped (is_started stayed True) yet the supervisor
+    # restarted → the inner poll loop honored the forced hard-heal promptly.
+    assert start_calls == 2
+    # The hard-heal actually purged the credentials from the entry data.
+    coord.hass.config_entries.async_update_entry.assert_called()
+    # Flag consumed (and reset) by the top-of-loop hard-heal.
+    assert coord._fcm_force_hard_heal is False

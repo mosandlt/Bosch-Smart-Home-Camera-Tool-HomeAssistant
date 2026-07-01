@@ -411,18 +411,59 @@ class TestPutLightingSwitch:
 
     @pytest.mark.asyncio
     async def test_success_updates_cache(self):
+        """200 with a full-group body → cache adopts the server's value for the
+        CHANGED group only (merge-only-changed-key, bug-hunt 2026-07-01 — no
+        longer a wholesale replace of the entry)."""
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
+        server_response = {
+            "frontLightSettings": {
+                "brightness": 0,
+                "color": None,
+                "whiteBalance": -1.0,
+            },
+            "topLedLightSettings": {
+                "brightness": 50,
+                "color": None,
+                "whiteBalance": -1.0,
+            },
+            "bottomLedLightSettings": {
+                "brightness": 0,
+                "color": None,
+                "whiteBalance": -1.0,
+            },
+        }
 
         @asynccontextmanager
         async def _put_resp(*args, **kw):
             r = MagicMock()
             r.status = 200
-            r.json = AsyncMock(return_value={"newCacheState": True})
+            r.json = AsyncMock(return_value=server_response)
             yield r
 
         session = MagicMock()
         session.put = _put_resp
-        coord = _stub_coord()
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {
+                    "frontLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                    "topLedLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                    "bottomLedLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                }
+            }
+        )
         light = _make_light(coord)
         with patch(
             "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
@@ -433,8 +474,13 @@ class TestPutLightingSwitch:
                 {"topLedLightSettings": {"brightness": 50}},
             )
         assert ok is True
-        # Cache replaced with response body
-        assert coord._lighting_switch_cache[CAM_ID] == {"newCacheState": True}
+        # Only the changed group is taken from the response; siblings preserved.
+        assert (
+            coord._lighting_switch_cache[CAM_ID]["topLedLightSettings"]["brightness"]
+            == 50
+        )
+        assert "frontLightSettings" in coord._lighting_switch_cache[CAM_ID]
+        assert "bottomLedLightSettings" in coord._lighting_switch_cache[CAM_ID]
 
     @pytest.mark.asyncio
     async def test_500_returns_false(self):
@@ -862,5 +908,89 @@ class TestPutLightingSwitch204NoCacheUpdate:
                 },
             )
         assert ok is True
-        # Cache must be the server response object (not a copy of sent body)
-        assert coord._lighting_switch_cache[CAM_ID] is server_response
+        # The changed group adopts the server's authoritative value, but the
+        # whole cache entry is NOT wholesale-replaced by the response object —
+        # only the changed group is merged in, so a concurrently-written sibling
+        # group isn't clobbered (merge-only-changed-key, bug-hunt 2026-07-01).
+        assert (
+            coord._lighting_switch_cache[CAM_ID]["frontLightSettings"]
+            == server_response["frontLightSettings"]
+        )
+        assert coord._lighting_switch_cache[CAM_ID] is not server_response
+
+
+class TestPutLightingSwitchConcurrentNoClobber:
+    """C3 regression (bug-hunt 2026-07-01): /lighting/switch requires the full
+    3-group body, so two concurrent sibling writes (a scene toggling Top + Bottom
+    LED) that each build their body from a pre-write snapshot used to re-send the
+    OTHER group's stale value — reverting it in cache AND on the camera. The
+    per-camera lock + merge-only-changed-key must make the later write read the
+    sibling's committed result and preserve both changes."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_sibling_writes_do_not_clobber(self):
+        from custom_components.bosch_shc_camera.light import (
+            BoschBottomLedLight,
+            BoschTopLedLight,
+        )
+
+        put_bodies: list[dict] = []
+
+        @asynccontextmanager
+        async def _slow_put(url, *args, **kw):
+            # Yield so the sibling task starts (and blocks on the lock) before we
+            # commit — this is exactly the interleaving that used to clobber.
+            await asyncio.sleep(0)
+            put_bodies.append(dict(kw.get("json", {})))
+            r = MagicMock()
+            r.status = 204
+            r.json = AsyncMock(side_effect=Exception("No JSON body"))
+            yield r
+
+        session = MagicMock()
+        session.put = _slow_put
+        coord = _stub_coord(
+            _lighting_switch_cache={
+                CAM_ID: {
+                    "frontLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                    "topLedLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                    "bottomLedLightSettings": {
+                        "brightness": 0,
+                        "color": None,
+                        "whiteBalance": -1.0,
+                    },
+                }
+            }
+        )
+        top = _make_light(coord, klass=BoschTopLedLight, led_key="topLedLightSettings")
+        bottom = _make_light(
+            coord, klass=BoschBottomLedLight, led_key="bottomLedLightSettings"
+        )
+
+        with patch(
+            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await asyncio.gather(
+                top._put_lighting_switch({"topLedLightSettings": {"brightness": 50}}),
+                bottom._put_lighting_switch(
+                    {"bottomLedLightSettings": {"brightness": 70}}
+                ),
+            )
+
+        cache = coord._lighting_switch_cache[CAM_ID]
+        # Neither write reverted the other in the cache.
+        assert cache["topLedLightSettings"]["brightness"] == 50
+        assert cache["bottomLedLightSettings"]["brightness"] == 70
+        # The second (serialized) PUT body carried the first write's committed
+        # value, so it did not revert the sibling on the camera either.
+        assert put_bodies[-1]["topLedLightSettings"]["brightness"] == 50
+        assert put_bodies[-1]["bottomLedLightSettings"]["brightness"] == 70
