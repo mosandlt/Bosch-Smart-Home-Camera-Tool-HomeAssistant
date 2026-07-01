@@ -11,6 +11,7 @@ Pins the contracts so a refactor can't:
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -670,3 +671,54 @@ def test_high_switch_off_hides_high_url_even_when_low_on() -> None:
     c._frigate_low_enabled[CAM_ID] = True  # type: ignore[attr-defined]
     assert c.frigate_endpoint_url(CAM_ID, "high") is None
     assert c.frigate_endpoint_url(CAM_ID, "low") is not None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _frigate_on_idle (bug-hunt 2026-07-01, C5): the on_idle callback the front-door
+# fires after `frigate_idle_timeout`s of zero recorder clients. Must tear down
+# the on-demand LOCAL session ONLY if nothing else still needs it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _make_idle_coord(*, active_consumer: bool, live: dict | None) -> SimpleNamespace:
+    hass = SimpleNamespace(
+        async_create_task=lambda coro, name=None: asyncio.ensure_future(coro)
+    )
+    return SimpleNamespace(
+        hass=hass,
+        _bg_tasks=set(),
+        _has_active_consumer=AsyncMock(return_value=active_consumer),
+        _live_connections=({CAM_ID: live} if live is not None else {}),
+        _tear_down_live_stream=AsyncMock(),
+    )
+
+
+async def _run_on_idle(coord: SimpleNamespace) -> None:
+    Coordinator._frigate_on_idle(coord, CAM_ID)
+    task = next(iter(coord._bg_tasks))
+    await task
+
+
+async def test_frigate_on_idle_skips_teardown_when_another_consumer_is_active() -> None:
+    """An active card view / Cast / Mini-NVR keeps the session — no teardown."""
+    coord = _make_idle_coord(active_consumer=True, live={"_connection_type": "LOCAL"})
+    await _run_on_idle(coord)
+    coord._tear_down_live_stream.assert_not_called()
+
+
+async def test_frigate_on_idle_skips_teardown_when_no_local_session() -> None:
+    """No consumer, but nothing LOCAL to tear down either (REMOTE or absent)."""
+    coord = _make_idle_coord(active_consumer=False, live={"_connection_type": "REMOTE"})
+    await _run_on_idle(coord)
+    coord._tear_down_live_stream.assert_not_called()
+
+    coord2 = _make_idle_coord(active_consumer=False, live=None)
+    await _run_on_idle(coord2)
+    coord2._tear_down_live_stream.assert_not_called()
+
+
+async def test_frigate_on_idle_tears_down_local_session_when_truly_idle() -> None:
+    """No other consumer + an on-demand LOCAL session → tear it down."""
+    coord = _make_idle_coord(active_consumer=False, live={"_connection_type": "LOCAL"})
+    await _run_on_idle(coord)
+    coord._tear_down_live_stream.assert_called_once_with(CAM_ID)

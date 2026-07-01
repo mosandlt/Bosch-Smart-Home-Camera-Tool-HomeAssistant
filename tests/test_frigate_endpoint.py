@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -972,6 +973,116 @@ async def test_idle_linger_cancelled_on_reconnect_does_not_signal():
     server._idle_task.cancel()
     await asyncio.sleep(0)
     assert calls == []  # on_idle never fired — the teardown was averted
+
+
+async def test_close_cancels_pending_idle_linger():
+    """close() cancels a still-pending idle-linger task (line 537), so the
+    front-door doesn't fire a stale on_idle after it's already been stopped."""
+
+    async def _resolve(_cam_id: str) -> InnerTarget | None:
+        return None
+
+    server = fe._CameraServer(
+        "camCLOSE0", FrontDoorConfig(idle_timeout=100), _resolve, None, None
+    )
+    server._idle_task = asyncio.create_task(server._idle_linger())
+    await asyncio.sleep(0)  # let it start and reach the 100s sleep
+    pending = server._idle_task
+
+    server.close()
+
+    assert server._idle_task is None
+    # _idle_linger swallows CancelledError internally (`except ...: return`), so
+    # the task completes normally rather than reporting .cancelled() — the
+    # real signal that close() actually cancelled it is that awaiting it
+    # returns almost instantly instead of hanging for the full 100s sleep.
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.wait_for(pending, timeout=2.0)
+
+
+async def test_handle_reconnect_cancels_pending_idle_linger_via_real_connection(
+    runner,
+):
+    """C5 (bug-hunt 2026-07-01): a real client connection (not a direct
+    _idle_linger manipulation) exercises _handle's own connect-time guard
+    (line 573) that cancels a stale pending linger."""
+    calls: list[int] = []
+    async with FakeCamera() as cam:
+        target = InnerTarget(cam.port, "user", "pass")
+        port = await runner.start_server(
+            "camRECON1",
+            FrontDoorConfig(idle_timeout=100),
+            _resolver(target),
+            on_idle=lambda: calls.append(1),
+        )
+        server = runner._servers["camRECON1"]
+        server._idle_task = asyncio.create_task(server._idle_linger())
+        await asyncio.sleep(0)
+        pending = server._idle_task
+
+        resp = await _client_request(
+            port, b"DESCRIBE rtsp://127.0.0.1/rtsp_tunnel RTSP/1.0\r\nCSeq: 1\r\n\r\n"
+        )
+        assert resp.startswith(b"RTSP/1.0 200 OK")
+
+        # _idle_linger swallows CancelledError (`except ...: return`), so it
+        # completes normally rather than reporting .cancelled() — the real
+        # proof it was actually cancelled is that this returns almost
+        # instantly instead of hanging for the full 100s idle_timeout.
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait_for(pending, timeout=2.0)
+        assert calls == []  # the stale linger's on_idle never fired
+
+
+async def test_handle_finally_cancels_stale_idle_task_at_zero_clients(runner):
+    """Defensive guard (line 595) distinct from the connect-time one (line 573):
+    if a pending idle-linger task is still set at the exact moment client_count
+    reaches zero in _handle's finally block — e.g. another client disconnected
+    while this one was still being served, so this connection's own connect
+    saw client_count go 1->2 and skipped the connect-time clear — it must still
+    be cancelled before a fresh linger is armed."""
+    calls: list[int] = []
+    async with FakeCamera() as cam:
+        target = InnerTarget(cam.port, "user", "pass")
+        port = await runner.start_server(
+            "camRACE001",
+            FrontDoorConfig(idle_timeout=100),
+            _resolver(target),
+            on_idle=lambda: calls.append(1),
+        )
+        server = runner._servers["camRACE001"]
+        # Simulate another client already connected, so this connection's own
+        # connect-time check sees client_count go 1->2 (not 0->1) and skips the
+        # line-573 guard entirely, leaving this stale task untouched.
+        server.client_count = 1
+        server._idle_task = asyncio.create_task(server._idle_linger())
+        await asyncio.sleep(0)
+        stale = server._idle_task
+
+        orig_serve = server._serve
+
+        async def _serve_and_drop_other_client(reader, writer, peer_ip):
+            # The "other" client disconnects while this one is still being served.
+            server.client_count -= 1
+            await orig_serve(reader, writer, peer_ip)
+
+        server._serve = _serve_and_drop_other_client
+
+        resp = await _client_request(
+            port, b"DESCRIBE rtsp://127.0.0.1/rtsp_tunnel RTSP/1.0\r\nCSeq: 1\r\n\r\n"
+        )
+        assert resp.startswith(b"RTSP/1.0 200 OK")
+
+        # _idle_linger swallows CancelledError (`except ...: return`), so it
+        # completes normally rather than reporting .cancelled() — the real
+        # proof it was actually cancelled is that this returns almost
+        # instantly instead of hanging for the full 100s idle_timeout.
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait_for(stale, timeout=2.0)
+        assert calls == []  # the stale linger's on_idle never fired
+        assert server.client_count == 0
+        assert server._idle_task is not None
+        assert server._idle_task is not stale
 
 
 # ─────────────────────────────────────────────────────────────────────────────
