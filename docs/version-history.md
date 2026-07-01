@@ -2,6 +2,12 @@
 
 Recent releases. Full changelog: [`CHANGELOG.md`](../CHANGELOG.md) or [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases).
 
+## v14.4.0 — 2026-07-01
+
+Minor — bug-hunt round: 5 backend/card reliability fixes + `frigate_idle_timeout` wired up as a real feature.
+
+`frigate_idle_timeout` (documented since v14.1.0, "set 0 to close immediately") was a complete no-op — nothing read the option and the on-demand front door had no idle signalling. `_CameraServer` now arms a cancellable idle-linger task on the last client disconnecting, tearing the front-door's on-demand LOCAL session down after `idle_timeout` seconds of zero clients (immediate if `<=0`); a reconnect cancels the pending linger. Reliability fixes: REMOTE-snapshot renewal could pop a concurrent renewal's live session on a coalesced `STREAM_START_SKIPPED` result (C1); FCM supervisor could delay a forced hard-heal (C2); light-group (C3) and audio-detection-switch (C4) concurrent writes clobbered each other's cache instead of merging; TLS-proxy `SO_KEEPALIVE` sat outside its try/except and could silently kill the proxy thread on an `OSError` (P3); card dead-track watchdog counted hidden-tab time toward its deadline, risking a false sticky-HLS after a quick tab switch (C6); hls.js fatal `MEDIA_ERROR` recovery was unbounded, now capped at 3 like the `NETWORK_ERROR` path (P1). Also: the release workflow now gates on CI (tests/quality/validate/secret-scan) before creating a release. CARD_VERSION 14.1.2 → 14.1.3. 5530 pytest / mypy --strict / ruff / codespell / pylint clean, 225/225 e2e green.
+
 ## v14.3.1 — 2026-06-29
 
 Patch — **stops diagnostic entities from bloating the recorder database** (#39).

@@ -5,6 +5,30 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.0] - 2026-07-01
+
+Minor — bug-hunt round with 5 backend/card reliability fixes plus one new working feature: `frigate_idle_timeout` (previously a documented no-op) now actually lingers and tears down idle external-recorder sessions.
+
+### New feature
+
+- **`frigate_idle_timeout` now works.** The option has been documented in 12 languages ("set 0 to close immediately") since it was introduced, but nothing ever read it and the on-demand external-recorder front door had no idle signalling wired up at all. `_CameraServer` (`frigate_endpoint.py`) now arms a cancellable idle-linger task when the last recorder client disconnects; it waits `idle_timeout` seconds of continuous zero clients before tearing the front-door's on-demand LOCAL session down (immediately if `idle_timeout<=0`). A reconnecting client (e.g. a recorder briefly dropping at a segment boundary) cancels the pending linger so the session isn't thrashed.
+
+### Reliability fixes
+
+- **REMOTE-snapshot renewal could kill a healthy stream (C1).** `_async_camera_image_impl`'s 401/403 renewal path treated a coalesced `STREAM_START_SKIPPED` result the same as a real failure and popped `_live_connections`/`_live_opened_at`, deleting a concurrent renewal's fresh session — killing the stream and the Frigate front-door with it. Now guarded the same way the `play_stream`/switch-turn-on paths already were.
+- **FCM supervisor could miss a forced hard-heal (C2).** The inner poll loop only checked `is_started()` and never re-read `_fcm_force_hard_heal`, so in the "socket says started but pushes are silently dead" case the flag could sit unacted-on. The loop now breaks on the flag and fast-restarts so the top-of-loop credential purge runs promptly.
+- **Concurrent light-group writes clobbered each other (C3).** `_put_lighting_switch` overwrote the whole `_lighting_switch_cache` entry on success instead of merging only the changed group — a scene toggling Top+Bottom LEDs could revert each other both in cache and on the camera. Fixed with a per-camera lock + merge-only-own-key, matching the fix `number.py` already had.
+- **Same clobber on the glass-break/fire-alarm switches (C4).** `_BoschAudioDetectionSwitchBase._set_detection` had the identical whole-entry overwrite on `_audio_detection_cache`; same per-camera-lock fix applied.
+- **TLS-proxy keepalive could silently kill the proxy thread (P3).** `setsockopt(SO_KEEPALIVE)` sat outside its try/except in `tls_proxy.py`; an `OSError` (FFmpeg closing its end) propagated out of the accept loop and killed the daemon proxy thread while `port_cache` still reported it alive, bypassing `on_proxy_died`. Both `SO_KEEPALIVE` calls moved inside their existing guard.
+- **Card: dead-track watchdog could false-fire after a quick tab switch (C6).** The 9s dead-track deadline was measured against wall-clock time; a poll re-armed while the tab was hidden but the deadline kept counting in the background, so a quick alt-tab right after opening a live view could land back past the deadline on a single 0-frames sample and force sticky HLS on a perfectly healthy WebRTC stream. Now only *visible* elapsed time accrues toward the deadline.
+- **Card: unbounded HLS MEDIA_ERROR recovery loop (P1).** hls.js's fatal `MEDIA_ERROR` path called `recoverMediaError()` without a bound (unlike the `NETWORK_ERROR` path, which already capped at 3). A persistently corrupt segment could loop forever, silently frozen. Now bounded to 3 attempts, then falls through to the same full-reconnect the other fatal error paths use.
+
+Also: the tag-triggered Release workflow now gates on `tests.yml`/`quality.yml`/`validate.yml`/`secret-scan.yml` concluding green on the same commit before creating a release, and release titles are `vX.Y.Z — <summary>` instead of a bare version number.
+
+CARD_VERSION bumped 14.1.2 → 14.1.3 (dead-track deadline + bounded MEDIA_ERROR fixes).
+
+5530 pytest / mypy --strict / ruff / codespell / pylint clean. 225/225 card e2e (Firefox + WebKit) green.
+
 ## [v14.3.1] - 2026-06-29
 
 Patch — **stops the diagnostic entities from bloating the recorder database** (reported in #39).

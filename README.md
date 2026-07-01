@@ -2154,11 +2154,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.2.0** — see the GitHub release page for full notes:
-[**v14.2.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.2.0)
+Latest: **v14.4.0** — see the GitHub release page for full notes:
+[**v14.4.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.4.0)
 
 | Version | Highlights |
 |---|---|
+| **v14.4.0** | **`frigate_idle_timeout` now actually works, plus a reliability round.** The external-recorder idle-timeout option (documented since v14.1.0) was a no-op until now — it properly lingers and tears down an idle on-demand session. Also fixes: a REMOTE-snapshot renewal race that could kill a healthy stream, a delayed FCM hard-heal, concurrent light-group and audio-detection switch writes clobbering each other, a TLS-proxy keepalive that could silently kill the proxy thread, a card dead-track watchdog false-positive after a quick tab switch, and an unbounded HLS `MEDIA_ERROR` recovery loop. |
 | **v14.2.0** | **Glass-break and smoke/fire-alarm sound detection for Gen2 cameras with Audio-Plus.** Two new switches — *Glass-Break Detection* and *Smoke/Fire-Alarm Detection* — appear for any Gen2 camera that supports audio analysis. Toggle them in HA just like the existing privacy or intrusion switches; the card polls the `audioDetectionConfig` endpoint and keeps the two detectors in sync on every write. |
 | **v14.1.2** | **WebRTC now works in the iOS Companion App on home Wi-Fi.** The card was immediately falling back to HLS (higher latency) when using a local `http://` address — a stale guard was throwing before WebRTC was even attempted. Removed; iOS on LAN now connects via WebRTC in the usual ~2 s. |
 | **v14.1.0** | **Record your Bosch camera in Frigate, BlueIris or go2rtc — with a persistent, credential-free RTSP endpoint.** Opt-in per camera, the integration now exposes an always-on RTSP URL you can paste straight into an external recorder: no `user:pass@`, and it no longer disappears when nobody is watching (the camera session opens on demand and the rotating Digest auth is handled for you). Enable it under *Configure → External Recorder (Frigate)*, pick *localhost-only* (default) or *whole-LAN* binding, optionally lock it down with an IP allowlist or a path-token / Basic-Auth, then turn on the per-camera *Frigate-Stream High/Low* switch and copy the URL from the matching sensor. See the [External Recorders](#external-recorders-frigate--blueiris--go2rtc) guide for a ready-to-use Frigate config. No effect unless you enable it. |

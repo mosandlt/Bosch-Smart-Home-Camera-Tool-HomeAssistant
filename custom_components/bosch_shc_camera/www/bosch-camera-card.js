@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.2";
+const CARD_VERSION = "14.1.3";
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -3060,7 +3060,24 @@ class BoschCameraCard extends HTMLElement {
               }
             }
           } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            hls.recoverMediaError();
+            this._hlsMediaErrorCount = (this._hlsMediaErrorCount || 0) + 1;
+            if (this._hlsMediaErrorCount <= 3) {
+              hls.recoverMediaError();
+            } else {
+              this._hlsMediaErrorCount = 0;
+              console.warn("bosch-camera-card: hls.js fatal MEDIA_ERROR persists, reconnecting", data);
+              this._reconnectingLiveVideo = true;
+              this._stopLiveVideo();
+              if (this._isStreaming && this._isStreaming()) {
+                setTimeout(() => {
+                  if (!this.isConnected) return;
+                  this._reconnectingLiveVideo = false;
+                  this._reconnectAfterStreamDrop();
+                }, 2e3);
+              } else {
+                this._reconnectingLiveVideo = false;
+              }
+            }
           } else {
             console.warn("bosch-camera-card: hls.js fatal error, reconnecting", data);
             this._reconnectingLiveVideo = true;
@@ -3406,23 +3423,28 @@ class BoschCameraCard extends HTMLElement {
     const FIRST_POLL_MS = 2500;
     const POLL_MS = 2e3;
     const MAX_MS = 9e3;
-    const startedAt = performance.now();
+    let visibleElapsed = 0;
+    let lastTick = performance.now();
     const poll = async () => {
       this._webrtcFirstFrameTimer = null;
       if (!this.isConnected || !this._liveVideoActive) return;
       if (this._streamTransport !== "webrtc") return;
       if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
       if (document.visibilityState !== "visible") {
+        lastTick = null;
         this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
         return;
       }
+      const nowTs = performance.now();
+      if (lastTick != null) visibleElapsed += nowTs - lastTick;
+      lastTick = nowTs;
       if (video._boschLastFrameAt != null) {
         this._webrtcRecoveryStreak = 0;
         return;
       }
       const snap = await this._webrtcStatsSnapshot();
       if (!this.isConnected || !this._liveVideoActive || this._streamTransport !== "webrtc") return;
-      const pastDeadline = performance.now() - startedAt >= MAX_MS;
+      const pastDeadline = visibleElapsed >= MAX_MS;
       if (snap == null) {
         if (pastDeadline) return;
         this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
