@@ -2,6 +2,10 @@
 
 Recent releases. Full changelog: [`CHANGELOG.md`](../CHANGELOG.md) or [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases).
 
+## v14.4.1 — 2026-07-03
+
+Patch — bug-hunt round 2. Ten hardening fixes found by a further adversarial-review pass: a lock serializing cloud-session (re)creation to prevent duplicate sessions; a Digest-auth fix so the `-SESS` algorithm variants reuse the same client nonce across both hash rounds (RFC 7616); hardened handling of malformed/unexpected RCP responses; additional FCM-supervisor guards closing a soft/hard-heal overlap window; per-camera write locks added to the intercom, audio-detection, light, and switch entities so concurrent writes serialize instead of racing; sensors now distinguish "no data yet" from "empty result" instead of collapsing both to the same state; a path-traversal guard on `media_source` requests for saved event media; a save lock on the snapshot store; a small additional gap closed in diagnostics redaction; and a card guard against double-registering listeners if `setConfig` runs again on an already-mounted card. CARD_VERSION 14.1.3 → 14.1.4. 5536 pytest / mypy --strict / ruff / codespell clean, card e2e green.
+
 ## v14.4.0 — 2026-07-01
 
 Minor — bug-hunt round: 5 backend/card reliability fixes + `frigate_idle_timeout` wired up as a real feature.

@@ -2,7 +2,7 @@
 
 Pytest suite for the Bosch Smart Home Camera HA integration.
 
-**Current state (v11.0.10):** 2978 tests across 111 files, **95% total line-coverage** — HA Gold-tier threshold met.
+**Current state (v14.4.1):** 5500+ tests across 260+ files, **100% line-coverage** — HA Platinum-tier bar (PLATINUM_DISCIPLINE). Exact current counts are in the latest [`docs/version-history.md`](../docs/version-history.md) entry, since both numbers grow with every release.
 
 Covers the HA Quality-Scale rules `config-flow-test-coverage` (Bronze), `test-coverage` (Gold).
 

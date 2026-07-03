@@ -1,7 +1,8 @@
-# PiP freezes when browser tab hidden (Chrome/Mac)
+# PiP freezes when browser tab hidden (Chrome/Mac) — RESOLVED in v14.0.0
 
 SYMPTOM: PiP active → switch browser tab → after a while PiP freezes (video stops) → return to tab → in-page `<video>` resumes but the floating PiP window stays frozen.
 PLATFORM: confirmed Chrome on macOS (Thomas 2026-06-19). v13.7.2 "PiP-freeze-hidden-tab fix" did NOT resolve it.
+STATUS: RESOLVED by **v14.0.0** (2026-06-24) — the card now keeps the HA dashboard mounted while a PiP window is open and stops running its teardown/rebuild recovery in that state, addressing this root cause directly (see `docs/version-history.md` and `pip-tabswitch-freeze-process.md` for the decision trail). Kept here for the original root-cause research.
 
 ## Root cause (two compounding factors)
 1. HIDDEN_TAB_TIMER_THROTTLING: Chrome 88+ heavily throttles `setInterval`/`setTimeout` in hidden tabs (sub-1s → 1s; chained timers → max 1×/min; intensive throttling after 5 min hidden can pause/clamp to 1×/min). Our stall detector is a 5 s `setInterval` (src/bosch-camera-card.js ~L5950). In a hidden tab it barely runs → the v13.7.2 PiP escalation (`ownsPip` → full reconnect) effectively only fires once the tab is visible again, not while hidden.

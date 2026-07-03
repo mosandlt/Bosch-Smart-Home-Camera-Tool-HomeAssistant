@@ -4,7 +4,7 @@ This document contains the architectural notes, section markers, and design rati
 
 **Source file:** [`src/bosch-camera-card.js`](../src/bosch-camera-card.js)
 
-> **Note:** Section markers and line numbers below were last extracted at v2.8.1. The card structure is unchanged but line numbers have drifted. Use `grep` on `src/bosch-camera-card.js` for exact positions. Current card version: **v2.11.7**.
+> **Note:** Section markers and line numbers below were last extracted at the card's internal header-comment version v2.8.1 — an older, since-abandoned numbering scheme kept only inside that comment block for historical reference. The card structure is largely unchanged but line numbers have drifted; use `grep` on `src/bosch-camera-card.js` for exact positions. The version number that actually matters today is `CARD_VERSION` (`src/bosch-camera-card.js`, mirrored in `custom_components/bosch_shc_camera/const.py`) — see [`docs/version-history.md`](version-history.md) for the current value.
 
 ---
 

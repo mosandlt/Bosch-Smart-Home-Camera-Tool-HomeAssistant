@@ -5,6 +5,29 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.1] - 2026-07-03
+
+Patch — bug-hunt round 2: ten hardening fixes across the cloud session, Digest auth, RCP, FCM, and the card, found by a further round of adversarial review.
+
+### Fixes
+
+- **Cloud-session race.** A lock now serializes cloud session (re)creation so two concurrent callers can no longer open duplicate sessions against the same camera.
+- **Digest auth `-SESS` cnonce.** The `MD5-sess`/`SHA-256-sess` Digest variants now reuse the same client nonce across the algorithm's two hash rounds instead of generating a fresh one, matching RFC 7616.
+- **RCP error-path hardening.** Malformed or unexpected RCP responses are now handled without raising an unguarded exception into the coordinator.
+- **FCM supervisor race guards.** Additional guards around the supervisor's soft/hard-heal transitions close a window where two heals could overlap.
+- **Per-camera write locks (intercom / audio / light / switch).** Concurrent writes to these entities now serialize per camera instead of racing.
+- **Sensor None-vs-empty semantics.** Diagnostic sensors now distinguish "no data yet" (`None`) from "empty result" instead of collapsing both to the same displayed state.
+- **`media_source` path-traversal guard.** Requests for saved event media are validated against path traversal before the file is served.
+- **Snapshot-store save lock.** Concurrent snapshot writes to the same camera's cache file are now serialized.
+- **Diagnostics redaction.** The downloadable diagnostics export closes a small additional gap in secret redaction.
+- **Card `setConfig` re-registration guard.** Calling `setConfig` again on an already-mounted card no longer double-registers its internal listeners.
+
+CARD_VERSION bumped 14.1.3 → 14.1.4.
+
+Full per-round detail: [`docs/version-history.md`](docs/version-history.md).
+
+5536 pytest / mypy --strict / ruff / codespell clean, card e2e green.
+
 ## [v14.4.0] - 2026-07-01
 
 Minor — bug-hunt round with 5 backend/card reliability fixes plus one new working feature: `frigate_idle_timeout` (previously a documented no-op) now actually lingers and tears down idle external-recorder sessions.

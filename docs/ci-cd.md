@@ -34,7 +34,7 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  L1["① pytest<br/>backend logic<br/>~4750 tests"] --> L2["② ruff · mypy<br/>codespell · CodeQL<br/>static + SAST"]
+  L1["① pytest<br/>backend logic<br/>~5500 tests"] --> L2["② ruff · mypy<br/>codespell · CodeQL<br/>static + SAST"]
   L2 --> L3["③ Playwright + mock-hass<br/>hover · theme-vars · privacy-stop<br/>audio-unmute · fullscreen"]
   L3 --> L4["④ stylelint<br/>browser-compat CSS"]
   L4 --> L5["⑤ hass-taste-test<br/>real HA loads the card"]
@@ -48,7 +48,7 @@ The suite is layered — each level catches what the cheaper one below it cannot
 
 | Layer | What it covers | How | Where |
 |---|---|---|---|
-| **1. Backend (Python)** | Coordinator, camera/switch/number/select/stream logic, write-paths, migrations | `pytest` + `pytest-homeassistant-custom-component` (~4750 tests) | `tests/`, CI `tests.yml` |
+| **1. Backend (Python)** | Coordinator, camera/switch/number/select/stream logic, write-paths, migrations | `pytest` + `pytest-homeassistant-custom-component` (~5500 tests) | `tests/`, CI `tests.yml` |
 | **2. Static / types / security (Python)** | Style, types, spelling, dep CVEs, SAST | ruff · mypy --strict · codespell · pip-audit · CodeQL | CI `quality.yml`, `codeql.yml` |
 | **3. Card unit + interaction** | Bundle parses, custom-elements register, idle card mounts, **hover / theme-vars / privacy-stop / audio-unmute / fullscreen single-owner** — driven by a **mock `hass`** + Playwright real-browser events | Playwright (chromium/firefox/webkit) | `test/e2e/card-smoke.spec.mjs`, CI `frontend-checks.yml` |
 | **4. Card CSS cross-browser** | Unsupported CSS per browser/OS | `stylelint` + `stylelint-browser-compat` on extracted `<style>` blocks | `npm run lint:css`, CI `frontend-checks.yml` |

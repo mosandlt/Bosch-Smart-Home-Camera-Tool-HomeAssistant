@@ -2154,11 +2154,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.4.0** — see the GitHub release page for full notes:
-[**v14.4.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.4.0)
+Latest: **v14.4.1** — see the GitHub release page for full notes:
+[**v14.4.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.4.1)
 
 | Version | Highlights |
 |---|---|
+| **v14.4.1** | **Bug-hunt round 2 — ten hardening fixes.** A lock around cloud-session (re)creation closes a duplicate-session race; the `-SESS` Digest-auth variants now reuse the correct client nonce across both hash rounds; RCP error-path handling is hardened; the FCM supervisor gets extra race guards; the intercom, audio-detection, light and switch entities get per-camera write locks so concurrent writes no longer clobber each other; diagnostic sensors distinguish "no data yet" from "empty"; a path-traversal guard on saved event media; a save lock on the snapshot store; a small diagnostics-redaction gap closed; and the card no longer double-registers listeners if `setConfig` runs twice on an already-mounted instance. |
 | **v14.4.0** | **`frigate_idle_timeout` now actually works, plus a reliability round.** The external-recorder idle-timeout option (documented since v14.1.0) was a no-op until now — it properly lingers and tears down an idle on-demand session. Also fixes: a REMOTE-snapshot renewal race that could kill a healthy stream, a delayed FCM hard-heal, concurrent light-group and audio-detection switch writes clobbering each other, a TLS-proxy keepalive that could silently kill the proxy thread, a card dead-track watchdog false-positive after a quick tab switch, and an unbounded HLS `MEDIA_ERROR` recovery loop. |
 | **v14.2.0** | **Glass-break and smoke/fire-alarm sound detection for Gen2 cameras with Audio-Plus.** Two new switches — *Glass-Break Detection* and *Smoke/Fire-Alarm Detection* — appear for any Gen2 camera that supports audio analysis. Toggle them in HA just like the existing privacy or intrusion switches; the card polls the `audioDetectionConfig` endpoint and keeps the two detectors in sync on every write. |
 | **v14.1.2** | **WebRTC now works in the iOS Companion App on home Wi-Fi.** The card was immediately falling back to HLS (higher latency) when using a local `http://` address — a stale guard was throwing before WebRTC was even attempted. Removed; iOS on LAN now connects via WebRTC in the usual ~2 s. |
@@ -2271,13 +2272,13 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v13.5.17** · HA Quality Scale **Platinum** · production-ready |
-| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.2** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
-| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.5.2** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
-| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.3** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
-| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.2-alpha** · stream-url node · 4 nodes (event / snapshot / privacy / config) |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.4.1** · HA Quality Scale **Platinum** · production-ready |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.4** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
+| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.7** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
+| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.5** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
+| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.5-alpha** · stream-url node · 4 nodes (event / snapshot / privacy / config) |
 
-Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — **v0.1.1-alpha** (dashboard + camera detail + settings) — community interest welcome
+Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — **v0.1.5-alpha** (dashboard + camera detail + settings) — community interest welcome
 
 HA stays the **reference implementation** — features land here first; the Python CLI, ioBroker Adapter and MCP Server catch up over time.
 
