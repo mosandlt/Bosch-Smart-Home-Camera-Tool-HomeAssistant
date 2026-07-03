@@ -82,6 +82,7 @@ nvQ8Em1LhUA=
 _SSL_CONTEXT: ssl.SSLContext | None = None
 _SSL_CONTEXT_LOCK: asyncio.Lock | None = None
 _SESSION_DATA_KEY = "bosch_shc_camera_cloud_session"
+_SESSION_LOCK: asyncio.Lock | None = None
 
 
 def _build_ssl_context() -> ssl.SSLContext:
@@ -122,21 +123,36 @@ async def async_get_bosch_cloud_session(hass: HomeAssistant) -> aiohttp.ClientSe
     previous ``verify_ssl=False`` sessions that accepted any certificate
     (GHSA-6qh5-x5m5-vj6v / CWE-295).
     """
+    global _SESSION_LOCK
     existing = cast("aiohttp.ClientSession | None", hass.data.get(_SESSION_DATA_KEY))
     if existing is not None and not existing.closed:
         return existing
 
-    ssl_context = await async_get_bosch_cloud_ssl_context(hass)
-    connector = aiohttp.TCPConnector(ssl=ssl_context)
-    session = aiohttp.ClientSession(connector=connector)
-    hass.data[_SESSION_DATA_KEY] = session
+    # Lazily create the lock on first call (must be on the event loop).
+    if _SESSION_LOCK is None:
+        _SESSION_LOCK = asyncio.Lock()
+    async with _SESSION_LOCK:
+        # Double-check inside the lock: another coroutine may have already
+        # built and stored the session while we awaited the lock (HA starts
+        # camera/switch/light/sensor platforms concurrently at integration
+        # setup, so this is a realistic race, not just theoretical).
+        existing = cast(
+            "aiohttp.ClientSession | None", hass.data.get(_SESSION_DATA_KEY)
+        )
+        if existing is not None and not existing.closed:
+            return existing
 
-    async def _close_session(_event: Any) -> None:
-        if not session.closed:
-            await session.close()
+        ssl_context = await async_get_bosch_cloud_ssl_context(hass)
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        session = aiohttp.ClientSession(connector=connector)
+        hass.data[_SESSION_DATA_KEY] = session
 
-    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _close_session)
-    return session
+        async def _close_session(_event: Any) -> None:
+            if not session.closed:
+                await session.close()
+
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _close_session)
+        return session
 
 
 @asynccontextmanager

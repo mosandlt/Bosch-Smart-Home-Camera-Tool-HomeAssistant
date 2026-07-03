@@ -174,6 +174,44 @@ class TestBuildDigestHeader:
         assert "nc=" not in hdr
         assert "response=" in hdr
 
+    def test_no_qop_omits_cnonce(self) -> None:
+        """Regression: RFC 2617 §3.2.2/RFC 7616 §3.4 — cnonce/nc are only
+        valid alongside qop. A prior bug sent cnonce unconditionally even on
+        the legacy no-qop branch, producing a header with a dangling
+        directive that a strict embedded HTTP stack could reject as
+        malformed (bug-hunt 2026-07-03)."""
+        challenge = _parse_digest_challenge(_digest_challenge(qop=""))
+        hdr = _build_digest_header(
+            "GET", "https://cam/snap.jpg", "user", "pass", challenge
+        )
+        assert "cnonce=" not in hdr
+
+    def test_qop_auth_includes_cnonce(self) -> None:
+        challenge = _parse_digest_challenge(_digest_challenge(qop="auth"))
+        hdr = _build_digest_header(
+            "GET", "https://cam/snap.jpg", "user", "pass", challenge
+        )
+        assert "cnonce=" in hdr
+
+    def test_sess_algorithm_without_qop_still_includes_cnonce(self) -> None:
+        """Regression: MD5-SESS/SHA-256-SESS fold cnonce into HA1 regardless
+        of qop (see HA1 computation above). Omitting cnonce from the header
+        in that case — as a naive "cnonce only with qop" fix would — leaves
+        the server unable to recompute HA1, so the response could never
+        verify. cnonce must still be disclosed whenever the algorithm is a
+        -sess variant, even without qop (bug-hunt 2026-07-03 round-1 verify)."""
+        challenge = _parse_digest_challenge(
+            _digest_challenge(qop="", algorithm="MD5-SESS")
+        )
+        hdr = _build_digest_header(
+            "GET", "https://cam/snap.jpg", "user", "pass", challenge
+        )
+        assert "cnonce=" in hdr
+        # qop/nc remain absent — they're meaningless without qop and would
+        # produce a dangling directive on a strict embedded HTTP stack.
+        assert "qop=" not in hdr
+        assert "nc=" not in hdr
+
     def test_opaque_included_when_present(self) -> None:
         challenge = _parse_digest_challenge(_digest_challenge(opaque="op99"))
         hdr = _build_digest_header(
@@ -348,9 +386,10 @@ class TestAsyncDigestRequest:
         assert result.status == 200
         _, second_kwargs = mock_session.request.call_args
         auth = second_kwargs["headers"]["Authorization"]
-        # Legacy mode must NOT include qop= or nc= in header
+        # Legacy mode must NOT include qop=, nc=, or cnonce= in header
         assert "qop=" not in auth
         assert "nc=" not in auth
+        assert "cnonce=" not in auth
 
     async def test_md5_sess_algorithm(self, mock_session: MagicMock) -> None:
         """TC-9: Algorithm MD5-sess handled correctly."""

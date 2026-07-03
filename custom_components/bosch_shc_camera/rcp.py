@@ -637,14 +637,36 @@ async def async_update_rcp_data(
                     and 0 <= minute <= 59
                     and 0 <= second <= 59
                 ):
-                    cam_dt = _dt.datetime(
-                        year, month, day, hour, minute, second, tzinfo=_dt.UTC
-                    )
-                    server_dt = _dt.datetime.now(_dt.UTC)
-                    offset = (cam_dt - server_dt).total_seconds()
-                    coordinator._rcp_clock_offset_cache[cam_id] = round(offset, 1)
-                    _LOGGER.debug("RCP clock offset for %s: %.1fs", cam_id, offset)
-                    _mark_ok("0x0a0f")
+                    try:
+                        cam_dt = _dt.datetime(
+                            year, month, day, hour, minute, second, tzinfo=_dt.UTC
+                        )
+                    except ValueError:
+                        # Per-field ranges passed but the combination isn't a
+                        # real calendar date (e.g. day=30, month=2). Without
+                        # this catch the 3-strikes counter below never sees
+                        # this failure mode, so a firmware/proxy returning
+                        # such garbage would retry every coordinator poll
+                        # forever instead of being suppressed like every
+                        # other guarded RCP field.
+                        _mark_fail("0x0a0f")
+                        _LOGGER.debug(
+                            "RCP clock for %s: invalid calendar date "
+                            "(Y=%d M=%d D=%d h=%d m=%d s=%d) — cache skipped",
+                            cam_id,
+                            year,
+                            month,
+                            day,
+                            hour,
+                            minute,
+                            second,
+                        )
+                    else:
+                        server_dt = _dt.datetime.now(_dt.UTC)
+                        offset = (cam_dt - server_dt).total_seconds()
+                        coordinator._rcp_clock_offset_cache[cam_id] = round(offset, 1)
+                        _LOGGER.debug("RCP clock offset for %s: %.1fs", cam_id, offset)
+                        _mark_ok("0x0a0f")
                 else:
                     _mark_fail("0x0a0f")
                     _LOGGER.debug(

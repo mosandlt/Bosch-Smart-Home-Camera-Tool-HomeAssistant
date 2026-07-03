@@ -282,6 +282,47 @@ class TestClockOutOfRange:
         assert coord._rcp_cmd_failures[CAM_ID].get("0x0a0f", 0) >= 1
 
 
+# ── async_update_rcp_data: clock in-range but invalid calendar date ─────────
+
+
+class TestClockInvalidCalendarDate:
+    """Regression (bug-hunt 2026-07-03): day=30, month=2 passes every
+    per-field range check (1<=month<=12, 1<=day<=31, ...) but isn't a real
+    calendar date. datetime(...) then raised ValueError, which was only
+    caught by the outer `except Exception` — bypassing _mark_fail entirely.
+    Without _mark_fail incrementing the counter, _skip()'s 3-strikes backoff
+    never engages, so a firmware/proxy returning such garbage retried the
+    clock read on every coordinator poll forever instead of being suppressed
+    like every other guarded RCP field."""
+
+    @pytest.mark.asyncio
+    async def test_invalid_calendar_date_marks_fail(self):
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        # year=2026, month=2, day=30 — all per-field ranges pass, but
+        # Feb 30 doesn't exist -> datetime() raises ValueError.
+        bad_clock = struct.pack(">HBBBBBB", 2026, 2, 30, 12, 0, 0, 0)
+
+        read_results = {
+            "0x0c22": None,
+            "0x0d00": None,
+            "0x0a0f": bad_clock,
+        }
+
+        async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
+            return read_results.get(command)
+
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert CAM_ID not in coord._rcp_clock_offset_cache
+        assert coord._rcp_cmd_failures[CAM_ID].get("0x0a0f", 0) >= 1
+
+
 # ── async_update_rcp_data: clock raw is None → _mark_fail ───────────────────
 
 

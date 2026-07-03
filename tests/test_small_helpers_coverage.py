@@ -277,6 +277,64 @@ class TestCloudSslSession:
         await cb(MagicMock())
         fake_session.close.assert_awaited_once()
 
+    async def test_concurrent_calls_create_only_one_session(self) -> None:
+        """Regression (bug-hunt 2026-07-03): async_get_bosch_cloud_session had
+        no lock, unlike its sibling async_get_bosch_cloud_ssl_context which
+        already used double-checked locking. HA starts camera/switch/light/
+        sensor platforms concurrently at integration setup, all calling this
+        helper — without a lock, two concurrent callers both see no cached
+        session, both build a fresh ClientSession+TCPConnector, and the
+        second write silently clobbers the first (discarded session stays
+        open, idle, until HA stop — log noise + wasted connector). Fix:
+        mirror the existing _SSL_CONTEXT_LOCK double-checked-locking pattern.
+        """
+        from custom_components.bosch_shc_camera import cloud_ssl
+
+        hass = _make_hass_for_cloud()
+        hass.data.pop(cloud_ssl._SESSION_DATA_KEY, None)
+
+        # Force a real yield point between the cache-miss check and the
+        # session being stored, so two concurrent callers actually interleave
+        # instead of one finishing before the other starts.
+        release = asyncio.Event()
+
+        async def _slow_ssl_context(_hass: Any) -> MagicMock:
+            await release.wait()
+            return MagicMock()
+
+        created_sessions: list[MagicMock] = []
+
+        def _make_session(*_args: Any, **_kwargs: Any) -> MagicMock:
+            session = MagicMock()
+            session.closed = False
+            created_sessions.append(session)
+            return session
+
+        with (
+            patch.object(
+                cloud_ssl, "async_get_bosch_cloud_ssl_context", new=_slow_ssl_context
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.TCPConnector",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.ClientSession",
+                side_effect=_make_session,
+            ),
+        ):
+            task_a = asyncio.create_task(cloud_ssl.async_get_bosch_cloud_session(hass))
+            task_b = asyncio.create_task(cloud_ssl.async_get_bosch_cloud_session(hass))
+            await asyncio.sleep(0)  # let both reach the awaited ssl-context call
+            release.set()
+            result_a, result_b = await asyncio.gather(task_a, task_b)
+
+        assert len(created_sessions) == 1, (
+            "concurrent callers must build exactly one ClientSession, not one each"
+        )
+        assert result_a is result_b
+        assert hass.data[cloud_ssl._SESSION_DATA_KEY] is result_a
+
     async def test_close_session_callback_skips_already_closed(self) -> None:
         """Lines 135-136: _close_session does not call close() when session is already closed."""
         from custom_components.bosch_shc_camera import cloud_ssl

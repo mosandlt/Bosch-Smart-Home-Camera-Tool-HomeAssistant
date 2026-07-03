@@ -111,8 +111,19 @@ def _build_digest_header(
         f'uri="{uri}"',
         f"algorithm={algorithm}",
         f'response="{response}"',
-        f'cnonce="{cnonce}"',
     ]
+    is_sess_algorithm = algorithm in ("MD5-SESS", "SHA-256-SESS")
+    if qop_value == "auth" or is_sess_algorithm:
+        # RFC 2617 §3.2.2 / RFC 7616 §3.4: cnonce is only valid alongside
+        # qop=auth EXCEPT it must still be disclosed for the -sess algorithm
+        # variants, which fold cnonce into HA1 above regardless of qop —
+        # omitting it there would mean the server can never recompute HA1
+        # and the response would never verify. qop/nc, however, are only
+        # meaningful (and only affect the response hash) when qop=="auth";
+        # sending them in the legacy no-qop branch produces a header with a
+        # dangling directive that a strict embedded HTTP stack may reject as
+        # malformed, looking like a credential failure.
+        parts.append(f'cnonce="{cnonce}"')
     if qop_value == "auth":
         parts.append(f"qop={qop_value}")
         parts.append(f"nc={nc}")
