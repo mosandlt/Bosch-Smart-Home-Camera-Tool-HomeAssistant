@@ -58,6 +58,7 @@ def _stub_coord(**overrides):
         _privacy_set_at={},
         _light_set_at={},
         _audio_enabled={CAM_ID: True},
+        _audio_cache={},
         _privacy_sound_cache={CAM_ID: False},
         _privacy_sound_set_at={},
         _timestamp_cache={CAM_ID: True},
@@ -410,24 +411,17 @@ class TestIntercomSwitchModePins:
 
     @pytest.mark.asyncio
     async def test_turn_on_sends_audioEnabled_true_speakerlevel(self, coord, entry):
+        """Regression (bug-hunt 2026-07-03): the body key is the API's
+        "speakerLevel" (lowercase s) — confirmed via capture 2026-04-08
+        {"audioEnabled":true,"microphoneLevel":60,"speakerLevel":80}. A
+        prior version sent "SpeakerLevel" (capital S), which the API
+        silently ignored, so speaker level 50 never actually applied."""
         sw = self._make(coord, entry)
         _bind_hass(sw)
-        mock_resp = MagicMock()
-        mock_resp.status = 204
-        mock_ctx = MagicMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_session = MagicMock()
-        mock_session.put = MagicMock(return_value=mock_ctx)
-        with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
-            new=AsyncMock(return_value=mock_session),
-        ):
-            await sw.async_turn_on()
-        _, call_kwargs = mock_session.put.call_args
-        body = call_kwargs.get("json", {})
-        assert body["audioEnabled"] is True
-        assert body["SpeakerLevel"] == 50
+        await sw.async_turn_on()
+        coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID, "audio", {"audioEnabled": True, "speakerLevel": 50}
+        )
         assert sw.is_on is True
 
     @pytest.mark.asyncio
@@ -435,22 +429,10 @@ class TestIntercomSwitchModePins:
         sw = self._make(coord, entry)
         sw._is_on = True
         _bind_hass(sw)
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_ctx = MagicMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_session = MagicMock()
-        mock_session.put = MagicMock(return_value=mock_ctx)
-        with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
-            new=AsyncMock(return_value=mock_session),
-        ):
-            await sw.async_turn_off()
-        _, call_kwargs = mock_session.put.call_args
-        body = call_kwargs.get("json", {})
-        assert body["audioEnabled"] is False
-        assert "SpeakerLevel" not in body
+        await sw.async_turn_off()
+        coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID, "audio", {"audioEnabled": False}
+        )
         assert sw.is_on is False
 
 

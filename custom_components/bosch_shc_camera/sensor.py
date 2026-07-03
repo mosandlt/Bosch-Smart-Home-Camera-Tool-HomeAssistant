@@ -1034,18 +1034,37 @@ class BoschMotionZonesSensor(_BoschSensorBase):
         self._attr_translation_key = "motion_zones"
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> int | None:
+        # Regression (bug-hunt 2026-07-03): unlike every sibling diagnostic
+        # sensor in this file (BoschRulesCountSensor, BoschAlarmCatalogSensor,
+        # etc.), this previously defaulted every cache lookup to `[]` and
+        # returned `len([])` == 0 even before any of the 3 sources had ever
+        # been fetched — reporting a confirmed "0 zones" state (with the
+        # misleading "No motion zones configured" attribute note) instead of
+        # unknown/unavailable during the window before the first successful
+        # fetch, or on a camera where it never succeeds. Distinguish
+        # "not yet fetched" (None) from "fetched, zero zones" ([]) per source.
+        gen2_zones = self.coordinator._gen2_zones_cache.get(self._cam_id)
+        cloud_zones = self.coordinator._cloud_zones_cache.get(self._cam_id)
+        zones = self.coordinator._rcp_motion_zones_cache.get(self._cam_id)
+        if gen2_zones is None and cloud_zones is None and zones is None:
+            return None
         # Gen2 polygon zones take priority
-        gen2_zones = self.coordinator._gen2_zones_cache.get(self._cam_id, [])
-        if len(gen2_zones) > 0:
+        if gen2_zones:
             return len(gen2_zones)
         # Then cloud zones (Gen1 rectangles)
-        cloud_zones = self.coordinator._cloud_zones_cache.get(self._cam_id, [])
-        if len(cloud_zones) > 0:
+        if cloud_zones:
             return len(cloud_zones)
         # Fallback to RCP
-        zones = self.coordinator._rcp_motion_zones_cache.get(self._cam_id, [])
-        return len(zones)
+        return len(zones or [])
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and (
+            self.coordinator._gen2_zones_cache.get(self._cam_id) is not None
+            or self.coordinator._cloud_zones_cache.get(self._cam_id) is not None
+            or self.coordinator._rcp_motion_zones_cache.get(self._cam_id) is not None
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1236,14 +1255,27 @@ class BoschPrivateAreasSensor(_BoschSensorBase):
         self._attr_translation_key = "privacy_masks"
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> int | None:
+        # Regression (bug-hunt 2026-07-03): see BoschMotionZonesSensor —
+        # this defaulted both cache lookups to `[]` and returned a
+        # confirmed "0 masks" (with a misleading "no masks configured"
+        # attribute note) even before either source had ever been fetched.
+        gen2_areas = self.coordinator._gen2_private_areas_cache.get(self._cam_id)
+        cloud_masks = self.coordinator._cloud_privacy_masks_cache.get(self._cam_id)
+        if gen2_areas is None and cloud_masks is None:
+            return None
         # Gen2 polygon private areas take priority
-        gen2_areas = self.coordinator._gen2_private_areas_cache.get(self._cam_id, [])
-        if len(gen2_areas) > 0:
+        if gen2_areas:
             return len(gen2_areas)
         # Gen1 cloud privacy masks
-        cloud_masks = self.coordinator._cloud_privacy_masks_cache.get(self._cam_id, [])
-        return len(cloud_masks)
+        return len(cloud_masks or [])
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and (
+            self.coordinator._gen2_private_areas_cache.get(self._cam_id) is not None
+            or self.coordinator._cloud_privacy_masks_cache.get(self._cam_id) is not None
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

@@ -332,6 +332,82 @@ class TestNativeUnitProperties:
         assert s.native_unit_of_measurement == "masks"
 
 
+# ── BoschMotionZonesSensor / BoschPrivateAreasSensor — unfetched vs empty ──
+# Regression (bug-hunt 2026-07-03): unlike every sibling diagnostic sensor in
+# this file (BoschRulesCountSensor et al.), these two previously defaulted
+# every cache lookup to `[]` and reported a confirmed "0 zones/masks" state
+# (plus a misleading "not configured" attribute note) even before any source
+# had ever been fetched, instead of unknown/unavailable.
+
+
+class TestMotionZonesSensorAvailability:
+    def test_none_when_no_source_ever_fetched(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
+
+        s = BoschMotionZonesSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value is None
+        assert s.available is False
+
+    def test_zero_when_fetched_but_empty(self, stub_coord, stub_entry):
+        """Once a source HAS been fetched (even to an empty list), 0 is a
+        real, distinguishable value — not the same as "never fetched"."""
+        from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
+
+        stub_coord._rcp_motion_zones_cache[CAM_ID] = []
+        s = BoschMotionZonesSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == 0
+        assert s.available is True
+
+    def test_gen2_zones_take_priority(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
+
+        stub_coord._gen2_zones_cache[CAM_ID] = [{"points": []}, {"points": []}]
+        stub_coord._cloud_zones_cache[CAM_ID] = [{"x": 0}]
+        s = BoschMotionZonesSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == 2
+
+    def test_cloud_zones_fallback(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
+
+        stub_coord._cloud_zones_cache[CAM_ID] = [{"x": 0}, {"x": 1}, {"x": 2}]
+        stub_coord._rcp_motion_zones_cache[CAM_ID] = [{"legacy": True}]
+        s = BoschMotionZonesSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == 3
+
+    def test_unavailable_when_coordinator_update_failed(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
+
+        stub_coord._rcp_motion_zones_cache[CAM_ID] = []
+        stub_coord.last_update_success = False
+        s = BoschMotionZonesSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.available is False
+
+
+class TestPrivateAreasSensorAvailability:
+    def test_none_when_no_source_ever_fetched(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.sensor import BoschPrivateAreasSensor
+
+        s = BoschPrivateAreasSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value is None
+        assert s.available is False
+
+    def test_zero_when_fetched_but_empty(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.sensor import BoschPrivateAreasSensor
+
+        stub_coord._cloud_privacy_masks_cache[CAM_ID] = []
+        s = BoschPrivateAreasSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == 0
+        assert s.available is True
+
+    def test_gen2_areas_take_priority(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.sensor import BoschPrivateAreasSensor
+
+        stub_coord._gen2_private_areas_cache[CAM_ID] = [{"points": []}]
+        stub_coord._cloud_privacy_masks_cache[CAM_ID] = [{"x": 0}, {"x": 1}]
+        s = BoschPrivateAreasSensor(stub_coord, CAM_ID, stub_entry)
+        assert s.native_value == 1
+
+
 # ── L1142 / L1147 / L1161 / L1163 / L1168-1175 — AmbientLightSchedule ──────
 
 

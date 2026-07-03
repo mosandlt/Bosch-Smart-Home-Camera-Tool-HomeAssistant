@@ -27,7 +27,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .base import _BoschEntityBase
-from .guards import _is_gen2_indoor, _warn_if_privacy_on
+from .guards import _get_cam_lock, _is_gen2_indoor, _warn_if_privacy_on
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -201,22 +201,33 @@ class BoschSpeakerLevelNumber(_BoschEntityBase, NumberEntity):  # type: ignore[m
         Sends full audio body (preserves audioEnabled + microphoneLevel) so
         existing audio settings are not clobbered. Uses async_put_camera for
         consistent token-refresh handling.
+
+        Serialized on a per-camera lock shared with BoschMicrophoneLevelNumber
+        and BoschIntercomSwitch (same /audio endpoint, same _audio_cache) so a
+        concurrent write to a sibling field can't be clobbered by a stale
+        snapshot taken before the lock (bug-hunt 2026-07-03; the merge-only
+        -own-field step below already existed since 2026-06-02, but without a
+        lock the READ before it could still race).
         """
         level = round(value)
-        audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
-        audio["speakerLevel"] = level
-        success = await self.coordinator.async_put_camera(self._cam_id, "audio", audio)
-        if success:
-            # Merge only the changed field so a concurrent microphone write
-            # isn't clobbered by our stale snapshot (bug-hunt 2026-06-02).
-            self.coordinator._audio_cache.setdefault(self._cam_id, {})[
-                "speakerLevel"
-            ] = level
-            _LOGGER.debug("Speaker level set to %d for %s", level, self._cam_id)
-        else:
-            _LOGGER.warning(
-                "Failed to set speaker level for %s: HTTP error", self._cam_id
+        lock = _get_cam_lock(self.coordinator, "_audio_config_locks", self._cam_id)
+        async with lock:
+            audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
+            audio["speakerLevel"] = level
+            success = await self.coordinator.async_put_camera(
+                self._cam_id, "audio", audio
             )
+            if success:
+                # Merge only the changed field so a concurrent microphone
+                # write isn't clobbered by our stale snapshot.
+                self.coordinator._audio_cache.setdefault(self._cam_id, {})[
+                    "speakerLevel"
+                ] = level
+                _LOGGER.debug("Speaker level set to %d for %s", level, self._cam_id)
+            else:
+                _LOGGER.warning(
+                    "Failed to set speaker level for %s: HTTP error", self._cam_id
+                )
         self.async_write_ha_state()
 
 
@@ -411,14 +422,22 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
             self, "Mikrofon-Lautstärke"
         ):
             return
-        audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
-        audio["microphoneLevel"] = round(value)
-        success = await self.coordinator.async_put_camera(self._cam_id, "audio", audio)
-        if success:
-            # Merge only the changed field (see speaker-level note).
-            self.coordinator._audio_cache.setdefault(self._cam_id, {})[
-                "microphoneLevel"
-            ] = round(value)
+        level = round(value)
+        # Serialized on the same per-camera lock as BoschSpeakerLevelNumber
+        # and BoschIntercomSwitch — see that class's docstring (bug-hunt
+        # 2026-07-03).
+        lock = _get_cam_lock(self.coordinator, "_audio_config_locks", self._cam_id)
+        async with lock:
+            audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
+            audio["microphoneLevel"] = level
+            success = await self.coordinator.async_put_camera(
+                self._cam_id, "audio", audio
+            )
+            if success:
+                # Merge only the changed field (see speaker-level note).
+                self.coordinator._audio_cache.setdefault(self._cam_id, {})[
+                    "microphoneLevel"
+                ] = level
         self.async_write_ha_state()
 
 

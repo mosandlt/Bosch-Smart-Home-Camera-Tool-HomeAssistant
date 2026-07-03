@@ -74,6 +74,7 @@ def _stub_coord(**overrides):
         _privacy_set_at={},
         _light_set_at={},
         _audio_enabled={CAM_ID: True},
+        _audio_cache={},
         _privacy_sound_cache={CAM_ID: False},
         _privacy_sound_set_at={},
         _timestamp_cache={CAM_ID: True},
@@ -686,86 +687,123 @@ class TestIntercomSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_on_success_sets_is_on(self, stub_coord, stub_entry):
-        """Lines 898-922: successful PUT sets _is_on=True."""
+        """Successful async_put_camera sets _is_on=True."""
         from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
 
         sw = BoschIntercomSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
-        mock_resp = MagicMock()
-        mock_resp.status = 204
-        mock_ctx = MagicMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_session = MagicMock()
-        mock_session.put = MagicMock(return_value=mock_ctx)
-        with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
-            new=AsyncMock(return_value=mock_session),
-        ):
-            await sw.async_turn_on()
+        await sw.async_turn_on()
         assert sw._is_on is True
         sw.async_write_ha_state.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_turn_off_success_sets_is_on_false(self, stub_coord, stub_entry):
-        """Lines 924-948: successful PUT sets _is_on=False."""
+        """Successful async_put_camera sets _is_on=False."""
         from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
 
         sw = BoschIntercomSwitch(stub_coord, CAM_ID, stub_entry)
         sw._is_on = True
         _bind_hass(sw)
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_ctx = MagicMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_session = MagicMock()
-        mock_session.put = MagicMock(return_value=mock_ctx)
-        with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
-            new=AsyncMock(return_value=mock_session),
-        ):
-            await sw.async_turn_off()
+        await sw.async_turn_off()
         assert sw._is_on is False
 
     @pytest.mark.asyncio
-    async def test_turn_on_exception_does_not_raise(self, stub_coord, stub_entry):
-        """Lines 920-922: exception inside try/except swallowed, async_write_ha_state still called."""
+    async def test_turn_on_failure_does_not_raise(self, stub_coord, stub_entry):
+        """async_put_camera returning False must not raise, and must still
+        call async_write_ha_state."""
         from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
 
+        stub_coord.async_put_camera = AsyncMock(return_value=False)
         sw = BoschIntercomSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
-        # Exception must be raised inside the try block (from session.put), not before it
-        failing_ctx = MagicMock()
-        failing_ctx.__aenter__ = AsyncMock(side_effect=Exception("network error"))
-        failing_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_session = MagicMock()
-        mock_session.put = MagicMock(return_value=failing_ctx)
-        with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
-            new=AsyncMock(return_value=mock_session),
-        ):
-            await sw.async_turn_on()  # must not raise
+        await sw.async_turn_on()  # must not raise
+        assert sw._is_on is False
         sw.async_write_ha_state.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_turn_off_exception_does_not_raise(self, stub_coord, stub_entry):
-        """Lines 946-948: exception swallowed in turn_off."""
+    async def test_turn_off_failure_does_not_raise(self, stub_coord, stub_entry):
+        """async_put_camera returning False must not raise on turn_off."""
         from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
 
+        stub_coord.async_put_camera = AsyncMock(return_value=False)
+        sw = BoschIntercomSwitch(stub_coord, CAM_ID, stub_entry)
+        sw._is_on = True
+        _bind_hass(sw)
+        await sw.async_turn_off()  # must not raise
+        assert sw._is_on is True  # unchanged — the write failed
+        sw.async_write_ha_state.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_turn_on_uses_correct_field_casing_and_preserves_mic_level(
+        self, stub_coord, stub_entry
+    ):
+        """Regression (bug-hunt 2026-07-03): a prior version sent the wrong
+        JSON key casing ("SpeakerLevel" instead of the API's "speakerLevel",
+        confirmed via capture 2026-04-08: {"audioEnabled":true,
+        "microphoneLevel":60,"speakerLevel":80}) — silently ignored by the
+        API, so speaker level 50 never actually applied. It also sent a
+        partial body that omitted microphoneLevel entirely."""
+        from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
+
+        stub_coord._audio_cache[CAM_ID] = {
+            "audioEnabled": False,
+            "microphoneLevel": 60,
+            "speakerLevel": 20,
+        }
         sw = BoschIntercomSwitch(stub_coord, CAM_ID, stub_entry)
         _bind_hass(sw)
-        failing_ctx = MagicMock()
-        failing_ctx.__aenter__ = AsyncMock(side_effect=Exception("network error"))
-        failing_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_session = MagicMock()
-        mock_session.put = MagicMock(return_value=failing_ctx)
-        with patch(
-            "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
-            new=AsyncMock(return_value=mock_session),
-        ):
-            await sw.async_turn_off()
-        sw.async_write_ha_state.assert_called_once()
+        await sw.async_turn_on()
+
+        stub_coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID,
+            "audio",
+            {"audioEnabled": True, "microphoneLevel": 60, "speakerLevel": 50},
+        )
+
+    @pytest.mark.asyncio
+    async def test_turn_on_updates_shared_audio_cache(self, stub_coord, stub_entry):
+        """Regression: the prior implementation never wrote back to
+        _audio_cache, leaving BoschSpeakerLevelNumber/BoschMicrophoneLevelNumber's
+        cached view permanently stale after every intercom toggle."""
+        from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
+
+        stub_coord._audio_cache[CAM_ID] = {
+            "audioEnabled": False,
+            "microphoneLevel": 60,
+            "speakerLevel": 20,
+        }
+        sw = BoschIntercomSwitch(stub_coord, CAM_ID, stub_entry)
+        _bind_hass(sw)
+        await sw.async_turn_on()
+
+        assert stub_coord._audio_cache[CAM_ID]["audioEnabled"] is True
+        assert stub_coord._audio_cache[CAM_ID]["speakerLevel"] == 50
+        # microphoneLevel untouched
+        assert stub_coord._audio_cache[CAM_ID]["microphoneLevel"] == 60
+
+    @pytest.mark.asyncio
+    async def test_turn_off_does_not_touch_speaker_level(self, stub_coord, stub_entry):
+        """turn_off only sets audioEnabled=False; speakerLevel/microphoneLevel
+        stay whatever they were, matching the ON-only "speakerLevel=50" body
+        documented on the class."""
+        from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
+
+        stub_coord._audio_cache[CAM_ID] = {
+            "audioEnabled": True,
+            "microphoneLevel": 60,
+            "speakerLevel": 50,
+        }
+        sw = BoschIntercomSwitch(stub_coord, CAM_ID, stub_entry)
+        sw._is_on = True
+        _bind_hass(sw)
+        await sw.async_turn_off()
+
+        stub_coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID,
+            "audio",
+            {"audioEnabled": False, "microphoneLevel": 60, "speakerLevel": 50},
+        )
+        assert stub_coord._audio_cache[CAM_ID]["speakerLevel"] == 50
 
 
 # ── BoschStatusLedSwitch ──────────────────────────────────────────────────────

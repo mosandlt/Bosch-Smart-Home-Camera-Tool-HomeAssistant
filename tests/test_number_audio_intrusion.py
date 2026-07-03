@@ -16,6 +16,7 @@ capture 2026-04-28 (distance=8 observed, sensitivity max=7 documented).
 
 from __future__ import annotations
 
+import asyncio
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -321,6 +322,66 @@ class TestBoschMicrophoneLevelNumber:
         coord = _coord(audio_cache={})
         ent = BoschMicrophoneLevelNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent._attr_translation_key == "microphone_level"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Shared per-camera lock — BoschSpeakerLevelNumber / BoschMicrophoneLevelNumber /
+# BoschIntercomSwitch (switch.py) all read-modify-write the same /audio endpoint
+# and _audio_cache.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestAudioConfigLockConcurrency:
+    @pytest.mark.asyncio
+    async def test_concurrent_speaker_and_mic_writes_serialize(self):
+        """Regression (bug-hunt 2026-07-03): BoschSpeakerLevelNumber and
+        BoschMicrophoneLevelNumber already merge only their own field back
+        into _audio_cache after a successful PUT (bug-hunt 2026-06-02), but
+        without a lock the READ before that merge could still race: two
+        concurrent writes for different fields could both snapshot the
+        cache before either finishes writing, so whichever completes last
+        would overwrite the other's just-written field with its own stale
+        snapshot. Pinned via a controlled interleaving: the microphone write
+        must NOT even start its PUT until the speaker write (which acquired
+        the shared lock first) has fully finished — proving the lock forces
+        real serialization, not just accidental non-overlap."""
+        from custom_components.bosch_shc_camera.number import (
+            BoschMicrophoneLevelNumber,
+            BoschSpeakerLevelNumber,
+        )
+
+        cam_id = CAM_ID_GEN2_OUTDOOR
+        coord = _coord(cam_id=cam_id, audio_cache={cam_id: dict(_AUDIO_CFG)})
+
+        release = asyncio.Event()
+        call_log: list[str] = []
+
+        async def _slow_put(_cam_id: str, _endpoint: str, _body: dict) -> bool:
+            call_log.append("put_start")
+            await release.wait()
+            return True
+
+        coord.async_put_camera = _slow_put
+
+        speaker_ent = _make_entity(BoschSpeakerLevelNumber, coord, cam_id)
+        mic_ent = _make_entity(BoschMicrophoneLevelNumber, coord, cam_id)
+
+        task_a = asyncio.create_task(speaker_ent.async_set_native_value(90.0))
+        await asyncio.sleep(0)  # let task_a acquire the lock and reach the PUT await
+        task_b = asyncio.create_task(mic_ent.async_set_native_value(10.0))
+        await asyncio.sleep(0)  # task_b must block on the lock, not reach the PUT
+
+        assert call_log == ["put_start"], (
+            "microphone write must not start its PUT while the speaker "
+            "write still holds the shared lock"
+        )
+
+        release.set()
+        await task_a
+        await task_b
+
+        assert coord._audio_cache[cam_id]["speakerLevel"] == 90
+        assert coord._audio_cache[cam_id]["microphoneLevel"] == 10
 
 
 # ══════════════════════════════════════════════════════════════════════════════

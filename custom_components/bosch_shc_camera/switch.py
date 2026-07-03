@@ -52,8 +52,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import BoschCameraCoordinator, get_options
 from .cloud_ssl import async_get_bosch_cloud_session
-from .const import CLOUD_API, DOMAIN, STREAM_START_SKIPPED
-from .guards import _INDOOR_HW, _is_gen2_indoor, _warn_if_privacy_on
+from .const import DOMAIN, STREAM_START_SKIPPED
+from .guards import _INDOOR_HW, _get_cam_lock, _is_gen2_indoor, _warn_if_privacy_on
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1216,8 +1216,22 @@ class BoschIntercomSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc
     """Switch: ON = intercom (two-way audio) active, OFF = intercom off.
 
     When turned ON: enables speaker via PUT /v11/video_inputs/{id}/audio
-    with {"audioEnabled": True, "SpeakerLevel": 50}.
-    When turned OFF: disables speaker with {"audioEnabled": False}.
+    with {"audioEnabled": True, "speakerLevel": 50} merged onto the current
+    cached body (preserves microphoneLevel — capture 2026-04-08 confirms the
+    body shape {"audioEnabled":true,"microphoneLevel":60,"speakerLevel":80}).
+    When turned OFF: disables speaker with {"audioEnabled": False}, same
+    merge. Shares coordinator._audio_cache and a per-camera lock with
+    BoschSpeakerLevelNumber/BoschMicrophoneLevelNumber (same endpoint) so a
+    concurrent write to a sibling field can't be clobbered by a stale
+    snapshot.
+
+    Bug-hunt 2026-07-03: previously used a raw session.put (no 401/token-
+    refresh retry, unlike async_put_camera), sent the wrong JSON key casing
+    ("SpeakerLevel" instead of the API's "speakerLevel" — silently ignored
+    by the API, so speaker level 50 was never actually applied), omitted
+    microphoneLevel entirely from the ON body, and never wrote back to
+    _audio_cache — leaving the Speaker/Microphone Number entities' cached
+    view permanently stale after every intercom toggle.
     Disabled by default — enable in Settings -> Entities.
     """
 
@@ -1248,61 +1262,41 @@ class BoschIntercomSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc
     def is_on(self) -> bool:
         return self._is_on
 
+    async def _async_set_intercom(self, *, enabled: bool) -> None:
+        """Read-modify-write the shared /audio body under the shared lock."""
+        lock = _get_cam_lock(self.coordinator, "_audio_config_locks", self._cam_id)
+        async with lock:
+            audio = dict(self.coordinator._audio_cache.get(self._cam_id, {}))
+            audio["audioEnabled"] = enabled
+            if enabled:
+                audio["speakerLevel"] = 50
+            success = await self.coordinator.async_put_camera(
+                self._cam_id, "audio", audio
+            )
+            if success:
+                self._is_on = enabled
+                cache = self.coordinator._audio_cache.setdefault(self._cam_id, {})
+                cache["audioEnabled"] = enabled
+                if enabled:
+                    cache["speakerLevel"] = 50
+                _LOGGER.info(
+                    "Intercom %s for %s", "ON" if enabled else "OFF", self._cam_title
+                )
+            else:
+                _LOGGER.warning(
+                    "Intercom %s failed for %s: HTTP error",
+                    "ON" if enabled else "OFF",
+                    self._cam_title,
+                )
+        self.async_write_ha_state()
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable intercom (two-way audio) with speaker level 50."""
-        session = await async_get_bosch_cloud_session(self.hass)
-        headers = {
-            "Authorization": f"Bearer {self.coordinator.token}",
-            "Content-Type": "application/json",
-        }
-        body = {"audioEnabled": True, "SpeakerLevel": 50}
-        try:
-            async with asyncio.timeout(10):
-                async with session.put(
-                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/audio",
-                    headers=headers,
-                    json=body,
-                ) as resp:
-                    if resp.status in (200, 201, 204):
-                        self._is_on = True
-                        _LOGGER.info("Intercom ON for %s", self._cam_title)
-                    else:
-                        _LOGGER.warning(
-                            "Intercom ON failed for %s: HTTP %d",
-                            self._cam_title,
-                            resp.status,
-                        )
-        except Exception:
-            _LOGGER.exception("Intercom ON error for %s", self._cam_title)
-        self.async_write_ha_state()
+        await self._async_set_intercom(enabled=True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable intercom (two-way audio)."""
-        session = await async_get_bosch_cloud_session(self.hass)
-        headers = {
-            "Authorization": f"Bearer {self.coordinator.token}",
-            "Content-Type": "application/json",
-        }
-        body = {"audioEnabled": False}
-        try:
-            async with asyncio.timeout(10):
-                async with session.put(
-                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/audio",
-                    headers=headers,
-                    json=body,
-                ) as resp:
-                    if resp.status in (200, 201, 204):
-                        self._is_on = False
-                        _LOGGER.info("Intercom OFF for %s", self._cam_title)
-                    else:
-                        _LOGGER.warning(
-                            "Intercom OFF failed for %s: HTTP %d",
-                            self._cam_title,
-                            resp.status,
-                        )
-        except Exception:
-            _LOGGER.exception("Intercom OFF error for %s", self._cam_title)
-        self.async_write_ha_state()
+        await self._async_set_intercom(enabled=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

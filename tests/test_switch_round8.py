@@ -54,6 +54,7 @@ def _coord(
     image_rotation_180=None,
     nvr_user_intent=None,
     live_connections=None,
+    audio_cache=None,
     **kwargs,
 ):
     shc_state = {CAM_ID: {"privacy_mode": privacy_on}}
@@ -81,6 +82,7 @@ def _coord(
         _shc_state_cache=shc_state,
         _live_connections=live_connections if live_connections is not None else {},
         _audio_enabled={},
+        _audio_cache=audio_cache if audio_cache is not None else {},
         options={},
         _privacy_sound_cache=privacy_sound_cache
         if privacy_sound_cache is not None
@@ -370,91 +372,43 @@ def _make_intercom_switch():
     return sw
 
 
-def _mock_session_ctx(status=200):
-    """Return a mock aiohttp session where PUT returns the given status."""
-
-    @asynccontextmanager
-    async def _resp_ctx():
-        yield SimpleNamespace(status=status)
-
-    @asynccontextmanager
-    async def _session_put(*args, **kwargs):
-        async with _resp_ctx() as r:
-            yield r
-
-    session = MagicMock()
-    session.put = _session_put
-    return session
-
-
 @pytest.mark.asyncio
 async def test_intercom_turn_on_success():
     sw = _make_intercom_switch()
-    with patch(
-        "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
-        new=AsyncMock(return_value=_mock_session_ctx(200)),
-    ):
-        await sw.async_turn_on()
+    await sw.async_turn_on()
     assert sw._is_on is True
     sw.async_write_ha_state.assert_called()
+    sw.coordinator.async_put_camera.assert_awaited_once_with(
+        CAM_ID, "audio", {"audioEnabled": True, "speakerLevel": 50}
+    )
 
 
 @pytest.mark.asyncio
-async def test_intercom_turn_on_non_200():
+async def test_intercom_turn_on_put_failure():
     sw = _make_intercom_switch()
-    with patch(
-        "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
-        new=AsyncMock(return_value=_mock_session_ctx(500)),
-    ):
-        await sw.async_turn_on()
+    sw.coordinator.async_put_camera = AsyncMock(return_value=False)
+    await sw.async_turn_on()
     assert sw._is_on is False  # not set to True on failure
-
-
-@pytest.mark.asyncio
-async def test_intercom_turn_on_exception():
-    """Exception path — _is_on stays False, no crash."""
-
-    @asynccontextmanager
-    async def _bad_put(*args, **kwargs):
-        raise aiohttp.ClientError("network error")
-        yield  # noqa: unreachable
-
-    import aiohttp
-
-    session = MagicMock()
-    session.put = _bad_put
-    sw = _make_intercom_switch()
-    with patch(
-        "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
-        new=AsyncMock(return_value=session),
-    ):
-        await sw.async_turn_on()
-    assert sw._is_on is False
-    sw.async_write_ha_state.assert_called()
 
 
 @pytest.mark.asyncio
 async def test_intercom_turn_off_success():
     sw = _make_intercom_switch()
     sw._is_on = True
-    with patch(
-        "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
-        new=AsyncMock(return_value=_mock_session_ctx(204)),
-    ):
-        await sw.async_turn_off()
+    await sw.async_turn_off()
     assert sw._is_on is False
+    sw.coordinator.async_put_camera.assert_awaited_once_with(
+        CAM_ID, "audio", {"audioEnabled": False}
+    )
 
 
 @pytest.mark.asyncio
-async def test_intercom_turn_off_non_200():
+async def test_intercom_turn_off_put_failure():
     sw = _make_intercom_switch()
     sw._is_on = True
-    with patch(
-        "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
-        new=AsyncMock(return_value=_mock_session_ctx(500)),
-    ):
-        await sw.async_turn_off()
-    # _is_on unchanged when HTTP non-200
+    sw.coordinator.async_put_camera = AsyncMock(return_value=False)
+    await sw.async_turn_off()
+    # _is_on unchanged when the PUT fails
     assert sw._is_on is True
 
 
