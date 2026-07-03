@@ -98,6 +98,17 @@ def test_frigate_config_parses_options() -> None:
     assert cfg.max_connections == 16
 
 
+def test_frigate_config_idle_timeout_zero_means_close_immediately() -> None:
+    """Regression (bug-hunt 2026-07-03): was `opts.get(..., 60) or 60`, which
+    treats explicit 0 as falsy and silently substitutes the 60s default. The
+    options-flow schema allows 0 (vol.Range(min=0, max=3600)) as a documented
+    "close immediately" value (frigate_endpoint.py: "if idle_timeout > 0: ...
+    # 0 = close immediately") — this made that value unreachable."""
+    c = _make_coord(frigate_idle_timeout=0)
+    cfg = c._frigate_config()
+    assert cfg.idle_timeout == 0.0
+
+
 # ── _frigate_url_host ────────────────────────────────────────────────────────
 
 

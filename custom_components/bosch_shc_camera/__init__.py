@@ -6202,13 +6202,22 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         opts = self.options
         raw_allow = str(opts.get("frigate_ip_allowlist", "") or "")
         allowlist = frozenset(p.strip() for p in raw_allow.split(",") if p.strip())
+        # NOT `opts.get(..., 60) or 60` — the options-flow schema allows 0
+        # (vol.Range(min=0, max=3600)) as an explicit "close immediately"
+        # value (frigate_endpoint.py: "if idle_timeout > 0: ... # 0 = close
+        # immediately"). `or 60` treats 0 as falsy and silently substitutes
+        # the default, making that documented value unreachable — the same
+        # class of bug as the previously-dead-until-v14.4.0
+        # frigate_idle_timeout option (bug-hunt 2026-07-03).
+        idle_timeout_opt = opts.get("frigate_idle_timeout", 60)
+        idle_timeout = 60 if idle_timeout_opt is None else idle_timeout_opt
         return FrontDoorConfig(
             bind_host=str(opts.get("frigate_bind_host", "127.0.0.1")),
             ip_allowlist=allowlist,
             auth_mode=str(opts.get("frigate_auth_mode", "none")),
             token=str(opts.get("frigate_token", "") or ""),
             basic_user=str(opts.get("frigate_basic_user", "frigate") or "frigate"),
-            idle_timeout=float(opts.get("frigate_idle_timeout", 60) or 60),
+            idle_timeout=float(idle_timeout),
             max_connections=int(opts.get("frigate_max_connections", 8) or 8),
         )
 

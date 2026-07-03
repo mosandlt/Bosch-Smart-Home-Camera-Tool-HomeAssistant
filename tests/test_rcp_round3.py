@@ -651,6 +651,131 @@ class TestNetworkServicesXmlWrapped:
 
         assert CAM_ID not in coord._rcp_network_services_cache
 
+    @pytest.mark.asyncio
+    async def test_whitespace_prefixed_xml_envelope_rejected(self):
+        """Regression (bug-hunt 2026-07-03): the guard was
+        `not raw.startswith(b"<")`, which only catches XML starting at
+        byte 0. Gen2 FW 9.40 prefixes the envelope with whitespace
+        (`\\n\\n<rcp>…`, same case 0x0c81 already guards against via
+        _is_xml_envelope's lstrip) — the old guard missed this and decoded
+        the envelope as garbage service names instead of rejecting it."""
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        whitespace_prefixed_xml = b"\n\n<rcp><payload>aabbcc</payload></rcp>"
+
+        read_map = {"0x0c62": whitespace_prefixed_xml}
+
+        async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
+            return read_map.get(command)
+
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert CAM_ID not in coord._rcp_network_services_cache
+        assert coord._rcp_cmd_failures[CAM_ID].get("0x0c62", 0) >= 1
+
+
+# ── async_update_rcp_data: Phase-2 commands previously had no _skip guard ───
+# Regression (bug-hunt 2026-07-03): 0x0c38/0x0c0a/0x0c62/0x0b60 had no
+# _skip()/_mark_fail()/_mark_ok() at all, unlike every Phase-1 command and
+# 0x0c00/0x0b91 — on a camera that doesn't support one of these, it retried
+# every single coordinator poll forever instead of being suppressed after 3
+# consecutive failures.
+
+
+class TestPhase2CommandsNowSkipGuarded:
+    @pytest.mark.asyncio
+    async def test_alarm_catalog_none_marks_fail_and_engages_skip(self):
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+
+        async def mock_rcp_read(*args, **kwargs):
+            return None
+
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
+            for _ in range(3):
+                await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert coord._rcp_cmd_failures[CAM_ID].get("0x0c38", 0) >= 3
+
+        # A 4th poll must now SKIP the read entirely — was previously an
+        # infinite unguarded retry.
+        call_count = {"0x0c38": 0}
+
+        async def mock_rcp_read_counting(hass, rcp_base, command, sessionid, **kwargs):
+            if command == "0x0c38":
+                call_count["0x0c38"] += 1
+            return None
+
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read_counting),
+        ):
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert call_count["0x0c38"] == 0, (
+            "0x0c38 must be skipped after 3 consecutive failures, not retried forever"
+        )
+
+    @pytest.mark.asyncio
+    async def test_motion_coords_none_marks_fail(self):
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+
+        async def mock_rcp_read(*args, **kwargs):
+            return None
+
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert coord._rcp_cmd_failures[CAM_ID].get("0x0c0a", 0) >= 1
+
+    @pytest.mark.asyncio
+    async def test_network_services_none_marks_fail(self):
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+
+        async def mock_rcp_read(*args, **kwargs):
+            return None
+
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert coord._rcp_cmd_failures[CAM_ID].get("0x0c62", 0) >= 1
+
+    @pytest.mark.asyncio
+    async def test_iva_catalog_none_marks_fail(self):
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+
+        async def mock_rcp_read(*args, **kwargs):
+            return None
+
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert coord._rcp_cmd_failures[CAM_ID].get("0x0b60", 0) >= 1
+
 
 # ── async_update_rcp_data: IVA catalog cached ────────────────────────────────
 

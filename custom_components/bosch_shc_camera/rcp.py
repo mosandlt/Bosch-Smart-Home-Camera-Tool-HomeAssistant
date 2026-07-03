@@ -595,7 +595,13 @@ async def async_update_rcp_data(
                         cam_id,
                         dimmer_val,
                     )
-            elif raw is None:
+            else:
+                # Truthy, non-XML, but shorter than the expected 2 bytes.
+                # Without this branch neither _mark_fail nor _mark_ok ever
+                # fires for this shape, so a command that consistently
+                # returns a too-short reply is never counted toward the
+                # 3-strikes skip and retries every poll forever (bug-hunt
+                # 2026-07-03).
                 _mark_fail("0x0c22")
         except Exception as err:
             _LOGGER.debug("RCP dimmer read error for %s: %s", cam_id, err)
@@ -610,7 +616,9 @@ async def async_update_rcp_data(
                 coordinator._rcp_privacy_cache[cam_id] = int(raw[1])
                 _LOGGER.debug("RCP privacy mask for %s: byte[1]=%d", cam_id, raw[1])
                 _mark_ok("0x0d00")
-            elif raw is None:
+            else:
+                # Truthy-but-too-short / empty / None — see 0x0c22 comment
+                # above (bug-hunt 2026-07-03).
                 _mark_fail("0x0d00")
         except Exception as err:
             _LOGGER.debug("RCP privacy read error for %s: %s", cam_id, err)
@@ -680,7 +688,9 @@ async def async_update_rcp_data(
                         minute,
                         second,
                     )
-            elif raw is None:
+            else:
+                # Truthy-but-too-short / empty / None — see 0x0c22 comment
+                # earlier in this function (bug-hunt 2026-07-03).
                 _mark_fail("0x0a0f")
         except Exception as err:
             _LOGGER.debug("RCP clock read error for %s: %s", cam_id, err)
@@ -764,7 +774,9 @@ async def async_update_rcp_data(
                         cam_id,
                         ladder[:4],
                     )
-            elif raw is None:
+            else:
+                # Truthy-but-too-short / empty / None — see 0x0c22 comment
+                # earlier in this function (bug-hunt 2026-07-03).
                 _mark_fail("0x0c81")
         except Exception as err:
             _LOGGER.debug("RCP bitrate read error for %s: %s", cam_id, err)
@@ -774,14 +786,24 @@ async def async_update_rcp_data(
     # Read alarm catalog (0x0c38) -- UTF-16-BE, ~1366 bytes
     # Contains all alarm types the camera firmware supports (virtual 0-15,
     # flame, smoke, glass break, audio, storage, etc.)
-    try:
-        raw = await _read("0x0c38", type_="P_OCTET")
-        if raw and len(raw) > 10:
-            alarms = _parse_alarm_catalog(raw)
-            coordinator._rcp_alarm_catalog_cache[cam_id] = alarms
-            _LOGGER.debug("RCP alarm catalog for %s: %d types", cam_id, len(alarms))
-    except Exception as err:
-        _LOGGER.debug("RCP alarm catalog read error for %s: %s", cam_id, err)
+    # Unlike every Phase-1 command and 0x0c00/0x0b91 below, this previously
+    # had no _skip guard at all — on a camera that doesn't support this
+    # command it retried every single coordinator poll forever instead of
+    # being suppressed after 3 consecutive failures (bug-hunt 2026-07-03).
+    if not _skip("0x0c38"):
+        try:
+            raw = await _read("0x0c38", type_="P_OCTET")
+            if _is_xml_envelope(raw):
+                _mark_fail("0x0c38")
+            elif raw and len(raw) > 10:
+                alarms = _parse_alarm_catalog(raw)
+                coordinator._rcp_alarm_catalog_cache[cam_id] = alarms
+                _LOGGER.debug("RCP alarm catalog for %s: %d types", cam_id, len(alarms))
+                _mark_ok("0x0c38")
+            else:
+                _mark_fail("0x0c38")
+        except Exception as err:
+            _LOGGER.debug("RCP alarm catalog read error for %s: %s", cam_id, err)
 
     # Read motion detection zones (0x0c00) -- 5 zones × 28 bytes
     if not _skip("0x0c00"):
@@ -798,14 +820,23 @@ async def async_update_rcp_data(
             _LOGGER.debug("RCP motion zones read error for %s: %s", cam_id, err)
 
     # Read motion zone coordinates (0x0c0a) -- int32 normalized ±1.0 as ×2^31
-    try:
-        raw = await _read("0x0c0a", type_="P_OCTET")
-        if raw and len(raw) >= 16:
-            coords = _parse_motion_coords(raw)
-            coordinator._rcp_motion_coords_cache[cam_id] = coords
-            _LOGGER.debug("RCP motion coords for %s: %d points", cam_id, len(coords))
-    except Exception as err:
-        _LOGGER.debug("RCP motion coords read error for %s: %s", cam_id, err)
+    # Same missing-skip-guard bug as 0x0c38 above (bug-hunt 2026-07-03).
+    if not _skip("0x0c0a"):
+        try:
+            raw = await _read("0x0c0a", type_="P_OCTET")
+            if _is_xml_envelope(raw):
+                _mark_fail("0x0c0a")
+            elif raw and len(raw) >= 16:
+                coords = _parse_motion_coords(raw)
+                coordinator._rcp_motion_coords_cache[cam_id] = coords
+                _LOGGER.debug(
+                    "RCP motion coords for %s: %d points", cam_id, len(coords)
+                )
+                _mark_ok("0x0c0a")
+            else:
+                _mark_fail("0x0c0a")
+        except Exception as err:
+            _LOGGER.debug("RCP motion coords read error for %s: %s", cam_id, err)
 
     # Read TLS certificate (0x0b91) -- DER X.509, ~455 bytes
     if not _skip("0x0b91"):
@@ -823,27 +854,46 @@ async def async_update_rcp_data(
 
     # Read network services (0x0c62) -- TLV list, ~469 bytes
     # Gen1/360 cameras via cloud proxy return the full RCP XML document — guard
-    # against caching raw XML as service names.
-    try:
-        raw = await _read("0x0c62", type_="P_OCTET")
-        if raw and len(raw) > 10 and not raw.startswith(b"<"):
-            services = _parse_network_services(raw)
-            coordinator._rcp_network_services_cache[cam_id] = services
-            _LOGGER.debug(
-                "RCP network services for %s: %d services", cam_id, len(services)
-            )
-    except Exception as err:
-        _LOGGER.debug("RCP network services read error for %s: %s", cam_id, err)
+    # against caching raw XML as service names. Was `not raw.startswith(b"<")`,
+    # which misses the whitespace-prefixed XML envelope Gen2 FW 9.40 returns
+    # (same case 0x0c81 already guards against with _is_xml_envelope's lstrip)
+    # — a whitespace-prefixed envelope decoded as garbage service names
+    # instead of being rejected. Also had no _skip guard (bug-hunt 2026-07-03).
+    if not _skip("0x0c62"):
+        try:
+            raw = await _read("0x0c62", type_="P_OCTET")
+            if _is_xml_envelope(raw):
+                _mark_fail("0x0c62")
+            elif raw and len(raw) > 10:
+                services = _parse_network_services(raw)
+                coordinator._rcp_network_services_cache[cam_id] = services
+                _LOGGER.debug(
+                    "RCP network services for %s: %d services", cam_id, len(services)
+                )
+                _mark_ok("0x0c62")
+            else:
+                _mark_fail("0x0c62")
+        except Exception as err:
+            _LOGGER.debug("RCP network services read error for %s: %s", cam_id, err)
 
     # Read IVA analytics catalog (0x0b60) -- 65 entries × 6B
-    try:
-        raw = await _read("0x0b60", type_="P_OCTET")
-        if raw and len(raw) >= 6:
-            analytics = _parse_iva_catalog(raw)
-            coordinator._rcp_iva_catalog_cache[cam_id] = analytics
-            _LOGGER.debug("RCP IVA catalog for %s: %d modules", cam_id, len(analytics))
-    except Exception as err:
-        _LOGGER.debug("RCP IVA catalog read error for %s: %s", cam_id, err)
+    # Same missing-skip-guard bug as 0x0c38/0x0c0a above (bug-hunt 2026-07-03).
+    if not _skip("0x0b60"):
+        try:
+            raw = await _read("0x0b60", type_="P_OCTET")
+            if _is_xml_envelope(raw):
+                _mark_fail("0x0b60")
+            elif raw and len(raw) >= 6:
+                analytics = _parse_iva_catalog(raw)
+                coordinator._rcp_iva_catalog_cache[cam_id] = analytics
+                _LOGGER.debug(
+                    "RCP IVA catalog for %s: %d modules", cam_id, len(analytics)
+                )
+                _mark_ok("0x0b60")
+            else:
+                _mark_fail("0x0b60")
+        except Exception as err:
+            _LOGGER.debug("RCP IVA catalog read error for %s: %s", cam_id, err)
 
 
 # ── Phase 2 parsers ─────────────────────────────────────────────────────────
