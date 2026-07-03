@@ -85,6 +85,73 @@ async def test_atomic_write_no_tmp_left(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_concurrent_saves_for_same_camera_are_serialized(tmp_path: Path) -> None:
+    """Regression (bug-hunt 2026-07-03): two concurrent save_snapshot() calls
+    for the SAME camera (e.g. a coordinator tick and an FCM-push handler both
+    fetching+saving around the same time) used to have no lock. Since
+    hass.async_add_executor_job dispatches to a REAL ThreadPoolExecutor
+    thread (not just an interleaved coroutine), two such calls could
+    genuinely write the fixed `{cam_id}.jpg.tmp` path concurrently — at best
+    an unordered "last replace() wins" (an older frame could clobber a
+    newer one), at worst a corrupted .tmp if the writes overlapped. Pinned
+    here: force call B to start only after call A has begun its (slow)
+    write, then confirm B's write only happens after A's finishes —
+    the lock must fully serialize, not just accidentally avoid overlap.
+    """
+    import threading
+    import time
+
+    from custom_components.bosch_shc_camera import snapshot_store
+
+    hass = _make_hass(tmp_path)
+
+    started = threading.Event()  # thread-safe: set from inside the executor thread
+    release_a = threading.Event()
+    order: list[str] = []
+    real_sync_save = snapshot_store._sync_save
+
+    def slow_sync_save_a(hass_arg, cam_id, jpeg):
+        order.append("a_start")
+        started.set()
+        # Block this executor thread until the test releases it — proves
+        # call B's executor dispatch cannot proceed until the async lock
+        # (acquired before either call reaches the executor) is released.
+        release_a.wait(timeout=5)
+        real_sync_save(hass_arg, cam_id, jpeg)
+        order.append("a_end")
+
+    def sync_save_b(hass_arg, cam_id, jpeg):
+        order.append("b_start")
+        real_sync_save(hass_arg, cam_id, jpeg)
+        order.append("b_end")
+
+    jpeg_a = b"\xff\xd8\xff\xe0" + b"\xaa" * 200
+    jpeg_b = b"\xff\xd8\xff\xe0" + b"\xbb" * 200
+
+    with patch.object(snapshot_store, "_sync_save", side_effect=slow_sync_save_a):
+        task_a = asyncio.create_task(
+            snapshot_store.save_snapshot(hass, VALID_CAM_ID, jpeg_a)
+        )
+        # Poll (thread-safe) until call A is inside its blocked write.
+        while not started.is_set():
+            await asyncio.sleep(0.01)
+
+        with patch.object(snapshot_store, "_sync_save", side_effect=sync_save_b):
+            task_b = asyncio.create_task(
+                snapshot_store.save_snapshot(hass, VALID_CAM_ID, jpeg_b)
+            )
+            await asyncio.sleep(0.05)  # give B a chance to (wrongly) start early
+            assert order == ["a_start"], (
+                "call B must not start its write while call A still holds the lock"
+            )
+            release_a.set()
+            await task_a
+            await task_b
+
+    assert order == ["a_start", "a_end", "b_start", "b_end"]
+
+
+@pytest.mark.asyncio
 async def test_overwrite_preserves_previous_on_exception(tmp_path: Path) -> None:
     """When Path.replace raises, the original file is left intact."""
     from custom_components.bosch_shc_camera import snapshot_store

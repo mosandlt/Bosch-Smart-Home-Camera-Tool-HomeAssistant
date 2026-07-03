@@ -712,11 +712,14 @@ class TestViewRoutingCameraFirstLocal:
         assert_in_source(
             src, "_find_source", '"S"', '"L"'
         )  # BoschCameraMediaView.get must disambiguate Local vs SMB camera-first paths via _find_source — without this, Local camera-first files (camera/year/month/day/file) are incorrectly routed to SMB and return HTTP 404 (georg, simon42, 2026-05-08)
-        # Specifically, the SMB preference line must exist (not just hardcode "S")
-        assert_in_source(  # Routing must use _find_source to check if SMB is configured before choosing kind='S'
+        # Specifically, the SMB preference expression must exist (not just hardcode "S").
+        # bug-hunt 2026-07-03: _find_source now runs via async_add_executor_job
+        # (it does blocking Path.exists()/mkdir()/is_dir() internally) instead of
+        # being called directly on the event loop.
+        assert_in_source(  # Routing must use _find_source (via the executor) to check if SMB is configured before choosing kind='S'
             src,
-            'kind = "S" if _find_source',
-            "kind = 'S' if _find_source",
+            '"S" if await self.hass.async_add_executor_job(_find_source, self.hass, entry_id, "S")',
+            "'S' if await self.hass.async_add_executor_job(_find_source, self.hass, entry_id, 'S')",
             any_of=True,
         )
 
@@ -733,9 +736,11 @@ class TestViewRoutingCameraFirstLocal:
         from custom_components.bosch_shc_camera.media_source import BoschCameraMediaView
 
         src = inspect.getsource(BoschCameraMediaView.get)
-        # The else branch must prefer Local via _find_source (not hardcode 'L' or 'S')
+        # The else branch must prefer Local via _find_source (not hardcode 'L' or 'S').
+        # bug-hunt 2026-07-03: _find_source now runs via async_add_executor_job.
         assert_in_source(  # The else-branch must check _find_source for Local before choosing kind. Hardcoding kind='L' would break SMB-only users; hardcoding kind='S' would break Local-only users.
-            src, '_find_source(self.hass, entry_id, "L") is not None'
+            src,
+            'await self.hass.async_add_executor_job(_find_source, self.hass, entry_id, "L")',
         )
         # Must also NOT unconditionally hardcode kind='S' in the else branch
         lines = src.splitlines()
@@ -823,10 +828,11 @@ class TestViewRoutingCameraFirstLocal:
         from custom_components.bosch_shc_camera.media_source import BoschCameraMediaView
 
         src = inspect.getsource(BoschCameraMediaView.get)
-        # After the fix: the camera/year path picks 'S' when SMB is present
+        # After the fix: the camera/year path picks 'S' when SMB is present.
+        # bug-hunt 2026-07-03: _find_source now runs via async_add_executor_job.
         assert_in_source(  # camera-first disambiguation must choose kind='S' when _find_source returns SMB, so FTP-uploaded / SMB camera-first files are served correctly
             src,
-            'kind = "S" if _find_source(self.hass, entry_id, "S") is not None else "L"',
+            'kind = ("S" if await self.hass.async_add_executor_job(_find_source, self.hass, entry_id, "S") is not None else "L")',
         )
 
     def test_smb_flat_single_source_routes_to_smb_when_no_local(self):
@@ -841,9 +847,11 @@ class TestViewRoutingCameraFirstLocal:
         from custom_components.bosch_shc_camera.media_source import BoschCameraMediaView
 
         src = inspect.getsource(BoschCameraMediaView.get)
-        # The else branch must use _find_source to choose between L and S
+        # The else branch must use _find_source to choose between L and S.
+        # bug-hunt 2026-07-03: _find_source now runs via async_add_executor_job.
         assert_in_source(  # The else-branch (flat file fallback) must check for a Local source before defaulting to kind='L', so SMB-only users with flat NAS files are served
-            src, '_find_source(self.hass, entry_id, "L") is not None'
+            src,
+            'await self.hass.async_add_executor_job(_find_source, self.hass, entry_id, "L")',
         )
 
     def test_nvr_path_routes_to_nvr(self):

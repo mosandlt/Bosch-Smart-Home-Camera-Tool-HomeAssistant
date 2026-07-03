@@ -54,6 +54,15 @@ TO_REDACT = {
     "smb_server",
     "smb_share",
     "smb_base_path",
+    # Frigate/external-recorder persistent RTSP front-door credentials.
+    # Regression (bug-hunt 2026-07-03): async_redact_data matches keys
+    # EXACTLY, so the generic "token"/"auth" entries above never caught
+    # "frigate_token" — the front-door auth token, Basic-Auth username, and
+    # allowed-IP list leaked in plaintext into every diagnostics export
+    # (a user-facing feature routinely pasted into public bug reports).
+    "frigate_token",
+    "frigate_basic_user",
+    "frigate_ip_allowlist",
     # Stream / RTSP URLs (contain proxy session credentials)
     "rtspsUrl",
     "rtsps_url",

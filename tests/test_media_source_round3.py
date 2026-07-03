@@ -396,6 +396,39 @@ class TestMediaViewDispatch:
             # S head — but only L backend is configured
             await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
 
+    @pytest.mark.asyncio
+    async def test_find_source_dispatched_via_executor_not_event_loop(self, tmp_path):
+        """Regression (bug-hunt 2026-07-03): _find_source → _enabled_sources
+        does blocking Path.exists()/mkdir()/is_dir() per configured entry.
+        get() used to call it directly on the event loop (unlike _browse(),
+        which already wraps it) — hit once per served file/thumbnail, so a
+        day-folder view could fire 200+ blocking-I/O calls on the loop.
+        Pinned here: hass.async_add_executor_job must be invoked with
+        _find_source as the callable, not just eventually produce the same
+        return value."""
+        hass = _make_view_hass("entry1", tmp_path, kind="L")
+
+        from custom_components.bosch_shc_camera.media_source import _find_source
+
+        executor_calls: list[tuple] = []
+
+        async def _spy_exec(fn, *args):
+            executor_calls.append((fn, *args))
+            return fn(*args)
+
+        hass.async_add_executor_job = _spy_exec
+
+        view = BoschCameraMediaView(hass)
+        request = MagicMock()
+        request.headers = {}
+        await view.get(request, "entry1", "L/Terrasse/" + CAM_FILE)
+
+        find_source_calls = [c for c in executor_calls if c[0] is _find_source]
+        assert find_source_calls, (
+            "_find_source must be dispatched via hass.async_add_executor_job, "
+            "not called directly on the event loop"
+        )
+
 
 class TestServeLocal:
     """Lines 773-784: _serve_local error paths."""

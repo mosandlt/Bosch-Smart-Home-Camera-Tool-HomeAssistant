@@ -40,6 +40,11 @@ def test_to_redact_covers_all_known_secrets() -> None:
         "smb_password",
         "smb_username",
         "smb_server",
+        # Frigate/external-recorder persistent RTSP front-door credentials
+        # (bug-hunt 2026-07-03 — these leaked unredacted before this fix)
+        "frigate_token",
+        "frigate_basic_user",
+        "frigate_ip_allowlist",
         # Stream URLs containing session creds
         "rtsps_url",
         "rtspsUrl",
@@ -419,3 +424,41 @@ async def test_options_redaction_strips_smb_credentials(hass: HomeAssistant) -> 
     assert redacted_opts["smb_server"] == "**REDACTED**"
     # smb_share exposes NAS share name (network topology) — must be redacted (M2 fix)
     assert redacted_opts["smb_share"] == "**REDACTED**"
+
+
+async def test_options_redaction_strips_frigate_credentials(
+    hass: HomeAssistant,
+) -> None:
+    """Regression (bug-hunt 2026-07-03): the Frigate/external-recorder
+    persistent RTSP front-door's auth token, Basic-Auth username, and
+    allowed-IP list leaked in plaintext in diagnostics exports — the generic
+    "token"/"auth" TO_REDACT entries don't catch "frigate_token" because
+    async_redact_data matches keys EXACTLY, not by substring."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={
+            "frigate_token": "super-secret-bearer-value",
+            "frigate_basic_user": "recorder-admin",
+            "frigate_ip_allowlist": "192.0.2.5,192.0.2.6",
+        },
+    )
+    entry.add_to_hass(hass)
+    entry.runtime_data = type(
+        "Stub",
+        (),
+        {
+            "data": {},
+            "last_update_success": True,
+            "_fcm_running": False,
+            "_fcm_healthy": True,
+            "_auth_outage_count": 0,
+            "update_interval": None,
+        },
+    )()
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    redacted_opts = diag["entry"]["options"]
+    assert redacted_opts["frigate_token"] == "**REDACTED**"
+    assert redacted_opts["frigate_basic_user"] == "**REDACTED**"
+    assert redacted_opts["frigate_ip_allowlist"] == "**REDACTED**"

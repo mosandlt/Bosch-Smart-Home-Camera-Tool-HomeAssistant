@@ -10,6 +10,7 @@ renamed to the final path so a crash mid-write leaves the previous file intact.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -17,6 +18,25 @@ from pathlib import Path
 from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+# Per-camera lock so two concurrent save_snapshot() calls for the SAME camera
+# (e.g. a coordinator tick and an FCM-push handler both fetching+saving around
+# the same time) can't race on the shared .tmp path. hass.async_add_executor_job
+# runs on a real ThreadPoolExecutor thread, not just an interleaved coroutine,
+# so without this lock two threads could genuinely write the fixed
+# `{cam_id}.jpg.tmp` path concurrently — at best "last replace() wins" with no
+# ordering guarantee (an older frame could clobber a newer one), at worst a
+# corrupted .tmp if the writes overlap (bug-hunt 2026-07-03).
+_save_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_save_lock(cam_id: str) -> asyncio.Lock:
+    lock = _save_locks.get(cam_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _save_locks[cam_id] = lock
+    return lock
+
 
 # Bosch camera IDs are UUID-formatted: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 # Normalized to upper-case before matching (API returns upper-case; callers may
@@ -133,7 +153,8 @@ async def save_snapshot(hass: HomeAssistant, cam_id: str, jpeg: bytes) -> None:
             _MAX_JPEG_BYTES,
         )
         return
-    await hass.async_add_executor_job(_sync_save, hass, cam_id, jpeg)
+    async with _get_save_lock(cam_id):
+        await hass.async_add_executor_job(_sync_save, hass, cam_id, jpeg)
 
 
 async def load_snapshot(hass: HomeAssistant, cam_id: str) -> bytes | None:

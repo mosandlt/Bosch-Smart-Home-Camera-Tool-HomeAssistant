@@ -387,6 +387,27 @@ class _SmbBackend:
             pass
 
     def _path(self, *segments: str) -> str:
+        """Build the UNC path, rejecting any traversal attempt in *segments*.
+
+        Regression (bug-hunt 2026-07-03): `camera` (and the other path
+        segments from callers like list_years/list_months/list_days/
+        open_file/open_flat_file) reached this string-join with ZERO
+        validation — unlike `filename`, which every caller already
+        re-validates against exactly this pattern before calling _path().
+        Camera titles come from the Bosch cloud account (in principle
+        attacker-influenceable) and `media_content_id` segments are
+        reachable via any media_source.resolve_media call, not just this
+        integration's own browse UI, so a crafted segment containing
+        "..\\" could escape `{share}\\{base}\\{camera}\\...` and read/list
+        outside the intended NAS tree. Same reject pattern as filename
+        validation elsewhere in this file, applied at the single choke
+        point every segment passes through.
+        """
+        for seg in segments:
+            if not seg:
+                continue
+            if "/" in seg or "\\" in seg or seg in (".", ".."):
+                raise FileNotFoundError(seg)
         all_parts = (self.share, *self.base_parts, *(s for s in segments if s))
         return "\\\\" + self.server + "\\" + "\\".join(all_parts)
 
@@ -1395,7 +1416,14 @@ class BoschCameraMediaView(HomeAssistantView):  # type: ignore[misc]
             # camera/year/month/day/filename — Local OR SMB camera-first single-source.
             # Prefer SMB only when an SMB source is actually configured; otherwise this
             # is a Local camera-first path (folder_pattern={camera}/{year}/{month}/{day}).
-            kind = "S" if _find_source(self.hass, entry_id, "S") is not None else "L"
+            kind = (
+                "S"
+                if await self.hass.async_add_executor_job(
+                    _find_source, self.hass, entry_id, "S"
+                )
+                is not None
+                else "L"
+            )
             tail = parts
         elif len(parts) >= 3 and _NVR_DATE_DIR_RE.match(parts[1]):
             # camera/YYYY-MM-DD/HH-MM.mp4 → NVR single-source.
@@ -1406,10 +1434,24 @@ class BoschCameraMediaView(HomeAssistantView):  # type: ignore[misc]
             # Prefer Local if a Local source is configured; fall back to SMB
             # so that users with only an SMB share (no local download_path) still
             # get their flat NAS files served correctly.
-            kind = "L" if _find_source(self.hass, entry_id, "L") is not None else "S"
+            kind = (
+                "L"
+                if await self.hass.async_add_executor_job(
+                    _find_source, self.hass, entry_id, "L"
+                )
+                is not None
+                else "S"
+            )
             tail = parts
 
-        match = _find_source(self.hass, entry_id, kind)
+        # Regression (bug-hunt 2026-07-03): _find_source → _enabled_sources
+        # does blocking Path.exists()/mkdir()/is_dir() per configured entry.
+        # _browse() below already wraps this in async_add_executor_job; this
+        # HTTP GET handler (hit once per served file/thumbnail — a day-folder
+        # view can fire ~200+ of these) called it directly on the event loop.
+        match = await self.hass.async_add_executor_job(
+            _find_source, self.hass, entry_id, kind
+        )
         if match is None:
             raise web.HTTPNotFound
         _src, backend = match

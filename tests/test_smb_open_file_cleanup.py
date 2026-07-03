@@ -105,3 +105,73 @@ class TestOpenFileExceptionCleanup:
                     "Terrasse_2026-05-19_12-30-45_MOTION_ABC123.mp4",
                 )
         close_spy.assert_called_once()
+
+
+class TestSmbPathTraversal:
+    """Regression (bug-hunt 2026-07-03): `_path()` string-joined every
+    segment into the UNC path with ZERO validation — unlike `filename`,
+    which every caller already re-validates before calling `_path()`.
+    Camera titles come from the Bosch cloud account (in principle
+    attacker-influenceable) and media_content_id segments are reachable via
+    any media_source.resolve_media call, not just this integration's own
+    browse UI, so a crafted `camera` segment containing "..\\" could escape
+    `{share}\\{base}\\{camera}\\...` and read/list outside the intended
+    NAS tree.
+    """
+
+    def test_path_rejects_backslash_traversal_segment(self) -> None:
+        backend = _backend()
+        with pytest.raises(FileNotFoundError):
+            backend._path("..\\..\\Windows\\System32", "file.mp4")
+
+    def test_path_rejects_dotdot_segment(self) -> None:
+        backend = _backend()
+        with pytest.raises(FileNotFoundError):
+            backend._path("..", "file.mp4")
+
+    def test_path_rejects_forward_slash_segment(self) -> None:
+        backend = _backend()
+        with pytest.raises(FileNotFoundError):
+            backend._path("../etc/passwd", "file.mp4")
+
+    def test_path_accepts_normal_segments(self) -> None:
+        """No regression: a legitimate camera/date tree still builds the
+        expected UNC path."""
+        backend = _backend()
+        path = backend._path("Terrasse", "2026", "05", "19", "file.mp4")
+        assert path == "\\\\nas\\M\\Terrasse\\2026\\05\\19\\file.mp4"
+
+    def test_open_file_rejects_malicious_camera_before_touching_smbclient(
+        self,
+    ) -> None:
+        """A malicious `camera` value must be rejected before smb_stat()/
+        open_file() are ever called with the traversal path — proving the
+        traversal never actually reaches the network layer."""
+        backend = _backend()
+        mod = _install_failing_smbclient()
+        with patch.object(
+            backend,
+            "_close_session_cache",
+            wraps=backend._close_session_cache,
+        ) as close_spy:
+            with pytest.raises(FileNotFoundError):
+                backend.open_file(
+                    "..\\..\\Windows\\System32",
+                    "2026",
+                    "05",
+                    "19",
+                    "Terrasse_2026-05-19_12-30-45_MOTION_ABC123.mp4",
+                )
+        mod.stat.assert_not_called()
+        mod.open_file.assert_not_called()
+        close_spy.assert_called_once()
+
+    def test_open_flat_file_rejects_malicious_camera(self) -> None:
+        backend = _backend()
+        mod = _install_failing_smbclient()
+        with pytest.raises(FileNotFoundError):
+            backend.open_flat_file(
+                "../etc", "Terrasse_2026-05-19_12-30-45_MOTION_ABC123.mp4"
+            )
+        mod.stat.assert_not_called()
+        mod.open_file.assert_not_called()
