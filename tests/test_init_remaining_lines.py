@@ -254,6 +254,47 @@ class TestSetupEntryBranches:
         await _async_cancel_coordinator_tasks(coord)
 
     @pytest.mark.asyncio
+    async def test_fcm_stop_cancelled_still_runs_remaining_cleanup(self):
+        """Regression (bug-hunt 2026-07-03): async_stop_fcm_push explicitly
+        re-raises asyncio.CancelledError — the only unguarded await in
+        _async_cancel_coordinator_tasks. If HA's shutdown deadline cancels
+        this teardown coroutine while sitting on exactly that await, the
+        CancelledError used to propagate immediately, skipping every
+        remaining cleanup step (token-refresh handle, renewal/reaper tasks,
+        bg_tasks, NVR drain watcher, NVR recorders, live-stream teardown,
+        Frigate endpoints, stop_all_proxies). Pinned here: even though
+        async_stop_fcm_push raises CancelledError, stop_all_proxies (the
+        last real cleanup step) must still run, and the CancelledError must
+        still surface to the caller afterwards (not be swallowed)."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        coord = SimpleNamespace()
+        coord.async_stop_fcm_push = AsyncMock(side_effect=asyncio.CancelledError())
+        refresh_handle = MagicMock()
+        coord._token_refresh_handle = refresh_handle
+        coord._renewal_tasks = {}
+        coord._reaper_tasks = {}
+        coord._bg_tasks = set()
+        coord._nvr_drain_task = None
+        coord._live_connections = {}
+        coord._tls_proxy_ports = {"11111111-1111-1111-1111-111111111111": 12345}
+        coord._stream_log_listener = None
+        coord.async_stop_frigate_endpoints = MagicMock()
+
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", new=AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies") as mock_stop_all_proxies,
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await _async_cancel_coordinator_tasks(coord)
+
+        # Remaining cleanup ran despite the cancellation on the first await.
+        refresh_handle.cancel.assert_called_once()
+        assert coord._token_refresh_handle is None
+        coord.async_stop_frigate_endpoints.assert_called_once()
+        mock_stop_all_proxies.assert_called_once_with(coord._tls_proxy_ports)
+
+    @pytest.mark.asyncio
     async def test_fcm_push_start_when_option_enabled(self):
         """Line 4443: opts.enable_fcm_push=True → hass.async_create_task(coord.async_start_fcm_push)."""
         hass = MagicMock()

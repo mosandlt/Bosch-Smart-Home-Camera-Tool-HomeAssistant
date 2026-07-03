@@ -271,6 +271,31 @@ async def test_sync_retries_ephemeral_on_bind_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sync_ephemeral_retry_bind_error_does_not_raise() -> None:
+    """Regression (bug-hunt 2026-07-03): the first OSError assumes "sticky
+    port taken" and retries on an ephemeral port — but an ephemeral (port=0)
+    bind still uses frigate_bind_host, so if THAT is unbindable (bad
+    interface/IPv6 literal/etc.) the retry fails with the same OSError,
+    previously uncaught. async_added_to_hass calls this on every HA restart
+    for a RestoreEntity-restored "on" switch, so a bad frigate_bind_host used
+    to break entity setup with a traceback on every restart instead of a
+    clear log line."""
+    c = _make_coord(frigate_endpoints_enabled=True)
+    c._frigate_low_enabled[CAM_ID] = True  # type: ignore[attr-defined]
+    c._frigate_sticky_port[CAM_ID] = 9999  # type: ignore[attr-defined]
+    runner = MagicMock()
+    runner.start_server = AsyncMock(
+        side_effect=[OSError("port taken"), OSError("cannot assign requested address")]
+    )
+    c._frigate_runner = runner  # type: ignore[attr-defined]
+    # Must not raise — this is the regression itself.
+    await c.async_sync_frigate_endpoint(CAM_ID)
+    assert runner.start_server.call_count == 2
+    # Sticky port must not be set to a stale/wrong value after both attempts failed.
+    assert CAM_ID not in c._frigate_sticky_port  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
 async def test_fixed_port_uses_base_for_first_cam() -> None:
     """frigate_bind_port > 0: first (only) camera gets the base port exactly."""
     c = _make_coord(frigate_endpoints_enabled=True, frigate_bind_port=8556)

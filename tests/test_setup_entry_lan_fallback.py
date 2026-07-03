@@ -345,6 +345,85 @@ class TestHaStopListener:
         cancel_mock.assert_awaited_once_with(coord_stub)
 
 
+class TestTokenRefreshScheduledAfterForwardEntrySetups:
+    """Regression (bug-hunt 2026-07-03): _schedule_token_refresh() used to
+    run BEFORE async_load_ai_budget()/async_forward_entry_setups(). If either
+    raised, async_setup_entry aborted with the timer already armed — HA
+    never calls async_unload_entry (or fires EVENT_HOMEASSISTANT_STOP,
+    registered even later) for a setup that never completed, so the handle
+    had no cancellation path and fired _proactive_refresh() later against an
+    orphaned coordinator. Each failed setup retry armed one more zombie
+    timer. Fixed by moving the schedule call to after
+    async_forward_entry_setups succeeds."""
+
+    @pytest.mark.asyncio
+    async def test_not_scheduled_when_forward_entry_setups_raises(self):
+        from custom_components.bosch_shc_camera import async_setup_entry
+
+        hass = _make_hass()
+        hass.config_entries.async_forward_entry_setups = AsyncMock(
+            side_effect=RuntimeError("platform setup boom")
+        )
+        entry = _make_entry()
+        coord_stub = _make_coord_stub([CAM_A])
+
+        ent_reg = MagicMock()
+        ent_reg.async_get_entity_id = MagicMock(return_value=None)
+
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="platform setup boom"):
+                await async_setup_entry(hass, entry)
+
+        coord_stub._schedule_token_refresh.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_scheduled_after_successful_forward_entry_setups(self):
+        """Pins ORDER, not just that both were called — a manager mock
+        records call order across both mocks so a regressed schedule-before-
+        forward reordering fails this test even though both still get
+        called exactly once on the happy path."""
+        from custom_components.bosch_shc_camera import async_setup_entry
+
+        hass = _make_hass()
+        entry = _make_entry()
+        coord_stub = _make_coord_stub([CAM_A])
+
+        ent_reg = MagicMock()
+        ent_reg.async_get_entity_id = MagicMock(return_value=None)
+
+        manager = MagicMock()
+        manager.attach_mock(
+            hass.config_entries.async_forward_entry_setups, "forward_entry_setups"
+        )
+        manager.attach_mock(
+            coord_stub._schedule_token_refresh, "schedule_token_refresh"
+        )
+
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
+            await async_setup_entry(hass, entry)
+
+        coord_stub._schedule_token_refresh.assert_called_once()
+        hass.config_entries.async_forward_entry_setups.assert_awaited_once()
+        call_order = [c[0] for c in manager.mock_calls]
+        assert call_order.index("forward_entry_setups") < call_order.index(
+            "schedule_token_refresh"
+        ), "schedule_token_refresh must run AFTER forward_entry_setups, not before"
+
+
 # ── v12.4.10 stale lan_reachable migration ────────────────────────────────
 
 

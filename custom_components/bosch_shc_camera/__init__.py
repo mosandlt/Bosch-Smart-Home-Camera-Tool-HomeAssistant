@@ -6352,12 +6352,31 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     err,
                 )
                 self._frigate_sticky_port.pop(cam_id, None)
-                port = await self._frigate_runner.start_server(
-                    cam_id,
-                    config,
-                    self._frigate_resolve_inner,
-                    on_idle=lambda: self._frigate_on_idle(cam_id),
-                )
+                try:
+                    port = await self._frigate_runner.start_server(
+                        cam_id,
+                        config,
+                        self._frigate_resolve_inner,
+                        on_idle=lambda: self._frigate_on_idle(cam_id),
+                    )
+                except OSError as err2:
+                    # The first OSError assumed "port taken", but an
+                    # ephemeral (port=0) bind still uses frigate_bind_host —
+                    # if THAT is the problem (unbindable/nonexistent
+                    # interface, bad IPv6 literal, etc.) the retry fails
+                    # with the same error, previously uncaught. Since
+                    # async_added_to_hass calls this on every HA restart for
+                    # a RestoreEntity-restored "on" switch, a bad
+                    # frigate_bind_host used to break entity setup with a
+                    # traceback on every restart instead of a clear log
+                    # (bug-hunt 2026-07-03).
+                    _LOGGER.error(
+                        "frigate front-door %s: could not bind even an "
+                        "ephemeral port (%s) — check frigate_bind_host",
+                        cam_id[:8],
+                        err2,
+                    )
+                    return
                 self._frigate_sticky_port[cam_id] = port
         # Sensors read the new port/state.
         self.async_update_listeners()
@@ -8157,9 +8176,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         _ereg.async_remove(_stale_id)
 
-    # Start proactive background token refresh (5 min before JWT expiry)
-    coordinator._schedule_token_refresh()
-
     # Restore persisted daily AI budget so the cap survives restart/reload.
     await coordinator.async_load_ai_budget()
 
@@ -8181,6 +8197,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         platforms = ["binary_sensor", *platforms]
 
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
+
+    # Start proactive background token refresh (5 min before JWT expiry).
+    # Deliberately scheduled AFTER the awaits above succeed: arming this
+    # timer earlier meant a failure in async_load_ai_budget() or
+    # async_forward_entry_setups() aborted async_setup_entry with the timer
+    # already live — HA never calls async_unload_entry (or fires
+    # EVENT_HOMEASSISTANT_STOP, registered further below) for a setup that
+    # never completed, so the handle had no cancellation path and fired
+    # _proactive_refresh() later against an orphaned coordinator. Each failed
+    # setup retry (HA retries on ConfigEntryNotReady) armed one more zombie
+    # timer with no bound on how many could accumulate (bug-hunt 2026-07-03).
+    coordinator._schedule_token_refresh()
 
     # Quench the camera-component log spam during stream pre-warm (idempotent).
     # See _StreamSupportNoiseFilter docstring for context.
@@ -8673,7 +8701,23 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     `async_unload_entry` is not invoked on full HA shutdown, only on entry
     unload/reload.
     """
-    await coord.async_stop_fcm_push()
+    # async_stop_fcm_push explicitly re-raises asyncio.CancelledError (it has
+    # its own awaits on FCM client shutdown). If this whole teardown
+    # coroutine is cancelled (e.g. HA's shutdown deadline cancelling a slow
+    # unload) while sitting on THIS specific await — the only unguarded one
+    # in this function, every step below already has its own try/except —
+    # the CancelledError used to propagate immediately and skip every
+    # remaining cleanup step: token-refresh handle, renewal/reaper tasks,
+    # remaining _bg_tasks, the NVR drain watcher, NVR recorders, live-stream
+    # teardown, Frigate endpoints, and stop_all_proxies. Catch it, finish the
+    # rest of the cleanup, then re-raise at the end so the cancellation still
+    # ultimately surfaces to the caller (bug-hunt 2026-07-03).
+    _cancelled_during_cleanup: asyncio.CancelledError | None = None
+    try:
+        await coord.async_stop_fcm_push()
+    except asyncio.CancelledError as err:
+        _cancelled_during_cleanup = err
+        _LOGGER.debug("FCM stop cancelled mid-teardown — continuing remaining cleanup")
     # Cancel scheduled proactive token refresh — otherwise a reload leaves
     # a stale TimerHandle that fires against the dead coordinator.
     handle = getattr(coord, "_token_refresh_handle", None)
@@ -8765,6 +8809,11 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
         # during the reload gap bail out early instead of accessing a dead object.
         listener._coordinator = None
         coord._stream_log_listener = None
+
+    if _cancelled_during_cleanup is not None:
+        # Cleanup finished despite the cancellation — now let it surface to
+        # the caller, matching standard asyncio cancellation etiquette.
+        raise _cancelled_during_cleanup
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
