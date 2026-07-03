@@ -142,7 +142,7 @@ async def _run_alert(
     clip_url: str = "",
     clip_status: str = "",
     cam_name: str = "Terrasse",
-    timestamp: str = "2026-05-15T10:00:00.000Z",
+    timestamp: str | None = "2026-05-15T10:00:00.000Z",
     session_override: Any = None,
 ) -> None:
     from custom_components.bosch_shc_camera.fcm import async_send_alert
@@ -718,3 +718,20 @@ class TestPathAandBOrdering:
         # Path B: save_snapshot must have fired
         mock_save.assert_awaited_once_with(alert_coord.hass, CAM_ID, JPEG_BYTES)
         image_entity.async_notify_refreshed.assert_awaited_once()
+
+
+class TestAlertTimestampNone:
+    """Regression (bug-hunt 2026-07-03): Bosch has been observed sending
+    "timestamp": null in event payloads. newest_event.get("timestamp", "")
+    only substitutes the default when the key is ABSENT, not when its value
+    is JSON null — a bare None reaching async_send_alert used to crash on
+    len(timestamp)/timestamp[:19], silently (it runs inside an untracked
+    hass.async_create_task, swallowed by asyncio's default exception
+    handler) dropping the text/snapshot/clip notification steps with zero
+    visible symptom."""
+
+    @pytest.mark.asyncio
+    async def test_none_timestamp_does_not_raise(self) -> None:
+        coord = _make_alert_coord()
+        # Must not raise — this is the regression itself.
+        await _run_alert(coord, event_type="MOVEMENT", timestamp=None)

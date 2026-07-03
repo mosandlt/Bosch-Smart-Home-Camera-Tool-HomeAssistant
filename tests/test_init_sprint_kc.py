@@ -360,6 +360,65 @@ class TestEventProcessing:
         assert len(coord._alert_sent_ids) == 25  # 24 fresh + the new event
 
     @pytest.mark.asyncio
+    async def test_prune_mutates_dict_in_place_not_rebind(self):
+        """Regression (bug-hunt 2026-07-03): the prune used to rebind
+        self._alert_sent_ids to a brand-new dict via a comprehension. fcm.py's
+        async_handle_fcm_push captures a LOCAL alias (`_sent =
+        coordinator._alert_sent_ids`) once and mutates it in place across
+        awaits — a rebind here would detach that alias, so a concurrent FCM
+        handler's later write (`_sent[newest_id] = _now`) would land in the
+        orphaned old dict, invisible to any later reader of
+        self._alert_sent_ids, allowing a duplicate alert for the same event.
+        Pinned here via object identity: the dict object itself must survive
+        the >64-entry prune unchanged, not be replaced.
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        now = time_mod.monotonic()
+        stale = {f"STALE-{i}": now - 300.0 for i in range(40)}
+        fresh = {f"FRESH-{i}": now for i in range(24)}
+        seeded = {**stale, **fresh}
+        assert len(seeded) == 64
+
+        events = [
+            {
+                "id": "EVT-IDENTITY",
+                "eventType": "MOVEMENT",
+                "eventTags": [],
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        ]
+        cam_entry = _make_cam_entry(CAM_A)
+        coord = _make_coord_full(
+            _last_events=float("-inf"),
+            _cached_events={},
+            _last_event_ids={CAM_A: "OLD-ID"},
+            _alert_sent_ids=dict(seeded),
+        )
+        original_dict_id = id(coord._alert_sent_ids)
+
+        # Simulate a concurrent FCM handler holding an alias to the SAME dict
+        # object (the exact scenario the in-place-mutation comment guards
+        # against).
+        aliased_ref = coord._alert_sent_ids
+
+        session = _session_for_cam(cam_entry, events=events)
+        with patch(
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        assert id(coord._alert_sent_ids) == original_dict_id, (
+            "prune must mutate self._alert_sent_ids in place, not rebind it "
+            "to a new dict object"
+        )
+        assert coord._alert_sent_ids is aliased_ref, (
+            "a concurrently-held alias to the dict must still see the pruned "
+            "state, not be silently detached"
+        )
+
+    @pytest.mark.asyncio
     async def test_event_dedup_suppresses_duplicate_alert(self):
         """_alert_sent_ids already contains newest event_id → no bus event fired.
 

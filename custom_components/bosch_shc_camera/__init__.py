@@ -2888,12 +2888,25 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             # grows one entry per event forever. Drop entries older
                             # than 2× the 60s dedup window.
                             if len(self._alert_sent_ids) > 64:
+                                # Mutate in place — a dict-comprehension rebind
+                                # (self._alert_sent_ids = {...}) would detach
+                                # any alias another concurrent call already
+                                # holds. fcm.py's async_handle_fcm_push does
+                                # exactly that: it captures `_sent =
+                                # coordinator._alert_sent_ids` once, then
+                                # writes to it later after an await. If this
+                                # rebind ran in between, that later write would
+                                # land in the orphaned old dict — invisible to
+                                # any later reader of self._alert_sent_ids —
+                                # allowing a duplicate alert for the same event
+                                # (bug-hunt 2026-07-03).
                                 _cutoff = _now_mono - 120.0
-                                self._alert_sent_ids = {
-                                    k: v
+                                for _k in [
+                                    k
                                     for k, v in self._alert_sent_ids.items()
-                                    if v >= _cutoff
-                                }
+                                    if v < _cutoff
+                                ]:
+                                    del self._alert_sent_ids[_k]
                             _LOGGER.debug(
                                 "New event detected for %s (id=%s) — triggering snapshot refresh",
                                 cam_id,

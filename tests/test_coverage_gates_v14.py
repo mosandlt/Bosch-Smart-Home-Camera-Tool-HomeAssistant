@@ -735,3 +735,121 @@ async def test_supervisor_inner_poll_breaks_on_forced_hard_heal() -> None:
     coord.hass.config_entries.async_update_entry.assert_called()
     # Flag consumed (and reset) by the top-of-loop hard-heal.
     assert coord._fcm_force_hard_heal is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# fcm.py — hard-heal purge exception must not kill the supervisor task
+# (bug-hunt 2026-07-03)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_supervisor_hard_heal_purge_exception_logs_and_retries() -> None:
+    """Regression: an exception raised while purging credentials (e.g. from
+    config_entries.async_update_entry) used to propagate straight out of
+    _async_run_fcm_supervisor, killing the task outright — FCM push then
+    stayed fully down until the next coordinator-tick watchdog cycle noticed
+    sup.done() and restarted it, instead of the designed ~10s poll cadence.
+    The fix wraps the hard-heal purge in try/except and retries instead of
+    dying. Pinned here: the first purge attempt raises, the supervisor
+    survives and completes a second hard-heal attempt before terminating."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    # No fcm_credentials → needs_hard is True every iteration (deterministic,
+    # doesn't depend on force_hard being consumed/reset).
+    coord = _make_supervisor_coord_with_lock({}, force_hard=False)
+    coord.hass.config_entries.async_update_entry = MagicMock(
+        side_effect=[RuntimeError("boom"), None]
+    )
+
+    purge_attempts = 0
+
+    async def _stop_push(_coord: object) -> None:
+        nonlocal purge_attempts
+        purge_attempts += 1
+
+    async def _start(_coord: object) -> bool:
+        # Only reached after a hard-heal purge attempt completed without
+        # raising (2nd attempt) — terminate the supervisor cleanly.
+        raise asyncio.CancelledError()
+
+    with (
+        patch.object(fcm, "async_stop_fcm_push", new=_stop_push),
+        patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+        patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+        patch("asyncio.sleep", new=AsyncMock()),
+    ):
+        task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert task.done()
+    assert not task.cancelled()
+    # Both the failed and the succeeding purge attempt ran async_stop_fcm_push.
+    assert purge_attempts == 2
+    assert coord.hass.config_entries.async_update_entry.call_count == 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# fcm.py — exception inside the poll loop must not kill the supervisor task
+# (bug-hunt 2026-07-03)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_supervisor_poll_loop_exception_logs_and_treats_as_terminated() -> None:
+    """Regression: an unexpected exception while polling the listener (e.g.
+    fcm_client.is_started() raising) used to propagate out of
+    _async_run_fcm_supervisor and kill the task, same failure class as the
+    hard-heal purge case above. The fix treats it like a normal listener
+    termination (falls through to stop+backoff) instead of dying. Pinned
+    here: is_started() raises once, the supervisor survives and reaches a
+    second start attempt."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    coord = _make_supervisor_coord_with_lock(
+        {"fcm_credentials": {"gcm": "x"}}, force_hard=False
+    )
+
+    fcm_client = MagicMock()
+    fcm_client.is_started.side_effect = RuntimeError("boom")
+    coord._fcm_client = fcm_client
+
+    start_calls = 0
+
+    async def _start(_coord: object) -> bool:
+        nonlocal start_calls
+        start_calls += 1
+        if start_calls == 1:
+            return True  # listener "up" → enter the poll loop, is_started() raises
+        raise asyncio.CancelledError()  # terminate on the 2nd attempt
+
+    stop_calls = 0
+
+    async def _stop_push(_coord: object) -> None:
+        nonlocal stop_calls
+        stop_calls += 1
+
+    with (
+        patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+        patch.object(fcm, "async_stop_fcm_push", new=_stop_push),
+        patch("asyncio.sleep", new=AsyncMock()),
+    ):
+        task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert task.done()
+    assert not task.cancelled()
+    # The supervisor reached a second start attempt instead of dying on the
+    # is_started() exception.
+    assert start_calls == 2
+    assert stop_calls == 1

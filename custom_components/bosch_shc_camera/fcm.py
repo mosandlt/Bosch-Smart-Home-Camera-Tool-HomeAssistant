@@ -562,6 +562,13 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> bool:
         # Load saved FCM credentials from config entry (survives HA restarts)
         saved_fcm_creds = coordinator._entry.data.get("fcm_credentials")
 
+        # Bound AFTER coordinator._fcm_client is assigned below. Read via
+        # late-binding closure (not captured by value) so the comparison in
+        # _persist() below always reflects which client THIS _try_fcm() call
+        # created — not whatever coordinator._fcm_client points to by the
+        # time the callback actually fires.
+        _this_client: Any = None
+
         def _on_creds_updated(creds: Any) -> None:
             """Save FCM credentials to config entry for persistence.
 
@@ -573,6 +580,20 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> bool:
             """
 
             def _persist() -> None:
+                # Guard against a stale client: a hard-heal purges creds and
+                # starts a fresh client+checkin while an OLD client's
+                # callback (fired from its own SDK thread, not necessarily
+                # covered by the drain-wait in async_stop_fcm_push) can still
+                # land on the loop afterwards. Without this check the late
+                # callback would silently overwrite the fresh credentials
+                # with stale ones, defeating the hard-heal it was meant to
+                # recover from (bug-hunt 2026-07-03).
+                if coordinator._fcm_client is not _this_client:
+                    _LOGGER.debug(
+                        "FCM: ignoring credentials_updated_callback from a "
+                        "stale/replaced client"
+                    )
+                    return
                 coordinator.hass.async_create_task(
                     _async_persist_fcm_creds(coordinator, creds)
                 )
@@ -603,6 +624,7 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> bool:
                 abort_on_sequential_error_count=None,
             )
         coordinator._fcm_client = FcmPushClient(**fcm_kwargs)
+        _this_client = coordinator._fcm_client
 
         try:
             coordinator._fcm_token = await coordinator._fcm_client.checkin_or_register()
@@ -890,22 +912,43 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                 reason = "no persisted credentials"
             _LOGGER.info("FCM supervisor: hard-heal (%s) — purging credentials", reason)
 
-            async with coordinator._fcm_start_lock:
-                await async_stop_fcm_push(coordinator)
-                new_data = {
-                    k: v
-                    for k, v in coordinator._entry.data.items()
-                    if not k.startswith("fcm_")
-                }
-                purged = sorted(set(coordinator._entry.data) - set(new_data))
-                coordinator.hass.config_entries.async_update_entry(
-                    coordinator._entry, data=new_data
+            try:
+                async with coordinator._fcm_start_lock:
+                    await async_stop_fcm_push(coordinator)
+                    new_data = {
+                        k: v
+                        for k, v in coordinator._entry.data.items()
+                        if not k.startswith("fcm_")
+                    }
+                    purged = sorted(set(coordinator._entry.data) - set(new_data))
+                    coordinator.hass.config_entries.async_update_entry(
+                        coordinator._entry, data=new_data
+                    )
+                    _LOGGER.info(
+                        "FCM supervisor: purged %d entry-data keys: %s",
+                        len(purged),
+                        purged,
+                    )
+                reset_fcm_creds_staleness_counter()
+                soft_streak = 0
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # An unhandled exception here (e.g. from async_update_entry)
+                # used to propagate straight out of this loop, killing the
+                # entire supervisor task — FCM push then stayed fully down
+                # until the next coordinator-tick watchdog cycle noticed
+                # sup.done() and restarted it, instead of the designed ~10s
+                # poll cadence (bug-hunt 2026-07-03). Log and retry instead.
+                _LOGGER.exception(
+                    "FCM supervisor: hard-heal purge raised an exception — "
+                    "retrying next iteration"
                 )
-                _LOGGER.info(
-                    "FCM supervisor: purged %d entry-data keys: %s", len(purged), purged
-                )
-            reset_fcm_creds_staleness_counter()
-            soft_streak = 0
+                try:
+                    await asyncio.sleep(FCM_SUPERVISOR_BACKOFF_SEC[0])
+                except asyncio.CancelledError:
+                    break
+                continue
 
         # ── Start listener ─────────────────────────────────────────────────
         started = False
@@ -968,6 +1011,18 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
             await async_stop_fcm_push(coordinator)
             _LOGGER.debug("FCM supervisor: cancelled while listener was running")
             break
+        except Exception:
+            # Anything unexpected here (e.g. fcm_client.is_started() raising)
+            # used to propagate straight out of _async_run_fcm_supervisor,
+            # killing the task outright — recovery then depended on the
+            # coordinator-tick watchdog noticing sup.done(), not the designed
+            # ~10s poll cadence (bug-hunt 2026-07-03). Treat it the same as a
+            # normal listener termination: fall through to the stop+backoff
+            # logic below instead of dying silently.
+            _LOGGER.exception(
+                "FCM supervisor: exception while polling listener — "
+                "treating as terminated"
+            )
 
         if forced_heal:
             _LOGGER.info("FCM supervisor: listener stopped for forced hard-heal")
@@ -1457,6 +1512,17 @@ async def async_send_alert(
     """
     from .smb import sync_local_save, sync_smb_upload
 
+    # Bosch has been observed sending "timestamp": null in event payloads;
+    # newest_event.get("timestamp", "") only substitutes the default when the
+    # key is ABSENT, not when its value is JSON null, so a bare None could
+    # reach here and crash len(timestamp)/timestamp[:19] below. This runs
+    # inside an untracked-by-caller hass.async_create_task, so an unguarded
+    # TypeError here was silently swallowed by asyncio's default exception
+    # handler — the HA event bus fired fine, but the text/snapshot/clip
+    # notification steps never ran, with no visible symptom (bug-hunt
+    # 2026-07-03).
+    timestamp = timestamp or ""
+
     opts = coordinator.options
 
     # Resolve the stable cam_id once at push-receipt time (start of coroutine).
@@ -1649,9 +1715,21 @@ async def async_send_alert(
         try:
             async with asyncio.timeout(15):
                 async with session.get(image_url, headers=headers) as resp:
-                    if resp.status == 200 and "image" in resp.headers.get(
-                        "Content-Type", ""
-                    ):
+                    _snap_content_type = resp.headers.get("Content-Type", "")
+                    if resp.status != 200 or "image" not in _snap_content_type:
+                        # No else-branch below (the 200+image body is large and
+                        # deeply nested) — log here instead so an expired/404/
+                        # 410 snapshot URL doesn't skip step 2 with zero trace,
+                        # making delivery failures undiagnosable (bug-hunt
+                        # 2026-07-03).
+                        _LOGGER.debug(
+                            "Alert step 2 (screenshot) skipped for %s: HTTP %s "
+                            "content-type=%r",
+                            cam_name,
+                            resp.status,
+                            _snap_content_type,
+                        )
+                    if resp.status == 200 and "image" in _snap_content_type:
                         data = await resp.read()
                         if data:
                             # Capture bytes for SMB/FTP upload (avoid re-download).
@@ -1831,7 +1909,7 @@ async def async_send_alert(
                                 if event_id and _ev_id and _ev_id != event_id:
                                     continue
                                 if not event_id and (
-                                    ev.get("timestamp", "")[:19] != timestamp[:19]
+                                    (ev.get("timestamp") or "")[:19] != timestamp[:19]
                                 ):
                                     # Fallback: no event_id known, use timestamp
                                     # (legacy path — event_id should always be
