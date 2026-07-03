@@ -1472,9 +1472,11 @@ class BoschCameraCard extends HTMLElement {
     this._startRefreshTimer();
     this._loadHlsJs().catch(() => {});
     const prevEntity = this._audioRegisteredEntity;
-    if (prevEntity) _boschAudioUnregister(prevEntity, this);
-    this._audioRegisteredEntity = config.camera_entity;
-    this._isSecondaryAudioInstance = _boschAudioRegister(config.camera_entity, this);
+    if (prevEntity !== config.camera_entity) {
+      if (prevEntity) _boschAudioUnregister(prevEntity, this);
+      this._audioRegisteredEntity = config.camera_entity;
+      this._isSecondaryAudioInstance = _boschAudioRegister(config.camera_entity, this);
+    }
   }
   _resolveTheme() {
     const cfg = this._config?.theme || "ios";

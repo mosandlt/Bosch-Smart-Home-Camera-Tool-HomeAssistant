@@ -2285,3 +2285,126 @@ test("native iOS HLS load watchdog: armed on the native path, cleared on teardow
   const stopBody = CARD_SRC.slice(stop, CARD_SRC.indexOf("_onSnapshotClick()", stop));
   expect(stopBody.includes("clearTimeout(this._nativeHlsLoadTimer)"), "timer cleared on teardown").toBe(true);
 });
+
+// ── Multi-instance audio registry: redundant setConfig must not swap roles ────
+// Regression (bug-hunt 2026-07-03): Lovelace re-invokes setConfig on unchanged
+// card instances for reasons unrelated to this card (editing any other card on
+// the same view, storage-collection updates, etc.). The registry is a Set,
+// which re-inserts at the end on delete+re-add, and "primary" = first-in-Set —
+// so a no-op setConfig on the primary instance used to silently move it to the
+// end, swapping primary/secondary (mute) roles between two cards showing the
+// same camera with no user action.
+test("redundant setConfig (same camera_entity) does not swap audio primary/secondary roles", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+
+  const result = await page.evaluate(async () => {
+    const hass = {
+      states: { "camera.dup": { state: "idle", attributes: { friendly_name: "Dup" }, last_updated: "2026-01-01T00:00:00Z" } },
+      config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+    };
+
+    const cardA = document.createElement("bosch-camera-card");
+    cardA.setConfig({ camera_entity: "camera.dup" });
+    cardA.hass = hass;
+    document.body.appendChild(cardA);
+
+    const cardB = document.createElement("bosch-camera-card");
+    cardB.setConfig({ camera_entity: "camera.dup" });
+    cardB.hass = hass;
+    document.body.appendChild(cardB);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    const before = {
+      aSecondary: cardA._isSecondaryAudioInstance,
+      bSecondary: cardB._isSecondaryAudioInstance,
+      // _isSecondaryAudioInstance is a cached snapshot set only at register
+      // time; the LIVE mute decision at runtime always re-derives from the
+      // registry Set order via _isSecondaryAudio(). Assert both so the test
+      // proves the actual runtime behavior, not just the cached field.
+      aSecondaryLive: cardA._isSecondaryAudio(),
+      bSecondaryLive: cardB._isSecondaryAudio(),
+    };
+
+    // Simulate a redundant Lovelace re-invoke on the PRIMARY card (cardA) with
+    // the SAME camera_entity — nothing about this card actually changed.
+    cardA.setConfig({ camera_entity: "camera.dup", title: "still the same camera" });
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    const after = {
+      aSecondary: cardA._isSecondaryAudioInstance,
+      bSecondary: cardB._isSecondaryAudioInstance,
+      aSecondaryLive: cardA._isSecondaryAudio(),
+      bSecondaryLive: cardB._isSecondaryAudio(),
+    };
+
+    cardA.remove();
+    cardB.remove();
+    return { before, after };
+  });
+
+  const expected = { aSecondary: false, bSecondary: true, aSecondaryLive: false, bSecondaryLive: true };
+  expect(result.before, "cardA registers first → primary (not secondary)").toEqual(expected);
+  expect(result.after, "roles must be unchanged after a redundant setConfig").toEqual(expected);
+});
+
+// Companion to the redundant-setConfig test above: a GENUINE camera_entity
+// change (the user re-points the card at a different camera, e.g. via the
+// dashboard editor) must still unregister from the old entity's group and
+// register into the new one — the guard must only skip the no-op case, not
+// break real re-registration.
+test("a genuine camera_entity change still re-registers the audio group", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+
+  const result = await page.evaluate(async () => {
+    const hass = {
+      states: {
+        "camera.one": { state: "idle", attributes: { friendly_name: "One" }, last_updated: "2026-01-01T00:00:00Z" },
+        "camera.two": { state: "idle", attributes: { friendly_name: "Two" }, last_updated: "2026-01-01T00:00:00Z" },
+      },
+      config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+    };
+
+    // A second, permanent card already anchoring camera.two as primary.
+    const anchorTwo = document.createElement("bosch-camera-card");
+    anchorTwo.setConfig({ camera_entity: "camera.two" });
+    anchorTwo.hass = hass;
+    document.body.appendChild(anchorTwo);
+
+    // The card under test starts on camera.one (alone → primary there).
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.one" });
+    card.hass = hass;
+    document.body.appendChild(card);
+    await new Promise((r) => setTimeout(r, 100));
+    const onCameraOne = {
+      secondary: card._isSecondaryAudioInstance,
+      secondaryLive: card._isSecondaryAudio(),
+      registeredEntity: card._audioRegisteredEntity,
+    };
+
+    // User re-points the card at camera.two, which already has a primary
+    // (anchorTwo) — the newly-arriving card must become secondary there,
+    // and camera.one's group must lose it (so a later card on camera.one
+    // would become primary again, not find a stale secondary occupying it).
+    card.setConfig({ camera_entity: "camera.two" });
+    await new Promise((r) => setTimeout(r, 100));
+    const onCameraTwo = {
+      secondary: card._isSecondaryAudioInstance,
+      secondaryLive: card._isSecondaryAudio(),
+      registeredEntity: card._audioRegisteredEntity,
+    };
+
+    card.remove();
+    anchorTwo.remove();
+    return { onCameraOne, onCameraTwo };
+  });
+
+  expect(result.onCameraOne, "alone on camera.one → primary")
+    .toEqual({ secondary: false, secondaryLive: false, registeredEntity: "camera.one" });
+  expect(result.onCameraTwo, "re-pointed to camera.two (already has a primary) → becomes secondary there")
+    .toEqual({ secondary: true, secondaryLive: true, registeredEntity: "camera.two" });
+});

@@ -1862,10 +1862,23 @@ class BoschCameraCard extends HTMLElement {
     // If it is the 2nd+ instance for the same entity, flag it as secondary so
     // it will be auto-muted (prevents echo when two cards show the same camera).
     // Re-register whenever setConfig re-runs (entity may have changed).
+    //
+    // Bug-hunt 2026-07-03: skip the unregister/re-register when the entity is
+    // UNCHANGED. Lovelace re-invokes setConfig on unchanged card instances for
+    // reasons that have nothing to do with this card (editing any other card
+    // on the same view, storage-collection updates, etc.) — not just when
+    // camera_entity actually changes. The registry is a Set, which re-inserts
+    // at the end on delete+re-add, and "primary" = first-in-Set. Without this
+    // guard, a no-op setConfig on the primary instance silently moved it to
+    // the end of the Set, swapping primary/secondary roles between two cards
+    // showing the same camera with no user action — the previously-muted
+    // instance would unmute and vice versa.
     const prevEntity = this._audioRegisteredEntity;
-    if (prevEntity) _boschAudioUnregister(prevEntity, this);
-    this._audioRegisteredEntity = config.camera_entity;
-    this._isSecondaryAudioInstance = _boschAudioRegister(config.camera_entity, this);
+    if (prevEntity !== config.camera_entity) {
+      if (prevEntity) _boschAudioUnregister(prevEntity, this);
+      this._audioRegisteredEntity = config.camera_entity;
+      this._isSecondaryAudioInstance = _boschAudioRegister(config.camera_entity, this);
+    }
   }
 
   // ── Theme (iOS / Android) ─────────────────────────────────────────────────
