@@ -335,6 +335,69 @@ class TestSmbPrefetchedImage:
         # Without prefetch, _http_get must be called to download the snapshot.
         mock_get.assert_called_once_with(img_url, "tok", timeout=30)
 
+    def test_prefetched_image_written_when_file_missing(self) -> None:
+        """File-doesn't-exist + prefetched bytes → write prefetched bytes, no fetch.
+
+        Pins smb.py L364-367: this combination (smb_stat raises OSError i.e.
+        the snapshot isn't already on the SMB share, AND the caller supplied
+        prefetched_image bytes) was previously untested in isolation — the
+        sibling test above shares its cloud-import path with `sys.modules`
+        (via ``setdefault``), which is order-dependent: once any earlier test
+        in the suite has triggered a real `import smbclient`, `setdefault`
+        becomes a no-op and the genuine smbclient package (not the mock) gets
+        used, so `register_session` fails against a real network call and the
+        function returns before ever reaching the upload branch. This test
+        installs its fake `smbclient` via unconditional assignment (matching
+        the robust pattern in test_smb_open_file_cleanup.py), so it reliably
+        exercises L364-367 regardless of test execution order.
+        """
+        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
+        coord = self._make_coord()
+        data = self._smb_data(
+            img_url="https://residential.cbs.boschsecurity.com/img.jpg"
+        )
+
+        import sys
+
+        written: dict[str, Any] = {}
+
+        def _fake_open_file(path: str, mode: str = "r") -> Any:
+            handle = MagicMock()
+
+            def _write(content: bytes) -> None:
+                written["path"] = path
+                written["mode"] = mode
+                written["content"] = content
+
+            handle.write = MagicMock(side_effect=_write)
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=handle)
+            cm.__exit__ = MagicMock(return_value=False)
+            return cm
+
+        fake_smb = MagicMock()
+        fake_smb.register_session = MagicMock()
+        fake_smb.open_file = MagicMock(side_effect=_fake_open_file)
+        fake_smb.stat = MagicMock(side_effect=OSError("not found"))
+        fake_smb.mkdir = MagicMock()
+        sys.modules["smbclient"] = fake_smb
+
+        with (
+            patch(f"{SMB_MODULE}.smb_makedirs"),
+            patch(f"{SMB_MODULE}._http_get") as mock_get,
+        ):
+            sync_smb_upload(coord, data, "tok", prefetched_image=JPEG_BYTES)
+
+        # L364-367: prefetched bytes written in binary mode, no cloud fetch.
+        fake_smb.register_session.assert_called_once()
+        mock_get.assert_not_called()
+        assert written["mode"] == "wb"
+        assert written["content"] == JPEG_BYTES
+        assert written["path"].endswith(
+            "Innenbereich_2026-06-12_07-07-30_MOVEMENT_aabbccdd.jpg"
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FTP prefetch — _sync_ftp_upload uses caller-supplied bytes, no _http_get call

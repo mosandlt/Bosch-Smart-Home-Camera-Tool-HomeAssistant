@@ -776,6 +776,80 @@ class TestPhase2CommandsNowSkipGuarded:
 
         assert coord._rcp_cmd_failures[CAM_ID].get("0x0b60", 0) >= 1
 
+    @pytest.mark.asyncio
+    async def test_alarm_catalog_xml_envelope_marks_fail(self):
+        """0x0c38 XML-wrapped cloud-proxy leak → _is_xml_envelope branch → _mark_fail.
+
+        Distinct from test_alarm_catalog_none_marks_fail_and_engages_skip above:
+        that test feeds raw=None which falls through to the plain `else`
+        branch's _mark_fail, never touching the `if _is_xml_envelope(raw):`
+        branch body. This pins the XML-envelope-specific _mark_fail call.
+        """
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        xml_bytes = b"\n\n<rcp>\n\n\t<command>0x0c38</command>\n</rcp>"
+
+        async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
+            return xml_bytes if command == "0x0c38" else None
+
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert coord._rcp_cmd_failures[CAM_ID].get("0x0c38", 0) >= 1
+        assert CAM_ID not in coord._rcp_alarm_catalog_cache
+
+    @pytest.mark.asyncio
+    async def test_motion_coords_xml_envelope_marks_fail(self):
+        """0x0c0a XML-wrapped cloud-proxy leak → _is_xml_envelope branch → _mark_fail.
+
+        Distinct from test_motion_coords_none_marks_fail above (raw=None hits
+        the plain `else` branch, not the `if _is_xml_envelope(raw):` body).
+        """
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        xml_bytes = b"\n\n<rcp>\n\n\t<command>0x0c0a</command>\n</rcp>"
+
+        async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
+            return xml_bytes if command == "0x0c0a" else None
+
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert coord._rcp_cmd_failures[CAM_ID].get("0x0c0a", 0) >= 1
+        assert CAM_ID not in coord._rcp_motion_coords_cache
+
+    @pytest.mark.asyncio
+    async def test_iva_catalog_xml_envelope_marks_fail(self):
+        """0x0b60 XML-wrapped cloud-proxy leak → _is_xml_envelope branch → _mark_fail.
+
+        Distinct from test_iva_catalog_none_marks_fail above (raw=None hits
+        the plain `else` branch, not the `if _is_xml_envelope(raw):` body).
+        """
+        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+
+        coord = _make_coord()
+        xml_bytes = b"\n\n<rcp>\n\n\t<command>0x0b60</command>\n</rcp>"
+
+        async def mock_rcp_read(hass, rcp_base, command, sessionid, **kwargs):
+            return xml_bytes if command == "0x0b60" else None
+
+        with (
+            patch(f"{MODULE}.get_cached_rcp_session", return_value="sess123"),
+            patch(f"{MODULE}.rcp_read", side_effect=mock_rcp_read),
+        ):
+            await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
+
+        assert coord._rcp_cmd_failures[CAM_ID].get("0x0b60", 0) >= 1
+        assert CAM_ID not in coord._rcp_iva_catalog_cache
+
 
 # ── async_update_rcp_data: IVA catalog cached ────────────────────────────────
 

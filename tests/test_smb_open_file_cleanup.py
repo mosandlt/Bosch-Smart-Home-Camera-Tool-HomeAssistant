@@ -141,6 +141,14 @@ class TestSmbPathTraversal:
         path = backend._path("Terrasse", "2026", "05", "19", "file.mp4")
         assert path == "\\\\nas\\M\\Terrasse\\2026\\05\\19\\file.mp4"
 
+    def test_path_skips_empty_segment(self) -> None:
+        """An empty-string segment (e.g. a double-slash/trailing-empty split
+        artifact) must be silently skipped, not raise and not appear in the
+        joined path — pins the `if not seg: continue` guard."""
+        backend = _backend()
+        path = backend._path("Terrasse", "", "file.mp4")
+        assert path == "\\\\nas\\M\\Terrasse\\file.mp4"
+
     def test_open_file_rejects_malicious_camera_before_touching_smbclient(
         self,
     ) -> None:

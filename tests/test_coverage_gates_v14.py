@@ -794,6 +794,64 @@ async def test_supervisor_hard_heal_purge_exception_logs_and_retries() -> None:
     assert coord.hass.config_entries.async_update_entry.call_count == 2
 
 
+@pytest.mark.asyncio
+async def test_supervisor_cancelled_during_hard_heal_purge_reraises() -> None:
+    """A real `asyncio.CancelledError` raised while purging credentials (e.g.
+    the task is cancelled mid-`async_stop_fcm_push`) must propagate out of
+    the supervisor immediately — it is NOT a "purge raised an exception,
+    retry" case (that path is only for genuine errors). The purge's
+    try/except distinguishes the two: `except asyncio.CancelledError: raise`
+    re-raises before the broader `except Exception:` retry-handler below it
+    can swallow real cancellation as a retryable failure."""
+    from custom_components.bosch_shc_camera import fcm
+
+    coord = _make_supervisor_coord_with_lock({}, force_hard=False)
+
+    async def _stop_push(_coord: object) -> None:
+        raise asyncio.CancelledError()
+
+    with (
+        patch.object(fcm, "async_stop_fcm_push", new=_stop_push),
+        patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+    ):
+        task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert task.done()
+    assert task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_supervisor_cancelled_during_purge_retry_backoff_sleep_breaks() -> None:
+    """After a hard-heal purge raises a plain `Exception` (retryable), the
+    supervisor sleeps for the backoff before retrying. If cancellation
+    arrives DURING that backoff sleep, the nested
+    `except asyncio.CancelledError: break` must stop the loop cleanly
+    (returning normally) rather than letting cancellation fall through to
+    the outer retry `continue` and looping forever on a dying task."""
+    from custom_components.bosch_shc_camera import fcm
+
+    coord = _make_supervisor_coord_with_lock({}, force_hard=False)
+
+    async def _stop_push(_coord: object) -> None:
+        raise RuntimeError("boom")
+
+    with (
+        patch.object(fcm, "async_stop_fcm_push", new=_stop_push),
+        patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+        patch("asyncio.sleep", new=AsyncMock(side_effect=asyncio.CancelledError())),
+    ):
+        task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+        # The `break` inside the nested except-CancelledError ends the while
+        # loop normally — the task completes WITHOUT propagating
+        # CancelledError and without being marked cancelled.
+        await task
+
+    assert task.done()
+    assert not task.cancelled()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # fcm.py — exception inside the poll loop must not kill the supervisor task
 # (bug-hunt 2026-07-03)
