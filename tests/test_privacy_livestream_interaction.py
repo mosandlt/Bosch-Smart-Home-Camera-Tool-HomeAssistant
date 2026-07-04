@@ -32,6 +32,7 @@ These tests pin both contracts so the bug cannot regress silently.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -50,6 +51,7 @@ def _make_coord(stream_obj=None, *, with_ls_entity: bool = False):
     """
     cam_entity = SimpleNamespace(stream=stream_obj)
     coord = SimpleNamespace(
+        _stream_locks={},
         _live_connections={CAM_ID: {"rtspsUrl": "rtsps://x"}},
         _user_intent_streams={CAM_ID},  # v12.4.12: user intent tracking
         _live_opened_at={CAM_ID: 100.0},
@@ -70,6 +72,9 @@ def _make_coord(stream_obj=None, *, with_ls_entity: bool = False):
         _nvr_processes={CAM_ID: object()},  # NVR is running for this cam
         _nvr_user_intent={CAM_ID: True},
         stop_recorder=AsyncMock(),
+    )
+    coord._get_stream_lock = lambda cam_id: coord._stream_locks.setdefault(
+        cam_id, asyncio.Lock()
     )
     if with_ls_entity:
         ls_entity = MagicMock()

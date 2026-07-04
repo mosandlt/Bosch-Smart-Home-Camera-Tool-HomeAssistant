@@ -725,6 +725,7 @@ def _make_idle_coord(*, active_consumer: bool, live: dict | None) -> SimpleNames
         _bg_tasks=set(),
         _has_active_consumer=AsyncMock(return_value=active_consumer),
         _live_connections=({CAM_ID: live} if live is not None else {}),
+        _auto_renew_generation={CAM_ID: 1},
         _tear_down_live_stream=AsyncMock(),
     )
 
@@ -757,4 +758,4 @@ async def test_frigate_on_idle_tears_down_local_session_when_truly_idle() -> Non
     """No other consumer + an on-demand LOCAL session → tear it down."""
     coord = _make_idle_coord(active_consumer=False, live={"_connection_type": "LOCAL"})
     await _run_on_idle(coord)
-    coord._tear_down_live_stream.assert_called_once_with(CAM_ID)
+    coord._tear_down_live_stream.assert_called_once_with(CAM_ID, expected_generation=1)

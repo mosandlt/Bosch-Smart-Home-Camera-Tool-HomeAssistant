@@ -94,7 +94,7 @@ class TestIdleSessionReaper:
             patch("custom_components.bosch_shc_camera.time.monotonic", monotonic),
         ):
             await BoschCameraCoordinator._idle_session_reaper(c, CAM, GEN)
-        c._tear_down_live_stream.assert_called_once_with(CAM)
+        c._tear_down_live_stream.assert_called_once_with(CAM, expected_generation=GEN)
         c.hass.async_create_task.assert_called_once()
         assert CAM not in c._session_idle_since  # cleared on the way out
 
@@ -127,7 +127,7 @@ class TestIdleSessionReaper:
             patch("custom_components.bosch_shc_camera.time.monotonic", monotonic),
         ):
             await BoschCameraCoordinator._idle_session_reaper(c, CAM, GEN)
-        c._tear_down_live_stream.assert_called_once_with(CAM)
+        c._tear_down_live_stream.assert_called_once_with(CAM, expected_generation=GEN)
 
     @pytest.mark.asyncio
     async def test_does_not_reap_while_consumer_present(self):

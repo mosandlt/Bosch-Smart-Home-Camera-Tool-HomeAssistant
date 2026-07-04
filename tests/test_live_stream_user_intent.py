@@ -34,6 +34,7 @@ These tests pin all four contracts.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -204,6 +205,7 @@ class TestTeardownClearsIntent:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = SimpleNamespace(
+            _stream_locks={},
             _live_connections={CAM_ID: {"rtspsUrl": "rtsps://x"}},
             _user_intent_streams={CAM_ID},
             _live_opened_at={CAM_ID: 100.0},
@@ -224,6 +226,9 @@ class TestTeardownClearsIntent:
             _nvr_processes={},
             _nvr_user_intent={},
             stop_recorder=AsyncMock(),
+        )
+        coord._get_stream_lock = lambda cam_id: coord._stream_locks.setdefault(
+            cam_id, asyncio.Lock()
         )
 
         await BoschCameraCoordinator._tear_down_live_stream(coord, CAM_ID)

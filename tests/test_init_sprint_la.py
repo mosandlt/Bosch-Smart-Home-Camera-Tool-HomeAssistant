@@ -47,7 +47,7 @@ def _make_coord(**overrides):
     """Minimal coordinator stub for keepalive / promote / terminator tests."""
     import inspect
 
-    def _create_task(coro, **kwargs):
+    def _create_task(coro, *args, **kwargs):
         """Consume the coroutine so Python 3.14 'never awaited' warnings don't fire."""
         if inspect.iscoroutine(coro):
             coro.close()
@@ -72,9 +72,9 @@ def _make_coord(**overrides):
     coord.hass._create_task_calls = []
     original_create_task = coord.hass.async_create_task
 
-    def _recording_create_task(coro, **kwargs):
+    def _recording_create_task(coro, *args, **kwargs):
         coord.hass._create_task_calls.append(coro)
-        return original_create_task(coro, **kwargs)
+        return original_create_task(coro, *args, **kwargs)
 
     coord.hass.async_create_task = _recording_create_task
     return coord
@@ -805,13 +805,22 @@ class TestRemoteSessionTerminator:
             await BoschCameraCoordinator._remote_session_terminator(coord, CAM_A, 1)
 
         (
-            coord._tear_down_live_stream.assert_awaited_once_with(CAM_A),
+            coord._tear_down_live_stream.assert_called_once_with(
+                CAM_A, expected_generation=1
+            ),
             (
-                "_tear_down_live_stream must be called with cam_id when REMOTE session expires"
+                "_tear_down_live_stream must be called with cam_id + the "
+                "generation observed at decision time when REMOTE session "
+                "expires — scheduled via its own task (not awaited here), "
+                "since this terminator is itself registered in "
+                "_renewal_tasks and awaiting teardown directly would cancel "
+                "itself mid-cleanup"
             ),
         )
-        assert len(coord.hass._create_task_calls) == 1, (
-            "hass.async_create_task must be called exactly once to schedule async_request_refresh"
+        assert len(coord.hass._create_task_calls) == 2, (
+            "hass.async_create_task must be called twice: once to schedule "
+            "the teardown itself (own task, not awaited inline), once for "
+            "async_request_refresh"
         )
 
     @pytest.mark.asyncio

@@ -24,10 +24,20 @@ import pytest
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
+def _get_stream_lock(coord, cam_id):
+    """Mirror the real `_get_stream_lock`: lazy per-cam `asyncio.Lock`."""
+    lock = coord._stream_locks.get(cam_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        coord._stream_locks[cam_id] = lock
+    return lock
+
+
 def _make_coord(stream_obj=None):
     """Coordinator stub with all the dicts `_tear_down_live_stream` touches."""
     cam_entity = SimpleNamespace(stream=stream_obj)
-    return SimpleNamespace(
+    coord = SimpleNamespace(
+        _stream_locks={},
         _live_connections={CAM_ID: {"rtspsUrl": "rtsps://x"}},
         _user_intent_streams={CAM_ID},  # v12.4.12: user intent tracking
         _live_opened_at={CAM_ID: 100.0},
@@ -50,7 +60,9 @@ def _make_coord(stream_obj=None):
         _nvr_processes={},
         _nvr_user_intent={},
         stop_recorder=AsyncMock(),
-    ), cam_entity
+    )
+    coord._get_stream_lock = lambda cam_id: _get_stream_lock(coord, cam_id)
+    return coord, cam_entity
 
 
 # ── Cleanup invariants ──────────────────────────────────────────────────

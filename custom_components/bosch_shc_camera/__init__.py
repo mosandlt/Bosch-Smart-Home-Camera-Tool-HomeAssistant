@@ -1410,7 +1410,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._local_rescue_attempts.pop(cam_id, None)
         self._local_rescue_at.pop(cam_id, None)
 
-    async def _tear_down_live_stream(self, cam_id: str) -> None:
+    async def _tear_down_live_stream(
+        self, cam_id: str, expected_generation: int | None = None
+    ) -> None:
         """Stop an active LOCAL/REMOTE live stream cleanly.
 
         Shared teardown for:
@@ -1440,96 +1442,139 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
              own `_StreamWorkerErrorListener` would then try to "fix" by
              falling back to REMOTE — which also fails since the camera
              returns HTTP 443 sh:camera.in.privacy.mode.
+
+        Runs entirely under the per-cam stream lock (`_get_stream_lock`) —
+        the SAME lock `try_live_connection`/`_try_live_connection_inner` hold
+        for the whole build/rebuild. Without this, an unlocked call here
+        (idle reaper, external-privacy detection, frigate-idle-timeout,
+        REMOTE-lifetime terminator — none of them go through
+        `try_live_connection`) could race a concurrent renewal: the renewal
+        publishes a brand-new proxy port + `Stream.update_source()` first,
+        then this teardown runs a beat later and pops `_live_connections`
+        (line below) — which also silently defeats `record_stream_error`'s
+        LOCAL-only counting — and closes the port the renewal just
+        published, leaving the new session dead with no error escalation
+        and no automatic recovery (live incident 2026-07-04, Innenbereich:
+        stream-worker looped on "Connection refused" against a rotated
+        session for 4+ minutes until a manual HA restart).
+
+        `expected_generation`: pass the `_auto_renew_generation` value the
+        caller observed when it DECIDED to tear down (idle reaper,
+        frigate-idle-timeout, REMOTE-lifetime terminator — all watchdogs that
+        read stale state, then queue this call). Locking closed the old race
+        but opened a new one: this call can now block for the whole duration
+        of a concurrent rebuild, and a rebuild bumps the generation — so by
+        the time this call finally gets the lock, the stale "tear it down"
+        decision may no longer apply to whatever session exists NOW (a fresh,
+        healthy, unrelated-to-the-original-reason session). Re-checking the
+        generation under the lock — before touching any state — lets us bail
+        out instead of destroying a session the caller never actually meant
+        to kill. Callers with a hard, still-true-regardless-of-session fact
+        (privacy ON, user pressed stop) pass `None` (default) — always apply.
         """
-        task = self._renewal_tasks.pop(cam_id, None)
-        if task and not task.done():
-            task.cancel()
-        # Cancel the idle reaper too. When the reaper itself triggers teardown
-        # it has already returned (it schedules teardown as a separate task), so
-        # this cancel is a no-op in that path; for all other teardown triggers
-        # (switch off, privacy on, REMOTE fallback) it stops the reaper loop.
-        reaper = self._reaper_tasks.pop(cam_id, None)
-        if reaper and not reaper.done():
-            reaper.cancel()
-        # Step 1 — clear visible state FIRST. BoschLiveStreamSwitch.is_on
-        # reads from `_user_intent_streams`; if anything below raises (NVR
-        # child gone, file lock, ...) the user-visible switch would otherwise
-        # stay stuck on "on". Reported by Thomas 2026-05-19 (Mini-NVR BETA).
-        # Reset user intent too — privacy-on, health-watchdog REMOTE-escalation
-        # and external teardowns all genuinely end the user's "live stream
-        # wanted" intent.
-        self._user_intent_streams.discard(cam_id)
-        self._live_connections.pop(cam_id, None)
-        self._live_opened_at.pop(cam_id, None)
-        self._session_idle_since.pop(cam_id, None)
-        # Clear the warm-up flag proactively. is_stream_warming() would lazily
-        # clear it (Scenario 1: no live conn), but a privacy-ON teardown is
-        # immediately followed by a privacy cooldown check that calls
-        # is_stream_warming — leaving it set risks blocking the very next
-        # privacy toggle. Discard here so the toggle is never spuriously gated.
-        self._stream_warming.discard(cam_id)
-        self._stream_warming_started.pop(cam_id, None)
-        self._stream_error_count.pop(cam_id, None)
-        self._stream_error_at.pop(cam_id, None)
-        self._stream_fell_back.pop(cam_id, None)
-        self._local_rescue_attempts.pop(cam_id, None)
-        self._local_rescue_at.pop(cam_id, None)
-        # Push the cleared state to HA immediately so the UI flips to "off"
-        # without waiting for the next coordinator refresh tick.
-        ls_entity = self._live_stream_entities.get(cam_id)
-        if ls_entity is not None and getattr(ls_entity, "hass", None) is not None:
-            try:
-                ls_entity.async_write_ha_state()
-            except Exception as exc:  # pragma: no cover — defensive: HA state write
+        async with self._get_stream_lock(cam_id):
+            if (
+                expected_generation is not None
+                and self._auto_renew_generation.get(cam_id, 0) != expected_generation
+            ):
                 _LOGGER.debug(
-                    "live-stream switch state write for %s skipped: %s",
+                    "Teardown for %s skipped — session generation changed "
+                    "(%s) since the caller decided to tear down (expected %s); "
+                    "a newer rebuild superseded the stale trigger",
                     cam_id[:8],
-                    exc,
+                    self._auto_renew_generation.get(cam_id, 0),
+                    expected_generation,
                 )
-        # Step 2 — stop the NVR sidecar best-effort. Ordering: BEFORE
-        # _stop_tls_proxy so ffmpeg gets a chance to flush MP4 cleanly,
-        # but AFTER the visible state is corrected. Keep user-intent set
-        # so the recorder auto-restarts when the LAN session comes back.
-        # Concept §2.
-        if cam_id in self._nvr_processes:
-            try:
-                await self.stop_recorder(cam_id, clear_intent=False)
-            except Exception as exc:
-                _LOGGER.warning(
-                    "stop_recorder for %s raised %s during teardown — "
-                    "switch state already cleared, continuing with proxy/stream cleanup",
-                    cam_id[:8],
-                    exc,
-                )
-        await self._stop_tls_proxy(cam_id)
-        await self._unregister_go2rtc_stream(cam_id)
-        cam_entity = self._camera_entities.get(cam_id)
-        if cam_entity is not None:
-            stream = getattr(cam_entity, "stream", None)
-            if stream is not None:
-                # Hard 5 s timeout: HA's Stream.stop() awaits the worker to
-                # exit, which never happens if the worker is stuck in an
-                # FFmpeg reconnect-loop against a dead URL (e.g. an expired
-                # REMOTE TLS-proxy port from a session that the relay has
-                # already capped). Without the timeout the entire teardown
-                # blocks the next stream-on for >5 min and pre-warm appears
-                # to "never start" (the stuck-warming watchdog clears it at
-                # 300 s). Setting `cam_entity.stream = None` synchronously
-                # afterwards is sufficient — HA's internal cleanup runs in
-                # a background task once the reference is dropped.
+                return
+            task = self._renewal_tasks.pop(cam_id, None)
+            if task and not task.done():
+                task.cancel()
+            # Cancel the idle reaper too. When the reaper itself triggers teardown
+            # it has already returned (it schedules teardown as a separate task), so
+            # this cancel is a no-op in that path; for all other teardown triggers
+            # (switch off, privacy on, REMOTE fallback) it stops the reaper loop.
+            reaper = self._reaper_tasks.pop(cam_id, None)
+            if reaper and not reaper.done():
+                reaper.cancel()
+            # Step 1 — clear visible state FIRST. BoschLiveStreamSwitch.is_on
+            # reads from `_user_intent_streams`; if anything below raises (NVR
+            # child gone, file lock, ...) the user-visible switch would otherwise
+            # stay stuck on "on". Reported by Thomas 2026-05-19 (Mini-NVR BETA).
+            # Reset user intent too — privacy-on, health-watchdog REMOTE-escalation
+            # and external teardowns all genuinely end the user's "live stream
+            # wanted" intent.
+            self._user_intent_streams.discard(cam_id)
+            self._live_connections.pop(cam_id, None)
+            self._live_opened_at.pop(cam_id, None)
+            self._session_idle_since.pop(cam_id, None)
+            # Clear the warm-up flag proactively. is_stream_warming() would lazily
+            # clear it (Scenario 1: no live conn), but a privacy-ON teardown is
+            # immediately followed by a privacy cooldown check that calls
+            # is_stream_warming — leaving it set risks blocking the very next
+            # privacy toggle. Discard here so the toggle is never spuriously gated.
+            self._stream_warming.discard(cam_id)
+            self._stream_warming_started.pop(cam_id, None)
+            self._stream_error_count.pop(cam_id, None)
+            self._stream_error_at.pop(cam_id, None)
+            self._stream_fell_back.pop(cam_id, None)
+            self._local_rescue_attempts.pop(cam_id, None)
+            self._local_rescue_at.pop(cam_id, None)
+            # Push the cleared state to HA immediately so the UI flips to "off"
+            # without waiting for the next coordinator refresh tick.
+            ls_entity = self._live_stream_entities.get(cam_id)
+            if ls_entity is not None and getattr(ls_entity, "hass", None) is not None:
                 try:
-                    await asyncio.wait_for(stream.stop(), timeout=5)
-                except TimeoutError:
-                    _LOGGER.warning(
-                        "camera.stream.stop() for %s timed out after 5s — "
-                        "force-detaching, worker will be GC'd",
-                        cam_id[:8],
-                    )
-                except Exception as exc:
+                    ls_entity.async_write_ha_state()
+                except Exception as exc:  # pragma: no cover — defensive: HA state write
                     _LOGGER.debug(
-                        "camera.stream.stop() for %s failed: %s", cam_id[:8], exc
+                        "live-stream switch state write for %s skipped: %s",
+                        cam_id[:8],
+                        exc,
                     )
-                cam_entity.stream = None
+            # Step 2 — stop the NVR sidecar best-effort. Ordering: BEFORE
+            # _stop_tls_proxy so ffmpeg gets a chance to flush MP4 cleanly,
+            # but AFTER the visible state is corrected. Keep user-intent set
+            # so the recorder auto-restarts when the LAN session comes back.
+            # Concept §2.
+            if cam_id in self._nvr_processes:
+                try:
+                    await self.stop_recorder(cam_id, clear_intent=False)
+                except Exception as exc:
+                    _LOGGER.warning(
+                        "stop_recorder for %s raised %s during teardown — "
+                        "switch state already cleared, continuing with proxy/stream cleanup",
+                        cam_id[:8],
+                        exc,
+                    )
+            await self._stop_tls_proxy(cam_id)
+            await self._unregister_go2rtc_stream(cam_id)
+            cam_entity = self._camera_entities.get(cam_id)
+            if cam_entity is not None:
+                stream = getattr(cam_entity, "stream", None)
+                if stream is not None:
+                    # Hard 5 s timeout: HA's Stream.stop() awaits the worker to
+                    # exit, which never happens if the worker is stuck in an
+                    # FFmpeg reconnect-loop against a dead URL (e.g. an expired
+                    # REMOTE TLS-proxy port from a session that the relay has
+                    # already capped). Without the timeout the entire teardown
+                    # blocks the next stream-on for >5 min and pre-warm appears
+                    # to "never start" (the stuck-warming watchdog clears it at
+                    # 300 s). Setting `cam_entity.stream = None` synchronously
+                    # afterwards is sufficient — HA's internal cleanup runs in
+                    # a background task once the reference is dropped.
+                    try:
+                        await asyncio.wait_for(stream.stop(), timeout=5)
+                    except TimeoutError:
+                        _LOGGER.warning(
+                            "camera.stream.stop() for %s timed out after 5s — "
+                            "force-detaching, worker will be GC'd",
+                            cam_id[:8],
+                        )
+                    except Exception as exc:
+                        _LOGGER.debug(
+                            "camera.stream.stop() for %s failed: %s", cam_id[:8], exc
+                        )
+                    cam_entity.stream = None
 
     def _schedule_stream_worker_error(self, cam_id: str, msg: str) -> None:
         """Thread-safe entry point from the log listener. Coalesces identical
@@ -1901,7 +1946,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     # fresh task runs teardown to completion; cancelling this
                     # (already-returning) reaper is then a no-op.
                     self.hass.async_create_task(
-                        self._tear_down_live_stream(cam_id),
+                        self._tear_down_live_stream(
+                            cam_id, expected_generation=generation
+                        ),
                         f"bosch_shc_camera_reap_teardown_{cam_id[:8]}",
                     )
                     return
@@ -6291,12 +6338,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             live = self._live_connections.get(cam_id)
             if not live or live.get("_connection_type") != "LOCAL":
                 return  # nothing LOCAL to tear down
+            # Capture the generation at decision time: `_tear_down_live_stream`
+            # can now block on the stream lock for the duration of a
+            # concurrent rebuild, so by the time it runs, this stale "LOCAL,
+            # no consumer" read may no longer describe the current session.
+            gen = self._auto_renew_generation.get(cam_id, 0)
             _LOGGER.info(
                 "frigate front-door %s idle for frigate_idle_timeout — tearing "
                 "down on-demand LOCAL session",
                 cam_id[:8],
             )
-            await self._tear_down_live_stream(cam_id)
+            await self._tear_down_live_stream(cam_id, expected_generation=gen)
 
         task = self.hass.async_create_task(
             _maybe_teardown(), f"bosch_shc_camera_frigate_idle_{cam_id[:8]}"
@@ -7045,7 +7097,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 "REMOTE session lifetime reached for %s — tearing down cleanly",
                 cam_id[:8],
             )
-            await self._tear_down_live_stream(cam_id)
+            # Schedule teardown in its OWN task rather than awaiting it here:
+            # this terminator is itself registered in `_renewal_tasks[cam_id]`
+            # (`_replace_renewal_task`), and `_tear_down_live_stream`'s first
+            # action pops+cancels that entry — i.e. it would cancel ITSELF
+            # mid-teardown, potentially aborting cleanup after the TLS proxy
+            # stops but before go2rtc unregister / `stream.stop()` run. Same
+            # trap the idle reaper already avoids (see its comment above).
+            self.hass.async_create_task(
+                self._tear_down_live_stream(cam_id, expected_generation=generation),
+                f"bosch_shc_camera_remote_terminate_{cam_id[:8]}",
+            )
             self.hass.async_create_task(self.async_request_refresh())
         except asyncio.CancelledError:
             _LOGGER.debug(
