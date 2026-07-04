@@ -2154,11 +2154,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.4.1** — see the GitHub release page for full notes:
-[**v14.4.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.4.1)
+Latest: **v14.4.2** — see the GitHub release page for full notes:
+[**v14.4.2 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.4.2)
 
 | Version | Highlights |
 |---|---|
+| **v14.4.2** | **Live-stream teardown reliability fix.** Found via a live production incident: a camera's local session got rotated, the new proxy port never came up, and the stream stayed stuck on "Connection refused" for 4+ minutes with no automatic recovery until a manual restart. The teardown path used by the idle reaper, privacy-detection, external-recorder idle-timeout, and the REMOTE session terminator now runs under the same lock as a session rebuild, so the two can no longer race each other and destroy a session mid-build. Two related edge cases surfaced and fixed during hardening: a stale teardown decision could otherwise still fire against an unrelated fresh session once unblocked, and the REMOTE terminator could cancel its own cleanup partway through. |
 | **v14.4.1** | **Bug-hunt round 2 — ten hardening fixes.** A lock around cloud-session (re)creation closes a duplicate-session race; the `-SESS` Digest-auth variants now reuse the correct client nonce across both hash rounds; RCP error-path handling is hardened; the FCM supervisor gets extra race guards; the intercom, audio-detection, light and switch entities get per-camera write locks so concurrent writes no longer clobber each other; diagnostic sensors distinguish "no data yet" from "empty"; a path-traversal guard on saved event media; a save lock on the snapshot store; a small diagnostics-redaction gap closed; and the card no longer double-registers listeners if `setConfig` runs twice on an already-mounted instance. |
 | **v14.4.0** | **`frigate_idle_timeout` now actually works, plus a reliability round.** The external-recorder idle-timeout option (documented since v14.1.0) was a no-op until now — it properly lingers and tears down an idle on-demand session. Also fixes: a REMOTE-snapshot renewal race that could kill a healthy stream, a delayed FCM hard-heal, concurrent light-group and audio-detection switch writes clobbering each other, a TLS-proxy keepalive that could silently kill the proxy thread, a card dead-track watchdog false-positive after a quick tab switch, and an unbounded HLS `MEDIA_ERROR` recovery loop. |
 | **v14.2.0** | **Glass-break and smoke/fire-alarm sound detection for Gen2 cameras with Audio-Plus.** Two new switches — *Glass-Break Detection* and *Smoke/Fire-Alarm Detection* — appear for any Gen2 camera that supports audio analysis. Toggle them in HA just like the existing privacy or intrusion switches; the card polls the `audioDetectionConfig` endpoint and keeps the two detectors in sync on every write. |
@@ -2272,7 +2273,7 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.4.1** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.4.2** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.4** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.7** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.5** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |

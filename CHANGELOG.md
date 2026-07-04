@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.2] - 2026-07-04
+
+Patch — live-stream teardown reliability fix, found and hardened via a live production incident.
+
+### Fixes
+
+- **Teardown/rebuild race.** `_tear_down_live_stream` (idle reaper, external-privacy-detection, frigate-idle-timeout, REMOTE-lifetime terminator) previously ran without the per-camera stream lock that `try_live_connection` already holds across a whole session rebuild. An unlocked teardown could interleave mid-rebuild: the rebuild publishes a brand-new local-proxy port, then the racing teardown closes that same port and clears the session state — leaving the new session dead with no error-counting and no automatic LOCAL→REMOTE recovery, stuck until a manual restart. Live incident (2026-07-04, Eyes Indoor II): the stream worker looped on "Connection refused" against a rotated session for 4+ minutes. Fixed by running the whole teardown under the same per-cam lock.
+- **Stale-intent teardown.** Locking the teardown closed the race above but opened a narrower one: watchdogs that decide to tear down based on a stale read (idle reaper, frigate-idle-timeout, REMOTE-lifetime terminator) could now block on the lock for the whole duration of a concurrent rebuild, then run unconditionally against whatever session exists afterward — even a fresh, healthy, unrelated one. Fixed with a generation check: teardown re-validates the session generation it was told to expect, immediately after acquiring the lock, and no-ops if a newer rebuild has since superseded the stale trigger.
+- **REMOTE-terminator self-cancellation.** The REMOTE session lifetime terminator is itself tracked as a renewal task and directly awaited the teardown, whose first action cancels that same tracked task — i.e. it could cancel itself mid-cleanup, aborting after the TLS proxy stopped but before go2rtc was unregistered / the HA `Stream` object was stopped. Fixed by scheduling teardown as its own task, matching the idle reaper's existing pattern.
+
 ## [v14.4.1] - 2026-07-03
 
 Patch — bug-hunt round 2: ten hardening fixes across the cloud session, Digest auth, RCP, FCM, and the card, found by a further round of adversarial review.
