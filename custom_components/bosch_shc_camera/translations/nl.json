@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "Bosch Smart Home Camera — Inloggen",
+        "description": "Kies hoe je wilt inloggen met je Bosch SingleKey ID.",
+        "menu_options": {
+          "auto_login": "Automatisch inloggen (aanbevolen)",
+          "manual_login": "Handmatig inloggen (gebruik dit als automatisch inloggen niet werkt, bijv. in de Home Assistant-app)"
+        }
+      },
+      "manual_login": {
         "title": "Bosch Smart Home Camera — Inloggen (Stap 1 van 2)",
         "description": "**Aanmeldprocedure:**\n\n1. Kopieer de URL hieronder\n2. Open deze in uw browser\n3. Log in met uw **Bosch SingleKey ID**\n4. De browser toont een **404-pagina** — dit is normaal\n5. Kopieer de **volledige URL** uit de adresbalk\n6. Klik op **Verzenden** om door te gaan",
         "data": {
@@ -11,7 +19,7 @@
           "login_url": "Kopieer deze URL en open hem in uw browser om in te loggen."
         }
       },
-      "auth": {
+      "manual_paste": {
         "title": "Bosch Smart Home Camera — URL plakken (Stap 2 van 2)",
         "description": "Plak de doorstuur-URL uit de adresbalk van uw browser hieronder.\n\n**Belangrijk:** De code verloopt na ~60 seconden.",
         "data": {
@@ -23,7 +31,7 @@
       },
       "reauth_confirm": {
         "title": "Bosch Smart Home Camera opnieuw koppelen",
-        "description": "Uw Bosch Cloud-token is verlopen en kan niet automatisch worden vernieuwd. Dit gebeurt doorgaans wanneer het vernieuwingstoken aan de Bosch-kant ongeldig is geworden.\n\nKlik op **Verzenden** om de Bosch SingleKey ID-aanmelding in uw browser te openen. Na het inloggen wordt u automatisch teruggeleid naar Home Assistant en blijft uw bestaande configuratie (entiteiten, automatiseringen, opties) behouden.",
+        "description": "Uw Bosch Cloud-token is verlopen en kan niet automatisch worden vernieuwd. Dit gebeurt doorgaans wanneer het vernieuwingstoken aan de Bosch-kant ongeldig is geworden.\n\nKlik op **Verzenden** om te kiezen hoe u opnieuw wilt inloggen. Uw bestaande configuratie (entiteiten, automatiseringen, opties) blijft behouden.",
         "submit": "Verzenden"
       },
       "reconfigure": {

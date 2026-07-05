@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "Bosch Smart Home Camera — Início de sessão",
+        "description": "Escolha como pretende iniciar sessão com o seu Bosch SingleKey ID.",
+        "menu_options": {
+          "auto_login": "Início de sessão automático (recomendado)",
+          "manual_login": "Início de sessão manual (utilize esta opção se o início de sessão automático não funcionar, por exemplo na app móvel do Home Assistant)"
+        }
+      },
+      "manual_login": {
         "title": "Bosch Smart Home Camera — Login (Passo 1 de 2)",
         "description": "**Como iniciar sessão:**\n\n1. Copie o URL do campo abaixo\n2. Abra-o no seu browser\n3. Inicie sessão com o seu **Bosch SingleKey ID**\n4. O browser mostra uma **página 404** — isso é esperado\n5. Copie o **URL completo** da barra de endereços\n6. Clique em **Enviar** para continuar",
         "data": {
@@ -11,7 +19,7 @@
           "login_url": "Copie este URL e abra-o no browser para iniciar sessão."
         }
       },
-      "auth": {
+      "manual_paste": {
         "title": "Bosch Smart Home Camera — Colar URL (Passo 2 de 2)",
         "description": "Cole o URL de redireccionamento da barra de endereços do browser abaixo.\n\n**Importante:** O código expira após ~60 segundos.",
         "data": {
@@ -23,7 +31,7 @@
       },
       "reauth_confirm": {
         "title": "Re-autenticar Bosch Smart Home Camera",
-        "description": "O seu token Bosch Cloud expirou e não pode ser renovado automaticamente. Isto acontece geralmente quando o token de actualização foi invalidado do lado da Bosch.\n\nClique em **Enviar** para abrir o login Bosch SingleKey ID no browser. Após o login, será redireccionado automaticamente para o Home Assistant e a sua configuração existente (entidades, automações, opções) será preservada.",
+        "description": "O seu token Bosch Cloud expirou e não pode ser renovado automaticamente. Isto acontece geralmente quando o token de actualização foi invalidado do lado da Bosch.\n\nClique em **Enviar** para escolher como pretende iniciar sessão novamente. A sua configuração existente (entidades, automações, opções) será preservada.",
         "submit": "Enviar"
       },
       "reconfigure": {

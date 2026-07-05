@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "Bosch Smart Home Camera — Login",
+        "description": "Choose how you'd like to log in with your Bosch SingleKey ID.",
+        "menu_options": {
+          "auto_login": "Automatic login (recommended)",
+          "manual_login": "Manual login (use this if automatic login doesn't work, e.g. in the Home Assistant mobile app)"
+        }
+      },
+      "manual_login": {
         "title": "Bosch Smart Home Camera — Login (Step 1 of 2)",
         "description": "**How to log in:**\n\n1. Copy the URL from the field below\n2. Open it in your browser\n3. Log in with your **Bosch SingleKey ID**\n4. Browser shows a **404 page** — this is expected\n5. Copy the **full URL** from the address bar\n6. Click **Submit** to continue",
         "data": {
@@ -11,7 +19,7 @@
           "login_url": "Copy this URL and open it in your browser to log in."
         }
       },
-      "auth": {
+      "manual_paste": {
         "title": "Bosch Smart Home Camera — Paste URL (Step 2 of 2)",
         "description": "Paste the redirect URL from your browser address bar below.\n\n**Important:** The code expires after ~60 seconds.",
         "data": {
@@ -23,7 +31,7 @@
       },
       "reauth_confirm": {
         "title": "Re-authenticate Bosch Smart Home Camera",
-        "description": "Your Bosch Cloud token has expired and cannot be refreshed automatically. This usually happens when the refresh token was invalidated on Bosch's side.\n\nClick **Submit** to open the Bosch SingleKey ID login in your browser. After login you'll be redirected back to Home Assistant automatically and your existing configuration (entities, automations, options) will be preserved.",
+        "description": "Your Bosch Cloud token has expired and cannot be refreshed automatically. This usually happens when the refresh token was invalidated on Bosch's side.\n\nClick **Submit** to choose how to log in again. Your existing configuration (entities, automations, options) will be preserved.",
         "submit": "Submit"
       },
       "reconfigure": {

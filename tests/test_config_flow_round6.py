@@ -257,11 +257,17 @@ class TestConfigFlowSteps:
 
         flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
         flow.hass = MagicMock()
+        flow.flow_id = "flow-id-1"
+        flow._manual_verifier = None
+        flow._manual_auth_url = ""
         # source is a read-only property backed by context dict
         flow.context = {"source": source}
         flow.async_set_unique_id = AsyncMock()
         flow._abort_if_unique_id_configured = MagicMock()
         flow.async_show_form = MagicMock(return_value={"type": "form", "step_id": "x"})
+        flow.async_show_menu = MagicMock(
+            return_value={"type": "menu", "step_id": "user"}
+        )
         flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
         flow.async_update_reload_and_abort = MagicMock(return_value={"type": "abort"})
         flow.async_update_and_abort = MagicMock(return_value={"type": "abort"})
@@ -281,28 +287,17 @@ class TestConfigFlowSteps:
 
     @pytest.mark.asyncio
     async def test_async_step_user_registers_implementation(self):
-        from homeassistant.helpers.config_entry_oauth2_flow import (
-            AbstractOAuth2FlowHandler,
-        )
-
-        from custom_components.bosch_shc_camera.config_flow import BoschCameraConfigFlow
-
+        """async_step_user registers the OAuth2 impl, then shows the
+        auto/manual login menu (it no longer delegates straight to the
+        automatic OAuth2 flow — see test_config_flow_manual_login.py)."""
         flow = self._make_flow(source="user")
-        with (
-            patch(f"{MODULE}.async_register_implementation") as mock_reg,
-            patch.object(
-                AbstractOAuth2FlowHandler,
-                "async_step_user",
-                AsyncMock(return_value={"type": "form"}),
-            ),
-        ):
+        with patch(f"{MODULE}.async_register_implementation") as mock_reg:
             result = await flow.async_step_user(None)
         assert mock_reg.called, (
             "async_register_implementation must be called in async_step_user"
         )
-        # Verify the result is a form (from the mocked OAuth2 step_user), not None
-        assert result is not None
-        assert result.get("type") == "form"
+        flow.async_show_menu.assert_called_once()
+        assert result == {"type": "menu", "step_id": "user"}
 
     @pytest.mark.asyncio
     async def test_reauth_confirm_with_user_input_calls_step_user(self):

@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "Bosch Smart Home Camera — Anmeldung",
+        "description": "Wähle, wie du dich mit deiner Bosch SingleKey ID anmelden möchtest.",
+        "menu_options": {
+          "auto_login": "Automatische Anmeldung (empfohlen)",
+          "manual_login": "Manuelle Anmeldung (nutze dies, wenn die automatische Anmeldung nicht funktioniert, z. B. in der Home Assistant App)"
+        }
+      },
+      "manual_login": {
         "title": "Bosch Smart Home Camera — Anmeldung (Schritt 1 von 2)",
         "description": "**So meldest du dich an:**\n\n1. URL unten kopieren\n2. Im Browser öffnen\n3. Mit **Bosch SingleKey ID** anmelden\n4. Browser zeigt **404-Seite** — das ist normal\n5. **Komplette URL** aus der Adressleiste kopieren\n6. Auf **Absenden** klicken",
         "data": {
@@ -11,7 +19,7 @@
           "login_url": "Diese URL kopieren und im Browser öffnen."
         }
       },
-      "auth": {
+      "manual_paste": {
         "title": "Bosch Smart Home Camera — URL einfügen (Schritt 2 von 2)",
         "description": "Die Redirect-URL aus der Browser-Adressleiste unten einfügen.\n\n**Wichtig:** Der Code läuft nach ~60 Sekunden ab!",
         "data": {
@@ -23,7 +31,7 @@
       },
       "reauth_confirm": {
         "title": "Bosch Smart Home Camera erneut anmelden",
-        "description": "Dein Bosch Cloud-Token ist abgelaufen und kann nicht automatisch erneuert werden. Das passiert meist, wenn der Refresh-Token auf der Bosch-Seite ungültig wurde.\n\nKlicke auf **Absenden**, um die Bosch SingleKey ID Anmeldung im Browser zu öffnen. Nach dem Login wirst du automatisch zu Home Assistant zurückgeleitet — deine bestehende Konfiguration (Entitäten, Automationen, Optionen) bleibt erhalten.",
+        "description": "Dein Bosch Cloud-Token ist abgelaufen und kann nicht automatisch erneuert werden. Das passiert meist, wenn der Refresh-Token auf der Bosch-Seite ungültig wurde.\n\nKlicke auf **Absenden**, um auszuwählen, wie du dich erneut anmelden möchtest. Deine bestehende Konfiguration (Entitäten, Automationen, Optionen) bleibt erhalten.",
         "submit": "Absenden"
       },
       "reconfigure": {

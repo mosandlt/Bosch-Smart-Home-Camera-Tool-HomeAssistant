@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "Bosch Smart Home Camera — 登录",
+        "description": "选择您希望使用 Bosch SingleKey ID 登录的方式。",
+        "menu_options": {
+          "auto_login": "自动登录（推荐）",
+          "manual_login": "手动登录（如果自动登录无效，例如在 Home Assistant 手机应用中，请使用此选项）"
+        }
+      },
+      "manual_login": {
         "title": "Bosch Smart Home Camera — 登录（第 1 步，共 2 步）",
         "description": "**登录步骤：**\n\n1. 复制下方字段中的 URL\n2. 在浏览器中打开\n3. 使用您的 **Bosch SingleKey ID** 登录\n4. 浏览器显示 **404 页面** — 这是正常现象\n5. 从地址栏复制**完整 URL**\n6. 点击**提交**继续",
         "data": {
@@ -11,7 +19,7 @@
           "login_url": "复制此 URL 并在浏览器中打开以完成登录。"
         }
       },
-      "auth": {
+      "manual_paste": {
         "title": "Bosch Smart Home Camera — 粘贴 URL（第 2 步，共 2 步）",
         "description": "请将浏览器地址栏中的重定向 URL 粘贴至下方。\n\n**重要：** 授权码将在约 60 秒后过期。",
         "data": {
@@ -23,7 +31,7 @@
       },
       "reauth_confirm": {
         "title": "重新认证 Bosch Smart Home Camera",
-        "description": "您的 Bosch Cloud 令牌已过期，无法自动续期。通常是因为刷新令牌在 Bosch 端被撤销所致。\n\n点击**提交**在浏览器中打开 Bosch SingleKey ID 登录页面。登录后将自动跳转回 Home Assistant，您现有的配置（实体、自动化、选项）将被保留。",
+        "description": "您的 Bosch Cloud 令牌已过期，无法自动续期。通常是因为刷新令牌在 Bosch 端被撤销所致。\n\n点击**提交**以选择重新登录的方式。您现有的配置（实体、自动化、选项）将被保留。",
         "submit": "提交"
       },
       "reconfigure": {

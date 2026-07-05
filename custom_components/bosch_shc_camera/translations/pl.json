@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "Bosch Smart Home Camera — Logowanie",
+        "description": "Wybierz, w jaki sposób chcesz się zalogować przy użyciu Bosch SingleKey ID.",
+        "menu_options": {
+          "auto_login": "Logowanie automatyczne (zalecane)",
+          "manual_login": "Logowanie ręczne (użyj tego, jeśli logowanie automatyczne nie działa, np. w aplikacji mobilnej Home Assistant)"
+        }
+      },
+      "manual_login": {
         "title": "Bosch Smart Home Camera — Logowanie (Krok 1 z 2)",
         "description": "**Jak się zalogować:**\n\n1. Skopiuj URL z pola poniżej\n2. Otwórz go w przeglądarce\n3. Zaloguj się przy użyciu **Bosch SingleKey ID**\n4. Przeglądarka wyświetli **stronę 404** — to oczekiwane zachowanie\n5. Skopiuj **pełny URL** z paska adresu\n6. Kliknij **Prześlij**, aby kontynuować",
         "data": {
@@ -11,7 +19,7 @@
           "login_url": "Skopiuj ten URL i otwórz go w przeglądarce, aby się zalogować."
         }
       },
-      "auth": {
+      "manual_paste": {
         "title": "Bosch Smart Home Camera — Wklej URL (Krok 2 z 2)",
         "description": "Wklej URL przekierowania z paska adresu przeglądarki poniżej.\n\n**Ważne:** Kod wygasa po ~60 sekundach.",
         "data": {
@@ -23,7 +31,7 @@
       },
       "reauth_confirm": {
         "title": "Ponowne uwierzytelnienie Bosch Smart Home Camera",
-        "description": "Token Bosch Cloud wygasł i nie może być automatycznie odświeżony. Zazwyczaj dzieje się tak, gdy token odświeżania zostanie unieważniony po stronie Bosch.\n\nKliknij **Prześlij**, aby otworzyć login Bosch SingleKey ID w przeglądarce. Po zalogowaniu zostaniesz automatycznie przekierowany z powrotem do Home Assistant, a istniejąca konfiguracja (encje, automatyzacje, opcje) zostanie zachowana.",
+        "description": "Token Bosch Cloud wygasł i nie może być automatycznie odświeżony. Zazwyczaj dzieje się tak, gdy token odświeżania zostanie unieważniony po stronie Bosch.\n\nKliknij **Prześlij**, aby wybrać sposób ponownego logowania. Istniejąca konfiguracja (encje, automatyzacje, opcje) zostanie zachowana.",
         "submit": "Prześlij"
       },
       "reconfigure": {

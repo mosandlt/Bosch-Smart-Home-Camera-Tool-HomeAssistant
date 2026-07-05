@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "Bosch Smart Home Camera — Inicio de sesión",
+        "description": "Elige cómo quieres iniciar sesión con tu Bosch SingleKey ID.",
+        "menu_options": {
+          "auto_login": "Inicio de sesión automático (recomendado)",
+          "manual_login": "Inicio de sesión manual (usa esto si el inicio de sesión automático no funciona, p. ej. en la app móvil de Home Assistant)"
+        }
+      },
+      "manual_login": {
         "title": "Bosch Smart Home Camera — Inicio de sesión (Paso 1 de 2)",
         "description": "**Cómo iniciar sesión:**\n\n1. Copiar la URL del campo inferior\n2. Abrirla en el navegador\n3. Iniciar sesión con el **Bosch SingleKey ID**\n4. El navegador muestra una **página 404** — es lo esperado\n5. Copiar la **URL completa** de la barra de direcciones\n6. Hacer clic en **Enviar** para continuar",
         "data": {
@@ -11,7 +19,7 @@
           "login_url": "Copiar esta URL y abrirla en el navegador para iniciar sesión."
         }
       },
-      "auth": {
+      "manual_paste": {
         "title": "Bosch Smart Home Camera — Pegar URL (Paso 2 de 2)",
         "description": "Pegar la URL de redirección desde la barra de direcciones del navegador.\n\n**Importante:** El código caduca después de ~60 segundos.",
         "data": {
@@ -23,7 +31,7 @@
       },
       "reauth_confirm": {
         "title": "Volver a autenticar Bosch Smart Home Camera",
-        "description": "El token de Bosch Cloud ha caducado y no puede renovarse automáticamente. Esto ocurre habitualmente cuando el token de actualización ha sido invalidado en el lado de Bosch.\n\nHacer clic en **Enviar** para abrir el inicio de sesión de Bosch SingleKey ID en el navegador. Tras el inicio de sesión, se redirigirá automáticamente a Home Assistant y se conservará la configuración existente (entidades, automatizaciones, opciones).",
+        "description": "El token de Bosch Cloud ha caducado y no puede renovarse automáticamente. Esto ocurre habitualmente cuando el token de actualización ha sido invalidado en el lado de Bosch.\n\nHaz clic en **Enviar** para elegir cómo quieres iniciar sesión de nuevo. Se conservará la configuración existente (entidades, automatizaciones, opciones).",
         "submit": "Enviar"
       },
       "reconfigure": {

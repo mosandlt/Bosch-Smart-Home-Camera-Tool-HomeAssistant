@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "Bosch Smart Home Camera — Connexion",
+        "description": "Choisissez comment vous souhaitez vous connecter avec votre Bosch SingleKey ID.",
+        "menu_options": {
+          "auto_login": "Connexion automatique (recommandé)",
+          "manual_login": "Connexion manuelle (à utiliser si la connexion automatique ne fonctionne pas, par ex. dans l'application mobile Home Assistant)"
+        }
+      },
+      "manual_login": {
         "title": "Bosch Smart Home Camera — Connexion (Étape 1 sur 2)",
         "description": "**Procédure de connexion :**\n\n1. Copier l'URL ci-dessous\n2. L'ouvrir dans votre navigateur\n3. Se connecter avec votre **Bosch SingleKey ID**\n4. Le navigateur affiche une **page 404** — c'est normal\n5. Copier l'**URL complète** de la barre d'adresse\n6. Cliquer sur **Envoyer** pour continuer",
         "data": {
@@ -11,7 +19,7 @@
           "login_url": "Copier cette URL et l'ouvrir dans votre navigateur pour vous connecter."
         }
       },
-      "auth": {
+      "manual_paste": {
         "title": "Bosch Smart Home Camera — Coller l'URL (Étape 2 sur 2)",
         "description": "Coller l'URL de redirection depuis la barre d'adresse du navigateur.\n\n**Important :** Le code expire après ~60 secondes.",
         "data": {
@@ -23,7 +31,7 @@
       },
       "reauth_confirm": {
         "title": "Reconnecter Bosch Smart Home Camera",
-        "description": "Votre token Bosch Cloud a expiré et ne peut pas être renouvelé automatiquement. Cela se produit généralement lorsque le refresh token a été invalidé côté Bosch.\n\nCliquer sur **Envoyer** pour ouvrir la connexion Bosch SingleKey ID dans votre navigateur. Après la connexion, vous serez redirigé automatiquement vers Home Assistant et votre configuration existante (entités, automations, options) sera conservée.",
+        "description": "Votre token Bosch Cloud a expiré et ne peut pas être renouvelé automatiquement. Cela se produit généralement lorsque le refresh token a été invalidé côté Bosch.\n\nCliquez sur **Envoyer** pour choisir comment vous reconnecter. Votre configuration existante (entités, automatisations, options) sera conservée.",
         "submit": "Envoyer"
       },
       "reconfigure": {

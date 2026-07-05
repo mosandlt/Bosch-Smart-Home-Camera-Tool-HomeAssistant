@@ -1,8 +1,13 @@
 """Config flow for Bosch Smart Home Camera integration.
 
-Setup flow (automatic OAuth2 with PKCE):
-  One-click browser login via Bosch SingleKey ID.
-  Uses my.home-assistant.io redirect for automatic callback.
+Setup flow — menu step "user" offers a choice of login method:
+  "auto_login"   — one-click browser login via Bosch SingleKey ID, using the
+                   my.home-assistant.io redirect for automatic callback.
+  "manual_login" — copy/paste fallback (steps "manual_login"/"manual_paste")
+                   for cases where the automatic redirect strands the user in
+                   the wrong browser tab/webview (seen on the HA Companion
+                   App and desktop Safari with SingleKey ID's multi-hop
+                   redirect chain).
 
 Options flow:
   Step "init"          — feature toggles
@@ -500,6 +505,11 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
     DOMAIN = DOMAIN
     VERSION = 3
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._manual_verifier: str | None = None
+        self._manual_auth_url: str = ""
+
     @property
     def logger(self) -> logging.Logger:
         return _LOGGER
@@ -507,7 +517,16 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Start OAuth2 flow — register implementation, then delegate to parent."""
+        """Register the OAuth2 implementation, then let the user pick a login method.
+
+        Offers a manual copy/paste fallback (mirrors the options-flow relogin
+        path) alongside the automatic browser redirect: SingleKey ID's
+        multi-hop redirect chain combined with the my.home-assistant.io relay
+        (which tracks "last visited instance" client-side rather than being
+        tied to this flow's tab) can strand the automatic flow in the wrong
+        tab/webview — reported for the HA Companion App and desktop Safari
+        alike (Bosch community PM from SebastianHarder, 2026-07-05).
+        """
         # Only enforce unique_id uniqueness on fresh setup. Reauth + reconfigure
         # both reuse the existing entry.
         if self.source not in (
@@ -526,17 +545,106 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
             self.hass, DOMAIN, BoschOAuth2Implementation(self.hass)
         )
 
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["auto_login", "manual_login"],
+        )
+
+    async def async_step_auto_login(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Automatic browser login — the pre-existing OAuth2 PKCE flow, unchanged."""
         return await super().async_step_user(user_input)
+
+    async def async_step_manual_login(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Show the SingleKey ID login URL as a copy/paste fallback (step 1 of 2)."""
+        if self._manual_verifier is None:
+            self._manual_verifier, challenge = _pkce_pair()
+            state = _encode_jwt(
+                self.hass,
+                {"flow_id": self.flow_id, "redirect_uri": REDIRECT_URI_MANUAL},
+            )
+            self._manual_auth_url = _build_auth_url(challenge, state)
+
+        if user_input is not None:
+            return await self.async_step_manual_paste()
+
+        return self.async_show_form(
+            step_id="manual_login",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional("login_url", default=self._manual_auth_url): str,
+                }
+            ),
+        )
+
+    async def async_step_manual_paste(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Exchange the pasted redirect URL for tokens (step 2 of 2)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            redirect_url = user_input.get("redirect_url", "").strip()
+            code = _extract_code(redirect_url)
+
+            if not code:
+                errors["redirect_url"] = "invalid_redirect_url"
+            else:
+                session = await async_get_bosch_cloud_session(self.hass)
+                tokens = await _exchange_code(
+                    session, code, self._manual_verifier or ""
+                )
+
+                if not tokens or not tokens.get("access_token"):
+                    errors["redirect_url"] = "token_exchange_failed"
+                else:
+                    new_data = {
+                        "bearer_token": tokens["access_token"],
+                        "refresh_token": tokens.get("refresh_token", ""),
+                    }
+                    if self.source == config_entries.SOURCE_REAUTH:
+                        existing = self._get_reauth_entry()
+                        self.hass.config_entries.async_update_entry(
+                            existing, data={**existing.data, **new_data}
+                        )
+                        self.hass.config_entries.async_schedule_reload(
+                            existing.entry_id
+                        )
+                        return self.async_abort(reason="reauth_successful")
+                    if self.source == config_entries.SOURCE_RECONFIGURE:
+                        existing = self._get_reconfigure_entry()
+                        self.hass.config_entries.async_update_entry(
+                            existing, data={**existing.data, **new_data}
+                        )
+                        self.hass.config_entries.async_schedule_reload(
+                            existing.entry_id
+                        )
+                        return self.async_abort(reason="reconfigure_successful")
+                    return self.async_create_entry(
+                        title="Bosch Smart Home Camera", data=new_data
+                    )
+
+        return self.async_show_form(
+            step_id="manual_paste",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("redirect_url"): str,
+                }
+            ),
+            errors=errors,
+        )
 
     async def async_step_reauth(
         self, entry_data: dict[str, Any]
     ) -> config_entries.ConfigFlowResult:
         """Start a reauth flow triggered by invalid_grant/expired refresh token.
 
-        Shows a confirmation dialog, then runs the normal auto-login flow
-        (browser → Bosch SingleKey ID → redirect back via my.home-assistant.io).
-        On success, the existing config entry is updated in place — options,
-        entities, and automations are preserved.
+        Shows a confirmation dialog, then offers the same auto/manual login
+        choice as initial setup. On success, the existing config entry is
+        updated in place — options, entities, and automations are preserved.
         """
         return await self.async_step_reauth_confirm()
 
