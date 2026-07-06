@@ -782,6 +782,7 @@ class TestCameraList401DoubleFailure:
         assert "sh:authorization.failed" in message
         assert "user is registered" in message
         assert "Re-authenticating will not fix it" in message
+        assert "official Bosch Smart Camera App" in message
 
 
 # ── 7. Camera list non-200 non-401 → UpdateFailed ────────────────────────────

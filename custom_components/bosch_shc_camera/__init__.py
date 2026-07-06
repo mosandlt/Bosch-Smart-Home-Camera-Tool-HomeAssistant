@@ -2563,12 +2563,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             # (2026-07-06 SebastianHarder community report — debug
                             # logging above finally surfaced the real reason).
                             if body_json.get("error") == "sh:authorization.failed":
+                                # The official Bosch Camera App performs a separate,
+                                # one-time "registration/check" step against the camera
+                                # backend after SingleKey ID login (name/marketing-consent/
+                                # T&C acceptance, distinct from login itself) — an account
+                                # that never went through that screen (e.g. reached camera
+                                # access via a beta/invite path rather than the normal
+                                # in-app first run) gets a permanently valid login but a
+                                # permanently rejected camera-API token. Re-authenticating
+                                # only repeats the login step, so it cannot fix this.
                                 raise UpdateFailed(
                                     "Bosch rejected the camera API with "
                                     f"'sh:authorization.failed' ({body_json.get('message', 'no detail')}) "
                                     "— this is an account/permission issue on Bosch's side, not a "
-                                    "login problem. Re-authenticating will not fix it — check camera "
-                                    "sharing/access for this account in the Bosch Smart Home app, or "
+                                    "login problem. Re-authenticating will not fix it. Open the "
+                                    "official Bosch Smart Camera App and complete any registration "
+                                    "or terms-of-service screen it shows on next login — this "
+                                    "integration only logs in and does not perform that separate "
+                                    "camera-account registration step. If no such screen appears, "
                                     "contact Bosch support."
                                 )
                             raise UpdateFailed(
