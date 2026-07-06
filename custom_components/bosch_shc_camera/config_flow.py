@@ -589,9 +589,14 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
         if user_input is not None:
             redirect_url = user_input.get("redirect_url", "").strip()
             code = _extract_code(redirect_url)
+            cloud_api_override = user_input.get(
+                "diagnostic_cloud_api_override", ""
+            ).strip()
 
             if not code:
                 errors["redirect_url"] = "invalid_redirect_url"
+            elif cloud_api_override and not cloud_api_override.startswith("https://"):
+                errors["diagnostic_cloud_api_override"] = "invalid_cloud_api_override"
             else:
                 session = await async_get_bosch_cloud_session(self.hass)
                 tokens = await _exchange_code(
@@ -605,6 +610,15 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
                         "bearer_token": tokens["access_token"],
                         "refresh_token": tokens.get("refresh_token", ""),
                     }
+                    # Advanced diagnostic escape hatch only — NEVER pre-filled with
+                    # any specific host. Lets a single account test whether it
+                    # authorizes against a different, Bosch-confirmed camera-API
+                    # base URL instead of the production default (see 2026-07-06
+                    # SebastianHarder investigation: sh:authorization.failed can
+                    # mean the account is registered on a different backend
+                    # environment than the one this integration talks to).
+                    if cloud_api_override:
+                        new_data["cloud_api_override"] = cloud_api_override.rstrip("/")
                     if self.source == config_entries.SOURCE_REAUTH:
                         existing = self._get_reauth_entry()
                         self.hass.config_entries.async_update_entry(
@@ -632,6 +646,7 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
             data_schema=vol.Schema(
                 {
                     vol.Required("redirect_url"): str,
+                    vol.Optional("diagnostic_cloud_api_override", default=""): str,
                 }
             ),
             errors=errors,
@@ -1502,9 +1517,14 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
         if user_input is not None:
             redirect_url = user_input.get("redirect_url", "").strip()
             code = _extract_code(redirect_url)
+            cloud_api_override = user_input.get(
+                "diagnostic_cloud_api_override", ""
+            ).strip()
 
             if not code:
                 errors["redirect_url"] = "invalid_redirect_url"
+            elif cloud_api_override and not cloud_api_override.startswith("https://"):
+                errors["diagnostic_cloud_api_override"] = "invalid_cloud_api_override"
             else:
                 session = await async_get_bosch_cloud_session(self.hass)
                 tokens = await _exchange_code(session, code, self._verifier)
@@ -1516,13 +1536,19 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     # by async_create_entry below.  Writing options here AND via
                     # async_create_entry causes the options-update listener to
                     # fire twice, triggering a double reload.
+                    new_data = {
+                        **self._config_entry.data,
+                        "bearer_token": tokens["access_token"],
+                        "refresh_token": tokens.get("refresh_token", ""),
+                    }
+                    # Advanced diagnostic escape hatch — see manual_paste for
+                    # rationale. Only set/overwritten when the user actually
+                    # provides a value this time; left untouched otherwise.
+                    if cloud_api_override:
+                        new_data["cloud_api_override"] = cloud_api_override.rstrip("/")
                     self.hass.config_entries.async_update_entry(
                         self._config_entry,
-                        data={
-                            **self._config_entry.data,
-                            "bearer_token": tokens["access_token"],
-                            "refresh_token": tokens.get("refresh_token", ""),
-                        },
+                        data=new_data,
                     )
                     _LOGGER.info(
                         "Token re-authenticated successfully — reloading integration"
@@ -1537,6 +1563,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
             data_schema=vol.Schema(
                 {
                     vol.Required("redirect_url"): str,
+                    vol.Optional("diagnostic_cloud_api_override", default=""): str,
                 }
             ),
             errors=errors,

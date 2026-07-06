@@ -23,10 +23,12 @@
         "title": "Bosch Smart Home Camera — URL plakken (Stap 2 van 2)",
         "description": "Plak de doorstuur-URL uit de adresbalk van uw browser hieronder.\n\n**Belangrijk:** De code verloopt na ~60 seconden.",
         "data": {
-          "redirect_url": "Doorstuur-URL"
+          "redirect_url": "Doorstuur-URL",
+          "diagnostic_cloud_api_override": "Geavanceerd: aangepaste camera-API-URL (alleen diagnose)"
         },
         "data_description": {
-          "redirect_url": "De volledige URL uit de adresbalk na het inloggen (bevat de autorisatiecode)"
+          "redirect_url": "De volledige URL uit de adresbalk na het inloggen (bevat de autorisatiecode)",
+          "diagnostic_cloud_api_override": "Laat leeg tenzij Bosch-support u expliciet een andere camera-API-basis-URL heeft gegeven om te testen — dit activeert geen bètaprogramma en ontgrendelt niets, het verandert alleen met welke server de integratie communiceert."
         }
       },
       "reauth_confirm": {
@@ -44,7 +46,8 @@
       "invalid_redirect_url": "Geen autorisatiecode gevonden in de URL.",
       "token_exchange_failed": "Aanmelden mislukt — de code is mogelijk verlopen. Probeer opnieuw.",
       "cannot_connect": "Verbinding met Bosch-servers mislukt.",
-      "timeout": "Verbindingstime-out."
+      "timeout": "Verbindingstime-out.",
+      "invalid_cloud_api_override": "De aangepaste camera-API-URL moet beginnen met https://"
     },
     "abort": {
       "already_configured": "Al geconfigureerd.",
@@ -308,10 +311,12 @@
         "title": "Opnieuw koppelen — Stap 2 van 2",
         "description": "Plak de doorstuur-URL. **Code verloopt na ~60 seconden!**",
         "data": {
-          "redirect_url": "Doorstuur-URL"
+          "redirect_url": "Doorstuur-URL",
+          "diagnostic_cloud_api_override": "Geavanceerd: aangepaste camera-API-URL (alleen diagnose)"
         },
         "data_description": {
-          "redirect_url": "Volledige URL uit de adresbalk van de browser na het inloggen (bevat de autorisatiecode)"
+          "redirect_url": "Volledige URL uit de adresbalk van de browser na het inloggen (bevat de autorisatiecode)",
+          "diagnostic_cloud_api_override": "Laat leeg tenzij Bosch-support u expliciet een andere camera-API-basis-URL heeft gegeven om te testen — dit activeert geen bètaprogramma en ontgrendelt niets, het verandert alleen met welke server de integratie communiceert."
         }
       }
     },
@@ -320,7 +325,8 @@
       "token_exchange_failed": "Aanmelden mislukt — code verlopen. Probeer opnieuw.",
       "cannot_connect": "Verbinding met Bosch-servers mislukt.",
       "invalid_ip_address": "Ongeldig IP-adres — voer een geldig IPv4- of IPv6-adres in.",
-      "invalid_ip_allowlist": "Ongeldige allowlist-invoer — gebruik kommagescheiden IP-adressen of CIDR-bereiken (bijv. 192.168.1.0/24)."
+      "invalid_ip_allowlist": "Ongeldige allowlist-invoer — gebruik kommagescheiden IP-adressen of CIDR-bereiken (bijv. 192.168.1.0/24).",
+      "invalid_cloud_api_override": "De aangepaste camera-API-URL moet beginnen met https://"
     },
     "abort": {
       "migration_started": "Migratie gestart — voltooi de herconfiguratieflow op de integratiekaart."

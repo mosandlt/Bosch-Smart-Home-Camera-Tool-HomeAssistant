@@ -23,10 +23,12 @@
         "title": "Bosch Smart Home Camera — Incolla URL (Passaggio 2 di 2)",
         "description": "Incollare l'URL di reindirizzamento dalla barra degli indirizzi del browser.\n\n**Importante:** Il codice scade dopo ~60 secondi.",
         "data": {
-          "redirect_url": "URL di reindirizzamento"
+          "redirect_url": "URL di reindirizzamento",
+          "diagnostic_cloud_api_override": "Avanzato: URL API fotocamera personalizzato (solo diagnostica)"
         },
         "data_description": {
-          "redirect_url": "L'URL completo dalla barra degli indirizzi dopo l'accesso (contiene il codice di autorizzazione)"
+          "redirect_url": "L'URL completo dalla barra degli indirizzi dopo l'accesso (contiene il codice di autorizzazione)",
+          "diagnostic_cloud_api_override": "Lasciare vuoto a meno che il supporto Bosch non abbia esplicitamente indicato un URL base API fotocamera diverso da testare — questo non attiva alcun programma beta né sblocca nulla, cambia solo il server con cui comunica l'integrazione."
         }
       },
       "reauth_confirm": {
@@ -44,7 +46,8 @@
       "invalid_redirect_url": "Nessun codice di autorizzazione trovato nell'URL.",
       "token_exchange_failed": "Accesso non riuscito — il codice potrebbe essere scaduto. Riprovare.",
       "cannot_connect": "Impossibile connettersi ai server Bosch.",
-      "timeout": "Connessione scaduta."
+      "timeout": "Connessione scaduta.",
+      "invalid_cloud_api_override": "L'URL API fotocamera personalizzato deve iniziare con https://"
     },
     "abort": {
       "already_configured": "Già configurato.",
@@ -308,10 +311,12 @@
         "title": "Nuovo accesso — Passaggio 2 di 2",
         "description": "Incollare l'URL di reindirizzamento. **Il codice scade in ~60 secondi!**",
         "data": {
-          "redirect_url": "URL di reindirizzamento"
+          "redirect_url": "URL di reindirizzamento",
+          "diagnostic_cloud_api_override": "Avanzato: URL API fotocamera personalizzato (solo diagnostica)"
         },
         "data_description": {
-          "redirect_url": "URL completo dalla barra degli indirizzi del browser dopo l'accesso (contiene il codice di autorizzazione)"
+          "redirect_url": "URL completo dalla barra degli indirizzi del browser dopo l'accesso (contiene il codice di autorizzazione)",
+          "diagnostic_cloud_api_override": "Lasciare vuoto a meno che il supporto Bosch non abbia esplicitamente indicato un URL base API fotocamera diverso da testare — questo non attiva alcun programma beta né sblocca nulla, cambia solo il server con cui comunica l'integrazione."
         }
       }
     },
@@ -320,7 +325,8 @@
       "token_exchange_failed": "Accesso non riuscito — codice scaduto. Riprovare.",
       "cannot_connect": "Impossibile connettersi ai server Bosch.",
       "invalid_ip_address": "Indirizzo IP non valido — inserire un indirizzo IPv4 o IPv6 valido.",
-      "invalid_ip_allowlist": "Voce allowlist non valida — usare indirizzi IP o intervalli CIDR separati da virgola (es. 192.168.1.0/24)."
+      "invalid_ip_allowlist": "Voce allowlist non valida — usare indirizzi IP o intervalli CIDR separati da virgola (es. 192.168.1.0/24).",
+      "invalid_cloud_api_override": "L'URL API fotocamera personalizzato deve iniziare con https://"
     },
     "abort": {
       "migration_started": "Migrazione avviata — completare il flusso Riconfigura nella card dell'integrazione."

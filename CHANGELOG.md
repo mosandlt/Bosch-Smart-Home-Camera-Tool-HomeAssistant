@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.8] - 2026-07-06
+
+Patch — advanced diagnostic field for a custom camera-API URL on manual login/re-login
+
+### Added
+
+- **An optional, empty-by-default "Advanced" field on the manual-login and re-login screens** lets you type in a different camera-API base URL to test against, for the rare case where Bosch support has confirmed your account should authorize against a non-default server. Never pre-filled with any specific value — it only changes which server this integration talks to, it doesn't unlock a beta program or anything else on its own. Most people will never need this; it exists purely as a diagnostic tool for a specific account issue, used only with Bosch's explicit guidance.
+
+5611 tests / mypy --strict / ruff / codespell green, 100% coverage.
+
 ## [v14.4.7] - 2026-07-06
 
 Patch — clearer guidance for the Bosch account/permission error added in v14.4.6

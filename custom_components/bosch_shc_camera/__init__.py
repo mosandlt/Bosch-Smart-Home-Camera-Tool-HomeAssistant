@@ -545,6 +545,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
+        # Advanced diagnostic escape hatch (set via the manual-login/relogin
+        # "Advanced" field) — NEVER defaulted to any specific host. Only ever
+        # non-empty if a user explicitly typed a Bosch-confirmed alternate
+        # camera-API base URL in to test whether their account is registered
+        # there instead of production (2026-07-06 SebastianHarder investigation).
+        cloud_api_override = entry.data.get("cloud_api_override", "")
+        self._cloud_api = cloud_api_override or CLOUD_API
+        if cloud_api_override:
+            _LOGGER.warning(
+                "Using diagnostic camera-API override %s instead of the "
+                "default — this should only be set for troubleshooting a "
+                "specific account issue with Bosch support's guidance",
+                cloud_api_override,
+            )
         opts = get_options(entry)
         # Snapshot of options at coordinator creation — used by _async_options_updated
         # to distinguish real options edits from data-only updates (e.g. token refresh).
@@ -2498,17 +2512,23 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
         session = await async_get_bosch_cloud_session(self.hass)
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        # getattr handles stub coordinators in tests that predate the
+        # diagnostic cloud_api_override field (real instances always set
+        # self._cloud_api in __init__).
+        cloud_api = getattr(self, "_cloud_api", CLOUD_API)
 
         try:
             # ── 1. List cameras (every tick — lightweight, needed for entity list) ──
             async with asyncio.timeout(15):
                 async with session.get(
-                    f"{CLOUD_API}/v11/video_inputs", headers=headers
+                    f"{cloud_api}/v11/video_inputs", headers=headers
                 ) as resp:
                     if resp.status == 401:
                         _LOGGER.info("Token expired (401) — attempting silent renewal")
                         _LOGGER.debug(
-                            "video_inputs 401 body (diagnostic, no token material): %s",
+                            "video_inputs 401 body against %s (diagnostic, no token "
+                            "material): %s",
+                            cloud_api,
                             (await resp.text())[:300],
                         )
                         token = await self._ensure_valid_token(token)
@@ -2539,15 +2559,17 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             if resp.status == 401:
                 async with asyncio.timeout(15):
                     async with session.get(
-                        f"{CLOUD_API}/v11/video_inputs", headers=headers
+                        f"{cloud_api}/v11/video_inputs", headers=headers
                     ) as resp2:
                         if resp2.status == 401:
                             import json as _json
 
                             body_text = (await resp2.text())[:300]
                             _LOGGER.debug(
-                                "video_inputs retry still 401 after renewal — "
-                                "Bosch response body (diagnostic, no token material): %s",
+                                "video_inputs retry still 401 after renewal against "
+                                "%s — Bosch response body (diagnostic, no token "
+                                "material): %s",
+                                cloud_api,
                                 body_text,
                             )
                             try:

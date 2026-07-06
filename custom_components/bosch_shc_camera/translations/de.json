@@ -23,10 +23,12 @@
         "title": "Bosch Smart Home Camera — URL einfügen (Schritt 2 von 2)",
         "description": "Die Redirect-URL aus der Browser-Adressleiste unten einfügen.\n\n**Wichtig:** Der Code läuft nach ~60 Sekunden ab!",
         "data": {
-          "redirect_url": "Redirect URL"
+          "redirect_url": "Redirect URL",
+          "diagnostic_cloud_api_override": "Erweitert: eigene Kamera-API-URL (nur Diagnose)"
         },
         "data_description": {
-          "redirect_url": "Die komplette URL aus der Browser-Adressleiste nach der Anmeldung (beginnt mit https://www.bosch.com/boschcam?code=...)"
+          "redirect_url": "Die komplette URL aus der Browser-Adressleiste nach der Anmeldung (beginnt mit https://www.bosch.com/boschcam?code=...)",
+          "diagnostic_cloud_api_override": "Leer lassen, außer der Bosch-Support hat dir ausdrücklich eine andere Kamera-API-Basis-URL zum Testen genannt — das aktiviert kein Beta-Programm und schaltet nichts frei, es ändert nur, mit welchem Server die Integration spricht."
         }
       },
       "reauth_confirm": {
@@ -44,7 +46,8 @@
       "invalid_redirect_url": "Kein Auth-Code in der URL gefunden.",
       "token_exchange_failed": "Anmeldung fehlgeschlagen — Code möglicherweise abgelaufen. Erneut versuchen.",
       "cannot_connect": "Verbindung zu Bosch-Servern fehlgeschlagen.",
-      "timeout": "Zeitüberschreitung."
+      "timeout": "Zeitüberschreitung.",
+      "invalid_cloud_api_override": "Die eigene Kamera-API-URL muss mit https:// beginnen"
     },
     "abort": {
       "already_configured": "Bereits konfiguriert.",
@@ -308,10 +311,12 @@
         "title": "Neu anmelden — Schritt 2 von 2",
         "description": "Redirect-URL einfügen. **Code läuft nach ~60 Sekunden ab!**",
         "data": {
-          "redirect_url": "Redirect URL"
+          "redirect_url": "Redirect URL",
+          "diagnostic_cloud_api_override": "Erweitert: eigene Kamera-API-URL (nur Diagnose)"
         },
         "data_description": {
-          "redirect_url": "Komplette URL aus der Browser-Adressleiste (beginnt mit https://www.bosch.com/boschcam?code=...)"
+          "redirect_url": "Komplette URL aus der Browser-Adressleiste (beginnt mit https://www.bosch.com/boschcam?code=...)",
+          "diagnostic_cloud_api_override": "Leer lassen, außer der Bosch-Support hat dir ausdrücklich eine andere Kamera-API-Basis-URL zum Testen genannt — das aktiviert kein Beta-Programm und schaltet nichts frei, es ändert nur, mit welchem Server die Integration spricht."
         }
       }
     },
@@ -320,7 +325,8 @@
       "token_exchange_failed": "Anmeldung fehlgeschlagen — Code abgelaufen. Erneut versuchen.",
       "cannot_connect": "Verbindung zu Bosch-Servern fehlgeschlagen.",
       "invalid_ip_address": "Ungültige IP-Adresse — bitte eine gültige IPv4- oder IPv6-Adresse eingeben.",
-      "invalid_ip_allowlist": "Ungültiger Allowlist-Eintrag — kommagetrennte IP-Adressen oder CIDR-Bereiche verwenden (z.B. 192.168.1.0/24)."
+      "invalid_ip_allowlist": "Ungültiger Allowlist-Eintrag — kommagetrennte IP-Adressen oder CIDR-Bereiche verwenden (z.B. 192.168.1.0/24).",
+      "invalid_cloud_api_override": "Die eigene Kamera-API-URL muss mit https:// beginnen"
     },
     "abort": {
       "migration_started": "Migration gestartet — bitte schließe den Neu-konfigurieren-Flow auf der Integrationskarte ab."

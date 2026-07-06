@@ -23,10 +23,12 @@
         "title": "Bosch Smart Home Camera — Coller l'URL (Étape 2 sur 2)",
         "description": "Coller l'URL de redirection depuis la barre d'adresse du navigateur.\n\n**Important :** Le code expire après ~60 secondes.",
         "data": {
-          "redirect_url": "URL de redirection"
+          "redirect_url": "URL de redirection",
+          "diagnostic_cloud_api_override": "Avancé : URL d'API caméra personnalisée (diagnostic uniquement)"
         },
         "data_description": {
-          "redirect_url": "L'URL complète de la barre d'adresse après connexion (contient le code d'autorisation)"
+          "redirect_url": "L'URL complète de la barre d'adresse après connexion (contient le code d'autorisation)",
+          "diagnostic_cloud_api_override": "Laisser vide sauf si le support Bosch vous a explicitement communiqué une autre URL de base d'API caméra à tester — cela n'active aucun programme bêta et ne débloque rien, cela change uniquement le serveur avec lequel l'intégration communique."
         }
       },
       "reauth_confirm": {
@@ -44,7 +46,8 @@
       "invalid_redirect_url": "Aucun code d'autorisation trouvé dans l'URL.",
       "token_exchange_failed": "Connexion échouée — le code a peut-être expiré. Réessayer.",
       "cannot_connect": "Impossible de se connecter aux serveurs Bosch.",
-      "timeout": "La connexion a expiré."
+      "timeout": "La connexion a expiré.",
+      "invalid_cloud_api_override": "L'URL d'API caméra personnalisée doit commencer par https://"
     },
     "abort": {
       "already_configured": "Déjà configuré.",
@@ -308,10 +311,12 @@
         "title": "Reconnexion — Étape 2 sur 2",
         "description": "Coller l'URL de redirection. **Le code expire dans ~60 secondes !**",
         "data": {
-          "redirect_url": "URL de redirection"
+          "redirect_url": "URL de redirection",
+          "diagnostic_cloud_api_override": "Avancé : URL d'API caméra personnalisée (diagnostic uniquement)"
         },
         "data_description": {
-          "redirect_url": "URL complète de la barre d'adresse du navigateur après connexion (contient le code d'autorisation)"
+          "redirect_url": "URL complète de la barre d'adresse du navigateur après connexion (contient le code d'autorisation)",
+          "diagnostic_cloud_api_override": "Laisser vide sauf si le support Bosch vous a explicitement communiqué une autre URL de base d'API caméra à tester — cela n'active aucun programme bêta et ne débloque rien, cela change uniquement le serveur avec lequel l'intégration communique."
         }
       }
     },
@@ -320,7 +325,8 @@
       "token_exchange_failed": "Connexion échouée — code expiré. Réessayer.",
       "cannot_connect": "Impossible de se connecter aux serveurs Bosch.",
       "invalid_ip_address": "Adresse IP invalide — saisissez une adresse IPv4 ou IPv6 valide.",
-      "invalid_ip_allowlist": "Entrée de liste d'autorisation invalide — utilisez des adresses IP ou plages CIDR séparées par des virgules (ex. 192.168.1.0/24)."
+      "invalid_ip_allowlist": "Entrée de liste d'autorisation invalide — utilisez des adresses IP ou plages CIDR séparées par des virgules (ex. 192.168.1.0/24).",
+      "invalid_cloud_api_override": "L'URL d'API caméra personnalisée doit commencer par https://"
     },
     "abort": {
       "migration_started": "Migration démarrée — veuillez compléter le flux Reconfigurer sur la carte d'intégration."

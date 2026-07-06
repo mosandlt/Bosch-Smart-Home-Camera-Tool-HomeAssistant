@@ -486,3 +486,49 @@ class TestOptionsFlowReloginSteps:
             )
         flow.async_create_entry.assert_called_once()
         flow.hass.config_entries.async_update_entry.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_relogin_paste_cloud_api_override_rejected_if_not_https(self):
+        """2026-07-06: advanced diagnostic override must reject non-https values."""
+        flow = self._make_options_flow()
+        result = await flow.async_step_relogin_paste(
+            user_input={
+                "redirect_url": "https://r.io?code=good_code",
+                "diagnostic_cloud_api_override": "not-a-url",
+            }
+        )
+        flow.async_show_form.assert_called_once()
+        _, kwargs = flow.async_show_form.call_args
+        assert (
+            kwargs.get("errors", {}).get("diagnostic_cloud_api_override")
+            == "invalid_cloud_api_override"
+        )
+
+    @pytest.mark.asyncio
+    async def test_relogin_paste_cloud_api_override_persisted(self):
+        """A valid override must be merged into the updated entry data."""
+        flow = self._make_options_flow()
+        with (
+            patch(f"{MODULE}._extract_code", return_value="good_code"),
+            patch(
+                f"{MODULE}._exchange_code",
+                AsyncMock(
+                    return_value={
+                        "access_token": "new_at",
+                        "refresh_token": "new_rt",
+                    }
+                ),
+            ),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+        ):
+            await flow.async_step_relogin_paste(
+                user_input={
+                    "redirect_url": "https://r.io?code=good_code",
+                    "diagnostic_cloud_api_override": "https://example-test.invalid/",
+                }
+            )
+        _, kwargs = flow.hass.config_entries.async_update_entry.call_args
+        assert kwargs["data"]["cloud_api_override"] == "https://example-test.invalid"

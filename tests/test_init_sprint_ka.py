@@ -94,6 +94,9 @@ def _make_coord(**overrides):
         token="tok-A",
         refresh_token="rfr-B",
         _refreshed_refresh=None,
+        # Diagnostic camera-API override — default (no override) is the real
+        # constant value so URL-content assertions keep working.
+        _cloud_api="https://residential.cbs.boschsecurity.com",
         _entry=SimpleNamespace(
             entry_id="01KM38DHZ525S61HPENAT7NHC0",
             data={"bearer_token": "tok-A", "refresh_token": "rfr-B"},
@@ -658,6 +661,93 @@ class TestCameraList401Retry:
             coord._ensure_valid_token.assert_called_once(),
             ("_ensure_valid_token must be called exactly once on 401"),
         )
+
+
+# ── 5b. Diagnostic cloud-API override is actually used for video_inputs ─────
+
+
+class TestDiagnosticCloudApiOverride:
+    """The advanced 'diagnostic_cloud_api_override' field must reach every
+    video_inputs URL the coordinator builds — not silently ignored.
+
+    Regression for the 2026-07-06 beta-backend-environment hypothesis
+    (Thomas): a single account might be registered on a different Bosch
+    camera-API backend than production; this diagnostic switch is the only
+    way to test that without touching Bosch's non-production infrastructure
+    ourselves.
+    """
+
+    @pytest.mark.asyncio
+    async def test_override_base_used_for_video_inputs_url(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        override = "https://example-diagnostic-override.invalid"
+        coord = _make_coord(_cloud_api=override)
+        coord._first_tick_done = True
+
+        called_urls = []
+
+        def _get(url, **kwargs):
+            called_urls.append(url)
+            if "video_inputs" in url and "ping" not in url:
+                return _make_resp(200, [])
+            return _make_resp(200, {})
+
+        session_mock = MagicMock()
+        session_mock.get = MagicMock(side_effect=_get)
+
+        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        video_input_calls = [u for u in called_urls if "video_inputs" in u]
+        assert video_input_calls, "video_inputs must have been called at all"
+        assert all(u.startswith(override) for u in video_input_calls), (
+            f"video_inputs URL must use the override base, got: {video_input_calls}"
+        )
+        assert not any(
+            u.startswith("https://residential.cbs.boschsecurity.com")
+            for u in video_input_calls
+        ), "override must replace, not add to, the default production base"
+
+    def test_coordinator_init_uses_default_when_no_override(self):
+        """No cloud_api_override in entry.data → falls back to the real CLOUD_API constant."""
+        from homeassistant.config_entries import ConfigEntry
+
+        from custom_components.bosch_shc_camera import CLOUD_API, BoschCameraCoordinator
+
+        entry = MagicMock(spec=ConfigEntry)
+        entry.data = {"bearer_token": "tok-A", "refresh_token": "rfr-B"}
+        entry.options = {}
+
+        coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
+        coord._entry = entry
+        cloud_api_override = entry.data.get("cloud_api_override", "")
+        coord._cloud_api = cloud_api_override or CLOUD_API
+
+        assert coord._cloud_api == CLOUD_API
+
+    def test_coordinator_init_uses_override_when_present(self):
+        """cloud_api_override in entry.data → replaces the default CLOUD_API constant."""
+        from homeassistant.config_entries import ConfigEntry
+
+        from custom_components.bosch_shc_camera import CLOUD_API, BoschCameraCoordinator
+
+        override = "https://custom-backend.example.invalid"
+        entry = MagicMock(spec=ConfigEntry)
+        entry.data = {
+            "bearer_token": "tok-A",
+            "refresh_token": "rfr-B",
+            "cloud_api_override": override,
+        }
+        entry.options = {}
+
+        coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
+        coord._entry = entry
+        cloud_api_override = entry.data.get("cloud_api_override", "")
+        coord._cloud_api = cloud_api_override or CLOUD_API
+
+        assert coord._cloud_api == override
+        assert coord._cloud_api != CLOUD_API
 
 
 # ── 6. Camera list 401 → retry also 401 → UpdateFailed ───────────────────────

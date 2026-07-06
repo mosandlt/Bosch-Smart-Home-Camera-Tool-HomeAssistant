@@ -483,3 +483,44 @@ async def test_two_coordinators_have_independent_state(hass: HomeAssistant) -> N
     # Update intervals differ per entry options.
     assert coord1.update_interval.total_seconds() == 30.0
     assert coord2.update_interval.total_seconds() == 90.0
+
+
+# ─── Diagnostic cloud_api_override (2026-07-06) ────────────────────────────
+
+
+async def test_no_cloud_api_override_uses_default_constant(
+    hass: HomeAssistant,
+) -> None:
+    """No cloud_api_override in entry.data → _cloud_api is the real CLOUD_API constant."""
+    from custom_components.bosch_shc_camera import CLOUD_API
+
+    entry = _make_entry(hass)
+    coord = BoschCameraCoordinator(hass, entry)
+    assert coord._cloud_api == CLOUD_API
+
+
+async def test_cloud_api_override_present_replaces_default_and_warns(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """cloud_api_override in entry.data → replaces _cloud_api and logs a WARNING.
+
+    This is an advanced diagnostic escape hatch (never pre-filled with any
+    host by the config/options flow) — the WARNING makes an accidentally-left
+    -on override loud and visible instead of silently changing behaviour.
+    """
+    from custom_components.bosch_shc_camera import CLOUD_API
+
+    override = "https://custom-backend.example.invalid"
+    entry = _make_entry(
+        hass,
+        data={
+            "bearer_token": "test_bearer_token",
+            "refresh_token": "test_refresh_token",
+            "cloud_api_override": override,
+        },
+    )
+    with caplog.at_level("WARNING", logger="custom_components.bosch_shc_camera"):
+        coord = BoschCameraCoordinator(hass, entry)
+    assert coord._cloud_api == override
+    assert coord._cloud_api != CLOUD_API
+    assert any("diagnostic camera-API override" in r.message for r in caplog.records)

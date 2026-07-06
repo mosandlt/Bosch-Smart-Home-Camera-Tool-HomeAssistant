@@ -200,6 +200,84 @@ class TestAsyncStepManualPaste:
         flow.hass.config_entries.async_update_entry.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_cloud_api_override_not_starting_https_shows_error(self) -> None:
+        """Advanced override field must be rejected if it isn't a https:// URL.
+
+        2026-07-06 (Thomas): optional diagnostic escape hatch so a single
+        account can test whether it's registered against a different,
+        Bosch-confirmed camera-API base URL — never pre-filled, must be
+        typed in deliberately.
+        """
+        flow = _make_flow(source="user")
+        result = await flow.async_step_manual_paste(
+            user_input={
+                "redirect_url": "https://r.io?code=good_code",
+                "diagnostic_cloud_api_override": "not-a-url",
+            }
+        )
+        flow.async_show_form.assert_called_once()
+        _, kwargs = flow.async_show_form.call_args
+        assert (
+            kwargs.get("errors", {}).get("diagnostic_cloud_api_override")
+            == "invalid_cloud_api_override"
+        )
+
+    @pytest.mark.asyncio
+    async def test_cloud_api_override_persisted_when_provided(self) -> None:
+        flow = _make_flow(source="user")
+        with (
+            patch(f"{MODULE}._extract_code", return_value="good_code"),
+            patch(
+                f"{MODULE}._exchange_code",
+                AsyncMock(return_value={"access_token": "at", "refresh_token": "rt"}),
+            ),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+        ):
+            await flow.async_step_manual_paste(
+                user_input={
+                    "redirect_url": "https://r.io?code=good_code",
+                    "diagnostic_cloud_api_override": "https://example-test.invalid/",
+                }
+            )
+        flow.async_create_entry.assert_called_once_with(
+            title="Bosch Smart Home Camera",
+            data={
+                "bearer_token": "at",
+                "refresh_token": "rt",
+                "cloud_api_override": "https://example-test.invalid",
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_cloud_api_override_omitted_when_blank(self) -> None:
+        """Blank override (the default) must NOT add a cloud_api_override key at all."""
+        flow = _make_flow(source="user")
+        with (
+            patch(f"{MODULE}._extract_code", return_value="good_code"),
+            patch(
+                f"{MODULE}._exchange_code",
+                AsyncMock(return_value={"access_token": "at", "refresh_token": "rt"}),
+            ),
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+        ):
+            await flow.async_step_manual_paste(
+                user_input={
+                    "redirect_url": "https://r.io?code=good_code",
+                    "diagnostic_cloud_api_override": "",
+                }
+            )
+        flow.async_create_entry.assert_called_once_with(
+            title="Bosch Smart Home Camera",
+            data={"bearer_token": "at", "refresh_token": "rt"},
+        )
+
+    @pytest.mark.asyncio
     async def test_success_on_reauth_updates_existing_entry(self) -> None:
         flow = _make_flow(source=config_entries.SOURCE_REAUTH)
         existing = MagicMock()

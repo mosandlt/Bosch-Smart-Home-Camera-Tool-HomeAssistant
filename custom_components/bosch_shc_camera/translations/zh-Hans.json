@@ -23,10 +23,12 @@
         "title": "Bosch Smart Home Camera — 粘贴 URL（第 2 步，共 2 步）",
         "description": "请将浏览器地址栏中的重定向 URL 粘贴至下方。\n\n**重要：** 授权码将在约 60 秒后过期。",
         "data": {
-          "redirect_url": "Redirect URL"
+          "redirect_url": "Redirect URL",
+          "diagnostic_cloud_api_override": "高级：自定义摄像头 API URL（仅用于诊断）"
         },
         "data_description": {
-          "redirect_url": "登录后浏览器地址栏中的完整 URL（包含授权码）"
+          "redirect_url": "登录后浏览器地址栏中的完整 URL（包含授权码）",
+          "diagnostic_cloud_api_override": "除非 Bosch 支持人员明确告知您使用其他摄像头 API 基础 URL 进行测试，否则请留空——此选项不会启用任何测试计划，也不会解锁任何功能，仅更改集成与哪个服务器通信。"
         }
       },
       "reauth_confirm": {
@@ -44,7 +46,8 @@
       "invalid_redirect_url": "在 URL 中未找到授权码。",
       "token_exchange_failed": "登录失败 — 授权码可能已过期。请重试。",
       "cannot_connect": "无法连接至 Bosch 服务器。",
-      "timeout": "连接超时。"
+      "timeout": "连接超时。",
+      "invalid_cloud_api_override": "自定义摄像头 API URL 必须以 https:// 开头"
     },
     "abort": {
       "already_configured": "已配置。",
@@ -308,10 +311,12 @@
         "title": "重新登录 — 第 2 步，共 2 步",
         "description": "粘贴重定向 URL。**授权码将在约 60 秒后过期！**",
         "data": {
-          "redirect_url": "Redirect URL"
+          "redirect_url": "Redirect URL",
+          "diagnostic_cloud_api_override": "高级：自定义摄像头 API URL（仅用于诊断）"
         },
         "data_description": {
-          "redirect_url": "登录后浏览器地址栏中的完整 URL（包含授权码）"
+          "redirect_url": "登录后浏览器地址栏中的完整 URL（包含授权码）",
+          "diagnostic_cloud_api_override": "除非 Bosch 支持人员明确告知您使用其他摄像头 API 基础 URL 进行测试，否则请留空——此选项不会启用任何测试计划，也不会解锁任何功能，仅更改集成与哪个服务器通信。"
         }
       }
     },
@@ -320,7 +325,8 @@
       "token_exchange_failed": "登录失败 — 授权码已过期。请重试。",
       "cannot_connect": "无法连接至 Bosch 服务器。",
       "invalid_ip_address": "无效的 IP 地址 — 请输入有效的 IPv4 或 IPv6 地址。",
-      "invalid_ip_allowlist": "无效的允许列表条目 — 请使用逗号分隔的 IP 地址或 CIDR 范围（例如 192.168.1.0/24）。"
+      "invalid_ip_allowlist": "无效的允许列表条目 — 请使用逗号分隔的 IP 地址或 CIDR 范围（例如 192.168.1.0/24）。",
+      "invalid_cloud_api_override": "自定义摄像头 API URL 必须以 https:// 开头"
     },
     "abort": {
       "migration_started": "迁移已启动 — 请在集成卡片上完成重新配置流程。"
