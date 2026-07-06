@@ -2507,6 +2507,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 ) as resp:
                     if resp.status == 401:
                         _LOGGER.info("Token expired (401) — attempting silent renewal")
+                        _LOGGER.debug(
+                            "video_inputs 401 body (diagnostic, no token material): %s",
+                            (await resp.text())[:300],
+                        )
                         token = await self._ensure_valid_token(token)
                         headers = {
                             "Authorization": f"Bearer {token}",
@@ -2538,6 +2542,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         f"{CLOUD_API}/v11/video_inputs", headers=headers
                     ) as resp2:
                         if resp2.status == 401:
+                            _LOGGER.debug(
+                                "video_inputs retry still 401 after renewal — "
+                                "Bosch response body (diagnostic, no token material): %s",
+                                (await resp2.text())[:300],
+                            )
                             raise UpdateFailed(
                                 "Token expired and renewal failed — go to Settings → Integrations → "
                                 "Bosch Smart Home Camera → Configure → Force new browser login"

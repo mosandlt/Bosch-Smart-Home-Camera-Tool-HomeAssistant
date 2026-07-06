@@ -5,6 +5,17 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.5] - 2026-07-06
+
+Patch — diagnostic logging for the "Token expired and renewal failed" case
+
+### Changed
+
+- **Enabling debug logging now captures why Bosch's cloud API rejects a token, not just that it did.** A follow-up community report (via the Bosch Smart Home Community) showed the v14.4.4 fix doesn't resolve every case: on some setups, a freshly-renewed token can still be rejected immediately by Bosch's API, which points away from the integration's retry logic and toward something on Bosch's side we previously had no visibility into. Both the initial 401 and the post-renewal-retry 401 now log the response body from Bosch at debug level (truncated, no token material), so a future report can be diagnosed with actual evidence instead of guesswork.
+- No behavior change — this is diagnostics only.
+
+5602 tests / mypy --strict / ruff / codespell green, 100% coverage.
+
 ## [v14.4.4] - 2026-07-06
 
 Patch — token-refresh reliability fix, plus a manual-login wording tweak

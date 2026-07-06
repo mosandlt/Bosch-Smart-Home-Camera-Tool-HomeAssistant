@@ -695,6 +695,50 @@ class TestCameraList401DoubleFailure:
             "Both 401 calls must have been made (initial + retry)"
         )
 
+    @pytest.mark.asyncio
+    async def test_401_bodies_logged_at_debug_for_diagnosis(self, caplog):
+        """Bosch's 401 response body must be captured at DEBUG on both attempts.
+
+        Regression for 2026-07-06 SebastianHarder community report: after v14.4.4
+        the coordinator still logged the generic "Token expired and renewal
+        failed" every tick with no way to see *why* Bosch rejected a freshly
+        renewed token. Neither call's response body was ever surfaced.
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord()
+        coord._first_tick_done = True
+
+        call_count = [0]
+
+        def _get(url, **kwargs):
+            if "v11/video_inputs" in url and "ping" not in url:
+                call_count[0] += 1
+                return _make_resp(
+                    401,
+                    None,
+                    text_data=f'{{"error":"consent_required_{call_count[0]}"}}',
+                )
+            return _make_resp(200, {})
+
+        session_mock = MagicMock()
+        session_mock.get = MagicMock(side_effect=_get)
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
+            pytest.raises(UpdateFailed, match="Token expired"),
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
+        assert any("consent_required_1" in m for m in debug_msgs), (
+            f"First 401 body must be logged at DEBUG, got: {debug_msgs}"
+        )
+        assert any("consent_required_2" in m for m in debug_msgs), (
+            f"Retry 401 body must be logged at DEBUG, got: {debug_msgs}"
+        )
+
 
 # ── 7. Camera list non-200 non-401 → UpdateFailed ────────────────────────────
 
