@@ -70,14 +70,61 @@ def _make_coord(**overrides):
 class TestEarlyReturns:
     @pytest.mark.asyncio
     async def test_returns_existing_token_when_still_valid(self):
-        """Another caller may have already refreshed while we waited on
-        the lock. Skip the POST."""
+        """No observed_token given (legacy callers) → fall back to the
+        JWT-expiry heuristic. Another caller may have already refreshed
+        while we waited on the lock. Skip the POST."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord(_token_still_valid=lambda min_remaining=60: True)
         coord.token = "still-valid-tok"
         out = await BoschCameraCoordinator._refresh_token_locked(coord)
         assert out == "still-valid-tok"
+
+    @pytest.mark.asyncio
+    async def test_skips_refresh_when_token_already_changed_since_observed(self):
+        """observed_token given + self.token already differs → a
+        concurrent caller refreshed while we waited on the lock. Skip
+        the POST and reuse their result."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord()
+        coord.token = "tok-refreshed-by-someone-else"
+        out = await BoschCameraCoordinator._refresh_token_locked(
+            coord, "tok-that-got-401"
+        )
+        assert out == "tok-refreshed-by-someone-else"
+
+    @pytest.mark.asyncio
+    async def test_attempts_refresh_when_observed_token_still_current_even_if_jwt_unexpired(
+        self,
+    ):
+        """Regression (2026-07-06, SebastianHarder community report): a
+        token can be rejected by Bosch (rotated/early-invalidated) well
+        before its own JWT `exp` claim says so. Passing `observed_token`
+        must force an actual refresh attempt instead of trusting
+        `_token_still_valid` and resending the same dead token forever."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        # JWT-expiry heuristic would say "still valid" (it's a fresh,
+        # unexpired token) — but it's exactly the token that just 401'd.
+        coord = _make_coord(_token_still_valid=lambda min_remaining=60: True)
+        coord.token = "tok-that-got-401"
+        new_tokens = {"access_token": "tok-NEW", "refresh_token": "rfr-NEW"}
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.config_flow._do_refresh",
+                new=AsyncMock(return_value=new_tokens),
+            ) as do_refresh,
+        ):
+            out = await BoschCameraCoordinator._refresh_token_locked(
+                coord, "tok-that-got-401"
+            )
+        do_refresh.assert_awaited_once()
+        assert out == "tok-NEW"
 
     @pytest.mark.asyncio
     async def test_outage_cooldown_raises_update_failed(self):

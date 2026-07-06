@@ -68,6 +68,7 @@ def _make_coord(**overrides):
     )
     base = dict(
         _entry=_default_entry,
+        token="tok-A",
         _refreshed_token=None,
         _refreshed_refresh=None,
         _options_snapshot={

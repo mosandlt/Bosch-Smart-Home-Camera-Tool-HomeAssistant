@@ -11,7 +11,7 @@
       },
       "manual_login": {
         "title": "Bosch Smart Home Camera — Inloggen (Stap 1 van 2)",
-        "description": "**Aanmeldprocedure:**\n\n1. Kopieer de URL hieronder\n2. Open deze in uw browser\n3. Log in met uw **Bosch SingleKey ID**\n4. De browser toont een **404-pagina** — dit is normaal\n5. Kopieer de **volledige URL** uit de adresbalk\n6. Klik op **Verzenden** om door te gaan",
+        "description": "**Aanmeldprocedure:**\n\n1. Kopieer de URL hieronder\n2. Open deze in uw browser\n3. Log in met uw **Bosch SingleKey ID**\n4. De browser toont een **foutpagina** — dit is normaal\n5. Kopieer de **volledige URL** uit de adresbalk\n6. Klik op **Verzenden** om door te gaan",
         "data": {
           "login_url": "Bosch Login URL"
         },

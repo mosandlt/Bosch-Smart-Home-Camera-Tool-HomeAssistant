@@ -7,7 +7,8 @@ name: Release
 # release is created. This closes the gap where the tag-triggered release
 # published in parallel with — and independently of — the test suite.
 # Release notes are extracted from the matching ## [vX.Y.Z] section in CHANGELOG.md.
-# Falls back to GitHub's auto-generated notes if no matching section is found.
+# A missing section fails the job — every tagged release must have a maintained
+# CHANGELOG.md entry, no silent fallback to auto-generated notes.
 
 on:
   push:
@@ -88,42 +89,48 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           VERSION="${TAG#v}"
-          awk "/^## \[v${VERSION}\]/{flag=1; next} /^## /{flag=0} flag" CHANGELOG.md \
-            > /tmp/release-notes.md
+          # VERSION is passed as an awk variable (-v), never interpolated into the
+          # program text — TAG can come from workflow_dispatch free-text input or
+          # an attacker-controlled tag name, so string interpolation there would be
+          # an awk/command-injection vector. index() is a literal substring match,
+          # not a regex, so embedded dots can't cause cross-version collisions.
+          awk -v ver="$VERSION" '
+            index($0, "## [v" ver "]") == 1 { flag=1; next }
+            /^## / { flag=0 }
+            flag { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
           # First non-empty content line of the section → human title summary.
-          SUMMARY=$(awk "/^## \[v${VERSION}\]/{f=1; next} /^## /{f=0} f && NF {print; exit}" CHANGELOG.md \
-            | sed -E 's/\*\*//g; s/^(Patch|Minor|Major)[[:space:]]+[—-]+[[:space:]]*//')
+          SUMMARY=$(awk -v ver="$VERSION" '
+            index($0, "## [v" ver "]") == 1 { f=1; next }
+            /^## / { f=0 }
+            f && NF { print; exit }
+          ' CHANGELOG.md | sed -E 's/\*\*//g; s/^(Patch|Minor|Major)[[:space:]]+[—-]+[[:space:]]*//')
           echo "summary=${SUMMARY}" >> "$GITHUB_OUTPUT"
-          if [ ! -s /tmp/release-notes.md ]; then
-            echo "No CHANGELOG entry found for v${VERSION} — falling back to auto-notes."
-            echo "fallback=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "fallback=false" >> "$GITHUB_OUTPUT"
+          if ! grep -q '[^[:space:]]' /tmp/release-notes.md; then
+            echo "::error::No CHANGELOG.md entry found for v${VERSION} — add a '## [v${VERSION}]' section before tagging."
+            exit 1
           fi
 
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.tag.outputs.tag }}
-          FALLBACK: ${{ steps.notes.outputs.fallback }}
           SUMMARY: ${{ steps.notes.outputs.summary }}
         run: |
           # Keep the leading "v" and append the CHANGELOG one-liner when present,
           # so titles read "v14.3.1 — <summary>" like hand-authored releases.
           TITLE="$TAG"
           [ -n "$SUMMARY" ] && TITLE="$TAG — $SUMMARY"
-          NOTES_FLAG="--notes-file /tmp/release-notes.md"
-          [ "$FALLBACK" = "true" ] && NOTES_FLAG="--generate-notes"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" \
               --latest \
-              $NOTES_FLAG
+              --notes-file /tmp/release-notes.md
           else
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" \
               --latest \
-              $NOTES_FLAG
+              --notes-file /tmp/release-notes.md
           fi

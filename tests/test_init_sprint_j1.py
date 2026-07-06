@@ -517,7 +517,7 @@ class TestEnsureValidToken:
 
         call_count = 0
 
-        async def _refresh():
+        async def _refresh(observed_token=None):
             nonlocal call_count
             call_count += 1
             return f"tok-{call_count}"

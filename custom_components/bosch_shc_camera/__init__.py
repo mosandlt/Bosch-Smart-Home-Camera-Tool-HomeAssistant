@@ -2001,7 +2001,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # JWT payload was not base64-decodable or not JSON — treat as expired.
             return False
 
-    async def _ensure_valid_token(self) -> str:
+    async def _ensure_valid_token(self, observed_token: str | None = None) -> str:
         """
         Return a valid bearer token.
         Called ONLY when we get a 401 — not on every tick.
@@ -2010,9 +2010,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             callers never race on the same refresh_token (Keycloak
             rotates and invalidates the previous token on success —
             the loser of the race would get invalid_grant forever).
-          - Skip-if-still-valid: after acquiring the lock, re-check
-            the in-memory token; another caller may have already
-            refreshed it while we waited.
+          - Skip-if-already-refreshed: after acquiring the lock, compare
+            against `observed_token` (the token the caller saw fail);
+            if it no longer matches `self.token`, another caller already
+            refreshed it while we waited — reuse that instead of a redundant
+            POST. Callers should always pass the token they observed to be
+            bad. Bosch can reject a token (rotate/early-invalidate it) well
+            before its own JWT `exp` claim says so — trusting `exp` alone
+            (as this used to) meant a token rejected for any other reason
+            was never actually refreshed: it still "looked" valid, so every
+            retry just resent the same dead token forever (2026-07-06,
+            SebastianHarder community report — a manual-login token was
+            rejected immediately, and the integration never recovered).
           - Always re-read the freshest refresh_token from the
             config entry under the lock so we never send a stale
             token that was already rotated and persisted by the
@@ -2022,9 +2031,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
           - Only alerts after 3 consecutive complete failures
         """
         async with self._token_refresh_lock:
-            return await self._refresh_token_locked()
+            return await self._refresh_token_locked(observed_token)
 
-    async def _refresh_token_locked(self) -> str:
+    async def _refresh_token_locked(self, observed_token: str | None = None) -> str:
         from .config_flow import (
             AuthServerOutageError,
             RefreshTokenInvalidError,
@@ -2032,8 +2041,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         )
 
         # Another caller may have just refreshed the token while we were
-        # waiting on the lock — if so, skip the POST entirely.
-        if self._token_still_valid(min_remaining=60):
+        # waiting on the lock — if so, skip the POST entirely. Prefer
+        # comparing against the token the caller actually observed to be
+        # bad (authoritative: a 401 already proves it); only fall back to
+        # the JWT-expiry heuristic when no observed token was given.
+        if observed_token is not None:
+            if self.token != observed_token:
+                return self.token
+        elif self._token_still_valid(min_remaining=60):
             return self.token
         # If we're in a Bosch auth-server outage, skip the POST entirely
         # until the back-off gate opens — avoids hammering a server that
@@ -2272,7 +2287,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             return
         _LOGGER.debug("Proactive token refresh triggered")
         try:
-            await self._ensure_valid_token()
+            # Pass the current token as `observed_token` so the JWT-expiry
+            # fallback (which would always say "still valid" here — this
+            # fires 5 minutes BEFORE expiry by design) can't skip the
+            # refresh; only a concurrent caller who already refreshed since
+            # this timer fired should short-circuit it.
+            await self._ensure_valid_token(self.token)
             # _ensure_valid_token calls _schedule_token_refresh on success,
             # so the next refresh is automatically rescheduled.
         except Exception as err:
@@ -2487,7 +2507,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 ) as resp:
                     if resp.status == 401:
                         _LOGGER.info("Token expired (401) — attempting silent renewal")
-                        token = await self._ensure_valid_token()
+                        token = await self._ensure_valid_token(token)
                         headers = {
                             "Authorization": f"Bearer {token}",
                             "Accept": "application/json",
@@ -4687,7 +4707,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         if resp.status == 401 and not token_refreshed:
                             token_refreshed = True
                             try:
-                                token = await self._ensure_valid_token()
+                                token = await self._ensure_valid_token(token)
                             except Exception as err:
                                 _LOGGER.warning(
                                     "try_live_connection: token refresh after 401 "
@@ -7569,7 +7589,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             endpoint,
                         )
                         try:
-                            token = await self._ensure_valid_token()
+                            token = await self._ensure_valid_token(token)
                             headers["Authorization"] = f"Bearer {token}"
                         except asyncio.CancelledError:
                             raise

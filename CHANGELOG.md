@@ -5,6 +5,33 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.4] - 2026-07-06
+
+Patch — token-refresh reliability fix, plus a manual-login wording tweak
+
+### Fix
+
+- **The integration could get stuck permanently reporting "setup error, retrying" after logging in.** If Bosch rejected a bearer token for any reason other than plain expiry — for example, right after a fresh manual login — the integration kept resending that same token forever instead of refreshing it. The token still looked valid by its own expiry timestamp, so a refresh was never attempted, and the built-in "please log in again" prompt was never reached either. A 401 from Bosch is now treated as authoritative: the integration correctly refreshes the token or asks you to re-authenticate instead of looping silently. As a side effect, the proactive refresh that runs a few minutes before a token's expiry now actually fires (it had been silently skipping itself every time).
+- Generalized the manual-login instructions to say "an error page" instead of a specific "404 page", since Bosch's redirect page can return other error codes too (reported via the Bosch Smart Home Community).
+
+### Internal
+
+- Release workflow hardening: fixed a `gh release edit` flag mismatch, an awk command-injection vector via the tag name, and a silent changelog-extraction fallback that could ship a release without notes.
+
+5601 tests / mypy --strict / ruff / codespell green, 100% coverage.
+
+## [v14.4.3] - 2026-07-05
+
+Patch — manual login option for SingleKey ID setup
+
+### Fix
+
+- **Setup now offers automatic or manual SingleKey ID login**, for the rare case where the automatic browser redirect gets confused. The one-click automatic login relies on a redirect relay (`my.home-assistant.io`) that tracks "the last Home Assistant instance you visited" rather than the specific setup flow you're in. With more than one browser tab open, or an in-app webview (as in the HA Companion App — also reported on desktop Safari), the redirect can land back in the wrong place, and the setup screen ends up flapping between blank, briefly successful, and an error, with login never completing (reported via the Bosch Smart Home Community).
+- Setup now shows a choice up front: the existing **automatic login** (unchanged, still the default recommendation — most people won't notice a difference), or a **manual login** that sidesteps the redirect entirely — copy a link, log in, paste the result back. The manual option reuses the same mechanism already available for re-login under *Configure → Auth*.
+- Also fixed: a leftover setup-dialog description (all 11 languages) that promised an immediate browser redirect after clicking Submit on re-authentication — now accurately describes the new choice.
+
+5599 tests / mypy --strict / ruff / codespell green, 100% coverage.
+
 ## [v14.4.2] - 2026-07-04
 
 Patch — live-stream teardown reliability fix, found and hardened via a live production incident.

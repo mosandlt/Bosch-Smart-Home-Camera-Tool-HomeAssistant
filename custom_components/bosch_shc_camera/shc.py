@@ -468,7 +468,7 @@ async def async_cloud_set_privacy_mode(
                             "cloud_set_privacy_mode: 401 -- refreshing token and retrying"
                         )
                         try:
-                            token = await coordinator._ensure_valid_token()
+                            token = await coordinator._ensure_valid_token(token)
                             headers["Authorization"] = f"Bearer {token}"
                             _token_refreshed = True
                         except Exception:  # noqa: S110 # token refresh failed; fall through to local SHC path

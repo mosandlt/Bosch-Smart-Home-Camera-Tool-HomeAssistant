@@ -239,6 +239,7 @@ class TestProactiveRefreshEarlyReturn:
         ensure_token = AsyncMock()
         coord = SimpleNamespace(
             hass=SimpleNamespace(is_stopping=False),
+            token="tok-x",
             _ensure_valid_token=ensure_token,
         )
         await BoschCameraCoordinator._proactive_refresh(coord)

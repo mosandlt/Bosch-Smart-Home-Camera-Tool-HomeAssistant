@@ -11,7 +11,7 @@
       },
       "manual_login": {
         "title": "Bosch Smart Home Camera — Connexion (Étape 1 sur 2)",
-        "description": "**Procédure de connexion :**\n\n1. Copier l'URL ci-dessous\n2. L'ouvrir dans votre navigateur\n3. Se connecter avec votre **Bosch SingleKey ID**\n4. Le navigateur affiche une **page 404** — c'est normal\n5. Copier l'**URL complète** de la barre d'adresse\n6. Cliquer sur **Envoyer** pour continuer",
+        "description": "**Procédure de connexion :**\n\n1. Copier l'URL ci-dessous\n2. L'ouvrir dans votre navigateur\n3. Se connecter avec votre **Bosch SingleKey ID**\n4. Le navigateur affiche une **page d'erreur** — c'est normal\n5. Copier l'**URL complète** de la barre d'adresse\n6. Cliquer sur **Envoyer** pour continuer",
         "data": {
           "login_url": "Bosch Login URL"
         },
