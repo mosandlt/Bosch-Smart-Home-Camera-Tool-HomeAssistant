@@ -2542,11 +2542,35 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         f"{CLOUD_API}/v11/video_inputs", headers=headers
                     ) as resp2:
                         if resp2.status == 401:
+                            import json as _json
+
+                            body_text = (await resp2.text())[:300]
                             _LOGGER.debug(
                                 "video_inputs retry still 401 after renewal — "
                                 "Bosch response body (diagnostic, no token material): %s",
-                                (await resp2.text())[:300],
+                                body_text,
                             )
+                            try:
+                                body_json = _json.loads(body_text)
+                            except ValueError:
+                                body_json = {}
+                            # A fresh, successfully-renewed token still being 401'd
+                            # is not a token problem at all — Bosch is telling us
+                            # the account itself lacks camera-API access (e.g. a
+                            # shared-user registration that never completed).
+                            # Re-authenticating cannot fix this; say so instead of
+                            # sending the user in an endless, pointless relogin loop
+                            # (2026-07-06 SebastianHarder community report — debug
+                            # logging above finally surfaced the real reason).
+                            if body_json.get("error") == "sh:authorization.failed":
+                                raise UpdateFailed(
+                                    "Bosch rejected the camera API with "
+                                    f"'sh:authorization.failed' ({body_json.get('message', 'no detail')}) "
+                                    "— this is an account/permission issue on Bosch's side, not a "
+                                    "login problem. Re-authenticating will not fix it — check camera "
+                                    "sharing/access for this account in the Bosch Smart Home app, or "
+                                    "contact Bosch support."
+                                )
                             raise UpdateFailed(
                                 "Token expired and renewal failed — go to Settings → Integrations → "
                                 "Bosch Smart Home Camera → Configure → Force new browser login"

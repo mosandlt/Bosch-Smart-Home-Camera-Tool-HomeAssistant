@@ -11,7 +11,7 @@
       },
       "manual_login": {
         "title": "Bosch Smart Home Camera — Inicio de sesión (Paso 1 de 2)",
-        "description": "**Cómo iniciar sesión:**\n\n1. Copiar la URL del campo inferior\n2. Abrirla en el navegador\n3. Iniciar sesión con el **Bosch SingleKey ID**\n4. El navegador muestra una **página de error** — es lo esperado\n5. Copiar la **URL completa** de la barra de direcciones\n6. Hacer clic en **Enviar** para continuar",
+        "description": "**Cómo iniciar sesión:**\n\n1. Copiar la URL del campo inferior\n2. Abrirla en el navegador\n3. Iniciar sesión con el **Bosch SingleKey ID**\n4. El navegador muestra una **página de error** — es lo esperado\n5. Copiar la **URL completa** de la barra de direcciones\n6. Hacer clic en **OK** para continuar",
         "data": {
           "login_url": "Bosch Login URL"
         },

@@ -739,6 +739,50 @@ class TestCameraList401DoubleFailure:
             f"Retry 401 body must be logged at DEBUG, got: {debug_msgs}"
         )
 
+    @pytest.mark.asyncio
+    async def test_sh_authorization_failed_raises_account_permission_message(self):
+        """Bosch's 'sh:authorization.failed' body must not be reported as a token problem.
+
+        Regression for 2026-07-06 SebastianHarder community report: debug
+        logging (added this same release) revealed that a freshly-renewed,
+        Keycloak-accepted token was still rejected by the camera API with
+        {"error":"sh:authorization.failed","message":"missing permission
+        \"user is registered\""} — an account/permission issue on Bosch's
+        side, not a token problem. Telling the user to re-authenticate is
+        actively misleading here (he had already done so, repeatedly).
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord()
+        coord._first_tick_done = True
+
+        def _get(url, **kwargs):
+            if "v11/video_inputs" in url and "ping" not in url:
+                return _make_resp(
+                    401,
+                    None,
+                    text_data=(
+                        '{"status":401,"error":"sh:authorization.failed",'
+                        '"message":"missing permission \\"user is registered\\"",'
+                        '"description":null,"href":null}'
+                    ),
+                )
+            return _make_resp(200, {})
+
+        session_mock = MagicMock()
+        session_mock.get = MagicMock(side_effect=_get)
+
+        with (
+            pytest.raises(UpdateFailed, match="account/permission issue") as exc_info,
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
+        ):
+            await BoschCameraCoordinator._async_update_data(coord)
+
+        message = str(exc_info.value)
+        assert "sh:authorization.failed" in message
+        assert "user is registered" in message
+        assert "Re-authenticating will not fix it" in message
+
 
 # ── 7. Camera list non-200 non-401 → UpdateFailed ────────────────────────────
 

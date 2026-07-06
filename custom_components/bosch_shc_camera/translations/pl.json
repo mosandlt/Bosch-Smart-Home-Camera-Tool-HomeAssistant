@@ -11,7 +11,7 @@
       },
       "manual_login": {
         "title": "Bosch Smart Home Camera — Logowanie (Krok 1 z 2)",
-        "description": "**Jak się zalogować:**\n\n1. Skopiuj URL z pola poniżej\n2. Otwórz go w przeglądarce\n3. Zaloguj się przy użyciu **Bosch SingleKey ID**\n4. Przeglądarka wyświetli **stronę błędu** — to oczekiwane zachowanie\n5. Skopiuj **pełny URL** z paska adresu\n6. Kliknij **Prześlij**, aby kontynuować",
+        "description": "**Jak się zalogować:**\n\n1. Skopiuj URL z pola poniżej\n2. Otwórz go w przeglądarce\n3. Zaloguj się przy użyciu **Bosch SingleKey ID**\n4. Przeglądarka wyświetli **stronę błędu** — to oczekiwane zachowanie\n5. Skopiuj **pełny URL** z paska adresu\n6. Kliknij **OK**, aby kontynuować",
         "data": {
           "login_url": "Bosch Login URL"
         },

@@ -11,7 +11,7 @@
       },
       "manual_login": {
         "title": "Bosch Smart Home Camera — Anmeldung (Schritt 1 von 2)",
-        "description": "**So meldest du dich an:**\n\n1. URL unten kopieren\n2. Im Browser öffnen\n3. Mit **Bosch SingleKey ID** anmelden\n4. Browser zeigt **Fehlerseite** — das ist normal\n5. **Komplette URL** aus der Adressleiste kopieren\n6. Auf **Absenden** klicken",
+        "description": "**So meldest du dich an:**\n\n1. URL unten kopieren\n2. Im Browser öffnen\n3. Mit **Bosch SingleKey ID** anmelden\n4. Browser zeigt **Fehlerseite** — das ist normal\n5. **Komplette URL** aus der Adressleiste kopieren\n6. Auf **OK** klicken",
         "data": {
           "login_url": "Bosch Login URL"
         },

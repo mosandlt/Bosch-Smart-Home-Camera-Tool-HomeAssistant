@@ -2154,11 +2154,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.4.5** — see the GitHub release page for full notes:
-[**v14.4.5 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.4.5)
+Latest: **v14.4.6** — see the GitHub release page for full notes:
+[**v14.4.6 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.4.6)
 
 | Version | Highlights |
 |---|---|
+| **v14.4.6** | **Bosch account/permission errors are now reported correctly, plus a small manual-login instruction fix.** The v14.4.5 diagnostic logging paid off immediately: a community report showed the camera API rejecting a freshly-renewed, valid token with `sh:authorization.failed` / "missing permission \"user is registered\"" — an account or sharing/permission issue on Bosch's side, not a token problem. The integration used to tell you to re-authenticate in this case, which cannot fix it; it now reports it as an account/permission issue instead. Also fixed step 6 of the manual-login instructions, which said "Click Submit" when the actual button is labelled "OK". |
 | **v14.4.5** | **Diagnostic logging for the "Token expired and renewal failed" case.** A community report showed the v14.4.4 fix didn't resolve every case — some setups still see the cloud reject a freshly-renewed token immediately. There was previously no way to see *why* Bosch's API rejects it, only the HTTP status. Enabling debug logging now also captures Bosch's actual response body (no token material) on both the initial and post-renewal-retry 401, so future reports can be diagnosed instead of guessed at. No behavior change. |
 | **v14.4.4** | **Fixes a rare case where the integration could get stuck permanently reporting "setup error, retrying" after logging in.** If Bosch rejected a bearer token for any reason other than plain expiry (e.g. right after a fresh manual login), the integration kept resending that same token forever instead of refreshing it — the token still looked valid by its own expiry timestamp, so a refresh was never attempted, and the built-in "please log in again" prompt was never reached either. A rejection is now treated as authoritative, so the integration correctly refreshes or asks you to re-authenticate instead of looping silently. Also generalized the manual-login instructions to say "error page" instead of a specific "404 page", since Bosch's redirect page can return other error codes too. |
 | **v14.4.3** | **A manual login option for SingleKey ID setup, for the rare case where the automatic browser redirect gets confused.** The one-click browser login relies on a redirect relay that tracks "the last Home Assistant instance you visited" rather than the specific setup flow you're in — with more than one browser tab or an in-app webview open (as on the HA Companion App, or reported on desktop Safari), the redirect can land you back in the wrong place and the setup screen ends up flapping between blank, briefly successful, and an error. Setup now offers a choice: the existing automatic login, or a manual copy-the-link-paste-the-result option that sidesteps the redirect entirely. Most people won't notice a difference — pick automatic and it works exactly as before. |
@@ -2276,7 +2277,7 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.4.5** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.4.6** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.4** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.7** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.5** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |

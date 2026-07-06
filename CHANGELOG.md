@@ -5,6 +5,17 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.6] - 2026-07-06
+
+Patch — Bosch account/permission errors reported correctly, plus a manual-login instruction fix
+
+### Fix
+
+- **Bosch account/permission errors are now reported correctly instead of as a token problem.** The v14.4.5 diagnostic logging paid off immediately: a community follow-up showed the camera API rejecting a freshly-renewed, valid token with `sh:authorization.failed` — Bosch's way of saying the account is missing camera-API access (e.g. an incomplete shared-user registration), not that the token expired. The integration used to respond by telling you to re-authenticate, which cannot fix an account-side permission problem; it now reports it as an account/permission issue and suggests checking camera sharing/access in the Bosch Smart Home app instead.
+- Fixed step 6 of the manual-login instructions ("Click Submit to continue") — the actual button on that step is labelled "OK", not "Submit"/its localized equivalent. Fixed in all 12 locales.
+
+5603 tests (1 skipped) / mypy --strict / ruff / codespell green, 100% coverage.
+
 ## [v14.4.5] - 2026-07-06
 
 Patch — diagnostic logging for the "Token expired and renewal failed" case

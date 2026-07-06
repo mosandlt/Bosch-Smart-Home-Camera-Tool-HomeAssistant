@@ -11,7 +11,7 @@
       },
       "manual_login": {
         "title": "Bosch Smart Home Camera — 登录（第 1 步，共 2 步）",
-        "description": "**登录步骤：**\n\n1. 复制下方字段中的 URL\n2. 在浏览器中打开\n3. 使用您的 **Bosch SingleKey ID** 登录\n4. 浏览器显示 **错误页面** — 这是正常现象\n5. 从地址栏复制**完整 URL**\n6. 点击**提交**继续",
+        "description": "**登录步骤：**\n\n1. 复制下方字段中的 URL\n2. 在浏览器中打开\n3. 使用您的 **Bosch SingleKey ID** 登录\n4. 浏览器显示 **错误页面** — 这是正常现象\n5. 从地址栏复制**完整 URL**\n6. 点击**OK**继续",
         "data": {
           "login_url": "Bosch Login URL"
         },

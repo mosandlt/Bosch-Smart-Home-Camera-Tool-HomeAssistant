@@ -11,7 +11,7 @@
       },
       "manual_login": {
         "title": "Bosch Smart Home Camera — Login (Step 1 of 2)",
-        "description": "**How to log in:**\n\n1. Copy the URL from the field below\n2. Open it in your browser\n3. Log in with your **Bosch SingleKey ID**\n4. Browser shows an **error page** — this is expected\n5. Copy the **full URL** from the address bar\n6. Click **Submit** to continue",
+        "description": "**How to log in:**\n\n1. Copy the URL from the field below\n2. Open it in your browser\n3. Log in with your **Bosch SingleKey ID**\n4. Browser shows an **error page** — this is expected\n5. Copy the **full URL** from the address bar\n6. Click **OK** to continue",
         "data": {
           "login_url": "Bosch Login URL"
         },
