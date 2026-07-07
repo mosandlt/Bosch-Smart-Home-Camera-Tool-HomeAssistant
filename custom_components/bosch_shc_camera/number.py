@@ -330,9 +330,19 @@ class BoschFrontLightIntensityNumber(_BoschEntityBase, NumberEntity):  # type: i
     async def async_set_native_value(self, value: float) -> None:
         """Set front light intensity (0-100% → 0.0-1.0 API value)."""
         intensity = round(value / 100, 2)
-        await self.coordinator.async_cloud_set_light_component(
+        success = await self.coordinator.async_cloud_set_light_component(
             self._cam_id, "intensity", intensity
         )
+        if not success:
+            # The setter (shc.py) never raises — see BoschPrivacyModeSwitch's
+            # matching fix (2026-07-07) for why: a total failure across every
+            # fallback path used to be invisible (state just reverted).
+            _LOGGER.warning(
+                "Front light intensity set to %.0f%% failed on all paths for %s "
+                "— state unchanged",
+                value,
+                self._cam_id[:8],
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

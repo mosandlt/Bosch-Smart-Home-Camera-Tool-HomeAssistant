@@ -109,6 +109,23 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
         self._fw = info.get("firmwareVersion", "")
         self._mac = info.get("macAddress", "")
 
+    def _warn_write_failed(self, feature: str, desired_label: str) -> None:
+        """Log a total write failure the cloud setter otherwise swallows.
+
+        The setters (shc.py) never raise — an automation calling into a
+        switch must keep running its later steps — so a total failure
+        across every fallback path is otherwise invisible: `is_on` still
+        reflects the last cached state and the UI just reverts with zero
+        explanation (live report 2026-07-07, privacy mode; same discard
+        pattern existed here too).
+        """
+        _LOGGER.warning(
+            "%s toggle for %s (%s) failed on all paths — state unchanged",
+            feature,
+            self._cam_title,
+            desired_label,
+        )
+
     @property
     def available(self) -> bool:
         """Base availability: coordinator running AND camera is ONLINE.
@@ -649,10 +666,18 @@ class BoschCameraLightSwitch(_BoschSwitchBase):
         )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_cloud_set_camera_light(self._cam_id, True)
+        success = await self.coordinator.async_cloud_set_camera_light(
+            self._cam_id, True
+        )
+        if not success:
+            self._warn_write_failed("Camera light", "ON")
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_cloud_set_camera_light(self._cam_id, False)
+        success = await self.coordinator.async_cloud_set_camera_light(
+            self._cam_id, False
+        )
+        if not success:
+            self._warn_write_failed("Camera light", "OFF")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -679,14 +704,18 @@ class BoschFrontLightSwitch(_BoschSwitchBase):
         )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_cloud_set_light_component(
+        success = await self.coordinator.async_cloud_set_light_component(
             self._cam_id, "front", True
         )
+        if not success:
+            self._warn_write_failed("Front light", "ON")
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_cloud_set_light_component(
+        success = await self.coordinator.async_cloud_set_light_component(
             self._cam_id, "front", False
         )
+        if not success:
+            self._warn_write_failed("Front light", "OFF")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -712,14 +741,18 @@ class BoschWallwasherSwitch(_BoschSwitchBase):
         return self.coordinator._shc_state_cache.get(self._cam_id, {}).get("wallwasher")  # type: ignore[no-any-return]
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_cloud_set_light_component(
+        success = await self.coordinator.async_cloud_set_light_component(
             self._cam_id, "wallwasher", True
         )
+        if not success:
+            self._warn_write_failed("Wallwasher", "ON")
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_cloud_set_light_component(
+        success = await self.coordinator.async_cloud_set_light_component(
             self._cam_id, "wallwasher", False
         )
+        if not success:
+            self._warn_write_failed("Wallwasher", "OFF")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -927,7 +960,23 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
                 "Privacy ON for %s — stopping active live stream", self._cam_title
             )
             await self.coordinator._tear_down_live_stream(self._cam_id)
-        await self.coordinator.async_cloud_set_privacy_mode(self._cam_id, desired)
+        success = await self.coordinator.async_cloud_set_privacy_mode(
+            self._cam_id, desired
+        )
+        if not success:
+            # The cascade (cloud → Gen2 LOCAL RCP → SHC) never raises — an
+            # automation calling this must keep running its later steps
+            # (see _request_privacy). But that means a total failure is
+            # otherwise silent to whoever pressed the switch: `is_on` still
+            # reflects the last cached state, so the UI just reverts with
+            # zero explanation. Log it here so it's at least visible without
+            # digging through shc.py's persistent_notification.
+            _LOGGER.warning(
+                "Privacy toggle for %s (%s) failed on all paths "
+                "(cloud+local RCP+SHC) — state unchanged",
+                self._cam_title,
+                "ON" if desired else "OFF",
+            )
 
     async def _flush_pending_privacy(self) -> None:
         """Apply whatever the latest pending desired state is, then clear it."""
@@ -1065,11 +1114,19 @@ class BoschNotificationsSwitch(_BoschSwitchBase):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable notifications (follow camera schedule)."""
-        await self.coordinator.async_cloud_set_notifications(self._cam_id, True)
+        success = await self.coordinator.async_cloud_set_notifications(
+            self._cam_id, True
+        )
+        if not success:
+            self._warn_write_failed("Notifications", "ON")
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable notifications (always off)."""
-        await self.coordinator.async_cloud_set_notifications(self._cam_id, False)
+        success = await self.coordinator.async_cloud_set_notifications(
+            self._cam_id, False
+        )
+        if not success:
+            self._warn_write_failed("Notifications", "OFF")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -5,6 +5,17 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.9] - 2026-07-07
+
+Patch — camera control switches now tell you when a command wasn't delivered, instead of silently reverting
+
+### Fixed
+
+- **Privacy mode, camera light, and notification switches now surface a notification when a command can't be delivered on any path.** When Bosch's cloud API is briefly unreachable, the integration already falls back to writing directly to the camera over your LAN (Gen2) or via a paired Smart Home Controller — but if every one of those paths failed too, the switch used to just silently revert to its previous state with zero explanation, looking like the button had done nothing. A persistent notification now appears whenever a command is not delivered on any path, so you know to try again once the connection recovers instead of wondering whether the button is broken.
+- Fixed a related gap where the notification could itself be skipped if the local Smart Home Controller fallback was reachable but its own write also failed — that case previously went unreported too.
+
+5620 tests (1 skipped) / mypy --strict / ruff / codespell green, 100% coverage.
+
 ## [v14.4.8] - 2026-07-06
 
 Patch — advanced diagnostic field for a custom camera-API URL on manual login/re-login

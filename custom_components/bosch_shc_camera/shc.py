@@ -417,6 +417,47 @@ def _schedule_privacy_off_snapshot(
 # ── Cloud API setters ────────────────────────────────────────────────────────
 
 
+async def _notify_write_failed(
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    feature_key: str,
+    feature_label: str,
+    desired_label: str,
+) -> None:
+    """Best-effort persistent_notification when every write path is exhausted.
+
+    Fires unconditionally — not gated on `_auth_outage_count` (that counter
+    only tracks consecutive 5xx from the coordinator's own *polling* loop, so
+    a one-off write-time failure while a user is toggling a switch never
+    touches it). Without this, a total failure left zero user-visible
+    feedback: the entity just silently reverted, looking like "the button
+    does nothing" (live report 2026-07-07, privacy mode; same gap existed —
+    even worse, with no notification code path at all — for camera light and
+    notifications).
+
+    `notification_id` is deterministic per camera+feature, so repeated
+    failures during a real outage overwrite the same entry instead of
+    spamming.
+    """
+    try:
+        await coordinator.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": f"Bosch Kamera — {feature_label}-Befehl nicht zugestellt",
+                "message": (
+                    f"{feature_label} {desired_label} für `{cam_id[:8]}…` konnte "
+                    "nicht gesetzt werden: Bosch-Cloud nicht erreichbar und "
+                    "lokaler Fallback fehlgeschlagen.\n\n"
+                    "Sobald die Cloud wieder online ist, bitte erneut schalten."
+                ),
+                "notification_id": f"bosch_{feature_key}_queued_{cam_id[:8]}",
+            },
+        )
+    except Exception:  # noqa: S110 # best-effort persistent_notification; HA service call non-critical after all write paths exhausted
+        pass
+
+
 async def async_cloud_set_privacy_mode(
     coordinator: BoschCameraCoordinator, cam_id: str, enabled: bool
 ) -> bool:
@@ -593,27 +634,19 @@ async def async_cloud_set_privacy_mode(
         _LOGGER.info(
             "cloud_set_privacy_mode: cloud failed, falling back to SHC for %s", cam_id
         )
-        return await async_shc_set_privacy_mode(coordinator, cam_id, enabled)
+        if await async_shc_set_privacy_mode(coordinator, cam_id, enabled):
+            return True
+        # SHC was reachable but its own write also failed (e.g. no cached
+        # device_id yet, or a non-2xx from the local PUT) — fall through to
+        # the notification tail instead of returning this False directly.
+        # Returning early here reproduced the exact "swallowed failure" bug
+        # this function was fixed for, just for this one sub-case (found by
+        # bug-hunt verification, 2026-07-07).
 
     # -- All fallbacks exhausted — surface a persistent notification ----------
-    if coordinator._auth_outage_count > 0:
-        try:
-            await coordinator.hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": "Bosch Kamera — Privacy-Befehl nicht zugestellt",
-                    "message": (
-                        f"Privacy-Mode {'ON' if enabled else 'OFF'} für `{cam_id[:8]}…` "
-                        "konnte nicht gesetzt werden: Bosch-Cloud nicht erreichbar "
-                        "und lokaler Fallback fehlgeschlagen.\n\n"
-                        "Sobald die Cloud wieder online ist, bitte erneut schalten."
-                    ),
-                    "notification_id": f"bosch_privacy_queued_{cam_id[:8]}",
-                },
-            )
-        except Exception:  # noqa: S110 # best-effort persistent_notification; HA service call non-critical after all write paths exhausted
-            pass
+    await _notify_write_failed(
+        coordinator, cam_id, "privacy", "Privacy-Mode", "ON" if enabled else "OFF"
+    )
     return False
 
 
@@ -720,7 +753,14 @@ async def async_cloud_set_camera_light(
         _LOGGER.info(
             "cloud_set_camera_light: cloud failed, falling back to SHC for %s", cam_id
         )
-        return await async_shc_set_camera_light(coordinator, cam_id, on)
+        if await async_shc_set_camera_light(coordinator, cam_id, on):
+            return True
+        # SHC was reachable but its own write also failed — fall through to
+        # the notification tail (same fix as async_cloud_set_privacy_mode,
+        # found by bug-hunt verification 2026-07-07).
+    await _notify_write_failed(
+        coordinator, cam_id, "light", "Kameralicht", "ON" if on else "OFF"
+    )
     return False
 
 
@@ -1005,6 +1045,18 @@ async def async_cloud_set_light_component(
                 cam_id[:8],
                 component,
             )
+    _component_labels = {
+        "front": "Frontlicht",
+        "wallwasher": "Wallwasher",
+        "intensity": "Licht-Helligkeit",
+    }
+    await _notify_write_failed(
+        coordinator,
+        cam_id,
+        f"light_{component}",
+        _component_labels.get(component, "Licht"),
+        str(value),
+    )
     return False
 
 
@@ -1016,42 +1068,46 @@ async def async_cloud_set_notifications(
     Uses PUT /v11/video_inputs/{id}/enable_notifications.
     """
     token = coordinator.token
+    status = "FOLLOW_CAMERA_SCHEDULE" if enabled else "ALWAYS_OFF"
     if not token:
         _LOGGER.warning("cloud_set_notifications: no token for %s", cam_id)
-        return False
+    else:
+        session = await async_get_bosch_cloud_session(coordinator.hass)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/enable_notifications"
+        body = {"enabledNotificationsStatus": status}
 
-    session = await async_get_bosch_cloud_session(coordinator.hass)
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/enable_notifications"
-    status = "FOLLOW_CAMERA_SCHEDULE" if enabled else "ALWAYS_OFF"
-    body = {"enabledNotificationsStatus": status}
-
-    try:
-        async with asyncio.timeout(10):
-            async with session.put(url, json=body, headers=headers) as resp:
-                if resp.status in (200, 201, 204):
-                    coordinator._shc_state_cache.setdefault(cam_id, {})[
-                        "notifications_status"
-                    ] = status
-                    coordinator._notif_set_at[cam_id] = time.monotonic()
-                    coordinator.async_update_listeners()
-                    _LOGGER.debug(
-                        "cloud_set_notifications: %s -> %s (HTTP %d)",
-                        cam_id,
-                        status,
-                        resp.status,
+        try:
+            async with asyncio.timeout(10):
+                async with session.put(url, json=body, headers=headers) as resp:
+                    if resp.status in (200, 201, 204):
+                        coordinator._shc_state_cache.setdefault(cam_id, {})[
+                            "notifications_status"
+                        ] = status
+                        coordinator._notif_set_at[cam_id] = time.monotonic()
+                        coordinator.async_update_listeners()
+                        _LOGGER.debug(
+                            "cloud_set_notifications: %s -> %s (HTTP %d)",
+                            cam_id,
+                            status,
+                            resp.status,
+                        )
+                        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
+                        return True
+                    _LOGGER.warning(
+                        "cloud_set_notifications: HTTP %d for %s", resp.status, cam_id
                     )
-                    # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
-                    return True
-                _LOGGER.warning(
-                    "cloud_set_notifications: HTTP %d for %s", resp.status, cam_id
-                )
-    except (TimeoutError, aiohttp.ClientError) as err:
-        _LOGGER.warning("cloud_set_notifications error for %s: %s", cam_id, err)
+        except (TimeoutError, aiohttp.ClientError) as err:
+            _LOGGER.warning("cloud_set_notifications error for %s: %s", cam_id, err)
+
+    # No local/SHC fallback exists for this endpoint — cloud is the only path.
+    await _notify_write_failed(
+        coordinator, cam_id, "notifications", "Benachrichtigungen", status
+    )
     return False
 
 

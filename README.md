@@ -175,6 +175,12 @@ The integration leaves no orphan files in `/config/www/`, no leftover entries in
 >
 > **Note:** The automatic redirect uses [my.home-assistant.io](https://my.home-assistant.io). If your HA instance URL is not configured there, you'll be prompted to set it up on first use.
 
+#### Manual login (fallback)
+
+If the automatic redirect strands you in the wrong browser tab or webview — reported on the HA Companion App and on desktop Safari — pick **"Manual login"** from the menu in step 3 instead. It's a two-step copy/paste flow: copy the login URL, log in with your Bosch SingleKey ID in your own browser, then paste the resulting URL (from the address bar after login) back into Home Assistant. The same option is available later under **Configure → Re-authenticate** if you ever need to log in again.
+
+The second step also has an **"Advanced: custom camera-API URL"** field — leave it empty. It only matters for the rare case where Bosch support has explicitly told you your account needs to authorize against a different camera-API server than the default; typing anything in doesn't unlock a beta program or anything else on its own.
+
 ### Step 2 — Configure Settings
 
 Go to **Settings → Integrations → Bosch Smart Home Camera → Configure**. Every setting has a description in the UI; the table below groups them by topic so you can decide which sections to fill in.
@@ -2154,11 +2160,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.4.8** — see the GitHub release page for full notes:
-[**v14.4.8 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.4.8)
+Latest: **v14.4.9** — see the GitHub release page for full notes:
+[**v14.4.9 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.4.9)
 
 | Version | Highlights |
 |---|---|
+| **v14.4.9** | **Camera control switches now tell you when a command wasn't delivered, instead of silently reverting.** When Bosch's cloud API is briefly unreachable, the integration already falls back to writing directly to the camera over your LAN (Gen2) or via a paired Smart Home Controller — but if every one of those paths failed too, a privacy/light/notifications switch used to just silently revert with zero explanation, looking like the button had done nothing. A persistent notification now appears whenever a command isn't delivered on any path. |
 | **v14.4.8** | **Advanced diagnostic field for the manual login/re-login: custom camera-API URL.** For the rare case where Bosch support confirms your account should authorize against a different camera-API server than the default — an optional, empty-by-default field on the manual-login and re-login screens lets you type in that URL to test it. Never pre-filled, and it only changes which server this integration talks to; it doesn't unlock anything on its own. Most people will never need this. |
 | **v14.4.7** | **Clearer guidance for the Bosch account/permission error added in v14.4.6.** The official Bosch Camera App performs a separate, one-time account-registration step against the camera backend after login (name/terms acceptance) — an account that never went through that screen gets a permanently valid login but a permanently rejected camera-API token, and re-authenticating cannot fix it. The error message now says exactly that: open the official Bosch Smart Camera App and complete any registration or terms-of-service screen it shows. |
 | **v14.4.6** | **Bosch account/permission errors are now reported correctly, plus a small manual-login instruction fix.** The v14.4.5 diagnostic logging paid off immediately: a community report showed the camera API rejecting a freshly-renewed, valid token with `sh:authorization.failed` / "missing permission \"user is registered\"" — an account or sharing/permission issue on Bosch's side, not a token problem. The integration used to tell you to re-authenticate in this case, which cannot fix it; it now reports it as an account/permission issue instead. Also fixed step 6 of the manual-login instructions, which said "Click Submit" when the actual button is labelled "OK". |
@@ -2279,7 +2286,7 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.4.8** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.4.9** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.4** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.7** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.5** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |

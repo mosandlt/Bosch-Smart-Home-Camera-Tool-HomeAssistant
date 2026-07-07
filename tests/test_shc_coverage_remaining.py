@@ -89,7 +89,10 @@ class TestGen2RcpFallbackFailureDebugLog:
           - Gen2 = True, cam_host present (creds cache)
           - rcp_local_write_privacy returns False
           - shc_ready = False, auth_outage_count = 0
-        Expected: returns False, no exception, no cache mutation.
+        Expected: returns False, no exception, no cache mutation. The
+        failure notification fires unconditionally now (2026-07-07 fix —
+        it used to be gated on auth_outage_count > 0, a counter that never
+        reflects a one-off write-time failure like this one).
         """
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
@@ -124,9 +127,10 @@ class TestGen2RcpFallbackFailureDebugLog:
         # No write-lock stamped, no cache mutation, no early True return
         assert CAM_ID not in coord._privacy_set_at
         assert "privacy_mode" not in coord._shc_state_cache[CAM_ID]
-        # auth_outage_count == 0 → no notification, returns False
         assert result is False
-        coord.hass.services.async_call.assert_not_called()
+        # Notification fires even though auth_outage_count == 0 — see
+        # test_privacy_write_failure_notification.py for the dedicated pin.
+        coord.hass.services.async_call.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_rcp_false_uses_rcp_lan_ip_cache_when_no_creds(self):
