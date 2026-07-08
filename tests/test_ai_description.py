@@ -21,7 +21,9 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -30,6 +32,11 @@ import pytest
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 CAM_ID_2 = "22222222-2222-2222-2222-222222222222"
+ICONS = json.loads(
+    (
+        Path(__file__).parent.parent / "custom_components/bosch_shc_camera/icons.json"
+    ).read_text(encoding="utf-8")
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -191,9 +198,15 @@ class TestAiSensorMetadata:
         s = _make_sensor()
         assert s.translation_key == "ai_description"
 
-    def test_icon(self) -> None:
+    def test_icon_lives_in_icons_json_not_hardcoded(self) -> None:
+        """Icon moved to icons.json (2026-07-08 migration) — no _attr_icon on
+        the entity itself, so HA's own icon-translation resolves it via
+        translation_key instead of a hardcoded Python value."""
         s = _make_sensor()
-        assert s.icon == "mdi:image-text"
+        assert getattr(s, "_attr_icon", None) is None
+        assert (
+            ICONS["entity"]["sensor"]["ai_description"]["default"] == "mdi:image-text"
+        )
 
 
 # ---------------------------------------------------------------------------

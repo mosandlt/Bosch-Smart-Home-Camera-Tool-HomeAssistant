@@ -644,7 +644,6 @@ class BoschCameraLightSwitch(_BoschSwitchBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_light_{cam_id.lower()}"
-        self._attr_icon = "mdi:led-on"
         self._attr_translation_key = "camera_light"
 
     @property
@@ -693,7 +692,6 @@ class BoschFrontLightSwitch(_BoschSwitchBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_front_light_{cam_id.lower()}"
-        self._attr_icon = "mdi:spotlight-beam"
         self._attr_translation_key = "front_light"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -732,7 +730,6 @@ class BoschWallwasherSwitch(_BoschSwitchBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_wallwasher_{cam_id.lower()}"
-        self._attr_icon = "mdi:wall-sconce-flat"
         self._attr_translation_key = "wallwasher"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -1141,7 +1138,6 @@ class BoschMotionEnabledSwitch(_BoschSwitchBase):
     See: GET /v11/video_inputs/{id}/rules (returns [] — rules stored on-device).
     """
 
-    _attr_icon = "mdi:motion-sensor"
     _attr_entity_registry_enabled_default = False
     _attr_translation_key = "motion_detection"
     _attr_entity_category = EntityCategory.CONFIG
@@ -1196,7 +1192,6 @@ class BoschMotionEnabledSwitch(_BoschSwitchBase):
 class BoschRecordSoundSwitch(_BoschSwitchBase):
     """Toggle audio in cloud event recordings."""
 
-    _attr_icon = "mdi:record-rec"
     _attr_entity_category = EntityCategory.CONFIG
     _attr_entity_registry_enabled_default = False
     _attr_translation_key = "record_sound"
@@ -1237,7 +1232,6 @@ class BoschAutoFollowSwitch(_BoschSwitchBase):
     Response: HTTP 204 on success.
     """
 
-    _attr_icon = "mdi:target-account"
     _attr_entity_registry_enabled_default = False
     _attr_translation_key = "auto_follow"
     _attr_entity_category = EntityCategory.CONFIG
@@ -1292,7 +1286,6 @@ class BoschIntercomSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc
     Disabled by default — enable in Settings -> Entities.
     """
 
-    _attr_icon = "mdi:microphone"
     _attr_translation_key = "intercom"
     _attr_entity_category = EntityCategory.CONFIG
 
@@ -1519,7 +1512,6 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_light"
-        self._attr_icon = "mdi:motion-sensor"
         self._attr_translation_key = "motion_light"
         self._attr_entity_category = EntityCategory.CONFIG
         self._is_on: bool | None = None
@@ -1607,7 +1599,6 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ambient_light"
-        self._attr_icon = "mdi:lightbulb-auto"
         self._attr_translation_key = "ambient_light"
         self._attr_entity_category = EntityCategory.CONFIG
         self._is_on: bool | None = None
@@ -1678,7 +1669,6 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_soft_light_fading"
-        self._attr_icon = "mdi:transition"
 
     @property
     def is_on(self) -> bool | None:
@@ -1750,7 +1740,6 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_intrusion_detection"
-        self._attr_icon = "mdi:shield-home"
         self._attr_translation_key = "intrusion_detection"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -1897,7 +1886,6 @@ class BoschGlassBreakDetectionSwitch(_BoschAudioDetectionSwitchBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_glass_break_detection"
-        self._attr_icon = "mdi:glass-fragile"
         self._attr_translation_key = "glass_break_detection"
 
 
@@ -1911,7 +1899,6 @@ class BoschFireAlarmDetectionSwitch(_BoschAudioDetectionSwitchBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_fire_alarm_detection"
-        self._attr_icon = "mdi:smoke-detector"
         self._attr_translation_key = "fire_alarm_detection"
 
 
@@ -2105,7 +2092,6 @@ class BoschAlarmModeSwitch(_BoschAlarmSettingsSwitchBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_mode"
-        self._attr_icon = "mdi:alarm-light"
         self._attr_translation_key = "alarm_mode"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -2120,7 +2106,6 @@ class BoschPreAlarmSwitch(_BoschAlarmSettingsSwitchBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_prealarm"
-        self._attr_icon = "mdi:led-on"
         self._attr_translation_key = "pre_alarm"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -2153,7 +2138,6 @@ class BoschImageRotation180Switch(_BoschSwitchBase, RestoreEntity):  # type: ign
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_image_rotation_180"
-        self._attr_icon = "mdi:image-auto-adjust"
         self._attr_translation_key = "image_rotation_180"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -2208,7 +2192,6 @@ class BoschPanicAlarmSwitch(_BoschSwitchBase):
     """
 
     _attr_entity_registry_enabled_default = False
-    _attr_icon = "mdi:alarm-light"
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
@@ -2287,7 +2270,6 @@ class BoschNvrRecordingSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_nvr_recording_{cam_id.lower()}"
-        self._attr_icon = "mdi:record-rec"
         self._attr_translation_key = "nvr_recording"
         self._attr_entity_category = EntityCategory.CONFIG
         # Opt-in feature — hide from "default-enabled" entity list. User adds
@@ -2396,7 +2378,6 @@ class BoschExternalStreamSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignor
     """
 
     _attr_entity_registry_enabled_default = False
-    _attr_icon = "mdi:share-variant-outline"
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry

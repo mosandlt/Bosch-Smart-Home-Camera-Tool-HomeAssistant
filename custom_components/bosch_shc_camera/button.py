@@ -63,7 +63,6 @@ class BoschRefreshSnapshotButton(_BoschEntityBase, ButtonEntity):  # type: ignor
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_refresh_{cam_id.lower()}"
-        self._attr_icon = "mdi:camera-refresh"
         self._attr_translation_key = "refresh_snapshot"
 
     async def async_press(self) -> None:
@@ -127,7 +126,6 @@ class BoschSoftResetButton(_BoschEntityBase, ButtonEntity):  # type: ignore[misc
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_soft_reset_{cam_id.lower()}"
-        self._attr_icon = "mdi:restart"
         self._attr_translation_key = "soft_reset"
 
     async def async_press(self) -> None:
@@ -154,7 +152,6 @@ class BoschHardResetButton(_BoschEntityBase, ButtonEntity):  # type: ignore[misc
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_hard_reset_{cam_id.lower()}"
-        self._attr_icon = "mdi:restart-alert"
         self._attr_translation_key = "hard_reset"
 
     async def async_press(self) -> None:

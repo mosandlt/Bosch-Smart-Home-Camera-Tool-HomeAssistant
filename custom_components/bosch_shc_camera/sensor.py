@@ -283,7 +283,6 @@ class BoschCameraLastEventSensor(_BoschSensorBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_last_event_{cam_id.lower()}"
         self._attr_device_class = SensorDeviceClass.TIMESTAMP
-        self._attr_icon = "mdi:motion-sensor"
         self._attr_translation_key = "last_event"
 
     @property
@@ -324,7 +323,6 @@ class BoschCameraEventsTodaySensor(_BoschSensorBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_events_today_{cam_id.lower()}"
-        self._attr_icon = "mdi:counter"
         self._attr_native_unit_of_measurement = "events"
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_translation_key = "events_today"
@@ -366,7 +364,6 @@ class BoschWifiSignalSensor(_BoschSensorBase):
         # No device_class — Bosch API returns percentage (0-100), not dBm
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = "%"
-        self._attr_icon = "mdi:wifi"
         self._attr_translation_key = "wifi_signal"
 
     @property
@@ -419,7 +416,6 @@ class BoschFirmwareVersionSensor(_BoschSensorBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_firmware_{cam_id.lower()}"
-        self._attr_icon = "mdi:chip"
         self._attr_translation_key = "firmware_version"
 
     @property
@@ -466,7 +462,6 @@ class BoschAmbientLightSensor(_BoschSensorBase):
         self._attr_unique_id = f"bosch_shc_ambient_light_{cam_id.lower()}"
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = "%"
-        self._attr_icon = "mdi:brightness-6"
         self._attr_translation_key = "ambient_light"
 
     @property
@@ -501,7 +496,6 @@ class BoschLedDimmerSensor(_BoschSensorBase):
         self._attr_unique_id = f"bosch_shc_led_dimmer_{cam_id.lower()}"
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = "%"
-        self._attr_icon = "mdi:brightness-6"
         self._attr_entity_registry_enabled_default = False
         self._attr_translation_key = "led_dimmer"
 
@@ -521,7 +515,6 @@ class BoschLedDimmerSensor(_BoschSensorBase):
 class BoschClockOffsetSensor(_BoschSensorBase):
     """Clock offset between camera internal clock and HA server (seconds)."""
 
-    _attr_icon = "mdi:clock-alert-outline"
     _attr_native_unit_of_measurement = "s"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -567,7 +560,6 @@ class BoschClockOffsetSensor(_BoschSensorBase):
 class BoschMotionSensitivitySensor(_BoschSensorBase):
     """Shows motion detection enabled state and sensitivity level."""
 
-    _attr_icon = "mdi:motion-sensor"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
     _attr_translation_key = "motion_sensitivity"
@@ -609,7 +601,6 @@ class BoschMotionSensitivitySensor(_BoschSensorBase):
 class BoschLastEventTypeSensor(_BoschSensorBase):
     """Shows the type of the most recent camera event."""
 
-    _attr_icon = "mdi:alert-circle-outline"
     _attr_translation_key = "last_event_type"
     _attr_options: ClassVar[list[str]] = [
         "movement",
@@ -659,7 +650,6 @@ class BoschLastEventTypeSensor(_BoschSensorBase):
 class BoschMovementEventsTodaySensor(_BoschSensorBase):
     """Number of MOVEMENT events today."""
 
-    _attr_icon = "mdi:run"
     _attr_native_unit_of_measurement = "events"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_registry_enabled_default = False
@@ -688,7 +678,6 @@ class BoschMovementEventsTodaySensor(_BoschSensorBase):
 class BoschAudioEventsTodaySensor(_BoschSensorBase):
     """Number of AUDIO_ALARM events today."""
 
-    _attr_icon = "mdi:volume-vibrate"
     _attr_native_unit_of_measurement = "events"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_registry_enabled_default = False
@@ -724,7 +713,6 @@ class BoschFcmPushStatusSensor(_BoschSensorBase):
     """
 
     _attr_unique_id = "bosch_shc_camera_fcm_push_status"
-    _attr_icon = "mdi:bell-ring-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "push_status"
     _attr_options: ClassVar[list[str]] = ["fcm_push", "polling", "disabled"]
@@ -776,7 +764,6 @@ class BoschCloudMaintenanceSensor(_BoschSensorBase):
     """
 
     _attr_unique_id = "bosch_shc_camera_cloud_maintenance"
-    _attr_icon = "mdi:cloud-alert"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "cloud_maintenance"
     _attr_options: ClassVar[list[str]] = [
@@ -826,7 +813,6 @@ class BoschUnreadEventsCountSensor(_BoschSensorBase):
     Disabled by default — enable in HA entity settings if needed.
     """
 
-    _attr_icon = "mdi:email-alert"
     _attr_native_unit_of_measurement = "events"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_registry_enabled_default = False
@@ -859,7 +845,6 @@ class BoschCommissionedSensor(_BoschSensorBase):
     Diagnostic, disabled by default.
     """
 
-    _attr_icon = "mdi:check-network"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
@@ -910,7 +895,6 @@ class BoschRulesCountSensor(_BoschSensorBase):
     Attributes: list of rule names and active status.
     """
 
-    _attr_icon = "mdi:calendar-clock"
     _attr_native_unit_of_measurement = "rules"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
@@ -967,7 +951,6 @@ class BoschAlarmCatalogSensor(_BoschSensorBase):
     with name and category (virtual, flame, smoke, audio, motion, etc.).
     """
 
-    _attr_icon = "mdi:alarm-light"
     _attr_native_unit_of_measurement = "types"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
@@ -1016,7 +999,6 @@ class BoschMotionZonesSensor(_BoschSensorBase):
       - zones/coordinates: RCP firmware data (fallback)
     """
 
-    _attr_icon = "mdi:vector-square"
     _attr_native_unit_of_measurement = "zones"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Coordinate lists for card overlay only — never historize the blobs
@@ -1096,7 +1078,6 @@ class BoschTlsCertSensor(_BoschSensorBase):
     key size, and serial number.
     """
 
-    _attr_icon = "mdi:certificate"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -1149,7 +1130,6 @@ class BoschNetworkServicesSensor(_BoschSensorBase):
     (HTTP, HTTPS, RTSP, SNMP, UPnP, NTP, ONVIF, etc.).
     """
 
-    _attr_icon = "mdi:server-network"
     _attr_native_unit_of_measurement = "services"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
@@ -1189,7 +1169,6 @@ class BoschIvaCatalogSensor(_BoschSensorBase):
     ID, version, flags, and active state.
     """
 
-    _attr_icon = "mdi:brain"
     _attr_native_unit_of_measurement = "modules"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
@@ -1239,7 +1218,6 @@ class BoschPrivateAreasSensor(_BoschSensorBase):
       - gen2_private_areas: Gen2 polygon masks (points array, color)
     """
 
-    _attr_icon = "mdi:eye-off"
     _attr_native_unit_of_measurement = "masks"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
@@ -1305,7 +1283,6 @@ class BoschAmbientLightScheduleSensor(_BoschSensorBase):
     Data source: GET /v11/video_inputs/{id}/lighting/ambient (fetched by coordinator, slow tier).
     """
 
-    _attr_icon = "mdi:lightbulb-auto"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
@@ -1404,8 +1381,6 @@ class BoschAlarmStateSensor(_BoschSensorBase):
     `alarm_type` in attributes exposes what kind of alarm last fired (NONE when idle).
     """
 
-    _attr_icon = "mdi:alarm-light-outline"
-
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
@@ -1470,7 +1445,6 @@ class BoschStreamStatusSensor(_BoschSensorBase):
     ) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_stream_status_{cam_id.lower()}"
-        self._attr_icon = "mdi:video-wireless"
         self._attr_translation_key = "stream_status"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_options = [
@@ -1545,7 +1519,6 @@ class BoschNvrStateSensor(_BoschSensorBase):
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_nvr_state_{cam_id.lower()}"
         self._attr_translation_key = "nvr_state"
-        self._attr_icon = "mdi:record-rec"
         self._attr_options = ["idle", "recording", "error"]
         self._attr_device_class = SensorDeviceClass.ENUM
 
@@ -1601,7 +1574,6 @@ class BoschCameraAiDescriptionSensor(_BoschSensorBase):
     stores a new result in ``coordinator.data[cam_id]["ai_description"]``.
     """
 
-    _attr_icon = "mdi:image-text"
     _attr_has_entity_name = True
 
     def __init__(
@@ -1787,7 +1759,6 @@ class BoschOnvifScopesSensor(_BoschSensorBase):
     Disabled by default — enable in HA entity settings.
     """
 
-    _attr_icon = "mdi:video-box"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
     _attr_options: ClassVar[list[str]] = ["supported"]
@@ -1843,7 +1814,6 @@ class BoschRcpVersionSensor(_BoschSensorBase):
     Disabled by default — enable in HA entity settings.
     """
 
-    _attr_icon = "mdi:protocol"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
@@ -1897,7 +1867,6 @@ class BoschCloudFeatureFlagsSensor(_BoschSensorBase):
     Disabled by default — enable in HA entity settings.
     """
 
-    _attr_icon = "mdi:flag-checkered"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 

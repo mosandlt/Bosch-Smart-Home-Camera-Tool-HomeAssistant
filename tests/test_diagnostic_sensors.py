@@ -9,6 +9,8 @@ Source: /v11/video_inputs/{id}/wifiinfo (signalStrength 0-100%) + info.firmwareV
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -16,6 +18,11 @@ import pytest
 from homeassistant.helpers.entity import EntityCategory
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
+ICONS = json.loads(
+    (
+        Path(__file__).parent.parent / "custom_components/bosch_shc_camera/icons.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -78,9 +85,13 @@ class TestWifiSignalSensor:
         s = self._make()
         assert s.native_unit_of_measurement == "%"
 
-    def test_icon(self) -> None:
+    def test_icon_lives_in_icons_json_not_hardcoded(self) -> None:
+        """Icon moved to icons.json (2026-07-08 migration) — no _attr_icon on
+        the entity itself, so HA's own icon-translation resolves it via
+        translation_key instead of a hardcoded Python value."""
         s = self._make()
-        assert s.icon == "mdi:wifi"
+        assert getattr(s, "_attr_icon", None) is None
+        assert ICONS["entity"]["sensor"]["wifi_signal"]["default"] == "mdi:wifi"
 
     def test_translation_key(self) -> None:
         s = self._make()
@@ -283,9 +294,12 @@ class TestFirmwareVersionSensor:
         s = self._make()
         assert s.native_unit_of_measurement is None
 
-    def test_icon(self) -> None:
+    def test_icon_lives_in_icons_json_not_hardcoded(self) -> None:
+        """Icon moved to icons.json (2026-07-08 migration) — see
+        TestWifiSignalSensor's identical test for the full rationale."""
         s = self._make()
-        assert s.icon == "mdi:chip"
+        assert getattr(s, "_attr_icon", None) is None
+        assert ICONS["entity"]["sensor"]["firmware_version"]["default"] == "mdi:chip"
 
     def test_translation_key(self) -> None:
         s = self._make()

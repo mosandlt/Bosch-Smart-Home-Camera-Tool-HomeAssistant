@@ -122,7 +122,6 @@ class BoschPanNumber(_BoschEntityBase, NumberEntity):  # type: ignore[misc]
         self._attr_native_step = 1
         self._attr_mode = NumberMode.SLIDER
         self._attr_native_unit_of_measurement = "°"
-        self._attr_icon = "mdi:pan-horizontal"
         self._attr_translation_key = "pan_position"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -167,7 +166,6 @@ class BoschSpeakerLevelNumber(_BoschEntityBase, NumberEntity):  # type: ignore[m
     Disabled by default — enable in Settings -> Entities.
     """
 
-    _attr_icon = "mdi:volume-medium"
     _attr_native_min_value = 0
     _attr_native_max_value = 100
     _attr_native_step = 1
@@ -245,7 +243,6 @@ class BoschAudioVolumeNumber(_BoschEntityBase, NumberEntity):  # type: ignore[mi
 
     DEFAULT_VOLUME = 50
 
-    _attr_icon = "mdi:volume-high"
     _attr_native_min_value = 0
     _attr_native_max_value = 100
     _attr_native_step = 5
@@ -292,7 +289,6 @@ class BoschFrontLightIntensityNumber(_BoschEntityBase, NumberEntity):  # type: i
     Disabled by default — enable in Settings → Entities.
     """
 
-    _attr_icon = "mdi:brightness-6"
     _attr_native_min_value = 0
     _attr_native_max_value = 100
     _attr_native_step = 5
@@ -361,7 +357,6 @@ class BoschLensElevationNumber(_BoschGen2NumberBase):
     Used by camera for perspective correction in person detection.
     """
 
-    _attr_icon = "mdi:arrow-up-down"
     _attr_native_min_value = 0.5
     _attr_native_max_value = 5.0
     _attr_native_step = 0.05
@@ -402,7 +397,6 @@ class BoschMicrophoneLevelNumber(_BoschGen2NumberBase):
     Writes via PUT /v11/video_inputs/{id}/audio → full body with updated microphoneLevel.
     """
 
-    _attr_icon = "mdi:microphone"
     _attr_native_min_value = 0
     _attr_native_max_value = 100
     _attr_native_step = 5
@@ -475,7 +469,6 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
     Writes via PUT /lighting/switch with frontLightSettings only.
     """
 
-    _attr_icon = "mdi:thermometer-lines"
     _attr_native_min_value = -1.0
     _attr_native_max_value = 1.0
     _attr_native_step = 0.05
@@ -614,7 +607,6 @@ class BoschTopLedBrightnessNumber(_BoschLedBrightnessBase):
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_top_led_brightness"
-        self._attr_icon = "mdi:arrow-up-bold"
         self._attr_translation_key = "top_led_brightness"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -627,7 +619,6 @@ class BoschBottomLedBrightnessNumber(_BoschLedBrightnessBase):
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_bottom_led_brightness"
-        self._attr_icon = "mdi:arrow-down-bold"
         self._attr_translation_key = "bottom_led_brightness"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -640,7 +631,6 @@ class BoschMotionLightSensitivityNumber(_BoschGen2NumberBase):
     1 = low sensitivity, 5 = high sensitivity.
     """
 
-    _attr_icon = "mdi:motion-sensor"
     _attr_native_min_value = 1
     _attr_native_max_value = 5
     _attr_native_step = 1
@@ -686,7 +676,6 @@ class BoschDarknessThresholdNumber(_BoschGen2NumberBase):
     Writes via PUT /v11/video_inputs/{id}/lighting with full body.
     """
 
-    _attr_icon = "mdi:weather-night"
     _attr_native_min_value = 0
     _attr_native_max_value = 100
     _attr_native_step = 1
@@ -740,7 +729,6 @@ class BoschPowerLedBrightnessNumber(_BoschGen2NumberBase):
     slider but internally maps to 5 discrete positions (0 = off, 4 = max).
     """
 
-    _attr_icon = "mdi:led-on"
     _attr_native_min_value = 0
     _attr_native_max_value = 4
     _attr_native_step = 1
@@ -828,7 +816,6 @@ class BoschAlarmDelayNumber(_BoschAlarmDelayBase):
     """
 
     _field = "alarmDelayInSeconds"
-    _attr_icon = "mdi:timer-alert"
     _attr_native_min_value = 10
     _attr_native_max_value = 300
 
@@ -845,7 +832,6 @@ class BoschAlarmActivationDelayNumber(_BoschAlarmDelayBase):
     """
 
     _field = "alarmActivationDelaySeconds"
-    _attr_icon = "mdi:timer-sand"
     _attr_native_min_value = 0
     _attr_native_max_value = 600
 
@@ -863,7 +849,6 @@ class BoschPreAlarmDelayNumber(_BoschAlarmDelayBase):
     """
 
     _field = "preAlarmDelayInSeconds"
-    _attr_icon = "mdi:led-on"
     _attr_native_min_value = 0
     _attr_native_max_value = 300
 
@@ -892,7 +877,6 @@ class BoschIntrusionSensitivityNumber(_BoschGen2NumberBase):
     (HOME_Eyes_Outdoor) — intrusion detection is present on both hardware variants.
     """
 
-    _attr_icon = "mdi:shield-alert"
     _attr_native_min_value = 0
     _attr_native_max_value = 7
     _attr_native_step = 1
@@ -952,7 +936,6 @@ class BoschIntrusionDistanceNumber(_BoschGen2NumberBase):
     as BoschIntrusionSensitivityNumber and BoschDetectionModeSelect).
     """
 
-    _attr_icon = "mdi:map-marker-distance"
     _attr_native_min_value = 1
     _attr_native_max_value = 8
     _attr_native_step = 1

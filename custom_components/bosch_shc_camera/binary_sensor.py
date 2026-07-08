@@ -199,7 +199,6 @@ class BoschMotionBinarySensor(_BoschBinarySensorBase):
     """Binary sensor: ON when a MOVEMENT event occurred within the configurable active window (default 90 s)."""
 
     _attr_device_class = BinarySensorDeviceClass.MOTION
-    _attr_icon = "mdi:motion-sensor"
 
     def __init__(
         self,
@@ -234,7 +233,6 @@ class BoschAudioAlarmBinarySensor(_BoschBinarySensorBase):
     """Binary sensor: ON when an AUDIO_ALARM event occurred within the configurable active window (default 90 s)."""
 
     _attr_device_class = BinarySensorDeviceClass.SOUND
-    _attr_icon = "mdi:volume-high"
 
     def __init__(
         self,
@@ -269,7 +267,6 @@ class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
     """Binary sensor: ON when a PERSON event occurred within the configurable active window (default 90 s)."""
 
     _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
-    _attr_icon = "mdi:account-alert"
 
     def __init__(
         self,

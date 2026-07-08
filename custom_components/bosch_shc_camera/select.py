@@ -99,7 +99,6 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
     """Select entity to choose the RTSPS stream quality (inst + highQualityVideo)."""
 
     _attr_has_entity_name = True
-    _attr_icon = "mdi:video-high-definition"
     _attr_options = QUALITY_OPTIONS
 
     def __init__(
@@ -183,7 +182,6 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
     Disabled by default — enable in Settings → Entities.
     """
 
-    _attr_icon = "mdi:motion-sensor"
     _attr_options = MOTION_SENSITIVITY_OPTIONS
     _attr_has_entity_name = True
     _attr_entity_registry_enabled_default = False
@@ -284,7 +282,6 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[m
     One per integration (not per camera).
     """
 
-    _attr_icon = "mdi:cellphone-arrow-down"
     _attr_options = FCM_PUSH_MODE_OPTIONS
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
@@ -364,7 +361,6 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
     One per integration (not per camera).
     """
 
-    _attr_icon = "mdi:home-network"
     _attr_options = STREAM_MODE_OPTIONS
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
@@ -422,7 +418,6 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
     Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig.
     """
 
-    _attr_icon = "mdi:shield-home-outline"
     _attr_options = DETECTION_MODE_OPTIONS
     _attr_has_entity_name = True
 
@@ -514,7 +509,6 @@ class BoschPanPresetSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mis
     camera is between presets (e.g. after a manual slider move).
     """
 
-    _attr_icon = "mdi:pan-horizontal"
     _attr_options = PAN_PRESET_OPTIONS
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
