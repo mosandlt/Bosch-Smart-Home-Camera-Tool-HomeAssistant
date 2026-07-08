@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.12] - 2026-07-08
+
+Patch — WebRTC hard-fail regression fix
+
+### Fixed
+
+- **Opening a camera's live view from Home Assistant's native device/more-info view immediately showed "Failed to start WebRTC stream: Camera does not support WebRTC"**, for every camera (Gen1 and Gen2 alike), introduced by v14.4.11's WebRTC pre-warm wait. Overriding the WebRTC offer handler to add that wait unintentionally made Home Assistant's own camera framework skip its normal provider detection, so every offer was rejected before reaching the actual streaming backend. The custom card itself silently fell back to its regular video player and kept working, which is why this only showed up in the native app view. Reported in [#40](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/40).
+
+5668 tests / mypy --strict / ruff / codespell green, deploy-verified on test HA — a real WebRTC offer against a live camera now succeeds instead of failing.
+
 ## [v14.4.11] - 2026-07-08
 
 Patch — native WebRTC pre-warm wait + in-card rule dialog
