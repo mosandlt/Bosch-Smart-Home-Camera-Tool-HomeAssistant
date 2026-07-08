@@ -147,6 +147,18 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     ) -> None:
         CoordinatorEntity.__init__(self, coordinator)
         Camera.__init__(self)
+        # HA core's Camera.__init__ sets _supports_native_async_webrtc=True purely
+        # because this class overrides async_handle_async_webrtc_offer() (for the
+        # pre-warm wait below) — regardless of what that override actually does.
+        # That flag then makes async_refresh_providers() skip go2rtc provider
+        # detection entirely (_webrtc_provider stays None forever) while
+        # camera_capabilities unconditionally advertises WEB_RTC support anyway,
+        # so every real offer hits super()'s `if self._webrtc_provider` check,
+        # finds None, and raises "Camera does not support WebRTC" (issue #40).
+        # Force it back off so core's normal go2rtc provider bookkeeping runs;
+        # our override still executes on every offer via normal polymorphism —
+        # the flag only gates capability/provider bookkeeping, not dispatch.
+        self._supports_native_async_webrtc = False
         # stream_options is set dynamically in stream_source() based on connection
         # type (LOCAL needs rtsp_transport=tcp; REMOTE uses FFmpeg default).
 
