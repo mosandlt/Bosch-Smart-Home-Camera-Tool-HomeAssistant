@@ -5,6 +5,18 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.10] - 2026-07-08
+
+Patch — firmware-update Repairs issue with a one-click Fix to install
+
+### Added
+
+- **A camera firmware update becoming available now raises a Repairs issue (Settings → Repairs)** naming the camera and the version jump (e.g. `9.40.102 → 9.40.104`), instead of the only signal being the generic core Settings → Updates panel — easy to miss. The issue clears itself automatically once the update has installed.
+- **Clicking "Fix" on that issue installs the update immediately**, reverse-engineered from the official Bosch app's own "Update now" button (same cloud endpoint, same request), instead of only waiting for Bosch's automatic rollout schedule.
+- **The camera's Firmware `update` entity also gets a working Install button.** Both entry points call the same underlying method, so a double-press guard and a short write-lock protect both identically instead of duplicating that logic. Installing reboots the camera; it's unreachable for roughly 3–7 minutes.
+
+5660 tests (1 skipped) / mypy --strict / ruff / codespell green.
+
 ## [v14.4.9] - 2026-07-07
 
 Patch — camera control switches now tell you when a command wasn't delivered, instead of silently reverting

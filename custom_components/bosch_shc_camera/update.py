@@ -3,12 +3,24 @@
 Shows firmware update status using the native HA update entity.
 Data source: GET /v11/video_inputs/{id}/firmware (short form).
 Response: {current, upToDate, update, updating, status}
+
+Install action: PUT /v11/video_inputs/{id}/firmware with {"id": <version>} —
+the same endpoint/payload the official Bosch app's "Update now" button uses
+(research/apk_2.12.0 decompile: FirmwareBackendService.UpdateCameraFirmware,
+called with the GET response's own `update`/LatestFirmwareVersion field as
+the "id" value). Bosch also rolls firmware out automatically on its own
+schedule — this button lets the user install a pending update immediately
+instead of waiting for that rollout.
 """
 
 import logging
 from typing import Any
 
-from homeassistant.components.update import UpdateDeviceClass, UpdateEntity
+from homeassistant.components.update import (
+    UpdateDeviceClass,
+    UpdateEntity,
+    UpdateEntityFeature,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
@@ -38,6 +50,7 @@ class BoschFirmwareUpdate(_BoschEntityBase, UpdateEntity):  # type: ignore[misc]
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_has_entity_name = True
+    _attr_supported_features = UpdateEntityFeature.INSTALL
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
@@ -84,3 +97,19 @@ class BoschFirmwareUpdate(_BoschEntityBase, UpdateEntity):  # type: ignore[misc]
             "updating": fw.get("updating", False),
             "status": fw.get("status", ""),
         }
+
+    async def async_install(
+        self, version: str | None, backup: bool, **kwargs: Any
+    ) -> None:
+        """Install the pending firmware update now instead of waiting for Bosch's rollout.
+
+        `version` is ignored — Bosch's firmware endpoint only ever offers a
+        single next version (the `update` field), the same one the official
+        app reads before calling this endpoint, so we always target that.
+
+        Delegates to the coordinator's `async_install_firmware()` — shared
+        with the "Fix" action on the `firmware_update_available` Repairs
+        issue (repairs.py) so both entry points guard/write-lock identically
+        instead of duplicating that logic.
+        """
+        await self.coordinator.async_install_firmware(self._cam_id)

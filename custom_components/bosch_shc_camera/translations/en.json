@@ -906,6 +906,20 @@
     "notifications_disabled": {
       "title": "Bosch Camera — Notifications disabled",
       "description": "The **{types}** cloud notification(s) are disabled for camera **{camera}**.\n\nWithout these notifications, Bosch does not send motion or person events, so the corresponding binary sensors will permanently show **Clear** even when motion occurs.\n\n**How to fix:** Enable the **{types}** notification switch(es) for this camera in Home Assistant (Settings → Devices & Services → Bosch Smart Home Camera → the camera device), or turn them on in the Bosch Smart Home app under the camera's notification settings."
+    },
+    "firmware_update_available": {
+      "title": "Bosch Camera — Firmware update available",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Install firmware update for {camera} now?",
+            "description": "A firmware update is available for camera **{camera}**: **{current}** → **{latest}**.\n\nBosch installs camera firmware updates automatically in the background on its own schedule, so no action is required — this issue clears itself once the update has installed. Clicking **Fix** installs it right now instead of waiting for that rollout (same as the **Install** button on the camera's **Firmware** entity): the camera will reboot and be unreachable for roughly 3–7 minutes."
+          }
+        },
+        "abort": {
+          "install_failed": "The install request could not be completed — the camera may already be updating, or Bosch's cloud rejected the request. Check the camera's Firmware entity for details, or try again later."
+        }
+      }
     }
   },
   "system_health": {

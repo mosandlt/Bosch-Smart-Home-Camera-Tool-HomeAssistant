@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -23,7 +24,9 @@ def stub_coord():
             }
         },
         _firmware_cache={},
+        _firmware_set_at={},
         last_update_success=True,
+        async_put_camera=AsyncMock(return_value=True),
     )
 
 
@@ -220,3 +223,58 @@ class TestSetupEntry:
             async_add_entities=lambda e, update_before_add=False: captured.extend(e),
         )
         assert captured == []
+
+
+class TestAsyncInstall:
+    """async_install delegates to coordinator.async_install_firmware() — shared
+    with the Repairs "Fix" flow (repairs.py). Detailed guard/write-lock
+    behavior is tested against the coordinator method directly in
+    tests/test_firmware_install.py; this class only pins the delegation.
+    """
+
+    @pytest.mark.asyncio
+    async def test_install_delegates_to_coordinator(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
+        stub_coord.async_install_firmware = AsyncMock(return_value=None)
+        u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
+
+        await u.async_install(version=None, backup=False)
+
+        stub_coord.async_install_firmware.assert_awaited_once_with(CAM_ID)
+
+    @pytest.mark.asyncio
+    async def test_install_ignores_passed_version(self, stub_coord, stub_entry):
+        """version param is ignored — the coordinator always targets its own
+        cached `update` field, not whatever HA passes."""
+        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
+        stub_coord.async_install_firmware = AsyncMock(return_value=None)
+        u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
+
+        await u.async_install(version="9.99.99", backup=False)
+
+        stub_coord.async_install_firmware.assert_awaited_once_with(CAM_ID)
+
+    @pytest.mark.asyncio
+    async def test_install_propagates_coordinator_error(self, stub_coord, stub_entry):
+        from homeassistant.exceptions import HomeAssistantError
+
+        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
+        stub_coord.async_install_firmware = AsyncMock(
+            side_effect=HomeAssistantError("no update available")
+        )
+        u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
+
+        with pytest.raises(HomeAssistantError, match="no update available"):
+            await u.async_install(version=None, backup=False)
+
+    @pytest.mark.asyncio
+    async def test_supported_features_includes_install(self, stub_coord, stub_entry):
+        from homeassistant.components.update import UpdateEntityFeature
+
+        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
+        u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
+        assert u._attr_supported_features & UpdateEntityFeature.INSTALL

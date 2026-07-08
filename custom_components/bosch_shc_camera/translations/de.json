@@ -906,6 +906,20 @@
     "notifications_disabled": {
       "title": "Bosch Kamera — Benachrichtigungen deaktiviert",
       "description": "Die **{types}** Cloud-Benachrichtigung(en) sind für Kamera **{camera}** deaktiviert.\n\nOhne diese Benachrichtigungen sendet Bosch keine Bewegungs- oder Personenereignisse, sodass die entsprechenden Binärsensoren dauerhaft **Klar** anzeigen — auch wenn tatsächlich Bewegung erkannt wird.\n\n**Lösung:** Aktiviere den/die **{types}** Benachrichtigungs-Schalter für diese Kamera in Home Assistant (Einstellungen → Geräte & Dienste → Bosch Smart Home Camera → das Kamera-Gerät) oder in der Bosch Smart Home App unter den Benachrichtigungseinstellungen der Kamera."
+    },
+    "firmware_update_available": {
+      "title": "Bosch Kamera — Firmware-Update verfügbar",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Firmware-Update für {camera} jetzt installieren?",
+            "description": "Für Kamera **{camera}** ist ein Firmware-Update verfügbar: **{current}** → **{latest}**.\n\nBosch installiert Kamera-Firmware-Updates automatisch im Hintergrund nach eigenem Zeitplan; es ist also keine Aktion nötig — dieser Hinweis verschwindet automatisch, sobald das Update installiert wurde. Ein Klick auf **Beheben** installiert es sofort, statt auf den Rollout zu warten (identisch zum **Installieren**-Button an der **Firmware**-Entität der Kamera): Die Kamera startet neu und ist für ca. 3–7 Minuten nicht erreichbar."
+          }
+        },
+        "abort": {
+          "install_failed": "Die Installationsanfrage konnte nicht abgeschlossen werden — die Kamera aktualisiert sich möglicherweise bereits, oder die Bosch-Cloud hat die Anfrage abgelehnt. Details siehe Firmware-Entität der Kamera, oder später erneut versuchen."
+        }
+      }
     }
   },
   "system_health": {

@@ -735,6 +735,7 @@ def _make_update_data_coord(**overrides):
         _audio_detection_cache={},
         _audio_detection_set_at={},
         _motion_set_at={},
+        _firmware_set_at={},
         _alarm_settings_set_at={},
         _alarm_settings_cache={},
         _alarm_status_cache={},

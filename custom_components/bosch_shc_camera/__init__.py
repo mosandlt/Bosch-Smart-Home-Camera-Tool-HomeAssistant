@@ -936,6 +936,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Cleared when the camera re-enables notifications so the WARN re-fires if
         # they are disabled again later.
         self._notif_disabled_logged: set[str] = set()
+        # Tracks cam_ids for which a "firmware update available" INFO has been
+        # logged. Cleared once the update installs (upToDate flips back to True)
+        # so the INFO re-fires for the next update.
+        self._fw_update_alerted: set[str] = set()
         self._privacy_set_at: dict[str, float] = {}  # privacy write timestamp
         self._privacy_sound_set_at: dict[
             str, float
@@ -951,6 +955,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         ] = {}  # audioDetectionConfig write (glass-break / fire-alarm)
         self._motion_set_at: dict[str, float] = {}  # motion sensitivity write
         self._alarm_settings_set_at: dict[str, float] = {}  # alarm_settings write
+        # firmware install-trigger write — held just long enough for the
+        # optimistic `updating=True` (set by BoschFirmwareUpdate.async_install)
+        # to survive one slow-tier poll cycle before Bosch's own backend
+        # reports the real in-progress state.
+        self._firmware_set_at: dict[str, float] = {}
         self._WRITE_LOCK_SECS = (
             30.0  # seconds to hold write lock (Bosch cloud propagation can take 20s+)
         )
@@ -3498,7 +3507,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             ):
                                 data[cam_id_key]["motion"] = ep_data
                         elif ep == "firmware":
-                            self._firmware_cache[cam_id_key] = ep_data
+                            # Write-locked like motion/privacy_sound_override above —
+                            # otherwise a poll landing right after async_install()'s
+                            # optimistic updating=True (before Bosch's backend has
+                            # actually flagged the install) reverts it to stale
+                            # "not updating" and a second install PUT could fire.
+                            if not self._is_write_locked(
+                                cam_id_key, self._firmware_set_at
+                            ):
+                                self._firmware_cache[cam_id_key] = ep_data
                         elif ep == "recording_options":
                             data[cam_id_key]["recordingOptions"] = ep_data
                         elif ep == "unread_events_count":
@@ -3915,6 +3932,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     exc_info=True,
                 )
 
+            # Raise a Repairs issue when a firmware update is available for a
+            # camera — see _refresh_firmware_update_issues docstring.
+            try:
+                self._refresh_firmware_update_issues()
+            except Exception:
+                _LOGGER.debug(
+                    "Firmware-update Repairs check failed (non-fatal)",
+                    exc_info=True,
+                )
+
             return data
 
         except UpdateFailed:
@@ -3997,6 +4024,99 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     f"notifications_disabled_{cam_id}",
                 )
                 self._notif_disabled_logged.discard(cam_id)
+
+    def _refresh_firmware_update_issues(self) -> None:
+        """Create or clear Repairs issues for cameras with a firmware update available.
+
+        Called once per coordinator tick (inside _async_update_data) AFTER data is
+        built. Idempotent — safe to call every tick. Mirrors
+        _refresh_notifications_disabled_issues (same Repairs-issue pattern):
+        previously a firmware update becoming available had NO user-visible
+        signal from the integration at all — only HA core's own generic
+        Settings → Updates panel, easy to miss (Thomas report 2026-07-07,
+        "just had a firmware update, got no alert").
+
+        A camera is only processed once its firmware endpoint has been fetched
+        at least once (`_firmware_cache[cam_id]['upToDate']` present) to avoid
+        a false-positive "issue cleared" transition on startup.
+        """
+        for cam_id, fw in self._firmware_cache.items():
+            if not fw:
+                # No data fetched yet — skip to avoid false positives.
+                continue
+
+            up_to_date = fw.get("upToDate")
+            if up_to_date is None:
+                continue
+
+            issue_id = f"firmware_update_available_{cam_id}"
+
+            if not up_to_date:
+                cam_title: str = (
+                    (self.data or {})
+                    .get(cam_id, {})
+                    .get("info", {})
+                    .get("title", cam_id)
+                )
+                current = fw.get("current") or "?"
+                latest = fw.get("update") or "?"
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    issue_id,
+                    is_fixable=True,
+                    is_persistent=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key="firmware_update_available",
+                    translation_placeholders={
+                        "camera": cam_title,
+                        "current": current,
+                        "latest": latest,
+                    },
+                    data={"cam_id": cam_id},
+                )
+                if cam_id not in self._fw_update_alerted:
+                    self._fw_update_alerted.add(cam_id)
+                    _LOGGER.info(
+                        "Firmware update available for %r: %s -> %s",
+                        cam_title,
+                        current,
+                        latest,
+                    )
+            else:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                self._fw_update_alerted.discard(cam_id)
+
+    async def async_install_firmware(self, cam_id: str) -> None:
+        """Install the pending firmware update for `cam_id` right now.
+
+        Shared by two entry points: the `update` entity's Install button
+        (update.py, BoschFirmwareUpdate.async_install) and the "Fix" action on
+        the `firmware_update_available` Repairs issue (repairs.py) — one
+        implementation so both stay in sync instead of duplicating the
+        guard/write-lock logic.
+
+        PUTs the same endpoint/payload the official Bosch app's "Update now"
+        button uses (research/apk_2.12.0 decompile: FirmwareBackendService.
+        UpdateCameraFirmware — {"id": <update field>} to the same URL this
+        integration already GETs for status).
+        """
+        fw: dict[str, Any] = self._firmware_cache.get(cam_id, {})
+        if fw.get("updating"):
+            raise HomeAssistantError("Firmware install is already in progress")
+        target = fw.get("update")
+        if not target:
+            raise HomeAssistantError(
+                "No firmware update is currently available to install"
+            )
+        ok = await self.async_put_camera(cam_id, "firmware", {"id": target})
+        if not ok:
+            raise HomeAssistantError(
+                f"Bosch cloud rejected the firmware install request for {target}"
+            )
+        fw["updating"] = True
+        self._firmware_cache[cam_id] = fw
+        self._firmware_set_at[cam_id] = time.monotonic()
 
     async def _async_refresh_maintenance(self, *, reactive: bool) -> None:
         """Fetch the Bosch community maintenance announcement in the background.
