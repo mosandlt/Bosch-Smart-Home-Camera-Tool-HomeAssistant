@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.13] - 2026-07-08
+
+Patch — RCP session-open race fix
+
+### Fixed
+
+- **A camera could intermittently fail to fetch its RCP-based data (live thumbnail, ONVIF scopes, RCP version, LED dimmer state, and similar supplementary values) right after a privacy-mode toggle**, most noticeable on cameras that had just come back online. Two internal requests could each try to open their own session with Bosch's cloud RCP proxy at the same moment; the proxy only allows one live session per camera, so the second request was silently rejected and that camera's RCP-derived data stayed unavailable until the next retry. Found and fixed while debugging on real Gen1 hardware.
+
+5669 tests / mypy --strict / ruff / codespell green, live-verified on test HA under repeated concurrent-toggle stress against real cameras — no further rejections.
+
 ## [v14.4.12] - 2026-07-08
 
 Patch — WebRTC hard-fail regression fix
