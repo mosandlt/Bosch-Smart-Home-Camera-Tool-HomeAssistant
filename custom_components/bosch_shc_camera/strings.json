@@ -340,160 +340,160 @@
     },
     "switch": {
       "live_stream": {
-        "name": "Live Stream"
+        "name": "Live stream"
       },
       "audio": {
-        "name": "Stream Audio"
+        "name": "Stream audio"
       },
       "camera_light": {
-        "name": "Camera Light"
+        "name": "Camera light"
       },
       "front_light": {
-        "name": "Front Light"
+        "name": "Front light"
       },
       "wallwasher": {
         "name": "Wallwasher"
       },
       "privacy_mode": {
-        "name": "Privacy Mode"
+        "name": "Privacy mode"
       },
       "notifications": {
         "name": "Notifications"
       },
       "motion_detection": {
-        "name": "Motion Detection"
+        "name": "Motion detection"
       },
       "record_sound": {
-        "name": "Record Sound"
+        "name": "Record sound"
       },
       "auto_follow": {
-        "name": "Auto Follow"
+        "name": "Auto follow"
       },
       "intercom": {
         "name": "Intercom"
       },
       "privacy_sound": {
-        "name": "Privacy Sound"
+        "name": "Privacy sound"
       },
       "timestamp_overlay": {
-        "name": "Timestamp Overlay"
+        "name": "Timestamp overlay"
       },
       "status_led": {
         "name": "Status LED"
       },
       "motion_light": {
-        "name": "Motion Light"
+        "name": "Motion light"
       },
       "ambient_light": {
-        "name": "Ambient Light"
+        "name": "Ambient light"
       },
       "soft_light_fading": {
-        "name": "Soft Light Fading"
+        "name": "Soft light fading"
       },
       "intrusion_detection": {
-        "name": "Intrusion Detection"
+        "name": "Intrusion detection"
       },
       "image_rotation_180": {
-        "name": "Rotate Image 180°"
+        "name": "Rotate image 180°"
       },
       "alarm_system_arm": {
-        "name": "Alarm System"
+        "name": "Alarm system"
       },
       "alarm_mode": {
         "name": "Siren"
       },
       "pre_alarm": {
-        "name": "Pre-Alarm"
+        "name": "Pre-alarm"
       },
       "panic_alarm": {
-        "name": "Trigger Siren"
+        "name": "Trigger siren"
       },
       "nvr_recording": {
-        "name": "Mini-NVR Recording"
+        "name": "Mini-NVR recording"
       },
       "external_stream": {
         "name": "Publish external stream URL"
       },
       "frigate_high": {
-        "name": "Frigate stream High"
+        "name": "Frigate stream high"
       },
       "frigate_low": {
-        "name": "Frigate stream Low"
+        "name": "Frigate stream low"
       },
       "glass_break_detection": {
-        "name": "Glass Break Detection"
+        "name": "Glass break detection"
       },
       "fire_alarm_detection": {
-        "name": "Smoke Alarm Detection"
+        "name": "Smoke alarm detection"
       }
     },
     "number": {
       "pan_position": {
-        "name": "Pan Position"
+        "name": "Pan position"
       },
       "speaker_level": {
-        "name": "Speaker Level"
+        "name": "Speaker level"
       },
       "audio_volume": {
-        "name": "Stream Volume"
+        "name": "Stream volume"
       },
       "front_light_intensity": {
-        "name": "Front Light Intensity"
+        "name": "Front light intensity"
       },
       "lens_elevation": {
-        "name": "Lens Elevation"
+        "name": "Lens elevation"
       },
       "microphone_level": {
-        "name": "Microphone Level"
+        "name": "Microphone level"
       },
       "white_balance": {
-        "name": "Front Light Color Temperature"
+        "name": "Front light color temperature"
       },
       "top_led_brightness": {
-        "name": "Top LED Brightness"
+        "name": "Top LED brightness"
       },
       "bottom_led_brightness": {
-        "name": "Bottom LED Brightness"
+        "name": "Bottom LED brightness"
       },
       "motion_light_sensitivity": {
-        "name": "Motion Light Sensitivity"
+        "name": "Motion light sensitivity"
       },
       "darkness_threshold": {
-        "name": "Darkness Threshold"
+        "name": "Darkness threshold"
       },
       "power_led_brightness": {
-        "name": "Power LED Brightness"
+        "name": "Power LED brightness"
       },
       "alarm_delay": {
-        "name": "Siren Duration"
+        "name": "Siren duration"
       },
       "alarm_activation_delay": {
-        "name": "Alarm Activation Delay"
+        "name": "Alarm activation delay"
       },
       "pre_alarm_delay": {
-        "name": "Pre-Alarm Duration"
+        "name": "Pre-alarm duration"
       },
       "intrusion_sensitivity": {
-        "name": "Intrusion Detection Sensitivity"
+        "name": "Intrusion detection sensitivity"
       },
       "intrusion_distance": {
-        "name": "Intrusion Detection Range"
+        "name": "Intrusion detection range"
       }
     },
     "button": {
       "refresh_snapshot": {
-        "name": "Refresh Snapshot"
+        "name": "Refresh snapshot"
       },
       "soft_reset": {
-        "name": "Restart Camera"
+        "name": "Restart camera"
       },
       "hard_reset": {
-        "name": "Factory Reset Camera"
+        "name": "Factory reset camera"
       }
     },
     "select": {
       "video_quality": {
-        "name": "Video Quality",
+        "name": "Video quality",
         "state": {
           "auto": "Auto",
           "high": "High (30 Mbps)",
@@ -501,7 +501,7 @@
         }
       },
       "motion_sensitivity": {
-        "name": "Motion Sensitivity",
+        "name": "Motion sensitivity",
         "state": {
           "super_high": "Super High",
           "high": "High",
@@ -512,14 +512,14 @@
         }
       },
       "fcm_push_mode": {
-        "name": "FCM Push Mode",
+        "name": "FCM push mode",
         "state": {
           "auto": "FCM Push",
           "polling": "Polling"
         }
       },
       "stream_mode": {
-        "name": "Stream Mode",
+        "name": "Stream mode",
         "state": {
           "auto": "Auto (Local → Cloud)",
           "local": "Local Only",
@@ -527,7 +527,7 @@
         }
       },
       "detection_mode": {
-        "name": "Detection Mode",
+        "name": "Detection mode",
         "state": {
           "all_motions": "All Motions",
           "only_humans": "Persons Only",
@@ -535,7 +535,7 @@
         }
       },
       "pan_preset": {
-        "name": "Pan Preset",
+        "name": "Pan preset",
         "state": {
           "home": "Home (Centre)",
           "left": "Left (−60°)",
@@ -550,13 +550,13 @@
         "name": "Motion"
       },
       "audio_alarm_binary": {
-        "name": "Audio Alarm"
+        "name": "Audio alarm"
       },
       "person_detected": {
-        "name": "Person Detected"
+        "name": "Person detected"
       },
       "lan_reachable": {
-        "name": "LAN Reachable"
+        "name": "LAN reachable"
       }
     },
     "update": {
@@ -572,7 +572,7 @@
         "name": "Bottom LED"
       },
       "front_light_entity": {
-        "name": "Front Light"
+        "name": "Front light"
       }
     },
     "sensor": {
@@ -587,31 +587,31 @@
         }
       },
       "last_event": {
-        "name": "Last Event"
+        "name": "Last event"
       },
       "events_today": {
-        "name": "Events Today"
+        "name": "Events today"
       },
       "wifi_signal": {
-        "name": "WiFi Signal"
+        "name": "WiFi signal"
       },
       "firmware_version": {
-        "name": "Firmware Version"
+        "name": "Firmware version"
       },
       "ambient_light": {
-        "name": "Ambient Light"
+        "name": "Ambient light"
       },
       "led_dimmer": {
-        "name": "LED Dimmer"
+        "name": "LED dimmer"
       },
       "clock_offset": {
-        "name": "Clock Offset"
+        "name": "Clock offset"
       },
       "motion_sensitivity": {
-        "name": "Motion Sensitivity"
+        "name": "Motion sensitivity"
       },
       "last_event_type": {
-        "name": "Last Event Type",
+        "name": "Last event type",
         "state": {
           "movement": "Movement",
           "person": "Person",
@@ -623,13 +623,13 @@
         }
       },
       "movement_events_today": {
-        "name": "Movement Events Today"
+        "name": "Movement events today"
       },
       "audio_events_today": {
-        "name": "Audio Events Today"
+        "name": "Audio events today"
       },
       "push_status": {
-        "name": "FCM Push Status",
+        "name": "FCM push status",
         "state": {
           "fcm_push": "FCM Push (instant)",
           "polling": "Polling (fallback)",
@@ -637,7 +637,7 @@
         }
       },
       "cloud_maintenance": {
-        "name": "Bosch Cloud Maintenance",
+        "name": "Bosch cloud maintenance",
         "state": {
           "active": "Maintenance in progress",
           "scheduled": "Maintenance scheduled",
@@ -648,34 +648,34 @@
         }
       },
       "unread_events": {
-        "name": "Unread Events"
+        "name": "Unread events"
       },
       "commissioned": {
         "name": "Commissioned"
       },
       "schedule_rules": {
-        "name": "Schedule Rules"
+        "name": "Schedule rules"
       },
       "alarm_catalog": {
-        "name": "Alarm Catalog"
+        "name": "Alarm catalog"
       },
       "motion_zones": {
-        "name": "Motion Zones"
+        "name": "Motion zones"
       },
       "tls_cert": {
-        "name": "TLS Certificate"
+        "name": "TLS certificate"
       },
       "network_services": {
-        "name": "Network Services"
+        "name": "Network services"
       },
       "iva_analytics": {
-        "name": "IVA Analytics"
+        "name": "IVA analytics"
       },
       "privacy_masks": {
-        "name": "Privacy Masks"
+        "name": "Privacy masks"
       },
       "ambient_schedule": {
-        "name": "Ambient Light Schedule",
+        "name": "Ambient light schedule",
         "state": {
           "disabled": "Disabled",
           "dusk_to_dawn": "Dusk to Dawn",
@@ -683,7 +683,7 @@
         }
       },
       "alarm_state": {
-        "name": "Alarm State",
+        "name": "Alarm state",
         "state": {
           "active": "Armed",
           "inactive": "Disarmed",
@@ -696,7 +696,7 @@
         }
       },
       "stream_status": {
-        "name": "Stream Status",
+        "name": "Stream status",
         "state": {
           "idle": "Idle",
           "warming_up": "Warming Up",
@@ -706,7 +706,7 @@
         }
       },
       "nvr_state": {
-        "name": "Mini-NVR State",
+        "name": "Mini-NVR state",
         "state": {
           "idle": "Idle",
           "recording": "Recording",
@@ -717,25 +717,25 @@
         "name": "Stream URL (main)"
       },
       "frigate_url_high": {
-        "name": "Frigate RTSP URL (High)"
+        "name": "Frigate RTSP URL (high)"
       },
       "frigate_url_low": {
-        "name": "Frigate RTSP URL (Low)"
+        "name": "Frigate RTSP URL (low)"
       },
       "stream_url_sub": {
         "name": "Stream URL (sub)"
       },
       "onvif_scopes": {
-        "name": "ONVIF Scopes"
+        "name": "ONVIF scopes"
       },
       "rcp_version": {
-        "name": "RCP Version"
+        "name": "RCP version"
       },
       "cloud_feature_flags": {
-        "name": "Cloud Feature Flags"
+        "name": "Cloud feature flags"
       },
       "ai_description": {
-        "name": "AI Snapshot Description"
+        "name": "AI snapshot description"
       }
     }
   },

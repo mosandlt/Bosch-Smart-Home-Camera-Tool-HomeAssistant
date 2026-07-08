@@ -40,3 +40,11 @@ jobs:
           pip-audit -r /tmp/our_reqs.txt
       - name: Translation completeness
         run: python3 scripts/check-translations.py
+      - name: Enum comparison (is/is not, not ==/!=)
+        run: python3 scripts/check-enum-comparisons.py
+      - name: Docstring hygiene
+        run: python3 scripts/check-docstrings.py
+      - name: Entity-name sentence case
+        run: python3 scripts/check-sentence-case.py
+      - name: PARALLEL_UPDATES present
+        run: python3 scripts/check-parallel-updates.py
