@@ -343,7 +343,7 @@
         "name": "Live Stream"
       },
       "audio": {
-        "name": "Audio"
+        "name": "Áudio da transmissão"
       },
       "camera_light": {
         "name": "Luz da Câmara"
@@ -435,7 +435,7 @@
         "name": "Nível do Altifalante"
       },
       "audio_volume": {
-        "name": "Volume de áudio"
+        "name": "Volume da transmissão"
       },
       "front_light_intensity": {
         "name": "Intensidade da Luz Frontal"

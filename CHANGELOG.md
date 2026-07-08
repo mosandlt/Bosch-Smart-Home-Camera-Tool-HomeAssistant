@@ -5,6 +5,17 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.1] - 2026-07-08
+
+Patch — firmware-install progress indicator + clearer entity labels
+
+### Fixed
+
+- **Pressing the firmware Install button showed no progress indicator at all**, even though the on-camera flash takes several minutes. Home Assistant's own install-progress tracking only follows the entity for as long as the Install button's own call is awaiting — a single quick network request — not the multi-minute install this integration already tracks separately via the camera's own status. The entity now declares that it supports progress tracking, so Home Assistant uses that existing tracking instead of its own, much shorter, one.
+- **The "Audio" switch and "Audio Volume" slider were unclearly labeled** — they control whether the Home Assistant card plays back a camera's stream audio and how loud, not a real microphone/speaker on the camera. Renamed to "Stream Audio" / "Stream Volume" to avoid confusion with the camera's actual audio hardware controls (e.g. intercom, Audio-Plus sound detection).
+
+5679 tests / mypy --strict / ruff / codespell green.
+
 ## [v14.5.0] - 2026-07-08
 
 Minor — camera restart button (reverse-engineered from the official app)

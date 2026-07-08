@@ -343,7 +343,7 @@
         "name": "Live Stream"
       },
       "audio": {
-        "name": "Audio"
+        "name": "Звук трансляції"
       },
       "camera_light": {
         "name": "Світло Камери"
@@ -435,7 +435,7 @@
         "name": "Рівень Динаміка"
       },
       "audio_volume": {
-        "name": "Гучність звуку"
+        "name": "Гучність трансляції"
       },
       "front_light_intensity": {
         "name": "Яскравість Переднього Світла"

@@ -2160,11 +2160,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.5.0** — see the GitHub release page for full notes:
-[**v14.5.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.0)
+Latest: **v14.5.1** — see the GitHub release page for full notes:
+[**v14.5.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.1)
 
 | Version | Highlights |
 |---|---|
+| **v14.5.1** | **Pressing the firmware Install button now shows a progress indicator for the whole multi-minute install**, instead of vanishing almost instantly. Also renamed the "Audio"/"Audio Volume" entities to "Stream Audio"/"Stream Volume" to make clear they control the card's playback, not the camera's actual microphone/speaker hardware. |
 | **v14.5.0** | **A "Restart Camera" button, reverse-engineered from the official Bosch app.** Ships disabled by default — live-testing showed Bosch's cloud currently rejects the request on this account even though it matches the app exactly, so it may not work everywhere yet. The implementation is correct and ready for when Bosch's backend catches up; enable it manually in the entity's settings to try it. |
 | **v14.4.13** | **Fixed a camera occasionally failing to fetch its live thumbnail, ONVIF info, or similar supplementary data right after a privacy-mode toggle.** Two internal requests could each try to open a session with Bosch's cloud RCP proxy at the same moment; the proxy only allows one live session per camera, so the second request got silently rejected. Found and fixed while testing on real Gen1 hardware. |
 | **v14.4.12** | **Fixed a bug from v14.4.11: opening a camera's live view from Home Assistant's native device view immediately showed "Camera does not support WebRTC".** A previous fix's WebRTC pre-warm wait unintentionally made Home Assistant's own camera framework skip its provider detection, rejecting every WebRTC offer before it reached the actual streaming backend. Affected every camera. The card itself was unaffected — it silently fell back to its regular player — which is why this only showed up in the native app view. |

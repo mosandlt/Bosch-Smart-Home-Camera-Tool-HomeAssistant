@@ -50,7 +50,17 @@ class BoschFirmwareUpdate(_BoschEntityBase, UpdateEntity):  # type: ignore[misc]
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_has_entity_name = True
-    _attr_supported_features = UpdateEntityFeature.INSTALL
+    # PROGRESS: without it, HA's own async_install_with_progress() ignores our
+    # in_progress property (below) and drives an internal in_progress flag
+    # that is only True while async_install() is awaiting — i.e. for the
+    # single PUT call, not the following minutes of on-camera flashing —
+    # so the frontend's progress indicator vanished almost immediately.
+    # With PROGRESS set, HA uses our in_progress property instead, which
+    # stays True for as long as the coordinator's slow-tier poll reports
+    # Bosch's own `updating` flag as true.
+    _attr_supported_features = (
+        UpdateEntityFeature.INSTALL | UpdateEntityFeature.PROGRESS
+    )
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)

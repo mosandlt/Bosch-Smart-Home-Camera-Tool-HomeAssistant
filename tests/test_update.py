@@ -278,3 +278,20 @@ class TestAsyncInstall:
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u._attr_supported_features & UpdateEntityFeature.INSTALL
+
+    @pytest.mark.asyncio
+    async def test_supported_features_includes_progress(self, stub_coord, stub_entry):
+        """Live bug (2026-07-08, Thomas): pressing Install showed no progress
+        indicator at all. Root cause: without UpdateEntityFeature.PROGRESS, HA's
+        own async_install_with_progress() ignores our `in_progress` property
+        (which correctly tracks the coordinator's `_firmware_cache[...]['updating']`
+        for the whole multi-minute on-camera flash) and instead drives an
+        internal flag that's only True while async_install() itself is awaiting
+        — i.e. for the single PUT call, not the following minutes of flashing.
+        """
+        from homeassistant.components.update import UpdateEntityFeature
+
+        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
+        u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
+        assert u._attr_supported_features & UpdateEntityFeature.PROGRESS

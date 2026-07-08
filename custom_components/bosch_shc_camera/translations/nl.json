@@ -343,7 +343,7 @@
         "name": "Live Stream"
       },
       "audio": {
-        "name": "Audio"
+        "name": "Stream-audio"
       },
       "camera_light": {
         "name": "Cameralamp"
@@ -435,7 +435,7 @@
         "name": "Luidspreker volume"
       },
       "audio_volume": {
-        "name": "Audiovolume"
+        "name": "Stream-volume"
       },
       "front_light_intensity": {
         "name": "Frontlamp intensiteit"
