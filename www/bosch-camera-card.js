@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.4";
+const CARD_VERSION = "14.1.5";
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -4695,6 +4695,36 @@ class BoschCameraCard extends HTMLElement {
   _escAttr(str) {
     return this._escHtml(str == null ? "" : String(str)).replace(/"/g, "&quot;");
   }
+  _showCreateRuleDialog() {
+    return new Promise(resolve => {
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;";
+      overlay.innerHTML = `\n        <form style="background:var(--card-background-color,#fff);color:var(--primary-text-color,#000);border-radius:12px;padding:20px;min-width:260px;max-width:90vw;box-shadow:0 4px 24px rgba(0,0,0,.3);font-family:inherit;">\n          <div style="font-size:16px;font-weight:600;margin-bottom:12px;">Regel erstellen</div>\n          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">Regel-Name</label>\n          <input name="name" type="text" value="Neue Regel" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">\n          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">Startzeit</label>\n          <input name="start" type="time" value="08:00" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">\n          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">Endzeit</label>\n          <input name="end" type="time" value="20:00" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:14px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">\n          <div style="display:flex;gap:8px;justify-content:flex-end;">\n            <button type="button" data-act="cancel" style="padding:8px 16px;border-radius:6px;border:none;background:var(--secondary-background-color,#eee);color:inherit;font-size:14px;">Abbrechen</button>\n            <button type="submit" data-act="ok" style="padding:8px 16px;border-radius:6px;border:none;background:var(--primary-color,#03a9f4);color:#fff;font-size:14px;">Erstellen</button>\n          </div>\n        </form>`;
+      const finish = result => {
+        overlay.remove();
+        resolve(result);
+      };
+      overlay.addEventListener("click", ev => {
+        if (ev.target === overlay) finish(null);
+      });
+      overlay.querySelector('[data-act="cancel"]').addEventListener("click", () => finish(null));
+      overlay.querySelector("form").addEventListener("submit", ev => {
+        ev.preventDefault();
+        const fd = new FormData(ev.target);
+        const name = (fd.get("name") || "").trim();
+        const start = fd.get("start");
+        const end = fd.get("end");
+        if (!name || !start || !end) return;
+        finish({
+          name: name,
+          start: start,
+          end: end
+        });
+      });
+      this.shadowRoot.appendChild(overlay);
+      overlay.querySelector('input[name="name"]').focus();
+    });
+  }
   _renderServiceButtons() {
     const grid = this.shadowRoot.getElementById("svc-grid");
     if (!grid) return;
@@ -4781,12 +4811,9 @@ class BoschCameraCard extends HTMLElement {
           return;
         }
         if (svc.svc === "_prompt_create_rule") {
-          const name = prompt("Regel-Name:", "Neue Regel");
-          if (!name) return;
-          const start = prompt("Startzeit (HH:MM):", "08:00");
-          if (!start) return;
-          const end = prompt("Endzeit (HH:MM):", "20:00");
-          if (!end) return;
+          const result = await this._showCreateRuleDialog();
+          if (!result) return;
+          const {name: name, start: start, end: end} = result;
           btn.classList.add("running");
           this._callService("bosch_shc_camera", "create_rule", {
             camera_id: camId(),

@@ -33,7 +33,8 @@
  * Changes vs 2.4.0:
  *   - New "Services" accordion: grid of quick-action buttons for
  *     Snapshot, Zonen lesen, Privacy-Masken, Freunde, Regel erstellen, Verbindung.
- *     Regel erstellen uses prompt() for name/start/end.
+ *     Regel erstellen uses an in-card dialog for name/start/end (was
+ *     window.prompt(), which is a silent no-op in iOS WKWebView).
  *   - Motion zone overlay now uses cloud API zones (normalized x/y/w/h 0-1)
  *     instead of broken RCP coordinates.
  *
@@ -148,7 +149,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.4";
+const CARD_VERSION = "14.1.5";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -8888,6 +8889,48 @@ class BoschCameraCard extends HTMLElement {
     return this._escHtml(str == null ? "" : String(str)).replace(/"/g, "&quot;");
   }
 
+  // In-card modal replacing window.prompt() for "Regel erstellen" — native
+  // prompt() silently returns null in iOS WKWebView (HA Companion app), so
+  // the button was a no-op there. Resolves { name, start, end } or null on
+  // cancel. MOBILE_BACKLOG item.
+  _showCreateRuleDialog() {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;";
+      overlay.innerHTML = `
+        <form style="background:var(--card-background-color,#fff);color:var(--primary-text-color,#000);border-radius:12px;padding:20px;min-width:260px;max-width:90vw;box-shadow:0 4px 24px rgba(0,0,0,.3);font-family:inherit;">
+          <div style="font-size:16px;font-weight:600;margin-bottom:12px;">Regel erstellen</div>
+          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">Regel-Name</label>
+          <input name="name" type="text" value="Neue Regel" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">
+          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">Startzeit</label>
+          <input name="start" type="time" value="08:00" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">
+          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">Endzeit</label>
+          <input name="end" type="time" value="20:00" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:14px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button type="button" data-act="cancel" style="padding:8px 16px;border-radius:6px;border:none;background:var(--secondary-background-color,#eee);color:inherit;font-size:14px;">Abbrechen</button>
+            <button type="submit" data-act="ok" style="padding:8px 16px;border-radius:6px;border:none;background:var(--primary-color,#03a9f4);color:#fff;font-size:14px;">Erstellen</button>
+          </div>
+        </form>`;
+      const finish = (result) => {
+        overlay.remove();
+        resolve(result);
+      };
+      overlay.addEventListener("click", (ev) => { if (ev.target === overlay) finish(null); });
+      overlay.querySelector('[data-act="cancel"]').addEventListener("click", () => finish(null));
+      overlay.querySelector("form").addEventListener("submit", (ev) => {
+        ev.preventDefault();
+        const fd = new FormData(ev.target);
+        const name = (fd.get("name") || "").trim();
+        const start = fd.get("start");
+        const end = fd.get("end");
+        if (!name || !start || !end) return;
+        finish({ name, start, end });
+      });
+      this.shadowRoot.appendChild(overlay);
+      overlay.querySelector('input[name="name"]').focus();
+    });
+  }
+
   _renderServiceButtons() {
     const grid = this.shadowRoot.getElementById("svc-grid");
     if (!grid) return;
@@ -8940,12 +8983,9 @@ class BoschCameraCard extends HTMLElement {
 
         // Special: prompt for create_rule
         if (svc.svc === "_prompt_create_rule") {
-          const name = prompt("Regel-Name:", "Neue Regel");
-          if (!name) return;
-          const start = prompt("Startzeit (HH:MM):", "08:00");
-          if (!start) return;
-          const end = prompt("Endzeit (HH:MM):", "20:00");
-          if (!end) return;
+          const result = await this._showCreateRuleDialog();
+          if (!result) return;
+          const { name, start, end } = result;
           btn.classList.add("running");
           this._callService("bosch_shc_camera", "create_rule", {
             camera_id: camId(), name: name,

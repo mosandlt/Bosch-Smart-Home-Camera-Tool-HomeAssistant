@@ -31,7 +31,11 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.components.camera import (
+    Camera,
+    CameraEntityFeature,
+    WebRTCSendMessage,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -723,19 +727,52 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # and returns None too, which HA core surfaces as the misleading
         # "does not support play stream service". Wait for warming to clear
         # (rtspsUrl gets populated at the same point) so super() reads a valid URL.
-        if self._cam_id in self.coordinator._stream_warming:
-            cfg = self.coordinator.get_model_config(self._cam_id)
-            deadline = time.monotonic() + cfg.min_total_wait + 5
-            while self._cam_id in self.coordinator._stream_warming:
-                if time.monotonic() > deadline:
-                    _LOGGER.warning(
-                        "%s: play_stream — pre-warm did not complete within %ds",
-                        self._display_name,
-                        cfg.min_total_wait + 5,
-                    )
-                    return None
-                await asyncio.sleep(0.5)
+        if not await self._wait_for_prewarm("play_stream"):
+            return None
         return await super().async_create_stream()
+
+    async def _wait_for_prewarm(self, caller: str) -> bool:
+        """Poll until LOCAL pre-warm clears (rtspsUrl populated), or time out.
+
+        Shared by async_create_stream() (HLS/Cast path) and
+        async_handle_async_webrtc_offer() (native app / go2rtc path) — both read
+        stream_source() right after this returns, and stream_source() only
+        returns a URL once pre-warm has cleared. Without this wait, a WebRTC
+        offer made mid-warm-up (MOBILE_BACKLOG item, ~25-35s black screen in the
+        native HA more-info view) fails immediately instead of waiting like the
+        card's own JS retry already does.
+        """
+        if self._cam_id not in self.coordinator._stream_warming:
+            return True
+        cfg = self.coordinator.get_model_config(self._cam_id)
+        deadline = time.monotonic() + cfg.min_total_wait + 5
+        while self._cam_id in self.coordinator._stream_warming:
+            if time.monotonic() > deadline:
+                _LOGGER.warning(
+                    "%s: %s — pre-warm did not complete within %ds",
+                    self._display_name,
+                    caller,
+                    cfg.min_total_wait + 5,
+                )
+                return False
+            await asyncio.sleep(0.5)
+        return True
+
+    async def async_handle_async_webrtc_offer(
+        self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
+    ) -> None:
+        """Wait for LOCAL pre-warm before delegating to the go2rtc provider.
+
+        Without this, a native WebRTC offer (HA Companion app / more-info
+        dialog) arriving while the camera is still warming up hits
+        stream_source() returning None with no retry — up to ~35s of black
+        screen (MOBILE_BACKLOG). The custom card already retries client-side
+        via _waitForStreamReady(); the native path had no equivalent.
+        """
+        await self._wait_for_prewarm("webrtc_offer")
+        await super().async_handle_async_webrtc_offer(
+            offer_sdp, session_id, send_message
+        )
 
     async def stream_source(self) -> str | None:
         """Return RTSP URL when a live connection has been opened.

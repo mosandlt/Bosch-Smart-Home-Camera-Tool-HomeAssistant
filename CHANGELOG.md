@@ -5,6 +5,21 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.4.11] - 2026-07-08
+
+Patch — native WebRTC pre-warm wait + in-card rule dialog
+
+### Fixed
+
+- **A live view opened from the native Home Assistant Companion app (not the card) could show up to ~25-35 seconds of black video with no retry** while a camera was still warming up its LOCAL stream. `async_create_stream()` (the HLS/Cast path) already waited for pre-warm to clear before reading the stream source, but `async_handle_async_webrtc_offer()` (the native app / go2rtc path) delegated straight to the base handler and read a not-yet-ready stream source immediately. Both paths now share the same pre-warm wait.
+- **The "Regel erstellen" quick-action button used a native browser prompt for the rule name/start/end time**, which iOS's Companion app (WKWebView) silently ignores — the button looked broken there. Replaced with an in-card dialog.
+
+### Changed
+
+- Raised the minimum required Home Assistant version (`hacs.json`) to 2026.7.1, matching the version this integration is actually tested against.
+
+1457 tests / mypy --strict / ruff / codespell / eslint / stylelint green, 231 e2e green.
+
 ## [v14.4.10] - 2026-07-08
 
 Patch — firmware-update Repairs issue with a one-click Fix to install
