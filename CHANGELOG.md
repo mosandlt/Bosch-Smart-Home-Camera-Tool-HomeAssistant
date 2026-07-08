@@ -5,6 +5,17 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.2] - 2026-07-08
+
+Patch — entity names now use sentence case
+
+### Changed
+
+- **Entity display names now follow sentence case** ("Live stream" instead of "Live Stream", "Camera light" instead of "Camera Light") to match the convention used across Home Assistant Core itself, instead of this integration's prior ad-hoc Title Case. Acronyms and proper nouns (LED, WiFi, NVR, RCP, TLS, IVA, ONVIF, FCM, RTSP, LAN, Bosch, Frigate) keep their capitalization. English only — the 11 translated languages are unaffected, since e.g. German capitalizes every noun regardless of position. Purely a display-text change: entity IDs, unique IDs, and automations are unaffected.
+- **Internal only:** added four new CI checks (enum comparisons, docstring hygiene, entity-name sentence case, PARALLEL_UPDATES presence) sourced from real review findings across `home-assistant/core` pull requests for the separate `bosch_shc` integration, to catch the same classes of issues here before they reach a reviewer.
+
+5679 tests / mypy --strict / ruff / codespell / pylint green.
+
 ## [v14.5.1] - 2026-07-08
 
 Patch — firmware-install progress indicator + clearer entity labels
