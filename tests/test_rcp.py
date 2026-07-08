@@ -107,7 +107,105 @@ class TestGetCachedRcpSession:
             )
 
         assert result is None
-        assert "hash123" not in cache, "Failed session must not pollute the cache"
+
+
+class TestGetCachedRcpSessionConcurrency:
+    """Regression: two concurrent openers for the same proxy_hash raced
+    Bosch's cloud RCP proxy, which only tolerates one live session per
+    proxy_hash — the loser got sessionid 0x00000000 ("proxy rejected"),
+    observed live 2026-07-08 (a privacy-mode-off snapshot trigger racing
+    the coordinator's own RCP data refresh for the same camera). Passing
+    a shared `session_locks` dict serializes same-proxy_hash opens so the
+    second caller awaits the first's in-flight open and reads the cache
+    instead of firing its own handshake.
+    """
+
+    @pytest.mark.asyncio
+    async def test_concurrent_callers_same_hash_open_session_once(self):
+        import asyncio
+
+        from custom_components.bosch_shc_camera.rcp import get_cached_rcp_session
+
+        cache: dict = {}
+        locks: dict = {}
+        open_calls = 0
+
+        async def _fake_rcp_session(hass, session_cache, proxy_host, proxy_hash):
+            nonlocal open_calls
+            open_calls += 1
+            # Yield control so a real race would interleave here if unlocked.
+            await asyncio.sleep(0.01)
+            return "session-SHARED"
+
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_session",
+            new=_fake_rcp_session,
+        ):
+            results = await asyncio.gather(
+                get_cached_rcp_session(
+                    MagicMock(), cache, "proxy-10:42090", "hash123", locks
+                ),
+                get_cached_rcp_session(
+                    MagicMock(), cache, "proxy-10:42090", "hash123", locks
+                ),
+            )
+
+        assert open_calls == 1, (
+            "Second caller must await the first's in-flight open (via the "
+            "shared lock) instead of firing its own concurrent handshake"
+        )
+        assert results == ["session-SHARED", "session-SHARED"]
+
+    @pytest.mark.asyncio
+    async def test_concurrent_callers_different_hash_not_serialized(self):
+        """Locks are per-proxy_hash — different cameras must not block each other."""
+        import asyncio
+
+        from custom_components.bosch_shc_camera.rcp import get_cached_rcp_session
+
+        cache: dict = {}
+        locks: dict = {}
+        open_calls = 0
+
+        async def _fake_rcp_session(hass, session_cache, proxy_host, proxy_hash):
+            nonlocal open_calls
+            open_calls += 1
+            await asyncio.sleep(0.01)
+            return f"session-{proxy_hash}"
+
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_session",
+            new=_fake_rcp_session,
+        ):
+            results = await asyncio.gather(
+                get_cached_rcp_session(
+                    MagicMock(), cache, "proxy-10:42090", "hashA", locks
+                ),
+                get_cached_rcp_session(
+                    MagicMock(), cache, "proxy-11:42090", "hashB", locks
+                ),
+            )
+
+        assert open_calls == 2, "Distinct proxy_hash values must open independently"
+        assert results == ["session-hashA", "session-hashB"]
+
+    @pytest.mark.asyncio
+    async def test_no_locks_arg_preserves_prior_unlocked_behavior(self):
+        """Omitting session_locks (existing call sites) must still work —
+        backward compatible, no forced serialization."""
+        from custom_components.bosch_shc_camera.rcp import get_cached_rcp_session
+
+        cache: dict = {}
+        with patch(
+            "custom_components.bosch_shc_camera.rcp.rcp_session",
+            new=AsyncMock(return_value="session-X"),
+        ):
+            result = await get_cached_rcp_session(
+                MagicMock(), cache, "proxy-10:42090", "hash123"
+            )
+
+        assert result == "session-X"
+        assert cache["hash123"][0] == "session-X"
 
 
 # ── rcp_local_read_privacy / rcp_local_write_privacy ─────────────────────────

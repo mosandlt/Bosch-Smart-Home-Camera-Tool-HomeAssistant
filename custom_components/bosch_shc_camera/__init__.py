@@ -722,6 +722,15 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # RCP session ID cache — keyed by proxy_hash, value (session_id, expires_monotonic)
         # Avoids 2 round-trip RCP handshake on every thumbnail/data fetch
         self._rcp_session_cache: dict[str, tuple[str, float]] = {}
+        # Per-proxy_hash lock serializing RCP session opens. Bosch's cloud RCP
+        # proxy only tolerates one live session per proxy_hash — two concurrent
+        # openers (e.g. a privacy-mode toggle's snapshot trigger racing the
+        # coordinator's RCP data refresh) each fire their own 0xff0c/0xff0d
+        # handshake, and the proxy rejects whichever loses the race with
+        # sessionid 0x00000000 ("proxy rejected"), seen live 2026-07-08.
+        # Serializing on this lock makes the second caller await the first's
+        # in-flight open and then read the now-populated cache instead.
+        self._rcp_session_locks: dict[str, asyncio.Lock] = {}
         # Proxy URL cache — keyed by cam_id, value (urls[0], expires_monotonic)
         # Proxy leases last ~60s; cache for 50s to skip PUT /connection on warm refreshes
         self._proxy_url_cache: dict[str, tuple[str, float]] = {}
@@ -4594,6 +4603,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             self._stream_locks[cam_id] = lock
         return lock
 
+    def _get_rcp_session_lock(self, proxy_hash: str) -> asyncio.Lock:
+        """Get or create per-proxy_hash RCP session-open lock.
+
+        Safe under asyncio: check-then-insert has no `await` between the
+        two steps, so concurrent coroutines cannot interleave here.
+        """
+        lock = self._rcp_session_locks.get(proxy_hash)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._rcp_session_locks[proxy_hash] = lock
+        return lock
+
     def clear_stream_warming(self, cam_id: str) -> None:
         """Force-clear the stream-warming flag for a camera.
 
@@ -7410,22 +7431,28 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
         Caches valid session IDs for 5 minutes (TTL 300 s) to avoid the 2-step
         RCP handshake (0xff0c + 0xff0d) on every thumbnail or data fetch.
-        """
-        now = time.monotonic()
-        cached = self._rcp_session_cache.get(proxy_hash)
-        if cached:
-            session_id, expires_at = cached
-            if now < expires_at:
-                return session_id
-            del self._rcp_session_cache[proxy_hash]
 
-        new_session_id: str | None = await self._rcp_session(proxy_host, proxy_hash)
-        if new_session_id:
-            self._rcp_session_cache[proxy_hash] = (
-                new_session_id,
-                now + 300.0,
-            )  # 5-min TTL
-        return new_session_id
+        Serialized per proxy_hash via `_get_rcp_session_lock` — Bosch's proxy
+        only tolerates one live session per proxy_hash, so two callers racing
+        an empty/expired cache would otherwise each open their own session and
+        one gets rejected (sessionid 0x00000000).
+        """
+        async with self._get_rcp_session_lock(proxy_hash):
+            now = time.monotonic()
+            cached = self._rcp_session_cache.get(proxy_hash)
+            if cached:
+                session_id, expires_at = cached
+                if now < expires_at:
+                    return session_id
+                del self._rcp_session_cache[proxy_hash]
+
+            new_session_id: str | None = await self._rcp_session(proxy_host, proxy_hash)
+            if new_session_id:
+                self._rcp_session_cache[proxy_hash] = (
+                    new_session_id,
+                    now + 300.0,
+                )  # 5-min TTL
+            return new_session_id
 
     async def _rcp_session(self, proxy_host: str, proxy_hash: str) -> str | None:
         """Open an RCP session via the cloud proxy and return the sessionid, or None on failure.

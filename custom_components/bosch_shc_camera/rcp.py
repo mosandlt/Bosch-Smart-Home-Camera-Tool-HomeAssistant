@@ -30,6 +30,23 @@ _LOGGER = logging.getLogger(__name__)
 
 # Type alias for the session cache: {proxy_hash: (session_id, expires_at_monotonic)}
 RcpSessionCache = dict[str, tuple[str, float]]
+# Type alias for the per-proxy_hash session-open lock dict
+RcpSessionLocks = dict[str, asyncio.Lock]
+
+
+def _get_rcp_session_lock(
+    session_locks: RcpSessionLocks, proxy_hash: str
+) -> asyncio.Lock:
+    """Get or create a per-proxy_hash RCP session-open lock.
+
+    Safe under asyncio: check-then-insert has no `await` between the two
+    steps, so concurrent coroutines cannot interleave here.
+    """
+    lock = session_locks.get(proxy_hash)
+    if lock is None:
+        lock = asyncio.Lock()
+        session_locks[proxy_hash] = lock
+    return lock
 
 
 def _is_xml_envelope(raw: bytes | None) -> bool:
@@ -55,26 +72,42 @@ async def get_cached_rcp_session(
     session_cache: RcpSessionCache,
     proxy_host: str,
     proxy_hash: str,
+    session_locks: RcpSessionLocks | None = None,
 ) -> str | None:
     """Return a cached RCP session ID, opening a new one if missing or expired.
 
     Caches valid session IDs for 5 minutes (TTL 300 s) to avoid the 2-step
     RCP handshake (0xff0c + 0xff0d) on every thumbnail or data fetch.
-    """
-    now = time.monotonic()
-    cached = session_cache.get(proxy_hash)
-    if cached:
-        session_id, expires_at = cached
-        if now < expires_at:
-            return session_id
-        del session_cache[proxy_hash]
 
-    new_session_id: str | None = await rcp_session(
-        hass, session_cache, proxy_host, proxy_hash
-    )
-    if new_session_id:
-        session_cache[proxy_hash] = (new_session_id, now + 300.0)  # 5-min TTL
-    return new_session_id
+    Serialized per proxy_hash when `session_locks` is given — Bosch's proxy
+    only tolerates one live session per proxy_hash, so two callers racing an
+    empty/expired cache would otherwise each open their own session and one
+    gets rejected (sessionid 0x00000000). Callers sharing a cache dict with
+    `BoschCameraCoordinator._get_cached_rcp_session` MUST also share its lock
+    dict (`coordinator._rcp_session_locks`) or the two call sites can still
+    race each other.
+    """
+
+    async def _get() -> str | None:
+        now = time.monotonic()
+        cached = session_cache.get(proxy_hash)
+        if cached:
+            session_id, expires_at = cached
+            if now < expires_at:
+                return session_id
+            del session_cache[proxy_hash]
+
+        new_session_id: str | None = await rcp_session(
+            hass, session_cache, proxy_host, proxy_hash
+        )
+        if new_session_id:
+            session_cache[proxy_hash] = (new_session_id, now + 300.0)  # 5-min TTL
+        return new_session_id
+
+    if session_locks is None:
+        return await _get()
+    async with _get_rcp_session_lock(session_locks, proxy_hash):
+        return await _get()
 
 
 async def rcp_session(
@@ -526,10 +559,15 @@ async def async_update_rcp_data(
       - _rcp_lan_ip_cache
       - _rcp_product_name_cache
       - _rcp_bitrate_cache
+      - _rcp_session_locks
       - hass
     """
     session_id = await get_cached_rcp_session(
-        coordinator.hass, coordinator._rcp_session_cache, proxy_host, proxy_hash
+        coordinator.hass,
+        coordinator._rcp_session_cache,
+        proxy_host,
+        proxy_hash,
+        coordinator._rcp_session_locks,
     )
     if not session_id:
         _LOGGER.debug(

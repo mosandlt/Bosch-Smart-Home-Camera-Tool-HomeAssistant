@@ -89,6 +89,7 @@ def _make_coord(**overrides):
         _rcp_lan_ip_cache={},
         _local_creds_cache={},
         _rcp_session_cache={},
+        _rcp_session_locks={},
         _lan_tcp_reachable={},
         _hw_version={},
         _privacy_set_at={},
@@ -129,7 +130,17 @@ def _make_coord(**overrides):
         debug=False,
     )
     base.update(overrides)
-    return SimpleNamespace(**base)
+    coord = SimpleNamespace(**base)
+
+    def _get_rcp_session_lock(proxy_hash: str) -> asyncio.Lock:
+        lock = coord._rcp_session_locks.get(proxy_hash)
+        if lock is None:
+            lock = asyncio.Lock()
+            coord._rcp_session_locks[proxy_hash] = lock
+        return lock
+
+    coord._get_rcp_session_lock = _get_rcp_session_lock
+    return coord
 
 
 def _bind_method(coord, method_name: str) -> None:

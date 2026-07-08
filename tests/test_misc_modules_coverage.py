@@ -772,6 +772,7 @@ class TestRcpPrivacyXmlEnvelope:
         coord = SimpleNamespace(
             hass=MagicMock(),
             _rcp_session_cache={},
+            _rcp_session_locks={},
             _rcp_dimmer_cache={},
             _rcp_privacy_cache={},
             _rcp_clock_offset_cache={},

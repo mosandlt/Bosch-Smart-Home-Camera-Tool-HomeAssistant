@@ -89,6 +89,7 @@ class TestRcpUpdateDimmerOutOfRange:
         coord._rcp_product_name_cache = {}
         coord._rcp_bitrate_cache = {}
         coord._rcp_session_cache = {}
+        coord._rcp_session_locks = {}
         coord._rcp_cmd_failures = {}
         coord.hass = MagicMock()
 

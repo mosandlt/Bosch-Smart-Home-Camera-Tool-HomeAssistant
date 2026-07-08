@@ -80,6 +80,7 @@ def _stub_coord(**kwargs):
         _proxy_url_cache={},
         _shc_state_cache={},
         _rcp_session_cache={},
+        _rcp_session_locks={},
         _live_connections={},
         _fresh_snap_cache={},
         _fresh_snap_locks={},
@@ -977,6 +978,9 @@ class TestGetCachedRcpSession:
 
         coord._get_cached_rcp_session = types.MethodType(
             BoschCameraCoordinator._get_cached_rcp_session, coord
+        )
+        coord._get_rcp_session_lock = types.MethodType(
+            BoschCameraCoordinator._get_rcp_session_lock, coord
         )
         return coord
 
