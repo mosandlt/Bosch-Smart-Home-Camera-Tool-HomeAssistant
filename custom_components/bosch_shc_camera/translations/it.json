@@ -483,6 +483,12 @@
     "button": {
       "refresh_snapshot": {
         "name": "Aggiorna Snapshot"
+      },
+      "soft_reset": {
+        "name": "Riavvia Fotocamera"
+      },
+      "hard_reset": {
+        "name": "Ripristina Fotocamera alle Impostazioni di Fabbrica"
       }
     },
     "select": {

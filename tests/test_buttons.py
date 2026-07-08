@@ -163,14 +163,17 @@ class TestRefreshSnapshotErrorHandling:
 class TestSetupEntry:
     @pytest.mark.asyncio
     async def test_creates_one_button_per_camera(self, stub_coord, stub_entry):
-        """Default options → 1 button entity per camera (Refresh only).
+        """Default options → 3 button entities per camera: Refresh Snapshot,
+        Restart (soft reset), Factory Reset (hard reset).
 
         BoschAcousticAlarmButton was removed entirely in v13.3 (was kept as
         an orphan since v12.0.4). Gen1 cameras have no integrated siren;
         Gen2 cameras use BoschPanicAlarmSwitch via /panic_alarm in switch.py.
         """
         from custom_components.bosch_shc_camera.button import (
+            BoschHardResetButton,
             BoschRefreshSnapshotButton,
+            BoschSoftResetButton,
             async_setup_entry,
         )
 
@@ -183,14 +186,22 @@ class TestSetupEntry:
         )
         types_ = {type(e) for e in captured}
         assert BoschRefreshSnapshotButton in types_
-        assert len(captured) == 1
+        assert BoschSoftResetButton in types_
+        assert BoschHardResetButton in types_
+        assert len(captured) == 3
 
     @pytest.mark.asyncio
-    async def test_skips_all_buttons_when_disabled_in_options(
+    async def test_snapshot_button_disabled_but_reset_buttons_remain(
         self, stub_coord, stub_entry
     ):
-        """enable_snapshot_button=False → setup_entry returns early, no entities created."""
-        from custom_components.bosch_shc_camera.button import async_setup_entry
+        """enable_snapshot_button=False only skips the snapshot-refresh button —
+        the reset buttons aren't gated by that option and must still appear."""
+        from custom_components.bosch_shc_camera.button import (
+            BoschHardResetButton,
+            BoschRefreshSnapshotButton,
+            BoschSoftResetButton,
+            async_setup_entry,
+        )
 
         stub_entry.options = {"enable_snapshot_button": False}
         stub_entry.data = {}
@@ -201,4 +212,8 @@ class TestSetupEntry:
             config_entry=stub_entry,
             async_add_entities=lambda e, update_before_add=False: captured.extend(e),
         )
-        assert captured == []
+        types_ = {type(e) for e in captured}
+        assert BoschRefreshSnapshotButton not in types_
+        assert BoschSoftResetButton in types_
+        assert BoschHardResetButton in types_
+        assert len(captured) == 2

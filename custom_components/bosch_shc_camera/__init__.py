@@ -4127,6 +4127,45 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._firmware_cache[cam_id] = fw
         self._firmware_set_at[cam_id] = time.monotonic()
 
+    async def async_soft_reset_camera(self, cam_id: str) -> None:
+        """Reboot the camera (soft reset).
+
+        PUTs the same bodyless endpoint the official Bosch app's camera
+        "Restart" action uses (research/apk_2.12.0 decompile:
+        BackendUrlProviderService.GetCameraSoftResetUrl → PUT
+        video_inputs/{id}/soft_reset). The camera briefly drops offline
+        while it reboots; no local state to update here — the next
+        status poll picks up the new online/offline state naturally.
+
+        Live-tested 2026-07-08 against a real online camera: Bosch's
+        cloud returned HTTP 404 sh:entity.notfound despite the request
+        matching the app byte-for-byte — the button entity is disabled
+        by default (button.py) for this reason.
+        """
+        ok = await self.async_put_camera(cam_id, "soft_reset", None)
+        if not ok:
+            raise HomeAssistantError(
+                "Bosch cloud rejected the soft-reset (restart) request"
+            )
+
+    async def async_hard_reset_camera(self, cam_id: str) -> None:
+        """Factory-reset the camera (hard reset).
+
+        PUTs the same bodyless endpoint the official Bosch app's camera
+        "Factory Reset" action uses (research/apk_2.12.0 decompile:
+        BackendUrlProviderService.GetCameraHardResetUrl → PUT
+        video_inputs/{id}/hard_reset). Unlike soft reset, this is
+        destructive — the camera loses its Bosch account pairing and
+        must be re-commissioned from scratch via the Bosch app before it
+        will work with this integration again. The button entity is
+        disabled by default for exactly this reason (button.py).
+        """
+        ok = await self.async_put_camera(cam_id, "hard_reset", None)
+        if not ok:
+            raise HomeAssistantError(
+                "Bosch cloud rejected the hard-reset (factory reset) request"
+            )
+
     async def _async_refresh_maintenance(self, *, reactive: bool) -> None:
         """Fetch the Bosch community maintenance announcement in the background.
 
@@ -7782,19 +7821,33 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         return self.data.get(cam_id, {}).get("recordingOptions", {})  # type: ignore[no-any-return]
 
     async def async_put_camera(
-        self, cam_id: str, endpoint: str, payload: dict[str, Any]
+        self, cam_id: str, endpoint: str, payload: dict[str, Any] | None
     ) -> bool:
-        """PUT to /v11/video_inputs/{cam_id}/{endpoint} with payload. Returns True on success."""
+        """PUT to /v11/video_inputs/{cam_id}/{endpoint} with payload. Returns True on success.
+
+        payload=None sends a truly empty body (no bytes, not even "{}") —
+        required for soft_reset/hard_reset. Verified from the decompiled
+        Bosch app (research/apk_2.12.0): UpdateSoftReset/UpdateHardReset
+        call the 2-arg PutStringAsync(url, accessToken) overload, whose
+        argsAsJson parameter defaults to "" — StringContent("", ...,
+        "application/json") is Content-Length: 0, not the 2-byte "{}"
+        aiohttp's `json={}` would send. Every other endpoint this method
+        is used for sends a real payload dict, so this only changes
+        behavior for the two reset endpoints.
+        """
         token = self.token
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
+        put_kwargs: dict[str, Any] = (
+            {"data": ""} if payload is None else {"json": payload}
+        )
         session = await async_get_bosch_cloud_session(self.hass)
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/{endpoint}"
         try:
             async with asyncio.timeout(10):
-                async with session.put(url, headers=headers, json=payload) as resp:
+                async with session.put(url, headers=headers, **put_kwargs) as resp:
                     if resp.status == 401:
                         # Token expired — refresh and retry once
                         _LOGGER.info(
@@ -7814,10 +7867,30 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                             return False
                         async with asyncio.timeout(10):
                             async with session.put(
-                                url, headers=headers, json=payload
+                                url, headers=headers, **put_kwargs
                             ) as resp2:
-                                return resp2.status in (200, 204)
-                    return resp.status in (200, 201, 204)
+                                ok2 = resp2.status in (200, 204)
+                                if not ok2:
+                                    body2 = await resp2.text()
+                                    _LOGGER.debug(
+                                        "async_put_camera %s/%s: retry HTTP %d — %s",
+                                        cam_id,
+                                        endpoint,
+                                        resp2.status,
+                                        body2[:200],
+                                    )
+                                return ok2
+                    ok = resp.status in (200, 201, 204)
+                    if not ok:
+                        body = await resp.text()
+                        _LOGGER.debug(
+                            "async_put_camera %s/%s: HTTP %d — %s",
+                            cam_id,
+                            endpoint,
+                            resp.status,
+                            body[:200],
+                        )
+                    return ok
         except Exception as err:
             _LOGGER.warning("async_put_camera %s/%s error: %s", cam_id, endpoint, err)
             return False

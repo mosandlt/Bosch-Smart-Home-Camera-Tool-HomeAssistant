@@ -25,9 +25,10 @@ MODULE = "custom_components.bosch_shc_camera"
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
-def _resp_cm(status: int):
+def _resp_cm(status: int, text: str = ""):
     resp = MagicMock()
     resp.status = status
+    resp.text = AsyncMock(return_value=text)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=resp)
     cm.__aexit__ = AsyncMock(return_value=None)
@@ -175,6 +176,7 @@ class TestAsyncPutCamera:
         first_resp.status = 401
         retry_resp = MagicMock()
         retry_resp.status = 403
+        retry_resp.text = AsyncMock(return_value="Forbidden")
 
         call_count = [0]
 
@@ -236,6 +238,66 @@ class TestAsyncPutCamera:
         assert captured_headers[0].get("Authorization") == "Bearer my-secret-token", (
             "PUT must include Authorization: Bearer header with coordinator token"
         )
+
+    @pytest.mark.asyncio
+    async def test_payload_none_sends_truly_empty_body_not_json_braces(self):
+        """payload=None must PUT with data="" (Content-Length: 0) — NOT
+        json={} (which aiohttp would serialize to the 2-byte body "{}").
+
+        Verified from the decompiled Bosch app (research/apk_2.12.0):
+        UpdateSoftReset/UpdateHardReset call the 2-arg PutStringAsync
+        overload, whose default argsAsJson="" produces StringContent("",
+        ..., "application/json") — a genuinely empty body. Needed for
+        soft_reset/hard_reset, the only two endpoints that pass
+        payload=None (every other async_put_camera call site sends a
+        real dict)."""
+        coord = self._bind(_stub_coord())
+        captured_kwargs = []
+        session = MagicMock()
+
+        def _put_cm(*args, **kwargs):
+            captured_kwargs.append(kwargs)
+            return _resp_cm(200)
+
+        session.put = MagicMock(side_effect=_put_cm)
+
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            result = await coord.async_put_camera(CAM_ID, "soft_reset", None)
+
+        assert result is True
+        assert captured_kwargs[0].get("data") == "", (
+            "payload=None must send data='' (truly empty body)"
+        )
+        assert "json" not in captured_kwargs[0], (
+            "payload=None must NOT fall back to json={} — that sends a "
+            "non-empty 2-byte body, diverging from what the real app sends"
+        )
+
+    @pytest.mark.asyncio
+    async def test_payload_dict_still_sends_json_body(self):
+        """Existing behavior for a real payload dict must be unaffected —
+        only payload=None changes to the empty-body path."""
+        coord = self._bind(_stub_coord())
+        captured_kwargs = []
+        session = MagicMock()
+
+        def _put_cm(*args, **kwargs):
+            captured_kwargs.append(kwargs)
+            return _resp_cm(200)
+
+        session.put = MagicMock(side_effect=_put_cm)
+
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await coord.async_put_camera(CAM_ID, "privacy", {"enabled": True})
+
+        assert captured_kwargs[0].get("json") == {"enabled": True}
+        assert "data" not in captured_kwargs[0]
 
 
 # ── get_quality / set_quality / get_quality_params ────────────────────────────

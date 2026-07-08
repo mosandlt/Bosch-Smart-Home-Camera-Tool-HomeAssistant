@@ -483,6 +483,12 @@
     "button": {
       "refresh_snapshot": {
         "name": "Odśwież Migawkę"
+      },
+      "soft_reset": {
+        "name": "Uruchom ponownie kamerę"
+      },
+      "hard_reset": {
+        "name": "Przywróć ustawienia fabryczne kamery"
       }
     },
     "select": {

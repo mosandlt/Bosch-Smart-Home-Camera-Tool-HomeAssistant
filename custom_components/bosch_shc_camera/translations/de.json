@@ -483,6 +483,12 @@
     "button": {
       "refresh_snapshot": {
         "name": "Snapshot aktualisieren"
+      },
+      "soft_reset": {
+        "name": "Kamera neu starten"
+      },
+      "hard_reset": {
+        "name": "Kamera auf Werkseinstellungen zurücksetzen"
       }
     },
     "select": {

@@ -483,6 +483,12 @@
     "button": {
       "refresh_snapshot": {
         "name": "刷新快照"
+      },
+      "soft_reset": {
+        "name": "重启摄像头"
+      },
+      "hard_reset": {
+        "name": "恢复摄像头出厂设置"
       }
     },
     "select": {

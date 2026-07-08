@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.0] - 2026-07-08
+
+Minor — camera restart button (reverse-engineered from the official app)
+
+### Added
+
+- **A "Restart Camera" button**, reverse-engineered from the official Bosch app (same cloud endpoint the app's own restart action uses). **Disabled by default**: live-testing against a real, online, owned camera showed Bosch's cloud currently rejects the request with "entity not found" on this account, even though the request matches the official app byte-for-byte — most likely the endpoint isn't enabled for every account/camera/firmware combination yet. Shipped disabled rather than left out entirely, since the implementation is correct and may simply start working as Bosch rolls it out further; enable it manually in the entity's settings to try it.
+
+5679 tests / mypy --strict / ruff / codespell green, deploy-verified on test HA.
+
 ## [v14.4.13] - 2026-07-08
 
 Patch — RCP session-open race fix

@@ -483,6 +483,12 @@
     "button": {
       "refresh_snapshot": {
         "name": "Actualizar Snapshot"
+      },
+      "soft_reset": {
+        "name": "Reiniciar câmara"
+      },
+      "hard_reset": {
+        "name": "Repor câmara para as predefinições de fábrica"
       }
     },
     "select": {
