@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.3] - 2026-07-08
+
+Patch — fixed several entity icons stuck showing the wrong state
+
+### Fixed
+
+- **Several entities' icons never actually reflected their real state** — most noticeably the camera light and intercom switches, which always showed their "on" icon even while off, and the stream status sensor, which always showed the same icon regardless of whether the stream was idle, connecting, or actively streaming. Root cause: a hardcoded icon in the integration's code was silently overriding the correct, state-aware icon already defined internally. All entity icons are now defined in one place, so state-based icon switching works everywhere it's supposed to.
+
+5679 tests / mypy --strict / ruff / codespell / pylint green.
+
 ## [v14.5.2] - 2026-07-08
 
 Patch — entity names now use sentence case
