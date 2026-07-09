@@ -720,6 +720,10 @@ async def start_recorder(coordinator: BoschCameraCoordinator, cam_id: str) -> No
         return
 
     coordinator._nvr_processes[cam_id] = proc
+    # A fresh spawn is underway — clear any stale give-up/error state from a
+    # prior crash-loop so the sensor doesn't keep showing "error" forever
+    # after a successful restart (issue #42).
+    coordinator._nvr_error_state.pop(cam_id, None)
     # Watcher coroutine restarts ffmpeg once on transient crash and gives up
     # if it crashes again within _RESPAWN_WINDOW_SECONDS.
     task = coordinator.hass.async_create_background_task(
@@ -876,6 +880,28 @@ async def _watch_recorder(
                 )
         except Exception:  # noqa: S110 # best-effort UI notification; error already logged
             pass
+        return
+
+    # Issue #42: a 401/Unauthorized ffmpeg exit means it raced a Bosch
+    # credential rotation — a known-transient condition (the next heartbeat
+    # tick, or this very respawn once it lands after the rotation settles,
+    # will pick up fresh creds), not a persistent fault. Counting it toward
+    # the give-up threshold let two back-to-back cred-rotation races
+    # permanently kill the recorder — observed as a ~1h recording gap when
+    # the NVR switch was toggled on shortly after a LOCAL session opened.
+    # Keep retrying on the normal delay/backoff without touching the crash
+    # counter or the give-up error state.
+    _AUTH_MARKERS = ("401", "unauthorized")
+    if any(marker in err_lower for marker in _AUTH_MARKERS):
+        _LOGGER.warning(
+            "NVR ffmpeg hit an auth failure for %s (cred-rotation race) — "
+            "retrying without counting toward the give-up limit",
+            cam_id[:8],
+        )
+        await asyncio.sleep(_RESPAWN_DELAY_SECONDS)
+        if not should_record(coordinator, cam_id, switch_on=last):
+            return
+        await start_recorder(coordinator, cam_id)
         return
 
     # B13-2: Always record the crash timestamp (not only for short-lived

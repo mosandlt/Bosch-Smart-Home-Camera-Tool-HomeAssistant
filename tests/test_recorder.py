@@ -896,6 +896,7 @@ def _make_phase_coord(opts=None, cam_title="Terrasse", cam_id=CAM_ID_SHORT):
         _nvr_preroll_segment_counts={},
         _nvr_preroll_last_crash={},
         _nvr_preroll_tasks={},
+        _nvr_error_state={},
         hass=MagicMock(),
     )
     coord.hass.async_add_executor_job = AsyncMock(return_value=None)
@@ -1697,6 +1698,25 @@ class TestStartRecorder:
         # Segment dir was created — under the staging tree as of v11.0.4
         # NVR-storage-target refactor (ffmpeg always writes to _staging first).
         assert (tmp_path / "_staging" / "Terrasse").exists()
+
+    @pytest.mark.asyncio
+    async def test_successful_spawn_clears_stale_error_state(self, tmp_path):
+        """Issue #42: _nvr_error_state must not stay stuck showing "error"
+        forever after a give-up — a fresh successful spawn (manual toggle,
+        or the stream-up hook reviving the recorder on the next LOCAL
+        session) must clear it."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord._nvr_error_state[CAM_ID] = "ffmpeg crashed twice"
+        proc = _mock_proc(returncode=None)
+
+        async def _spawn(*args, **kwargs):
+            return proc
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await recorder.start_recorder(coord, CAM_ID)
+        assert CAM_ID not in coord._nvr_error_state
 
     @pytest.mark.asyncio
     async def test_replaces_existing_process(self, tmp_path):
@@ -2730,6 +2750,86 @@ class TestWatchRecorder:
             await recorder._watch_recorder(coord, CAM_ID, proc)
         restart.assert_not_called()
         assert "crashed" in coord._nvr_error_state.get(CAM_ID, "").lower()
+
+    @pytest.mark.asyncio
+    async def test_auth_failure_respawns_without_giveup(self):
+        """Issue #42: a 401/Unauthorized ffmpeg exit (cred-rotation race) must
+        retry without counting toward the 2-crash give-up threshold — a
+        second back-to-back auth-failure must NOT set _nvr_error_state or
+        skip the respawn, unlike a genuine repeated crash."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        # Simulate the reported sequence: a crash was already recorded
+        # moments ago — with a normal crash this would trigger give-up.
+        coord._nvr_recent_crash[CAM_ID] = time.monotonic() - 5
+        proc = _mock_proc(
+            returncode=8, stderr_data=b"method OPTIONS failed: 401 (Unauthorized)"
+        )
+        proc.wait = AsyncMock(return_value=8)
+        coord._nvr_processes[CAM_ID] = proc
+
+        with (
+            patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
+            await recorder._watch_recorder(coord, CAM_ID, proc)
+
+        restart.assert_awaited_once_with(coord, CAM_ID)
+        assert CAM_ID not in coord._nvr_error_state
+        # The crash-window timestamp must be untouched by the auth-failure
+        # path — it doesn't count as a "crash" for give-up purposes.
+        assert coord._nvr_recent_crash[CAM_ID] == pytest.approx(
+            time.monotonic() - 5, abs=1.0
+        )
+
+    @pytest.mark.asyncio
+    async def test_auth_failure_case_insensitive_and_lowercase_401(self):
+        """The marker match must be case-insensitive and also catch a bare
+        '401' without the word 'Unauthorized' in the tail."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = _mock_proc(returncode=8, stderr_data=b"HTTP/1.1 401 \n")
+        proc.wait = AsyncMock(return_value=8)
+        coord._nvr_processes[CAM_ID] = proc
+
+        with (
+            patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
+            await recorder._watch_recorder(coord, CAM_ID, proc)
+
+        restart.assert_awaited_once_with(coord, CAM_ID)
+        assert CAM_ID not in coord._nvr_error_state
+
+    @pytest.mark.asyncio
+    async def test_auth_failure_no_respawn_when_gate_closed_after_sleep(self):
+        """Same gate-recheck-after-sleep discipline as the normal crash path
+        must apply to the auth-failure path too."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = _mock_proc(returncode=8, stderr_data=b"401 unauthorized")
+        proc.wait = AsyncMock(return_value=8)
+        coord._nvr_processes[CAM_ID] = proc
+
+        call_count = [0]
+
+        def _toggling_should_record(c, cid, *, switch_on):
+            call_count[0] += 1
+            return call_count[0] == 1
+
+        with (
+            patch.object(
+                recorder, "should_record", side_effect=_toggling_should_record
+            ),
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+            patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
+        ):
+            await recorder._watch_recorder(coord, CAM_ID, proc)
+
+        restart.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_gate_closed_after_sleep_no_respawn(self):

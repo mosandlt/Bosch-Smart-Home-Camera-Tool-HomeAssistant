@@ -2160,11 +2160,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.5.4** — see the GitHub release page for full notes:
-[**v14.5.4 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.4)
+Latest: **v14.5.5** — see the GitHub release page for full notes:
+[**v14.5.5 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.5)
 
 | Version | Highlights |
 |---|---|
+| **v14.5.5** | **Mini-NVR no longer gives up permanently on a credential-rotation race.** Turning Mini-NVR on shortly after opening a live view could occasionally hit two quick, unrelated connection hiccups in a row — which the recorder mistook for a real double crash and gave up on, requiring a manual switch toggle to recover. That specific hiccup is now recognized as harmless and no longer counts against it; the recorder just keeps retrying until it connects. The stuck "error" indicator is also now cleared properly once recording successfully resumes. |
 | **v14.5.4** | **Fixed Mini-NVR recordings being cut into tiny few-second clips instead of proper continuous segments.** The recorder was being unnecessarily restarted every time Bosch rotated the camera's local access credentials in the background — which for some cameras happens as often as every 15 seconds — interrupting the in-progress recording each time. The credential rotation itself doesn't require a restart, so recording now continues uninterrupted. |
 | **v14.5.3** | **Fixed several entity icons stuck showing the wrong state** — most noticeably the camera light and intercom switches always showing their "on" icon even while off. A hardcoded icon was silently overriding the correct, state-aware icon defined internally; all icons now come from one consistent source. |
 | **v14.5.2** | **Entity display names now use sentence case** ("Live stream" instead of "Live Stream"), matching Home Assistant Core's own convention. Display text only — entity IDs, unique IDs, and automations are unaffected. English only; translated languages keep their own capitalization rules. |
