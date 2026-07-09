@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.4] - 2026-07-09
+
+Patch — Mini-NVR recordings no longer truncated to a few seconds per minute
+
+### Fixed
+
+- **Mini-NVR recordings were being cut into tiny few-second clips instead of continuous 5-minute segments** (issue #41). The recorder was being unnecessarily restarted every time Bosch rotated the camera's local access credentials in the background — which for some cameras happens as often as every 15 seconds — interrupting the in-progress recording each time. The credential rotation itself doesn't require a restart, since the already-open recording connection survives it; only a brand-new connection would need the refreshed credentials, and that path already existed separately for genuine recorder failures. Recording now continues uninterrupted through routine credential rotation.
+
+5796 tests / mypy --strict / ruff / codespell green, 100% coverage, deploy-verified on test HA.
+
 ## [v14.5.3] - 2026-07-08
 
 Patch — fixed several entity icons stuck showing the wrong state

@@ -1,10 +1,11 @@
-"""Coverage pin: every switch/number call site added by the 2026-07-07
-notify-on-total-failure fix must exercise its `if not success:` warning
-branch — the first CI run of v14.4.9 caught these at 99.93% coverage
-(switch.py lines 122/673/680/711/718/748/755/1121/1129, number.py:340),
-none of which were hit by the existing suite (every prior test only
-exercised the success path for these four switches + the light-intensity
-number entity).
+"""Coverage pin: number.py's front-light-intensity call site added by the
+2026-07-07 notify-on-total-failure fix must exercise its `if not success:`
+warning branch (number.py:340) — none of which were hit by the existing
+suite (prior tests only exercised the success path).
+
+Note: the equivalent switch.py coverage (camera-light/front-light/
+wallwasher/notifications switches) for this same fix now lives in
+tests/test_switch.py.
 """
 
 from __future__ import annotations
@@ -32,94 +33,6 @@ def _coord(**overrides: object) -> SimpleNamespace:
 
 def _entry() -> SimpleNamespace:
     return SimpleNamespace(entry_id="01ENTRY", data={}, options={})
-
-
-@pytest.mark.asyncio
-class TestCameraLightSwitchWarnsOnFailure:
-    async def test_turn_on_failure_warns(self, caplog):
-        from custom_components.bosch_shc_camera.switch import BoschCameraLightSwitch
-
-        sw = BoschCameraLightSwitch(_coord(), CAM_ID, _entry())
-        with caplog.at_level(logging.WARNING):
-            await sw.async_turn_on()
-        assert any("failed on all paths" in r.message for r in caplog.records)
-
-    async def test_turn_off_failure_warns(self, caplog):
-        from custom_components.bosch_shc_camera.switch import BoschCameraLightSwitch
-
-        sw = BoschCameraLightSwitch(_coord(), CAM_ID, _entry())
-        with caplog.at_level(logging.WARNING):
-            await sw.async_turn_off()
-        assert any("failed on all paths" in r.message for r in caplog.records)
-
-    async def test_turn_on_success_is_silent(self, caplog):
-        from custom_components.bosch_shc_camera.switch import BoschCameraLightSwitch
-
-        sw = BoschCameraLightSwitch(
-            _coord(async_cloud_set_camera_light=AsyncMock(return_value=True)),
-            CAM_ID,
-            _entry(),
-        )
-        with caplog.at_level(logging.WARNING):
-            await sw.async_turn_on()
-        assert not any("failed on all paths" in r.message for r in caplog.records)
-
-
-@pytest.mark.asyncio
-class TestFrontLightSwitchWarnsOnFailure:
-    async def test_turn_on_failure_warns(self, caplog):
-        from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
-
-        sw = BoschFrontLightSwitch(_coord(), CAM_ID, _entry())
-        with caplog.at_level(logging.WARNING):
-            await sw.async_turn_on()
-        assert any("failed on all paths" in r.message for r in caplog.records)
-
-    async def test_turn_off_failure_warns(self, caplog):
-        from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
-
-        sw = BoschFrontLightSwitch(_coord(), CAM_ID, _entry())
-        with caplog.at_level(logging.WARNING):
-            await sw.async_turn_off()
-        assert any("failed on all paths" in r.message for r in caplog.records)
-
-
-@pytest.mark.asyncio
-class TestWallwasherSwitchWarnsOnFailure:
-    async def test_turn_on_failure_warns(self, caplog):
-        from custom_components.bosch_shc_camera.switch import BoschWallwasherSwitch
-
-        sw = BoschWallwasherSwitch(_coord(), CAM_ID, _entry())
-        with caplog.at_level(logging.WARNING):
-            await sw.async_turn_on()
-        assert any("failed on all paths" in r.message for r in caplog.records)
-
-    async def test_turn_off_failure_warns(self, caplog):
-        from custom_components.bosch_shc_camera.switch import BoschWallwasherSwitch
-
-        sw = BoschWallwasherSwitch(_coord(), CAM_ID, _entry())
-        with caplog.at_level(logging.WARNING):
-            await sw.async_turn_off()
-        assert any("failed on all paths" in r.message for r in caplog.records)
-
-
-@pytest.mark.asyncio
-class TestNotificationsSwitchWarnsOnFailure:
-    async def test_turn_on_failure_warns(self, caplog):
-        from custom_components.bosch_shc_camera.switch import BoschNotificationsSwitch
-
-        sw = BoschNotificationsSwitch(_coord(), CAM_ID, _entry())
-        with caplog.at_level(logging.WARNING):
-            await sw.async_turn_on()
-        assert any("failed on all paths" in r.message for r in caplog.records)
-
-    async def test_turn_off_failure_warns(self, caplog):
-        from custom_components.bosch_shc_camera.switch import BoschNotificationsSwitch
-
-        sw = BoschNotificationsSwitch(_coord(), CAM_ID, _entry())
-        with caplog.at_level(logging.WARNING):
-            await sw.async_turn_off()
-        assert any("failed on all paths" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio

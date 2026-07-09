@@ -186,7 +186,7 @@ def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
           silently overwrite an existing field.
         * ``user_input`` itself is never mutated.
 
-    Pure helper, fully tested in ``tests/test_config_flow_sections.py``.
+    Pure helper, fully tested in ``tests/test_config_flow.py``.
     """
     flat: dict[str, Any] = {}
     seen_section_keys: set[str] = set()

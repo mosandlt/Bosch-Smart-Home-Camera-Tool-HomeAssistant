@@ -1,19 +1,34 @@
-"""Tests for the Bosch community RSS maintenance fetcher (maintenance.py).
+"""Tests for the Bosch community RSS maintenance fetcher (maintenance.py) and
+the coordinator hooks that consume it.
 
 Background: Bosch announces maintenance windows in their community forum
 (community.bosch-smarthome.com/.../Wartungsarbeiten). The 19.05.2026 camera
 maintenance reported by Thomas was at 07:00–10:00 MESZ — fixture below uses
 that real announcement as a regression input.
+
+Covers, in order:
+- `_parse_window` / `_parse_pub_date` / `_is_camera_relevant` / `_prefers`
+  parsing and ranking helpers.
+- `_parse_feed_body` (RSS + Atom) and `_parse_html_fallback`.
+- `async_fetch_maintenance` end to end against a mocked aiohttp session.
+- `BoschCameraCoordinator._async_maybe_announce_cloud_state`: the
+  cloud-up/cloud-down transition notifier.
+- `BoschCameraCoordinator._async_maybe_announce_maintenance`: the
+  scheduled/active/past maintenance-window notify hook.
+- `BoschCameraCoordinator._async_refresh_maintenance`: the periodic +
+  reactive refresh helper (cooldown gating, cache retention on failure).
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from custom_components.bosch_shc_camera import BoschCameraCoordinator
 from custom_components.bosch_shc_camera.maintenance import (
     MaintenanceWindow,
     _is_camera_relevant,
@@ -372,3 +387,683 @@ class TestParsePubDate:
         d = _parse_pub_date("not a date")
         after = datetime.now(tz=UTC)
         assert before <= d <= after
+
+
+# ── BoschCameraCoordinator._async_maybe_announce_cloud_state ────────────
+#
+# Pins:
+# - First observation (healthy or failed) is silent — baseline only.
+# - One-tick failure blips never fire (must persist ≥ _CLOUD_OUTAGE_NOTIFY_AFTER_S).
+# - Outage announcement fires exactly once when the threshold is crossed.
+# - Recovery fires immediately when the next success arrives after an outage.
+# - Active RSS maintenance suppresses both outage and recovery announcements.
+# - Notify-service failure is swallowed.
+# - No notify service configured = silent + state still tracked.
+
+
+def _make_cloud_state_coord(
+    notify_service: str = "thomas", maintenance: MaintenanceWindow | None = None
+) -> SimpleNamespace:
+    coord = SimpleNamespace()
+    coord.options = {"alert_notify_service": notify_service}
+    coord._cloud_outage_started_at = None
+    coord._cloud_outage_notified = False
+    coord._CLOUD_OUTAGE_NOTIFY_AFTER_S = 60.0
+    coord._maintenance_cache = maintenance
+    coord.hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
+    coord._async_dispatch_cloud_alert = (
+        BoschCameraCoordinator._async_dispatch_cloud_alert.__get__(coord)
+    )
+    return coord
+
+
+def _active_maintenance() -> MaintenanceWindow:
+    ref = datetime(2026, 5, 19, 7, 30, tzinfo=UTC)
+    return MaintenanceWindow(
+        title="Wartung Kamera-Infrastruktur",
+        link="https://example/x",
+        pub_date=ref - timedelta(hours=12),
+        summary="07:00–10:00 MESZ",
+        scheduled_start=ref - timedelta(hours=1),
+        scheduled_end=ref + timedelta(hours=2),
+        source="rss:Wartungsarbeiten",
+        camera_relevant=True,
+    )
+
+
+@pytest.mark.asyncio
+class TestCloudStateAnnounce:
+    async def test_first_success_is_silent(self):
+        coord = _make_cloud_state_coord()
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, True)
+        coord.hass.services.async_call.assert_not_called()
+
+    async def test_first_failure_is_silent(self):
+        """Single failed tick must never fire — could be a transient blip."""
+        coord = _make_cloud_state_coord()
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        coord.hass.services.async_call.assert_not_called()
+        assert coord._cloud_outage_started_at == 1000.0
+        assert coord._cloud_outage_notified is False
+
+    async def test_failure_under_threshold_stays_silent(self):
+        coord = _make_cloud_state_coord()
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1030.0
+        ):  # +30s
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        coord.hass.services.async_call.assert_not_called()
+        assert coord._cloud_outage_notified is False
+
+    async def test_failure_past_threshold_fires_once(self):
+        coord = _make_cloud_state_coord()
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1070.0
+        ):  # +70s
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        coord.hass.services.async_call.assert_called_once()
+        args = coord.hass.services.async_call.await_args.args
+        assert args[0] == "notify"
+        assert args[1] == "thomas"
+        assert "nicht erreichbar" in args[2]["title"].lower()
+        assert coord._cloud_outage_notified is True
+        # Subsequent failed ticks don't re-fire.
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1200.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        assert coord.hass.services.async_call.await_count == 1
+
+    async def test_blip_clears_without_announcing(self):
+        """One failed tick followed by a success must not announce anything."""
+        coord = _make_cloud_state_coord()
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1010.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, True)
+        coord.hass.services.async_call.assert_not_called()
+        assert coord._cloud_outage_started_at is None
+        assert coord._cloud_outage_notified is False
+
+    async def test_recovery_fires_immediately(self):
+        coord = _make_cloud_state_coord()
+        coord._cloud_outage_started_at = 1000.0
+        coord._cloud_outage_notified = True
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1500.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, True)
+        coord.hass.services.async_call.assert_called_once()
+        title = coord.hass.services.async_call.await_args.args[2]["title"]
+        assert "wieder erreichbar" in title.lower()
+        assert coord._cloud_outage_notified is False
+        assert coord._cloud_outage_started_at is None
+
+    async def test_active_maintenance_suppresses_outage(self):
+        coord = _make_cloud_state_coord(maintenance=_active_maintenance())
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch("custom_components.bosch_shc_camera.maintenance.datetime") as dt_mock,
+        ):
+            dt_mock.now.return_value = datetime(2026, 5, 19, 7, 30, tzinfo=UTC)
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+        ):
+            with patch.object(
+                MaintenanceWindow,
+                "state",
+                return_value="active",
+            ):
+                await BoschCameraCoordinator._async_maybe_announce_cloud_state(
+                    coord, False
+                )
+        coord.hass.services.async_call.assert_not_called()
+        # Internal state still flipped so a recovery during maintenance does
+        # not later re-fire — but no notification was sent.
+        assert coord._cloud_outage_notified is True
+
+    async def test_active_maintenance_suppresses_recovery(self):
+        coord = _make_cloud_state_coord(maintenance=_active_maintenance())
+        coord._cloud_outage_notified = True
+        coord._cloud_outage_started_at = 1000.0
+        with patch.object(MaintenanceWindow, "state", return_value="active"):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, True)
+        coord.hass.services.async_call.assert_not_called()
+        # Tracker still reset so the next genuine outage starts fresh.
+        assert coord._cloud_outage_notified is False
+        assert coord._cloud_outage_started_at is None
+
+    async def test_no_service_configured_still_tracks_state(self):
+        coord = _make_cloud_state_coord(notify_service="")
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        coord.hass.services.async_call.assert_not_called()
+        # State still tracked so configuring a service mid-outage doesn't
+        # surface a stale notification on the next failed tick.
+        assert coord._cloud_outage_notified is True
+
+    async def test_notify_failure_is_swallowed(self):
+        coord = _make_cloud_state_coord()
+        coord.hass.services.async_call = AsyncMock(side_effect=RuntimeError("svc down"))
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+        ):
+            # Must not raise.
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        # State still flipped so we do not retry-storm.
+        assert coord._cloud_outage_notified is True
+
+    async def test_multiple_services_all_called(self):
+        coord = _make_cloud_state_coord(notify_service="thomas, signalhome")
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        assert coord.hass.services.async_call.await_count == 2
+        services = {c.args[1] for c in coord.hass.services.async_call.await_args_list}
+        assert services == {"thomas", "signalhome"}
+
+    async def test_notify_prefix_stripped(self):
+        """A configured `notify.thomas` (with the `notify.` prefix already
+        present) must not be concatenated onto the hardcoded `domain="notify"`
+        — that combination would call `notify.notify.thomas`, which HA
+        rejects with `Action notify.notify.thomas not found`. The helper
+        splits any `notify.<name>` form so the call lands as
+        `domain="notify"`, `service="<name>"`."""
+        coord = _make_cloud_state_coord(notify_service="notify.thomas")
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+        ):
+            await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
+        coord.hass.services.async_call.assert_called_once()
+        args = coord.hass.services.async_call.await_args.args
+        assert args[0] == "notify"
+        assert args[1] == "thomas"  # NOT "notify.thomas"
+
+
+# ── BoschCameraCoordinator._async_maybe_announce_maintenance ────────────
+#
+# Pin every transition path so the same window can never spam the user, but a
+# genuine state change (scheduled -> active) gets one fresh announcement.
+
+
+def _mw_for_announce(
+    state: str, link: str = "https://example/x", camera_relevant: bool = True
+) -> MaintenanceWindow:
+    """Build a MaintenanceWindow that classifies as `state` at frozen 'now'.
+
+    Picks start/end relative to a fixed reference instant so the same
+    `state()` evaluation lands in the expected bucket regardless of wall
+    clock.
+    """
+    ref = datetime(2026, 5, 19, 7, 30, tzinfo=UTC)
+    pub = ref - timedelta(hours=12)
+    if state == "active":
+        start, end = ref - timedelta(hours=1), ref + timedelta(hours=2)
+    elif state == "scheduled":
+        start, end = ref + timedelta(hours=3), ref + timedelta(hours=5)
+    elif state == "past":
+        start, end = ref - timedelta(hours=5), ref - timedelta(hours=3)
+    elif state == "recent":
+        start, end = None, None
+        pub = ref - timedelta(hours=2)  # within recent window
+    else:  # unknown
+        start, end = None, None
+        pub = ref - timedelta(days=60)
+    return MaintenanceWindow(
+        title="Wartung Kamera-Infrastruktur",
+        link=link,
+        pub_date=pub,
+        summary="Window between 07:00 and 10:00 MESZ",
+        scheduled_start=start,
+        scheduled_end=end,
+        source="rss:Wartungsarbeiten",
+        camera_relevant=camera_relevant,
+    )
+
+
+def _make_announce_coord(notify_service: str = "thomas") -> SimpleNamespace:
+    """Stub coordinator carrying only what `_async_maybe_announce_maintenance` reads."""
+    coord = SimpleNamespace()
+    coord.options = {"alert_notify_service": notify_service}
+    coord._maintenance_notified_key = None
+    coord.hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
+    return coord
+
+
+@pytest.mark.asyncio
+class TestMaintenanceAnnounce:
+    async def _state_fixed_to(self, coord: SimpleNamespace, state: str) -> None:
+        """Patch `MaintenanceWindow.state` so the test does not race wall clock."""
+        # We just rely on _mw_for_announce building windows that classify
+        # naturally — but state() does evaluate against utcnow(). Freeze via
+        # monkeypatch in tests that care (only "recent"/"unknown" depend on
+        # now; "active" uses a fixed +/-1h window around 2026-05-19 which may
+        # have already passed in CI). Use freezegun via pytest-freezer
+        # (already in deps).
+        pass
+
+    async def test_announces_on_scheduled(self, freezer):
+        freezer.move_to("2026-05-19T07:30:00+00:00")
+        coord = _make_announce_coord()
+        mw = _mw_for_announce("scheduled")
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, mw)
+        coord.hass.services.async_call.assert_called_once()
+        args = coord.hass.services.async_call.await_args
+        assert args.args[0] == "notify"
+        assert args.args[1] == "thomas"
+        assert "geplant" in args.args[2]["title"].lower()
+        assert "Wartung" in args.args[2]["message"]
+        assert coord._maintenance_notified_key == (mw.link, "scheduled")
+
+    async def test_announces_again_on_scheduled_to_active(self, freezer):
+        freezer.move_to("2026-05-19T07:30:00+00:00")
+        coord = _make_announce_coord()
+        sched = _mw_for_announce("scheduled")
+        active = _mw_for_announce("active", link=sched.link)
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, sched)
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, active)
+        assert coord.hass.services.async_call.await_count == 2
+        # Second call carries the active wording.
+        second = coord.hass.services.async_call.await_args_list[1]
+        assert "läuft" in second.args[2]["title"].lower()
+        assert coord._maintenance_notified_key == (active.link, "active")
+
+    async def test_dedupes_duplicate_calls(self, freezer):
+        freezer.move_to("2026-05-19T07:30:00+00:00")
+        coord = _make_announce_coord()
+        mw = _mw_for_announce("scheduled")
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, mw)
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, mw)
+        coord.hass.services.async_call.assert_called_once()
+
+    @pytest.mark.parametrize("silent_state", ["past", "recent", "unknown"])
+    async def test_silent_for_non_actionable_states(self, freezer, silent_state):
+        freezer.move_to("2026-05-19T07:30:00+00:00")
+        coord = _make_announce_coord()
+        mw = _mw_for_announce(silent_state)
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, mw)
+        coord.hass.services.async_call.assert_not_called()
+
+    async def test_silent_when_not_camera_relevant(self, freezer):
+        freezer.move_to("2026-05-19T07:30:00+00:00")
+        coord = _make_announce_coord()
+        mw = _mw_for_announce("active", camera_relevant=False)
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, mw)
+        coord.hass.services.async_call.assert_not_called()
+
+    async def test_no_service_configured_still_dedupes(self, freezer):
+        """Without a notify service we record the key anyway so the user is
+        not pestered the moment they later configure a service mid-window."""
+        freezer.move_to("2026-05-19T07:30:00+00:00")
+        coord = _make_announce_coord(notify_service="")
+        mw = _mw_for_announce("scheduled")
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, mw)
+        coord.hass.services.async_call.assert_not_called()
+        assert coord._maintenance_notified_key == (mw.link, "scheduled")
+
+    async def test_notify_failure_is_swallowed(self, freezer):
+        freezer.move_to("2026-05-19T07:30:00+00:00")
+        coord = _make_announce_coord()
+        coord.hass.services.async_call = AsyncMock(
+            side_effect=RuntimeError("service down")
+        )
+        mw = _mw_for_announce("active")
+        # Must not raise — the maintenance fetch loop should not be brittle
+        # to a misconfigured notify service.
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, mw)
+        # Key still gets recorded so we don't retry-storm on every coordinator tick.
+        assert coord._maintenance_notified_key == (mw.link, "active")
+
+    async def test_multiple_services_all_called(self, freezer):
+        """alert_notify_service can be a comma-separated list — every entry is called."""
+        freezer.move_to("2026-05-19T07:30:00+00:00")
+        coord = _make_announce_coord(notify_service="thomas, signalhome")
+        mw = _mw_for_announce("active")
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, mw)
+        assert coord.hass.services.async_call.await_count == 2
+        called = {c.args[1] for c in coord.hass.services.async_call.await_args_list}
+        assert called == {"thomas", "signalhome"}
+
+    async def test_new_window_link_re_announces(self, freezer):
+        """A different announcement (new Bosch RSS item, different link)
+        should re-announce even if the previous one was already 'scheduled'."""
+        freezer.move_to("2026-05-19T07:30:00+00:00")
+        coord = _make_announce_coord()
+        first = _mw_for_announce("scheduled", link="https://example/a")
+        second = _mw_for_announce("scheduled", link="https://example/b")
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, first)
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, second)
+        assert coord.hass.services.async_call.await_count == 2
+
+    async def test_active_to_past_announces_ended(self, freezer):
+        """active → past transition for the same window fires one final
+        'beendet' notification so users know the cloud should be back."""
+        freezer.move_to("2026-05-19T07:30:00+00:00")
+        coord = _make_announce_coord()
+        active = _mw_for_announce("active")
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, active)
+        # Now jump past the window end (was ref + 2h)
+        freezer.move_to("2026-05-19T10:00:00+00:00")
+        past = _mw_for_announce("past", link=active.link)
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, past)
+        assert coord.hass.services.async_call.await_count == 2
+        second = coord.hass.services.async_call.await_args_list[1]
+        assert "beendet" in second.args[2]["title"].lower()
+        assert coord._maintenance_notified_key == (past.link, "past")
+
+    async def test_stale_past_window_does_not_announce(self, freezer):
+        """A 'past' announcement discovered without a prior 'active' phase
+        (e.g. integration restart after the window already closed) must
+        stay silent — otherwise users get spammed about historical
+        maintenance every time HA reboots."""
+        freezer.move_to("2026-05-19T10:00:00+00:00")
+        coord = _make_announce_coord()
+        past = _mw_for_announce("past")
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, past)
+        coord.hass.services.async_call.assert_not_called()
+        # Dedupe key is still set so a follow-up tick stays silent too.
+        assert coord._maintenance_notified_key == (past.link, "past")
+
+    async def test_full_scheduled_active_past_lifecycle(self, freezer):
+        """End-to-end: scheduled → active → past for the same window
+        triggers exactly three notifications in the right order."""
+        freezer.move_to("2026-05-19T03:00:00+00:00")
+        coord = _make_announce_coord()
+        link = "https://example/abc"
+        # Phase 1: scheduled (now is before window start)
+        sched = _mw_for_announce("scheduled", link=link)
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, sched)
+        # Phase 2: active (jump into window)
+        freezer.move_to("2026-05-19T07:30:00+00:00")
+        active = _mw_for_announce("active", link=link)
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, active)
+        # Phase 3: past (jump past end)
+        freezer.move_to("2026-05-19T10:00:00+00:00")
+        past = _mw_for_announce("past", link=link)
+        await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, past)
+        assert coord.hass.services.async_call.await_count == 3
+        titles = [
+            c.args[2]["title"].lower()
+            for c in coord.hass.services.async_call.await_args_list
+        ]
+        assert "geplant" in titles[0]
+        assert "läuft" in titles[1]
+        assert "beendet" in titles[2]
+
+
+# ── BoschCameraCoordinator._async_refresh_maintenance ────────────────────
+#
+# Periodic + reactive refresh helper that hits the Bosch community RSS feed
+# in the background. The cooldown logic and the exception-swallow path are
+# not exercised by the tests above because they go through the public RSS
+# fetcher directly.
+
+
+def _mw_for_refresh() -> MaintenanceWindow:
+    ref = datetime(2026, 5, 19, 7, 30, tzinfo=UTC)
+    return MaintenanceWindow(
+        title="Wartung Kamera-Infrastruktur",
+        link="https://example/x",
+        pub_date=ref - timedelta(hours=12),
+        summary="07:00–10:00 MESZ",
+        scheduled_start=ref - timedelta(hours=1),
+        scheduled_end=ref + timedelta(hours=2),
+        source="rss:Wartungsarbeiten",
+        camera_relevant=True,
+    )
+
+
+def _make_refresh_coord(
+    *,
+    last_fetch: float = float("-inf"),
+    cooldown: float = 300.0,
+    cache: MaintenanceWindow | None = None,
+) -> SimpleNamespace:
+    coord = SimpleNamespace()
+    coord._maintenance_last_fetch = last_fetch
+    coord._MAINTENANCE_REACTIVE_COOLDOWN_S = cooldown
+    coord._maintenance_cache = cache
+    coord.hass = SimpleNamespace(data={})
+    # Stub out announce side-effect so the test only exercises the refresh path.
+    coord._async_maybe_announce_maintenance = AsyncMock(return_value=None)
+    return coord
+
+
+@pytest.mark.asyncio
+class TestAsyncRefreshMaintenance:
+    async def test_periodic_fetch_updates_cache(self):
+        coord = _make_refresh_coord()
+        new_mw = _mw_for_refresh()
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=AsyncMock(return_value=new_mw),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=object(),
+            ),
+        ):
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=False
+            )
+        assert coord._maintenance_cache is new_mw
+        assert coord._maintenance_last_fetch == 1000.0
+        coord._async_maybe_announce_maintenance.assert_awaited_once_with(new_mw)
+
+    async def test_reactive_within_cooldown_is_noop(self):
+        coord = _make_refresh_coord(last_fetch=950.0, cooldown=300.0)
+        fetch_mock = AsyncMock(return_value=_mw_for_refresh())
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=fetch_mock,
+            ),
+        ):
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=True
+            )
+        fetch_mock.assert_not_awaited()
+        # Cache untouched, last_fetch untouched (we returned before stamping).
+        assert coord._maintenance_cache is None
+        assert coord._maintenance_last_fetch == 950.0
+
+    async def test_reactive_outside_cooldown_runs(self):
+        coord = _make_refresh_coord(last_fetch=500.0, cooldown=300.0)
+        new_mw = _mw_for_refresh()
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=AsyncMock(return_value=new_mw),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=object(),
+            ),
+        ):
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=True
+            )
+        assert coord._maintenance_cache is new_mw
+
+    async def test_periodic_ignores_cooldown(self):
+        """Cooldown gate only applies to reactive calls — periodic ticks
+        always fetch when scheduled."""
+        coord = _make_refresh_coord(last_fetch=950.0, cooldown=300.0)
+        new_mw = _mw_for_refresh()
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=AsyncMock(return_value=new_mw),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=object(),
+            ),
+        ):
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=False
+            )
+        assert coord._maintenance_cache is new_mw
+
+    async def test_fetch_exception_keeps_previous_cache(self):
+        previous = _mw_for_refresh()
+        coord = _make_refresh_coord(cache=previous)
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=AsyncMock(side_effect=RuntimeError("network broken")),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=object(),
+            ),
+        ):
+            # Must not raise.
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=False
+            )
+        # Cache unchanged — sensor stays stable across community-site outage.
+        assert coord._maintenance_cache is previous
+        coord._async_maybe_announce_maintenance.assert_not_awaited()
+
+    async def test_fetch_returns_none_keeps_previous_cache(self):
+        previous = _mw_for_refresh()
+        coord = _make_refresh_coord(cache=previous)
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.async_get_clientsession",
+                return_value=object(),
+            ),
+        ):
+            await BoschCameraCoordinator._async_refresh_maintenance(
+                coord, reactive=False
+            )
+        assert coord._maintenance_cache is previous
+        coord._async_maybe_announce_maintenance.assert_not_awaited()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Section: RSS parser edge cases (relocated from
+# tests/test_misc_small_gaps.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestMaintenanceParserEdges:
+    def test_invalid_date_returns_none_pair(self):
+        """`_parse_window` swallows a ValueError from invalid date components
+        (e.g. 30. Februar) and returns (None, None)."""
+        from custom_components.bosch_shc_camera.maintenance import _parse_window
+
+        # 30. Februar is unparseable — the datetime constructor raises.
+        text = "Wartung am 30.02.2026 von 07:00 bis 10:00 Uhr MESZ"
+        pub = datetime(2026, 2, 28, tzinfo=UTC)
+        start, end = _parse_window(text, pub)
+        assert start is None and end is None
+
+    @pytest.mark.asyncio
+    async def test_empty_title_entry_is_skipped(self):
+        """RSS items without a title must be skipped instead of crashing on
+        the empty string."""
+        from custom_components.bosch_shc_camera import maintenance
+
+        rss = b"""<?xml version="1.0"?>
+        <rss><channel>
+          <item>
+            <title></title>
+            <link>https://example/empty</link>
+            <pubDate>Tue, 19 May 2026 06:00:00 +0000</pubDate>
+            <description>placeholder</description>
+          </item>
+          <item>
+            <title>Wartung Kamera-Cloud 19.05.2026 07:00-10:00 MESZ</title>
+            <link>https://example/good</link>
+            <pubDate>Tue, 19 May 2026 06:00:00 +0000</pubDate>
+            <description>Wartung der Kamera-Cloud</description>
+          </item>
+        </channel></rss>"""
+
+        class _FakeResp:
+            status = 200
+
+            async def read(self):
+                return rss
+
+            async def text(self):
+                return rss.decode()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+        class _FakeSession:
+            def get(self, _url, **_kw):
+                return _FakeResp()
+
+        result = await maintenance.async_fetch_maintenance(_FakeSession())
+        assert result is not None
+        assert "Wartung" in result.title

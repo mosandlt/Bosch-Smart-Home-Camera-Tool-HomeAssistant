@@ -295,3 +295,44 @@ class TestAsyncInstall:
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u._attr_supported_features & UpdateEntityFeature.PROGRESS
+
+
+# ── Doubled-prefix entity_id naming regression ──────────────────────────
+#
+# Source: Andrew75 forum post 998974/15 (2026-05-15) reported entity IDs
+# like button.bosch_est_bosch_est_refresh_snapshot instead of
+# button.bosch_est_refresh_snapshot — the same bug class also affected
+# update.py's BoschFirmwareUpdate.
+#
+# Root cause: classes with `_attr_has_entity_name = True` AND
+# `_attr_name = f"Bosch {self._cam_title} <Suffix>"` caused HA to prepend
+# the device name automatically AND the code re-prepended "Bosch {title}"
+# manually.
+#
+# Fix (v14.2.2): remove all `_attr_name` assignments; use
+# `_attr_translation_key` instead so HA resolves the entity name from
+# translations/en.json at runtime. `_attr_name` must be None (unset) for
+# translation_key-based naming to work.
+
+
+class TestFirmwareUpdateNaming:
+    def test_attr_name_is_none(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
+        u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
+        name = getattr(u, "_attr_name", None)
+        assert name is None or not name.startswith("Bosch "), (
+            f"_attr_name={name!r} still contains the 'Bosch' prefix"
+        )
+
+    def test_translation_key_is_firmware_update(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
+        u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
+        assert u._attr_translation_key == "firmware_update"
+
+    def test_has_entity_name_is_true(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+
+        u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
+        assert u._attr_has_entity_name is True

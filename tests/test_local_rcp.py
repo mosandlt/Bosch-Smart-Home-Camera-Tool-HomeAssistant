@@ -288,3 +288,30 @@ class TestRcpReadRemoteSyncErrors:
                 "proxy-20.live.cbs.boschsecurity.com:42090/abc123", "0x0c22", "P_OCTET"
             )
         assert result == b"\x48\x65\x6c\x6c\x6f"  # "Hello"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Section: rcp_read_remote_sync non-200 branch (relocated from
+# tests/test_remaining_cheap_gaps.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRcpReadRemoteSyncNon200:
+    def test_returns_none_when_proxy_returns_500(self):
+        """Cloud-Proxy `/rcp.xml` returning HTTP 500 → debug log + None, no
+        XML parse attempted."""
+        from custom_components.bosch_shc_camera import local_rcp
+
+        fake_resp = MagicMock()
+        fake_resp.status = 500
+        fake_resp.read = MagicMock(return_value=b"")
+        fake_resp.__enter__ = MagicMock(return_value=fake_resp)
+        fake_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=fake_resp):
+            result = local_rcp.rcp_read_remote_sync(
+                "proxy.example/abc123",
+                "0x0d00",
+                "P_OCTET",
+            )
+        assert result is None

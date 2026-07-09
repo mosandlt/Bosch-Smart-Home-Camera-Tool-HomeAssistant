@@ -556,3 +556,134 @@ class TestAsyncDigestRequest:
         ).hexdigest()
 
         assert f'response="{expected_response}"' in auth_hdr
+
+
+# ---------------------------------------------------------------------------
+# Stale-nonce retry: a second 401 carrying stale=true means the server
+# accepted the credentials but wants a fresh nonce — retry once more instead
+# of giving up.
+# ---------------------------------------------------------------------------
+
+
+def _make_resp(
+    status: int,
+    headers: dict[str, str] | None = None,
+    body: bytes = b"",
+) -> MagicMock:
+    """Minimal aiohttp.ClientResponse mock."""
+    r = MagicMock()
+    r.status = status
+    r.headers = headers or {}
+    r.read = AsyncMock(return_value=body)
+    r.__aenter__ = AsyncMock(return_value=r)
+    r.__aexit__ = AsyncMock(return_value=False)
+    return r
+
+
+def _digest_hdr(nonce: str = "nonce1", stale: str = "") -> str:
+    parts = [
+        'realm="cam@bosch.com"',
+        f'nonce="{nonce}"',
+        "algorithm=MD5",
+        'qop="auth"',
+    ]
+    if stale:
+        parts.append(f"stale={stale}")
+    return "Digest " + ", ".join(parts)
+
+
+@pytest.mark.asyncio
+class TestAuthUtilsStaleNonce:
+    """When the second 401 carries stale=true, retry with the new nonce."""
+
+    async def test_stale_true_triggers_third_request(self) -> None:
+        session = MagicMock()
+        session.request = AsyncMock()
+
+        resp_401_first = _make_resp(
+            401, headers={"WWW-Authenticate": _digest_hdr("nonce1")}
+        )
+        resp_401_stale = _make_resp(
+            401,
+            headers={"WWW-Authenticate": _digest_hdr("nonce2", stale="true")},
+        )
+        resp_200 = _make_resp(200, body=b"ok")
+
+        session.request.side_effect = [resp_401_first, resp_401_stale, resp_200]
+
+        result = await async_digest_request(
+            session, "GET", "https://cam/snap.jpg", "user", "pass"
+        )
+
+        assert result.status == 200
+        assert session.request.call_count == 3, (
+            "Stale-nonce path must issue a third request with the refreshed nonce"
+        )
+        # Third call must carry Authorization built from the NEW nonce
+        _, third_kwargs = session.request.call_args
+        auth = third_kwargs["headers"]["Authorization"]
+        assert "nonce2" in auth, "Third request must use the new stale nonce"
+
+    async def test_stale_false_does_not_retry(self) -> None:
+        """stale=false on second 401 → second response returned as-is (no third request)."""
+        session = MagicMock()
+        session.request = AsyncMock()
+
+        resp_401_first = _make_resp(
+            401, headers={"WWW-Authenticate": _digest_hdr("nonce1")}
+        )
+        resp_401_nonstale = _make_resp(
+            401,
+            headers={"WWW-Authenticate": _digest_hdr("nonce2", stale="false")},
+        )
+
+        session.request.side_effect = [resp_401_first, resp_401_nonstale]
+
+        result = await async_digest_request(
+            session, "GET", "https://cam/snap.jpg", "user", "bad_pass"
+        )
+
+        assert result.status == 401
+        assert session.request.call_count == 2
+
+    async def test_second_401_no_www_auth_returns_as_is(self) -> None:
+        """Second 401 without WWW-Authenticate → returned immediately (no retry)."""
+        session = MagicMock()
+        session.request = AsyncMock()
+
+        resp_401_first = _make_resp(401, headers={"WWW-Authenticate": _digest_hdr()})
+        resp_401_bare = _make_resp(401, headers={})
+
+        session.request.side_effect = [resp_401_first, resp_401_bare]
+
+        result = await async_digest_request(
+            session, "GET", "https://cam/snap.jpg", "user", "pass"
+        )
+
+        assert result.status == 401
+        assert session.request.call_count == 2
+
+    async def test_stale_retry_uses_caller_headers(self) -> None:
+        """Custom caller headers survive into the stale-retry third request."""
+        session = MagicMock()
+        session.request = AsyncMock()
+
+        resp_401_first = _make_resp(
+            401, headers={"WWW-Authenticate": _digest_hdr("n1")}
+        )
+        resp_401_stale = _make_resp(
+            401,
+            headers={"WWW-Authenticate": _digest_hdr("n2", stale="true")},
+        )
+        resp_200 = _make_resp(200)
+
+        session.request.side_effect = [resp_401_first, resp_401_stale, resp_200]
+
+        custom = {"X-Source": "test"}
+        await async_digest_request(
+            session, "GET", "https://cam/snap.jpg", "u", "p", headers=custom
+        )
+
+        _, third_kw = session.request.call_args
+        assert third_kw["headers"].get("X-Source") == "test"
+        assert "Authorization" in third_kw["headers"]

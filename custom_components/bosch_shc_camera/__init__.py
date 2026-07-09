@@ -1375,16 +1375,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             )
             self._bg_tasks.add(go2rtc_task)
             go2rtc_task.add_done_callback(self._bg_tasks.discard)
-            # NVR sidecar: ffmpeg holds the OLD creds — once the camera rotates
-            # them out (~60 s grace per Bosch session), reconnects 401 and the
-            # recording dies. Re-spawning ffmpeg now (with the new URL) costs
-            # one ~1-2 s gap in the recording per heartbeat, which is the
-            # tradeoff documented in `docs/mini-nvr-concept.md` §3.3.
-            if cam_id in self._nvr_processes and self._nvr_user_intent.get(cam_id):
-                self.hass.async_create_task(
-                    self._restart_recorder_if_active(cam_id),
-                    name=f"bosch_nvr_restart_{cam_id[:8]}",
-                )
+            # NVR sidecar: unlike a fresh connect, the ESTABLISHED ffmpeg RTSP
+            # session survives cred rotation (see docstring above) — no
+            # restart needed here. A proactive restart on every heartbeat used
+            # to run unconditionally, which on fast-rotating Gen1 cameras
+            # (15 s heartbeat) killed and respawned ffmpeg ~4x/minute,
+            # truncating every recorded segment to a few seconds (GitHub
+            # issue #41). Genuine ffmpeg failures (the connection actually
+            # dying, e.g. once creds truly go stale past the ~60 s grace) are
+            # already recovered by `_watch_recorder`, which respawns with the
+            # freshly-cached `rtspsUrl` set above.
             _LOGGER.debug(
                 "Heartbeat refreshed creds for %s (gen=%d, %.0fs into session, user=%s)",
                 cam_id[:8],
@@ -5527,21 +5527,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             await self.hass.async_add_executor_job(nvr_recorder.sync_nvr_cleanup, self)
         except Exception as err:
             _LOGGER.debug("NVR cleanup background task error: %s", err)
-
-    async def _restart_recorder_if_active(self, cam_id: str) -> None:
-        """Restart the recorder if it was running — used by cred-rotation hook.
-
-        Called after `_refresh_local_creds_from_heartbeat` updates the proxy
-        URL. The freshly-rotated digest creds need a new ffmpeg process —
-        the running one will start hitting 401 within ~60 s as the camera
-        rotates the per-session creds out from under it.
-        """
-        if cam_id not in self._nvr_processes:
-            return
-        if not self._nvr_user_intent.get(cam_id):
-            return
-        _LOGGER.debug("NVR restarting recorder for %s after cred rotation", cam_id[:8])
-        await nvr_recorder.start_recorder(self, cam_id)
 
     # ── go2rtc integration ────────────────────────────────────────────────────
     async def async_fetch_live_snapshot(self, cam_id: str) -> bytes | None:

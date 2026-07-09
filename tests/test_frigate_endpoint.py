@@ -1446,3 +1446,37 @@ def test_camera_server_close_noop_when_no_server():
     server = fe._CameraServer("camNOSRV", FrontDoorConfig(), _resolve, None, None)
     server._server = None
     server.close()  # must not raise
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Section: connection-cap rejection (relocated from
+# tests/test_coverage_gates_v14.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_front_door_rejects_client_when_connection_cap_reached() -> None:
+    """`_CameraServer._handle` closes the writer immediately when all
+    semaphore slots (max_connections) are already taken."""
+    config = FrontDoorConfig(max_connections=1)
+    server = fe._CameraServer(
+        cam_id="11111111-1111-1111-1111-111111111111",
+        config=config,
+        resolve_inner=AsyncMock(),
+        on_active=None,
+        on_idle=None,
+    )
+
+    # Exhaust the semaphore so _sem.locked() returns True.
+    await server._sem.acquire()
+
+    writer = MagicMock()
+    writer.get_extra_info = MagicMock(return_value=("127.0.0.1", 5000))
+    writer.close = MagicMock()
+
+    await server._handle(MagicMock(), writer)
+
+    writer.close.assert_called_once()
+
+    # Restore semaphore so it isn't leaked.
+    server._sem.release()

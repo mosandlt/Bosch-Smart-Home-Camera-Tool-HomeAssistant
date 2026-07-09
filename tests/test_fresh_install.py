@@ -55,29 +55,11 @@ class TestDefaultOptions:
         assert opts["download_path"] == "/config/bosch_events"
         assert opts["enable_fcm_push"] is False
 
-    def test_default_enable_local_save_is_false(self):
-        """Fresh install: enable_local_save must default to False (opt-in, not auto-enabled)."""
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
-
-        assert DEFAULT_OPTIONS.get("enable_local_save") is False
-
-    def test_default_download_path_is_set(self):
-        """download_path has a default path but is inactive until enable_local_save=True."""
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
-
-        assert DEFAULT_OPTIONS.get("download_path") == "/config/bosch_events"
-
-    def test_default_fcm_push_disabled(self):
-        """Fresh install: FCM push is disabled by default — polling drives events."""
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
-
-        assert DEFAULT_OPTIONS.get("enable_fcm_push") is False
-
-    def test_default_notify_service_empty(self):
-        """Fresh install: no notification service configured by default."""
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
-
-        assert DEFAULT_OPTIONS.get("alert_notify_service") == ""
+    # NOTE: pure DEFAULT_OPTIONS-value assertions (test_default_enable_local_save_is_false,
+    # test_default_download_path_is_set, test_default_fcm_push_disabled,
+    # test_default_notify_service_empty) moved to tests/test_const.py (2026-07-09) —
+    # they test const.py's own DEFAULT_OPTIONS values directly, not get_options()
+    # merging behaviour like the two tests above.
 
 
 # ── 2. async_send_alert — fresh-install defaults produce local save ───────────

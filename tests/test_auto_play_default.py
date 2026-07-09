@@ -31,7 +31,7 @@ from custom_components.bosch_shc_camera.const import (
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
-# ── shared helpers (mirror tests/test_options_flow_settings.py) ─────────────
+# ── shared helpers (mirror tests/test_config_flow.py) ───────────────────────
 
 
 def _make_entry(*, options: dict | None = None) -> SimpleNamespace:
@@ -158,101 +158,8 @@ class TestOptionsFlowRoundTrip:
         the SelectSelector enforces in the UI (tests bypass that). A garbage
         value lands in options as-is — the camera-attribute read site is
         responsible for collapsing it to "lan". The collapse is verified in
-        TestCameraAttribute.test_garbage_collapses_to_lan.
+        tests/test_camera.py::TestCameraAttributeAutoPlayDefault.test_garbage_collapses_to_lan.
         """
         flow = BoschCameraOptionsFlow(_make_entry())
         data = await _submit(flow, {"features": {"auto_play_default": "garbage"}})
         assert data["auto_play_default"] == "garbage"
-
-
-# ── camera attribute exposure: 4 modes + default + garbage ──────────────────
-
-
-@pytest.fixture
-def stub_coord():
-    return SimpleNamespace(
-        data={
-            CAM_ID: {
-                "info": {
-                    "title": "Terrasse",
-                    "hardwareVersion": "HOME_Eyes_Outdoor",
-                    "firmwareVersion": "9.40.25",
-                    "macAddress": "aa:bb:cc:dd:ee:01",
-                },
-                "events": [],
-                "live": {},
-            }
-        },
-        _live_connections={},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        last_update_success=True,
-        motion_settings=lambda cam_id: {},
-        is_stream_warming=lambda cam_id: False,
-    )
-
-
-def _entry_with(mode_value):
-    """ConfigEntry-like with auto_play_default set to ``mode_value`` (or absent)."""
-    opts: dict = {"snapshot_interval": 1800}
-    if mode_value is not None:
-        opts["auto_play_default"] = mode_value
-    return SimpleNamespace(
-        entry_id="01ENTRY",
-        data={"bearer_token": "fake-token"},
-        options=opts,
-    )
-
-
-class TestCameraAttribute:
-    @pytest.mark.parametrize("mode", ["lan", "always", "never"])
-    def test_each_mode_exposed(self, stub_coord, mode):
-        """PIN_EVERY_MODE: each canonical mode shows up verbatim on the
-        camera entity attribute the card reads."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = BoschCamera(stub_coord, CAM_ID, _entry_with(mode))
-        attrs = cam.extra_state_attributes
-        assert attrs["auto_play_default"] == mode
-
-    def test_legacy_confirm_collapses(self, stub_coord):
-        """v12.8.0 briefly exposed a "confirm" mode (popup dialog). v12.8.1
-        dropped it in favour of an inline tap-to-reveal overlay. Any stale
-        stored "confirm" value must collapse to "lan" so existing users
-        keep working without manual intervention."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = BoschCamera(stub_coord, CAM_ID, _entry_with("confirm"))
-        attrs = cam.extra_state_attributes
-        assert attrs["auto_play_default"] == "lan"
-
-    def test_default_when_option_absent(self, stub_coord):
-        """No option stored → attribute must still be "lan" so the card
-        gets a usable signal without falling back to its own client-side
-        default (which would drift from the integration default)."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = BoschCamera(stub_coord, CAM_ID, _entry_with(None))
-        attrs = cam.extra_state_attributes
-        assert attrs["auto_play_default"] == "lan"
-
-    def test_garbage_collapses_to_lan(self, stub_coord):
-        """Garbage value (typo, stale value from a future renamed mode)
-        collapses to "lan" at the read site. Never disables stream start
-        silently — sane fallback ensures the card stays functional."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = BoschCamera(stub_coord, CAM_ID, _entry_with("not-a-real-mode"))
-        attrs = cam.extra_state_attributes
-        assert attrs["auto_play_default"] == "lan"
-
-    def test_empty_string_collapses_to_lan(self, stub_coord):
-        """Empty string is a sub-case of garbage. Pin it explicitly because
-        select selectors can serialize a no-selection state as ``""`` in
-        some HA versions."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = BoschCamera(stub_coord, CAM_ID, _entry_with(""))
-        attrs = cam.extra_state_attributes
-        assert attrs["auto_play_default"] == "lan"

@@ -2160,11 +2160,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.5.3** — see the GitHub release page for full notes:
-[**v14.5.3 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.3)
+Latest: **v14.5.4** — see the GitHub release page for full notes:
+[**v14.5.4 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.4)
 
 | Version | Highlights |
 |---|---|
+| **v14.5.4** | **Fixed Mini-NVR recordings being cut into tiny few-second clips instead of proper continuous segments.** The recorder was being unnecessarily restarted every time Bosch rotated the camera's local access credentials in the background — which for some cameras happens as often as every 15 seconds — interrupting the in-progress recording each time. The credential rotation itself doesn't require a restart, so recording now continues uninterrupted. |
 | **v14.5.3** | **Fixed several entity icons stuck showing the wrong state** — most noticeably the camera light and intercom switches always showing their "on" icon even while off. A hardcoded icon was silently overriding the correct, state-aware icon defined internally; all icons now come from one consistent source. |
 | **v14.5.2** | **Entity display names now use sentence case** ("Live stream" instead of "Live Stream"), matching Home Assistant Core's own convention. Display text only — entity IDs, unique IDs, and automations are unaffected. English only; translated languages keep their own capitalization rules. |
 | **v14.5.1** | **Pressing the firmware Install button now shows a progress indicator for the whole multi-minute install**, instead of vanishing almost instantly. Also renamed the "Audio"/"Audio Volume" entities to "Stream Audio"/"Stream Volume" to make clear they control the card's playback, not the camera's actual microphone/speaker hardware. |

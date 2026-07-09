@@ -213,11 +213,6 @@ class TestGH6_StreamPipeline:
     invariants.
     """
 
-    def test_live_stream_switch_class_exists(self):
-        from custom_components.bosch_shc_camera import switch as switch_mod
-
-        assert hasattr(switch_mod, "BoschLiveStreamSwitch")
-
     def test_live_connections_dict_drives_supported_features(self):
         """Camera always advertises STREAM so HA's stream component registers
         the entity — live_connections drives stream_source() content, not the
@@ -256,39 +251,10 @@ class TestGH6_StreamPipeline:
         coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
         assert CameraEntityFeature.STREAM in cam.supported_features
 
-    def test_session_stale_blocks_live_stream_switch(self):
-        """When `_session_stale` is set for a cam, the live_stream switch
-        becomes unavailable so users don't see a frozen stream as healthy."""
-        from types import SimpleNamespace as _SN
 
-        from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
-
-        coord = _SN(
-            data={
-                CAM_ID: {
-                    "info": {
-                        "title": "x",
-                        "hardwareVersion": "X",
-                        "firmwareVersion": "x",
-                        "macAddress": "x",
-                    },
-                    "status": "ONLINE",
-                }
-            },
-            _live_connections={},
-            _shc_state_cache={CAM_ID: {"privacy_mode": False}},
-            _session_stale={CAM_ID: True},  # keepalive given up
-            last_update_success=True,
-            is_camera_online=lambda cid: True,
-            is_session_stale=lambda cid: True,
-        )
-        entry = _SN(entry_id="01", data={}, options={})
-        sw = BoschLiveStreamSwitch(coord, CAM_ID, entry)
-        assert sw.available is False, (
-            "LiveStream switch must show unavailable when keepalive "
-            "loop has stalled — prevents users from thinking a frozen "
-            "stream is healthy (GH#6 stream-loop symptom)"
-        )
+# Note: the live_stream-switch-specific regression tests that used to live
+# here (class existence + unavailable-on-stale-session) now live in
+# tests/test_switch.py alongside the rest of the switch.py suite.
 
 
 # ── Meta enforcer ─────────────────────────────────────────────────────

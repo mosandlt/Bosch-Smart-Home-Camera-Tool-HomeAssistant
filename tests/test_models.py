@@ -147,6 +147,79 @@ def test_models_registry_has_no_aliases_to_default() -> None:
         )
 
 
+class TestStreamFallbackTiming:
+    """Per-model thresholds governing when AUTO mode falls back from LOCAL
+    to REMOTE. These are empirically tuned — lowering them reintroduces the
+    false-fallback churn that was reported in pre-v10.5 versions.
+    """
+
+    def test_indoor_max_stream_errors_low_enough_to_fallback_quickly(self) -> None:
+        """Indoor cameras on stable WLAN — should fallback at modest
+        consecutive-error count."""
+        cfg = get_model_config("INDOOR")
+        assert 3 <= cfg.max_stream_errors <= 8, (
+            f"Indoor max_stream_errors={cfg.max_stream_errors} — too low "
+            "would cause spurious cloud fallbacks; too high delays recovery"
+        )
+
+    def test_outdoor_max_stream_errors_higher_for_wifi_jitter(self) -> None:
+        """Outdoor cameras see real WLAN jitter — must tolerate more
+        consecutive errors before falling back."""
+        cfg = get_model_config("OUTDOOR")
+        assert cfg.max_stream_errors >= 3, (
+            f"Outdoor max_stream_errors={cfg.max_stream_errors} — needs "
+            "higher tolerance than indoor due to outdoor WLAN flakiness"
+        )
+
+    def test_min_wifi_for_local_above_zero(self) -> None:
+        """`min_wifi_for_local` gates LOCAL stream attempts; below this
+        signal % we go straight to REMOTE."""
+        for hw in ("INDOOR", "OUTDOOR", "HOME_Eyes_Outdoor", "HOME_Eyes_Indoor"):
+            cfg = get_model_config(hw)
+            assert 20 <= cfg.min_wifi_for_local <= 60, (
+                f"{hw} min_wifi_for_local={cfg.min_wifi_for_local}% — must "
+                "leave headroom for legit weak signals + reject hopeless ones"
+            )
+
+    def test_pre_warm_min_wait_per_generation(self) -> None:
+        """Pre-warm `min_total_wait` must cover encoder warm-up:
+        - Gen1 indoor: 360 SoC is fast → ≤ 30 s
+        - Gen2 outdoor: heavier encoder → up to 60 s
+        """
+        gen1_indoor = get_model_config("INDOOR")
+        gen2_outdoor = get_model_config("HOME_Eyes_Outdoor")
+        assert gen1_indoor.min_total_wait <= 30
+        # Gen2 outdoor needs more time
+        assert gen2_outdoor.min_total_wait >= gen1_indoor.min_total_wait
+
+    def test_renewal_interval_at_most_session_duration(self) -> None:
+        """`renewal_interval` must be ≤ `max_session_duration` —
+        otherwise the renewal happens AFTER the session times out and
+        the stream drops.
+
+        Equal values are OK for Gen2 Outdoor (HOME_Eyes_Outdoor) where
+        `renewal_interval=heartbeat_interval=max_session_duration=3600`
+        is intentional: PUT /connection rotates Digest creds, so we
+        skip PUT-based renewal entirely and rely on FFmpeg's
+        GET_PARAMETER to keep the session alive in-flight.
+        """
+        for hw in MODELS:
+            cfg = get_model_config(hw)
+            assert cfg.renewal_interval <= cfg.max_session_duration, (
+                f"{hw}: renewal_interval={cfg.renewal_interval} > "
+                f"max_session_duration={cfg.max_session_duration} — would "
+                "cause stream drops"
+            )
+
+    def test_heartbeat_interval_sane(self) -> None:
+        """`heartbeat_interval` ≤ `max_session_duration`. For Gen2 Outdoor
+        the value is intentionally high (3600) to avoid Digest-cred
+        rotation."""
+        for hw in MODELS:
+            cfg = get_model_config(hw)
+            assert cfg.heartbeat_interval <= cfg.max_session_duration
+
+
 def test_no_gen2_360_in_registry() -> None:
     """Bosch never released a Gen2 360° camera. The lineup is:
       Gen1: Eyes Außenkamera, 360 Innenkamera
@@ -165,3 +238,17 @@ def test_no_gen2_360_in_registry() -> None:
                 f"exists in Bosch's lineup. If Bosch actually ships a Gen2 360°, "
                 f"remove this guard in the same PR that adds the hardware."
             )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Section: GH#3 — Gen2 Outdoor model config (relocated from
+# tests/test_github_issues.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_gh3_gen2_outdoor_model_config_exists():
+    """Gen2 Outdoor hardware version must resolve to a generation-2 config."""
+    from custom_components.bosch_shc_camera.models import get_model_config
+
+    cfg = get_model_config("HOME_Eyes_Outdoor")
+    assert cfg.generation == 2
