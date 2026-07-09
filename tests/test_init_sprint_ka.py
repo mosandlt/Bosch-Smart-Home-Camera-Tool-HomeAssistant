@@ -25,6 +25,7 @@ import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -705,7 +706,7 @@ class TestDiagnosticCloudApiOverride:
             f"video_inputs URL must use the override base, got: {video_input_calls}"
         )
         assert not any(
-            u.startswith("https://residential.cbs.boschsecurity.com")
+            urlparse(u).hostname == "residential.cbs.boschsecurity.com"
             for u in video_input_calls
         ), "override must replace, not add to, the default production base"
 
