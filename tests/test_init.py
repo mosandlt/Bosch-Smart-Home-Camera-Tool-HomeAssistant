@@ -36442,3 +36442,38 @@ class TestWebhookDelivery:
             "stale closure regression"
         )
         assert posted_url != old_url
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BoschCameraCoordinator.is_updating() — defensive firmware-cache read
+# (relocated from tests/test_updating_unavailable.py; the camera/light/switch
+# entity `available()` consumers of this signal stayed in their own
+# test_camera.py / test_light.py / test_switch.py files)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestIsUpdatingHelper:
+    """The coordinator helper must read _firmware_cache[cam_id]['updating']
+    defensively — empty cache, missing key, and explicit True/False must all
+    resolve to a plain bool so entity available() properties across camera/
+    light/switch can short-circuit on it during a firmware install."""
+
+    def test_returns_false_when_firmware_cache_empty(self) -> None:
+        coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
+        coord._firmware_cache = {}
+        assert coord.is_updating(CAM_ID) is False
+
+    def test_returns_false_when_updating_key_missing(self) -> None:
+        coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
+        coord._firmware_cache = {CAM_ID: {"status": "QUEUED"}}
+        assert coord.is_updating(CAM_ID) is False
+
+    def test_returns_true_when_updating_flag_set(self) -> None:
+        coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
+        coord._firmware_cache = {CAM_ID: {"updating": True}}
+        assert coord.is_updating(CAM_ID) is True
+
+    def test_returns_false_when_updating_flag_false(self) -> None:
+        coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
+        coord._firmware_cache = {CAM_ID: {"updating": False}}
+        assert coord.is_updating(CAM_ID) is False

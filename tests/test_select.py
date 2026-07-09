@@ -15,6 +15,7 @@ Sections:
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1802,3 +1803,47 @@ class TestFcmPushModeSelectAvailableSuperFalse:
             new_callable=lambda: property(lambda s: True),
         ):
             assert sel.available is True
+
+
+# ── BoschFcmPushModeSelect: restart-task lifecycle tracking ──────────────────
+@pytest.mark.asyncio
+async def test_fcm_mode_select_tracks_restart_task() -> None:
+    """Selecting a new FCM push mode must register the async_start_fcm_push()
+    task in coordinator._bg_tasks so async_unload_entry can cancel it — an
+    untracked fire-and-forget task could keep running (and re-establish FCM)
+    after the entry was unloaded."""
+    from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+
+    coordinator = SimpleNamespace(
+        data={CAM_ID: {"info": {"title": "Terrasse"}}},
+        options={"enable_fcm_push": True},
+        _fcm_push_mode="auto",
+        _bg_tasks=set(),
+        async_stop_fcm_push=AsyncMock(),
+        async_start_fcm_push=AsyncMock(),
+        last_update_success=True,
+    )
+    entry = SimpleNamespace(entry_id="01ENTRY", options={"fcm_push_mode": "auto"})
+
+    sel = BoschFcmPushModeSelect(coordinator, CAM_ID, entry)
+    # Stand in for the HA-managed attributes the entity would get once added.
+    sel.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_update_entry=MagicMock()),
+        async_create_task=lambda coro, **kw: asyncio.ensure_future(coro),
+    )
+    sel.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
+
+    await sel.async_select_option("all")
+
+    # Task is registered before it completes.
+    assert len(coordinator._bg_tasks) == 1
+    coordinator.async_stop_fcm_push.assert_awaited_once()
+
+    # Let the scheduled task run, then a further tick for the done-callback
+    # (add_done_callback fires via call_soon on the next loop iteration).
+    for _ in range(5):
+        await asyncio.sleep(0)
+        if not coordinator._bg_tasks:
+            break
+    coordinator.async_start_fcm_push.assert_awaited_once()
+    assert len(coordinator._bg_tasks) == 0

@@ -76,242 +76,40 @@ class TestIssue1_MotionRevert:
         )
 
 
-# ── Issue #5, #6: Binary sensor misses motion events (FIXED) ───────────
+# ── Issues #5-8: routed to per-module test files during the tests/ reorg ────
+#
+# geotie's binary-sensor / polling-bootstrap fixes (#5, #6) now live in
+# tests/test_binary_sensor.py (TestIssue5_BinarySensorMissesEvents equivalent
+# window/60s-lag tests) and tests/test_init.py
+# (test_forum_issue5_polling_seeds_last_event_ids_on_first_tick).
+# xDraGGi's mark_events_read opt-out (#7) now lives in tests/test_const.py.
+# geotie's Media Browser empty-after-upgrade fix (#8) now lives in
+# tests/test_media_source.py (test_download_path_creates_missing_directory)
+# plus the README doc-check (test_readme_documents_auto_download_path).
 
 
-class TestIssue5_BinarySensorMissesEvents:
-    """geotie — 'Die obige Automation funktioniert, wird aber oft nicht ausgelöst.'
-
-    Three independent fixes shipped over time pin this behavior:
-
-    a) `EVENT_ACTIVE_WINDOW = 90 s` (binary_sensor.py) covers the polling-only
-       case where an event can be up to 60s old when first seen.
-    b) FCM push handler at `fcm.py:async_handle_fcm_push` now mirrors
-       fresh events into `coordinator.data[cam_id]['events']` BEFORE
-       calling `async_update_listeners()` so windowed binary sensors
-       see the new event immediately (without this, data[] was only
-       refreshed on the next 60s tick).
-    c) `_last_event_ids` bootstrap on the first polling tick (this
-       commit) — without the seed, polling-only mode after a restart
-       had `prev_id is None` permanently, the alert-chain elif was
-       never reached, and `bosch_shc_camera_motion` never fired.
-    """
-
-    def _make_hass(self):
-        fake_hass = MagicMock()
-        fake_hass.config.time_zone = "UTC"
-        return fake_hass
-
-    def test_window_covers_60s_polling_lag(self):
-        """Event 60s old (max polling lag) must still trigger the sensor."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
-            EVENT_ACTIVE_WINDOW,
-            BoschMotionBinarySensor,
-        )
-
-        assert EVENT_ACTIVE_WINDOW >= 90, (
-            "Window must cover the 60s scan_interval + margin; lowering "
-            "below 90s reintroduces the geotie missed-trigger bug."
-        )
-
-    def test_motion_sensor_fires_for_60s_old_event(self):
-        """A 60s-old event still triggers — the polling path can be that lagged."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
-            BoschMotionBinarySensor,
-        )
-
-        coord = SimpleNamespace(
-            data={
-                CAM_ID: {
-                    "info": {
-                        "title": "Terrasse",
-                        "hardwareVersion": "HOME_Eyes_Outdoor",
-                        "firmwareVersion": "9.40.25",
-                        "macAddress": "x",
-                    },
-                    "events": [
-                        {
-                            "eventType": "MOVEMENT",
-                            "id": "e1",
-                            "timestamp": (
-                                datetime.now(UTC) - timedelta(seconds=60)
-                            ).strftime("%Y-%m-%dT%H:%M:%S"),
-                        }
-                    ],
-                }
-            }
-        )
-        entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={})
-        s = BoschMotionBinarySensor(coord, CAM_ID, entry)
-        s.hass = self._make_hass()
-        assert s.is_on is True
-
-    def test_polling_seeds_last_event_ids_on_first_tick(self):
-        """After restart with FCM disabled, polling must bootstrap
-        `_last_event_ids` so subsequent ticks can detect new events.
-
-        Pre-fix: `prev_id is None` branch only marked events as read
-        without setting `_last_event_ids`, so prev_id stayed None forever
-        and the alert-chain elif was never reached. Result: motion
-        automations never fired in polling-only mode after a restart.
-        """
-        # Read the current source to confirm the seed is in place; if
-        # someone removes it, this assertion fails loudly.
-        import inspect
-
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        src = inspect.getsource(BoschCameraCoordinator._async_update_data)
-        # The fix line: after the prev_id-is-None mark-as-read block,
-        # we set self._last_event_ids[cam_id] = newest_id.
-        assert_in_source(  # _last_event_ids bootstrap missing in _async_update_data — polling-only mode will stop firing alerts after restart
-            src, "self._last_event_ids[cam_id] = newest_id"
-        )
-
-
-# ── Issue #7: Events marked as read in Bosch app (OPT-OUT) ─────────────
-
-
-class TestIssue7_MarkEventsReadOptOut:
-    """xDraGGi — 'Integration markiert alle Events als gelesen, dadurch verschwinden
-    sie aus "neu" im offiziellen Bosch-App.'
-
-    By design — the integration calls `PUT /v11/events {id, isRead: true}`
-    after dispatching the alert chain, so the same event isn't re-alerted
-    on a coordinator-tick after FCM already handled it. xDraGGi prefers
-    to keep events visible in the Bosch app.
-
-    Fix: the option flow has `mark_events_read` (default OFF in newer
-    versions). This test pins the contract that the option exists +
-    defaults to OFF so xDraGGi's setup is the new norm.
-    """
-
-    def test_mark_events_read_option_is_documented(self):
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
-
-        # Either default to False or be absent (treated as False on .get).
-        assert DEFAULT_OPTIONS.get("mark_events_read", False) is False, (
-            "mark_events_read must default to False so the user controls "
-            "whether events disappear from the Bosch app's 'new' list "
-            "(xDraGGi forum complaint)."
-        )
-
-    def test_option_present_in_strings(self):
-        """The option must appear in strings.json so users can find + toggle it."""
-        import json
-        from pathlib import Path
-
-        comp = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
-        strings = json.loads((comp / "strings.json").read_text())
-        # Labels now live under sections.<section>.data, not flat data.
-        sections = (
-            strings.get("options", {})
-            .get("step", {})
-            .get("init", {})
-            .get("sections", {})
-        )
-        all_labels = {k for sec in sections.values() for k in sec.get("data", {})}
-        assert "mark_events_read" in all_labels, (
-            "The mark_events_read option must be exposed in the options "
-            "flow UI — xDraGGi reported confusion about WHY events "
-            "disappear from the Bosch app, fix is to make the toggle "
-            "discoverable."
-        )
-
-
-# ── Issue #8: Media Browser hard to find / empty after upgrade (FIXED) ──
-
-
-class TestIssue8_MediaBrowserEmpty:
-    """geotie — 'Wo findet man die Aufnahmen schneller im Dashboard oder sonst in HA?'
-    plus user-report 'Media Browser bleibt leer nach v10.7.1 → v11.0.0 upgrade'.
-
-    Two distinct fixes:
-    a) Media Browser provider exists since v10.7.0 — events appear under
-       Media → Bosch SHC Camera. The README documents both the local
-       and SMB tree shapes.
-    b) v11.0.1: `_enabled_sources` now creates the download directory
-       on first call so the entry appears immediately when the user
-       enables auto-download (was hidden until first event arrived).
-    """
-
-    def test_enabled_sources_creates_missing_dir(self, tmp_path):
-        """v11.0.1 fix — the regression guard that closes the user-visible
-        'Media Browser bleibt leer' issue."""
-        from custom_components.bosch_shc_camera.media_source import _enabled_sources
-
-        new_dir = tmp_path / "fresh_install"
-        assert not new_dir.exists()
-        hass = SimpleNamespace(
-            config_entries=SimpleNamespace(
-                async_loaded_entries=lambda d: [
-                    SimpleNamespace(
-                        entry_id="01ENTRY",
-                        runtime_data=SimpleNamespace(
-                            options={
-                                "download_path": str(new_dir),
-                                "media_browser_source": "auto",
-                            }
-                        ),
-                    )
-                ],
-            ),
-        )
-        _enabled_sources(hass)
-        assert new_dir.is_dir(), (
-            "Media Browser must auto-create download_path so the entry "
-            "appears immediately, not only after first event"
-        )
-
-    def test_readme_documents_auto_download_path(self):
-        """README must explain WHERE the local save folder option is.
-
-        enable_auto_download was removed — local saving is now controlled solely
-        by the download_path field (non-empty = active). The UI label is
-        'Local save folder' / 'Lokaler Speicher-Ordner'. The README must
-        document the Configure path so users can find it.
-        """
-        from pathlib import Path
-
-        readme = Path(__file__).parent.parent / "README.md"
-        text = readme.read_text()
-        # The field that controls local saving (filling it in = enable)
-        assert "Local save folder" in text or "download_path" in text, (
-            "README must document the local save folder so users know how to "
-            "enable Media Browser (non-empty path = active, no separate toggle)"
-        )
-        # The Reconfigure-vs-Configure UX confusion must be addressed
-        assert "Reconfigure" in text and "Configure" in text, (
-            "README must distinguish Configure (options) from Reconfigure "
-            "(re-OAuth), the new v11.0.0 menu item that confused users"
-        )
-
-
-# ── Meta: every forum-reported issue has a test in this file ──
+# ── Meta: every forum-reported issue has a test somewhere in the suite ──
 
 
 class TestMeta:
     """The CLAUDE.md TEST_EVERY_BUG rule says every forum-reported issue
-    must have a regression test before the fix is committed. This is the
-    enforcer — if a future PR fixes a forum bug without adding a test,
-    `count_test_classes` flags it.
+    must have a regression test before the fix is committed. This file is
+    the traceability index — issues #1-#8 map to test functions across
+    this file and the per-module files noted above. If a future PR fixes a
+    forum bug without adding a test anywhere, that's the gap to close.
     """
 
-    def test_eight_forum_issues_have_test_classes(self):
-        """Sanity: this file must grow when new forum issues appear."""
-        # Six TestIssue<N>_… classes for issues 1, 5, 7, 8 (issues 2/6
-        # share class with 1/5; 3/4 are docs/feature, no code test
-        # possible). The count below is the floor — adding more is fine.
+    def test_forum_issue_index_documents_all_code_testable_issues(self):
+        """Sanity: this file's docstring table must list every forum issue
+        (code-testable or not) so the traceability index doesn't silently
+        go stale as fixes get routed into per-module test files."""
         from pathlib import Path
 
         text = Path(__file__).read_text()
-        # `class TestIssue` followed by digits
-        import re
-
-        classes = re.findall(r"^class TestIssue\d+_", text, re.MULTILINE)
-        assert len(classes) >= 4, (
-            "test_forum_issues.py must have at least 4 TestIssue<N>_ "
-            "classes — one per code-testable forum complaint. If you "
-            "added a forum-reported bug fix, add a TestIssue<N>_ class "
-            "here too (CLAUDE.md TEST_EVERY_BUG rule)."
-        )
+        for n in range(1, 9):
+            assert f"| {n} |" in text, (
+                f"Forum issue #{n} missing from the traceability table — "
+                "CLAUDE.md TEST_EVERY_BUG requires every forum-reported "
+                "issue stay indexed even after its test moves to a "
+                "per-module file."
+            )

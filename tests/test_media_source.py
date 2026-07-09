@@ -5618,3 +5618,30 @@ class TestFilenameRegexCameraPrefix:
             assert self._regex().match(name) is None, (
                 f"{name!r} must not match _FILE_RE"
             )
+
+
+# ── README documents the local-save / Media Browser enablement path ─────────
+
+
+class TestReadmeDocumentsLocalSavePath:
+    """The local save folder (download_path) is what enables the Media
+    Browser source — the README must document it plus the Configure vs
+    Reconfigure distinction so users can find and enable it."""
+
+    def test_readme_documents_auto_download_path(self):
+        """enable_auto_download was removed — local saving is controlled
+        solely by the download_path field (non-empty = active). The UI
+        label is 'Local save folder' / 'Lokaler Speicher-Ordner'."""
+        from pathlib import Path
+
+        readme = Path(__file__).parent.parent / "README.md"
+        text = readme.read_text()
+        assert "Local save folder" in text or "download_path" in text, (
+            "README must document the local save folder so users know how to "
+            "enable Media Browser (non-empty path = active, no separate toggle)"
+        )
+        # The Reconfigure-vs-Configure UX confusion must be addressed.
+        assert "Reconfigure" in text and "Configure" in text, (
+            "README must distinguish Configure (options) from Reconfigure "
+            "(re-OAuth) menu items."
+        )

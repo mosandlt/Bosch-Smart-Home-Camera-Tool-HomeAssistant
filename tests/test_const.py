@@ -98,3 +98,24 @@ class TestMarkEventsReadOptOutDefault:
             "flow UI so users can discover why events disappear from the "
             "Bosch app's 'new' list."
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Section: STREAM_START_SKIPPED sentinel (relocated from
+# tests/test_stream_start_in_progress.py — the coordinator/switch-side
+# consumers of the sentinel stayed in tests/test_init.py / tests/test_switch.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestStreamStartSkippedSentinel:
+    """A coalesced (de-duped) concurrent stream-start must be distinguishable
+    from a real failure by every `if result:` consumer without special-casing —
+    the sentinel must stay falsy, unique, and distinct from `None`."""
+
+    def test_sentinel_is_falsy_singleton(self):
+        from custom_components.bosch_shc_camera.const import STREAM_START_SKIPPED
+
+        assert bool(STREAM_START_SKIPPED) is False
+        assert STREAM_START_SKIPPED is STREAM_START_SKIPPED
+        # It must NOT be None — that is the whole point (None == real failure).
+        assert STREAM_START_SKIPPED is not None
