@@ -71,11 +71,15 @@ from homeassistant.util import dt as dt_util
 from . import recorder as nvr_recorder
 from . import shc as shc_mod
 from .auth_utils import async_digest_request
+from .camera_list import fetch_camera_list
+from .camera_status import poll_statuses
 from .cloud_ssl import (
     async_bosch_cloud_session_cm,
     async_get_bosch_cloud_session,
     async_get_bosch_cloud_ssl_context,
 )
+from .event_dispatch import build_data_and_dispatch
+from .event_polling import poll_events
 from .fcm import (
     _write_file as _fcm_write_file,
 )
@@ -124,12 +128,25 @@ from .session_state import (
     StreamWarmingView,
     get_or_create_session,
 )
+from .slow_tier import (
+    _compute_cam_context,
+    _poll_cam_control,
+    _poll_cam_info_caches,
+    _poll_slow_tier_endpoints,
+)
 from .smb import (
     sync_smb_cleanup,
 )
 from .smb import (
     sync_smb_upload as sync_smb_upload,  # re-export: mypy --no-implicit-reexport
 )
+from .tick_bootstrap import ensure_feature_flags, ensure_protocol_checked
+from .tick_failure import (
+    dispatch_client_error,
+    dispatch_timeout,
+    dispatch_update_failed,
+)
+from .tick_housekeeping import run_housekeeping
 from .tls_proxy import pre_warm_rtsp, start_tls_proxy, stop_all_proxies, stop_tls_proxy
 
 _LOGGER = logging.getLogger(__name__)
@@ -151,17 +168,7 @@ _FRESH_SNAP_TTL = 8.0
 # lower `interval_events` keeps it (min() below).
 FCM_DOWN_EVENT_POLL_SEC = 60.0
 
-# Delivery-death detection (issue #36). When the periodic /v11/events poll finds
-# a genuinely NEW event while FCM is enabled+running+"healthy" yet no real push
-# has arrived in this window, push delivery is dead at the cloud/Google layer
-# even though the socket reports is_started()=True (the exact silent-death case
-# the fcm.py module docstring describes). The poll is ground truth that push
-# missed a real event, so we flip _fcm_healthy=False and force a HARD heal
-# (purge + fresh registration) — which also re-POSTs to Bosch /v11/devices,
-# healing a server-side-dropped device registration. 10 min is wide enough that
-# a push arriving just before the poll (race) keeps _fcm_last_push recent and
-# suppresses a false positive.
-FCM_DELIVERY_DEAD_AFTER_SEC = 600.0
+# FCM_DELIVERY_DEAD_AFTER_SEC moved to const.py — shared with event_dispatch.py.
 
 # Grace before a camera's online→offline transition is ANNOUNCED (push/notify).
 # Cameras on a Wi-Fi repeater/mesh briefly drop during a repeater restart or a
@@ -173,16 +180,7 @@ FCM_DELIVERY_DEAD_AFTER_SEC = 600.0
 # is debounced.
 CAMERA_OFFLINE_ANNOUNCE_GRACE_SEC = 300.0  # 5 min
 
-# Bounded slow-tier defer (stream-contention gate, see the slow-tier block in
-# _async_update_data): while a live stream is active the slow-tier diagnostic
-# read is deferred to avoid TLS-channel contention.  On a *continuously* active
-# stream (e.g. a dashboard left on live view) that deferral would otherwise
-# never end, freezing the diagnostic sensors indefinitely.  After this many
-# seconds of unbroken deferral we force one read even while streaming —
-# accepting a rare brief contention over permanently stale diagnostics — then
-# the defer cycle restarts.  Bounds worst-case staleness to ~this + one slow
-# interval.
-SLOW_TIER_MAX_DEFER_SEC = 1800.0
+# SLOW_TIER_MAX_DEFER_SEC moved to const.py — shared with slow_tier.py.
 
 # Module-level debounce dict for auto-describe-on-motion — keyed by cam_id.
 # Must live at module level (not inside async_setup_entry) so it survives
@@ -2567,156 +2565,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
         session = await async_get_bosch_cloud_session(self.hass)
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-        # getattr handles stub coordinators in tests that predate the
-        # diagnostic cloud_api_override field (real instances always set
-        # self._cloud_api in __init__).
-        cloud_api = getattr(self, "_cloud_api", CLOUD_API)
 
         try:
             # ── 1. List cameras (every tick — lightweight, needed for entity list) ──
-            async with asyncio.timeout(15):
-                async with session.get(
-                    f"{cloud_api}/v11/video_inputs", headers=headers
-                ) as resp:
-                    if resp.status == 401:
-                        _LOGGER.info("Token expired (401) — attempting silent renewal")
-                        _LOGGER.debug(
-                            "video_inputs 401 body against %s (diagnostic, no token "
-                            "material): %s",
-                            cloud_api,
-                            (await resp.text())[:300],
-                        )
-                        token = await self._ensure_valid_token(token)
-                        headers = {
-                            "Authorization": f"Bearer {token}",
-                            "Accept": "application/json",
-                        }
-                    elif resp.status != 200:
-                        # Cloud 5xx often coincides with announced maintenance —
-                        # kick off a background fetch of the community RSS so
-                        # the UI can show a specific reason instead of generic
-                        # "unavailable". Rate-limited inside the helper.
-                        # getattr handles stub coordinators in tests.
-                        _maint = getattr(self, "_async_refresh_maintenance", None)
-                        if _maint is not None:
-                            self.hass.async_create_task(_maint(reactive=True))
-                        # And kick a LAN-ping sweep so the switch/light entities
-                        # have a fresh reachability signal even though the
-                        # cloud-driven status loop won't run this tick.
-                        _outage_ping = getattr(self, "_async_outage_ping_all", None)
-                        if _outage_ping is not None:
-                            self.hass.async_create_task(_outage_ping())
-                        raise UpdateFailed(f"Camera list returned HTTP {resp.status}")
-                    else:
-                        cam_list = await resp.json()
-
-            # Retry after renewal if we got a 401
-            if resp.status == 401:
-                async with asyncio.timeout(15):
-                    async with session.get(
-                        f"{cloud_api}/v11/video_inputs", headers=headers
-                    ) as resp2:
-                        if resp2.status == 401:
-                            import json as _json
-
-                            body_text = (await resp2.text())[:300]
-                            _LOGGER.debug(
-                                "video_inputs retry still 401 after renewal against "
-                                "%s — Bosch response body (diagnostic, no token "
-                                "material): %s",
-                                cloud_api,
-                                body_text,
-                            )
-                            try:
-                                body_json = _json.loads(body_text)
-                            except ValueError:
-                                body_json = {}
-                            # A fresh, successfully-renewed token still being 401'd
-                            # is not a token problem at all — Bosch is telling us
-                            # the account itself lacks camera-API access (e.g. a
-                            # shared-user registration that never completed).
-                            # Re-authenticating cannot fix this; say so instead of
-                            # sending the user in an endless, pointless relogin loop
-                            # (2026-07-06 SebastianHarder community report — debug
-                            # logging above finally surfaced the real reason).
-                            if body_json.get("error") == "sh:authorization.failed":
-                                # The official Bosch Camera App performs a separate,
-                                # one-time "registration/check" step against the camera
-                                # backend after SingleKey ID login (name/marketing-consent/
-                                # T&C acceptance, distinct from login itself) — an account
-                                # that never went through that screen (e.g. reached camera
-                                # access via a beta/invite path rather than the normal
-                                # in-app first run) gets a permanently valid login but a
-                                # permanently rejected camera-API token. Re-authenticating
-                                # only repeats the login step, so it cannot fix this.
-                                raise UpdateFailed(
-                                    "Bosch rejected the camera API with "
-                                    f"'sh:authorization.failed' ({body_json.get('message', 'no detail')}) "
-                                    "— this is an account/permission issue on Bosch's side, not a "
-                                    "login problem. Re-authenticating will not fix it. Open the "
-                                    "official Bosch Smart Camera App and complete any registration "
-                                    "or terms-of-service screen it shows on next login — this "
-                                    "integration only logs in and does not perform that separate "
-                                    "camera-account registration step. If no such screen appears, "
-                                    "contact Bosch support."
-                                )
-                            raise UpdateFailed(
-                                "Token expired and renewal failed — go to Settings → Integrations → "
-                                "Bosch Smart Home Camera → Configure → Force new browser login"
-                            )
-                        if resp2.status != 200:
-                            raise UpdateFailed(
-                                f"Camera list returned HTTP {resp2.status}"
-                            )
-                        cam_list = await resp2.json()
+            cam_list, token, headers = await fetch_camera_list(
+                self, session, headers, token
+            )
 
             # ── Feature flags (fetch once — rarely changes) ────────────────
-            if not self._feature_flags:
-                try:
-                    async with asyncio.timeout(5):
-                        async with session.get(
-                            f"{CLOUD_API}/v11/feature_flags", headers=headers
-                        ) as ff_resp:
-                            if ff_resp.status == 200:
-                                self._feature_flags = await ff_resp.json()
-                                _LOGGER.debug("Feature flags: %s", self._feature_flags)
-                except asyncio.CancelledError:
-                    raise
-                except (TimeoutError, aiohttp.ClientError) as err:
-                    _LOGGER.debug("Feature flags fetch failed: %s", err)
+            await ensure_feature_flags(self, session, headers)
 
             # ── Protocol version check (once at startup) ──────────────────
-            if not self._protocol_checked:
-                self._protocol_checked = True
-                try:
-                    _version = self._integration_version
-                    async with asyncio.timeout(5):
-                        async with session.get(
-                            f"{CLOUD_API}/protocol_support?protocol=11&client=haV{_version}",
-                            headers=headers,
-                        ) as proto_resp:
-                            if proto_resp.status == 200:
-                                proto_data = await proto_resp.json()
-                                if proto_data.get("state") != "SUPPORTED":
-                                    _LOGGER.warning(
-                                        "Bosch API protocol version 11 may no longer be supported "
-                                        "(state=%s) — consider updating the integration",
-                                        proto_data.get("state"),
-                                    )
-                                else:
-                                    _LOGGER.debug(
-                                        "Protocol v11 supported: %s", proto_data
-                                    )
-                            else:
-                                _LOGGER.warning(
-                                    "Bosch API protocol version check returned HTTP %s "
-                                    "— consider updating the integration",
-                                    proto_resp.status,
-                                )
-                except Exception as exc:
-                    _LOGGER.debug("Protocol version check failed: %s", exc)
-
-            data: dict[str, Any] = {}
+            await ensure_protocol_checked(self, session, headers)
 
             # ── Build camera ID list ─────────────────────────────────────────
             cam_ids: list[str] = []
@@ -2729,441 +2589,20 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     # Cache hardware version for model-specific behavior
                     self._hw_version[cid] = cam.get("hardwareVersion", "CAMERA")
 
-            # ── 2. Status — parallel across all cameras ──────────────────────
-            # Local TCP ping + cloud /commissioned run in parallel for all cameras.
-            # Local ping (~5ms) can skip the cloud call (~200ms) when camera is reachable.
-            interval_status = int(opts.get("interval_status", 60))
-
-            async def _check_status(cam_id: str) -> tuple[str, str]:
-                """Check single camera status. Returns (cam_id, status)."""
-                if not self._should_check_status(cam_id, now, interval_status):
-                    return (cam_id, self._cached_status.get(cam_id, "UNKNOWN"))
-
-                # Fast path: local TCP ping — if camera is reachable on LAN,
-                # it's definitely ONLINE (skip cloud /commissioned call).
-                if await self._async_local_tcp_ping(cam_id):
-                    self._per_cam_status_at[cam_id] = now
-                    self._offline_since.pop(cam_id, None)  # clear offline tracking
-                    _LOGGER.debug(
-                        "Local TCP ping OK for %s — ONLINE (cloud check skipped)",
-                        cam_id[:8],
-                    )
-                    # Active LOCAL promotion: if this cam is currently pinned to
-                    # REMOTE because of a past LAN-fail burst (auto-mode
-                    # fallback) and the LAN is reachable again, clear the
-                    # error counter + fallback flag so the next stream-on
-                    # gets to attempt LOCAL again. If a stream is *currently*
-                    # running on REMOTE-fallback we additionally schedule a
-                    # background `try_live_connection(is_renewal=True)` —
-                    # the inner already runs `Stream.update_source()` after
-                    # pre-warm, so the live HLS session swaps from Cloud to
-                    # LAN with a brief (~2-3 s) re-buffer instead of
-                    # waiting for the user to re-toggle. Cooldown 5 min
-                    # prevents ping-pong if LAN flaps in/out.
-                    if self._stream_fell_back.get(cam_id):
-                        # Read options fresh here: this branch only runs for a
-                        # camera that has fallen back to REMOTE (rare), so the
-                        # cost is negligible, and reading `self._entry.options`
-                        # directly avoids coupling to the enclosing-scope `opts`
-                        # snapshot (which a caller/test may set independently of
-                        # the entry). Reverted a micro-opt that broke that
-                        # contract. 2026-06-18.
-                        _check_opts = get_options(self._entry)
-                        if _check_opts.get("stream_connection_type", "local") == "auto":
-                            err_count_was = self._stream_error_count.get(cam_id, 0)
-                            _LOGGER.info(
-                                "AUTO mode: %s LAN reachable again — clearing "
-                                "REMOTE fallback flag (counter=%d)",
-                                cam_id[:8],
-                                err_count_was,
-                            )
-                            self._stream_error_count.pop(cam_id, None)
-                            self._stream_error_at.pop(cam_id, None)
-                            self._stream_fell_back.pop(cam_id, None)
-                            # Active promotion path: only when a stream is
-                            # actively running on REMOTE-fallback.
-                            live = self._live_connections.get(cam_id, {})
-                            if live.get("_connection_type") == "REMOTE":
-                                last_promote = self._local_promote_at.get(
-                                    cam_id, float("-inf")
-                                )
-                                _LOCAL_PROMOTE_COOLDOWN_S = 300
-                                if (now - last_promote) > _LOCAL_PROMOTE_COOLDOWN_S:
-                                    self._local_promote_at[cam_id] = now
-                                    _LOGGER.info(
-                                        "AUTO mode: %s active REMOTE stream — "
-                                        "attempting live LOCAL promotion via renewal",
-                                        cam_id[:8],
-                                    )
-                                    self.hass.async_create_task(
-                                        self._promote_to_local(cam_id)
-                                    )
-                    return (cam_id, "ONLINE")
-
-                # Cloud path: /ping (primary, 8 bytes) + /commissioned (fallback)
-                status = "UNKNOWN"
-                ping_ok = False
-                try:
-                    async with asyncio.timeout(5):
-                        async with session.get(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
-                            headers=headers,
-                        ) as pr:
-                            if pr.status == 200:
-                                ping_result = (await pr.text()).strip().strip('"')
-                                # Map firmware update statuses to UPDATING
-                                if ping_result.startswith("UPDATING"):
-                                    status = "UPDATING"
-                                else:
-                                    status = ping_result  # "ONLINE" or "OFFLINE"
-                                ping_ok = True
-                            elif pr.status == 444:
-                                _LOGGER.warning(
-                                    "Bosch session-quota hit for %s — too many simultaneous"
-                                    " live sessions across all clients (HA, Bosch App, ioBroker, etc.)."
-                                    " Close unused sessions to recover.",
-                                    cam_id[:8],
-                                )
-                                status = "SESSION_LIMIT"
-                                ping_ok = True
-                except Exception as err:
-                    _LOGGER.debug("Ping check error for %s: %s", cam_id, err)
-                if not ping_ok:
-                    try:
-                        async with asyncio.timeout(8):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/commissioned",
-                                headers=headers,
-                            ) as r:
-                                if r.status == 200:
-                                    comm = await r.json()
-                                    self._commissioned_cache[cam_id] = comm
-                                    if comm.get("connected") and comm.get(
-                                        "commissioned"
-                                    ):
-                                        status = "ONLINE"
-                                    elif comm.get("configured"):
-                                        status = "OFFLINE"
-                                elif r.status == 444:
-                                    _LOGGER.warning(
-                                        "Bosch session-quota hit for %s (commissioned fallback)"
-                                        " — too many simultaneous live sessions across all clients.",
-                                        cam_id[:8],
-                                    )
-                                    status = "SESSION_LIMIT"
-                    except Exception as err:
-                        _LOGGER.debug(
-                            "Commissioned fallback error for %s: %s", cam_id, err
-                        )
-
-                self._per_cam_status_at[cam_id] = now
-                # Track offline duration for extended interval.
-                # SESSION_LIMIT is NOT a connectivity failure — do not add to _offline_since
-                # so the camera does not get penalised with extended check intervals.
-                if status in ("OFFLINE", "UPDATING"):
-                    if cam_id not in self._offline_since:
-                        self._offline_since[cam_id] = now
-                else:
-                    self._offline_since.pop(cam_id, None)
-                # Fire persistent notification if 444 hits accumulate
-                if status == "SESSION_LIMIT":
-                    _handle_quota = getattr(
-                        self, "_async_handle_session_quota_hit", None
-                    )
-                    if _handle_quota is not None:
-                        self.hass.async_create_task(_handle_quota(cam_id))
-                return (cam_id, status)
-
-            # Run all status checks in parallel
-            status_results = await asyncio.gather(
-                *[_check_status(cid) for cid in cam_ids],
-                return_exceptions=True,
+            # ── 2. Status ─ parallel across all cameras ────────────────────────
+            any_status_checked = await poll_statuses(
+                self, cam_ids, session, headers, now, opts
             )
-            any_status_checked = False
-            for result in status_results:
-                if isinstance(result, BaseException):
-                    continue
-                cid, status = result
-                self._cached_status[cid] = status
-                # Mark as checked unconditionally — _per_cam_status_at[cid] was
-                # just updated inside _check_status, so re-calling _should_check_status
-                # would always return False for extended-offline cams (their per-cam
-                # timestamp was just set to `now`). That caused _last_status to stall
-                # forever when all cameras were persistently offline, making do_status=True
-                # on every subsequent tick even though no real API calls ran.
-                any_status_checked = True
 
             # ── 3. Events — parallel across all cameras ──────────────────────
-            async def _fetch_events(cam_id: str) -> tuple[str, list[Any], bool]:
-                """Fetch events for single camera.
-
-                Returns ``(cam_id, events, ok)``. ``ok`` is True only when the
-                cloud gave a definitive answer (last_event matched the cached id,
-                or the full events list came back 200). On a transient failure
-                ``ok`` is False so the caller keeps the previously-cached events
-                instead of blanking them, and does not advance ``_last_events``
-                (which would defer the next retry by a full poll interval — up to
-                300 s while FCM is healthy). Mirrors the cross-version ioBroker fix.
-                """
-                events: list[Any] = []
-                skip_full_fetch = False
-                ok = False
-                try:
-                    async with asyncio.timeout(5):
-                        async with session.get(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/last_event",
-                            headers=headers,
-                        ) as le_resp:
-                            if le_resp.status == 200:
-                                last_ev = await le_resp.json()
-                                last_ev_id = last_ev.get("id", "")
-                                if (
-                                    last_ev_id
-                                    and last_ev_id == self._last_event_ids.get(cam_id)
-                                ):
-                                    skip_full_fetch = True
-                                    ok = True
-                                    events = self._cached_events.get(cam_id, [])
-                                    _LOGGER.debug(
-                                        "last_event unchanged for %s (id=%s) — skipping full fetch",
-                                        cam_id,
-                                        last_ev_id[:8],
-                                    )
-                except Exception as err:
-                    _LOGGER.debug(
-                        "last_event check error for %s: %s — falling back to full fetch",
-                        cam_id,
-                        err,
-                    )
-
-                if not skip_full_fetch:
-                    try:
-                        url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=20"
-                        async with asyncio.timeout(15):
-                            async with session.get(url, headers=headers) as r:
-                                if r.status == 200:
-                                    events = await r.json()
-                                    ok = True
-                    except Exception as err:
-                        _LOGGER.debug(
-                            "Events fetch error for %s: %s",
-                            cam_id,
-                            BoschCameraCoordinator._err_str(err),
-                        )
-                return (cam_id, events, ok)
-
-            any_events_fetched = False
-            if do_events:
-                # Run all event fetches in parallel
-                event_results = await asyncio.gather(
-                    *[_fetch_events(cid) for cid in cam_ids],
-                    return_exceptions=True,
-                )
-                for ev_result in event_results:
-                    if isinstance(ev_result, BaseException):
-                        continue
-                    cid, ev_list, ev_ok = ev_result
-                    # Only overwrite the cache on a definitive fetch — a transient
-                    # failure must not blank a camera's events (and its
-                    # events-today count) until the next successful poll.
-                    if ev_ok:
-                        self._cached_events[cid] = ev_list
-                        any_events_fetched = True
+            any_events_fetched = await poll_events(
+                self, cam_ids, session, headers, do_events
+            )
 
             # ── Build data dict + process new events (must be sequential) ─────
-            for cam_id in cam_ids:
-                cam = cam_by_id[cam_id]
-                status = self._cached_status.get(cam_id, "UNKNOWN")
-                events = self._cached_events.get(cam_id, [])
-
-                if do_events and events:
-                    newest_id = events[0].get("id", "")
-                    prev_id = self._last_event_ids.get(cam_id)
-                    if prev_id is None:
-                        unread_ids = [
-                            ev.get("id")
-                            for ev in events
-                            if ev.get("id") and not ev.get("isRead", False)
-                        ]
-                        if unread_ids and self.options.get("mark_events_read", False):
-                            _LOGGER.debug(
-                                "Startup: marking %d unread event(s) as read for %s",
-                                len(unread_ids),
-                                cam_id,
-                            )
-                            try:
-                                await self.async_mark_events_read(unread_ids)
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception as err:
-                                _LOGGER.debug(
-                                    "Mark-read (startup) failed for %s: %s", cam_id, err
-                                )
-                        # Bootstrap _last_event_ids so the next polling tick can
-                        # detect newer events. Without this seed, prev_id stays
-                        # None forever in polling-only mode (no FCM) — every
-                        # tick re-enters this branch, alert chain (`elif newest_id
-                        # and newest_id != prev_id`) is never reached, and
-                        # automations on `bosch_shc_camera_motion` never fire
-                        # after a restart. (Forum: geotie 2026 — "Automation
-                        # funktioniert, wird aber oft nicht ausgelöst".)
-                        if newest_id:
-                            self._last_event_ids[cam_id] = newest_id
-                    elif newest_id and newest_id != prev_id:
-                        # Per-event-ID dedup shared with fcm.async_handle_fcm_push.
-                        # Guards against a polling tick firing an alert that the
-                        # FCM handler already dispatched for the same event ID.
-                        _now_mono = time.monotonic()
-                        # Delivery-death detection (issue #36): this poll found a
-                        # genuinely new event. If FCM push is enabled+running+
-                        # "healthy" yet no real push has arrived in the last
-                        # FCM_DELIVERY_DEAD_AFTER_SEC, push delivery is dead at the
-                        # cloud/Google layer even though the socket reports
-                        # is_started()=True — the poll just proved push missed a
-                        # real event. Flag unhealthy + force a HARD heal (purge +
-                        # fresh registration, which re-POSTs to Bosch /v11/devices).
-                        # A push arriving just before this poll keeps _fcm_last_push
-                        # recent → no false positive.
-                        with self._fcm_lock:
-                            _last_push = getattr(self, "_fcm_last_push", float("-inf"))
-                            _started_at = getattr(
-                                self, "_fcm_started_at", float("-inf")
-                            )
-                            # Grace reference: the later of "last real push" and
-                            # "listener start". A still-warming-up listener (no
-                            # push yet, started <window ago) is never condemned;
-                            # a dead-from-start registration IS caught once the
-                            # listener has been up for the window with no push.
-                            _ref = max(_last_push, _started_at)
-                            _push_age = _now_mono - _ref
-                            if (
-                                self.options.get("enable_fcm_push", False)
-                                and getattr(self, "_fcm_running", False)
-                                and getattr(self, "_fcm_healthy", False)
-                                and _ref != float("-inf")
-                                and _push_age > FCM_DELIVERY_DEAD_AFTER_SEC
-                            ):
-                                self._fcm_healthy = False
-                                self._fcm_force_hard_heal = True
-                                _ago = (
-                                    "never"
-                                    if _last_push == float("-inf")
-                                    else f"{_push_age / 60.0:.0f} min ago"
-                                )
-                                _LOGGER.warning(
-                                    "FCM delivery watchdog: polling found a new event "
-                                    "(%s) that push never delivered (last push %s) — "
-                                    "delivery is dead despite a live socket; forcing "
-                                    "fresh registration with Bosch CBS",
-                                    newest_id,
-                                    _ago,
-                                )
-                        _dedup_skip = (
-                            self._alert_sent_ids.get(newest_id, float("-inf"))
-                            > _now_mono - 60.0
-                        )
-                        self._last_event_ids[cam_id] = newest_id
-                        if _dedup_skip:
-                            _LOGGER.debug(
-                                "Polling dedup: skipping duplicate alert for %s id=%s",
-                                cam_id,
-                                newest_id,
-                            )
-                        else:
-                            self._alert_sent_ids[newest_id] = _now_mono
-                            # Bound memory: the FCM handler prunes this dedup map
-                            # too, but it never runs when FCM is disabled, so the
-                            # polling path must prune here as well — otherwise it
-                            # grows one entry per event forever. Drop entries older
-                            # than 2× the 60s dedup window.
-                            if len(self._alert_sent_ids) > 64:
-                                # Mutate in place — a dict-comprehension rebind
-                                # (self._alert_sent_ids = {...}) would detach
-                                # any alias another concurrent call already
-                                # holds. fcm.py's async_handle_fcm_push does
-                                # exactly that: it captures `_sent =
-                                # coordinator._alert_sent_ids` once, then
-                                # writes to it later after an await. If this
-                                # rebind ran in between, that later write would
-                                # land in the orphaned old dict — invisible to
-                                # any later reader of self._alert_sent_ids —
-                                # allowing a duplicate alert for the same event
-                                # (bug-hunt 2026-07-03).
-                                _cutoff = _now_mono - 120.0
-                                for _k in [
-                                    k
-                                    for k, v in self._alert_sent_ids.items()
-                                    if v < _cutoff
-                                ]:
-                                    del self._alert_sent_ids[_k]
-                            _LOGGER.debug(
-                                "New event detected for %s (id=%s) — triggering snapshot refresh",
-                                cam_id,
-                                newest_id,
-                            )
-                            cam_entity = self._camera_entities.get(cam_id)
-                            if cam_entity:
-                                self.hass.async_create_task(
-                                    cam_entity._async_trigger_image_refresh(delay=2)
-                                )
-                            newest_event = events[0]
-                            event_type = newest_event.get("eventType", "")
-                            event_tags = newest_event.get("eventTags", []) or []
-                            # Gen2 DualRadar fires eventType=MOVEMENT w/ eventTags=["PERSON"]
-                            # when a human is detected — the tag is more specific, so upgrade.
-                            if "PERSON" in event_tags and event_type == "MOVEMENT":
-                                event_type = "PERSON"
-                            cam_name = cam.get("title", cam_id)
-                            event_payload = {
-                                "camera_id": cam_id,
-                                "camera_name": cam_name,
-                                "timestamp": newest_event.get("timestamp", ""),
-                                "image_url": newest_event.get("imageUrl", ""),
-                                "event_id": newest_id,
-                            }
-                            if event_type == "MOVEMENT":
-                                self.hass.bus.async_fire(
-                                    "bosch_shc_camera_motion", event_payload
-                                )
-                            elif event_type == "AUDIO_ALARM":
-                                self.hass.bus.async_fire(
-                                    "bosch_shc_camera_audio_alarm", event_payload
-                                )
-                            elif event_type == "PERSON":
-                                self.hass.bus.async_fire(
-                                    "bosch_shc_camera_person", event_payload
-                                )
-                            self.hass.async_create_task(
-                                self._async_send_alert(
-                                    cam_name,
-                                    event_type,
-                                    newest_event.get("timestamp", ""),
-                                    newest_event.get("imageUrl", ""),
-                                    newest_event.get("videoClipUrl", ""),
-                                    newest_event.get("videoClipUploadStatus", ""),
-                                    event_id=newest_id,
-                                )
-                            )
-                            if self.options.get("mark_events_read", False):
-                                try:
-                                    await self.async_mark_events_read([newest_id])
-                                except asyncio.CancelledError:
-                                    raise
-                                except Exception as err:
-                                    _LOGGER.debug(
-                                        "Mark-read (new event) failed for %s: %s",
-                                        cam_id,
-                                        err,
-                                    )
-                    elif newest_id:
-                        self._last_event_ids[cam_id] = newest_id
-
-                data[cam_id] = {
-                    "info": cam,
-                    "status": status,
-                    "events": events,
-                    "live": self._live_connections.get(cam_id, {}),
-                }
+            data = await build_data_and_dispatch(
+                self, cam_ids, cam_by_id, now, do_events
+            )
 
             # Update timestamps only after successful fetches
             if any_status_checked:
@@ -3184,556 +2623,39 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # no extra request needed. SHC (step 5) supplements as fallback.
             for cam_id_key, cam_entry in data.items():
                 cam_raw = cam_entry.get("info", {})
-                privacy_str = cam_raw.get("privacyMode", "")
-                feat_support = cam_raw.get("featureSupport", {})
-                has_light = feat_support.get("light", False)
-                feat_status = cam_raw.get("featureStatus", {})
-                light_on = feat_status.get("frontIlluminatorInGeneralLightOn")
+                _poll_cam_info_caches(self, cam_id_key, cam_raw)
 
-                cache = self._shc_state_cache.setdefault(
-                    cam_id_key,
-                    {
-                        "device_id": None,
-                        "camera_light": None,
-                        "front_light": None,
-                        "wallwasher": None,
-                        "front_light_intensity": None,
-                        "privacy_mode": None,
-                        "has_light": False,
-                        "notifications_status": None,
-                    },
+                # ── Per-camera context: hw/is_gen2/is_online/stream state/
+                # slow-tier defer gate — computed once, shared by every
+                # slow-tier sub-block below (replaces several redundant
+                # re-derivations the original inline loop had at different
+                # points) ──────────────────────────────────────────────────
+                ctx = _compute_cam_context(
+                    self, cam_id_key, cam_raw, data, opts, do_slow
                 )
-                # Cloud is authoritative for privacy (fast, always available).
-                # Skip overwrite if a write happened within _WRITE_LOCK_SECS — same
-                # propagation-delay race as camera light.
-                privacy_locked = (
-                    cam_id_key in self._privacy_set_at
-                    and (time.monotonic() - self._privacy_set_at[cam_id_key])
-                    < self._WRITE_LOCK_SECS
-                )
-                if privacy_str and not privacy_locked:
-                    new_privacy = privacy_str.upper() == "ON"
-                    old_privacy = cache.get("privacy_mode")
-                    cache["privacy_mode"] = new_privacy
-                    # Hardware/external privacy trigger detection.
-                    # When the cam's physical privacy button is pressed (or someone
-                    # toggles privacy in the Bosch app), the cloud reports
-                    # privacyMode=ON but our `BoschPrivacyModeSwitch.async_turn_on`
-                    # — which is the only path that calls `_tear_down_live_stream`
-                    # — never runs. The result is a stuck `state: streaming`,
-                    # the live-stream switch frozen on `on`, and the TLS proxy
-                    # entering an endless reconnect loop against the now-gone
-                    # camera (Errno 113 Host unreachable). We detect the
-                    # OFF→ON transition here and schedule the same teardown
-                    # the user-toggle path uses.
-                    if (
-                        new_privacy is True
-                        and old_privacy is not True
-                        and self._live_connections.get(cam_id_key)
-                    ):
-                        _LOGGER.info(
-                            "Privacy ON detected externally for %s — tearing down active stream",
-                            cam_id_key[:8],
-                        )
-                        self.hass.async_create_task(
-                            self._tear_down_live_stream(cam_id_key)
-                        )
-                cache["has_light"] = has_light
-                # Use cloud featureStatus for light state; SHC supplements if available.
-                # Skip overwrite if a write happened within _WRITE_LOCK_SECS — the cloud
-                # API returns stale data briefly after a PUT /lighting_override, which
-                # would flip the switch back to OFF right after the user turned it ON.
-                light_locked = (
-                    cam_id_key in self._light_set_at
-                    and (time.monotonic() - self._light_set_at[cam_id_key])
-                    < self._WRITE_LOCK_SECS
-                )
-                if light_on is not None and not light_locked:
-                    # Gen2: Use lighting/switch cache for actual light state
-                    # (featureStatus reports config state, not physical on/off)
-                    from .models import get_model_config as _gmc_light
+                is_online = ctx.is_online
+                do_slow_cam = ctx.do_slow_cam
 
-                    _hw = cam_raw.get("hardwareVersion", "CAMERA")
-                    if _gmc_light(_hw).generation >= 2:
-                        # Gen2: Only update light state from lighting/switch cache
-                        # Do NOT use featureStatus (reports config, not physical state)
-                        # If cache not yet populated, keep current state (don't overwrite)
-                        lsc = self._lighting_switch_cache.get(cam_id_key)
-                        if lsc:
-                            front_bri = lsc.get("frontLightSettings", {}).get(
-                                "brightness", 0
-                            )
-                            top_bri = lsc.get("topLedLightSettings", {}).get(
-                                "brightness", 0
-                            )
-                            bot_bri = lsc.get("bottomLedLightSettings", {}).get(
-                                "brightness", 0
-                            )
-                            cache["front_light"] = front_bri > 0
-                            cache["wallwasher"] = top_bri > 0 or bot_bri > 0
-                            cache["camera_light"] = (
-                                front_bri > 0 or top_bri > 0 or bot_bri > 0
-                            )
-                            cache["front_light_intensity"] = (
-                                front_bri / 100.0 if front_bri else 0.0
-                            )
-                        # else: keep current cache values, don't overwrite from featureStatus
-                    else:
-                        cache["camera_light"] = light_on
-                        cache["front_light"] = feat_status.get(
-                            "frontIlluminatorInGeneralLightOn"
-                        )
-                        cache["wallwasher"] = feat_status.get(
-                            "wallwasherInGeneralLightOn"
-                        )
-                        intensity = feat_status.get(
-                            "frontIlluminatorGeneralLightIntensity"
-                        )
-                        if intensity is not None:
-                            cache["front_light_intensity"] = intensity
-                elif cache.get("camera_light") is None:
-                    cache["camera_light"] = None
-                # Read notifications status from cloud API response.
-                # Skip overwrite if written recently (same propagation-delay race as light).
-                notif_status = cam_raw.get("notificationsEnabledStatus", "")
-                notif_locked = (
-                    cam_id_key in self._notif_set_at
-                    and (time.monotonic() - self._notif_set_at[cam_id_key])
-                    < self._WRITE_LOCK_SECS
-                )
-                if notif_status and not notif_locked:
-                    cache["notifications_status"] = notif_status
-
-                # Camera online check — skip expensive API calls for offline cameras
-                cam_status = data[cam_id_key].get("status", "UNKNOWN")
-                is_online = cam_status == "ONLINE"
-
-                # Fetch pan position for cameras that support it (skip if offline)
-                pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
-                if pan_limit and is_online:
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/pan",
-                                headers=headers,
-                            ) as pan_resp:
-                                if pan_resp.status == 200:
-                                    pan_data = await pan_resp.json()
-                                    self._pan_cache[cam_id_key] = pan_data.get(
-                                        "currentAbsolutePosition"
-                                    )
-                    except Exception as err:
-                        _LOGGER.debug(
-                            "Pan fetch error for %s: %s",
-                            cam_id_key,
-                            BoschCameraCoordinator._err_str(err),
-                        )
-
-                # ── Gen2 lighting/switch — fetched every tick (60s) ──
-                # Bosch app polls this every ~40s. Slow tier (300s) is too slow
-                # for responsive light state sync when lights are changed via the app.
-                from .models import get_model_config as _gmc_tick
-
-                hw_tick = cam_raw.get("hardwareVersion", "")
-                if is_online and _gmc_tick(hw_tick).generation >= 2:
-                    try:
-                        async with asyncio.timeout(5):
-                            async with session.get(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/lighting/switch",
-                                headers=headers,
-                            ) as ls_resp:
-                                if ls_resp.status == 200:
-                                    self._lighting_switch_cache[
-                                        cam_id_key
-                                    ] = await ls_resp.json()
-                    except Exception as err:
-                        _LOGGER.debug(
-                            "lighting/switch fetch error for %s: %s",
-                            cam_id_key,
-                            BoschCameraCoordinator._err_str(err),
-                        )
+                # Pan position + Gen2 lighting/switch — both polled every
+                # tick (not slow-tier-gated), only gated on is_online.
+                await _poll_cam_control(self, cam_id_key, ctx, session, headers)
 
                 # ── Slow tier: wifiinfo, ambient light, motion, audio, recording ──
                 # Only fetched every interval_slow seconds (default 5 min).
-                # These values change rarely — fetching every tick wastes bandwidth.
-                # Skipped when camera is offline or session-quota hit (444) — endpoints
-                # would return 444 too, and the camera isn't truly unreachable.
-                #
-                # Stream-contention gate (Root-Cause: stream-freeze-on-motion-event-
-                # contention.md, 2026-06-12): the Gen2 camera exposes ONE TLS control
-                # channel shared by the RTSP keepalive AND every RCP / cloud slow-tier
-                # read.  When both compete, OPTIONS RTT grows from ~1 s to ~21 s against
-                # a 30-s RTSP session timeout → go2rtc EOF → 5-10 s video freeze.
-                # Fix: defer (NOT drop) the slow-tier fetch for a camera while its live
-                # stream is active.  The next coordinator tick where the stream is idle
-                # picks it up via _slow_tier_deferred.  A *continuously* active stream
-                # (dashboard left on live view) never goes idle, so the deferral is
-                # bounded by SLOW_TIER_MAX_DEFER_SEC: once exceeded we force one read
-                # despite the stream, then restart the cycle — no permanent staleness.
-                # Partial coordinator stubs in unit tests bypass __init__ and may
-                # lack these attributes; the real coordinator always sets them in
-                # __init__.  Lazy-init keeps the gate robust without forcing every
-                # stub to mirror the fields.
-                if not hasattr(self, "_slow_tier_deferred"):
-                    self._slow_tier_deferred = set()
-                if not hasattr(self, "_slow_tier_defer_since"):
-                    self._slow_tier_defer_since = {}
-                stream_active = cam_id_key in self._live_connections
-                # Option: defer slow-tier when stream is active (default ON).
-                # When OFF, slow-tier runs regardless — diagnostic sensors stay
-                # current during streaming at the cost of potential TLS contention.
-                _defer_diag = bool(
-                    opts.get(
-                        "defer_diag_during_stream",
-                        True,
-                    )
-                )
-                # Bounded defer: a deferral that has lasted ≥ the cap must yield one
-                # read even while the stream is live, else diagnostics freeze forever.
-                _defer_started = self._slow_tier_defer_since.get(cam_id_key)
-                defer_bound_reached = (
-                    _defer_started is not None
-                    and time.monotonic() - _defer_started >= SLOW_TIER_MAX_DEFER_SEC
-                )
-                # per-camera slow flag: True on the normal interval, OR when a deferred
-                # fetch is now safe to run (stream gone idle since last deferral).
-                do_slow_cam = (
-                    do_slow
-                    or (cam_id_key in self._slow_tier_deferred and not stream_active)
-                    or defer_bound_reached
-                )
-                if (
-                    _defer_diag
-                    and do_slow_cam
-                    and stream_active
-                    and not defer_bound_reached
-                ):
-                    # Defer: stream is live — adding to deferred set instead of running.
-                    self._slow_tier_deferred.add(cam_id_key)
-                    self._slow_tier_defer_since.setdefault(cam_id_key, time.monotonic())
-                    _LOGGER.debug(
-                        "Slow-tier deferred for %s (live stream active)",
-                        cam_id_key,
-                    )
-                    do_slow_cam = False  # skip the fetch blocks below for this camera
-                elif do_slow_cam and cam_id_key in self._slow_tier_deferred:
-                    # Deferred fetch now safe: stream gone idle, defer disabled, or the
-                    # defer bound was reached (forced read despite an active stream).
-                    self._slow_tier_deferred.discard(cam_id_key)
-                    self._slow_tier_defer_since.pop(cam_id_key, None)
-                    _LOGGER.debug(
-                        "Slow-tier running deferred fetch for %s (%s)",
-                        cam_id_key,
-                        "defer bound reached, stream still active"
-                        if defer_bound_reached and stream_active
-                        else "stream now idle",
-                    )
-                if do_slow_cam and not is_online:
-                    _LOGGER.debug(
-                        "Slow-tier skipped for %s (%s)", cam_id_key, cam_status.lower()
-                    )
-                if do_slow_cam and is_online:
-                    # ── Parallel slow-tier fetch ──────────────────────────────
-                    # All endpoints are independent — fetch in parallel with
-                    # asyncio.gather() instead of sequentially.
-                    # Reduces slow-tier from ~13×5s = 65s to ~5s (single timeout).
-                    hw = cam_raw.get("hardwareVersion", "")
-                    pan_limit = cam_raw.get("featureSupport", {}).get("panLimit", 0)
-
-                    async def _fetch(
-                        endpoint: str,
-                    ) -> tuple[str, int, dict[str, Any] | None]:
-                        """Fetch a single slow-tier endpoint. Returns (endpoint, status, data)."""
-                        try:
-                            async with asyncio.timeout(8):
-                                async with session.get(
-                                    f"{CLOUD_API}/v11/video_inputs/{cam_id_key}/{endpoint}",  # noqa: B023 # closure awaited within the same loop iteration
-                                    headers=headers,
-                                ) as r:
-                                    if r.status == 200:
-                                        return (endpoint, 200, await r.json())
-                                    return (endpoint, r.status, None)
-                        except Exception as err:
-                            _LOGGER.debug(
-                                "%s fetch error for %s: %s",
-                                endpoint,
-                                cam_id_key,  # noqa: B023 # closure awaited within the same loop iteration
-                                BoschCameraCoordinator._err_str(err),
-                            )
-                            return (endpoint, 0, None)
-
-                    # Build task list (skip endpoints not applicable to this camera)
-                    from .models import get_model_config as _gmc2
-
-                    is_gen2 = _gmc2(hw).generation >= 2
-                    endpoints = [
-                        "wifiinfo",
-                        "ambient_light_sensor_level",
-                        "motion",
-                        "firmware",
-                        "recording_options",
-                        "unread_events_count",
-                        "commissioned",
-                        "timestamp",
-                        "notifications",
-                        "rules",
-                    ]
-                    # Gen1 uses motion_sensitive_areas + privacy_masks (rectangles)
-                    # Gen2 Outdoor II uses zones + privateAreas (polygons) — different endpoints!
-                    # Gen2 Indoor II returns 442 ("hardware not supported") on privateAreas
-                    # — confirmed by direct API test 2026-04-11. Only poll zones.
-                    if is_gen2:
-                        endpoints.append("zones")
-                        if hw not in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
-                            endpoints.append("privateAreas")
-                    else:
-                        endpoints.extend(["motion_sensitive_areas", "privacy_masks"])
-                    if hw in (
-                        "INDOOR",
-                        "CAMERA_360",
-                        "HOME_Eyes_Indoor",
-                        "CAMERA_INDOOR_GEN2",
-                    ):
-                        endpoints.append("privacy_sound_override")
-                    if pan_limit:
-                        endpoints.append("autofollow")
-                    has_light = cam_raw.get("featureSupport", {}).get("light", False)
-                    if has_light:
-                        endpoints.append("lighting_options")
-
-                    # Gen2-only endpoints
-                    if is_gen2:
-                        endpoints.extend(
-                            [
-                                "ledlights",
-                                "lens_elevation",
-                                "audio",
-                                "lighting/motion",
-                                "lighting/ambient",
-                                "lighting",
-                                "intrusionDetectionConfig",
-                                "audioDetectionConfig",
-                            ]
+                await _poll_slow_tier_endpoints(
+                    self,
+                    cam_id_key,
+                    cam_raw,
+                    ctx,
+                    data,
+                    session,
+                    headers,
+                    lambda cid, title, ep_data: (
+                        BoschCameraCoordinator._maybe_fire_intrusion_event(
+                            self, cid, title, ep_data
                         )
-                    # Gen2 Indoor II-only endpoints (alarm system + power-LED).
-                    # privacy_sound_override is added above (same as Gen1 Indoor).
-                    if hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
-                        endpoints.extend(
-                            [
-                                "alarm_settings",
-                                "alarmStatus",
-                                "iconLedBrightness",
-                            ]
-                        )
-
-                    results = await asyncio.gather(
-                        *[_fetch(ep) for ep in endpoints],
-                        return_exceptions=True,
-                    )
-
-                    # Process results
-                    for fetch_result in results:
-                        if isinstance(fetch_result, BaseException):
-                            continue
-                        ep, ep_status, ep_data = fetch_result
-                        if ep_status != 200 or ep_data is None:
-                            continue
-                        if ep == "wifiinfo":
-                            self._wifiinfo_cache[cam_id_key] = ep_data
-                        elif ep == "ambient_light_sensor_level":
-                            self._ambient_light_cache[cam_id_key] = ep_data.get(
-                                "ambientLightSensorLevel"
-                            )
-                        elif ep == "motion":
-                            # Skip within the write-lock window so a poll that
-                            # lands before the cloud reflects the user's
-                            # sensitivity change doesn't revert the UI.
-                            if not self._is_write_locked(
-                                cam_id_key, self._motion_set_at
-                            ):
-                                data[cam_id_key]["motion"] = ep_data
-                        elif ep == "firmware":
-                            # Write-locked like motion/privacy_sound_override above —
-                            # otherwise a poll landing right after async_install()'s
-                            # optimistic updating=True (before Bosch's backend has
-                            # actually flagged the install) reverts it to stale
-                            # "not updating" and a second install PUT could fire.
-                            if not self._is_write_locked(
-                                cam_id_key, self._firmware_set_at
-                            ):
-                                self._firmware_cache[cam_id_key] = ep_data
-                        elif ep == "recording_options":
-                            data[cam_id_key]["recordingOptions"] = ep_data
-                        elif ep == "unread_events_count":
-                            if isinstance(ep_data, dict):
-                                self._unread_events_cache[cam_id_key] = int(
-                                    ep_data.get("count", ep_data.get("result", 0)) or 0
-                                )
-                            elif isinstance(ep_data, (int, float)):
-                                self._unread_events_cache[cam_id_key] = int(ep_data)
-                        elif ep == "privacy_sound_override":
-                            if not self._is_write_locked(
-                                cam_id_key, self._privacy_sound_set_at
-                            ):
-                                self._privacy_sound_cache[cam_id_key] = ep_data.get(
-                                    "result", False
-                                )
-                        elif ep == "commissioned":
-                            self._commissioned_cache[cam_id_key] = ep_data
-                        elif ep == "autofollow":
-                            data[cam_id_key]["autofollow"] = ep_data
-                        elif ep == "timestamp":
-                            if not self._is_write_locked(
-                                cam_id_key, self._timestamp_set_at
-                            ):
-                                self._timestamp_cache[cam_id_key] = ep_data.get(
-                                    "result", False
-                                )
-                        elif ep == "notifications":
-                            self._notifications_cache[cam_id_key] = ep_data
-                        elif ep == "rules":
-                            self._rules_cache[cam_id_key] = (
-                                ep_data if isinstance(ep_data, list) else []
-                            )
-                        elif ep == "motion_sensitive_areas":
-                            self._cloud_zones_cache[cam_id_key] = (
-                                ep_data if isinstance(ep_data, list) else []
-                            )
-                        elif ep == "privacy_masks":
-                            self._cloud_privacy_masks_cache[cam_id_key] = (
-                                ep_data if isinstance(ep_data, list) else []
-                            )
-                        elif ep == "lighting_options":
-                            self._lighting_options_cache[cam_id_key] = (
-                                ep_data if isinstance(ep_data, dict) else {}
-                            )
-                        elif ep == "ledlights":
-                            if not self._is_write_locked(
-                                cam_id_key, self._ledlights_set_at
-                            ):
-                                self._ledlights_cache[cam_id_key] = (
-                                    ep_data.get("state") == "ON"
-                                    if isinstance(ep_data, dict)
-                                    else None
-                                )
-                        elif ep == "lens_elevation":
-                            self._lens_elevation_cache[cam_id_key] = (
-                                ep_data.get("elevation")
-                                if isinstance(ep_data, dict)
-                                else None
-                            )
-                        elif ep == "audio":
-                            self._audio_cache[cam_id_key] = (
-                                ep_data if isinstance(ep_data, dict) else {}
-                            )
-                        elif ep == "lighting/motion":
-                            self._motion_light_cache[cam_id_key] = (
-                                ep_data if isinstance(ep_data, dict) else {}
-                            )
-                            # MotionLightSwitch state is synced via switch._is_on
-                            # on its next update — nothing to do here.
-                        elif ep == "lighting/ambient":
-                            self._ambient_lighting_cache[cam_id_key] = (
-                                ep_data if isinstance(ep_data, dict) else {}
-                            )
-                        elif ep == "lighting":
-                            self._global_lighting_cache[cam_id_key] = (
-                                ep_data if isinstance(ep_data, dict) else {}
-                            )
-                        elif ep == "intrusionDetectionConfig":
-                            # Skip cache overwrite within the write-lock window —
-                            # otherwise a slow-tier poll hitting before the cloud
-                            # has caught up to the user's toggle reverts the
-                            # switch back to the stale enabled value.
-                            if not self._is_write_locked(
-                                cam_id_key, self._intrusion_config_set_at
-                            ):
-                                self._intrusion_config_cache[cam_id_key] = (
-                                    ep_data if isinstance(ep_data, dict) else {}
-                                )
-                        elif ep == "audioDetectionConfig":
-                            # Glass-break / fire-alarm sound detection (Gen2
-                            # Audio-Plus). Skip cache overwrite within the
-                            # write-lock window so an optimistic toggle isn't
-                            # reverted by a slow-tier poll before cloud catches up.
-                            if not self._is_write_locked(
-                                cam_id_key, self._audio_detection_set_at
-                            ):
-                                self._audio_detection_cache[cam_id_key] = (
-                                    ep_data if isinstance(ep_data, dict) else {}
-                                )
-                        elif ep == "alarm_settings":
-                            # Skip within the write-lock window (cloud
-                            # propagation) so the optimistic cache isn't reverted.
-                            if not self._is_write_locked(
-                                cam_id_key, self._alarm_settings_set_at
-                            ):
-                                self._alarm_settings_cache[cam_id_key] = (
-                                    ep_data if isinstance(ep_data, dict) else {}
-                                )
-                        elif ep == "alarmStatus":
-                            # Actual response format confirmed 2026-04-11:
-                            #   {"alarmType": "NONE" | ..., "intrusionSystem": "INACTIVE" | "ACTIVE" | ...}
-                            self._alarm_status_cache[cam_id_key] = (
-                                ep_data if isinstance(ep_data, dict) else {}
-                            )
-                            if isinstance(ep_data, dict) and not self._is_write_locked(
-                                cam_id_key, self._arming_set_at
-                            ):
-                                intrusion = str(
-                                    ep_data.get("intrusionSystem", "")
-                                ).upper()
-                                if intrusion == "ACTIVE":
-                                    self._arming_cache[cam_id_key] = True
-                                elif intrusion == "INACTIVE":
-                                    self._arming_cache[cam_id_key] = False
-                            if isinstance(ep_data, dict):
-                                # Class-method dispatch (not bound `self.`) because
-                                # existing test fixtures inject `SimpleNamespace`
-                                # stubs as `self`. Those lack instance methods, so
-                                # the bound-method lookup raises AttributeError —
-                                # the explicit `Class.method(self, ...)` form binds
-                                # at call-site instead. The helper itself is
-                                # defensive (lazy-inits `_last_alarm_type`).
-                                BoschCameraCoordinator._maybe_fire_intrusion_event(
-                                    self,
-                                    cam_id_key,
-                                    cam_raw.get("title", cam_id_key),
-                                    ep_data,
-                                )
-                        elif ep == "iconLedBrightness":
-                            # Power-LED brightness 0-4 (5 discrete steps: off + 4 levels)
-                            try:
-                                val = (
-                                    int(ep_data.get("value", 0))
-                                    if isinstance(ep_data, dict)
-                                    else 0
-                                )
-                                self._icon_led_brightness_cache[cam_id_key] = max(
-                                    0, min(4, val)
-                                )
-                            except (TypeError, ValueError):
-                                self._icon_led_brightness_cache[cam_id_key] = 0
-                        elif ep == "zones":
-                            zones_data: list[Any] = (
-                                ep_data if isinstance(ep_data, list) else []
-                            )
-                            self._gen2_zones_cache[cam_id_key] = zones_data
-                            _LOGGER.debug(
-                                "Gen2 zones for %s: %d zones fetched",
-                                cam_id_key[:8],
-                                len(zones_data),
-                            )
-                        elif ep == "privateAreas":
-                            areas_data: list[Any] = (
-                                ep_data if isinstance(ep_data, list) else []
-                            )
-                            self._gen2_private_areas_cache[cam_id_key] = areas_data
-                            _LOGGER.debug(
-                                "Gen2 privateAreas for %s: %d areas fetched",
-                                cam_id_key[:8],
-                                len(areas_data),
-                            )
+                    ),
+                )
 
                 # ── RCP data via cloud proxy (slow tier — every 5 min) ────────
                 # Opens a proxy connection and reads multiple RCP values.
@@ -3744,12 +2666,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 # Skip when Privacy is ON — the cloud proxy rejects RCP session
                 # handshakes (invalid session 0x00000000) while privacy blocks the
                 # camera's RCP endpoint. Avoids noisy debug logs every 5 min.
-                local_stream_active = (
-                    cam_id_key in self._live_connections
-                    and self._live_connections[cam_id_key].get("_connection_type")
-                    == "LOCAL"
-                )
-                privacy_on = cam_raw.get("privacyMode", "").upper() == "ON"
+                local_stream_active = ctx.local_stream_active
+                privacy_on = ctx.privacy_on
                 if is_online and do_slow_cam and privacy_on:
                     _LOGGER.debug(
                         "RCP slow-tier skipped for %s (privacy ON)", cam_id_key
@@ -3844,128 +2762,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 except Exception as err:
                     _LOGGER.debug("SHC state update error: %s", err)
 
-            # ── 7. SMB/NAS upload — triggered by FCM push only (not coordinator) ──
-            # Removed from coordinator tick: the full event scan took ~90s on
-            # startup (checking hundreds of existing files via SMB). New events
-            # are uploaded immediately when FCM push triggers alert processing.
-
-            # ── 8. SMB daily cleanup (retention) ──────────────────────────────
-            _SMB_CLEANUP_INTERVAL = 86400  # once per day
-            if (
-                opts.get("enable_smb_upload")
-                and opts.get("smb_server")
-                and opts.get("smb_retention_days", 180) > 0
-                and (time.monotonic() - self._last_smb_cleanup) >= _SMB_CLEANUP_INTERVAL
-            ):
-                self._last_smb_cleanup = time.monotonic()
-                # Fire-and-forget: cleanup walks the entire share and can take
-                # minutes on large datasets. Don't block the coordinator tick.
-                # Errors land in the executor future and are logged from smb.py.
-                self.hass.async_create_background_task(
-                    self._run_smb_cleanup_bg(),
-                    "bosch_shc_camera_smb_cleanup",
-                )
-
-            # ── 8b. NVR daily retention purge ─────────────────────────────────
-            _NVR_CLEANUP_INTERVAL = 86400  # once per day
-            if (
-                opts.get("enable_nvr", False)
-                and int(opts.get("nvr_retention_days", 3)) > 0
-                and (time.monotonic() - self._last_nvr_cleanup) >= _NVR_CLEANUP_INTERVAL
-            ):
-                self._last_nvr_cleanup = time.monotonic()
-                self.hass.async_create_background_task(
-                    self._run_nvr_cleanup_bg(),
-                    "bosch_shc_camera_nvr_cleanup",
-                )
-
-            # Quality-Scale Gold (stale-devices): remove devices for cameras that
-            # no longer exist in the Bosch cloud account. Skip on the fast first
-            # tick so we don't race the device-registry creation in async_setup_entry.
-            if not is_first_tick and data:
-                self._cleanup_stale_devices(set(data.keys()))
-
-            # Per-camera availability transition notifier — fires when a cam
-            # flips between online and offline. First tick is silent (records
-            # baseline). Skipped on the fast first tick because the cache is
-            # still being populated and could carry a stale "online" from a
-            # restore_state load. Defensive getattr handles stub coordinators
-            # in unit tests that bypass __init__ (~80 fixtures across the
-            # test suite).
-            _announce = getattr(self, "_async_maybe_announce_camera_status", None)
-            _compute = getattr(self, "_compute_status_for", None)
-            if (
-                not is_first_tick
-                and data
-                and _announce is not None
-                and _compute is not None
-            ):
-                for _cam_id, _cam_data in data.items():
-                    new_status = _compute(_cam_id, _cam_data)
-                    self.hass.async_create_task(_announce(_cam_id, new_status))
-
-            # Persist LAN IPs (cam_id → IP) so the next cloud-degraded
-            # startup can ping cameras without first needing a cloud call.
-            # Throttle: only write if the mapping actually changed.
-            _store = getattr(self, "_lan_ips_store", None)
-            if _store is not None and self._rcp_lan_ip_cache:
-                _snapshot = {k: v for k, v in self._rcp_lan_ip_cache.items() if v}
-                _prev = getattr(self, "_lan_ips_snapshot", None)
-                if _snapshot and _snapshot != _prev:
-                    self._lan_ips_snapshot = _snapshot
-                    self.hass.async_create_task(_store.async_save(_snapshot))
-
-            # Persist hardware versions (cam_id → hw_version) for the same
-            # cloud-degraded-startup reason — without this, _is_gen2() defaults
-            # to Gen1 after a cold start during a cloud outage, which makes
-            # the LAN-fallback gate on the privacy / front-light switches
-            # report "unavailable" even though the LAN RCP path would work.
-            _hw_store = getattr(self, "_hw_version_store", None)
-            if _hw_store is not None and self._hw_version:
-                _hw_snapshot = {k: v for k, v in self._hw_version.items() if v}
-                _hw_prev = getattr(self, "_hw_version_snapshot", None)
-                if _hw_snapshot and _hw_snapshot != _hw_prev:
-                    self._hw_version_snapshot = _hw_snapshot
-                    self.hass.async_create_task(_hw_store.async_save(_hw_snapshot))
-
-            # Persist LOCAL Digest creds so LAN-fallback privacy / light
-            # writes survive HA restarts during a Bosch cloud outage. Without
-            # this, every cold restart while the cloud is 503 leaves the cred
-            # cache empty and the LAN RCP write returns <err> "no auth".
-            _creds_store = getattr(self, "_local_creds_store", None)
-            if _creds_store is not None and self._local_creds_cache:
-                _cred_snapshot = {
-                    k: {
-                        "user": v["user"],
-                        "password": v["password"],
-                        "host": v["host"],
-                        "port": v.get("port", 443),
-                    }
-                    for k, v in self._local_creds_cache.items()
-                    if v.get("user") and v.get("password") and v.get("host")
-                }
-                _cred_prev = getattr(self, "_local_creds_snapshot", None)
-                if _cred_snapshot and _cred_snapshot != _cred_prev:
-                    self._local_creds_snapshot = _cred_snapshot
-                    self.hass.async_create_task(_creds_store.async_save(_cred_snapshot))
-
-            # Periodic background refresh of the Bosch community maintenance
-            # feed — once per hour on a healthy coordinator tick. Reactive
-            # refresh on 503 is handled inside the cloud-call branch.
-            # getattr defaults handle stub coordinators in tests that bypass __init__.
-            _maint_last = getattr(self, "_maintenance_last_fetch", float("-inf"))
-            _maint_interval = getattr(self, "_MAINTENANCE_INTERVAL_S", 3600.0)
-            _maint_refresh = getattr(self, "_async_refresh_maintenance", None)
-            if _maint_refresh is not None and (now - _maint_last) >= _maint_interval:
-                self.hass.async_create_task(_maint_refresh(reactive=False))
-
-            # Cloud-state transition notifier (v12.4.11). Schedule as a
-            # background task so the coordinator main loop is not delayed by
-            # a slow notify service. getattr handles stub coordinators in
-            # tests that bypass __init__.
-            _cloud_alert = getattr(self, "_async_maybe_announce_cloud_state", None)
-            if _cloud_alert is not None:
-                self.hass.async_create_task(_cloud_alert(True))
+            # ── 7/8. Housekeeping: SMB/NVR cleanup, stale devices, availability
+            # notify, LAN-IP/hw-version/local-creds persistence, maintenance feed,
+            # cloud-state notify ────────────────────────────────────────────────
+            await run_housekeeping(self, data, opts, now, is_first_tick)
 
             # Raise a Repairs issue when movement/person notifications are
             # disabled on a camera — without them the binary sensors are
@@ -3991,28 +2791,12 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             return data
 
         except UpdateFailed:
-            _cloud_alert = getattr(self, "_async_maybe_announce_cloud_state", None)
-            if _cloud_alert is not None:
-                self.hass.async_create_task(_cloud_alert(False))
+            await dispatch_update_failed(self)
             raise
         except TimeoutError:
-            _maint = getattr(self, "_async_refresh_maintenance", None)
-            if _maint is not None:
-                self.hass.async_create_task(_maint(reactive=True))
-            _outage_ping = getattr(self, "_async_outage_ping_all", None)
-            if _outage_ping is not None:
-                self.hass.async_create_task(_outage_ping())
-            _cloud_alert = getattr(self, "_async_maybe_announce_cloud_state", None)
-            if _cloud_alert is not None:
-                self.hass.async_create_task(_cloud_alert(False))
-            raise UpdateFailed(
-                "Timeout fetching camera data from Bosch cloud"
-            ) from None
+            raise await dispatch_timeout(self) from None
         except aiohttp.ClientError as err:
-            _cloud_alert = getattr(self, "_async_maybe_announce_cloud_state", None)
-            if _cloud_alert is not None:
-                self.hass.async_create_task(_cloud_alert(False))
-            raise UpdateFailed(f"Network error: {err}") from err
+            raise await dispatch_client_error(self, err) from err
 
     def _refresh_notifications_disabled_issues(self) -> None:
         """Create or clear Repairs issues for cameras with disabled movement/person notifications.

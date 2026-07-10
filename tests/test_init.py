@@ -52,7 +52,6 @@ import custom_components.bosch_shc_camera as bosch_init
 from custom_components.bosch_shc_camera import (
     _DOUBLED_PREFIX_RE,
     OPTIONS_SNAPSHOT_KEY,
-    SLOW_TIER_MAX_DEFER_SEC,
     BoschCameraCoordinator,
     _async_cancel_coordinator_tasks,
     _async_options_updated,
@@ -64,6 +63,7 @@ from custom_components.bosch_shc_camera import (
 from custom_components.bosch_shc_camera.const import (
     DEFAULT_OPTIONS,
     DOMAIN,
+    SLOW_TIER_MAX_DEFER_SEC,
     STREAM_IDLE_REAP_SEC,
 )
 from custom_components.bosch_shc_camera.frigate_endpoint import (
@@ -34201,7 +34201,7 @@ class TestDedupContinueDropsData:
 
     def test_continue_skips_assignment_in_loop(self):
         """Verify the structural bug: `continue` before the data-assignment block."""
-        source = (SRC / "__init__.py").read_text()
+        source = (SRC / "event_dispatch.py").read_text()
         # Find the dedup-continue block
         dedup_block = "_alert_sent_ids.get(newest_id"  # format-robust token (ruff may wrap the full expression)
         assert dedup_block in source, (
@@ -34216,7 +34216,7 @@ class TestDedupContinueDropsData:
         alert dispatch, but MUST NOT skip the data[cam_id] assignment.
         The loop body order must be: dedup → skip alert (no continue) → data[cam_id] =
         """
-        source = (SRC / "__init__.py").read_text()
+        source = (SRC / "event_dispatch.py").read_text()
         # Locate the dedup block and data assignment
         dedup_pattern = "_alert_sent_ids.get(newest_id"  # format-robust token (ruff may wrap the full expression)
         dedup_idx = source.find(dedup_pattern)
@@ -34253,7 +34253,7 @@ class TestDedupContinueDropsData:
 
     def test_dedup_path_sets_last_event_ids(self):
         """Even on dedup, _last_event_ids must be updated to prevent re-alert on next tick."""
-        source = (SRC / "__init__.py").read_text()
+        source = (SRC / "event_dispatch.py").read_text()
         # The dedup path must update _last_event_ids[cam_id] = newest_id
         # before any early exit
         dedup_pattern = "_alert_sent_ids.get(newest_id"  # format-robust token (ruff may wrap the full expression)
@@ -34904,25 +34904,32 @@ class TestStreamSupportNoiseFilterSentinel:
 class TestAnyStatusCheckedFix:
     """`any_status_checked` must be set unconditionally once a non-exception
     status result is processed — re-gating it on a fresh `_should_check_status`
-    call after `_check_status` already stamped `_per_cam_status_at[cid]=now`
-    always returns False for extended-offline cameras, causing a redundant
-    status-check gather on every subsequent tick."""
+    call after `_check_one_camera_status` already stamped
+    `_per_cam_status_at[cid]=now` always returns False for extended-offline
+    cameras, causing a redundant status-check gather on every subsequent tick.
+
+    Premise updated (2026-07, Phase 2 step 4): this logic lives in
+    `camera_status.py::poll_statuses` now, not inline in
+    `_async_update_data` — see camera_status.py's own module docstring for
+    the same explanation, carried over verbatim during the extraction.
+    """
 
     def test_any_status_checked_set_unconditionally(self):
         import inspect
 
-        import custom_components.bosch_shc_camera.__init__ as _m
+        import custom_components.bosch_shc_camera.camera_status as _m
 
-        src = inspect.getsource(_m.BoschCameraCoordinator._async_update_data)
+        src = inspect.getsource(_m.poll_statuses)
 
         block_start = src.find("any_status_checked = False")
         assert block_start != -1, "any_status_checked pattern must exist"
 
-        stale_pattern = "if self._should_check_status(cid, now, interval_status):\n                    any_status_checked = True"
+        stale_pattern = "if coordinator._should_check_status(cid, now, interval_status):\n                    any_status_checked = True"
         assert stale_pattern not in src, (
             "any_status_checked must NOT be gated on _should_check_status re-eval "
             "after gather — _per_cam_status_at[cid] was just set to `now` inside "
-            "_check_status, so re-eval always returns False for extended-offline cams"
+            "_check_one_camera_status, so re-eval always returns False for "
+            "extended-offline cams"
         )
 
         correct_pattern = "any_status_checked = True"
@@ -34935,9 +34942,9 @@ class TestAnyStatusCheckedFix:
     def test_comment_explains_fix(self):
         import inspect
 
-        import custom_components.bosch_shc_camera.__init__ as _m
+        import custom_components.bosch_shc_camera.camera_status as _m
 
-        src = inspect.getsource(_m.BoschCameraCoordinator._async_update_data)
+        src = inspect.getsource(_m.poll_statuses)
         assert "_per_cam_status_at" in src and "any_status_checked" in src, (
             "The fix comment must reference _per_cam_status_at to explain "
             "why the stale re-evaluation was incorrect"
@@ -34953,18 +34960,18 @@ class TestAlertSentIdsSentinel:
     def test_alert_sent_ids_default_not_zero(self):
         import inspect
 
-        import custom_components.bosch_shc_camera.__init__ as _m
+        import custom_components.bosch_shc_camera.event_dispatch as _m
 
         src = inspect.getsource(_m)
         assert "_alert_sent_ids.get(newest_id, 0.0)" not in src, (
-            "__init__.py must not use 0.0 as default for _alert_sent_ids.get(); "
+            "event_dispatch.py must not use 0.0 as default for _alert_sent_ids.get(); "
             "on hosts with monotonic < 60s, 0.0 > (now-60) is True → first alert suppressed"
         )
 
     def test_alert_sent_ids_uses_neginf_default(self):
         import inspect
 
-        import custom_components.bosch_shc_camera.__init__ as _m
+        import custom_components.bosch_shc_camera.event_dispatch as _m
 
         src = inspect.getsource(_m)
         assert_in_source(src, '_alert_sent_ids.get(newest_id, float("-inf"))')
@@ -35876,9 +35883,11 @@ def test_forum_issue5_polling_seeds_last_event_ids_on_first_tick():
     without setting `_last_event_ids`, so `prev_id` stayed None forever and
     the alert-chain elif was never reached — motion automations never fired
     in polling-only mode after a restart."""
-    src = inspect.getsource(BoschCameraCoordinator._async_update_data)
+    import custom_components.bosch_shc_camera.event_dispatch as _event_dispatch_mod
+
+    src = inspect.getsource(_event_dispatch_mod.build_data_and_dispatch)
     assert_in_source(  # _last_event_ids bootstrap missing → alerts stop firing after restart
-        src, "self._last_event_ids[cam_id] = newest_id"
+        src, "coordinator._last_event_ids[cam_id] = newest_id"
     )
 
 

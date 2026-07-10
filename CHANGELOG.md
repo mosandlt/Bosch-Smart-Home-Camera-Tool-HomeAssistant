@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.10] - 2026-07-10
+
+Patch — internal cleanup continued (coordinator rewrite, Phase 2), no user-facing change
+
+### Changed
+
+- **Internal only**: the coordinator's ~10,000-line `__init__.py` had its per-tick polling method (`_async_update_data`, the single largest piece of the file) split into 8 focused modules — camera-list fetch, tick bootstrap, status polling, event polling, event dispatch, post-tick housekeeping, and the per-camera slow-tier diagnostic pass (itself further split into 4 sub-pieces: per-camera context, info-cache updates, pan/lighting control, and the ~20-endpoint slow-tier fetch). Each extraction step preserved behavior exactly — no functional change — and was independently verified by a dedicated review pass plus a full regression-test run before merging; the highest-risk piece (the slow-tier endpoint fetch) additionally got a thorough endpoint-by-endpoint review and a live health check on test hardware spanning a full slow-tier poll cycle. Continuation of the internal cleanup started in v14.5.7–v14.5.9.
+
+5870 tests / mypy --strict / ruff / codespell green, 100% coverage, deploy-verified on test HA across all 8 extraction steps.
+
 ## [v14.5.9] - 2026-07-10
 
 Patch — "Download Diagnostics" no longer crashes; internal cleanup continued

@@ -8,6 +8,28 @@ DOMAIN = "bosch_shc_camera"
 CARD_VERSION = "14.1.5"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
+# Delivery-death detection (issue #36). When the periodic /v11/events poll finds
+# a genuinely NEW event while FCM is enabled+running+"healthy" yet no real push
+# has arrived in this window, push delivery is dead at the cloud/Google layer
+# even though the socket reports is_started()=True (the exact silent-death case
+# the fcm.py module docstring describes). The poll is ground truth that push
+# missed a real event, so we flip _fcm_healthy=False and force a HARD heal
+# (purge + fresh registration) — which also re-POSTs to Bosch /v11/devices,
+# healing a server-side-dropped device registration. 10 min is wide enough that
+# a push arriving just before the poll (race) keeps _fcm_last_push recent and
+# suppresses a false positive.
+FCM_DELIVERY_DEAD_AFTER_SEC = 600.0
+
+# Bounded slow-tier defer (stream-contention gate, see slow_tier.py). While a
+# live stream is active the slow-tier diagnostic read is deferred to avoid
+# TLS-channel contention. On a *continuously* active stream (e.g. a dashboard
+# left on live view) that deferral would otherwise never end, freezing the
+# diagnostic sensors indefinitely. After this many seconds of unbroken
+# deferral we force one read even while streaming — accepting a rare brief
+# contention over permanently stale diagnostics — then the defer cycle
+# restarts. Bounds worst-case staleness to ~this + one slow interval.
+SLOW_TIER_MAX_DEFER_SEC = 1800.0
+
 ALL_PLATFORMS = [
     "binary_sensor",
     "camera",
