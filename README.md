@@ -2160,11 +2160,16 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.5.5** — see the GitHub release page for full notes:
-[**v14.5.5 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.5)
+Latest: **v14.5.10** — see the GitHub release page for full notes:
+[**v14.5.10 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.10)
 
 | Version | Highlights |
 |---|---|
+| **v14.5.10** | **Internal cleanup only, no user-facing change.** The coordinator's per-tick data-fetching method — by far the largest single piece of the integration's code — has been split into 8 focused, independently-tested modules. Continuation of the internal cleanup started in v14.5.7. |
+| **v14.5.9** | **"Download Diagnostics" no longer fails, internal cleanup continued.** The Settings → Devices & Services diagnostics download could fail due to a gap left by the previous two internal-cleanup releases; found and fixed before it affected most users. |
+| **v14.5.8** | **Internal cleanup — no user-facing change.** Continuation of the internal cleanup started in v14.5.7. |
+| **v14.5.7** | **Internal cleanup — no user-facing change.** Five near-identical copies of the same internal locking helper, accumulated one at a time over many releases, are now a single shared helper — groundwork for further cleanup. |
+| **v14.5.6** | **Mini-NVR credential-rotation race fixed at its root.** A follow-up to v14.5.5: the underlying rejection that release learned to tolerate is now prevented from happening in the first place. Also caps a genuinely broken camera credential at 5 retries instead of retrying silently forever. |
 | **v14.5.5** | **Mini-NVR no longer gives up permanently on a credential-rotation race.** Turning Mini-NVR on shortly after opening a live view could occasionally hit two quick, unrelated connection hiccups in a row — which the recorder mistook for a real double crash and gave up on, requiring a manual switch toggle to recover. That specific hiccup is now recognized as harmless and no longer counts against it; the recorder just keeps retrying until it connects. The stuck "error" indicator is also now cleared properly once recording successfully resumes. |
 | **v14.5.4** | **Fixed Mini-NVR recordings being cut into tiny few-second clips instead of proper continuous segments.** The recorder was being unnecessarily restarted every time Bosch rotated the camera's local access credentials in the background — which for some cameras happens as often as every 15 seconds — interrupting the in-progress recording each time. The credential rotation itself doesn't require a restart, so recording now continues uninterrupted. |
 | **v14.5.3** | **Fixed several entity icons stuck showing the wrong state** — most noticeably the camera light and intercom switches always showing their "on" icon even while off. A hardcoded icon was silently overriding the correct, state-aware icon defined internally; all icons now come from one consistent source. |
@@ -2296,11 +2301,11 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.4.9** · HA Quality Scale **Platinum** · production-ready |
-| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.4** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
-| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.7** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.5.10** · HA Quality Scale **Platinum** · production-ready |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.5** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
+| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.8** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.5** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
-| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.5-alpha** · stream-url node · 4 nodes (event / snapshot / privacy / config) |
+| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.6-alpha** · stream-url node · 4 nodes (event / snapshot / privacy / config) |
 
 Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — **v0.1.5-alpha** (dashboard + camera detail + settings) — community interest welcome
 
