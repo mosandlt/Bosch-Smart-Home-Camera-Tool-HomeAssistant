@@ -1,19 +1,30 @@
 """Per-camera live-session bookkeeping.
 
-First slice of the coordinator god-object rewrite (Phase 1 of
+Phase 1 of the coordinator god-object rewrite (see
 .claude/plans/jiggly-moseying-peacock.md, in the project root). Consolidates
-three previously separate per-camera coordinator dicts —
-``_auto_renew_generation``, ``_session_idle_since``, and
-``_stream_warming_started`` — into one object per camera.
+per-camera coordinator dicts into one object per camera.
 
-These three were chosen for the FIRST slice specifically because they have
-NO external readers (only `BoschCameraCoordinator` itself, in
-``__init__.py``, ever touches them) — unlike ``_live_connections`` and
-``_stream_warming``, which are read/mutated directly from ``camera.py`` and
-``switch.py`` and therefore need a compatibility-preserving design before
-they can move. This slice is a pure internal consolidation with zero
-blast radius on the other entity-platform files, mirroring the
-``lock_utils.py`` Phase 0 step.
+Slice 1 folded in three dicts with NO external readers (only
+`BoschCameraCoordinator` itself, in ``__init__.py``, ever touched them):
+``_auto_renew_generation``, ``_session_idle_since``, ``_stream_warming_started``.
+
+Slice 2 (this one) folds in two more: ``_stream_warming`` (a ``set[str]``)
+and ``_live_opened_at`` (a ``dict[str, float]``) — both DO have external
+readers (``camera.py``: ``in``/``not in`` on ``_stream_warming``, ``.get()``/
+``.pop()`` on ``_live_opened_at``). Rather than rewrite those call sites,
+``_StreamWarmingView``/``_LiveOpenedAtView`` below are thin facades
+implementing exactly the subset of the ``set``/``dict`` protocol those call
+sites use, backed by the same ``_sessions`` store — so
+``coordinator._stream_warming``/``coordinator._live_opened_at`` keep
+behaving exactly as before to every external caller, with zero changes
+needed in ``camera.py``/``switch.py``.
+
+Deliberately NOT folded into this slice: ``_live_connections`` itself — a
+much larger, heterogeneous ~15-key dict (raw Bosch API JSON plus derived
+fields) with real external MUTATION (two direct ``.pop()`` call sites in
+``camera.py``/``switch.py``), not just reads. That merge needs its own
+dedicated design (likely a Mapping-protocol facade or similar) and is left
+for a future slice rather than folded in here.
 
 ``generation`` is the TOCTOU guard central to this rewrite's motivation: a
 caller that decides to tear down or renew a session captures the generation
@@ -31,16 +42,18 @@ from dataclasses import dataclass
 class CameraSessionState:
     """Per-camera live-session bookkeeping.
 
-    ``idle_since`` and ``warming_started`` use ``None``/``float('-inf')``
-    respectively as their "not currently set" sentinel — matching the exact
-    semantics of the dict lookups they replace (SENTINEL_RULE: never ``0.0``
-    for "never done", since CI/production hosts boot with a nonzero
-    monotonic clock already).
+    ``idle_since``/``opened_at`` use ``None``, ``warming_started`` uses
+    ``float('-inf')``, as their "not currently set" sentinel — matching the
+    exact semantics of the dict/set lookups they replace (SENTINEL_RULE:
+    never ``0.0`` for "never done", since CI/production hosts boot with a
+    nonzero monotonic clock already).
     """
 
     generation: int = 0
     idle_since: float | None = None
     warming_started: float = float("-inf")
+    warming: bool = False
+    opened_at: float | None = None
 
 
 def get_or_create_session(
@@ -57,3 +70,63 @@ def get_or_create_session(
         session = CameraSessionState()
         store[cam_id] = session
     return session
+
+
+class StreamWarmingView:
+    """Set-like facade over `CameraSessionState.warming`.
+
+    Preserves the `_stream_warming: set[str]` contract external callers
+    (`camera.py`: `in`/`not in`) rely on, without them needing to change.
+    """
+
+    def __init__(self, sessions: dict[str, CameraSessionState]) -> None:
+        self._sessions = sessions
+
+    def __contains__(self, cam_id: str) -> bool:
+        session = self._sessions.get(cam_id)
+        return session is not None and session.warming
+
+    def add(self, cam_id: str) -> None:
+        get_or_create_session(self._sessions, cam_id).warming = True
+
+    def discard(self, cam_id: str) -> None:
+        session = self._sessions.get(cam_id)
+        if session is not None:
+            session.warming = False
+
+    def __len__(self) -> int:
+        return sum(1 for session in self._sessions.values() if session.warming)
+
+
+class LiveOpenedAtView:
+    """Dict-like facade over `CameraSessionState.opened_at`.
+
+    Preserves the `_live_opened_at: dict[str, float]` contract external
+    callers (`camera.py`: `.get()`/`.pop()`) rely on, without them needing
+    to change.
+    """
+
+    def __init__(self, sessions: dict[str, CameraSessionState]) -> None:
+        self._sessions = sessions
+
+    def get(self, cam_id: str, default: float | None = None) -> float | None:
+        session = self._sessions.get(cam_id)
+        if session is None or session.opened_at is None:
+            return default
+        return session.opened_at
+
+    def pop(self, cam_id: str, default: float | None = None) -> float | None:
+        session = self._sessions.get(cam_id)
+        if session is None or session.opened_at is None:
+            return default
+        val = session.opened_at
+        session.opened_at = None
+        return val
+
+    def __setitem__(self, cam_id: str, value: float) -> None:
+        get_or_create_session(self._sessions, cam_id).opened_at = value
+
+    def __len__(self) -> int:
+        return sum(
+            1 for session in self._sessions.values() if session.opened_at is not None
+        )

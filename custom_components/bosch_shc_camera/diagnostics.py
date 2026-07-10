@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import pathlib
 import time
+from collections.abc import Sized
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -118,7 +119,10 @@ async def async_get_config_entry_diagnostics(
                 )
             )
 
-    stream_warming: set[str] = getattr(coord, "_stream_warming", set())
+    # Not a set[str] anymore — coord._stream_warming is a StreamWarmingView
+    # facade (session_state.py) since the Phase 1 coordinator rewrite. Sized
+    # is the correct minimal type for the only operation used here, len().
+    stream_warming: Sized = getattr(coord, "_stream_warming", set())
 
     return {
         "integration_version": INTEGRATION_VERSION,

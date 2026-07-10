@@ -211,9 +211,26 @@ async def test_coordinator_section_exposes_health_signals(
     hass: HomeAssistant,
 ) -> None:
     """coordinator.running, fcm_running, fcm_healthy, auth_outage_count,
-    and stream_warming_count are essential bug-report context."""
+    and stream_warming_count are essential bug-report context.
+
+    Regression: `_stream_warming` is a `StreamWarmingView` facade (Phase 1
+    coordinator rewrite), not a plain `set[str]` — a stub using a real
+    `set()` here would NOT have caught `len()` breaking against the real
+    facade (found live by a THREE_PER_ISSUE_PER_CHANGE bug-hunt agent), so
+    this constructs the actual facade against a real `_sessions` dict.
+    """
+    from custom_components.bosch_shc_camera.session_state import (
+        CameraSessionState,
+        StreamWarmingView,
+    )
+
     entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
     entry.add_to_hass(hass)
+    sessions = {
+        "cam-A": CameraSessionState(warming=True),
+        "cam-B": CameraSessionState(warming=True),
+        "cam-C": CameraSessionState(warming=False),  # must NOT be counted
+    }
     entry.runtime_data = type(
         "Stub",
         (),
@@ -223,7 +240,7 @@ async def test_coordinator_section_exposes_health_signals(
             "_fcm_running": True,
             "_fcm_healthy": False,
             "_auth_outage_count": 4,
-            "_stream_warming": {"cam-A", "cam-B"},
+            "_stream_warming": StreamWarmingView(sessions),
             "update_interval": type("Td", (), {"total_seconds": lambda self: 60.0})(),
         },
     )()

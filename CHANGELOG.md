@@ -5,6 +5,20 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.9] - 2026-07-10
+
+Patch — "Download Diagnostics" no longer crashes; internal cleanup continued
+
+### Fixed
+
+- **The "Download Diagnostics" button in Settings → Devices & Services could fail** due to an internal refactor in the previous two releases leaving one piece of bookkeeping unable to report its count. Found and fixed during this release's own internal review, before it shipped to most users — see the version history for detail if curious.
+
+### Changed
+
+- **Internal only**: two more per-camera bookkeeping structures used for the live-stream warm-up/session-timestamp logic are now part of the same consolidated object from v14.5.7/v14.5.8, with no change in behavior for anything else.
+
+5662 tests / mypy --strict / ruff / codespell green, 100% coverage, deploy-verified on test HA.
+
 ## [v14.5.8] - 2026-07-10
 
 Patch — internal cleanup, no user-facing change

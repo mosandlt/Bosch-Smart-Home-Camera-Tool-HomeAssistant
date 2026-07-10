@@ -118,7 +118,12 @@ from .rcp import async_update_rcp_data
 from .rcp import (
     get_cached_rcp_session as get_cached_rcp_session,  # re-export: mypy --no-implicit-reexport
 )
-from .session_state import CameraSessionState, get_or_create_session
+from .session_state import (
+    CameraSessionState,
+    LiveOpenedAtView,
+    StreamWarmingView,
+    get_or_create_session,
+)
 from .smb import (
     sync_smb_cleanup,
 )
@@ -572,9 +577,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             name=DOMAIN,
             update_interval=timedelta(seconds=int(opts.get("scan_interval", 60))),
         )
+        # Per-camera session bookkeeping (generation counter for the TOCTOU
+        # guard, idle-reaper/stream-warmup timestamps, warming flag) — Phase 1
+        # of the coordinator rewrite (see session_state.py). Declared before
+        # _live_opened_at/_stream_warming below since those are now thin
+        # facades backed by this same dict. Accessed via _get_session().
+        self._sessions: dict[str, CameraSessionState] = {}
         # Live-stream proxy info — keyed by cam_id, cleared after LIVE_SESSION_TTL seconds
         self._live_connections: dict[str, dict[str, Any]] = {}
-        self._live_opened_at: dict[str, float] = {}  # timestamp when session was opened
+        # timestamp when session was opened — dict-like facade over
+        # CameraSessionState.opened_at (external readers in camera.py use
+        # .get()/.pop(), preserved via LiveOpenedAtView; see session_state.py)
+        self._live_opened_at = LiveOpenedAtView(self._sessions)
         # Local-RCP+ state cache: per-cam {"privacy_mode": bool, "led_dimmer": int, "fetched_at": float, "source": "local"|"remote"}
         # Refreshed opportunistically after each successful PUT /connection.
         # Used as a refinement source for SHC-cache values when SHC is offline /
@@ -600,13 +614,6 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # Idle-session reaper tasks (one per LOCAL session, generation-tracked
         # like _renewal_tasks). See _idle_session_reaper.
         self._reaper_tasks: dict[str, asyncio.Task[None]] = {}
-        # Per-camera session bookkeeping (generation counter for the TOCTOU
-        # guard, idle-reaper timestamp, stream-warmup timestamp) — Phase 1 of
-        # the coordinator rewrite (see session_state.py). Consolidates what
-        # used to be 3 separate dicts (_auto_renew_generation,
-        # _session_idle_since, _stream_warming_started); accessed via
-        # _get_session().
-        self._sessions: dict[str, CameraSessionState] = {}
         # Camera entity references — registered on entity setup, used by button/service
         self._camera_entities: dict[str, Any] = {}
         # Live-stream switch entity references — registered by
@@ -1070,8 +1077,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # is_stream_warming() never need hasattr guards. Lazy init (hasattr) caused
         # clear_stream_warming() calls before first is_stream_warming() to silently
         # no-op, leaving the entity badge stuck on "warming" after stream start.
-        self._stream_warming: set[str] = set()
-        # warming_started timestamp lives in _sessions (CameraSessionState) now.
+        # set-like facade over CameraSessionState.warming (external readers
+        # in camera.py use `in`/`not in`, preserved via StreamWarmingView).
+        # warming_started timestamp lives in the same CameraSessionState.
+        self._stream_warming = StreamWarmingView(self._sessions)
         # Bosch community RSS-derived maintenance announcement. Periodic refresh
         # every _MAINTENANCE_INTERVAL_S; reactive refresh on cloud 5xx (rate-
         # limited by _MAINTENANCE_REACTIVE_COOLDOWN_S). Cleared explicitly only

@@ -225,7 +225,11 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
 
     # ── Live-stream & sessions ─────────────────────────────────────────
     assert coord._live_connections == {}
-    assert coord._live_opened_at == {}
+    # _live_opened_at/_stream_warming are now dict-/set-like facades
+    # (LiveOpenedAtView/StreamWarmingView) over the shared _sessions dict, so
+    # "initialised empty" is checked via _sessions itself (below) plus a
+    # get()/membership probe here — the facades don't support `== {}`/`== set()`.
+    assert coord._live_opened_at.get(CAM_A) is None
     assert coord._rcp_state_cache == {}
     assert coord._stream_type_override is None
     assert coord._audio_enabled == {}
@@ -368,7 +372,9 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
     assert coord._offline_since == {}
     assert coord._OFFLINE_EXTENDED_INTERVAL == 900
     assert coord._per_cam_status_at == {}
-    assert coord._stream_warming == set()
+    # _stream_warming is now a set-like facade (StreamWarmingView) over the
+    # shared _sessions dict — checked via membership, not `== set()`.
+    assert CAM_A not in coord._stream_warming
     # _stream_warming_started/_auto_renew_generation/_session_idle_since were
     # consolidated into _sessions (CameraSessionState) — already asserted above.
 
@@ -523,7 +529,11 @@ async def test_two_coordinators_have_independent_state(hass: HomeAssistant) -> N
     coord1._stream_warming.add("cam-A")
     coord1._hw_version["cam-A"] = "HOME_Eyes_Outdoor"
     assert coord2._tls_proxy_ports == {}
-    assert coord2._stream_warming == set()
+    # _stream_warming is a set-like facade (StreamWarmingView) over each
+    # coordinator's OWN _sessions dict — checked via membership + the
+    # backing dict itself, not `== set()`.
+    assert "cam-A" not in coord2._stream_warming
+    assert coord2._sessions == {}
     assert coord2._hw_version == {}
     # Update intervals differ per entry options.
     assert coord1.update_interval.total_seconds() == 30.0
@@ -34325,7 +34335,17 @@ class TestStreamWarmingInit:
     """
 
     def test_stream_warming_initialised_in_init(self):
-        """BoschCameraCoordinator.__init__ must set _stream_warming = set()."""
+        """BoschCameraCoordinator.__init__ must eagerly init `_stream_warming`.
+
+        Premise updated (2026-07, Phase 1 slice 2): `_stream_warming` is no
+        longer a bare `set()` — it's a `StreamWarmingView` facade over the
+        shared `_sessions` dict (preserves the external `in`/`not in`
+        contract camera.py relies on without changing camera.py). The
+        original BUG-3 concern (lazy hasattr-guarded init causing
+        clear_stream_warming() to silently no-op before the first
+        is_stream_warming() call) still applies to whatever backs it today,
+        so this pins the eager assignment, just via the new facade type.
+        """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         src = inspect.getsource(BoschCameraCoordinator.__init__)
@@ -34333,11 +34353,15 @@ class TestStreamWarmingInit:
             "BUG-3: _stream_warming not initialised in __init__. "
             "clear_stream_warming() called before is_stream_warming() silently no-ops."
         )
-        # Must be initialised as an empty set, not lazily
+        # Must be initialised eagerly (unconditionally), not lazily
         assert_in_source(
-            src, "_stream_warming = set()", "_stream_warming: set", any_of=True
+            src,
+            "_stream_warming = set()",
+            "_stream_warming: set",
+            "_stream_warming = StreamWarmingView(",
+            any_of=True,
         )
-        # _stream_warming must be eagerly initialised to set() in __init__
+        # _stream_warming must be eagerly initialised in __init__
 
     def test_stream_warming_started_initialised_in_init(self):
         """BoschCameraCoordinator.__init__ must eagerly init the per-cam session
