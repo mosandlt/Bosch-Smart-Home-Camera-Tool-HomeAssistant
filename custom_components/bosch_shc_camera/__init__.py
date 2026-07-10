@@ -113,6 +113,7 @@ from .frigate_endpoint import (
     InnerTarget,
     build_public_url,
 )
+from .lock_utils import get_or_create_lock
 from .rcp import async_update_rcp_data
 from .rcp import (
     get_cached_rcp_session as get_cached_rcp_session,  # re-export: mypy --no-implicit-reexport
@@ -4653,40 +4654,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
     # _stream_warming: set of cam_ids currently in warm-up phase (blocks privacy toggles)
 
     def _get_stream_lock(self, cam_id: str) -> asyncio.Lock:
-        """Get or create per-camera stream setup lock.
-
-        Safe under asyncio: check-then-insert has no `await` between the
-        two steps, so concurrent coroutines cannot interleave here.
-        """
-        lock = self._stream_locks.get(cam_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._stream_locks[cam_id] = lock
-        return lock
+        """Get or create per-camera stream setup lock."""
+        return get_or_create_lock(self._stream_locks, cam_id)
 
     def _get_rcp_session_lock(self, proxy_hash: str) -> asyncio.Lock:
-        """Get or create per-proxy_hash RCP session-open lock.
-
-        Safe under asyncio: check-then-insert has no `await` between the
-        two steps, so concurrent coroutines cannot interleave here.
-        """
-        lock = self._rcp_session_locks.get(proxy_hash)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._rcp_session_locks[proxy_hash] = lock
-        return lock
+        """Get or create per-proxy_hash RCP session-open lock."""
+        return get_or_create_lock(self._rcp_session_locks, proxy_hash)
 
     def _get_nvr_recorder_lock(self, cam_id: str) -> asyncio.Lock:
-        """Get or create per-camera Mini-NVR recorder-spawn lock.
-
-        Safe under asyncio: check-then-insert has no `await` between the
-        two steps, so concurrent coroutines cannot interleave here.
-        """
-        lock = self._nvr_recorder_locks.get(cam_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._nvr_recorder_locks[cam_id] = lock
-        return lock
+        """Get or create per-camera Mini-NVR recorder-spawn lock."""
+        return get_or_create_lock(self._nvr_recorder_locks, cam_id)
 
     def clear_stream_warming(self, cam_id: str) -> None:
         """Force-clear the stream-warming flag for a camera.
@@ -5578,10 +5555,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         Lovelace double-firing) are serialized so only one PUT /connection
         runs per camera at a time. The second caller finds the warm cache.
         """
-        lock = self._snapshot_fetch_locks.get(cam_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._snapshot_fetch_locks[cam_id] = lock
+        lock = get_or_create_lock(self._snapshot_fetch_locks, cam_id)
         async with lock:
             return await self._async_fetch_live_snapshot_impl(cam_id)
 
@@ -6089,7 +6063,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             return None
 
         # Slow path: serialise concurrent fetches for the same camera
-        lock = self._fresh_snap_locks.setdefault(cam_id, asyncio.Lock())
+        lock = get_or_create_lock(self._fresh_snap_locks, cam_id)
         async with lock:
             # Re-check cache now that we hold the lock — a concurrent caller that
             # raced through the fast-path miss and waited here may have already

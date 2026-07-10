@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.7] - 2026-07-10
+
+Patch — internal cleanup, no user-facing change
+
+### Changed
+
+- **Internal only**: five near-identical copies of the same "get-or-create a per-camera lock" code, scattered across the integration and accumulated one at a time over many releases, are now a single shared helper. No behavior change — this is groundwork for further internal cleanup planned for upcoming releases.
+
+5639 tests / mypy --strict / ruff / codespell green, 100% coverage, deploy-verified on test HA.
+
 ## [v14.5.6] - 2026-07-10
 
 Patch — Mini-NVR credential-rotation race fixed at its root, not just tolerated
