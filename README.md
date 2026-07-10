@@ -2160,11 +2160,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.5.10** — see the GitHub release page for full notes:
-[**v14.5.10 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.10)
+Latest: **v14.5.11** — see the GitHub release page for full notes:
+[**v14.5.11 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.11)
 
 | Version | Highlights |
 |---|---|
+| **v14.5.11** | **The Mini-NVR "recording"/"idle" sensor no longer lags behind reality.** It could show "idle" for up to ~20 seconds after recording had actually started, or "recording" for 1-2 minutes after it had actually stopped — the underlying state was always correct, it just wasn't pushed to Home Assistant until the next routine check. It now updates immediately at every real state change. |
 | **v14.5.10** | **Internal cleanup only, no user-facing change.** The coordinator's per-tick data-fetching method — by far the largest single piece of the integration's code — has been split into 8 focused, independently-tested modules. Continuation of the internal cleanup started in v14.5.7. |
 | **v14.5.9** | **"Download Diagnostics" no longer fails, internal cleanup continued.** The Settings → Devices & Services diagnostics download could fail due to a gap left by the previous two internal-cleanup releases; found and fixed before it affected most users. |
 | **v14.5.8** | **Internal cleanup — no user-facing change.** Continuation of the internal cleanup started in v14.5.7. |
@@ -2301,7 +2302,7 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.5.10** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.5.11** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.5** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.8** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.5** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |

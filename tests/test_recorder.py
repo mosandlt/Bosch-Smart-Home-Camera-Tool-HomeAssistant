@@ -900,6 +900,7 @@ def _make_phase_coord(opts=None, cam_title="Terrasse", cam_id=CAM_ID_SHORT):
         _nvr_auth_retry_count={},
         _nvr_recorder_locks={},
         hass=MagicMock(),
+        async_update_listeners=MagicMock(),
     )
     coord.hass.async_add_executor_job = AsyncMock(return_value=None)
     coord.hass.async_create_background_task = MagicMock(return_value=MagicMock())
@@ -1489,6 +1490,7 @@ def _make_lifecycle_coord(
             "enable_nvr": True,
         },
         is_camera_online=lambda cid: True,
+        async_update_listeners=MagicMock(),
     )
 
     def _get_nvr_recorder_lock(cam_id: str) -> asyncio.Lock:
@@ -1822,6 +1824,7 @@ class TestStartRecorder:
             options={},
             data={CAM_ID_SHORT: {"info": {"title": "Terrasse"}}},
             hass=SimpleNamespace(async_add_executor_job=AsyncMock()),
+            async_update_listeners=MagicMock(),
         )
 
         async def _fake_sleep(_sec):
@@ -1851,6 +1854,7 @@ class TestStartRecorder:
             options={"nvr_event_only": True, "nvr_preroll_seconds": 0},
             data={CAM_ID_SHORT: {"info": {"title": "Terrasse"}}},
             hass=SimpleNamespace(async_add_executor_job=AsyncMock()),
+            async_update_listeners=MagicMock(),
         )
 
         async def _fake_sleep(_sec):
@@ -5034,6 +5038,7 @@ class TestPersistentNotificationScheduling:
             },
             options={"nvr_base_path": "/tmp/nvr_test", "enable_nvr": True},
             is_camera_online=lambda cid: True,
+            async_update_listeners=MagicMock(),
             _live_connections={
                 cam_id: {
                     "_connection_type": "LOCAL",
@@ -5084,6 +5089,7 @@ class TestPersistentNotificationScheduling:
             data={cam_id: {"info": {"title": "Cam"}, "status": "ONLINE"}},
             options={"nvr_base_path": "/tmp/nvr_test", "enable_nvr": True},
             is_camera_online=lambda cid: True,
+            async_update_listeners=MagicMock(),
             _live_connections={
                 cam_id: {
                     "_connection_type": "LOCAL",
@@ -5403,3 +5409,99 @@ class TestWatchRecorderBoundedAuthRetry:
             await recorder.start_recorder(coord, CAM_ID)
 
         assert CAM_ID not in coord._nvr_auth_retry_count
+
+
+class TestNvrStateChangePushesImmediateUpdate:
+    """Issue #42 follow-up (realKim-dotcom, 2026-07-10): the `mini_nvr_state`
+    sensor reads `_nvr_processes`/`_nvr_error_state` live (no I/O), but
+    nothing told HA to re-render those entities when those dicts changed —
+    so the sensor only refreshed on the next ~60s coordinator tick, lagging
+    up to 20s behind a real start and 1-2 min behind a real stop. Every
+    recorder-lifecycle transition must now call
+    `coordinator.async_update_listeners()` immediately."""
+
+    @pytest.mark.asyncio
+    async def test_successful_spawn_pushes_update(self, tmp_path):
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        proc = _mock_proc(returncode=None)
+
+        async def _spawn(*args, **kwargs):
+            return proc
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await recorder.start_recorder(coord, CAM_ID)
+
+        coord.async_update_listeners.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_stop_recorder_pushes_update_when_process_was_running(self, tmp_path):
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord._nvr_processes[CAM_ID] = _mock_proc(returncode=None)
+
+        await recorder.stop_recorder(coord, CAM_ID)
+
+        coord.async_update_listeners.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_stop_recorder_no_push_when_nothing_was_running(self, tmp_path):
+        """No process registered → nothing actually changed → no spurious push."""
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        assert CAM_ID not in coord._nvr_processes
+
+        await recorder.stop_recorder(coord, CAM_ID)
+
+        coord.async_update_listeners.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unexpected_crash_pushes_update(self, tmp_path):
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        proc = _mock_proc(returncode=1)
+        coord._nvr_processes[CAM_ID] = proc
+
+        with (
+            patch.object(recorder, "start_recorder", new=AsyncMock()),
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
+            await recorder._watch_recorder(coord, CAM_ID, proc)
+
+        coord.async_update_listeners.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_disk_full_give_up_pushes_update(self, tmp_path):
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        proc = _mock_proc(
+            returncode=1, stderr_data=b"Error writing trailer: No space left on device"
+        )
+        coord._nvr_processes[CAM_ID] = proc
+
+        await recorder._watch_recorder(coord, CAM_ID, proc)
+
+        assert coord._nvr_error_state[CAM_ID] == "disk full"
+        coord.async_update_listeners.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_auth_retry_give_up_pushes_update(self, tmp_path):
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord._nvr_auth_retry_count[CAM_ID] = recorder._MAX_CONSECUTIVE_AUTH_RETRIES
+        proc = _mock_proc(
+            returncode=8, stderr_data=b"method OPTIONS failed: 401 (Unauthorized)"
+        )
+        coord._nvr_processes[CAM_ID] = proc
+
+        await recorder._watch_recorder(coord, CAM_ID, proc)
+
+        assert "repeated auth failures" in coord._nvr_error_state[CAM_ID]
+        coord.async_update_listeners.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_crash_twice_give_up_pushes_update(self, tmp_path):
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord._nvr_recent_crash[CAM_ID] = time.monotonic()
+        proc = _mock_proc(returncode=1, stderr_data=b"some other ffmpeg error")
+        coord._nvr_processes[CAM_ID] = proc
+
+        with patch.object(asyncio, "sleep", new=AsyncMock()):
+            await recorder._watch_recorder(coord, CAM_ID, proc)
+
+        assert coord._nvr_error_state[CAM_ID] == "ffmpeg crashed twice"
+        coord.async_update_listeners.assert_called()

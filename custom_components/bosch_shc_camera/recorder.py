@@ -765,6 +765,12 @@ async def start_recorder(
         # respawn zeroed the counter the retry loop had just incremented.
         if not is_auto_retry:
             coordinator._nvr_auth_retry_count.pop(cam_id, None)
+    # Push an immediate entity update so `mini_nvr_state` (and anything else
+    # reading these dicts) reflects "recording" the instant ffmpeg actually
+    # spawns, instead of waiting for the next ~60s coordinator tick (issue
+    # #42 follow-up — realKim-dotcom, 2026-07-10: sensor read "idle" up to
+    # 20s after the process was already up).
+    coordinator.async_update_listeners()
     # Watcher coroutine restarts ffmpeg once on transient crash and gives up
     # if it crashes again within _RESPAWN_WINDOW_SECONDS.
     task = coordinator.hass.async_create_background_task(
@@ -786,6 +792,13 @@ async def stop_recorder(coordinator: BoschCameraCoordinator, cam_id: str) -> Non
     proc = coordinator._nvr_processes.pop(cam_id, None)
     if proc is None:
         return
+    # Push immediately — `_nvr_processes` (the sensor's source of truth) is
+    # already popped above, so "recording" flips to "idle" right now
+    # regardless of how long the graceful-stop/SIGKILL sequence below takes.
+    # Issue #42 follow-up: previously the sensor kept reading "recording"
+    # for up to 1-2 minutes after a stop, waiting for the next coordinator
+    # tick to notice the (already correct) state.
+    coordinator.async_update_listeners()
     if proc.returncode is not None:
         _LOGGER.debug(
             "NVR stop_recorder: ffmpeg already exited for %s (rc=%d)",
@@ -851,6 +864,11 @@ async def _watch_recorder(
     if coordinator._nvr_processes.get(cam_id) is not proc:
         return
     coordinator._nvr_processes.pop(cam_id, None)
+    # Push immediately — an unexpected ffmpeg exit is a real "recording"→
+    # "idle" transition the instant it's detected, not something that should
+    # wait for the next coordinator tick (issue #42 follow-up, same reasoning
+    # as stop_recorder above).
+    coordinator.async_update_listeners()
 
     # Drain stderr for the first crash to surface ffmpeg's reason.
     err_tail = ""
@@ -894,6 +912,7 @@ async def _watch_recorder(
             (coordinator.options.get("nvr_base_path") or DEFAULT_BASE_PATH),
         )
         coordinator._nvr_error_state[cam_id] = "disk full"
+        coordinator.async_update_listeners()
         try:
             hass = getattr(coordinator, "hass", None)
             if hass is not None:
@@ -948,6 +967,7 @@ async def _watch_recorder(
             coordinator._nvr_error_state[cam_id] = (
                 "repeated auth failures — not a rotation race"
             )
+            coordinator.async_update_listeners()
             return
         _LOGGER.warning(
             "NVR ffmpeg hit an auth failure for %s (cred-rotation race, "
@@ -978,6 +998,7 @@ async def _watch_recorder(
             cam_id[:8],
         )
         coordinator._nvr_error_state[cam_id] = "ffmpeg crashed twice"
+        coordinator.async_update_listeners()
         return
     coordinator._nvr_recent_crash[cam_id] = now
 

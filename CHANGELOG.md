@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.11] - 2026-07-10
+
+Patch — Mini-NVR "recording"/"idle" sensor no longer lags behind reality
+
+### Fixed
+
+- **The Mini-NVR state sensor (`mini_nvr_state`) could show "idle" for up to ~20 seconds after recording had actually started, or "recording" for 1-2 minutes after it had actually stopped.** Found by realKim-dotcom while re-verifying the issue #42 fix. The sensor already read the correct underlying state directly (no caching), but nothing told Home Assistant to refresh it the moment recording actually started or stopped — it only updated on the next routine ~60-second background check. It now refreshes immediately at every real state change: start, stop, an unexpected crash, and each of the three "giving up" cases (disk full, repeated authentication failures, crashed twice in a row).
+
+5877 tests / mypy --strict / ruff / codespell green, 100% coverage, deploy-verified on test HA.
+
 ## [v14.5.10] - 2026-07-10
 
 Patch — internal cleanup continued (coordinator rewrite, Phase 2), no user-facing change
