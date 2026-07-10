@@ -1127,6 +1127,19 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         self._nvr_user_intent: dict[str, bool] = {}
         self._nvr_error_state: dict[str, str] = {}
         self._nvr_recent_crash: dict[str, float] = {}
+        # _nvr_auth_retry_count: consecutive 401/Unauthorized ffmpeg exits per
+        # camera (issue #42 follow-up). A single 401 is almost always a
+        # transient heartbeat cred-rotation race and is retried without
+        # counting toward the crash-window give-up — but retrying forever
+        # would hide a GENUINE broken-credential fault. Capped separately
+        # in recorder._watch_recorder.
+        self._nvr_auth_retry_count: dict[str, int] = {}
+        # _nvr_recorder_locks: per-camera lock serializing the tail of
+        # recorder.start_recorder (final creds re-read → ffmpeg spawn)
+        # against _refresh_local_creds_from_heartbeat's in-place mutation of
+        # _live_connections[cam_id] — closes the remaining race window from
+        # issue #42 rather than only tolerating its 401 symptom.
+        self._nvr_recorder_locks: dict[str, asyncio.Lock] = {}
         self._last_nvr_cleanup: float = float(
             "-inf"
         )  # float('-inf') → runs on first tick
@@ -1271,7 +1284,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         """
         return bool(self._session_stale.get(cam_id, False))
 
-    def _refresh_local_creds_from_heartbeat(
+    async def _refresh_local_creds_from_heartbeat(
         self,
         cam_id: str,
         resp_text: str,
@@ -1294,6 +1307,10 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         The handler is best-effort: any parse / state error is swallowed,
         the heartbeat keeps running, and the reactive 401 rescue in
         _handle_stream_worker_error remains as a safety net.
+
+        Async (issue #42 follow-up) so the live-dict mutation can serialize
+        against `recorder.start_recorder`'s spawn tail via
+        `_get_nvr_recorder_lock` instead of only shrinking the race window.
         """
         try:
             import json as _json
@@ -1336,19 +1353,24 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 f"127.0.0.1:{proxy_port}/rtsp_tunnel?inst={inst_val}"
                 f"{audio_param}&fmtp=1&maxSessionDuration={mcfg.max_session_duration}"
             )
-            live["_local_user"] = new_user
-            live["_local_password"] = new_pass
-            live["rtspsUrl"] = new_url
-            live["rtspUrl"] = new_url
-            cache = self._local_creds_cache.get(cam_id, {})
-            cache.update(
-                {
-                    "user": new_user,
-                    "password": new_pass,
-                    "ts": time.monotonic(),
-                }
-            )
-            self._local_creds_cache[cam_id] = cache
+            # Serialize against recorder.start_recorder's final creds
+            # re-read + ffmpeg spawn (issue #42 follow-up) — without this,
+            # a heartbeat rotation landing mid-spawn could still hand ffmpeg
+            # a cred pair that's stale by the time it connects.
+            async with self._get_nvr_recorder_lock(cam_id):
+                live["_local_user"] = new_user
+                live["_local_password"] = new_pass
+                live["rtspsUrl"] = new_url
+                live["rtspUrl"] = new_url
+                cache = self._local_creds_cache.get(cam_id, {})
+                cache.update(
+                    {
+                        "user": new_user,
+                        "password": new_pass,
+                        "ts": time.monotonic(),
+                    }
+                )
+                self._local_creds_cache[cam_id] = cache
             cam_entity = self._camera_entities.get(cam_id)
             stream = getattr(cam_entity, "stream", None) if cam_entity else None
             if stream is not None:
@@ -4654,6 +4676,18 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             self._rcp_session_locks[proxy_hash] = lock
         return lock
 
+    def _get_nvr_recorder_lock(self, cam_id: str) -> asyncio.Lock:
+        """Get or create per-camera Mini-NVR recorder-spawn lock.
+
+        Safe under asyncio: check-then-insert has no `await` between the
+        two steps, so concurrent coroutines cannot interleave here.
+        """
+        lock = self._nvr_recorder_locks.get(cam_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._nvr_recorder_locks[cam_id] = lock
+        return lock
+
     def clear_stream_warming(self, cam_id: str) -> None:
         """Force-clear the stream-warming flag for a camera.
 
@@ -7184,7 +7218,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                 )
                                 if resp.status in (200, 201):
                                     consecutive_fails = 0
-                                    self._refresh_local_creds_from_heartbeat(
+                                    await self._refresh_local_creds_from_heartbeat(
                                         cam_id,
                                         resp_text,
                                         generation,

@@ -897,12 +897,23 @@ def _make_phase_coord(opts=None, cam_title="Terrasse", cam_id=CAM_ID_SHORT):
         _nvr_preroll_last_crash={},
         _nvr_preroll_tasks={},
         _nvr_error_state={},
+        _nvr_auth_retry_count={},
+        _nvr_recorder_locks={},
         hass=MagicMock(),
     )
     coord.hass.async_add_executor_job = AsyncMock(return_value=None)
     coord.hass.async_create_background_task = MagicMock(return_value=MagicMock())
     coord.hass.loop = MagicMock()
     coord._bg_tasks = set()
+
+    def _get_nvr_recorder_lock(cid: str) -> asyncio.Lock:
+        lock = coord._nvr_recorder_locks.get(cid)
+        if lock is None:
+            lock = asyncio.Lock()
+            coord._nvr_recorder_locks[cid] = lock
+        return lock
+
+    coord._get_nvr_recorder_lock = _get_nvr_recorder_lock
     return coord
 
 
@@ -1468,6 +1479,8 @@ def _make_lifecycle_coord(
         _nvr_user_intent={CAM_ID: True},
         _nvr_recent_crash={},
         _nvr_error_state={},
+        _nvr_auth_retry_count={},
+        _nvr_recorder_locks={},
         _bg_tasks=set(),
         data={CAM_ID: {"info": {"title": "Terrasse"}, "status": "ONLINE"}},
         options={
@@ -1477,6 +1490,15 @@ def _make_lifecycle_coord(
         },
         is_camera_online=lambda cid: True,
     )
+
+    def _get_nvr_recorder_lock(cam_id: str) -> asyncio.Lock:
+        lock = coord._nvr_recorder_locks.get(cam_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            coord._nvr_recorder_locks[cam_id] = lock
+        return lock
+
+    coord._get_nvr_recorder_lock = _get_nvr_recorder_lock
 
     # Build a hass stub. async_add_executor_job runs the function in-thread for
     # the test (no actual executor needed). async_create_background_task swallows
@@ -2775,7 +2797,7 @@ class TestWatchRecorder:
         ):
             await recorder._watch_recorder(coord, CAM_ID, proc)
 
-        restart.assert_awaited_once_with(coord, CAM_ID)
+        restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
         assert CAM_ID not in coord._nvr_error_state
         # The crash-window timestamp must be untouched by the auth-failure
         # path — it doesn't count as a "crash" for give-up purposes.
@@ -2800,7 +2822,7 @@ class TestWatchRecorder:
         ):
             await recorder._watch_recorder(coord, CAM_ID, proc)
 
-        restart.assert_awaited_once_with(coord, CAM_ID)
+        restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
         assert CAM_ID not in coord._nvr_error_state
 
     @pytest.mark.asyncio
@@ -5178,3 +5200,206 @@ class TestNvrRecentCrashSentinel:
         assert new_behavior is False, (
             "float('-inf') default must not trigger crash-loop guard on first crash"
         )
+
+
+# =============================================================================
+# Section: issue #42 follow-up — cred-rotation race root-cause fix
+# (late re-read + shared lock with _refresh_local_creds_from_heartbeat) and
+# bounded auth-retry so a genuine broken credential surfaces instead of
+# retrying forever.
+# =============================================================================
+
+
+class TestStartRecorderCredRotationRace:
+    @pytest.mark.asyncio
+    async def test_late_rotation_uses_fresh_url_not_stale_capture(self, tmp_path):
+        """A heartbeat cred rotation landing between the makedirs executor
+        job and the ffmpeg spawn must NOT result in ffmpeg being launched
+        with the stale, already-invalidated URL captured earlier in
+        start_recorder — it must re-read _live_connections one more time
+        right before spawning."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        stale_url = coord._live_connections[CAM_ID]["rtspsUrl"]
+        fresh_url = "rtsp://newuser:newpass@127.0.0.1:46597/rtsp_tunnel?inst=1"
+
+        async def _rotating_executor(fn, *args, **kwargs):
+            # Simulate _refresh_local_creds_from_heartbeat firing while
+            # start_recorder is awaiting the staging-dir makedirs job.
+            if fn is os.makedirs:
+                coord._live_connections[CAM_ID]["rtspsUrl"] = fresh_url
+            return fn(*args, **kwargs)
+
+        coord.hass.async_add_executor_job = _rotating_executor
+
+        proc = _mock_proc(returncode=None)
+        captured_args = []
+
+        async def _spawn(*args, **kwargs):
+            captured_args.append(args)
+            return proc
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await recorder.start_recorder(coord, CAM_ID)
+
+        assert captured_args, "ffmpeg was never spawned"
+        argv = captured_args[0]
+        assert not any(stale_url in a for a in argv if isinstance(a, str)), (
+            "ffmpeg must not be spawned with the stale, already-rotated URL"
+        )
+        assert any("newuser:newpass" in a for a in argv if isinstance(a, str)), (
+            "ffmpeg must be spawned with the freshly-rotated creds"
+        )
+
+    @pytest.mark.asyncio
+    async def test_torn_down_mid_makedirs_aborts_spawn(self, tmp_path):
+        """If the LOCAL session is torn down (e.g. LOCAL→REMOTE fallback)
+        while start_recorder awaits the makedirs job, the final re-read
+        under the lock must detect this and abort rather than spawn ffmpeg
+        against a stream that no longer exists."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+
+        async def _tearing_down_executor(fn, *args, **kwargs):
+            if fn is os.makedirs:
+                coord._live_connections[CAM_ID]["_connection_type"] = "REMOTE"
+            return fn(*args, **kwargs)
+
+        coord.hass.async_add_executor_job = _tearing_down_executor
+
+        with patch.object(asyncio, "create_subprocess_exec") as spawn:
+            await recorder.start_recorder(coord, CAM_ID)
+        spawn.assert_not_called()
+        assert CAM_ID not in coord._nvr_processes
+
+    @pytest.mark.asyncio
+    async def test_spawn_serializes_against_heartbeat_lock(self, tmp_path):
+        """start_recorder's final re-read+spawn must run under the SAME
+        per-camera lock instance _refresh_local_creds_from_heartbeat uses,
+        so the two can never interleave mid-mutation."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        proc = _mock_proc(returncode=None)
+        seen_locked_during_spawn = []
+
+        async def _spawn(*args, **kwargs):
+            seen_locked_during_spawn.append(
+                coord._get_nvr_recorder_lock(CAM_ID).locked()
+            )
+            return proc
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await recorder.start_recorder(coord, CAM_ID)
+
+        assert seen_locked_during_spawn == [True], (
+            "ffmpeg spawn must happen while holding the per-camera NVR recorder lock"
+        )
+        # Lock must be released again once start_recorder returns.
+        assert not coord._get_nvr_recorder_lock(CAM_ID).locked()
+
+
+class TestWatchRecorderBoundedAuthRetry:
+    @pytest.mark.asyncio
+    async def test_retries_up_to_cap_then_gives_up(self, tmp_path):
+        """6 consecutive 401 exits must retry exactly 5 times (per
+        _MAX_CONSECUTIVE_AUTH_RETRIES) and then give up with a distinct
+        error message — a genuine broken credential must not retry
+        forever and silently hide the fault from the user.
+
+        Regression: this must exercise the REAL `start_recorder` (only
+        `asyncio.create_subprocess_exec` mocked), not a fake stand-in —
+        the bug this guards against was `start_recorder`'s own
+        auth-retry respawn resetting `_nvr_auth_retry_count` before the
+        next 401 could ever accumulate past 1, which a fake respawn that
+        skips `start_recorder` entirely cannot catch."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        spawn_count = [0]
+
+        async def _spawn(*args, **kwargs):
+            spawn_count[0] += 1
+            # Every spawned ffmpeg immediately 401s (genuinely broken cred).
+            return _mock_proc(
+                returncode=8,
+                stderr_data=b"method OPTIONS failed: 401 (Unauthorized)",
+            )
+
+        first_proc = _mock_proc(
+            returncode=8,
+            stderr_data=b"method OPTIONS failed: 401 (Unauthorized)",
+        )
+        coord._nvr_processes[CAM_ID] = first_proc
+
+        with (
+            patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn),
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
+            # _make_lifecycle_coord's async_create_background_task stub
+            # just closes the scheduled watcher coroutine instead of
+            # running it, so drive the respawn chain explicitly here —
+            # each iteration is what the (unrun) background task would
+            # have done on its own.
+            proc = first_proc
+            for _ in range(recorder._MAX_CONSECUTIVE_AUTH_RETRIES + 1):
+                await recorder._watch_recorder(coord, CAM_ID, proc)
+                proc = coord._nvr_processes.get(CAM_ID)
+                if proc is None:
+                    break  # gave up
+
+        assert spawn_count[0] == recorder._MAX_CONSECUTIVE_AUTH_RETRIES, (
+            "must respawn via the REAL start_recorder exactly "
+            "_MAX_CONSECUTIVE_AUTH_RETRIES times, not loop forever"
+        )
+        assert coord._nvr_auth_retry_count[CAM_ID] == (
+            recorder._MAX_CONSECUTIVE_AUTH_RETRIES + 1
+        )
+        assert "repeated auth failures" in coord._nvr_error_state.get(CAM_ID, "")
+        assert CAM_ID not in coord._nvr_processes, (
+            "must give up with no process registered, not keep respawning"
+        )
+
+    @pytest.mark.asyncio
+    async def test_single_auth_failure_does_not_give_up(self):
+        """A lone 401 (the common transient-race case) must retry without
+        touching _nvr_error_state — the bounded cap must not make the
+        common case worse."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = _mock_proc(
+            returncode=8, stderr_data=b"method OPTIONS failed: 401 (Unauthorized)"
+        )
+        coord._nvr_processes[CAM_ID] = proc
+
+        with (
+            patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
+            await recorder._watch_recorder(coord, CAM_ID, proc)
+
+        restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
+        assert CAM_ID not in coord._nvr_error_state
+        assert coord._nvr_auth_retry_count[CAM_ID] == 1
+
+    @pytest.mark.asyncio
+    async def test_auth_retry_counter_reset_on_successful_spawn(self, tmp_path):
+        """After one 401 retry, a later successful spawn must clear the
+        auth-retry counter — a later isolated 401 must not inherit the
+        prior streak toward the give-up cap."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord._nvr_auth_retry_count[CAM_ID] = recorder._MAX_CONSECUTIVE_AUTH_RETRIES
+        proc = _mock_proc(returncode=None)
+
+        async def _spawn(*args, **kwargs):
+            return proc
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await recorder.start_recorder(coord, CAM_ID)
+
+        assert CAM_ID not in coord._nvr_auth_retry_count

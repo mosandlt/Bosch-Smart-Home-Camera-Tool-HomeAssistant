@@ -51,6 +51,12 @@ DEFAULT_SEGMENT_SECONDS = 300  # 5 minutes, wall-aligned
 # Crash-loop guard: if ffmpeg exits twice within this window we give up.
 _RESPAWN_WINDOW_SECONDS = 30.0
 _RESPAWN_DELAY_SECONDS = 5.0
+# Auth-retry guard (issue #42 follow-up): a single 401 is almost always a
+# transient heartbeat cred-rotation race and is retried without counting
+# toward the crash-window give-up above — but a GENUINE broken credential
+# would otherwise retry silently forever. Cap consecutive 401s so a real
+# fault still surfaces instead of looping forever.
+_MAX_CONSECUTIVE_AUTH_RETRIES = 5
 # Stop timeout — give ffmpeg time to flush the trailing moov atom on SIGTERM.
 # Centralized in const.py so the SIGTERM/SIGKILL/stderr timing is tunable
 # without touching the recorder.
@@ -607,12 +613,26 @@ def should_record(
 # ── recorder lifecycle (per-camera ffmpeg child) ─────────────────────────────
 
 
-async def start_recorder(coordinator: BoschCameraCoordinator, cam_id: str) -> None:
+async def start_recorder(
+    coordinator: BoschCameraCoordinator, cam_id: str, *, is_auto_retry: bool = False
+) -> None:
     """Spawn (or replace) the ffmpeg recorder for one camera.
 
     Idempotent: if a recorder is already running for ``cam_id`` it is stopped
     first so the new one picks up fresh creds (heartbeat-cred rotation hook).
     Caller is responsible for the LAN-only check (`should_record`).
+
+    ``is_auto_retry`` must be True ONLY when `_watch_recorder`'s own
+    auth-failure branch calls this to respawn after a 401. A successful
+    ffmpeg *spawn* is not proof the credential is actually valid — the RTSP
+    DESCRIBE that would reveal a genuinely broken credential still happens
+    after this returns. Resetting ``_nvr_auth_retry_count`` on every spawn
+    (as this used to do unconditionally) made the give-up cap in
+    `_watch_recorder` unreachable for a persistent auth fault: each retry's
+    respawn immediately zeroed the counter the retry loop had just
+    incremented, so it could never exceed 1. Every OTHER caller (switch
+    toggle, coordinator tick, the non-auth crash-respawn path) still resets
+    it, since those are legitimate "give this a fresh budget" moments.
     """
     # Replace any pre-existing recorder (cred rotation, switch re-toggle).
     await stop_recorder(coordinator, cam_id)
@@ -693,7 +713,6 @@ async def start_recorder(coordinator: BoschCameraCoordinator, cam_id: str) -> No
         return
 
     quality = (opts.get("nvr_quality") or "auto").strip().lower()
-    args = _build_ffmpeg_args(rtsp_url, pattern, quality=quality)
 
     _LOGGER.info(
         "NVR starting recorder for %s -> %s (quality=%s)",
@@ -701,29 +720,51 @@ async def start_recorder(coordinator: BoschCameraCoordinator, cam_id: str) -> No
         pattern,
         quality,
     )
-    _LOGGER.debug("NVR ffmpeg argv for %s: %s", cam_name, " ".join(args))
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-    except FileNotFoundError:
-        _LOGGER.error(
-            "NVR cannot start — ffmpeg binary not found on PATH. "
-            "Install ffmpeg or disable the NVR option.",
-        )
-        return
-    except OSError as err:
-        _LOGGER.warning("NVR ffmpeg spawn failed for %s: %s", cam_name, err)
-        return
+    # Issue #42 follow-up: the makedirs step above awaits an executor job,
+    # long enough for a Bosch heartbeat to rotate LOCAL creds out from under
+    # the `rtsp_url` captured earlier — ffmpeg would then connect with an
+    # already-invalid cred pair and 401 on its first DESCRIBE. Re-read the
+    # live URL right before spawning (closing the window to a few
+    # microseconds) and hold the same lock `_refresh_local_creds_from_heartbeat`
+    # uses while mutating `_live_connections`, so the two can't interleave.
+    async with coordinator._get_nvr_recorder_lock(cam_id):
+        live = coordinator._live_connections.get(cam_id, {})
+        if live.get("_connection_type") != "LOCAL":
+            return  # stream torn down while we were creating staging dirs
+        fresh_rtsp_url = live.get("rtspsUrl") or live.get("rtspUrl") or rtsp_url
+        args = _build_ffmpeg_args(fresh_rtsp_url, pattern, quality=quality)
+        _LOGGER.debug("NVR ffmpeg argv for %s: %s", cam_name, " ".join(args))
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            _LOGGER.error(
+                "NVR cannot start — ffmpeg binary not found on PATH. "
+                "Install ffmpeg or disable the NVR option.",
+            )
+            return
+        except OSError as err:
+            _LOGGER.warning("NVR ffmpeg spawn failed for %s: %s", cam_name, err)
+            return
 
-    coordinator._nvr_processes[cam_id] = proc
-    # A fresh spawn is underway — clear any stale give-up/error state from a
-    # prior crash-loop so the sensor doesn't keep showing "error" forever
-    # after a successful restart (issue #42).
-    coordinator._nvr_error_state.pop(cam_id, None)
+        coordinator._nvr_processes[cam_id] = proc
+        # A fresh spawn is underway — clear any stale give-up/error state from a
+        # prior crash-loop so the sensor doesn't keep showing "error" forever
+        # after a successful restart (issue #42).
+        coordinator._nvr_error_state.pop(cam_id, None)
+        # Do NOT reset the auth-retry counter when THIS spawn is itself an
+        # auto-retry from the auth-failure branch below — a successful
+        # subprocess *spawn* is not proof the credential is valid (the RTSP
+        # DESCRIBE that would reveal a persistent auth fault happens after
+        # this returns). Resetting here unconditionally made the give-up cap
+        # unreachable for a genuinely broken credential: each retry's own
+        # respawn zeroed the counter the retry loop had just incremented.
+        if not is_auto_retry:
+            coordinator._nvr_auth_retry_count.pop(cam_id, None)
     # Watcher coroutine restarts ffmpeg once on transient crash and gives up
     # if it crashes again within _RESPAWN_WINDOW_SECONDS.
     task = coordinator.hass.async_create_background_task(
@@ -893,15 +934,33 @@ async def _watch_recorder(
     # counter or the give-up error state.
     _AUTH_MARKERS = ("401", "unauthorized")
     if any(marker in err_lower for marker in _AUTH_MARKERS):
+        retries = coordinator._nvr_auth_retry_count.get(cam_id, 0) + 1
+        coordinator._nvr_auth_retry_count[cam_id] = retries
+        if retries > _MAX_CONSECUTIVE_AUTH_RETRIES:
+            _LOGGER.error(
+                "NVR ffmpeg rejected with auth failures %d times in a row for "
+                "%s — this is no longer consistent with a transient "
+                "cred-rotation race. Toggle the recording switch off+on to "
+                "retry.",
+                retries,
+                cam_id[:8],
+            )
+            coordinator._nvr_error_state[cam_id] = (
+                "repeated auth failures — not a rotation race"
+            )
+            return
         _LOGGER.warning(
-            "NVR ffmpeg hit an auth failure for %s (cred-rotation race) — "
-            "retrying without counting toward the give-up limit",
+            "NVR ffmpeg hit an auth failure for %s (cred-rotation race, "
+            "%d/%d consecutive) — retrying without counting toward the "
+            "crash-window give-up limit",
             cam_id[:8],
+            retries,
+            _MAX_CONSECUTIVE_AUTH_RETRIES,
         )
         await asyncio.sleep(_RESPAWN_DELAY_SECONDS)
         if not should_record(coordinator, cam_id, switch_on=last):
             return
-        await start_recorder(coordinator, cam_id)
+        await start_recorder(coordinator, cam_id, is_auto_retry=True)
         return
 
     # B13-2: Always record the crash timestamp (not only for short-lived

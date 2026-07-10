@@ -5,6 +5,17 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.6] - 2026-07-10
+
+Patch — Mini-NVR credential-rotation race fixed at its root, not just tolerated
+
+### Fixed
+
+- **Follow-up to v14.5.5**: that release stopped the recorder from permanently giving up when a background credential rotation raced its very first connection attempt, but the underlying 401 rejection was still happening every single time — just being absorbed instead of prevented, as a user's live verification confirmed. The recorder now re-checks for a credential rotation immediately before connecting instead of relying on a value that could already be a few seconds stale, closing the window where this could happen at all.
+- **A genuinely broken camera credential (as opposed to a passing rotation) could retry silently forever** without ever surfacing an error. Repeated authentication failures are now capped at 5 attempts before the recorder reports a clear error state, instead of retrying indefinitely.
+
+5634 tests / mypy --strict / ruff / codespell green, 100% coverage, deploy-verified on test HA.
+
 ## [v14.5.5] - 2026-07-09
 
 Patch — Mini-NVR no longer gives up permanently on a credential-rotation race

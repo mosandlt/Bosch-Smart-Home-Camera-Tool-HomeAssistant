@@ -11567,11 +11567,23 @@ class TestRefreshLocalCredsFromHeartbeat:
             hass=SimpleNamespace(async_create_task=self._make_task_mock()),
             debug=False,
             get_model_config=lambda cid: SimpleNamespace(max_session_duration=3600),
+            _nvr_recorder_locks={},
         )
         base.update(overrides)
-        return SimpleNamespace(**base), cam_entity
+        ns = SimpleNamespace(**base)
+        if not hasattr(ns, "_get_nvr_recorder_lock"):
 
-    def test_happy_path_updates_creds_and_url(self):
+            def _default_get_nvr_recorder_lock(cam_id: str) -> asyncio.Lock:
+                lock = ns._nvr_recorder_locks.get(cam_id)
+                if lock is None:
+                    lock = asyncio.Lock()
+                    ns._nvr_recorder_locks[cam_id] = lock
+                return lock
+
+            ns._get_nvr_recorder_lock = _default_get_nvr_recorder_lock
+        return ns, cam_entity
+
+    async def test_happy_path_updates_creds_and_url(self):
         """Fresh user+password in response → live dict + cache + URL all
         updated. The new URL must point to the same proxy port and carry
         the new creds."""
@@ -11579,7 +11591,7 @@ class TestRefreshLocalCredsFromHeartbeat:
 
         coord, _ = self._coord()
         resp = '{"user": "new-user", "password": "new-pass"}'
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             resp,
@@ -11596,7 +11608,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         assert coord._local_creds_cache[CAM_A]["user"] == "new-user"
         assert coord._local_creds_cache[CAM_A]["password"] == "new-pass"
 
-    def test_url_keeps_inst_param(self):
+    async def test_url_keeps_inst_param(self):
         """The original rtspsUrl carries `inst=1` — the rebuilt URL must
         preserve it. Bosch's session-per-instance limits mean wrong inst
         triggers concurrent-session rejection on Gen1."""
@@ -11607,7 +11619,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         coord._live_connections[CAM_A]["rtspsUrl"] = (
             "rtsp://old:old@127.0.0.1:46767/rtsp_tunnel?inst=2&enableaudio=1"
         )
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             '{"user": "n", "password": "p"}',
@@ -11616,7 +11628,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         )
         assert "inst=2" in coord._live_connections[CAM_A]["rtspsUrl"]
 
-    def test_audio_track_always_in_rebuilt_url(self):
+    async def test_audio_track_always_in_rebuilt_url(self):
         """The AAC track is ALWAYS requested now — switch.<cam>_audio is a synced
         card-side MUTE preference, not a stream-track toggle — so the rebuilt
         cred-rotation URL carries enableaudio=1 even when the mute is off. (This
@@ -11624,7 +11636,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord, _ = self._coord(_audio_enabled={CAM_A: False})
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             '{"user": "n", "password": "p"}',
@@ -11633,13 +11645,13 @@ class TestRefreshLocalCredsFromHeartbeat:
         )
         assert "enableaudio=1" in coord._live_connections[CAM_A]["rtspsUrl"]
 
-    def test_no_creds_in_response_skips_silently(self):
+    async def test_no_creds_in_response_skips_silently(self):
         """Bosch sometimes returns {} on heartbeat — must be a no-op."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord, _ = self._coord()
         before = dict(coord._live_connections[CAM_A])
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             "{}",
@@ -11648,13 +11660,13 @@ class TestRefreshLocalCredsFromHeartbeat:
         )
         assert coord._live_connections[CAM_A] == before
 
-    def test_session_torn_down_skips(self):
+    async def test_session_torn_down_skips(self):
         """If the live session was torn down between PUT and parse, the
         cam_id is gone from `_live_connections` — must not crash."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord, _ = self._coord(_live_connections={})
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             '{"user": "n", "password": "p"}',
@@ -11664,7 +11676,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         # No exception, no mutation
         assert coord._live_connections == {}
 
-    def test_session_now_remote_skips(self):
+    async def test_session_now_remote_skips(self):
         """If LOCAL fell back to REMOTE in the last second, the LOCAL
         creds are no longer relevant. Skip rather than overwrite a
         REMOTE session with rebuilt LOCAL URL."""
@@ -11673,7 +11685,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         coord, _ = self._coord()
         coord._live_connections[CAM_A]["_connection_type"] = "REMOTE"
         before = dict(coord._live_connections[CAM_A])
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             '{"user": "n", "password": "p"}',
@@ -11684,7 +11696,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         # creds untouched
         assert coord._live_connections[CAM_A]["_local_user"] == before["_local_user"]
 
-    def test_unchanged_creds_skip(self):
+    async def test_unchanged_creds_skip(self):
         """If the response carries the same user+password we already
         have, skip — no need to call Stream.update_source for nothing."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
@@ -11693,7 +11705,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         # Stream stub that records calls
         stream = MagicMock()
         coord._camera_entities[CAM_A].stream = stream
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             '{"user": "old-user", "password": "old-pass"}',
@@ -11702,7 +11714,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         )
         stream.update_source.assert_not_called()
 
-    def test_stream_update_source_called(self):
+    async def test_stream_update_source_called(self):
         """When creds change AND the camera entity has a Stream object,
         Stream.update_source must be called with the new URL so HA's
         stream worker rebuilds without a teardown."""
@@ -11711,7 +11723,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         coord, _ = self._coord()
         stream = MagicMock()
         coord._camera_entities[CAM_A].stream = stream
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             '{"user": "n", "password": "p"}',
@@ -11722,7 +11734,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         call_url = stream.update_source.call_args[0][0]
         assert "n:p@127.0.0.1:46767" in call_url
 
-    def test_stream_update_source_swallows_exceptions(self):
+    async def test_stream_update_source_swallows_exceptions(self):
         """If `Stream.update_source` raises (HA bug, race), the helper
         must keep going and update the cache anyway — the next worker
         restart will pick up the cached URL."""
@@ -11733,7 +11745,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         stream.update_source.side_effect = RuntimeError("HA stream error")
         coord._camera_entities[CAM_A].stream = stream
         # Must NOT raise
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             '{"user": "n", "password": "p"}',
@@ -11743,13 +11755,13 @@ class TestRefreshLocalCredsFromHeartbeat:
         # Cache still updated
         assert coord._local_creds_cache[CAM_A]["user"] == "n"
 
-    def test_no_proxy_port_skips(self):
+    async def test_no_proxy_port_skips(self):
         """If TLS proxy was stopped between PUT and parse, no port to
         point the URL at — must skip, not crash."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord, _ = self._coord(_tls_proxy_ports={})
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             '{"user": "n", "password": "p"}',
@@ -11759,14 +11771,14 @@ class TestRefreshLocalCredsFromHeartbeat:
         # Live conn untouched
         assert coord._live_connections[CAM_A]["_local_user"] == "old-user"
 
-    def test_bad_json_swallowed(self):
+    async def test_bad_json_swallowed(self):
         """The handler is best-effort — bad JSON must not crash the
         heartbeat loop. The reactive 401-rescue path is the safety net."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord, _ = self._coord()
         # Must NOT raise
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             "not json {{{ bad",
@@ -11774,7 +11786,7 @@ class TestRefreshLocalCredsFromHeartbeat:
             elapsed=10.0,
         )
 
-    def test_active_recorder_not_restarted_on_cred_rotation(self):
+    async def test_active_recorder_not_restarted_on_cred_rotation(self):
         """GitHub issue #41 regression: a heartbeat cred rotation must NOT
         restart an active NVR recorder. The docstring of
         `_refresh_local_creds_from_heartbeat` itself states the established
@@ -11792,7 +11804,7 @@ class TestRefreshLocalCredsFromHeartbeat:
             _nvr_user_intent={CAM_A: True},
         )
         assert not hasattr(coord, "_restart_recorder_if_active")
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             '{"user": "n", "password": "p"}',
@@ -11802,7 +11814,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         # Only 1 task now: go2rtc re-register. No NVR restart task.
         assert coord.hass.async_create_task.call_count == 1
 
-    def test_go2rtc_reregister_without_hls_stream(self):
+    async def test_go2rtc_reregister_without_hls_stream(self):
         """B2 regression: go2rtc re-registration must fire even when the
         camera entity has stream=None (WebRTC-only viewer, no HLS stream
         opened). Before the fix the go2rtc PUT was gated on `stream is not
@@ -11818,7 +11830,7 @@ class TestRefreshLocalCredsFromHeartbeat:
         coord, cam_entity = self._coord()
         assert cam_entity.stream is None  # pre-condition
 
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord,
             CAM_A,
             '{"user": "webrtc-user", "password": "webrtc-pass"}',
@@ -14934,6 +14946,8 @@ def _make_coord_sprint_j1(**overrides):
         # provide a simple lambda so tests don't need BoschCameraCoordinator bound.
         # Individual tests that pre-populate _stream_locks can rely on this.
         _get_stream_lock=None,  # set after namespace creation below
+        _nvr_recorder_locks={},
+        _get_nvr_recorder_lock=None,  # set after namespace creation below
         stop_recorder=AsyncMock(),
         try_live_connection=AsyncMock(return_value=None),
         record_stream_error=MagicMock(),
@@ -14971,6 +14985,17 @@ def _make_coord_sprint_j1(**overrides):
             return lock
 
         ns._get_stream_lock = _default_get_stream_lock
+    # _get_nvr_recorder_lock: bind the real lookup against _nvr_recorder_locks dict
+    if ns._get_nvr_recorder_lock is None:
+
+        def _default_get_nvr_recorder_lock(cam_id: str) -> asyncio.Lock:
+            lock = ns._nvr_recorder_locks.get(cam_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                ns._nvr_recorder_locks[cam_id] = lock
+            return lock
+
+        ns._get_nvr_recorder_lock = _default_get_nvr_recorder_lock
     return ns
 
 
@@ -15040,7 +15065,7 @@ class TestRefreshLocalCredsDebugLog:
     to DEBUG level — no custom toggle needed.
     """
 
-    def test_debug_log_emitted_on_cred_rotation(self, caplog):
+    async def test_debug_log_emitted_on_cred_rotation(self, caplog):
         """The method always emits a debug log after successful cred rotation."""
         import logging
 
@@ -15071,7 +15096,7 @@ class TestRefreshLocalCredsDebugLog:
         with caplog.at_level(
             logging.DEBUG, logger="custom_components.bosch_shc_camera"
         ):
-            BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+            await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
                 coord, CAM_A, resp_text, generation=2, elapsed=45.0
             )
 
@@ -15486,6 +15511,45 @@ class TestGetStreamLock:
 
         lock_a = BoschCameraCoordinator._get_stream_lock(coord, CAM_A)
         lock_b = BoschCameraCoordinator._get_stream_lock(coord, cam_b)
+
+        assert lock_a is not lock_b
+
+
+class TestGetNvrRecorderLock:
+    """_get_nvr_recorder_lock must create and cache an asyncio.Lock per
+    camera (issue #42 follow-up) — mirrors _get_stream_lock's contract."""
+
+    def test_creates_new_lock_for_unknown_cam(self):
+        """First call for a cam_id creates and caches an asyncio.Lock."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_sprint_j1(_nvr_recorder_locks={})
+
+        lock = BoschCameraCoordinator._get_nvr_recorder_lock(coord, CAM_A)
+
+        assert isinstance(lock, asyncio.Lock)
+        assert coord._nvr_recorder_locks[CAM_A] is lock
+
+    def test_returns_same_lock_on_second_call(self):
+        """Repeated calls for the same cam_id return the identical lock object."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_sprint_j1(_nvr_recorder_locks={})
+
+        lock1 = BoschCameraCoordinator._get_nvr_recorder_lock(coord, CAM_A)
+        lock2 = BoschCameraCoordinator._get_nvr_recorder_lock(coord, CAM_A)
+
+        assert lock1 is lock2
+
+    def test_different_cams_get_different_locks(self):
+        """Two distinct cam_ids get distinct asyncio.Lock instances."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        cam_b = "22222222-2222-2222-2222-222222222222"
+        coord = _make_coord_sprint_j1(_nvr_recorder_locks={})
+
+        lock_a = BoschCameraCoordinator._get_nvr_recorder_lock(coord, CAM_A)
+        lock_b = BoschCameraCoordinator._get_nvr_recorder_lock(coord, cam_b)
 
         assert lock_a is not lock_b
 
@@ -22528,7 +22592,7 @@ def _make_coord_sprint_la(**overrides):
         _session_stale={},
         get_model_config=MagicMock(return_value=_model_cfg_sprint_la()),
         try_live_connection=AsyncMock(return_value={"_connection_type": "LOCAL"}),
-        _refresh_local_creds_from_heartbeat=MagicMock(),
+        _refresh_local_creds_from_heartbeat=AsyncMock(),
         _tear_down_live_stream=AsyncMock(),
         async_request_refresh=AsyncMock(return_value=None),
         hass=SimpleNamespace(async_create_task=_create_task),
@@ -30039,7 +30103,7 @@ def _stub_coord_round8(**kwargs):
     )
     coord.get_model_config = MagicMock()
     coord.try_live_connection = AsyncMock(return_value=None)
-    coord._refresh_local_creds_from_heartbeat = MagicMock()
+    coord._refresh_local_creds_from_heartbeat = AsyncMock()
     coord._ensure_go2rtc_schemes_fresh = AsyncMock()
     for k, v in kwargs.items():
         setattr(coord, k, v)
@@ -35533,13 +35597,14 @@ class TestRefreshLocalCredsInstParamEdgeCases:
             _tls_proxy_ports={CAM: 9000},
             _audio_enabled={},
             get_model_config=lambda cid: SimpleNamespace(max_session_duration=3600),
+            _get_nvr_recorder_lock=lambda cid: asyncio.Lock(),
         )
 
         resp_json = json.dumps(
             {"user": "newuser", "password": "newpass", "urls": ["192.168.1.1:443"]}
         )
 
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord, CAM, resp_json, generation=1, elapsed=30.0
         )
 
@@ -35567,13 +35632,14 @@ class TestRefreshLocalCredsInstParamEdgeCases:
             _tls_proxy_ports={CAM: 9001},
             _audio_enabled={},
             get_model_config=lambda cid: SimpleNamespace(max_session_duration=3600),
+            _get_nvr_recorder_lock=lambda cid: asyncio.Lock(),
         )
 
         resp_json = json.dumps(
             {"user": "newuser", "password": "newpass", "urls": ["192.168.1.1:443"]}
         )
 
-        BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
             coord, CAM, resp_json, generation=1, elapsed=30.0
         )
 
@@ -35826,13 +35892,14 @@ async def test_refresh_local_creds_invalid_inst_value():
         _tls_proxy_ports={CAM: 9000},
         _audio_enabled={},
         get_model_config=lambda cid: SimpleNamespace(max_session_duration=3600),
+        _get_nvr_recorder_lock=lambda cid: asyncio.Lock(),
     )
 
     resp_json = json.dumps(
         {"user": "newuser", "password": "newpass", "urls": ["192.168.1.1:443"]}
     )
 
-    BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+    await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
         coord, CAM, resp_json, generation=1, elapsed=30.0
     )
 
@@ -35862,13 +35929,14 @@ async def test_refresh_local_creds_valid_inst_value():
         _tls_proxy_ports={CAM: 9001},
         _audio_enabled={},
         get_model_config=lambda cid: SimpleNamespace(max_session_duration=3600),
+        _get_nvr_recorder_lock=lambda cid: asyncio.Lock(),
     )
 
     resp_json = json.dumps(
         {"user": "newuser", "password": "newpass", "urls": ["192.168.1.1:443"]}
     )
 
-    BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+    await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
         coord, CAM, resp_json, generation=1, elapsed=30.0
     )
 
