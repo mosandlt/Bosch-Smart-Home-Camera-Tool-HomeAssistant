@@ -70,6 +70,10 @@ from custom_components.bosch_shc_camera.frigate_endpoint import (
     FrontDoorConfig,
     InnerTarget,
 )
+from custom_components.bosch_shc_camera.session_state import (
+    CameraSessionState,
+    get_or_create_session,
+)
 from tests.source_match import assert_in_source
 
 # ============================================================================
@@ -229,7 +233,7 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
     # ── Renewal/task tracking ──────────────────────────────────────────
     assert coord._auto_renew_tasks == {}
     assert coord._renewal_tasks == {}
-    assert coord._auto_renew_generation == {}
+    assert coord._sessions == {}
     assert coord._camera_entities == {}
 
     # ── Cached data tiers ──────────────────────────────────────────────
@@ -365,7 +369,8 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
     assert coord._OFFLINE_EXTENDED_INTERVAL == 900
     assert coord._per_cam_status_at == {}
     assert coord._stream_warming == set()
-    assert coord._stream_warming_started == {}
+    # _stream_warming_started/_auto_renew_generation/_session_idle_since were
+    # consolidated into _sessions (CameraSessionState) — already asserted above.
 
     # ── Mini-NVR state ─────────────────────────────────────────────────
     assert coord._nvr_processes == {}
@@ -2186,13 +2191,15 @@ def _inner_coord() -> SimpleNamespace:
     `token=None` makes the inner return None immediately AFTER the force_reset
     teardown block, so the test isolates exactly that teardown.
     """
-    return SimpleNamespace(
+    coord = SimpleNamespace(
         _live_connections={CAM_ID: {"_connection_type": "LOCAL"}},
         _stream_warming={CAM_ID},
-        _stream_warming_started={CAM_ID: 123.0},
+        _sessions={CAM_ID: CameraSessionState(warming_started=123.0)},
         _stop_tls_proxy=AsyncMock(return_value=None),
         token=None,
     )
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
+    return coord
 
 
 @pytest.mark.asyncio
@@ -2207,7 +2214,7 @@ async def test_force_reset_tears_down_under_inner():
     c._stop_tls_proxy.assert_awaited_once_with(CAM_ID)
     assert CAM_ID not in c._live_connections, "force_reset must drop live session"
     assert CAM_ID not in c._stream_warming, "force_reset must clear warming flag"
-    assert CAM_ID not in c._stream_warming_started
+    assert c._sessions[CAM_ID].warming_started == float("-inf")
 
 
 @pytest.mark.asyncio
@@ -2332,7 +2339,7 @@ def _make_coord():
     """Minimal coordinator stub with everything `_tear_down_live_stream` touches."""
     coord = SimpleNamespace(
         _stream_locks={},
-        _auto_renew_generation={CAM_ID: 1},
+        _sessions={CAM_ID: CameraSessionState(generation=1)},
         _live_connections={
             CAM_ID: {"_connection_type": "LOCAL", "rtspsUrl": "rtsps://old"}
         },
@@ -2344,10 +2351,8 @@ def _make_coord():
         _local_rescue_attempts={},
         _local_rescue_at={},
         _stream_warming=set(),
-        _stream_warming_started={},
         _renewal_tasks={},
         _reaper_tasks={},
-        _session_idle_since={},
         _camera_entities={},
         _live_stream_entities={},
         _stop_tls_proxy=AsyncMock(),
@@ -2359,6 +2364,7 @@ def _make_coord():
     coord._get_stream_lock = lambda cam_id: coord._stream_locks.setdefault(
         cam_id, asyncio.Lock()
     )
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
     return coord
 
 
@@ -2442,7 +2448,7 @@ async def test_teardown_skips_when_session_generation_changed_since_decision():
     longer applies to whatever session exists now — it must no-op rather
     than destroy the fresh, healthy, unrelated session."""
     coord = _make_coord()
-    coord._auto_renew_generation[CAM_ID] = 2  # a rebuild already superseded gen=1
+    coord._sessions[CAM_ID].generation = 2  # a rebuild already superseded gen=1
     coord._live_connections[CAM_ID] = {
         "_connection_type": "LOCAL",
         "rtspsUrl": "rtsps://fresh-healthy-session",
@@ -3485,10 +3491,9 @@ def _make_coord_stream_lifecycle(stream_obj=None):
         _local_rescue_attempts={CAM_ID: 1},
         _local_rescue_at={CAM_ID: 100.0},
         _stream_warming={CAM_ID},
-        _stream_warming_started={CAM_ID: 100.0},
+        _sessions={CAM_ID: CameraSessionState(warming_started=100.0)},
         _renewal_tasks={},
         _reaper_tasks={},
-        _session_idle_since={},
         _camera_entities={CAM_ID: cam_entity},
         _live_stream_entities={},  # bug fix 2026-05-19 (teardown state-write)
         _stop_tls_proxy=AsyncMock(),
@@ -3500,6 +3505,7 @@ def _make_coord_stream_lifecycle(stream_obj=None):
         stop_recorder=AsyncMock(),
     )
     coord._get_stream_lock = lambda cam_id: _get_stream_lock(coord, cam_id)
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
     return coord, cam_entity
 
 
@@ -3729,9 +3735,21 @@ def _bounded_sleep(max_iters: int, on_iter=None):
 
 
 def _reaper_coord(**overrides) -> SimpleNamespace:
+    sessions_override = overrides.pop("_sessions", None)
+    generation_override = overrides.pop("_auto_renew_generation", None)
+    idle_since_override = overrides.pop("_session_idle_since", None)
+    if sessions_override is not None:
+        sessions = sessions_override
+    else:
+        sessions = {CAM: CameraSessionState(generation=GEN)}
+        if generation_override is not None:
+            for cam_id, gen in generation_override.items():
+                sessions.setdefault(cam_id, CameraSessionState()).generation = gen
+        if idle_since_override is not None:
+            for cam_id, val in idle_since_override.items():
+                sessions.setdefault(cam_id, CameraSessionState()).idle_since = val
     base = dict(
-        _session_idle_since={},
-        _auto_renew_generation={CAM: GEN},
+        _sessions=sessions,
         _live_connections={CAM: {"_connection_type": "LOCAL"}},
         _user_intent_streams=set(),
         _has_active_consumer=AsyncMock(return_value=False),
@@ -3739,7 +3757,9 @@ def _reaper_coord(**overrides) -> SimpleNamespace:
         hass=SimpleNamespace(async_create_task=MagicMock()),
     )
     base.update(overrides)
-    return SimpleNamespace(**base)
+    coord = SimpleNamespace(**base)
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
+    return coord
 
 
 class TestIdleSessionReaper:
@@ -3757,7 +3777,7 @@ class TestIdleSessionReaper:
             await BoschCameraCoordinator._idle_session_reaper(c, CAM, GEN)
         c._tear_down_live_stream.assert_called_once_with(CAM, expected_generation=GEN)
         c.hass.async_create_task.assert_called_once()
-        assert CAM not in c._session_idle_since  # cleared on the way out
+        assert c._sessions[CAM].idle_since is None  # cleared on the way out
 
     @pytest.mark.asyncio
     async def test_first_tick_only_arms_timer_no_reap(self):
@@ -3808,7 +3828,7 @@ class TestIdleSessionReaper:
             await BoschCameraCoordinator._idle_session_reaper(c, CAM, GEN)
         c._tear_down_live_stream.assert_not_called()
         assert c._has_active_consumer.await_count >= 1
-        assert CAM not in c._session_idle_since
+        assert c._sessions[CAM].idle_since is None
 
     @pytest.mark.asyncio
     async def test_idle_timer_resets_when_consumer_returns(self):
@@ -4850,7 +4870,8 @@ def _coord(
     )
     c._live_connections = {"C": live} if live else {}
     c._stream_warming = set()
-    c._stream_warming_started = {}
+    c._sessions = {}
+    c._get_session = lambda cam_id: get_or_create_session(c._sessions, cam_id)
     c._stop_tls_proxy = AsyncMock(return_value=None)
     if try_raises is not None:
         c.try_live_connection = AsyncMock(side_effect=try_raises)
@@ -5068,7 +5089,8 @@ def _make_coord_tls_proxy_rebuild(*, live_conn: dict | None = None):
     # toggle stays responsive after the breaker fires (regression 2026-05-19,
     # Innenbereich incident).
     coord._stream_warming = set()
-    coord._stream_warming_started = {}
+    coord._sessions = {}
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
     coord._stop_tls_proxy = AsyncMock(return_value=None)
     coord.try_live_connection = AsyncMock(return_value={"_connection_type": "LOCAL"})
     coord._on_tls_proxy_died = BoschCameraCoordinator._on_tls_proxy_died.__get__(coord)
@@ -6714,14 +6736,16 @@ def _make_idle_coord(*, active_consumer: bool, live: dict | None) -> SimpleNames
     hass = SimpleNamespace(
         async_create_task=lambda coro, name=None: asyncio.ensure_future(coro)
     )
-    return SimpleNamespace(
+    coord = SimpleNamespace(
         hass=hass,
         _bg_tasks=set(),
         _has_active_consumer=AsyncMock(return_value=active_consumer),
         _live_connections=({CAM_ID: live} if live is not None else {}),
-        _auto_renew_generation={CAM_ID: 1},
+        _sessions={CAM_ID: CameraSessionState(generation=1)},
         _tear_down_live_stream=AsyncMock(),
     )
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
+    return coord
 
 
 async def _run_on_idle(coord: SimpleNamespace) -> None:
@@ -10261,7 +10285,7 @@ def _make_coord_coordinator_pure_helpers(**overrides) -> SimpleNamespace:
         _live_connections={},
         _live_opened_at={},
         _stream_warming=set(),
-        _stream_warming_started={},
+        _sessions={},
         _stream_error_count={},
         _stream_error_at={},
         _stream_fell_back={},
@@ -10291,7 +10315,9 @@ def _make_coord_coordinator_pure_helpers(**overrides) -> SimpleNamespace:
         _refreshed_refresh=None,
     )
     base.update(overrides)
-    return SimpleNamespace(**base)
+    coord = SimpleNamespace(**base)
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
+    return coord
 
 
 class TestIsWriteLocked:
@@ -10864,11 +10890,11 @@ class TestStreamWarming:
 
         coord = _make_coord_coordinator_pure_helpers()
         coord._stream_warming.add(CAM_A)
-        coord._stream_warming_started[CAM_A] = time.monotonic()
+        coord._sessions[CAM_A] = CameraSessionState(warming_started=time.monotonic())
         # No _live_connections[CAM_A] → stale
         assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is False
         assert CAM_A not in coord._stream_warming
-        assert CAM_A not in coord._stream_warming_started
+        assert coord._get_session(CAM_A).warming_started == float("-inf")
 
     def test_warming_with_url_set_auto_clears(self):
         """Scenario 2: URL ready but flag still on — race in cleanup paths.
@@ -10877,7 +10903,7 @@ class TestStreamWarming:
 
         coord = _make_coord_coordinator_pure_helpers()
         coord._stream_warming.add(CAM_A)
-        coord._stream_warming_started[CAM_A] = time.monotonic()
+        coord._sessions[CAM_A] = CameraSessionState(warming_started=time.monotonic())
         coord._live_connections[CAM_A] = {"rtspsUrl": "rtsps://x"}
         assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is False
         assert CAM_A not in coord._stream_warming
@@ -10893,7 +10919,9 @@ class TestStreamWarming:
 
         coord = _make_coord_coordinator_pure_helpers()
         coord._stream_warming.add(CAM_A)
-        coord._stream_warming_started[CAM_A] = time.monotonic() - 200
+        coord._sessions[CAM_A] = CameraSessionState(
+            warming_started=time.monotonic() - 200
+        )
         # No URL (so scenario 2 doesn't fire), but live conn entry exists
         coord._live_connections[CAM_A] = {"rtspsUrl": ""}
         assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is False
@@ -10907,7 +10935,9 @@ class TestStreamWarming:
 
         coord = _make_coord_coordinator_pure_helpers()
         coord._stream_warming.add(CAM_A)
-        coord._stream_warming_started[CAM_A] = time.monotonic() - 250
+        coord._sessions[CAM_A] = CameraSessionState(
+            warming_started=time.monotonic() - 250
+        )
         coord._live_connections[CAM_A] = {"rtspsUrl": ""}
         assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is False
 
@@ -10917,7 +10947,9 @@ class TestStreamWarming:
 
         coord = _make_coord_coordinator_pure_helpers()
         coord._stream_warming.add(CAM_A)
-        coord._stream_warming_started[CAM_A] = time.monotonic() - 30  # 30 s ago
+        coord._sessions[CAM_A] = CameraSessionState(
+            warming_started=time.monotonic() - 30
+        )  # 30 s ago
         coord._live_connections[CAM_A] = {"rtspsUrl": ""}
         assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is True
 
@@ -10928,7 +10960,9 @@ class TestStreamWarming:
 
         coord = _make_coord_coordinator_pure_helpers()
         coord._stream_warming.add(CAM_A)
-        coord._stream_warming_started[CAM_A] = time.monotonic() - 150
+        coord._sessions[CAM_A] = CameraSessionState(
+            warming_started=time.monotonic() - 150
+        )
         coord._live_connections[CAM_A] = {"rtspsUrl": ""}
         assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is True
 
@@ -14481,14 +14515,14 @@ class TestStreamWarming_async_methods:
     def test_clear_when_not_warming_no_crash(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        coord = SimpleNamespace(_stream_warming=set(), _stream_warming_started={})
+        coord = SimpleNamespace(_stream_warming=set(), _sessions={})
         BoschCameraCoordinator.clear_stream_warming(coord, CAM_A)
         # No assertion — just must not crash
 
     def test_is_warming_returns_false_for_unknown(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        coord = SimpleNamespace(_stream_warming=set(), _stream_warming_started={})
+        coord = SimpleNamespace(_stream_warming=set(), _sessions={})
         assert BoschCameraCoordinator.is_stream_warming(coord, CAM_A) is False
 
 
@@ -14906,10 +14940,9 @@ def _make_coord_sprint_j1(**overrides):
         _local_rescue_attempts={},
         _local_rescue_at={},
         _stream_warming=set(),
-        _stream_warming_started={},
+        _sessions={},
         _renewal_tasks={},
         _reaper_tasks={},
-        _session_idle_since={},
         _bg_tasks=set(),
         _nvr_processes={},
         _nvr_preroll_processes={},
@@ -14996,6 +15029,7 @@ def _make_coord_sprint_j1(**overrides):
             return lock
 
         ns._get_nvr_recorder_lock = _default_get_nvr_recorder_lock
+    ns._get_session = lambda cam_id: get_or_create_session(ns._sessions, cam_id)
     return ns
 
 
@@ -15216,7 +15250,6 @@ class TestTearDownLiveStream_sprint_j1:
             stop_recorder=stop_recorder,
             _renewal_tasks={},
             _reaper_tasks={},
-            _session_idle_since={},
             _camera_entities={},  # no stream entity — skips stream.stop()
         )
 
@@ -15235,7 +15268,6 @@ class TestTearDownLiveStream_sprint_j1:
             stop_recorder=stop_recorder,
             _renewal_tasks={},
             _reaper_tasks={},
-            _session_idle_since={},
             _camera_entities={},
         )
 
@@ -15263,7 +15295,6 @@ class TestTearDownLiveStream_sprint_j1:
             _nvr_processes={},
             _renewal_tasks={},
             _reaper_tasks={},
-            _session_idle_since={},
             _camera_entities={CAM_A: cam_entity},
         )
 
@@ -15295,7 +15326,6 @@ class TestTearDownLiveStream_sprint_j1:
             _nvr_processes={},
             _renewal_tasks={},
             _reaper_tasks={},
-            _session_idle_since={},
             _camera_entities={CAM_A: cam_entity},
         )
 
@@ -15552,6 +15582,50 @@ class TestGetNvrRecorderLock:
         lock_b = BoschCameraCoordinator._get_nvr_recorder_lock(coord, cam_b)
 
         assert lock_a is not lock_b
+
+
+class TestGetSession:
+    """_get_session must create and cache a CameraSessionState per camera
+    (Phase 1 of the coordinator rewrite) — mirrors _get_stream_lock's/
+    _get_nvr_recorder_lock's get-or-create contract."""
+
+    def test_creates_new_session_for_unknown_cam(self):
+        """First call for a cam_id creates and caches a CameraSessionState
+        with default field values."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_sprint_j1(_sessions={})
+
+        session = BoschCameraCoordinator._get_session(coord, CAM_A)
+
+        assert isinstance(session, CameraSessionState)
+        assert coord._sessions[CAM_A] is session
+        assert session.generation == 0
+        assert session.idle_since is None
+        assert session.warming_started == float("-inf")
+
+    def test_returns_same_session_on_second_call(self):
+        """Repeated calls for the same cam_id return the identical object."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_sprint_j1(_sessions={})
+
+        session1 = BoschCameraCoordinator._get_session(coord, CAM_A)
+        session2 = BoschCameraCoordinator._get_session(coord, CAM_A)
+
+        assert session1 is session2
+
+    def test_different_cams_get_different_sessions(self):
+        """Two distinct cam_ids get distinct CameraSessionState instances."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        cam_b = "22222222-2222-2222-2222-222222222222"
+        coord = _make_coord_sprint_j1(_sessions={})
+
+        session_a = BoschCameraCoordinator._get_session(coord, CAM_A)
+        session_b = BoschCameraCoordinator._get_session(coord, cam_b)
+
+        assert session_a is not session_b
 
 
 class TestTryLiveConnection:
@@ -16958,7 +17032,6 @@ def _make_cancel_coord(**overrides):
         _token_refresh_handle=None,
         _renewal_tasks={},
         _reaper_tasks={},
-        _session_idle_since={},
         _bg_tasks=set(),
         _nvr_drain_task=None,
         _tls_proxy_ports={},
@@ -21368,7 +21441,8 @@ def _make_coord_sprint_kd(**overrides):
         _live_opened_at={},
         # Stream warming
         _stream_warming=set(),
-        _stream_warming_started={},
+        # Per-camera session state (generation/idle_since/warming_started)
+        _sessions={},
         # Camera entities (for stream stop/update)
         _camera_entities={},
         # Background task tracking
@@ -21376,8 +21450,6 @@ def _make_coord_sprint_kd(**overrides):
         # Renewal task tracking
         _renewal_tasks={},
         _reaper_tasks={},
-        _session_idle_since={},
-        _auto_renew_generation={},
         # NVR
         _nvr_user_intent={},
         _nvr_processes={},
@@ -21417,6 +21489,7 @@ def _make_coord_sprint_kd(**overrides):
 
     coord._replace_renewal_task = _replace_renewal_task
     coord._replace_reaper_task = _replace_renewal_task
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
     return coord
 
 
@@ -22587,7 +22660,7 @@ def _make_coord_sprint_la(**overrides):
     base = dict(
         token="tok-A",
         _live_connections={CAM_A: {"_connection_type": "LOCAL"}},
-        _auto_renew_generation={CAM_A: 1},
+        _sessions={CAM_A: CameraSessionState(generation=1)},
         _renewal_tasks={},
         _session_stale={},
         get_model_config=MagicMock(return_value=_model_cfg_sprint_la()),
@@ -22599,6 +22672,7 @@ def _make_coord_sprint_la(**overrides):
     )
     base.update(overrides)
     coord = SimpleNamespace(**base)
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
     # Store _create_task reference so tests can inspect calls if needed
     coord.hass._create_task_calls = []
     original_create_task = coord.hass.async_create_task
@@ -22645,7 +22719,7 @@ class TestAutoRenewBreakGuards:
 
         coord = _make_coord_sprint_la()
         # Generation mismatch: task runs with gen=1 but dict says 99
-        coord._auto_renew_generation[CAM_A] = 99
+        coord._sessions[CAM_A].generation = 99
 
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
@@ -22694,7 +22768,7 @@ class TestAutoRenewBreakGuards:
 
         coord = _make_coord_sprint_la()
         coord._renewal_tasks[CAM_A] = MagicMock()
-        coord._auto_renew_generation[CAM_A] = 99  # stale gen → break
+        coord._sessions[CAM_A].generation = 99  # stale gen → break
 
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await BoschCameraCoordinator._auto_renew_local_session(coord, CAM_A, 1)
@@ -22715,7 +22789,7 @@ class TestAutoRenewFullRenewal:
             nonlocal call_count
             call_count += 1
             if call_count >= 2:
-                coord._auto_renew_generation[CAM_A] = 999
+                coord._sessions[CAM_A].generation = 999
 
         return _sleep
 
@@ -22811,7 +22885,7 @@ class TestAutoRenewFullRenewal:
             nonlocal iteration
             iteration += 1
             if iteration >= 4:
-                coord._auto_renew_generation[CAM_A] = 999
+                coord._sessions[CAM_A].generation = 999
 
         coord = _make_coord_sprint_la(
             get_model_config=MagicMock(
@@ -22838,7 +22912,7 @@ class TestAutoRenewFullRenewal:
             nonlocal iteration
             iteration += 1
             if iteration >= 3:
-                coord._auto_renew_generation[CAM_A] = 999
+                coord._sessions[CAM_A].generation = 999
 
         coord = _make_coord_sprint_la(
             get_model_config=MagicMock(
@@ -22868,7 +22942,7 @@ class TestAutoRenewHeartbeat:
             nonlocal call_count
             call_count += 1
             if call_count >= 2:
-                coord._auto_renew_generation[CAM_A] = 999
+                coord._sessions[CAM_A].generation = 999
 
         return _sleep
 
@@ -23017,7 +23091,7 @@ class TestAutoRenewForceRenewal:
             nonlocal call_count
             call_count += 1
             if call_count >= 4:
-                coord._auto_renew_generation[CAM_A] = 999
+                coord._sessions[CAM_A].generation = 999
 
         return _sleep
 
@@ -23270,7 +23344,9 @@ class TestRemoteSessionTerminator:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_sprint_la(
-            _auto_renew_generation={CAM_A: 99},  # task runs with gen=1 → stale
+            _sessions={
+                CAM_A: CameraSessionState(generation=99)
+            },  # task runs with gen=1 → stale
             _live_connections={CAM_A: {"_connection_type": "REMOTE"}},
         )
 
@@ -23443,7 +23519,7 @@ class TestRemoteSessionTerminator:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_sprint_la(
-            _auto_renew_generation={CAM_A: 99},
+            _sessions={CAM_A: CameraSessionState(generation=99)},
             _live_connections={CAM_A: {"_connection_type": "REMOTE"}},
         )
         coord._renewal_tasks[CAM_A] = MagicMock()
@@ -25665,13 +25741,11 @@ def _make_coord_live(**overrides):
         _live_connections={},
         _live_opened_at={},
         _stream_warming=set(),
-        _stream_warming_started={},
+        _sessions={},
         _camera_entities={},
         _bg_tasks=set(),
         _renewal_tasks={},
         _reaper_tasks={},
-        _session_idle_since={},
-        _auto_renew_generation={},
         _nvr_user_intent={},
         _nvr_processes={},
         _nvr_preroll_processes={},
@@ -25699,6 +25773,7 @@ def _make_coord_live(**overrides):
     )
     base.update(overrides)
     coord = SimpleNamespace(**base)
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
 
     def _replace_renewal_task(cam_id, coro):
         t = coord.hass.async_create_task(coro)
@@ -27032,11 +27107,10 @@ def _make_coord_live_sprint_mc(**overrides):
         _live_connections={},
         _live_opened_at={},
         _stream_warming=set(),
-        _stream_warming_started={},
+        _sessions={},
         _camera_entities={},
         _bg_tasks=set(),
         _renewal_tasks={},
-        _auto_renew_generation={},
         _nvr_user_intent={},
         _nvr_processes={},
         _async_local_tcp_ping=AsyncMock(return_value=False),
@@ -27061,6 +27135,7 @@ def _make_coord_live_sprint_mc(**overrides):
     )
     base.update(overrides)
     coord = SimpleNamespace(**base)
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
 
     def _replace_renewal_task(cam_id, coro):
         t = coord.hass.async_create_task(coro)
@@ -30084,6 +30159,15 @@ def _resp_cm_round8(
 
 def _stub_coord_round8(**kwargs):
     hass = MagicMock()
+    generation_override = kwargs.pop("_auto_renew_generation", None)
+    idle_since_override = kwargs.pop("_session_idle_since", None)
+    sessions = dict(kwargs.pop("_sessions", {}))
+    if generation_override is not None:
+        for cam_id, gen in generation_override.items():
+            sessions.setdefault(cam_id, CameraSessionState()).generation = gen
+    if idle_since_override is not None:
+        for cam_id, val in idle_since_override.items():
+            sessions.setdefault(cam_id, CameraSessionState()).idle_since = val
     coord = SimpleNamespace(
         token="test-token",
         hass=hass,
@@ -30091,7 +30175,7 @@ def _stub_coord_round8(**kwargs):
         _live_connections={},
         _rcp_state_cache={},
         _camera_entities={},
-        _auto_renew_generation={},
+        _sessions=sessions,
         _session_stale={},
         _renewal_tasks={},
         _reaper_tasks={},
@@ -30105,6 +30189,7 @@ def _stub_coord_round8(**kwargs):
     coord.try_live_connection = AsyncMock(return_value=None)
     coord._refresh_local_creds_from_heartbeat = AsyncMock()
     coord._ensure_go2rtc_schemes_fresh = AsyncMock()
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
     for k, v in kwargs.items():
         setattr(coord, k, v)
     return coord
@@ -34255,13 +34340,22 @@ class TestStreamWarmingInit:
         # _stream_warming must be eagerly initialised to set() in __init__
 
     def test_stream_warming_started_initialised_in_init(self):
-        """BoschCameraCoordinator.__init__ must set _stream_warming_started = {}."""
+        """BoschCameraCoordinator.__init__ must eagerly init the per-cam session
+        store that now backs `warming_started` (consolidated 2026-07 from the
+        standalone `_stream_warming_started` dict into `_sessions`, a
+        dict[str, CameraSessionState] — see session_state.py). Premise updated:
+        the original BUG-3 concern (lazy hasattr-guarded init causing
+        clear_stream_warming() to silently no-op before the first
+        is_stream_warming() call) still applies to whatever backs
+        `warming_started` today, so this now pins `_sessions` instead of the
+        retired dict name."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         src = inspect.getsource(BoschCameraCoordinator.__init__)
-        assert "_stream_warming_started" in src, (
-            "BUG-3: _stream_warming_started not initialised in __init__. "
-            "A clear call before first is_stream_warming() call silently no-ops."
+        assert "_sessions" in src, (
+            "BUG-3 (updated): _sessions not initialised in __init__. "
+            "A clear call before first is_stream_warming() call would silently "
+            "no-op on a lazily-created per-cam CameraSessionState."
         )
 
     def test_no_hasattr_guard_in_clear_stream_warming(self):

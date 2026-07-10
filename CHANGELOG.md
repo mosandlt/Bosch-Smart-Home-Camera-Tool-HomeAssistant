@@ -5,6 +5,16 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.8] - 2026-07-10
+
+Patch — internal cleanup, no user-facing change
+
+### Changed
+
+- **Internal only**: three separate per-camera bookkeeping dicts used for the live-stream session renewal/idle-timeout logic are now one consolidated object. No behavior change — continuation of the internal cleanup started in v14.5.7.
+
+5642 tests / mypy --strict / ruff / codespell green, 100% coverage, deploy-verified on test HA.
+
 ## [v14.5.7] - 2026-07-10
 
 Patch — internal cleanup, no user-facing change

@@ -28,6 +28,10 @@ import aiohttp
 import pytest
 
 from custom_components.bosch_shc_camera import switch as switch_mod
+from custom_components.bosch_shc_camera.session_state import (
+    CameraSessionState,
+    get_or_create_session,
+)
 from custom_components.bosch_shc_camera.switch import (
     BoschAmbientLightSwitch,
     BoschCameraLightSwitch,
@@ -4272,10 +4276,9 @@ class TestTeardownClearsIntent:
             _local_rescue_attempts={},
             _local_rescue_at={},
             _stream_warming={CAM_ID},
-            _stream_warming_started={CAM_ID: 100.0},
+            _sessions={CAM_ID: CameraSessionState(warming_started=100.0)},
             _renewal_tasks={},
             _reaper_tasks={},
-            _session_idle_since={},
             _camera_entities={},
             _live_stream_entities={},
             _stop_tls_proxy=AsyncMock(),
@@ -4286,6 +4289,9 @@ class TestTeardownClearsIntent:
         )
         coord._get_stream_lock = lambda cam_id: coord._stream_locks.setdefault(
             cam_id, asyncio.Lock()
+        )
+        coord._get_session = lambda cam_id: get_or_create_session(
+            coord._sessions, cam_id
         )
 
         await BoschCameraCoordinator._tear_down_live_stream(coord, CAM_ID)
@@ -4362,10 +4368,9 @@ def _make_coord_privacy_livestream(stream_obj=None, *, with_ls_entity: bool = Fa
         _local_rescue_attempts={CAM_ID: 1},
         _local_rescue_at={CAM_ID: 100.0},
         _stream_warming={CAM_ID},
-        _stream_warming_started={CAM_ID: 100.0},
+        _sessions={CAM_ID: CameraSessionState(warming_started=100.0)},
         _renewal_tasks={},
         _reaper_tasks={},
-        _session_idle_since={},
         _camera_entities={CAM_ID: cam_entity},
         _live_stream_entities={},
         _stop_tls_proxy=AsyncMock(),
@@ -4377,6 +4382,7 @@ def _make_coord_privacy_livestream(stream_obj=None, *, with_ls_entity: bool = Fa
     coord._get_stream_lock = lambda cam_id: coord._stream_locks.setdefault(
         cam_id, asyncio.Lock()
     )
+    coord._get_session = lambda cam_id: get_or_create_session(coord._sessions, cam_id)
     if with_ls_entity:
         ls_entity = MagicMock()
         ls_entity.hass = object()  # truthy, simulates "added to hass"

@@ -118,6 +118,7 @@ from .rcp import async_update_rcp_data
 from .rcp import (
     get_cached_rcp_session as get_cached_rcp_session,  # re-export: mypy --no-implicit-reexport
 )
+from .session_state import CameraSessionState, get_or_create_session
 from .smb import (
     sync_smb_cleanup,
 )
@@ -596,12 +597,16 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # that inspects it, but never populated now (use _renewal_tasks).
         self._auto_renew_tasks: dict[str, asyncio.Task[None]] = {}
         self._renewal_tasks: dict[str, asyncio.Task[None]] = {}
-        self._auto_renew_generation: dict[str, int] = {}
         # Idle-session reaper tasks (one per LOCAL session, generation-tracked
-        # like _renewal_tasks) + the monotonic timestamp at which a switch-OFF
-        # session was first observed with no consumer. See _idle_session_reaper.
+        # like _renewal_tasks). See _idle_session_reaper.
         self._reaper_tasks: dict[str, asyncio.Task[None]] = {}
-        self._session_idle_since: dict[str, float] = {}
+        # Per-camera session bookkeeping (generation counter for the TOCTOU
+        # guard, idle-reaper timestamp, stream-warmup timestamp) — Phase 1 of
+        # the coordinator rewrite (see session_state.py). Consolidates what
+        # used to be 3 separate dicts (_auto_renew_generation,
+        # _session_idle_since, _stream_warming_started); accessed via
+        # _get_session().
+        self._sessions: dict[str, CameraSessionState] = {}
         # Camera entity references — registered on entity setup, used by button/service
         self._camera_entities: dict[str, Any] = {}
         # Live-stream switch entity references — registered by
@@ -1066,7 +1071,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # clear_stream_warming() calls before first is_stream_warming() to silently
         # no-op, leaving the entity badge stuck on "warming" after stream start.
         self._stream_warming: set[str] = set()
-        self._stream_warming_started: dict[str, float] = {}
+        # warming_started timestamp lives in _sessions (CameraSessionState) now.
         # Bosch community RSS-derived maintenance announcement. Periodic refresh
         # every _MAINTENANCE_INTERVAL_S; reactive refresh on cloud 5xx (rate-
         # limited by _MAINTENANCE_REACTIVE_COOLDOWN_S). Cleared explicitly only
@@ -1513,7 +1518,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         stream-worker looped on "Connection refused" against a rotated
         session for 4+ minutes until a manual HA restart).
 
-        `expected_generation`: pass the `_auto_renew_generation` value the
+        `expected_generation`: pass the session's `generation` value the
         caller observed when it DECIDED to tear down (idle reaper,
         frigate-idle-timeout, REMOTE-lifetime terminator — all watchdogs that
         read stale state, then queue this call). Locking closed the old race
@@ -1530,14 +1535,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         async with self._get_stream_lock(cam_id):
             if (
                 expected_generation is not None
-                and self._auto_renew_generation.get(cam_id, 0) != expected_generation
+                and self._get_session(cam_id).generation != expected_generation
             ):
                 _LOGGER.debug(
                     "Teardown for %s skipped — session generation changed "
                     "(%s) since the caller decided to tear down (expected %s); "
                     "a newer rebuild superseded the stale trigger",
                     cam_id[:8],
-                    self._auto_renew_generation.get(cam_id, 0),
+                    self._get_session(cam_id).generation,
                     expected_generation,
                 )
                 return
@@ -1561,14 +1566,14 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             self._user_intent_streams.discard(cam_id)
             self._live_connections.pop(cam_id, None)
             self._live_opened_at.pop(cam_id, None)
-            self._session_idle_since.pop(cam_id, None)
+            self._get_session(cam_id).idle_since = None
             # Clear the warm-up flag proactively. is_stream_warming() would lazily
             # clear it (Scenario 1: no live conn), but a privacy-ON teardown is
             # immediately followed by a privacy cooldown check that calls
             # is_stream_warming — leaving it set risks blocking the very next
             # privacy toggle. Discard here so the toggle is never spuriously gated.
             self._stream_warming.discard(cam_id)
-            self._stream_warming_started.pop(cam_id, None)
+            self._get_session(cam_id).warming_started = float("-inf")
             self._stream_error_count.pop(cam_id, None)
             self._stream_error_at.pop(cam_id, None)
             self._stream_fell_back.pop(cam_id, None)
@@ -1954,27 +1959,27 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         tracked exactly like `_auto_renew_local_session`: an OFF→ON cycle or
         full renewal bumps the generation and this loop exits.
         """
-        self._session_idle_since.pop(cam_id, None)
+        self._get_session(cam_id).idle_since = None
         try:
             while True:
                 await asyncio.sleep(STREAM_IDLE_REAP_CHECK_SEC)
-                if self._auto_renew_generation.get(cam_id, 0) != generation:
+                if self._get_session(cam_id).generation != generation:
                     return  # OFF→ON / renewal started a newer session
                 live = self._live_connections.get(cam_id)
                 if not live or live.get("_connection_type") != "LOCAL":
                     return  # session gone or no longer LOCAL — nothing to reap
                 if await self._has_active_consumer(cam_id):
-                    if cam_id in self._session_idle_since:
+                    if self._get_session(cam_id).idle_since is not None:
                         _LOGGER.debug(
                             "Idle reaper: %s — consumer back, idle timer reset",
                             cam_id[:8],
                         )
-                    self._session_idle_since.pop(cam_id, None)
+                    self._get_session(cam_id).idle_since = None
                     continue
                 now = time.monotonic()
-                since = self._session_idle_since.get(cam_id)
+                since = self._get_session(cam_id).idle_since
                 if since is None:
-                    self._session_idle_since[cam_id] = now
+                    self._get_session(cam_id).idle_since = now
                     _LOGGER.debug(
                         "Idle reaper: %s — no consumer, arming idle timer (%ds grace)",
                         cam_id[:8],
@@ -1994,7 +1999,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         cam_id[:8],
                         now - since,
                     )
-                    self._session_idle_since.pop(cam_id, None)
+                    self._get_session(cam_id).idle_since = None
                     # Schedule teardown in its own task: _tear_down_live_stream
                     # cancels _reaper_tasks[cam_id] (i.e. THIS task), so awaiting
                     # it directly would deliver CancelledError mid-teardown. A
@@ -2008,7 +2013,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                     )
                     return
         finally:
-            self._session_idle_since.pop(cam_id, None)
+            self._get_session(cam_id).idle_since = None
 
     # ── Properties ────────────────────────────────────────────────────────────
     @property
@@ -4665,6 +4670,11 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         """Get or create per-camera Mini-NVR recorder-spawn lock."""
         return get_or_create_lock(self._nvr_recorder_locks, cam_id)
 
+    def _get_session(self, cam_id: str) -> CameraSessionState:
+        """Get or create per-camera session bookkeeping (generation counter,
+        idle-reaper timestamp, stream-warmup timestamp — see session_state.py)."""
+        return get_or_create_session(self._sessions, cam_id)
+
     def clear_stream_warming(self, cam_id: str) -> None:
         """Force-clear the stream-warming flag for a camera.
 
@@ -4703,7 +4713,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 "Clearing stale stream-warming flag for %s (no live conn)", cam_id[:8]
             )
             self._stream_warming.discard(cam_id)
-            self._stream_warming_started.pop(cam_id, None)
+            self._get_session(cam_id).warming_started = float("-inf")
             return False
         live = self._live_connections.get(cam_id, {})
         # Scenario 2: warming flag but pre-warm actually finished (URL set)
@@ -4713,7 +4723,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 cam_id[:8],
             )
             self._stream_warming.discard(cam_id)
-            self._stream_warming_started.pop(cam_id, None)
+            self._get_session(cam_id).warming_started = float("-inf")
             return False
         # Scenario 3: warming for >180 s — hard timeout. Pre-warm worst case is
         # ~150 s (CAMERA_EYES outdoor: 8 retries × 13 s + 35 s min_total_wait +
@@ -4723,7 +4733,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         # _stream_warming with no start timestamp is an inconsistent state — treat
         # it as stuck and clear it rather than holding the privacy toggle hostage
         # forever (a `0` default is falsy and would skip the failsafe entirely).
-        started = self._stream_warming_started.get(cam_id, float("-inf"))
+        started = self._get_session(cam_id).warming_started
         elapsed = _time.monotonic() - started
         if elapsed > 180:
             _LOGGER.warning(
@@ -4732,7 +4742,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                 f"{elapsed:.0f}s" if started != float("-inf") else "unknown duration",
             )
             self._stream_warming.discard(cam_id)
-            self._stream_warming_started.pop(cam_id, None)
+            self._get_session(cam_id).warming_started = float("-inf")
             return False
         return True
 
@@ -4804,7 +4814,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # against the port we'd just killed → frozen image (race 2026-06-01).
             self._live_connections.pop(cam_id, None)
             self._stream_warming.discard(cam_id)
-            self._stream_warming_started.pop(cam_id, None)
+            self._get_session(cam_id).warming_started = float("-inf")
             await self._stop_tls_proxy(cam_id)
         token = self.token
         if not token:
@@ -5157,7 +5167,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         # is withheld from stream_source() until ready.
                         if type_val == "LOCAL" and local_user and local_pass:
                             self._stream_warming.add(cam_id)
-                            self._stream_warming_started[cam_id] = time.monotonic()
+                            self._get_session(cam_id).warming_started = time.monotonic()
                             # Stop HA's existing Stream now — the PUT above
                             # just rotated creds and the TLS proxy just
                             # switched ports, so FFmpeg's cached URL is dead.
@@ -5270,7 +5280,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     cam_id[:8],
                                 )
                                 self._stream_warming.discard(cam_id)
-                                self._stream_warming_started.pop(cam_id, None)
+                                self._get_session(cam_id).warming_started = float(
+                                    "-inf"
+                                )
                                 self._live_connections.pop(cam_id, None)
                                 await self._stop_tls_proxy(cam_id)
                                 self._stream_fell_back[cam_id] = True
@@ -5293,7 +5305,9 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                                     cam_id[:8],
                                 )
                                 self._stream_warming.discard(cam_id)
-                                self._stream_warming_started.pop(cam_id, None)
+                                self._get_session(cam_id).warming_started = float(
+                                    "-inf"
+                                )
                             # Ensure minimum total time from PUT /connection.
                             # Renewals use 2/3 of this (camera encoder already warm).
                             min_wait = (
@@ -5386,8 +5400,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
 
                         # ── LOCAL session auto-renewal ───────────────────
                         if type_val == "LOCAL" and local_user and local_pass:
-                            gen = self._auto_renew_generation.get(cam_id, 0) + 1
-                            self._auto_renew_generation[cam_id] = gen
+                            gen = self._get_session(cam_id).generation + 1
+                            self._get_session(cam_id).generation = gen
                             self._replace_renewal_task(
                                 cam_id, self._auto_renew_local_session(cam_id, gen)
                             )
@@ -5413,8 +5427,8 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
                         # flips OFF gracefully and the user sees a defined
                         # state instead of a buffering spinner.
                         elif type_val == "REMOTE":
-                            gen = self._auto_renew_generation.get(cam_id, 0) + 1
-                            self._auto_renew_generation[cam_id] = gen
+                            gen = self._get_session(cam_id).generation + 1
+                            self._get_session(cam_id).generation = gen
                             self._replace_renewal_task(
                                 cam_id, self._remote_session_terminator(cam_id, gen)
                             )
@@ -6602,7 +6616,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             # can now block on the stream lock for the duration of a
             # concurrent rebuild, so by the time it runs, this stale "LOCAL,
             # no consumer" read may no longer describe the current session.
-            gen = self._auto_renew_generation.get(cam_id, 0)
+            gen = self._get_session(cam_id).generation
             _LOGGER.info(
                 "frigate front-door %s idle for frigate_idle_timeout — tearing "
                 "down on-demand LOCAL session",
@@ -7086,7 +7100,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             while True:
                 await asyncio.sleep(heartbeat_interval)
                 # Stop if a newer generation was started (OFF→ON cycle)
-                if self._auto_renew_generation.get(cam_id, 0) != generation:
+                if self._get_session(cam_id).generation != generation:
                     _LOGGER.debug(
                         "Keepalive: stale gen=%d for %s — stopping",
                         generation,
@@ -7313,7 +7327,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
         every ~58 min — worse UX than a clean stop.
 
         Generation-tracked the same way as `_auto_renew_local_session`: any
-        OFF→ON cycle bumps `_auto_renew_generation`, this loop's generation
+        OFF→ON cycle bumps the session's `generation`, this loop's generation
         check then exits without action.
         """
         cfg = self.get_model_config(cam_id)
@@ -7331,7 +7345,7 @@ class BoschCameraCoordinator(DataUpdateCoordinator):  # type: ignore[misc]
             await asyncio.sleep(delay)
             # Stop if a newer generation was started (OFF→ON cycle, or a
             # subsequent LOCAL upgrade replaced the REMOTE session).
-            if self._auto_renew_generation.get(cam_id, 0) != generation:
+            if self._get_session(cam_id).generation != generation:
                 _LOGGER.debug(
                     "REMOTE terminator: stale gen=%d for %s — skipping",
                     generation,
