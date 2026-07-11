@@ -9761,6 +9761,7 @@ INVALID_INPUT_CASES = [
     ("get_privacy_masks", {}, "argument_required"),
     ("set_privacy_masks", {"masks": []}, "argument_required"),
     ("get_lighting_schedule", {}, "argument_required"),
+    ("set_lighting_schedule", {}, "argument_required"),
     # camera_id + something else
     ("update_rule", {"camera_id": ""}, "argument_required"),
     ("delete_motion_zone", {"camera_id": "", "zone_index": 0}, "argument_required"),
@@ -25053,6 +25054,7 @@ def _make_coord_for_update_data(**overrides):
         _timestamp_set_at={},
         _ledlights_set_at={},
         _arming_set_at={},
+        _lighting_options_set_at={},
         # Feature / protocol
         _feature_flags={"dummy": True},  # already populated → skip FF fetch
         _protocol_checked=True,  # already checked → skip protocol fetch
@@ -33590,6 +33592,223 @@ async def test_update_rule_put_url_includes_rule_id():
     assert not put_call_url.endswith("/rules"), (
         f"PUT URL must NOT end at /rules (collection), got: {put_call_url}"
     )
+
+
+@pytest.mark.asyncio
+async def test_set_lighting_schedule_rejects_threshold_out_of_range():
+    """set_lighting_schedule with threshold > 1.0 must raise value_out_of_range.
+
+    Regression test: HA never had a lighting-schedule WRITE service at all
+    (only get_lighting_schedule existed) even though Bosch's cloud API
+    supports PUT /v11/video_inputs/{id}/lighting_options for outdoor cameras
+    with LED light — the Python CLI already proves this endpoint is writable
+    (bosch_camera.py cmd_lighting_schedule). Family-parity resync 2026-07-11
+    flagged this as a gap to close.
+    """
+    from homeassistant.exceptions import ServiceValidationError
+
+    hass = _make_hass_backend_round2_fixes()
+    handlers = _register_and_get_handlers(hass)
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await handlers["set_lighting_schedule"](
+            _call_backend_round2_fixes({"camera_id": CAM_ID, "threshold": 1.5})
+        )
+    assert exc_info.value.translation_key == "value_out_of_range"
+
+
+@pytest.mark.asyncio
+async def test_set_lighting_schedule_puts_merged_schedule():
+    """set_lighting_schedule GETs the current schedule, merges given fields, PUTs it back."""
+    hass = _make_hass_backend_round2_fixes()
+    resp = _resp_cm(
+        200,
+        json_data={
+            "scheduleStatus": "FOLLOW_SCHEDULE",
+            "generalLightOnTime": "20:00:00",
+            "generalLightOffTime": "06:00:00",
+            "darknessThreshold": 0.5,
+            "lightOnMotion": False,
+        },
+    )
+    session = _make_session_backend_round2_fixes(resp)
+    entry, coord = _entry_with_coord_backend_round2_fixes()
+    hass.config_entries.async_loaded_entries.return_value = [entry]
+    handlers = _register_and_get_handlers(hass)
+
+    with patch(
+        f"{MODULE}.async_get_bosch_cloud_session",
+        AsyncMock(return_value=session),
+    ):
+        await handlers["set_lighting_schedule"](
+            _call_backend_round2_fixes(
+                {
+                    "camera_id": CAM_ID,
+                    "on_time": "18:00",
+                    "off_time": "23:00",
+                    "motion": True,
+                    "threshold": 0.4,
+                }
+            )
+        )
+
+    session.get.assert_called_once()
+    get_url = session.get.call_args[0][0]
+    assert f"/video_inputs/{CAM_ID}/lighting_options" in get_url
+
+    session.put.assert_called_once()
+    put_url = session.put.call_args[0][0]
+    assert f"/video_inputs/{CAM_ID}/lighting_options" in put_url
+    put_body = session.put.call_args.kwargs["json"]
+    assert put_body["generalLightOnTime"] == "18:00:00"
+    assert put_body["generalLightOffTime"] == "23:00:00"
+    assert put_body["lightOnMotion"] is True
+    assert put_body["darknessThreshold"] == 0.4
+    assert put_body["scheduleStatus"] == "FOLLOW_SCHEDULE"
+    coord.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_set_lighting_schedule_updates_cache_and_write_lock():
+    """A successful PUT must optimistically update `_lighting_options_cache` and
+    stamp `_lighting_options_set_at`, mirroring the write-lock pattern used by
+    `_privacy_sound_cache`/`_ledlights_cache` (slow_tier.py).
+
+    Regression test for a real bug found by 3 independent bug-hunt agents on
+    2026-07-11: without this, get_lighting_schedule's cache-preferring read
+    (services.py handle_get_lighting_schedule) could serve stale pre-write
+    data for up to a full slow-tier poll interval right after a successful
+    set_lighting_schedule call.
+    """
+    hass = _make_hass_backend_round2_fixes()
+    resp = _resp_cm(
+        200,
+        json_data={
+            "scheduleStatus": "FOLLOW_SCHEDULE",
+            "generalLightOnTime": "20:00:00",
+            "generalLightOffTime": "06:00:00",
+            "darknessThreshold": 0.5,
+            "lightOnMotion": False,
+        },
+    )
+    session = _make_session_backend_round2_fixes(resp)
+    entry, coord = _entry_with_coord_backend_round2_fixes(
+        _lighting_options_cache={}, _lighting_options_set_at={}
+    )
+    hass.config_entries.async_loaded_entries.return_value = [entry]
+    handlers = _register_and_get_handlers(hass)
+
+    before = time.monotonic()
+    with patch(
+        f"{MODULE}.async_get_bosch_cloud_session",
+        AsyncMock(return_value=session),
+    ):
+        await handlers["set_lighting_schedule"](
+            _call_backend_round2_fixes({"camera_id": CAM_ID, "on_time": "18:00"})
+        )
+
+    assert coord._lighting_options_cache[CAM_ID]["generalLightOnTime"] == "18:00:00"
+    assert coord._lighting_options_set_at[CAM_ID] >= before
+
+
+@pytest.mark.asyncio
+async def test_set_lighting_schedule_rejects_non_numeric_threshold():
+    """set_lighting_schedule with a non-numeric threshold must raise value_out_of_range."""
+    from homeassistant.exceptions import ServiceValidationError
+
+    hass = _make_hass_backend_round2_fixes()
+    handlers = _register_and_get_handlers(hass)
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await handlers["set_lighting_schedule"](
+            _call_backend_round2_fixes({"camera_id": CAM_ID, "threshold": "nope"})
+        )
+    assert exc_info.value.translation_key == "value_out_of_range"
+
+
+@pytest.mark.asyncio
+async def test_set_lighting_schedule_raises_on_get_failure():
+    """set_lighting_schedule surfaces a non-200 GET (fetch current) as HomeAssistantError."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    hass = _make_hass_backend_round2_fixes()
+    session = _make_session_backend_round2_fixes(_resp_cm(500, text="boom"))
+    entry, coord = _entry_with_coord_backend_round2_fixes()
+    hass.config_entries.async_loaded_entries.return_value = [entry]
+    handlers = _register_and_get_handlers(hass)
+
+    with (
+        patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            AsyncMock(return_value=session),
+        ),
+        pytest.raises(HomeAssistantError) as exc_info,
+    ):
+        await handlers["set_lighting_schedule"](
+            _call_backend_round2_fixes({"camera_id": CAM_ID, "on_time": "18:00"})
+        )
+    assert exc_info.value.translation_key == "http_error_with_body"
+    session.put.assert_not_called()
+    coord.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_set_lighting_schedule_raises_on_put_failure():
+    """set_lighting_schedule surfaces a non-200/204 PUT as HomeAssistantError."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    hass = _make_hass_backend_round2_fixes()
+    session = MagicMock()
+    session.get = MagicMock(
+        return_value=_resp_cm(200, json_data={"scheduleStatus": "FOLLOW_SCHEDULE"})
+    )
+    session.put = MagicMock(return_value=_resp_cm(442, text="unsupported model"))
+    entry, coord = _entry_with_coord_backend_round2_fixes()
+    hass.config_entries.async_loaded_entries.return_value = [entry]
+    handlers = _register_and_get_handlers(hass)
+
+    with (
+        patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            AsyncMock(return_value=session),
+        ),
+        pytest.raises(HomeAssistantError) as exc_info,
+    ):
+        await handlers["set_lighting_schedule"](
+            _call_backend_round2_fixes({"camera_id": CAM_ID, "on_time": "18:00"})
+        )
+    assert exc_info.value.translation_key == "http_error_with_body"
+    coord.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_set_lighting_schedule_wraps_unexpected_exception():
+    """A non-HomeAssistantError raised mid-flow (e.g. session.get exploding)
+    must be wrapped as HomeAssistantError(translation_key="unexpected_error"),
+    not propagate raw — matches every sibling write handler's except Exception
+    fallback (services.py's generic catch-all, pinned here for coverage).
+    """
+    from homeassistant.exceptions import HomeAssistantError
+
+    hass = _make_hass_backend_round2_fixes()
+    session = MagicMock()
+    session.get = MagicMock(side_effect=RuntimeError("boom"))
+    entry, coord = _entry_with_coord_backend_round2_fixes()
+    hass.config_entries.async_loaded_entries.return_value = [entry]
+    handlers = _register_and_get_handlers(hass)
+
+    with (
+        patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            AsyncMock(return_value=session),
+        ),
+        pytest.raises(HomeAssistantError) as exc_info,
+    ):
+        await handlers["set_lighting_schedule"](
+            _call_backend_round2_fixes({"camera_id": CAM_ID, "on_time": "18:00"})
+        )
+    assert exc_info.value.translation_key == "unexpected_error"
+    coord.async_request_refresh.assert_not_awaited()
 
 
 def _stub_coord_for_sensor(events=None):

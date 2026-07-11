@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import UTC
 
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -1015,6 +1016,149 @@ def _register_services(hass: HomeAssistant) -> None:
                     ) from err
                 break
 
+    async def handle_set_lighting_schedule(call: ServiceCall) -> None:
+        """Set the LED lighting schedule (on/off time, motion trigger, darkness threshold).
+
+        Outdoor cameras with LED light only (mirrors the Python CLI's
+        GET-merge-PUT to /v11/video_inputs/{id}/lighting_options — Bosch's
+        cloud API supports write here already, no local RCP dependency).
+        """
+        # Local import (not top-level): keeps unittest.mock.patch(
+        # "custom_components.bosch_shc_camera.async_get_bosch_cloud_session"/
+        # ".CLOUD_API") working the same way it did before this handler moved
+        # out of __init__.py — those patches target the package's own
+        # namespace, not services.py's.
+        from . import (
+            CLOUD_API as CLOUD_API,
+        )
+        from . import async_get_bosch_cloud_session as async_get_bosch_cloud_session
+
+        cam_id = call.data.get("camera_id", "")
+        if not cam_id:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id"},
+            )
+        on_time = call.data.get("on_time")
+        off_time = call.data.get("off_time")
+        motion = call.data.get("motion")
+        threshold = call.data.get("threshold")
+        if threshold is not None:
+            try:
+                threshold = float(threshold)
+            except (TypeError, ValueError) as err:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="value_out_of_range",
+                    translation_placeholders={
+                        "kind": "lighting_schedule",
+                        "index": "0",
+                        "field": "threshold",
+                        "value": str(threshold),
+                    },
+                ) from err
+            if not 0.0 <= threshold <= 1.0:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="value_out_of_range",
+                    translation_placeholders={
+                        "kind": "lighting_schedule",
+                        "index": "0",
+                        "field": "threshold",
+                        "value": f"{threshold:.3f}",
+                    },
+                )
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+            coord = entry.runtime_data
+            if coord:
+                session = await async_get_bosch_cloud_session(hass)
+                headers = {
+                    "Authorization": f"Bearer {coord.token}",
+                    "Content-Type": "application/json",
+                }
+                try:
+                    async with asyncio.timeout(10):
+                        async with session.get(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
+                            headers=headers,
+                        ) as get_resp:
+                            if get_resp.status != 200:
+                                body = await get_resp.text()
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error_with_body",
+                                    translation_placeholders={
+                                        "action": "Set lighting schedule (fetch current)",
+                                        "status": str(get_resp.status),
+                                        "body": body[:200],
+                                    },
+                                )
+                            data = await get_resp.json()
+                    if on_time:
+                        data["generalLightOnTime"] = (
+                            on_time if len(on_time.split(":")) == 3 else f"{on_time}:00"
+                        )
+                    if off_time:
+                        data["generalLightOffTime"] = (
+                            off_time
+                            if len(off_time.split(":")) == 3
+                            else f"{off_time}:00"
+                        )
+                    if motion is not None:
+                        data["lightOnMotion"] = bool(motion)
+                    if threshold is not None:
+                        data["darknessThreshold"] = threshold
+                    data["scheduleStatus"] = "FOLLOW_SCHEDULE"
+                    async with asyncio.timeout(10):
+                        async with session.put(
+                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
+                            headers=headers,
+                            json=data,
+                        ) as put_resp:
+                            if put_resp.status in (200, 204):
+                                _LOGGER.info(
+                                    "Lighting schedule set for %s: %s → %s",
+                                    cam_id[:8],
+                                    data.get("generalLightOnTime"),
+                                    data.get("generalLightOffTime"),
+                                )
+                                # Optimistic cache update + write-lock, same
+                                # pattern as _privacy_sound_cache/_ledlights_cache
+                                # (slow_tier.py) — without this, a slow-tier poll
+                                # landing before the next rotation completes can
+                                # serve get_lighting_schedule stale pre-write data
+                                # for up to a full poll interval (bug-hunt finding,
+                                # 3-agent verification 2026-07-11).
+                                coord._lighting_options_cache[cam_id] = data
+                                coord._lighting_options_set_at[cam_id] = (
+                                    time.monotonic()
+                                )
+                                await coord.async_request_refresh()
+                            else:
+                                body = await put_resp.text()
+                                raise HomeAssistantError(
+                                    translation_domain=DOMAIN,
+                                    translation_key="http_error_with_body",
+                                    translation_placeholders={
+                                        "action": "Set lighting schedule",
+                                        "status": str(put_resp.status),
+                                        "body": body[:200],
+                                    },
+                                )
+                except HomeAssistantError:
+                    raise
+                except Exception as err:
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unexpected_error",
+                        translation_placeholders={
+                            "action": "Set lighting schedule",
+                            "error": str(err),
+                        },
+                    ) from err
+                break
+
     async def handle_rename_camera(call: ServiceCall) -> None:
         """Rename a camera via the Bosch cloud API."""
         # Local import (not top-level): keeps unittest.mock.patch(
@@ -1463,6 +1607,10 @@ def _register_services(hass: HomeAssistant) -> None:
     if not hass.services.has_service(DOMAIN, "get_lighting_schedule"):
         hass.services.async_register(
             DOMAIN, "get_lighting_schedule", handle_get_lighting_schedule
+        )
+    if not hass.services.has_service(DOMAIN, "set_lighting_schedule"):
+        hass.services.async_register(
+            DOMAIN, "set_lighting_schedule", handle_set_lighting_schedule
         )
     if not hass.services.has_service(DOMAIN, "get_privacy_masks"):
         hass.services.async_register(

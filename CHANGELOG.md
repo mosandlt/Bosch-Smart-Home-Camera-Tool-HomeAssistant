@@ -5,6 +5,17 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.6.0] - 2026-07-11
+
+Minor — new `set_lighting_schedule` service: LED lighting schedules (on/off time, motion trigger, darkness threshold) can now be written from Home Assistant, not just read.
+
+### Added
+
+- **`set_lighting_schedule` service** — sets the LED lighting schedule for outdoor cameras with LED light (on time, off time, light-on-motion, darkness threshold; any field left out keeps its current value). The integration only ever had a read-only `get_lighting_schedule` service, even though Bosch's cloud API supports `PUT /v11/video_inputs/{id}/lighting_options` — the sibling Python CLI tool already proves this endpoint is writable. Flagged as a gap during the 2026-07-11 cross-product feature-parity resync. Implementation mirrors the CLI's GET-merge-PUT pattern and reuses the same conventions as the existing `set_privacy_masks`/`set_motion_zones` write handlers.
+- The new handler's write also optimistically updates `_lighting_options_cache` and stamps a write-lock timestamp (`_lighting_options_set_at`), matching the pattern already used for `_privacy_sound_cache`/`_ledlights_cache` — found and fixed via a 3-agent bug-hunt pass on the new code before release (all 3 independently found the same gap: without it, `get_lighting_schedule` could serve stale pre-write data for up to a full slow-tier poll interval right after a successful write).
+
+5890 pytest (1 pre-existing skip) / mypy --strict / ruff / codespell / pylint clean, deploy-verified on test HA: the endpoint is Gen1-outdoor-only (confirmed live — the existing pre-write `lighting_options` endpoint also `sh:hardware.not.supported`s on both cameras currently on this account, Gen2 Eyes Outdoor II and Gen1 360° Indoor, neither eligible), so the real 442 rejection was live-confirmed against Bosch's cloud API and the new handler surfaces it as a clean `HomeAssistantError` (no crash) — but the write-success (PUT 200) path could not be live-verified end to end for lack of an eligible Gen1 Eyes Outdoor camera on this account.
+
 ## [v14.5.13] - 2026-07-11
 
 Patch — internal cleanup: coordinator split into mixins (continuing v14.5.7-v14.5.10's rewrite), no user-facing change

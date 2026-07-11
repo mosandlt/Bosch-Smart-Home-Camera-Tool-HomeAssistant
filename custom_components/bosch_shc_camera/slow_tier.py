@@ -546,9 +546,15 @@ async def _poll_slow_tier_endpoints(
                 ep_data if isinstance(ep_data, list) else []
             )
         elif ep == "lighting_options":
-            coordinator._lighting_options_cache[cam_id] = (
-                ep_data if isinstance(ep_data, dict) else {}
-            )
+            # Write-locked like motion/privacy_sound_override above — otherwise
+            # a poll landing before Bosch's cloud reflects a set_lighting_schedule
+            # write can revert the cache to the stale pre-write schedule.
+            if not coordinator._is_write_locked(
+                cam_id, coordinator._lighting_options_set_at
+            ):
+                coordinator._lighting_options_cache[cam_id] = (
+                    ep_data if isinstance(ep_data, dict) else {}
+                )
         elif ep == "ledlights":
             if not coordinator._is_write_locked(cam_id, coordinator._ledlights_set_at):
                 coordinator._ledlights_cache[cam_id] = (

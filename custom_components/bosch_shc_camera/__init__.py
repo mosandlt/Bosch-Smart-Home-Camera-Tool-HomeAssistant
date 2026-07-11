@@ -964,6 +964,7 @@ class BoschCameraCoordinator(
         ] = {}  # audioDetectionConfig write (glass-break / fire-alarm)
         self._motion_set_at: dict[str, float] = {}  # motion sensitivity write
         self._alarm_settings_set_at: dict[str, float] = {}  # alarm_settings write
+        self._lighting_options_set_at: dict[str, float] = {}  # lighting schedule write
         # firmware install-trigger write — held just long enough for the
         # optimistic `updating=True` (set by BoschFirmwareUpdate.async_install)
         # to survive one slow-tier poll cycle before Bosch's own backend

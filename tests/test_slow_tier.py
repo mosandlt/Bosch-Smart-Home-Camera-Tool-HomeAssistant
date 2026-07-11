@@ -630,6 +630,7 @@ def _make_slow_coord(**overrides):
         _cloud_zones_cache={},
         _cloud_privacy_masks_cache={},
         _lighting_options_cache={},
+        _lighting_options_set_at={},
         _ledlights_set_at={},
         _ledlights_cache={},
         _lens_elevation_cache={},

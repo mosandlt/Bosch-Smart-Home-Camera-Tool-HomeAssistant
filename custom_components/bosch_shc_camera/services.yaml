@@ -243,6 +243,44 @@ get_lighting_schedule:
       selector:
         text:
 
+set_lighting_schedule:
+  name: Set Lighting Schedule
+  description: >
+    Set the LED lighting schedule (on/off time, motion trigger, darkness threshold)
+    for a camera with LED light. Outdoor cameras only. Any field left empty keeps
+    its current value.
+  fields:
+    camera_id:
+      name: Camera ID
+      required: true
+      selector:
+        text:
+    on_time:
+      name: On Time
+      description: Time the light turns on (HH:MM or HH:MM:SS).
+      example: "18:00"
+      selector:
+        text:
+    off_time:
+      name: Off Time
+      description: Time the light turns off (HH:MM or HH:MM:SS).
+      example: "23:00"
+      selector:
+        text:
+    motion:
+      name: Light On Motion
+      description: Also turn the light on when motion is detected.
+      selector:
+        boolean:
+    threshold:
+      name: Darkness Threshold
+      description: Ambient-light threshold (0.0–1.0) below which the schedule engages.
+      selector:
+        number:
+          min: 0.0
+          max: 1.0
+          step: 0.05
+
 get_privacy_masks:
   name: Get Privacy Masks
   description: >
