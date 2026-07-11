@@ -2187,11 +2187,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.5.12** — see the GitHub release page for full notes:
-[**v14.5.12 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.12)
+Latest: **v14.5.13** — see the GitHub release page for full notes:
+[**v14.5.13 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.13)
 
 | Version | Highlights |
 |---|---|
+| **v14.5.13** | **Internal cleanup only, no user-facing change.** Continuation of the coordinator-rewrite work from v14.5.7-v14.5.10: the main coordinator class shrank from 9385 to 6636 lines, split into focused modules and mixins (token/auth lifecycle, FCM push, Frigate front-doors, SHC/cloud setters, HA service handlers, and the live-session-open logic). Live-verified end to end against a real camera (WebRTC, snapshot, privacy toggle, service call) before release. |
 | **v14.5.12** | **First-time setup: the native camera view no longer stays black until the "Live Stream" switch is toggled by hand.** Opening a fresh camera via Cast or the built-in HLS card already auto-started video on demand; the native WebRTC path used by Home Assistant's own more-info dialog and the Companion app did not — so a camera that had never had its switch manually turned on simply showed no video the first time. It now auto-starts the same way on every path. README also gets a new "Quick Start" section up front and a troubleshooting checklist for "I don't see any image / video". |
 | **v14.5.11** | **The Mini-NVR "recording"/"idle" sensor no longer lags behind reality.** It could show "idle" for up to ~20 seconds after recording had actually started, or "recording" for 1-2 minutes after it had actually stopped — the underlying state was always correct, it just wasn't pushed to Home Assistant until the next routine check. It now updates immediately at every real state change. |
 | **v14.5.10** | **Internal cleanup only, no user-facing change.** The coordinator's per-tick data-fetching method — by far the largest single piece of the integration's code — has been split into 8 focused, independently-tested modules. Continuation of the internal cleanup started in v14.5.7. |

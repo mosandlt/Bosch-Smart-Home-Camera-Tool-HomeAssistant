@@ -49,6 +49,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.bosch_shc_camera as _bosch_module
 import custom_components.bosch_shc_camera as bosch_init
+import custom_components.bosch_shc_camera.frigate_endpoint as bosch_frigate_endpoint
 from custom_components.bosch_shc_camera import (
     _DOUBLED_PREFIX_RE,
     OPTIONS_SNAPSHOT_KEY,
@@ -69,6 +70,9 @@ from custom_components.bosch_shc_camera.const import (
 from custom_components.bosch_shc_camera.frigate_endpoint import (
     FrontDoorConfig,
     InnerTarget,
+)
+from custom_components.bosch_shc_camera.live_connection import (
+    try_live_connection_inner,
 )
 from custom_components.bosch_shc_camera.session_state import (
     CameraSessionState,
@@ -2182,7 +2186,7 @@ class TestTokenStillValid:
 # killed the port the renewal had just started — and the rescue's own
 # `try_live_connection(is_renewal=False)` then SKIPPED (lock held), leaving
 # go2rtc + HA Stream pinned to the dead proxy port → frozen image.
-# Fix: the teardown moved INSIDE `_try_live_connection_inner`, guarded by a new
+# Fix: the teardown moved INSIDE `try_live_connection_inner`, guarded by a new
 # `force_reset` flag, so the stop-old-proxy + rebuild are atomic under the lock.
 # The recovery callers pass `force_reset=True`, which also makes the public
 # `try_live_connection` WAIT for the lock instead of skipping.
@@ -2196,7 +2200,7 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
 def _inner_coord() -> SimpleNamespace:
-    """Minimal stub for `_try_live_connection_inner` up to the token gate.
+    """Minimal stub for `try_live_connection_inner` up to the token gate.
 
     `token=None` makes the inner return None immediately AFTER the force_reset
     teardown block, so the test isolates exactly that teardown.
@@ -2217,7 +2221,7 @@ async def test_force_reset_tears_down_under_inner():
     """force_reset=True → old session + proxy torn down inside the inner
     (i.e. under the stream lock), before any rebuild work."""
     c = _inner_coord()
-    result = await BoschCameraCoordinator._try_live_connection_inner(
+    result = await try_live_connection_inner(
         c, CAM_ID, is_renewal=False, force_reset=True
     )
     assert result is None  # no token → returns after teardown
@@ -2232,7 +2236,7 @@ async def test_no_force_reset_no_teardown():
     """force_reset=False → inner does NOT tear down (opportunistic / renewal
     callers manage their own session state)."""
     c = _inner_coord()
-    result = await BoschCameraCoordinator._try_live_connection_inner(
+    result = await try_live_connection_inner(
         c, CAM_ID, is_renewal=False, force_reset=False
     )
     assert result is None
@@ -2256,7 +2260,7 @@ async def test_force_reset_bypasses_lock_skip_guard():
 
     inner_called = {"n": 0}
 
-    async def _fake_inner(cam_id, is_renewal=False, force_reset=False):
+    async def _fake_inner(coordinator, cam_id, is_renewal=False, force_reset=False):
         inner_called["n"] += 1
         return {"_connection_type": "LOCAL"}
 
@@ -2264,20 +2268,26 @@ async def test_force_reset_bypasses_lock_skip_guard():
         _shc_state_cache={},
         _get_stream_lock=lambda cid: lock,
         _ensure_go2rtc_schemes_fresh=AsyncMock(),
-        _try_live_connection_inner=_fake_inner,
     )
 
-    task = asyncio.ensure_future(
-        BoschCameraCoordinator.try_live_connection(c, CAM_ID, force_reset=True)
-    )
-    await asyncio.sleep(0)  # let it reach `async with lock` and block (not skip)
-    assert inner_called["n"] == 0, "force_reset call should be WAITING on the lock"
-    assert not task.done(), (
-        "REGRESSION: force_reset call returned early (skipped) while the lock "
-        "was held — recovery must wait for the lock, never skip."
-    )
-    lock.release()  # renewal finished
-    result = await task
+    # try_live_connection calls the free function try_live_connection_inner
+    # (imported into __init__.py's module namespace), not a coordinator
+    # method — patch it there, matching where the real code looks it up.
+    with patch(
+        "custom_components.bosch_shc_camera.try_live_connection_inner",
+        new=_fake_inner,
+    ):
+        task = asyncio.ensure_future(
+            BoschCameraCoordinator.try_live_connection(c, CAM_ID, force_reset=True)
+        )
+        await asyncio.sleep(0)  # let it reach `async with lock` and block (not skip)
+        assert inner_called["n"] == 0, "force_reset call should be WAITING on the lock"
+        assert not task.done(), (
+            "REGRESSION: force_reset call returned early (skipped) while the lock "
+            "was held — recovery must wait for the lock, never skip."
+        )
+        lock.release()  # renewal finished
+        result = await task
     assert result == {"_connection_type": "LOCAL"}
     assert inner_called["n"] == 1
 
@@ -2295,9 +2305,16 @@ async def test_opportunistic_call_still_skips_when_locked():
         _shc_state_cache={},
         _get_stream_lock=lambda cid: lock,
         _ensure_go2rtc_schemes_fresh=AsyncMock(),
-        _try_live_connection_inner=AsyncMock(return_value={"x": 1}),
     )
-    result = await BoschCameraCoordinator.try_live_connection(c, CAM_ID)
+    inner_mock = AsyncMock(return_value={"x": 1})
+    # try_live_connection calls the free function try_live_connection_inner
+    # (imported into __init__.py's module namespace), not a coordinator
+    # method — patch it there, matching where the real code looks it up.
+    with patch(
+        "custom_components.bosch_shc_camera.try_live_connection_inner",
+        new=inner_mock,
+    ):
+        result = await BoschCameraCoordinator.try_live_connection(c, CAM_ID)
     # Skipped — returns the falsy STREAM_START_SKIPPED sentinel (not None) since
     # 2026-06-18 so the switch consumer can tell a benign de-dup from a real
     # failure. Still skips the inner setup (the behavior this test pins).
@@ -2305,7 +2322,7 @@ async def test_opportunistic_call_still_skips_when_locked():
 
     assert result is STREAM_START_SKIPPED
     assert not result
-    c._try_live_connection_inner.assert_not_awaited()
+    inner_mock.assert_not_awaited()
     lock.release()
 
 
@@ -2317,7 +2334,7 @@ async def test_opportunistic_call_still_skips_when_locked():
 # Root cause: `_tear_down_live_stream` (idle reaper / external-privacy-detect /
 # frigate-idle-timeout / REMOTE-lifetime terminator — none of them go through
 # `try_live_connection`) ran WITHOUT the per-cam stream lock
-# (`_get_stream_lock`), while `try_live_connection`/`_try_live_connection_inner`
+# (`_get_stream_lock`), while `try_live_connection`/`try_live_connection_inner`
 # hold that lock across the WHOLE rebuild (PUT /connection + TLS proxy start +
 # pre-warm + `Stream.update_source()`). An unlocked teardown could interleave
 # mid-rebuild: the renewal publishes a brand-new proxy port into HA's `Stream`
@@ -3866,10 +3883,18 @@ class TestIdleSessionReaper:
         c._tear_down_live_stream.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_exits_on_stale_generation(self):
-        """A newer session (OFF→ON / renewal) bumps the generation → exit."""
+    async def test_exits_on_stale_generation(self, caplog):
+        """A newer session (OFF→ON / renewal) bumps the generation → exit.
+
+        caplog pins WHICH of the three exit branches fired — asserting only
+        `_tear_down_live_stream.assert_not_called()` (as before) is true for
+        all three branches and wouldn't catch the generation-check being
+        merged with/swapped for the not-LOCAL check."""
+        import logging
+
         c = _reaper_coord(_auto_renew_generation={CAM: GEN + 1})
         with (
+            caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
             patch("custom_components.bosch_shc_camera.asyncio.sleep", AsyncMock()),
             patch(
                 "custom_components.bosch_shc_camera.time.monotonic",
@@ -3878,12 +3903,16 @@ class TestIdleSessionReaper:
         ):
             await BoschCameraCoordinator._idle_session_reaper(c, CAM, GEN)
         c._tear_down_live_stream.assert_not_called()
+        assert "stale generation, exiting" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_exits_when_session_gone(self):
-        """Session already torn down / no longer LOCAL → exit without reaping."""
+    async def test_exits_when_session_gone(self, caplog):
+        """Session already torn down → exit without reaping."""
+        import logging
+
         c = _reaper_coord(_live_connections={})
         with (
+            caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
             patch("custom_components.bosch_shc_camera.asyncio.sleep", AsyncMock()),
             patch(
                 "custom_components.bosch_shc_camera.time.monotonic",
@@ -3892,12 +3921,16 @@ class TestIdleSessionReaper:
         ):
             await BoschCameraCoordinator._idle_session_reaper(c, CAM, GEN)
         c._tear_down_live_stream.assert_not_called()
+        assert "session gone, exiting" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_exits_when_connection_no_longer_local(self):
+    async def test_exits_when_connection_no_longer_local(self, caplog):
         """A LOCAL→REMOTE fallback leaves a REMOTE session the reaper ignores."""
+        import logging
+
         c = _reaper_coord(_live_connections={CAM: {"_connection_type": "REMOTE"}})
         with (
+            caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
             patch("custom_components.bosch_shc_camera.asyncio.sleep", AsyncMock()),
             patch(
                 "custom_components.bosch_shc_camera.time.monotonic",
@@ -3906,6 +3939,7 @@ class TestIdleSessionReaper:
         ):
             await BoschCameraCoordinator._idle_session_reaper(c, CAM, GEN)
         c._tear_down_live_stream.assert_not_called()
+        assert "no longer LOCAL, exiting" in caplog.text
 
 
 class TestReplaceReaperTask:
@@ -6200,7 +6234,9 @@ def test_url_host_lan_detects_ip(monkeypatch) -> None:
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(bosch_init.socket, "socket", lambda *a, **k: _FakeSock())
+    monkeypatch.setattr(
+        bosch_frigate_endpoint.socket, "socket", lambda *a, **k: _FakeSock()
+    )
     assert c._frigate_url_host("0.0.0.0") == "192.168.1.50"
 
 
@@ -6214,7 +6250,9 @@ def test_url_host_lan_fallback_on_oserror(monkeypatch) -> None:
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(bosch_init.socket, "socket", lambda *a, **k: _FailSock())
+    monkeypatch.setattr(
+        bosch_frigate_endpoint.socket, "socket", lambda *a, **k: _FailSock()
+    )
     assert c._frigate_url_host("0.0.0.0") == "127.0.0.1"
 
 
@@ -13174,7 +13212,7 @@ class TestFreshSnapshotCacheFastPath:
 # are thin one-liners over `fcm.async_*` — patch the imported symbol
 # and assert the call signature.
 # - SHC setter wrappers (async_shc_set_camera_light, async_cloud_set_*)
-# are thin one-liners over `shc_mod.*` — same approach.
+# are thin one-liners over `shc.*` (SHCCoordinatorMixin) — same approach.
 # - `async_put_camera` runs the universal Bosch v11 PUT path with
 # 401-rescue. Mock the aiohttp session.
 # - `_async_local_tcp_ping` wraps asyncio.open_connection. Mock it.
@@ -13355,7 +13393,7 @@ class TestFcmWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera._fcm_async_ensure_supervisor",
+            "custom_components.bosch_shc_camera.fcm.async_ensure_fcm_supervisor",
             new=AsyncMock(return_value=None),
         ) as m:
             await BoschCameraCoordinator.async_start_fcm_push(coord)
@@ -13367,7 +13405,7 @@ class TestFcmWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera._fcm_async_stop_supervisor",
+            "custom_components.bosch_shc_camera.fcm.async_stop_fcm_supervisor",
             new=AsyncMock(return_value=None),
         ) as m:
             await BoschCameraCoordinator.async_stop_fcm_push(coord)
@@ -13379,7 +13417,7 @@ class TestFcmWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera._fcm_register_fcm_with_bosch",
+            "custom_components.bosch_shc_camera.fcm.register_fcm_with_bosch",
             new=AsyncMock(return_value=True),
         ) as m:
             ok = await BoschCameraCoordinator._register_fcm_with_bosch(coord)
@@ -13392,7 +13430,7 @@ class TestFcmWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera._fcm_async_handle_fcm_push",
+            "custom_components.bosch_shc_camera.fcm.async_handle_fcm_push",
             new=AsyncMock(return_value=None),
         ) as m:
             await BoschCameraCoordinator._async_handle_fcm_push(coord)
@@ -13404,7 +13442,7 @@ class TestFcmWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera._fcm_async_send_alert",
+            "custom_components.bosch_shc_camera.fcm.async_send_alert",
             new=AsyncMock(return_value=None),
         ) as m:
             await BoschCameraCoordinator._async_send_alert(
@@ -13433,7 +13471,7 @@ class TestFcmWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera._fcm_async_mark_events_read",
+            "custom_components.bosch_shc_camera.fcm.async_mark_events_read",
             new=AsyncMock(return_value=True),
         ) as m:
             ok = await BoschCameraCoordinator.async_mark_events_read(
@@ -13447,7 +13485,7 @@ class TestFcmWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera._fcm_get_alert_services",
+            "custom_components.bosch_shc_camera.fcm.get_alert_services",
             return_value=["notify.test_user"],
         ) as m:
             out = BoschCameraCoordinator._get_alert_services(coord, "movement")
@@ -13459,7 +13497,7 @@ class TestFcmWrappers:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         with patch(
-            "custom_components.bosch_shc_camera._fcm_build_notify_data",
+            "custom_components.bosch_shc_camera.fcm.build_notify_data",
             return_value={"message": "x"},
         ) as m:
             out = BoschCameraCoordinator._build_notify_data(
@@ -13475,21 +13513,21 @@ class TestFcmWrappers:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         with patch(
-            "custom_components.bosch_shc_camera._fcm_write_file",
+            "custom_components.bosch_shc_camera.fcm._write_file",
         ) as m:
             BoschCameraCoordinator._write_file("/tmp/x.jpg", b"\xff\xd8")
             m.assert_called_once_with("/tmp/x.jpg", b"\xff\xd8")
 
 
 class TestShcWrappers:
-    """All `shc_mod.*` delegations. Same one-line wrapper pattern."""
+    """All SHCCoordinatorMixin delegations to shc.py's functions. Same one-line wrapper pattern."""
 
     def test_shc_configured_property(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod.shc_configured",
+            "custom_components.bosch_shc_camera.shc.shc_configured",
             return_value=True,
         ) as m:
             assert BoschCameraCoordinator.shc_configured.fget(coord) is True
@@ -13500,7 +13538,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod.shc_ready",
+            "custom_components.bosch_shc_camera.shc.shc_ready",
             return_value=False,
         ) as m:
             assert BoschCameraCoordinator.shc_ready.fget(coord) is False
@@ -13511,7 +13549,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod._shc_mark_success",
+            "custom_components.bosch_shc_camera.shc._shc_mark_success",
         ) as m:
             BoschCameraCoordinator._shc_mark_success(coord)
             m.assert_called_once_with(coord)
@@ -13521,7 +13559,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod._shc_mark_failure",
+            "custom_components.bosch_shc_camera.shc._shc_mark_failure",
         ) as m:
             BoschCameraCoordinator._shc_mark_failure(coord)
             m.assert_called_once_with(coord)
@@ -13532,7 +13570,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod.async_shc_request",
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
             new=AsyncMock(return_value={"ok": 1}),
         ) as m:
             out = await BoschCameraCoordinator._async_shc_request(
@@ -13549,7 +13587,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod.async_update_shc_states",
+            "custom_components.bosch_shc_camera.shc.async_update_shc_states",
             new=AsyncMock(return_value=None),
         ) as m:
             await BoschCameraCoordinator._async_update_shc_states(coord, {"data": 1})
@@ -13561,7 +13599,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod.async_shc_set_camera_light",
+            "custom_components.bosch_shc_camera.shc.async_shc_set_camera_light",
             new=AsyncMock(return_value=True),
         ) as m:
             ok = await BoschCameraCoordinator.async_shc_set_camera_light(
@@ -13576,7 +13614,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod.async_cloud_set_light_component",
+            "custom_components.bosch_shc_camera.shc.async_cloud_set_light_component",
             new=AsyncMock(return_value=True),
         ) as m:
             ok = await BoschCameraCoordinator.async_cloud_set_light_component(
@@ -13594,7 +13632,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod.async_shc_set_privacy_mode",
+            "custom_components.bosch_shc_camera.shc.async_shc_set_privacy_mode",
             new=AsyncMock(return_value=True),
         ) as m:
             ok = await BoschCameraCoordinator.async_shc_set_privacy_mode(
@@ -13609,7 +13647,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod.async_cloud_set_privacy_mode",
+            "custom_components.bosch_shc_camera.shc.async_cloud_set_privacy_mode",
             new=AsyncMock(return_value=True),
         ) as m:
             ok = await BoschCameraCoordinator.async_cloud_set_privacy_mode(
@@ -13624,7 +13662,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod.async_cloud_set_camera_light",
+            "custom_components.bosch_shc_camera.shc.async_cloud_set_camera_light",
             new=AsyncMock(return_value=True),
         ) as m:
             await BoschCameraCoordinator.async_cloud_set_camera_light(
@@ -13638,7 +13676,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod.async_cloud_set_notifications",
+            "custom_components.bosch_shc_camera.shc.async_cloud_set_notifications",
             new=AsyncMock(return_value=True),
         ) as m:
             await BoschCameraCoordinator.async_cloud_set_notifications(
@@ -13652,7 +13690,7 @@ class TestShcWrappers:
 
         coord = _make_coord_async_methods()
         with patch(
-            "custom_components.bosch_shc_camera.shc_mod.async_cloud_set_pan",
+            "custom_components.bosch_shc_camera.shc.async_cloud_set_pan",
             new=AsyncMock(return_value=True),
         ) as m:
             await BoschCameraCoordinator.async_cloud_set_pan(coord, CAM_A, 30)
@@ -14982,7 +15020,6 @@ def _make_coord_sprint_j1(**overrides):
         _refresh_token_locked=AsyncMock(return_value="refreshed-token"),
         _token_refresh_lock=None,  # overridden in specific tests
         _ensure_go2rtc_schemes_fresh=AsyncMock(),
-        _try_live_connection_inner=AsyncMock(return_value={"ok": True}),
         _unregister_go2rtc_stream=AsyncMock(),
         _register_go2rtc_stream=AsyncMock(return_value=True),
         # _get_stream_lock is a real method call inside try_live_connection;
@@ -15374,7 +15411,13 @@ class TestEnsureValidToken:
 
     @pytest.mark.asyncio
     async def test_delegates_to_refresh_token_locked(self):
-        """Return value flows through from _refresh_token_locked."""
+        """Return value flows through from _refresh_token_locked, and the
+        caller-observed token is forwarded — not silently dropped. Every
+        real call site (shc.py:512, camera_list.py:71, __init__.py:3771/6659)
+        passes the token it saw fail so _refresh_token_locked can trust a
+        401 over the JWT's own (possibly still-"valid") exp claim (v14.4.4
+        fix). Asserting only `assert_awaited_once()` would still pass if
+        that forwarding silently broke."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_sprint_j1(
@@ -15382,10 +15425,12 @@ class TestEnsureValidToken:
             _refresh_token_locked=AsyncMock(return_value="fresh-tok-xyz"),
         )
 
-        result = await BoschCameraCoordinator._ensure_valid_token(coord)
+        result = await BoschCameraCoordinator._ensure_valid_token(
+            coord, "observed-stale-tok"
+        )
 
         assert result == "fresh-tok-xyz"
-        coord._refresh_token_locked.assert_awaited_once()
+        coord._refresh_token_locked.assert_awaited_once_with("observed-stale-tok")
 
     @pytest.mark.asyncio
     async def test_concurrent_calls_both_complete(self):
@@ -15644,7 +15689,7 @@ class TestTryLiveConnection:
     Lines 2294-2298: privacy_mode active → return None (logged at INFO)
     Lines 2300-2302: lock already locked + not is_renewal → return None (WARNING)
     Lines 2308-2311: not is_renewal → _ensure_go2rtc_schemes_fresh awaited,
-                     then lock acquired → _try_live_connection_inner called
+                     then lock acquired → try_live_connection_inner called
     """
 
     @pytest.mark.asyncio
@@ -15731,12 +15776,18 @@ class TestTryLiveConnection:
             _shc_state_cache={CAM_A: {}},
             _stream_locks={CAM_A: busy_lock},
             _ensure_go2rtc_schemes_fresh=AsyncMock(),
-            _try_live_connection_inner=AsyncMock(return_value=inner_result),
         )
 
-        result = await BoschCameraCoordinator.try_live_connection(
-            coord, CAM_A, is_renewal=True
-        )
+        # try_live_connection calls the free function try_live_connection_inner
+        # (imported into __init__.py's module namespace), not a coordinator
+        # method — patch it there, matching where the real code looks it up.
+        with patch(
+            "custom_components.bosch_shc_camera.try_live_connection_inner",
+            new=AsyncMock(return_value=inner_result),
+        ):
+            result = await BoschCameraCoordinator.try_live_connection(
+                coord, CAM_A, is_renewal=True
+            )
 
         assert result == inner_result
 
@@ -15752,12 +15803,15 @@ class TestTryLiveConnection:
             _shc_state_cache={CAM_A: {}},
             _stream_locks={},
             _ensure_go2rtc_schemes_fresh=ensure_fresh,
-            _try_live_connection_inner=AsyncMock(return_value=inner_result),
         )
 
-        result = await BoschCameraCoordinator.try_live_connection(
-            coord, CAM_A, is_renewal=False
-        )
+        with patch(
+            "custom_components.bosch_shc_camera.try_live_connection_inner",
+            new=AsyncMock(return_value=inner_result),
+        ):
+            result = await BoschCameraCoordinator.try_live_connection(
+                coord, CAM_A, is_renewal=False
+            )
 
         ensure_fresh.assert_awaited_once()
         assert result == inner_result
@@ -15774,12 +15828,15 @@ class TestTryLiveConnection:
             _shc_state_cache={CAM_A: {}},
             _stream_locks={},
             _ensure_go2rtc_schemes_fresh=ensure_fresh,
-            _try_live_connection_inner=AsyncMock(return_value=inner_result),
         )
 
-        result = await BoschCameraCoordinator.try_live_connection(
-            coord, CAM_A, is_renewal=True
-        )
+        with patch(
+            "custom_components.bosch_shc_camera.try_live_connection_inner",
+            new=AsyncMock(return_value=inner_result),
+        ):
+            result = await BoschCameraCoordinator.try_live_connection(
+                coord, CAM_A, is_renewal=True
+            )
 
         ensure_fresh.assert_not_awaited()
         assert result == inner_result
@@ -21381,7 +21438,7 @@ class TestFcmDeliveryDeathWatchdog:
 # session.close() finally block (lines 2790-2808)
 # All tests run without a live HA instance.  Coordinator is a SimpleNamespace stub;
 # the method is called via the unbound pattern:
-# BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+# try_live_connection_inner(coord, CAM_A)
 
 
 async def _noop_coro_sprint_kd():
@@ -21408,7 +21465,7 @@ def _model_cfg(**overrides):
 
 
 def _make_coord_sprint_kd(**overrides):
-    """Minimal coordinator stub for _try_live_connection_inner."""
+    """Minimal coordinator stub for try_live_connection_inner."""
     task_mock = MagicMock()
     task_mock.done = MagicMock(return_value=True)
 
@@ -21512,7 +21569,7 @@ def _put_resp(status: int, body: str):
 
 
 def _make_session_sprint_kd(put_response):
-    """Build a minimal aiohttp session mock for _try_live_connection_inner."""
+    """Build a minimal aiohttp session mock for try_live_connection_inner."""
     session_mock = MagicMock()
     session_mock.close = AsyncMock()
     session_mock.put = AsyncMock(return_value=put_response)
@@ -21537,9 +21594,7 @@ class TestNoTokenGuard_sprint_kd:
                 side_effect=lambda **kw: session_created.append(1) or MagicMock(),
             ),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is None
         # Session must NOT be created when token is missing
@@ -21556,9 +21611,7 @@ class TestNoTokenGuard_sprint_kd:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=MagicMock()),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is None
 
@@ -21589,7 +21642,7 @@ class TestConnectionTypePref:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         call_kwargs = session_mock.put.call_args
         assert call_kwargs is not None
@@ -21614,7 +21667,7 @@ class TestConnectionTypePref:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         call_kwargs = session_mock.put.call_args
         assert call_kwargs is not None
@@ -21637,7 +21690,7 @@ class TestConnectionTypePref:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         call_kwargs = session_mock.put.call_args
         assert call_kwargs is not None
@@ -21663,7 +21716,7 @@ class TestConnectionTypePref:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         # First PUT call must be LOCAL
         first_call = session_mock.put.call_args_list[0]
@@ -21690,7 +21743,7 @@ class TestConnectionTypePref:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         # After aged-out decay the counter must be cleared
         assert CAM_A not in coord._stream_error_count
@@ -21718,7 +21771,7 @@ class TestConnectionTypePref:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         # First PUT must be REMOTE (weak WiFi → REMOTE preferred)
         first_call = session_mock.put.call_args_list[0]
@@ -21744,7 +21797,7 @@ class TestConnectionTypePref:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         call_kwargs = session_mock.put.call_args
         assert call_kwargs.kwargs["json"]["type"] == "REMOTE"
@@ -21774,7 +21827,7 @@ class TestTcpPreCheck:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         # After TCP fail, only REMOTE should be tried
         assert session_mock.put.call_count == 1
@@ -21801,7 +21854,7 @@ class TestTcpPreCheck:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         # LOCAL should be tried first (TCP ok → LOCAL stays in candidates)
         first_call = session_mock.put.call_args_list[0]
@@ -21828,7 +21881,7 @@ class TestTcpPreCheck:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         # Ping must NOT be called (cache hit)
         ping_mock.assert_not_called()
@@ -21873,9 +21926,7 @@ class TestPut200LocalSuccess:
                 new=AsyncMock(return_value=True),
             ),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None
         assert result.get("_connection_type") == "LOCAL"
@@ -21923,9 +21974,7 @@ class TestPut200LocalSuccess:
                 new=AsyncMock(return_value=True),
             ),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None
         coord._start_tls_proxy.assert_awaited_once()
@@ -21973,9 +22022,7 @@ class TestPut200LocalSuccess:
                 new=AsyncMock(return_value=True),
             ),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None
         reg_mock.assert_awaited_once()
@@ -22018,9 +22065,7 @@ class TestPut200LocalSuccess:
                 new=AsyncMock(return_value=True),
             ),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None
         assert "rtspsUrl" in result
@@ -22056,9 +22101,7 @@ class TestPut200RemoteSuccess:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None
         assert "rtspsUrl" in result
@@ -22093,9 +22136,7 @@ class TestPut200RemoteSuccess:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None
         assert "proxyUrl" in result
@@ -22127,9 +22168,7 @@ class TestPut200RemoteSuccess:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None
         # Falls back to direct rtsps://
@@ -22162,9 +22201,7 @@ class TestPut200RemoteSuccess:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None
         assert result.get("_bufferingTime") == 2000
@@ -22195,9 +22232,7 @@ class TestPut200RemoteSuccess:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None
         assert CAM_A in coord._live_connections
@@ -22225,9 +22260,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is None
 
@@ -22250,9 +22283,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is None
 
@@ -22291,9 +22322,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         types = {c.kwargs["json"]["type"] for c in session_mock.put.call_args_list}
         assert {"LOCAL", "REMOTE"}.issubset(types), (
@@ -22321,9 +22350,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is None
 
@@ -22363,9 +22390,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         # TimeoutError on LOCAL → fell through to REMOTE → success
         assert result is not None
@@ -22394,9 +22419,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is None
 
@@ -22419,7 +22442,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         session_mock.close.assert_awaited_once()
 
@@ -22445,7 +22468,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         session_mock.close.assert_awaited_once()
 
@@ -22475,9 +22498,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None
         session_mock.close.assert_awaited_once()
@@ -22504,9 +22525,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is None
         # Both LOCAL and REMOTE must have been tried
@@ -22532,7 +22551,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         call_headers = session_mock.put.call_args.kwargs["headers"]
         assert call_headers["Authorization"] == "Bearer my-secret-token"
@@ -22556,7 +22575,7 @@ class TestErrorPaths:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         call_url = session_mock.put.call_args.args[0]
         assert CAM_A in call_url
@@ -22591,10 +22610,10 @@ class TestGreenItReaperGate:
         )
         coord._replace_reaper_task = MagicMock()  # distinct from renewal stub
         coord._idle_session_reaper = MagicMock(return_value=object())  # not a coroutine
-        return coord, BoschCameraCoordinator, body
+        return coord, body
 
     async def _run(self, options):
-        coord, Coord, body = self._local(options)
+        coord, body = self._local(options)
         with (
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch(
@@ -22606,7 +22625,7 @@ class TestGreenItReaperGate:
                 new=AsyncMock(return_value=True),
             ),
         ):
-            await Coord._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
         return coord
 
     @pytest.mark.asyncio
@@ -24854,7 +24873,7 @@ class TestGen2LightingSwitchTickFetch:
 
 # Coverage targets:
 # Group A (lines 1886-2166): slow-tier _async_update_data result processing
-# Group B (lines 2437-2785): _try_live_connection_inner remaining branches
+# Group B (lines 2437-2785): try_live_connection_inner remaining branches
 # All tests run without a live HA instance.  Coordinator is a SimpleNamespace stub;
 # methods are called via BoschCameraCoordinator.<method>(coord, ...) (unbound pattern).
 
@@ -25719,7 +25738,7 @@ def _model_cfg_sprint_lc(**overrides):
 
 
 def _make_coord_live(**overrides):
-    """Minimal coordinator stub for _try_live_connection_inner tests."""
+    """Minimal coordinator stub for try_live_connection_inner tests."""
     task_mock = MagicMock()
     task_mock.done = MagicMock(return_value=True)
 
@@ -25827,9 +25846,7 @@ class TestRemoteInst4Reduced:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         # Method should succeed (no 400 because inst was reduced to 2)
         assert result is not None, "REMOTE with inst=4→2 reduction must succeed"
@@ -25897,7 +25914,7 @@ class TestLocalCredsCacheSplitException:
             # int("NOTAPORT") at line 2491 (outside try) raises ValueError which
             # propagates — catch it here to verify the cache was NOT set before the raise.
             try:
-                await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+                await try_live_connection_inner(coord, CAM_A)
             except (ValueError, Exception):
                 pass  # expected — line 2491 also raises, not covered by inner try
 
@@ -25955,7 +25972,7 @@ class TestStaleStreamStopTimeout:
                 new=AsyncMock(return_value=True),
             ),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         assert cam_ent.stream is None, (
             "cam_ent.stream must be None after stale.stop() TimeoutError (force-detach)"
@@ -26013,7 +26030,7 @@ class TestStaleStreamStopException:
                 new=AsyncMock(return_value=True),
             ),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         assert cam_ent.stream is None, (
             "cam_ent.stream must be None after generic exception in stale.stop()"
@@ -26073,9 +26090,7 @@ class TestNoProxyPortPrewarmFalse:
                 side_effect=_prewarm_spy,
             ),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         # pre_warm_rtsp must NOT be called (no proxy port → prewarm_ok=False directly)
         assert not prewarm_called, (
@@ -26134,9 +26149,7 @@ class TestLocalPrewarmFailedFallsBackToRemote:
                 new=AsyncMock(return_value=False),
             ),
         ):  # pre-warm FAILS
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         # REMOTE fallback must succeed
         assert result is not None, (
@@ -26201,7 +26214,7 @@ class TestMinWaitSleepCalled:
                 new=AsyncMock(return_value=True),
             ),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         # At least one sleep call must have been for the min_wait remaining time
         positive_sleeps = [s for s in sleep_calls if s > 0]
@@ -26246,7 +26259,7 @@ class TestStreamUpdateSourceException:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         assert cam_ent.stream is None, (
             "cam_entity.stream must be set to None when update_source raises"
@@ -26287,9 +26300,7 @@ class TestStreamUpdateSourceNoExistingStream:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None, "Method must return a result dict"
         assert cam_ent.stream is None, (
@@ -26356,7 +26367,7 @@ class TestNvrSidecarLocal:
                 new=AsyncMock(return_value=True),
             ),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         nvr_start_calls = [n for n in task_calls if "nvr_start" in n]
         assert nvr_start_calls, (
@@ -26414,7 +26425,7 @@ class TestNvrSidecarRemote:
             patch("aiohttp.TCPConnector", return_value=MagicMock()),
             patch("aiohttp.ClientSession", return_value=session_mock),
         ):
-            await BoschCameraCoordinator._try_live_connection_inner(coord, CAM_A)
+            await try_live_connection_inner(coord, CAM_A)
 
         nvr_stop_calls = [n for n in task_calls if "nvr_stop" in n]
         assert nvr_stop_calls, (
@@ -27085,7 +27096,7 @@ def _model_cfg_sprint_mc(**overrides):
 
 
 def _make_coord_live_sprint_mc(**overrides):
-    """Minimal coordinator stub for _try_live_connection_inner tests."""
+    """Minimal coordinator stub for try_live_connection_inner tests."""
     task_mock = MagicMock()
     task_mock.done = MagicMock(return_value=True)
 
@@ -27199,9 +27210,7 @@ class TestStreamUpdateSourceSuccess:
             ),
             caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
         ):
-            result = await BoschCameraCoordinator._try_live_connection_inner(
-                coord, CAM_A
-            )
+            result = await try_live_connection_inner(coord, CAM_A)
 
         stream_mock.update_source.assert_called_once()
         assert result is not None
@@ -34399,16 +34408,17 @@ class TestStreamWarmingInit:
         )
 
     def test_no_hasattr_guard_for_stream_warming_in_try_live_connection(self):
-        """The hasattr guard for _stream_warming in _try_live_connection_inner
+        """The hasattr guard for _stream_warming in try_live_connection_inner
         must be removed once __init__ sets the attribute eagerly."""
-        source = (SRC / "__init__.py").read_text()
-        # Find _try_live_connection_inner body and check for hasattr(_stream_warming)
-        func_start = source.find("_try_live_connection_inner")
-        if func_start == -1:
-            pytest.skip("_try_live_connection_inner not found — name may have changed")
+        source = (SRC / "live_connection.py").read_text()
+        # Find try_live_connection_inner body and check for hasattr(_stream_warming)
+        func_start = source.find("def try_live_connection_inner")
+        assert func_start != -1, (
+            "try_live_connection_inner not found in live_connection.py"
+        )
         func_body = source[func_start : func_start + 1500]
-        assert 'hasattr(self, "_stream_warming")' not in func_body, (
-            "BUG-3: hasattr guard for _stream_warming still in _try_live_connection_inner — "
+        assert 'hasattr(coordinator, "_stream_warming")' not in func_body, (
+            "BUG-3: hasattr guard for _stream_warming still in try_live_connection_inner — "
             "attribute should be eagerly initialised in __init__"
         )
 
@@ -34825,15 +34835,15 @@ class TestNvrCleanupSentinel:
 
 class TestLocalRtspUrlInit:
     """local_rtsp_url must be initialized before the `if urls:` block in
-    `_try_live_connection_inner` — using it unconditionally afterward raised
+    `try_live_connection_inner` — using it unconditionally afterward raised
     NameError when Bosch's LOCAL response contained an empty `urls` list."""
 
     def test_local_rtsp_url_initialized_before_urls_block(self):
         import inspect
 
-        import custom_components.bosch_shc_camera.__init__ as _m
+        import custom_components.bosch_shc_camera.live_connection as _m
 
-        src = inspect.getsource(_m.BoschCameraCoordinator._try_live_connection_inner)
+        src = inspect.getsource(_m.try_live_connection_inner)
         init_pos = src.find('local_rtsp_url = ""')
         urls_pos = src.find("if urls:")
         assert init_pos != -1, (
@@ -35784,7 +35794,7 @@ async def test_fetch_firebase_config_delegates_to_fcm_module():
     coord = SimpleNamespace(hass=hass)
 
     with patch(
-        "custom_components.bosch_shc_camera._fcm_fetch_firebase_config",
+        "custom_components.bosch_shc_camera.fcm.fetch_firebase_config",
         new_callable=AsyncMock,
         return_value={"project_id": "bosch-smart-cameras", "api_key": "key"},
     ) as mock_fcm:
@@ -36082,7 +36092,7 @@ async def test_fetch_firebase_config_delegation():
     coord = SimpleNamespace(hass=hass)
 
     with patch(
-        "custom_components.bosch_shc_camera._fcm_fetch_firebase_config",
+        "custom_components.bosch_shc_camera.fcm.fetch_firebase_config",
         new_callable=AsyncMock,
         return_value={"project_id": "bosch-smart-cameras", "api_key": "key"},
     ) as mock_fcm:

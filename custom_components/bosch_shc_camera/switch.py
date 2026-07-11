@@ -109,6 +109,31 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
         self._fw = info.get("firmwareVersion", "")
         self._mac = info.get("macAddress", "")
 
+    async def _async_apply_toggle(
+        self,
+        endpoint: str,
+        body: dict[str, Any],
+        cache: dict[str, Any],
+        set_at: dict[str, float],
+        cache_value: Any,
+    ) -> None:
+        """PUT `endpoint`; on success, cache `cache_value` + stamp `set_at`.
+
+        Shared by the simple boolean-toggle switches (privacy sound,
+        timestamp overlay, status LED, alarm arming, …) that were previously
+        each copy-pasting this same write→cache→set_at→write_ha_state
+        sequence with only the endpoint/body/cache dicts differing. `cache`
+        and `set_at` are the coordinator's existing per-feature dicts passed
+        by reference (other modules read them directly by name), so this
+        does not change any external cache identity — only removes the
+        duplication of the write sequence itself.
+        """
+        success = await self.coordinator.async_put_camera(self._cam_id, endpoint, body)
+        if success:
+            cache[self._cam_id] = cache_value
+            set_at[self._cam_id] = time.monotonic()
+        self.async_write_ha_state()
+
     def _warn_write_failed(self, feature: str, desired_label: str) -> None:
         """Log a total write failure the cloud setter otherwise swallows.
 
@@ -1383,22 +1408,22 @@ class BoschPrivacySoundSwitch(_BoschSwitchBase):
         )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "privacy_sound_override", {"result": True}
+        await self._async_apply_toggle(
+            "privacy_sound_override",
+            {"result": True},
+            self.coordinator._privacy_sound_cache,
+            self.coordinator._privacy_sound_set_at,
+            True,
         )
-        if success:
-            self.coordinator._privacy_sound_cache[self._cam_id] = True
-            self.coordinator._privacy_sound_set_at[self._cam_id] = time.monotonic()
-        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "privacy_sound_override", {"result": False}
+        await self._async_apply_toggle(
+            "privacy_sound_override",
+            {"result": False},
+            self.coordinator._privacy_sound_cache,
+            self.coordinator._privacy_sound_set_at,
+            False,
         )
-        if success:
-            self.coordinator._privacy_sound_cache[self._cam_id] = False
-            self.coordinator._privacy_sound_set_at[self._cam_id] = time.monotonic()
-        self.async_write_ha_state()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1432,22 +1457,22 @@ class BoschTimestampSwitch(_BoschSwitchBase):
         )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "timestamp", {"result": True}
+        await self._async_apply_toggle(
+            "timestamp",
+            {"result": True},
+            self.coordinator._timestamp_cache,
+            self.coordinator._timestamp_set_at,
+            True,
         )
-        if success:
-            self.coordinator._timestamp_cache[self._cam_id] = True
-            self.coordinator._timestamp_set_at[self._cam_id] = time.monotonic()
-        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "timestamp", {"result": False}
+        await self._async_apply_toggle(
+            "timestamp",
+            {"result": False},
+            self.coordinator._timestamp_cache,
+            self.coordinator._timestamp_set_at,
+            False,
         )
-        if success:
-            self.coordinator._timestamp_cache[self._cam_id] = False
-            self.coordinator._timestamp_set_at[self._cam_id] = time.monotonic()
-        self.async_write_ha_state()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1480,22 +1505,22 @@ class BoschStatusLedSwitch(_BoschSwitchBase):
         )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "ledlights", {"state": "ON"}
+        await self._async_apply_toggle(
+            "ledlights",
+            {"state": "ON"},
+            self.coordinator._ledlights_cache,
+            self.coordinator._ledlights_set_at,
+            True,
         )
-        if success:
-            self.coordinator._ledlights_cache[self._cam_id] = True
-            self.coordinator._ledlights_set_at[self._cam_id] = time.monotonic()
-        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "ledlights", {"state": "OFF"}
+        await self._async_apply_toggle(
+            "ledlights",
+            {"state": "OFF"},
+            self.coordinator._ledlights_cache,
+            self.coordinator._ledlights_set_at,
+            False,
         )
-        if success:
-            self.coordinator._ledlights_cache[self._cam_id] = False
-            self.coordinator._ledlights_set_at[self._cam_id] = time.monotonic()
-        self.async_write_ha_state()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2024,13 +2049,13 @@ class BoschAlarmSystemArmSwitch(_BoschSwitchBase):
         }
 
     async def _set_arm(self, arm: bool) -> None:
-        success = await self.coordinator.async_put_camera(
-            self._cam_id, "intrusionSystem/arming", {"arm": arm}
+        await self._async_apply_toggle(
+            "intrusionSystem/arming",
+            {"arm": arm},
+            self.coordinator._arming_cache,
+            self.coordinator._arming_set_at,
+            arm,
         )
-        if success:
-            self.coordinator._arming_cache[self._cam_id] = arm
-            self.coordinator._arming_set_at[self._cam_id] = time.monotonic()
-        self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._set_arm(True)

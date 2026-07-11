@@ -3365,13 +3365,19 @@ class TestCameraLightSwitchWarnsOnFailure:
         sw = BoschCameraLightSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_on()
-        assert any("failed on all paths" in r.message for r in caplog.records)
+        assert any(
+            "Camera light toggle for Terrasse (ON) failed on all paths" in r.message
+            for r in caplog.records
+        )
 
     async def test_turn_off_failure_warns(self, caplog):
         sw = BoschCameraLightSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_off()
-        assert any("failed on all paths" in r.message for r in caplog.records)
+        assert any(
+            "Camera light toggle for Terrasse (OFF) failed on all paths" in r.message
+            for r in caplog.records
+        )
 
     async def test_turn_on_success_is_silent(self, caplog):
         sw = BoschCameraLightSwitch(
@@ -3392,7 +3398,10 @@ class TestFrontLightSwitchWarnsOnFailure:
         sw = BoschFrontLightSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_on()
-        assert any("failed on all paths" in r.message for r in caplog.records)
+        assert any(
+            "Front light toggle for Terrasse (ON) failed on all paths" in r.message
+            for r in caplog.records
+        )
 
     async def test_turn_off_failure_warns(self, caplog):
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
@@ -3400,7 +3409,10 @@ class TestFrontLightSwitchWarnsOnFailure:
         sw = BoschFrontLightSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_off()
-        assert any("failed on all paths" in r.message for r in caplog.records)
+        assert any(
+            "Front light toggle for Terrasse (OFF) failed on all paths" in r.message
+            for r in caplog.records
+        )
 
 
 @pytest.mark.asyncio
@@ -3409,13 +3421,19 @@ class TestWallwasherSwitchWarnsOnFailure:
         sw = BoschWallwasherSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_on()
-        assert any("failed on all paths" in r.message for r in caplog.records)
+        assert any(
+            "Wallwasher toggle for Terrasse (ON) failed on all paths" in r.message
+            for r in caplog.records
+        )
 
     async def test_turn_off_failure_warns(self, caplog):
         sw = BoschWallwasherSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_off()
-        assert any("failed on all paths" in r.message for r in caplog.records)
+        assert any(
+            "Wallwasher toggle for Terrasse (OFF) failed on all paths" in r.message
+            for r in caplog.records
+        )
 
 
 @pytest.mark.asyncio
@@ -3424,13 +3442,19 @@ class TestNotificationsSwitchWarnsOnFailure:
         sw = BoschNotificationsSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_on()
-        assert any("failed on all paths" in r.message for r in caplog.records)
+        assert any(
+            "Notifications toggle for Terrasse (ON) failed on all paths" in r.message
+            for r in caplog.records
+        )
 
     async def test_turn_off_failure_warns(self, caplog):
         sw = BoschNotificationsSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_off()
-        assert any("failed on all paths" in r.message for r in caplog.records)
+        assert any(
+            "Notifications toggle for Terrasse (OFF) failed on all paths" in r.message
+            for r in caplog.records
+        )
 
 
 # ============================================================

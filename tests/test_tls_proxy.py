@@ -1616,6 +1616,99 @@ class TestClientKeepidleSetsockoptRaises:
         # No unhandled exception → except (AttributeError, OSError): pass hit
         assert cam_id not in port_cache
 
+    def test_proxy_survives_client_setsockopt_oserror_and_accepts_next_connection(
+        self,
+    ):
+        """Behavioral regression test for the v14.4.0 bug: client (FFmpeg)
+        SO_KEEPALIVE tuning sat OUTSIDE its try/except guard, so a synthetic
+        OSError there propagated out of the proxy's accept loop and silently
+        killed the daemon thread — the port stayed registered but no further
+        connections were ever relayed to the camera, and `on_proxy_died` was
+        never called to tell the coordinator to rebuild the session
+        (bug-hunt 2026-07-01; fix moved the setsockopt calls inside
+        `except (AttributeError, OSError): pass`).
+
+        A pure string-match on "SO_KEEPALIVE" would NOT catch someone moving
+        the calls back outside the try — the string stays present either
+        way. This test proves the try/except boundary actually works by
+        driving TWO connections through the same proxy port: if the first
+        connection's OSError kills the accept-loop thread, the SECOND
+        connection's upstream leg is never relayed (nothing left running to
+        call srv.accept()) and upstream.accept() below times out.
+        """
+        cam_id = "CAM-CLIENT-KEEPIDLE-SURVIVES"
+        threads_before = frozenset(threading.enumerate())
+        port_cache: dict[str, int] = {}
+        ctx = _plain_ssl_ctx()
+        died: list[bool] = []
+
+        upstream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        upstream.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        upstream.bind(("127.0.0.1", 0))
+        upstream.listen(2)
+        upstream.settimeout(3)
+        up_port = upstream.getsockname()[1]
+
+        keepidle_sentinel = getattr(socket, "TCP_KEEPIDLE", 256)
+        original_setsockopt = socket.socket.setsockopt
+
+        def _patched_setsockopt(self, level, optname, value):
+            if level == socket.IPPROTO_TCP and optname in (
+                getattr(socket, "TCP_KEEPINTVL", -1),
+                getattr(socket, "TCP_KEEPCNT", -1),
+            ):
+                raise OSError(errno.ENOPROTOOPT, "no client keepalive sub-option")
+            return original_setsockopt(self, level, optname, value)
+
+        try:
+            with patch.object(socket, "TCP_KEEPIDLE", keepidle_sentinel, create=True):
+                with patch.object(socket.socket, "setsockopt", _patched_setsockopt):
+                    port = start_tls_proxy(
+                        ctx,
+                        cam_id,
+                        "127.0.0.1",
+                        up_port,
+                        port_cache,
+                        on_proxy_died=lambda: died.append(True),
+                    )
+
+                    # First connection: triggers the client-side keepalive OSError.
+                    client1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    client1.settimeout(2)
+                    client1.connect(("127.0.0.1", port))
+                    upstream_conn1, _ = upstream.accept()
+                    time.sleep(0.15)
+                    upstream_conn1.close()
+                    client1.close()
+
+                    # Second connection through the SAME proxy port: only
+                    # arrives if the accept-loop thread survived the first
+                    # client's OSError.
+                    client2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    client2.settimeout(2)
+                    client2.connect(("127.0.0.1", port))
+                    try:
+                        upstream_conn2, _ = upstream.accept()
+                    except TimeoutError:
+                        pytest.fail(
+                            "proxy accept-loop thread died after the first "
+                            "client-socket OSError — a second connection was "
+                            "never relayed to the upstream camera. This is "
+                            "the v14.4.0 regression: SO_KEEPALIVE must stay "
+                            "INSIDE its try/except guard."
+                        )
+                    upstream_conn2.close()
+                    client2.close()
+        finally:
+            upstream.close()
+            stop_tls_proxy(cam_id, port_cache)
+            _join_new_threads(threads_before)
+
+        assert not died, (
+            "on_proxy_died must not fire for a benign keepalive OSError — "
+            "only real connect failures should trip the circuit breaker"
+        )
+
 
 # ── _pipe relay behavior (real echo servers) ──────────────────────────────
 
@@ -2774,18 +2867,18 @@ class TestPreWarmMaxSessionDuration:
         ), "maxSessionDuration=60 must not appear when 3600 is requested"
 
     def test_caller_passes_max_session_duration(self):
-        """__init__.py call site must pass max_session_duration=cfg.max_session_duration."""
+        """live_connection.py call site must pass max_session_duration=cfg.max_session_duration."""
         init_src = (
             Path(__file__).parent.parent
             / "custom_components"
             / "bosch_shc_camera"
-            / "__init__.py"
+            / "live_connection.py"
         ).read_text()
 
         # Find the pre_warm_rtsp(...) call block and check for the new kwarg.
         # The call is multi-line so we need to match balanced parens manually.
         start = init_src.find("await pre_warm_rtsp(")
-        assert start != -1, "Could not find pre_warm_rtsp call in __init__.py"
+        assert start != -1, "Could not find pre_warm_rtsp call in live_connection.py"
         # Walk forward to find the matching closing paren
         depth = 0
         end = start

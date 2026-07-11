@@ -683,65 +683,90 @@ class TestExchangeCode:
 
 
 class TestAsyncOauthCreateEntryStructure:
-    """Structural: verify the source-routing logic exists in config_flow.py."""
+    """Behavioral: exercises async_oauth_create_entry's actual source-routing,
+    not just a string match on the source code. A pure `"SOURCE_REAUTH" in
+    src` check (the previous version of this test) still passes even if the
+    runtime `if self.source == config_entries.SOURCE_REAUTH:` condition is
+    inverted, removed, or swapped with the reconfigure branch — the token
+    stays present elsewhere in the file (imports, comments, the sibling
+    manual-paste routing). These tests instead construct a real flow
+    instance per source and assert the *observable* outcome: which entry
+    object gets updated, whether a brand-new entry gets created, and which
+    abort reason is returned.
+    """
 
-    def test_reauth_source_routing_exists(self):
-        """The flow must branch on SOURCE_REAUTH to update (not recreate) the entry."""
-        from pathlib import Path
-
-        src = (
-            Path(__file__).parent.parent
-            / "custom_components"
-            / "bosch_shc_camera"
-            / "config_flow.py"
-        ).read_text()
-        # async_oauth_create_entry must check SOURCE_REAUTH
-        func_start = src.find("async def async_oauth_create_entry")
-        assert func_start != -1
-        next_func = src.find("\n    async def ", func_start + 1)
-        func_body = src[func_start:next_func] if next_func != -1 else src[func_start:]
-        assert "SOURCE_REAUTH" in func_body, (
-            "async_oauth_create_entry must route on SOURCE_REAUTH to update "
-            "(not recreate) the existing entry"
+    def _make_flow(self, source: str):
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschCameraConfigFlow,
         )
 
-    def test_reconfigure_source_routing_exists(self):
-        from pathlib import Path
-
-        src = (
-            Path(__file__).parent.parent
-            / "custom_components"
-            / "bosch_shc_camera"
-            / "config_flow.py"
-        ).read_text()
-        func_start = src.find("async def async_oauth_create_entry")
-        next_func = src.find("\n    async def ", func_start + 1)
-        func_body = (
-            src[func_start:next_func]
-            if next_func != -1
-            else src[func_start : func_start + 1200]
+        flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
+        flow.hass = MagicMock()
+        flow.flow_id = "flow-id-routing"
+        flow.context = {"source": source}
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+        flow.async_abort = MagicMock(
+            side_effect=lambda reason: {"type": "abort", "reason": reason}
         )
-        assert "RECONFIGURE" in func_body, (
-            "async_oauth_create_entry must handle SOURCE_RECONFIGURE path "
-            "(Quality-Scale Gold reconfigure flow)"
+        # Distinct sentinels so a swapped reauth/reconfigure branch (or one
+        # routing through the other's helper) is detectable by identity.
+        flow._reauth_entry_sentinel = MagicMock(name="reauth_entry")
+        flow._reconfigure_entry_sentinel = MagicMock(name="reconfigure_entry")
+        flow._get_reauth_entry = MagicMock(return_value=flow._reauth_entry_sentinel)
+        flow._get_reconfigure_entry = MagicMock(
+            return_value=flow._reconfigure_entry_sentinel
         )
+        flow.hass.config_entries.async_update_entry = MagicMock()
+        flow.hass.config_entries.async_schedule_reload = MagicMock()
+        return flow
 
-    def test_new_data_contains_bearer_and_refresh(self):
-        """The output keys must match what BoschCameraCoordinator reads."""
-        from pathlib import Path
+    @pytest.mark.asyncio
+    async def test_fresh_setup_creates_new_entry_not_update(self) -> None:
+        """No reauth/reconfigure context → a brand-new entry, never an update."""
+        flow = self._make_flow(source="user")
+        await flow.async_oauth_create_entry(
+            {"token": {"access_token": "at1", "refresh_token": "rt1"}}
+        )
+        flow.async_create_entry.assert_called_once()
+        _, kwargs = flow.async_create_entry.call_args
+        assert kwargs["data"]["bearer_token"] == "at1"
+        assert kwargs["data"]["refresh_token"] == "rt1"
+        flow.hass.config_entries.async_update_entry.assert_not_called()
+        flow.hass.config_entries.async_schedule_reload.assert_not_called()
 
-        src = (
-            Path(__file__).parent.parent
-            / "custom_components"
-            / "bosch_shc_camera"
-            / "config_flow.py"
-        ).read_text()
-        func_start = src.find("async def async_oauth_create_entry")
-        func_body = src[func_start : func_start + 800]
-        # async_oauth_create_entry must write bearer_token key —
-        # coordinator reads entry.data['bearer_token']
-        assert_in_source(func_body, '"bearer_token"', "'bearer_token'", any_of=True)
-        assert_in_source(func_body, '"refresh_token"', "'refresh_token'", any_of=True)
+    @pytest.mark.asyncio
+    async def test_reauth_updates_reauth_entry_only(self) -> None:
+        """SOURCE_REAUTH must update the reauth entry, never create a new
+        entry and never touch the reconfigure entry."""
+        flow = self._make_flow(source=config_entries.SOURCE_REAUTH)
+        result = await flow.async_oauth_create_entry(
+            {"token": {"access_token": "at2", "refresh_token": "rt2"}}
+        )
+        flow.hass.config_entries.async_update_entry.assert_called_once()
+        call_args, call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        updated_entry = call_args[0] if call_args else call_kwargs["entry"]
+        assert updated_entry is flow._reauth_entry_sentinel
+        flow._get_reconfigure_entry.assert_not_called()
+        flow.async_create_entry.assert_not_called()
+        flow.hass.config_entries.async_schedule_reload.assert_called_once()
+        assert result == {"type": "abort", "reason": "reauth_successful"}
+
+    @pytest.mark.asyncio
+    async def test_reconfigure_updates_reconfigure_entry_only(self) -> None:
+        """SOURCE_RECONFIGURE must update the reconfigure entry, never
+        create a new entry and never touch the reauth entry."""
+        flow = self._make_flow(source=config_entries.SOURCE_RECONFIGURE)
+        result = await flow.async_oauth_create_entry(
+            {"token": {"access_token": "at3", "refresh_token": "rt3"}}
+        )
+        flow.hass.config_entries.async_update_entry.assert_called_once()
+        call_args, call_kwargs = flow.hass.config_entries.async_update_entry.call_args
+        updated_entry = call_args[0] if call_args else call_kwargs["entry"]
+        assert updated_entry is flow._reconfigure_entry_sentinel
+        flow._get_reauth_entry.assert_not_called()
+        flow.async_create_entry.assert_not_called()
+        flow.hass.config_entries.async_schedule_reload.assert_called_once()
+        assert result == {"type": "abort", "reason": "reconfigure_successful"}
 
 
 class TestOptionsFlowStructure:

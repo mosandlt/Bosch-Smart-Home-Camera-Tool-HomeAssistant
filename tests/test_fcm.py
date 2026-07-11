@@ -211,7 +211,9 @@ async def test_stop_supervisor_cancels_running_task_and_calls_stop_push() -> Non
     assert running.done()
 
 
-async def test_supervisor_hard_heal_reason_soft_streak() -> None:
+async def test_supervisor_hard_heal_reason_soft_streak(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """soft_streak >= FCM_SUPERVISOR_SOFT_HEAL_MAX → 'soft-restarts' hard-heal reason."""
     from custom_components.bosch_shc_camera import fcm
     from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
@@ -231,6 +233,7 @@ async def test_supervisor_hard_heal_reason_soft_streak() -> None:
             "_async_start_fcm_push_locked",
             new=AsyncMock(side_effect=asyncio.CancelledError),
         ),
+        caplog.at_level("INFO", logger=MODULE),
     ):
         task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
         try:
@@ -239,9 +242,19 @@ async def test_supervisor_hard_heal_reason_soft_streak() -> None:
             pass
 
     assert task.done()
+    hard_heal_logs = [
+        r.getMessage() for r in caplog.records if "hard-heal" in r.getMessage()
+    ]
+    assert any("soft-restarts without a push" in msg for msg in hard_heal_logs), (
+        hard_heal_logs
+    )
+    assert not any("PHONE_REGISTRATION_ERROR" in msg for msg in hard_heal_logs)
+    assert not any("no persisted credentials" in msg for msg in hard_heal_logs)
 
 
-async def test_supervisor_hard_heal_reason_creds_staleness() -> None:
+async def test_supervisor_hard_heal_reason_creds_staleness(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """A recent staleness timestamp → 'PHONE_REGISTRATION_ERROR' hard-heal reason."""
     from custom_components.bosch_shc_camera import fcm
     from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
@@ -263,6 +276,7 @@ async def test_supervisor_hard_heal_reason_creds_staleness() -> None:
                 "_async_start_fcm_push_locked",
                 new=AsyncMock(side_effect=asyncio.CancelledError),
             ),
+            caplog.at_level("INFO", logger=MODULE),
         ):
             task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
             try:
@@ -270,11 +284,21 @@ async def test_supervisor_hard_heal_reason_creds_staleness() -> None:
             except asyncio.CancelledError:
                 pass
         assert task.done()
+        hard_heal_logs = [
+            r.getMessage() for r in caplog.records if "hard-heal" in r.getMessage()
+        ]
+        assert any("PHONE_REGISTRATION_ERROR" in msg for msg in hard_heal_logs), (
+            hard_heal_logs
+        )
+        assert not any("soft-restarts without a push" in msg for msg in hard_heal_logs)
+        assert not any("no persisted credentials" in msg for msg in hard_heal_logs)
     finally:
         _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
 
 
-async def test_supervisor_hard_heal_reason_no_credentials() -> None:
+async def test_supervisor_hard_heal_reason_no_credentials(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """No fcm_credentials in entry.data → 'no persisted credentials' hard-heal reason."""
     from custom_components.bosch_shc_camera import fcm
     from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
@@ -291,6 +315,7 @@ async def test_supervisor_hard_heal_reason_no_credentials() -> None:
             "_async_start_fcm_push_locked",
             new=AsyncMock(side_effect=asyncio.CancelledError),
         ),
+        caplog.at_level("INFO", logger=MODULE),
     ):
         task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
         try:
@@ -299,6 +324,14 @@ async def test_supervisor_hard_heal_reason_no_credentials() -> None:
             pass
 
     assert task.done()
+    hard_heal_logs = [
+        r.getMessage() for r in caplog.records if "hard-heal" in r.getMessage()
+    ]
+    assert any("no persisted credentials" in msg for msg in hard_heal_logs), (
+        hard_heal_logs
+    )
+    assert not any("soft-restarts without a push" in msg for msg in hard_heal_logs)
+    assert not any("PHONE_REGISTRATION_ERROR" in msg for msg in hard_heal_logs)
 
 
 async def test_supervisor_creates_lock_when_absent_and_breaks_on_cancelled() -> None:

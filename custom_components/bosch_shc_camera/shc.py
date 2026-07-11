@@ -1,8 +1,13 @@
 """SHC local API and Cloud API setter functions for Bosch Smart Home cameras.
 
 Extracted from the coordinator class to keep __init__.py focused on
-polling / data merging.  Every function receives the coordinator instance
-as its first argument instead of using `self`.
+polling / data merging. Every function below receives the coordinator
+instance as its first argument instead of using `self`. `SHCCoordinatorMixin`
+at the end of this file is the exception — it's mixed into
+BoschCameraCoordinator (see __init__.py's class declaration) and its methods
+DO use `self`, but each one is just a one-line delegator back to the
+free function of the same purpose above (same pattern as FCMCoordinatorMixin
+in fcm.py / FrigateCoordinatorMixin in frigate_endpoint.py).
 
 Public API (cloud setters — used by switch / number entities):
   async_cloud_set_privacy_mode(coordinator, cam_id, enabled)
@@ -1169,3 +1174,70 @@ async def async_cloud_set_pan(
     except (TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.warning("cloud_set_pan error for %s: %s", cam_id, err)
     return False
+
+
+class SHCCoordinatorMixin:
+    """Thin coordinator-facing methods delegating to this module's functions.
+
+    Mixed into BoschCameraCoordinator (see __init__.py's class declaration)
+    so `coordinator.shc_configured`/`coordinator.async_cloud_set_pan(...)`
+    etc. keep working as properties/methods — every one of them just
+    forwards `self` to the corresponding free function above, which is
+    where the actual SHC/cloud-setter logic lives. `self: Any` (not a
+    concrete `self: BoschCameraCoordinator` annotation) for the same reason
+    documented on FrigateCoordinatorMixin (frigate_endpoint.py): mypy
+    --strict rejects a concrete self-type here because proving it requires
+    knowing BoschCameraCoordinator's bases at this class's own definition
+    site, which is circular.
+    """
+
+    @property
+    def shc_configured(self: Any) -> bool:
+        """True if SHC local API is fully configured (IP + certs)."""
+        return shc_configured(self)
+
+    @property
+    def shc_ready(self: Any) -> bool:
+        """True if SHC is configured AND currently considered available."""
+        return shc_ready(self)
+
+    def _shc_mark_success(self: Any) -> None:
+        _shc_mark_success(self)
+
+    def _shc_mark_failure(self: Any) -> None:
+        _shc_mark_failure(self)
+
+    async def _async_shc_request(
+        self: Any, method: str, path: str, body: dict[str, Any] | None = None
+    ) -> dict[str, Any] | list[Any] | None:
+        return await async_shc_request(self, method, path, body)
+
+    async def _async_update_shc_states(self: Any, data: dict[str, Any]) -> None:
+        return await async_update_shc_states(self, data)
+
+    async def async_shc_set_camera_light(self: Any, cam_id: str, on: bool) -> bool:
+        return await async_shc_set_camera_light(self, cam_id, on)
+
+    async def async_cloud_set_light_component(
+        self: Any, cam_id: str, component: str, value: Any
+    ) -> bool:
+        return await async_cloud_set_light_component(self, cam_id, component, value)
+
+    async def async_shc_set_privacy_mode(self: Any, cam_id: str, enabled: bool) -> bool:
+        return await async_shc_set_privacy_mode(self, cam_id, enabled)
+
+    async def async_cloud_set_privacy_mode(
+        self: Any, cam_id: str, enabled: bool
+    ) -> bool:
+        return await async_cloud_set_privacy_mode(self, cam_id, enabled)
+
+    async def async_cloud_set_camera_light(self: Any, cam_id: str, on: bool) -> bool:
+        return await async_cloud_set_camera_light(self, cam_id, on)
+
+    async def async_cloud_set_notifications(
+        self: Any, cam_id: str, enabled: bool
+    ) -> bool:
+        return await async_cloud_set_notifications(self, cam_id, enabled)
+
+    async def async_cloud_set_pan(self: Any, cam_id: str, position: int) -> bool:
+        return await async_cloud_set_pan(self, cam_id, position)

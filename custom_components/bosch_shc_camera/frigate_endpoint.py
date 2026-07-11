@@ -41,6 +41,7 @@ import base64
 import hmac
 import ipaddress
 import logging
+import socket
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
@@ -771,3 +772,271 @@ class FrontDoorRunner:
     def stop_all(self) -> None:
         for cam_id in list(self._servers):
             self.stop_server(cam_id)
+
+
+class FrigateCoordinatorMixin:
+    """Coordinator-facing Frigate/external-recorder front-door management.
+
+    Mixed into BoschCameraCoordinator (see __init__.py's class declaration).
+    Every method here is annotated `self: Any` — mirroring the `coordinator:
+    Any` convention this codebase already uses for the free-function
+    coordinator helpers (fcm.py, live_connection.py) — since this group
+    reads/writes many coordinator attributes directly (`_frigate_runner`,
+    `_live_connections`, `_tls_proxy_ports`, `data`, `options`, `hass`, …)
+    and calls several coordinator methods (`try_live_connection`,
+    `_has_active_consumer`, `_tear_down_live_stream`, `_get_session`,
+    `get_model_config`). A concrete `self: BoschCameraCoordinator`
+    annotation was tried first but mypy --strict rejects it here: proving
+    "self is a supertype of FrigateCoordinatorMixin" requires the checker to
+    already know BoschCameraCoordinator's bases at THIS module's definition
+    site, which is circular (BoschCameraCoordinator's own type depends on
+    this mixin). `Any` sidesteps that without losing meaningful type safety
+    on the small FCM mixin (which types `hass` directly since it's the only
+    attribute that group touches).
+    """
+
+    # Bare annotation only (no assignment) — declares the type without
+    # creating a class-level default, so mypy doesn't infer a conflicting
+    # narrower type (e.g. non-Optional FrontDoorRunner) from the `self:
+    # Any`-typed assignment in async_sync_frigate_endpoint below. The real
+    # instance attribute is set in BoschCameraCoordinator.__init__.
+    _frigate_runner: FrontDoorRunner | None
+
+    def _frigate_config(self: Any) -> FrontDoorConfig:
+        """Build the front-door config from the integration options."""
+        opts = self.options
+        raw_allow = str(opts.get("frigate_ip_allowlist", "") or "")
+        allowlist = frozenset(p.strip() for p in raw_allow.split(",") if p.strip())
+        # NOT `opts.get(..., 60) or 60` — the options-flow schema allows 0
+        # (vol.Range(min=0, max=3600)) as an explicit "close immediately"
+        # value (frigate_endpoint.py: "if idle_timeout > 0: ... # 0 = close
+        # immediately"). `or 60` treats 0 as falsy and silently substitutes
+        # the default, making that documented value unreachable — the same
+        # class of bug as the previously-dead-until-v14.4.0
+        # frigate_idle_timeout option (bug-hunt 2026-07-03).
+        idle_timeout_opt = opts.get("frigate_idle_timeout", 60)
+        idle_timeout = 60 if idle_timeout_opt is None else idle_timeout_opt
+        return FrontDoorConfig(
+            bind_host=str(opts.get("frigate_bind_host", "127.0.0.1")),
+            ip_allowlist=allowlist,
+            auth_mode=str(opts.get("frigate_auth_mode", "none")),
+            token=str(opts.get("frigate_token", "") or ""),
+            basic_user=str(opts.get("frigate_basic_user", "frigate") or "frigate"),
+            idle_timeout=float(idle_timeout),
+            max_connections=int(opts.get("frigate_max_connections", 8) or 8),
+        )
+
+    def _frigate_url_host(self: Any, bind_host: str) -> str:
+        """Host to embed in the published URL.
+
+        - A specific interface IP (e.g. 192.168.1.50) or 127.0.0.1 is routable
+          as-is and used verbatim.
+        - An all-interfaces bind (0.0.0.0 / :: / empty) isn't routable, so we
+          detect the HA host's primary outbound IPv4 (no packet is sent) instead.
+        """
+        if bind_host not in ("0.0.0.0", "::", ""):  # noqa: S104 # all-interfaces sentinels
+            return bind_host
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(("8.8.8.8", 80))
+            return str(sock.getsockname()[0])
+        except OSError:
+            return "127.0.0.1"
+        finally:
+            sock.close()
+
+    async def _frigate_resolve_inner(self: Any, cam_id: str) -> InnerTarget | None:
+        """Lazily ensure a LOCAL live session + inner TLS proxy for a recorder.
+
+        Returns the inner proxy port + the session's rotating Digest creds, or
+        None when no LOCAL session is available (e.g. REMOTE-only fallback,
+        privacy mode, camera offline) so the front-door drops the client.
+        Credential-free injection only works on the LOCAL path.
+
+        Only opens a new session when there is no active LOCAL session — calling
+        try_live_connection() unconditionally would issue a PUT /connection on
+        Gen2 FW 9.40.25+, rotating Digest credentials and destroying the running
+        TLS proxy port every time a recorder reconnects (HA#37 stream-drop loop).
+        """
+        live = self._live_connections.get(cam_id, {})
+        if live.get("_connection_type") != "LOCAL":
+            await self.try_live_connection(cam_id)
+            live = self._live_connections.get(cam_id, {})
+        if live.get("_connection_type") != "LOCAL":
+            return None
+        port = self._tls_proxy_ports.get(cam_id)
+        user = live.get("_local_user")
+        pwd = live.get("_local_password")
+        if not (port and user and pwd):
+            return None
+        return InnerTarget(port=port, digest_user=str(user), digest_password=str(pwd))
+
+    def _frigate_wanted(self: Any, cam_id: str) -> bool:
+        """True if the feature is enabled AND a High/Low switch is on for cam."""
+        if not self.options.get("frigate_endpoints_enabled", False):
+            return False
+        return bool(
+            self._frigate_high_enabled.get(cam_id)
+            or self._frigate_low_enabled.get(cam_id)
+        )
+
+    def _frigate_on_idle(self: Any, cam_id: str) -> None:
+        """Front-door for cam_id has had zero recorder clients for the configured
+        frigate_idle_timeout. Tear down the on-demand LOCAL session it opened —
+        but ONLY if no OTHER consumer (a live card view, Cast, Mini-NVR) is still
+        using it; otherwise do nothing and let the generic idle reaper handle
+        teardown when everyone leaves. Runs as a background task because on_idle
+        is a synchronous loop callback. (bug-hunt 2026-07-01 — wires the
+        previously-dead frigate_idle_timeout option.)
+        """
+
+        async def _maybe_teardown() -> None:
+            if await self._has_active_consumer(cam_id):
+                return  # a live view / recording still needs the session
+            live = self._live_connections.get(cam_id)
+            if not live or live.get("_connection_type") != "LOCAL":
+                return  # nothing LOCAL to tear down
+            # Capture the generation at decision time: `_tear_down_live_stream`
+            # can now block on the stream lock for the duration of a
+            # concurrent rebuild, so by the time it runs, this stale "LOCAL,
+            # no consumer" read may no longer describe the current session.
+            gen = self._get_session(cam_id).generation
+            _LOGGER.info(
+                "frigate front-door %s idle for frigate_idle_timeout — tearing "
+                "down on-demand LOCAL session",
+                cam_id[:8],
+            )
+            await self._tear_down_live_stream(cam_id, expected_generation=gen)
+
+        task = self.hass.async_create_task(
+            _maybe_teardown(), f"bosch_shc_camera_frigate_idle_{cam_id[:8]}"
+        )
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    async def async_sync_frigate_endpoint(self: Any, cam_id: str) -> None:
+        """Start or stop the front-door for a camera per current switch state."""
+        wanted = self._frigate_wanted(cam_id)
+        if not wanted:
+            if self._frigate_runner is not None and self._frigate_runner.has_server(
+                cam_id
+            ):
+                self._frigate_runner.stop_server(cam_id)
+            return
+        if self._frigate_runner is None:
+            self._frigate_runner = FrontDoorRunner()
+        config = self._frigate_config()
+        base_port = int(self.options.get("frigate_bind_port", 0))
+        if base_port > 0:
+            # Fixed-port mode: compute a stable per-camera port from the sorted
+            # list of ALL known cam_ids (sorted → adding a new camera doesn't
+            # shift existing cameras' ports). First cam → base, second → base+1, …
+            sorted_cams = sorted(self.data.keys()) if self.data else [cam_id]
+            idx = sorted_cams.index(cam_id) if cam_id in sorted_cams else 0
+            preferred_port = base_port + idx
+            try:
+                port = await self._frigate_runner.start_server(
+                    cam_id,
+                    config,
+                    self._frigate_resolve_inner,
+                    preferred_port=preferred_port,
+                    on_idle=lambda: self._frigate_on_idle(cam_id),
+                )
+                self._frigate_sticky_port[cam_id] = port
+            except OSError as err:
+                _LOGGER.error(
+                    "frigate front-door %s: fixed port %d unavailable (%s) — "
+                    "set frigate_bind_port to 0 or pick a free port",
+                    cam_id[:8],
+                    preferred_port,
+                    err,
+                )
+                return
+        else:
+            # Ephemeral mode: use in-session sticky port; fall back on collision.
+            try:
+                port = await self._frigate_runner.start_server(
+                    cam_id,
+                    config,
+                    self._frigate_resolve_inner,
+                    preferred_port=self._frigate_sticky_port.get(cam_id, 0),
+                    on_idle=lambda: self._frigate_on_idle(cam_id),
+                )
+                self._frigate_sticky_port[cam_id] = port
+            except OSError as err:
+                # Sticky port taken (e.g. after a reload) — retry on an ephemeral port.
+                _LOGGER.warning(
+                    "frigate front-door %s: bind on sticky port failed (%s) — using ephemeral",
+                    cam_id[:8],
+                    err,
+                )
+                self._frigate_sticky_port.pop(cam_id, None)
+                try:
+                    port = await self._frigate_runner.start_server(
+                        cam_id,
+                        config,
+                        self._frigate_resolve_inner,
+                        on_idle=lambda: self._frigate_on_idle(cam_id),
+                    )
+                except OSError as err2:
+                    # The first OSError assumed "port taken", but an
+                    # ephemeral (port=0) bind still uses frigate_bind_host —
+                    # if THAT is the problem (unbindable/nonexistent
+                    # interface, bad IPv6 literal, etc.) the retry fails
+                    # with the same error, previously uncaught. Since
+                    # async_added_to_hass calls this on every HA restart for
+                    # a RestoreEntity-restored "on" switch, a bad
+                    # frigate_bind_host used to break entity setup with a
+                    # traceback on every restart instead of a clear log
+                    # (bug-hunt 2026-07-03).
+                    _LOGGER.error(
+                        "frigate front-door %s: could not bind even an "
+                        "ephemeral port (%s) — check frigate_bind_host",
+                        cam_id[:8],
+                        err2,
+                    )
+                    return
+                self._frigate_sticky_port[cam_id] = port
+        # Sensors read the new port/state.
+        self.async_update_listeners()
+
+    def frigate_endpoint_url(self: Any, cam_id: str, quality: str) -> str | None:
+        """Published credential-free RTSP URL for a camera+quality, or None.
+
+        None when the feature is off, the matching High/Low switch is off, or
+        the front-door is not currently bound.
+        """
+        if not self.options.get("frigate_endpoints_enabled", False):
+            return None
+        enabled = (
+            self._frigate_high_enabled
+            if quality == QUALITY_HIGH
+            else self._frigate_low_enabled
+        )
+        if not enabled.get(cam_id):
+            return None
+        if self._frigate_runner is None or not self._frigate_runner.has_server(cam_id):
+            return None
+        port = self._frigate_runner.port(cam_id)
+        if not port:
+            return None
+        config = self._frigate_config()
+        # Use the camera model's session duration (3600s), not the 60s default —
+        # a too-low value can arm a server-side timer that kills the stream.
+        msd = int(self.get_model_config(cam_id).max_session_duration)
+        return build_public_url(
+            self._frigate_url_host(config.bind_host),
+            port,
+            quality,
+            config,
+            max_session_duration=msd,
+        )
+
+    def async_stop_frigate_endpoints(self: Any) -> None:
+        """Tear down all front-doors (integration unload / shutdown)."""
+        if self._frigate_runner is not None:
+            try:
+                self._frigate_runner.stop_all()
+            except Exception as err:  # broad: teardown must never block unload
+                _LOGGER.debug("frigate front-doors stop_all raised: %s", err)
+            self._frigate_runner = None

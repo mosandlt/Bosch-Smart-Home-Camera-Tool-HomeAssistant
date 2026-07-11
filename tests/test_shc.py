@@ -1804,6 +1804,19 @@ class TestCloudSetCameraLight:
         ):
             ok = await shc.async_cloud_set_camera_light(coord, CAM_ID, False)
         assert ok is False
+        # Every write path exhausted (both Gen2 endpoints 500, no SHC) must
+        # surface a persistent_notification — this is exactly the user-facing
+        # gap v14.4.9 fixed (silent revert with zero feedback). Asserting
+        # only `ok is False` doesn't catch a regression that skips the notify
+        # call while still correctly returning False.
+        coord.hass.services.async_call.assert_called_once()
+        call_args = coord.hass.services.async_call.call_args
+        assert call_args.args[0] == "persistent_notification"
+        assert call_args.args[1] == "create"
+        notif_data = call_args.args[2]
+        assert CAM_ID[:8] in notif_data["notification_id"]
+        assert "light" in notif_data["notification_id"]
+        assert "OFF" in notif_data["message"]
 
 
 class TestCloudSetCameraLightBranches:

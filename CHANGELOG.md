@@ -5,6 +5,18 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.13] - 2026-07-11
+
+Patch — internal cleanup: coordinator split into mixins (continuing v14.5.7-v14.5.10's rewrite), no user-facing change
+
+### Changed
+
+- **Internal only.** `__init__.py`'s `BoschCameraCoordinator` class was 9385 lines before this release's work started — it's now 6636 (-29%). Four cohesive method groups were split off into mixin classes, each co-located with the module it already delegated to where one existed: FCM push glue → `fcm.py`, Frigate/external-recorder front-door management → `frigate_endpoint.py`, SHC local API/cloud-setter glue → `shc.py`, and — new this release — the full bearer-token/OAuth lifecycle (read/refresh/proactive-renewal, Keycloak retry + outage backoff, reauth-flow triggering) → a new `token_auth.py`. Two more chunks were moved out as standalone functions rather than mixins: the ~20 HA service-call handlers (trigger_snapshot, rules CRUD, motion zones, privacy masks, camera sharing, …) → `services.py`, and the single largest, most complex method in the coordinator — opening a live RTSP/WebRTC session — → `live_connection.py`. A small duplicated write-pattern in `switch.py` (4 near-identical boolean toggles) was also consolidated into one shared helper.
+- Every extraction was independently verified: full pytest suite green after each step, 100% coverage maintained throughout, and — for the four mixins plus the two larger extractions — 3 independent bug-hunt passes per change (self→coordinator substitution correctness, dangling-reference checks across the whole repo, cross-mixin collision checks, and for the token/auth move specifically, line-by-line confirmation that none of the retry counts/backoff formulas/failure thresholds drifted). Also fixed 8 pre-existing tests that were passing but wouldn't actually have caught a regression in the branch they claimed to guard (found during the same review pass).
+- Live-verified end to end on test HA after deploying all of it together: real WebRTC session open, live snapshot fetch, a full privacy-mode on/off round trip, and the `trigger_snapshot` service call — all against the real Terrasse camera, zero exceptions.
+
+5883 tests (1 pre-existing skip) / mypy --strict / ruff / codespell green, 100% coverage.
+
 ## [v14.5.12] - 2026-07-11
 
 Patch — first-time setup: the native camera view no longer stays black until the "Live Stream" switch is toggled by hand; README gets a Quick Start guide

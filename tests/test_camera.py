@@ -5955,10 +5955,20 @@ async def test_webrtc_offer_existing_connection_skips_auto_open():
 
 
 @pytest.mark.asyncio
-async def test_webrtc_offer_prewarm_timeout_still_delegates():
+async def test_webrtc_offer_prewarm_timeout_still_delegates(caplog: Any) -> None:
     """If pre-warm never clears within the deadline, _wait_for_prewarm logs a
     warning and returns False — but the offer still delegates to super() so
-    HA surfaces its own "no stream" handling rather than silently hanging."""
+    HA surfaces its own "no stream" handling rather than silently hanging.
+
+    `async_handle_async_webrtc_offer` discards `_wait_for_prewarm`'s bool
+    return and delegates to super() unconditionally either way — so
+    `mock_super.assert_awaited_once_with(...)` alone is identical whether
+    pre-warm succeeded, timed out, or the wait was skipped entirely. Pin the
+    timeout branch specifically: the deadline-exceeded WARNING fired and
+    `_stream_warming` was never cleared (a successful/skipped wait clears or
+    never sets it)."""
+    import logging
+
     coord = _make_coord_prewarm(
         _stream_warming={CAM_ID_PREWARM},
         get_model_config=lambda cid: SimpleNamespace(min_total_wait=0),
@@ -5967,10 +5977,13 @@ async def test_webrtc_offer_prewarm_timeout_still_delegates():
 
     send_message = MagicMock()
     with (
+        caplog.at_level(
+            logging.WARNING, logger="custom_components.bosch_shc_camera.camera"
+        ),
         patch(
             "custom_components.bosch_shc_camera.camera.asyncio.sleep",
             new=AsyncMock(return_value=None),
-        ),
+        ) as mock_sleep,
         patch(
             "homeassistant.components.camera.Camera.async_handle_async_webrtc_offer",
             new=AsyncMock(return_value=None),
@@ -5981,6 +5994,9 @@ async def test_webrtc_offer_prewarm_timeout_still_delegates():
         )
 
     mock_super.assert_awaited_once_with("sdp-offer", "session-1", send_message)
+    mock_sleep.assert_awaited()
+    assert "did not complete within" in caplog.text
+    assert CAM_ID_PREWARM in coord._stream_warming
 
 
 def _make_real_camera_prewarm() -> Any:

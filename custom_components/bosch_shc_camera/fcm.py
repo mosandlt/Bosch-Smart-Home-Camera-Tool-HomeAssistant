@@ -2103,3 +2103,80 @@ async def async_mark_events_read(coordinator: Any, event_ids: list[str]) -> bool
     if success:
         _LOGGER.debug("Marked %d events as read", len(event_ids))
     return success
+
+
+class FCMCoordinatorMixin:
+    """Thin coordinator-facing methods delegating to this module's functions.
+
+    Mixed into BoschCameraCoordinator (see __init__.py's class declaration)
+    so `coordinator.async_start_fcm_push()` etc. keep working as methods —
+    every one of them just forwards `self` to the corresponding free
+    function above, which is where the actual FCM logic lives.
+    """
+
+    hass: HomeAssistant
+
+    async def _fetch_firebase_config(self) -> dict[str, str]:
+        """Fetch Firebase config (delegated to fetch_firebase_config)."""
+        return await fetch_firebase_config(self.hass)
+
+    async def async_start_fcm_push(self) -> None:
+        """Start the FCM supervisor (delegated to async_ensure_fcm_supervisor)."""
+        return await async_ensure_fcm_supervisor(self)
+
+    async def _register_fcm_with_bosch(self) -> bool:
+        """Register FCM token with Bosch CBS (delegated to register_fcm_with_bosch)."""
+        return await register_fcm_with_bosch(self)
+
+    async def async_stop_fcm_push(self) -> None:
+        """Stop the FCM supervisor and push listener (delegated to async_stop_fcm_supervisor)."""
+        return await async_stop_fcm_supervisor(self)
+
+    async def _async_handle_fcm_push(self) -> None:
+        """Handle an FCM push (delegated to async_handle_fcm_push)."""
+        return await async_handle_fcm_push(self)
+
+    def _get_alert_services(self, type_key: str) -> list[str]:
+        """Return notify services for a given alert type (delegated to get_alert_services)."""
+        return get_alert_services(self, type_key)
+
+    @staticmethod
+    def _build_notify_data(
+        svc: str,
+        message: str,
+        file_path: str | None = None,
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        """Build notify service call data (delegated to build_notify_data)."""
+        return build_notify_data(svc, message, file_path, title)
+
+    async def _async_send_alert(
+        self,
+        cam_name: str,
+        event_type: str,
+        timestamp: str,
+        image_url: str,
+        clip_url: str = "",
+        clip_status: str = "",
+        event_id: str = "",
+    ) -> None:
+        """Send a 3-step alert (delegated to async_send_alert)."""
+        return await async_send_alert(
+            self,
+            cam_name,
+            event_type,
+            timestamp,
+            image_url,
+            clip_url,
+            clip_status,
+            event_id=event_id,
+        )
+
+    async def async_mark_events_read(self, event_ids: list[str]) -> bool:
+        """Mark events as read on the Bosch cloud (delegated to async_mark_events_read)."""
+        return await async_mark_events_read(self, event_ids)
+
+    @staticmethod
+    def _write_file(path: str, data: bytes) -> None:
+        """Write binary data to file (delegated to the module-level _write_file)."""
+        _write_file(path, data)
