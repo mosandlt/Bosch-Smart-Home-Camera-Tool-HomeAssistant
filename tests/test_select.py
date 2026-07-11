@@ -263,6 +263,201 @@ class TestVideoQualitySelectBasic:
         assert "auto" in sel._attr_options
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# BoschNvrModeSelect — per-camera Mini-NVR mode override (GitHub #43)
+# ═════════════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+def stub_coord_nvr_mode():
+    calls = {}
+
+    def _get_nvr_mode(cid):
+        return calls.get(cid, "continuous")
+
+    def _set_nvr_mode(cid, mode):
+        calls[cid] = mode
+
+    return SimpleNamespace(
+        data={
+            CAM_ID: {
+                "info": {"title": "Terrasse", "hardwareVersion": "HOME_Eyes_Outdoor"},
+                "live": {},
+            }
+        },
+        get_nvr_mode=_get_nvr_mode,
+        set_nvr_mode=_set_nvr_mode,
+        options={"enable_nvr": True},
+        _nvr_processes={},
+        _nvr_preroll_processes={},
+        start_recorder=AsyncMock(),
+    )
+
+
+class TestNvrModeSelectBasic:
+    def test_construction(self, stub_coord_nvr_mode, stub_entry):
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        assert sel._attr_translation_key == "nvr_mode"
+        assert sel._attr_unique_id.endswith("_nvr_mode")
+
+    def test_device_info(self, stub_coord_nvr_mode, stub_entry):
+        from custom_components.bosch_shc_camera import DOMAIN
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        info = sel.device_info
+        assert (DOMAIN, CAM_ID) in info["identifiers"]
+        assert info["manufacturer"] == "Bosch"
+        assert info["model"] == "HOME_Eyes_Outdoor"
+
+    def test_options_are_continuous_and_event_buffered_only(
+        self, stub_coord_nvr_mode, stub_entry
+    ):
+        """No 'off' option — that's the existing BoschNvrRecordingSwitch's job."""
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        assert sel._attr_options == ["continuous", "event_buffered"]
+
+    def test_current_option_reads_coordinator_default(
+        self, stub_coord_nvr_mode, stub_entry
+    ):
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        assert sel.current_option == "continuous"
+
+    def test_current_option_reflects_override(self, stub_coord_nvr_mode, stub_entry):
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        stub_coord_nvr_mode.get_nvr_mode = lambda cid: "event_buffered"
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        assert sel.current_option == "event_buffered"
+
+    def test_current_option_falls_back_for_unknown_value(
+        self, stub_coord_nvr_mode, stub_entry
+    ):
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        stub_coord_nvr_mode.get_nvr_mode = lambda cid: "garbage"
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        assert sel.current_option == "continuous"
+
+    @pytest.mark.asyncio
+    async def test_async_select_option_calls_coordinator_setter(
+        self, stub_coord_nvr_mode, stub_entry
+    ):
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        sel.async_write_ha_state = MagicMock()
+        await sel.async_select_option("event_buffered")
+        assert stub_coord_nvr_mode.get_nvr_mode(CAM_ID) == "event_buffered"
+        sel.async_write_ha_state.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_select_option_restarts_active_continuous_recorder(
+        self, stub_coord_nvr_mode, stub_entry
+    ):
+        """Bug-hunt finding (2026-07-11): a mode change must apply immediately
+        if a recorder is already running for this camera — otherwise a
+        healthy long-running camera could be stuck on the old mode
+        indefinitely (the proactive cred-rotation restart that used to
+        pick this up was removed in v14.5.4)."""
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        stub_coord_nvr_mode._nvr_processes[CAM_ID] = MagicMock()  # already running
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        sel.async_write_ha_state = MagicMock()
+        await sel.async_select_option("event_buffered")
+        stub_coord_nvr_mode.start_recorder.assert_awaited_once_with(CAM_ID)
+
+    @pytest.mark.asyncio
+    async def test_async_select_option_restarts_active_preroll_recorder(
+        self, stub_coord_nvr_mode, stub_entry
+    ):
+        """Same as above, but the camera was running event-buffered mode
+        (tracked in _nvr_preroll_processes, not _nvr_processes)."""
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        stub_coord_nvr_mode._nvr_preroll_processes[CAM_ID] = MagicMock()
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        sel.async_write_ha_state = MagicMock()
+        await sel.async_select_option("continuous")
+        stub_coord_nvr_mode.start_recorder.assert_awaited_once_with(CAM_ID)
+
+    @pytest.mark.asyncio
+    async def test_async_select_option_no_restart_when_recorder_inactive(
+        self, stub_coord_nvr_mode, stub_entry
+    ):
+        """No recorder running for this camera (e.g. the NVR switch is off) →
+        must NOT call start_recorder, which would incorrectly turn NVR on."""
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        sel.async_write_ha_state = MagicMock()
+        await sel.async_select_option("event_buffered")
+        stub_coord_nvr_mode.start_recorder.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_restore_state_applies_valid_saved_option(
+        self, stub_coord_nvr_mode, stub_entry
+    ):
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        last = MagicMock()
+        last.state = "event_buffered"
+        with (
+            patch(
+                "homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
+                AsyncMock(),
+            ),
+            patch.object(sel, "async_get_last_state", AsyncMock(return_value=last)),
+        ):
+            await sel.async_added_to_hass()
+        assert stub_coord_nvr_mode.get_nvr_mode(CAM_ID) == "event_buffered"
+
+    @pytest.mark.asyncio
+    async def test_restore_state_ignores_invalid_saved_option(
+        self, stub_coord_nvr_mode, stub_entry
+    ):
+        """A stale/invalid restored state must not be applied as an override."""
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        last = MagicMock()
+        last.state = "unknown"
+        with (
+            patch(
+                "homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
+                AsyncMock(),
+            ),
+            patch.object(sel, "async_get_last_state", AsyncMock(return_value=last)),
+        ):
+            await sel.async_added_to_hass()
+        assert stub_coord_nvr_mode.get_nvr_mode(CAM_ID) == "continuous"
+
+    @pytest.mark.asyncio
+    async def test_restore_no_last_state_leaves_default(
+        self, stub_coord_nvr_mode, stub_entry
+    ):
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        with (
+            patch(
+                "homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
+                AsyncMock(),
+            ),
+            patch.object(sel, "async_get_last_state", AsyncMock(return_value=None)),
+        ):
+            await sel.async_added_to_hass()
+        assert stub_coord_nvr_mode.get_nvr_mode(CAM_ID) == "continuous"
+
+
 class TestFcmPushModeSelectBasic:
     def test_construction(self, stub_coord_basic, stub_entry):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
@@ -861,6 +1056,39 @@ class TestAsyncSetupEntryPlatform:
         )
         types_ = {type(e).__name__ for e in captured}
         assert "BoschDetectionModeSelect" not in types_
+
+    @pytest.mark.asyncio
+    async def test_enable_nvr_true_adds_nvr_mode_select(self):
+        from custom_components.bosch_shc_camera.select import async_setup_entry
+
+        coord = _stub_coord_platform()
+        entry = _stub_entry_platform(options={"enable_nvr": True})
+        entry.runtime_data = coord
+        captured: list = []
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e: captured.extend(e),
+        )
+        types_ = {type(e).__name__ for e in captured}
+        assert "BoschNvrModeSelect" in types_
+
+    @pytest.mark.asyncio
+    async def test_enable_nvr_false_no_nvr_mode_select(self):
+        """Default (Mini-NVR disabled) → no NVR mode select clutters the entity list."""
+        from custom_components.bosch_shc_camera.select import async_setup_entry
+
+        coord = _stub_coord_platform()
+        entry = _stub_entry_platform()  # enable_nvr absent → defaults False
+        entry.runtime_data = coord
+        captured: list = []
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e: captured.extend(e),
+        )
+        types_ = {type(e).__name__ for e in captured}
+        assert "BoschNvrModeSelect" not in types_
 
     @pytest.mark.asyncio
     async def test_integration_level_selects_added(self):

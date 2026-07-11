@@ -500,6 +500,13 @@
           "low": "Низька (1,9 Мбіт/с)"
         }
       },
+      "nvr_mode": {
+        "name": "Режим Mini-NVR",
+        "state": {
+          "continuous": "Безперервний",
+          "event_buffered": "Буферизація за подіями (передзапис)"
+        }
+      },
       "motion_sensitivity": {
         "name": "Чутливість Виявлення Руху",
         "state": {

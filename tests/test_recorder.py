@@ -915,6 +915,24 @@ def _make_phase_coord(opts=None, cam_title="Terrasse", cam_id=CAM_ID_SHORT):
         return lock
 
     coord._get_nvr_recorder_lock = _get_nvr_recorder_lock
+
+    # get_nvr_mode: mirrors the REAL coordinator method exactly — per-camera
+    # override first (GitHub #43), else fall back to the global nvr_event_only
+    # option. Bug-hunt finding (2026-07-11): an earlier version of this stub
+    # only mirrored the fallback half, silently ignoring any override a test
+    # set via coord._nvr_mode_preference — meaning no test using this factory
+    # could ever exercise the per-camera-override-differs-from-global path
+    # that is the entire point of the feature.
+    coord._nvr_mode_preference = {}
+    coord.get_nvr_mode = lambda cid: (
+        coord._nvr_mode_preference[cid]
+        if coord._nvr_mode_preference.get(cid) in ("continuous", "event_buffered")
+        else (
+            "event_buffered"
+            if coord.options.get("nvr_event_only", False)
+            else "continuous"
+        )
+    )
     return coord
 
 
@@ -1502,6 +1520,24 @@ def _make_lifecycle_coord(
 
     coord._get_nvr_recorder_lock = _get_nvr_recorder_lock
 
+    # get_nvr_mode: mirrors the REAL coordinator method exactly — per-camera
+    # override first (GitHub #43), else fall back to the global nvr_event_only
+    # option. Bug-hunt finding (2026-07-11): an earlier version of this stub
+    # only mirrored the fallback half, silently ignoring any override a test
+    # set via coord._nvr_mode_preference — meaning no test using this factory
+    # could ever exercise the per-camera-override-differs-from-global path
+    # that is the entire point of the feature.
+    coord._nvr_mode_preference = {}
+    coord.get_nvr_mode = lambda cid: (
+        coord._nvr_mode_preference[cid]
+        if coord._nvr_mode_preference.get(cid) in ("continuous", "event_buffered")
+        else (
+            "event_buffered"
+            if coord.options.get("nvr_event_only", False)
+            else "continuous"
+        )
+    )
+
     # Build a hass stub. async_add_executor_job runs the function in-thread for
     # the test (no actual executor needed). async_create_background_task swallows
     # the coro so we don't have to await unstarted watchers.
@@ -1856,6 +1892,7 @@ class TestStartRecorder:
             hass=SimpleNamespace(async_add_executor_job=AsyncMock()),
             async_update_listeners=MagicMock(),
         )
+        coord.get_nvr_mode = lambda cid: "event_buffered"
 
         async def _fake_sleep(_sec):
             coord._live_connections[CAM_ID_SHORT]["rtspsUrl"] = (
@@ -2090,6 +2127,149 @@ class TestEventOnlyMode(unittest.TestCase):
 
         asyncio.get_event_loop().run_until_complete(_run())
         assert cam_id in coord._nvr_processes, "main ffmpeg not spawned in normal mode"
+
+
+class TestPerCameraNvrModeOverrideMixedFleet:
+    """GitHub #43 — the actual use case the feature exists for: a mixed fleet
+    where one camera needs continuous-while-armed recording (glass-facing,
+    PIR can't fire through glass) while another wants the lightweight
+    event-buffered pre-roll ring, in the SAME install, diverging from
+    whatever the global nvr_event_only default is set to.
+
+    Bug-hunt finding (2026-07-11): the shared test-coordinator factories'
+    get_nvr_mode stubs originally ignored per-camera overrides entirely, so
+    this exact scenario was completely untested at the recorder-integration
+    level despite being the feature's whole reason to exist. Fixed alongside
+    this test.
+    """
+
+    def test_override_continuous_beats_global_event_only(self):
+        """Global nvr_event_only=True (event-buffered default) but CAM_A has
+        a 'continuous' override → CAM_A must still spawn the main ffmpeg
+        recorder, not just a pre-roll ring."""
+        import custom_components.bosch_shc_camera.recorder as recorder
+
+        cam_a = "AAAAAAAA"
+        coord = _make_phase_coord(
+            cam_id=cam_a,
+            cam_title="Glasfassade",
+            opts={
+                "nvr_base_path": "/config/bosch_nvr",
+                "nvr_quality": "auto",
+                "nvr_preroll_seconds": 0,
+                "nvr_event_only": True,  # global default: event-buffered
+            },
+        )
+        coord._nvr_mode_preference[cam_a] = "continuous"  # per-cam override
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = None
+        mock_proc.wait = AsyncMock(return_value=0)
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.read = AsyncMock(return_value=b"")
+
+        async def _run():
+            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+                await recorder.start_recorder(coord, cam_a)
+
+        asyncio.get_event_loop().run_until_complete(_run())
+        assert cam_a in coord._nvr_processes, (
+            "override='continuous' must spawn the main ffmpeg recorder even "
+            "though the global option says event-only"
+        )
+
+    def test_override_event_buffered_beats_global_continuous(self):
+        """Global nvr_event_only=False (continuous default) but CAM_B has an
+        'event_buffered' override → CAM_B must run only the pre-roll ring,
+        no main ffmpeg recorder."""
+        import custom_components.bosch_shc_camera.recorder as recorder
+
+        cam_b = "BBBBBBBB"
+        coord = _make_phase_coord(
+            cam_id=cam_b,
+            cam_title="Grundstueck",
+            opts={
+                "nvr_base_path": "/config/bosch_nvr",
+                "nvr_quality": "auto",
+                "nvr_preroll_seconds": 20,
+                "nvr_event_only": False,  # global default: continuous
+            },
+        )
+        coord._nvr_mode_preference[cam_b] = "event_buffered"  # per-cam override
+
+        started_preroll = []
+
+        async def fake_start_preroll(c, cid):
+            started_preroll.append(cid)
+
+        async def _run():
+            with patch.object(
+                recorder, "start_preroll_recorder", side_effect=fake_start_preroll
+            ):
+                await recorder.start_recorder(coord, cam_b)
+
+        asyncio.get_event_loop().run_until_complete(_run())
+        assert cam_b not in coord._nvr_processes, (
+            "override='event_buffered' must NOT spawn the main ffmpeg "
+            "recorder even though the global option says continuous"
+        )
+        assert cam_b in started_preroll, (
+            "override='event_buffered' must start the pre-roll ring"
+        )
+
+    def test_two_cameras_same_coordinator_diverge_independently(self):
+        """The real mixed-fleet scenario: ONE coordinator serving both
+        cameras, each resolving to a DIFFERENT effective mode at the same
+        time — proving the override is genuinely per-camera, not accidentally
+        shared/global state."""
+        import custom_components.bosch_shc_camera.recorder as recorder
+
+        cam_glass, cam_premises = "AAAAAAAA", "BBBBBBBB"
+        coord = _make_phase_coord(
+            cam_id=cam_glass,
+            opts={
+                "nvr_base_path": "/config/bosch_nvr",
+                "nvr_quality": "auto",
+                "nvr_preroll_seconds": 20,
+                "nvr_event_only": False,  # global default: continuous
+            },
+        )
+        # Add the second camera to the same coordinator instance.
+        coord.data[cam_premises] = {"info": {"title": "Grundstueck"}}
+        coord._live_connections[cam_premises] = {
+            "_connection_type": "LOCAL",
+            "rtspsUrl": "rtsp://user:pass@127.0.0.1:9001/rtsp_tunnel?inst=1",
+        }
+        # Only the premises camera opts into event-buffered; the glass camera
+        # stays on the (here: continuous) global default.
+        coord._nvr_mode_preference[cam_premises] = "event_buffered"
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = None
+        mock_proc.wait = AsyncMock(return_value=0)
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.read = AsyncMock(return_value=b"")
+        started_preroll = []
+
+        async def fake_start_preroll(c, cid):
+            started_preroll.append(cid)
+
+        async def _run():
+            with (
+                patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+                patch.object(
+                    recorder, "start_preroll_recorder", side_effect=fake_start_preroll
+                ),
+            ):
+                await recorder.start_recorder(coord, cam_glass)
+                await recorder.start_recorder(coord, cam_premises)
+
+        asyncio.get_event_loop().run_until_complete(_run())
+        assert cam_glass in coord._nvr_processes, "glass cam must run continuous"
+        assert cam_premises not in coord._nvr_processes, (
+            "premises cam must NOT run continuous"
+        )
+        assert cam_premises in started_preroll, "premises cam must run pre-roll"
 
 
 # =============================================================================

@@ -10871,6 +10871,84 @@ class TestQualityPreference:
         assert BoschCameraCoordinator.get_quality_params(coord, CAM_A) == (False, 2)
 
 
+class TestNvrModePreference:
+    """Per-camera Mini-NVR mode override (GitHub #43) — coordinator methods."""
+
+    def test_no_override_falls_back_to_global_continuous(self):
+        """No per-cam override + global nvr_event_only=False → 'continuous'."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_coordinator_pure_helpers(
+            options={"nvr_event_only": False}, _nvr_mode_preference={}
+        )
+        assert BoschCameraCoordinator.get_nvr_mode(coord, CAM_A) == "continuous"
+
+    def test_no_override_falls_back_to_global_event_buffered(self):
+        """No per-cam override + global nvr_event_only=True → 'event_buffered'."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_coordinator_pure_helpers(
+            options={"nvr_event_only": True}, _nvr_mode_preference={}
+        )
+        assert BoschCameraCoordinator.get_nvr_mode(coord, CAM_A) == "event_buffered"
+
+    def test_per_camera_override_wins_over_global_continuous(self):
+        """Per-cam override='event_buffered' wins even if global says continuous."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_coordinator_pure_helpers(
+            options={"nvr_event_only": False},
+            _nvr_mode_preference={CAM_A: "event_buffered"},
+        )
+        assert BoschCameraCoordinator.get_nvr_mode(coord, CAM_A) == "event_buffered"
+
+    def test_per_camera_override_wins_over_global_event_buffered(self):
+        """Per-cam override='continuous' wins even if global says event_buffered —
+        the exact mixed-fleet scenario from the issue (glass-facing camera needs
+        continuous-while-armed while the global default is event-buffered)."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_coordinator_pure_helpers(
+            options={"nvr_event_only": True},
+            _nvr_mode_preference={CAM_A: "continuous"},
+        )
+        assert BoschCameraCoordinator.get_nvr_mode(coord, CAM_A) == "continuous"
+
+    def test_override_does_not_affect_other_cameras(self):
+        """Setting an override for CAM_A must not change CAM_B's effective mode."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_coordinator_pure_helpers(
+            options={"nvr_event_only": False},
+            _nvr_mode_preference={CAM_A: "event_buffered"},
+        )
+        assert (
+            BoschCameraCoordinator.get_nvr_mode(coord, "cam-b-not-set") == "continuous"
+        )
+
+    def test_set_nvr_mode_stores_override(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_coordinator_pure_helpers(
+            options={"nvr_event_only": False}, _nvr_mode_preference={}
+        )
+        BoschCameraCoordinator.set_nvr_mode(coord, CAM_A, "event_buffered")
+        assert coord._nvr_mode_preference[CAM_A] == "event_buffered"
+        assert BoschCameraCoordinator.get_nvr_mode(coord, CAM_A) == "event_buffered"
+
+    def test_invalid_override_value_ignored(self):
+        """A garbage cached value (shouldn't happen via the select entity, but
+        defensively) must not be treated as a valid override — falls back to
+        the global option instead of propagating an invalid mode string."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_coordinator_pure_helpers(
+            options={"nvr_event_only": False},
+            _nvr_mode_preference={CAM_A: "bogus_mode"},
+        )
+        assert BoschCameraCoordinator.get_nvr_mode(coord, CAM_A) == "continuous"
+
+
 class TestSettingsReaders:
     def test_motion_settings_empty_when_no_data(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator

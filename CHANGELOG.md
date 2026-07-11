@@ -5,6 +5,18 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.7.0] - 2026-07-11
+
+Minor — new per-camera Mini-NVR mode select entity: a mixed camera fleet can now run different recording strategies per camera instead of one global setting.
+
+### Added
+
+- **Per-camera Mini-NVR mode override** (closes the core of #43, realKim-dotcom) — new `select.*_nvr_mode` entity per camera (`continuous` / `event_buffered`), falling back to the existing global `nvr_event_only` option when left untouched (zero change for existing installs). Use case: a glass-facing camera whose PIR can't fire through glass can stay on always-on recording while other cameras run the lightweight event-buffered pre-roll ring, in the same install. Gated behind the existing "Enable NVR" option, disabled by default (enable it in Settings → Devices → your camera's disabled entities).
+- **Scope, stated plainly**: "Continuous" is today's existing always-on recording, not alarm-armed-gated recording — this integration doesn't have an alarm-aware recording gate yet. A per-camera override for the pre-roll buffer *size* (`nvr_preroll_seconds`) is not included either; all event-buffered cameras still share one global value. Both are reasonable candidates for a follow-up, tracked against #43 rather than closing it outright.
+- Changing the mode now restarts an already-running recorder for that camera immediately, so the new setting doesn't sit unused until some unrelated event happens to respawn it.
+
+24 new tests (coordinator methods, entity incl. restore-on-restart, 3 integration tests proving two cameras on one coordinator resolve independently — the actual mixed-fleet scenario the feature exists for). 5916 pytest (1 pre-existing skip) / mypy --strict / ruff / pylint / codespell clean, 100% coverage.
+
 ## [v14.6.0] - 2026-07-11
 
 Minor — new `set_lighting_schedule` service: LED lighting schedules (on/off time, motion trigger, darkness threshold) can now be written from Home Assistant, not just read.

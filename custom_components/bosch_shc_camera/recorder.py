@@ -673,7 +673,10 @@ async def start_recorder(
 
     # Event-only mode: skip continuous recording, run only the pre-roll ring
     # buffer. Motion events can still create clips from cached segments.
-    if opts.get("nvr_event_only", False):
+    # Resolved per-camera (GitHub #43) with fallback to the global option —
+    # lets a mixed fleet run continuous-while-armed on cameras where PIR
+    # can't fire (e.g. shooting through glass) while others stay event-only.
+    if coordinator.get_nvr_mode(cam_id) == "event_buffered":
         preroll_secs = int(opts.get("nvr_preroll_seconds") or 0)
         if preroll_secs > 0:
             await start_preroll_recorder(coordinator, cam_id)

@@ -719,6 +719,11 @@ class BoschCameraCoordinator(
         # Video quality preference — keyed by cam_id, runtime only (not persisted)
         # Values: "auto" | "high" | "low"
         self._quality_preference: dict[str, str] = {}
+        # Per-camera Mini-NVR mode override — keyed by cam_id, restored from
+        # RestoreEntity on startup (BoschNvrModeSelect), same in-memory
+        # pattern as _quality_preference. Values: "continuous" | "event_buffered".
+        # Absent = fall back to the global nvr_event_only option (GitHub #43).
+        self._nvr_mode_preference: dict[str, str] = {}
         # RCP session ID cache — keyed by proxy_hash, value (session_id, expires_monotonic)
         # Avoids 2 round-trip RCP handshake on every thumbnail/data fetch
         self._rcp_session_cache: dict[str, tuple[str, float]] = {}
@@ -5250,6 +5255,30 @@ class BoschCameraCoordinator(
         if q == "low":
             return False, 4  # low-bandwidth stream (~1.9 Mbps)
         return False, 2  # "auto" — iOS default, balanced (~7.5 Mbps)
+
+    def get_nvr_mode(self, cam_id: str) -> str:
+        """Return effective Mini-NVR mode for this camera: 'continuous' or 'event_buffered'.
+
+        Priority:
+          1. Per-camera override set by BoschNvrModeSelect (GitHub #43 — lets a
+             mixed fleet run different strategies, e.g. glass-facing cameras
+             where PIR never fires need continuous-while-armed, premises
+             cameras want a lightweight pre-roll ring instead of 24/7 capture).
+          2. Global ``nvr_event_only`` option, for full backward compatibility
+             with installs that never touch the new per-camera select.
+        """
+        override = self._nvr_mode_preference.get(cam_id)
+        if override in ("continuous", "event_buffered"):
+            return override
+        return (
+            "event_buffered"
+            if self.options.get("nvr_event_only", False)
+            else "continuous"
+        )
+
+    def set_nvr_mode(self, cam_id: str, mode: str) -> None:
+        """Set the per-camera Mini-NVR mode override. mode must be 'continuous' or 'event_buffered'."""
+        self._nvr_mode_preference[cam_id] = mode
 
     def motion_settings(self, cam_id: str) -> dict[str, Any]:
         """Return motion detection settings dict, or empty dict."""

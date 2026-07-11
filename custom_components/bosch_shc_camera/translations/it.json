@@ -500,6 +500,13 @@
           "low": "Bassa (1,9 Mbps)"
         }
       },
+      "nvr_mode": {
+        "name": "Modalità Mini-NVR",
+        "state": {
+          "continuous": "Continua",
+          "event_buffered": "Bufferizzata per eventi (pre-registrazione)"
+        }
+      },
       "motion_sensitivity": {
         "name": "Sensibilità movimento",
         "state": {

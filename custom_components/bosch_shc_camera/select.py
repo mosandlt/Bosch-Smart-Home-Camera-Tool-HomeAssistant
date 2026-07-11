@@ -35,6 +35,8 @@ STREAM_MODE_OPTIONS = ["auto", "local", "remote"]
 
 QUALITY_OPTIONS = ["auto", "high", "low"]
 
+NVR_MODE_OPTIONS = ["continuous", "event_buffered"]
+
 MOTION_SENSITIVITY_OPTIONS = [
     "super_high",
     "high",
@@ -87,6 +89,10 @@ async def async_setup_entry(
             entities.append(
                 BoschPanPresetSelect(coordinator, cam_id, config_entry, pan_limit)
             )
+        # Per-camera Mini-NVR mode override (GitHub #43) — only relevant once
+        # Mini-NVR itself is enabled (same gate as BoschNvrRecordingSwitch).
+        if config_entry.options.get("enable_nvr", False):
+            entities.append(BoschNvrModeSelect(coordinator, cam_id, config_entry))
     # Integration-level selects (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
@@ -169,6 +175,103 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
                     )
             except Exception:  # noqa: S110 # best-effort go2rtc re-registration on live-URL change, failure non-actionable
                 pass
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschNvrModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):  # type: ignore[misc]
+    """Select entity to override the Mini-NVR recording mode for one camera.
+
+    GitHub #43 (realKim-dotcom): lets a mixed fleet run different NVR
+    strategies per camera instead of one global `nvr_event_only` flag —
+    e.g. a glass-facing camera (PIR never fires through glass) wants
+    always-on recording instead of motion-gated, while a premises camera
+    wants a lightweight event-buffered pre-roll ring instead of 24/7 capture.
+
+    SCOPE (bug-hunt finding, 2026-07-11 — documented honestly rather than
+    silently narrowed): "Continuous" here means the existing always-on
+    behavior, NOT the alarm-armed-gated recording the original issue
+    describes ("continuous while armed") — this integration has no
+    alarm-state-aware recording gate today. A per-camera `nvr_preroll_seconds`
+    override (the issue's second ask, so different event-buffered cameras
+    could each pick their own buffer size) is also not implemented; all
+    event-buffered cameras still share the one global preroll-seconds value.
+    Both are reasonable v1 follow-ups, not silently dropped.
+
+    No "off" option: the existing BoschNvrRecordingSwitch already turns
+    Mini-NVR on/off per camera — a third redundant "off" mode here would
+    just duplicate that switch and confuse which one is authoritative.
+    """
+
+    _attr_has_entity_name = True
+    _attr_options = NVR_MODE_OPTIONS
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        cam_data = coordinator.data.get(cam_id, {})
+        cam_info = cam_data.get("info", {})
+        self._cam_title = cam_info.get("title", cam_id)
+        self._entry = entry
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_nvr_mode"
+        self._attr_translation_key = "nvr_mode"
+        self._attr_entity_category = EntityCategory.CONFIG
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last NVR mode override after HA restart."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state in NVR_MODE_OPTIONS:
+            self.coordinator.set_nvr_mode(self._cam_id, last_state.state)
+            _LOGGER.debug("Restored NVR mode %s for %s", last_state.state, self._cam_id)
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        cam_data = self.coordinator.data.get(self._cam_id, {})
+        cam_info = cam_data.get("info", {})
+        return {
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name": f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "sw_version": cam_info.get("firmwareVersion", ""),
+        }
+
+    @property
+    def current_option(self) -> str:
+        """Return the effective mode (per-cam override, or the global fallback)."""
+        mode = self.coordinator.get_nvr_mode(self._cam_id)
+        return mode if mode in NVR_MODE_OPTIONS else "continuous"
+
+    async def async_select_option(self, option: str) -> None:
+        """Set the per-camera NVR mode override and apply it immediately
+        if a recorder is already running for this camera.
+
+        Bug-hunt finding (2026-07-11): an earlier version of this docstring
+        claimed the change would "take effect on the next credential
+        rotation" — but v14.5.4 removed the proactive cred-rotation restart
+        entirely (LOCAL sessions now survive indefinitely without it), so a
+        camera with a long-running healthy recorder could get stuck on the
+        old mode with no natural trigger ever picking up the new one. Restart
+        explicitly instead, reusing the same idempotent respawn path
+        `BoschNvrRecordingSwitch.async_turn_on` uses — safe to call even
+        though it also (redundantly, since it's already true) sets
+        `_nvr_user_intent`, because it's gated on "recorder already active"
+        so it can never turn NVR ON for a camera whose switch is off.
+        """
+        self.coordinator.set_nvr_mode(self._cam_id, option)
+        recorder_active = (
+            self._cam_id in self.coordinator._nvr_processes
+            or self._cam_id in self.coordinator._nvr_preroll_processes
+        )
+        if recorder_active:
+            await self.coordinator.start_recorder(self._cam_id)
         self.async_write_ha_state()
 
 

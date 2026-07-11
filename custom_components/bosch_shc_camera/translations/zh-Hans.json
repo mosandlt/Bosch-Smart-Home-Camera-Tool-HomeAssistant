@@ -500,6 +500,13 @@
           "low": "低（1.9 Mbps）"
         }
       },
+      "nvr_mode": {
+        "name": "Mini-NVR 模式",
+        "state": {
+          "continuous": "连续录制",
+          "event_buffered": "事件缓冲（预录）"
+        }
+      },
       "motion_sensitivity": {
         "name": "移动检测灵敏度",
         "state": {
