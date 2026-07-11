@@ -38,11 +38,13 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
 
 ## Table of Contents
 
+- [Quick Start (5 Minutes)](#quick-start-5-minutes) — the short version, for when the rest of this README feels like too much
 - [Supported Cameras](#supported-cameras)
 - [Disclaimer](#disclaimer)
 - [Prerequisites — Setting Up a New Camera](#prerequisites--setting-up-a-new-camera)
 - [Installation](#installation)
 - [Setup](#setup)
+  - [I don't see any image / video](#i-dont-see-any-image--video) — troubleshooting for the most common "it's not working" report
 - [Architecture](#architecture)
   - [Network Connectivity](#network-connectivity) — required ports, VLAN/subnet pitfalls
 - [Streaming & Reliability](#streaming--reliability)
@@ -69,6 +71,20 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
 - [Integration Comparison](#integration-comparison) — pick the right project for your platform
 - [Related Projects](#related-projects)
 - [License](#license)
+
+---
+
+## Quick Start (5 Minutes)
+
+New here and just want a working camera? This is the only part of this README you *need* to read right now — everything else (Frigate, AI descriptions, SMB upload, …) is optional and you can ignore it until you actually want that feature.
+
+1. **Set the camera up in the official Bosch Smart Camera app first.** Pairing + the first firmware update can take up to an hour — see [Prerequisites](#prerequisites--setting-up-a-new-camera) if you haven't done this yet. Skipping this step is the #1 reason "nothing shows up" later.
+2. **Install via HACS.** Click the "Open HACS" button under [Installation](#installation), click **Download**, then **restart Home Assistant**.
+3. **Add the integration and log in.** Settings → Devices & Services → **+ Add Integration** → search **"Bosch Smart Home Camera"** → log in with the same account you use in the Bosch app. Home Assistant finds all your cameras automatically — there is nothing else to fill in at this point.
+4. **Add a camera to a dashboard.** Edit any dashboard → **+ Add card** → pick your camera entity (`camera.bosch_<name>`) → choose **"Bosch Camera Card"** from the Community section. You should see a live picture within a few seconds.
+5. **Ignore "Configure" for now.** The big settings screen (Step 2 in [Setup](#setup) below) covers optional features — notifications, SMB/NAS upload, AI snapshot descriptions, external recorders. None of it is required for a camera to work. Come back to it only when you specifically want one of those.
+
+**No image at all, or the video never starts?** → [I don't see any image / video](#i-dont-see-any-image--video).
 
 ---
 
@@ -262,6 +278,17 @@ use_bosch_sort: true
 See the [overview card reference](#bosch-camera-overview-card--multi-camera-grid) for the grid layout, sort options, and per-camera overrides.
 
 > **Upgrading from pre-v10.3.19?** The integration auto-removes any stale `/local/bosch-camera-card.js` resource entry from Lovelace storage. The physical file in `/config/www/` is intentionally left in place (an integration must not modify user files there) and is harmless either way — the integration loads its own bundled copy.
+
+### I don't see any image / video
+
+Work through this list in order — it covers the setups reported so far:
+
+1. **Does the camera work in the official Bosch Smart Camera app right now?** If not, this integration can't help either — fix it there first (see [Prerequisites](#prerequisites--setting-up-a-new-camera)). A camera stuck mid firmware-update or removed from your Bosch account will never show up correctly here.
+2. **Check the device status.** Settings → Devices & Services → Bosch Smart Home Camera → your camera device. If it shows **"Unavailable"**, the integration can't reach Bosch's cloud or your camera at all — check [Network Connectivity](#network-connectivity) (required ports, VLAN pitfalls) and enable debug logging (Step 2 table above) to see the actual error.
+3. **Static thumbnail vs. live video are two different things.** The small preview image on a dashboard card updates automatically every ~30 s and needs no extra action. The actual **live video** only starts once you open the camera (tap the card / open the more-info dialog) — the first connection can take a few seconds while the integration negotiates a session with the camera. This is normal, not a hang.
+4. **Video still stays black after tapping into it?** Every view (the custom card, Home Assistant's own native camera view, the Companion app) opens the live connection automatically on demand — you never have to flip a switch by hand. If it's still black after ~10-15 s, check the per-camera **"Live Stream"** switch entity: turning it ON manually forces a session open and is a useful test to isolate whether the problem is the connection itself or just the view.
+5. **Only one camera affected, others work fine?** That's almost always the camera itself (offline / rebooting / Wi-Fi issue), not the integration — power-cycle it and check it in the Bosch app.
+6. **Still stuck?** Enable debug logging (Step 2 table above), reproduce the issue, and open a [GitHub issue](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues) with the log excerpt for your camera plus its model/generation.
 
 ---
 
@@ -2160,11 +2187,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.5.11** — see the GitHub release page for full notes:
-[**v14.5.11 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.11)
+Latest: **v14.5.12** — see the GitHub release page for full notes:
+[**v14.5.12 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.12)
 
 | Version | Highlights |
 |---|---|
+| **v14.5.12** | **First-time setup: the native camera view no longer stays black until the "Live Stream" switch is toggled by hand.** Opening a fresh camera via Cast or the built-in HLS card already auto-started video on demand; the native WebRTC path used by Home Assistant's own more-info dialog and the Companion app did not — so a camera that had never had its switch manually turned on simply showed no video the first time. It now auto-starts the same way on every path. README also gets a new "Quick Start" section up front and a troubleshooting checklist for "I don't see any image / video". |
 | **v14.5.11** | **The Mini-NVR "recording"/"idle" sensor no longer lags behind reality.** It could show "idle" for up to ~20 seconds after recording had actually started, or "recording" for 1-2 minutes after it had actually stopped — the underlying state was always correct, it just wasn't pushed to Home Assistant until the next routine check. It now updates immediately at every real state change. |
 | **v14.5.10** | **Internal cleanup only, no user-facing change.** The coordinator's per-tick data-fetching method — by far the largest single piece of the integration's code — has been split into 8 focused, independently-tested modules. Continuation of the internal cleanup started in v14.5.7. |
 | **v14.5.9** | **"Download Diagnostics" no longer fails, internal cleanup continued.** The Settings → Devices & Services diagnostics download could fail due to a gap left by the previous two internal-cleanup releases; found and fixed before it affected most users. |

@@ -773,14 +773,46 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     async def async_handle_async_webrtc_offer(
         self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
     ) -> None:
-        """Wait for LOCAL pre-warm before delegating to the go2rtc provider.
+        """Auto-open a live connection, then wait for LOCAL pre-warm, before
+        delegating to the go2rtc provider.
 
-        Without this, a native WebRTC offer (HA Companion app / more-info
-        dialog) arriving while the camera is still warming up hits
+        Unlike async_create_stream() (Cast/HLS path), this native-WebRTC
+        entry point never had an auto-open guard: a camera whose "Live
+        Stream" switch was never turned on (e.g. right after first setup)
+        has no active session, so stream_source() stays None and go2rtc
+        raised "Camera does not support WebRTC" for a first-time user simply
+        opening the native more-info dialog — no image/stream at all,
+        reported by a new user on community.simon42.com. Mirrors the
+        auto-open already done in async_create_stream().
+
+        Also: wait for LOCAL pre-warm before delegating to the go2rtc
+        provider. Without this, a native WebRTC offer (HA Companion app /
+        more-info dialog) arriving while the camera is still warming up hits
         stream_source() returning None with no retry — up to ~35s of black
         screen (MOBILE_BACKLOG). The custom card already retries client-side
         via _waitForStreamReady(); the native path had no equivalent.
         """
+        if not self.coordinator._live_connections.get(self._cam_id):
+            shc = self.coordinator._shc_state_cache.get(self._cam_id, {})
+            if shc.get("privacy_mode") is True:
+                raise HomeAssistantError(
+                    f"{self._display_name}: stream unavailable — privacy mode is ON"
+                )
+            _LOGGER.debug(
+                "%s: webrtc_offer — auto-opening live connection", self._display_name
+            )
+            result = await self.coordinator.try_live_connection(self._cam_id)
+            if result is STREAM_START_SKIPPED:
+                _LOGGER.debug(
+                    "%s: webrtc_offer — coalescing into an in-progress start",
+                    self._display_name,
+                )
+            elif not result:
+                _LOGGER.warning(
+                    "%s: webrtc_offer — live connection failed", self._display_name
+                )
+            else:
+                self.coordinator.async_update_listeners()
         await self._wait_for_prewarm("webrtc_offer")
         await super().async_handle_async_webrtc_offer(
             offer_sdp, session_id, send_message

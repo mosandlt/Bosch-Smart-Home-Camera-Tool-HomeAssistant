@@ -5,6 +5,20 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.5.12] - 2026-07-11
+
+Patch — first-time setup: the native camera view no longer stays black until the "Live Stream" switch is toggled by hand; README gets a Quick Start guide
+
+### Fixed
+
+- **A camera that never had its "Live Stream" switch manually turned on showed no video at all in Home Assistant's native camera view (more-info dialog, Companion app)** — reported by a new user on the community forum right after finishing setup. Opening the camera via Cast or the built-in HLS card already auto-opened a live connection on demand; the native WebRTC path (used by HA's own more-info dialog and the Companion app) did not, so `go2rtc` had nothing to stream and raised "Camera does not support WebRTC" with no obvious error surfaced to the user. The native WebRTC path now auto-opens a live connection the same way the Cast/HLS path already did, so video starts automatically the first time a camera is opened, without ever needing to find and flip a switch.
+
+### Documentation
+
+- **README now leads with a short "Quick Start" section** covering only the handful of steps actually required for a working camera — install, log in, add a card. The ~50 options under "Configure" (notifications, SMB upload, AI descriptions, external recorders, …) are clearly optional and can be skipped entirely on first setup. A new "I don't see any image / video" troubleshooting checklist was also added under Setup.
+
+5882 tests (1 pre-existing skip) / mypy --strict / ruff / codespell green, 100% coverage on the touched file, deploy-verified on test HA.
+
 ## [v14.5.11] - 2026-07-10
 
 Patch — Mini-NVR "recording"/"idle" sensor no longer lags behind reality

@@ -5788,7 +5788,10 @@ async def test_webrtc_offer_waits_for_prewarm_before_delegating():
 @pytest.mark.asyncio
 async def test_webrtc_offer_no_warming_delegates_immediately():
     """No pre-warm in progress → no waiting, straight delegation (happy path)."""
-    coord = _make_coord_prewarm(_stream_warming=set())
+    coord = _make_coord_prewarm(
+        _stream_warming=set(),
+        _live_connections={CAM_ID_PREWARM: {"rtspsUrl": "rtsp://x"}},
+    )
     cam = _make_camera_prewarm(coord)
 
     send_message = MagicMock()
@@ -5801,6 +5804,154 @@ async def test_webrtc_offer_no_warming_delegates_immediately():
         )
 
     mock_super.assert_awaited_once_with("sdp-offer", "session-1", send_message)
+    coord.try_live_connection.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webrtc_offer_no_live_connection_auto_opens_one():
+    """First-time-setup gap (community.simon42.com report): a camera whose
+    Live Stream switch was never turned on has no _live_connections entry.
+    The native WebRTC offer must auto-open one — mirroring async_create_stream
+    — instead of delegating straight to super() with stream_source()==None."""
+    coord = _make_coord_prewarm(_live_connections={}, _stream_warming=set())
+    cam = _make_camera_prewarm(coord)
+
+    send_message = MagicMock()
+    with patch(
+        "homeassistant.components.camera.Camera.async_handle_async_webrtc_offer",
+        new=AsyncMock(return_value=None),
+    ) as mock_super:
+        await cam.async_handle_async_webrtc_offer(
+            "sdp-offer", "session-1", send_message
+        )
+
+    coord.try_live_connection.assert_awaited_once_with(CAM_ID_PREWARM)
+    coord.async_update_listeners.assert_called_once()
+    mock_super.assert_awaited_once_with("sdp-offer", "session-1", send_message)
+
+
+@pytest.mark.asyncio
+async def test_webrtc_offer_privacy_mode_blocks_auto_open():
+    """Privacy mode ON + no existing session must raise instead of opening
+    a new one — matches async_create_stream's existing privacy gate."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord = _make_coord_prewarm(
+        _live_connections={},
+        _stream_warming=set(),
+        _shc_state_cache={CAM_ID_PREWARM: {"privacy_mode": True}},
+    )
+    cam = _make_camera_prewarm(coord)
+    cam._display_name = "Bosch Innenbereich"
+
+    send_message = MagicMock()
+    with pytest.raises(HomeAssistantError, match="privacy mode"):
+        await cam.async_handle_async_webrtc_offer(
+            "sdp-offer", "session-1", send_message
+        )
+
+    coord.try_live_connection.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webrtc_offer_auto_open_coalesces_on_skip(caplog: Any) -> None:
+    """A concurrent start already in flight (STREAM_START_SKIPPED) must not
+    be treated as a failure — just fall through to the pre-warm wait.
+
+    STREAM_START_SKIPPED.__bool__() is False, so `elif not result` alone
+    would ALSO match this branch — pin the debug-not-warning log line so a
+    regression collapsing the `is STREAM_START_SKIPPED` special case into
+    the generic failure branch (spurious warnings on every coalesced start)
+    is actually caught, not just the (identical either way) delegation."""
+    import logging
+
+    from custom_components.bosch_shc_camera.const import STREAM_START_SKIPPED
+
+    coord = _make_coord_prewarm(
+        _live_connections={},
+        _stream_warming=set(),
+        try_live_connection=AsyncMock(return_value=STREAM_START_SKIPPED),
+    )
+    cam = _make_camera_prewarm(coord)
+
+    send_message = MagicMock()
+    with (
+        caplog.at_level(
+            logging.DEBUG, logger="custom_components.bosch_shc_camera.camera"
+        ),
+        patch(
+            "homeassistant.components.camera.Camera.async_handle_async_webrtc_offer",
+            new=AsyncMock(return_value=None),
+        ) as mock_super,
+    ):
+        await cam.async_handle_async_webrtc_offer(
+            "sdp-offer", "session-1", send_message
+        )
+
+    coord.async_update_listeners.assert_not_called()
+    mock_super.assert_awaited_once_with("sdp-offer", "session-1", send_message)
+    assert "coalescing into an in-progress start" in caplog.text
+    assert not any(r.levelno >= logging.WARNING for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_webrtc_offer_auto_open_failure_logs_and_still_delegates(
+    caplog: Any,
+) -> None:
+    """try_live_connection returning falsy (real failure, not a coalesced
+    skip) must log a WARNING (not the coalescing debug line) but still fall
+    through to super() — matching the prewarm-timeout case, so HA surfaces
+    its own no-stream handling."""
+    import logging
+
+    coord = _make_coord_prewarm(
+        _live_connections={},
+        _stream_warming=set(),
+        try_live_connection=AsyncMock(return_value=None),
+    )
+    cam = _make_camera_prewarm(coord)
+
+    send_message = MagicMock()
+    with (
+        caplog.at_level(
+            logging.DEBUG, logger="custom_components.bosch_shc_camera.camera"
+        ),
+        patch(
+            "homeassistant.components.camera.Camera.async_handle_async_webrtc_offer",
+            new=AsyncMock(return_value=None),
+        ) as mock_super,
+    ):
+        await cam.async_handle_async_webrtc_offer(
+            "sdp-offer", "session-1", send_message
+        )
+
+    coord.async_update_listeners.assert_not_called()
+    mock_super.assert_awaited_once_with("sdp-offer", "session-1", send_message)
+    assert "live connection failed" in caplog.text
+    assert "coalescing into an in-progress start" not in caplog.text
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_webrtc_offer_existing_connection_skips_auto_open():
+    """A camera whose stream is already active (switch ON / prior offer)
+    must not re-trigger try_live_connection on every subsequent offer."""
+    coord = _make_coord_prewarm(
+        _live_connections={CAM_ID_PREWARM: {"rtspsUrl": "rtsp://x"}},
+        _stream_warming=set(),
+    )
+    cam = _make_camera_prewarm(coord)
+
+    send_message = MagicMock()
+    with patch(
+        "homeassistant.components.camera.Camera.async_handle_async_webrtc_offer",
+        new=AsyncMock(return_value=None),
+    ):
+        await cam.async_handle_async_webrtc_offer(
+            "sdp-offer", "session-1", send_message
+        )
+
+    coord.try_live_connection.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -5850,7 +6001,10 @@ def _make_real_camera_prewarm() -> Any:
                 "live": {},
             }
         },
-        _live_connections={},
+        # Already-open session: this fixture targets the provider-delegation
+        # and native-webrtc-flag regressions, not the auto-open path (covered
+        # separately by the test_webrtc_offer_no_live_connection_* tests).
+        _live_connections={CAM_ID_PREWARM: {"rtspsUrl": "rtsp://127.0.0.1:1/x"}},
         _camera_entities={},
         _stream_fell_back={},
         _stream_error_count={},
