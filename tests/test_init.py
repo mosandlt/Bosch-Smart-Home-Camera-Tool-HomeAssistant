@@ -3536,6 +3536,34 @@ def _make_coord_stream_lifecycle(stream_obj=None):
     return coord, cam_entity
 
 
+class TestGetNvrClipAssemblyLock:
+    """`_get_nvr_clip_assembly_lock` — get-or-create per-camera lock
+    guarding `recorder.assemble_and_ship_motion_clip` (issue #43
+    follow-up). Mirrors the sibling `_get_nvr_recorder_lock`."""
+
+    def _make_coordinator(self) -> BoschCameraCoordinator:
+        coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
+        coord._nvr_clip_assembly_locks = {}
+        return coord
+
+    def test_returns_asyncio_lock(self) -> None:
+        coord = self._make_coordinator()
+        lock = coord._get_nvr_clip_assembly_lock("cam-a")
+        assert isinstance(lock, asyncio.Lock)
+
+    def test_same_camera_returns_same_lock(self) -> None:
+        coord = self._make_coordinator()
+        lock1 = coord._get_nvr_clip_assembly_lock("cam-a")
+        lock2 = coord._get_nvr_clip_assembly_lock("cam-a")
+        assert lock1 is lock2
+
+    def test_different_cameras_get_independent_locks(self) -> None:
+        coord = self._make_coordinator()
+        lock_a = coord._get_nvr_clip_assembly_lock("cam-a")
+        lock_b = coord._get_nvr_clip_assembly_lock("cam-b")
+        assert lock_a is not lock_b
+
+
 class TestTearDownLiveStream:
     @pytest.mark.asyncio
     async def test_clears_all_per_cam_state(self):

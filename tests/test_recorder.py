@@ -5992,6 +5992,24 @@ class TestCapturePostroll:
         assert result is False
 
     @pytest.mark.asyncio
+    async def test_oserror_on_spawn_returns_false(self):
+        """Generic OSError (e.g. EAGAIN fork-limit) during spawn → False."""
+        coord = SimpleNamespace(
+            _live_connections={
+                CAM_ID: {
+                    "_connection_type": "LOCAL",
+                    "rtspsUrl": "rtsp://127.0.0.1:9000/x",
+                }
+            }
+        )
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=OSError("EAGAIN"),
+        ):
+            result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
+        assert result is False
+
+    @pytest.mark.asyncio
     async def test_timeout_kills_and_returns_false(self):
         coord = SimpleNamespace(
             _live_connections={
@@ -6003,6 +6021,34 @@ class TestCapturePostroll:
         )
         proc = MagicMock()
         proc.kill = MagicMock()
+
+        async def _hang():
+            await asyncio.sleep(9999)
+
+        proc.communicate = _hang
+
+        with (
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+            patch("asyncio.wait_for", side_effect=TimeoutError),
+        ):
+            result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
+        assert result is False
+        proc.kill.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_timeout_kill_process_lookup_error_swallowed(self):
+        """proc.kill() raising ProcessLookupError (already dead) after a
+        communicate() timeout must not propagate."""
+        coord = SimpleNamespace(
+            _live_connections={
+                CAM_ID: {
+                    "_connection_type": "LOCAL",
+                    "rtspsUrl": "rtsp://127.0.0.1:9000/x",
+                }
+            }
+        )
+        proc = MagicMock()
+        proc.kill = MagicMock(side_effect=ProcessLookupError())
 
         async def _hang():
             await asyncio.sleep(9999)
@@ -6105,6 +6151,84 @@ class TestAssembleAndShipMotionClip:
         finally:
             lock.release()
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_postroll_temp_dir_makedirs_oserror_falls_back_to_preroll_only(
+        self, tmp_path
+    ):
+        """Cannot create the postroll temp dir (e.g. permission denied) —
+        must not abort the whole assembly, just skip the postroll capture
+        and ship a pre-roll-only clip."""
+        coord = _make_assembly_coord(tmp_path, postroll_seconds=5)
+
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc.returncode = 0
+
+        _real_makedirs = os.makedirs
+        # Precise prefix match on the actual postroll cache path — a bare
+        # substring check on "_postroll_tmp" would be fragile against
+        # pytest's auto-generated tmp_path (which embeds the test name).
+        postroll_root = str(tmp_path / "cache" / "_postroll_tmp")
+
+        def _makedirs(path, *args, **kwargs):
+            if path.startswith(postroll_root):
+                raise OSError("permission denied")
+            return _real_makedirs(path, *args, **kwargs)
+
+        with (
+            patch.object(
+                recorder,
+                "list_preroll_files",
+                return_value=[str(tmp_path / "pre0.mp4")],
+            ),
+            patch("os.makedirs", side_effect=_makedirs),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
+            result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_staging_dir_makedirs_oserror_returns_false(self, tmp_path):
+        """Cannot create the staging dest dir — must return False and clean
+        up any postroll temp file already captured, rather than leaving it
+        behind or crashing."""
+        coord = _make_assembly_coord(tmp_path, postroll_seconds=5)
+        captured_paths: list[str] = []
+
+        async def _fake_capture_postroll(_coord, _cam_id, output_path, _secs):
+            captured_paths.append(output_path)
+            with open(output_path, "wb") as f:
+                f.write(b"x" * 2048)
+            return True
+
+        _real_makedirs = os.makedirs
+        # Precise prefix match on the actual staging base path — NOT a bare
+        # substring check, since pytest's auto-generated tmp_path for THIS
+        # test already contains "_staging" (from the test's own name),
+        # which would false-positive-match the unrelated postroll temp dir
+        # too and defeat the "postroll still succeeds" half of this test.
+        staging_root = str(tmp_path / "nvr")
+
+        def _makedirs(path, *args, **kwargs):
+            if path.startswith(staging_root):
+                raise OSError("disk full")
+            return _real_makedirs(path, *args, **kwargs)
+
+        with (
+            patch.object(recorder, "list_preroll_files", return_value=[]),
+            patch.object(
+                recorder, "_capture_postroll", side_effect=_fake_capture_postroll
+            ),
+            patch("os.makedirs", side_effect=_makedirs),
+        ):
+            result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
+
+        assert result is False
+        assert len(captured_paths) == 1
+        assert not os.path.exists(captured_paths[0])
 
     @pytest.mark.asyncio
     async def test_preroll_only_writes_into_staging_tree(self, tmp_path):
@@ -6325,6 +6449,20 @@ class TestStopPrerollRecorderCachePrune:
         await recorder.stop_preroll_recorder(coord, CAM_ID)
 
         assert not seg.exists()
+
+    @pytest.mark.asyncio
+    async def test_prune_error_swallowed(self, tmp_path):
+        """A raising executor job (e.g. cache dir vanished mid-prune) must
+        not propagate — best-effort cleanup, non-fatal."""
+        coord = _make_preroll_coord(tmp_path)
+
+        async def _raising_executor(fn, *args, **kwargs):
+            raise OSError("cache dir vanished")
+
+        coord.hass.async_add_executor_job = _raising_executor
+
+        # Must not raise.
+        await recorder.stop_preroll_recorder(coord, CAM_ID)
 
     @pytest.mark.asyncio
     async def test_prune_cache_false_keeps_leftover_segments(self, tmp_path):
