@@ -190,6 +190,7 @@
               "nvr_retention_days": "NVR-bewaartermijn (dagen)",
               "nvr_quality": "NVR-opnamekwaliteit",
               "nvr_preroll_seconds": "Pre-roll-buffer (seconden)",
+              "nvr_postroll_seconds": "Post-roll opname (seconden)",
               "nvr_preroll_cache_dir": "Pre-roll-cachemap"
             },
             "data_description": {
@@ -200,6 +201,7 @@
               "nvr_retention_days": "NVR-segmenten ouder dan dit aantal dagen automatisch verwijderen. Bereik: 1-365. Standaard: 3. Wordt eenmaal per dag uitgevoerd.",
               "nvr_quality": "**Auto** gebruikt de volledige kwaliteitsstream (inst=1, ~30 Mbps). **Laag** gebruikt de lage-bandbreedtestream (inst=4, ~2 Mbps) — bespaart ~90% schijfruimte ten koste van resolutie. Alleen LAN; de Cloud-relay ondersteunt inst=4 niet.",
               "nvr_preroll_seconds": "Bewaart een rollende buffer van dit aantal seconden in RAM (/dev/shm). Bij bewegingsdetectie wordt een clip gemaakt die deze pre-roll bevat. 0 = uitgeschakeld. Standaard: 0. RAM-gebruik: ~250 KB/s per camera.",
+              "nvr_postroll_seconds": "Neemt bij een bewegingsgebeurtenis dit aantal extra seconden live op en voegt ze toe aan de pre-roll-clip. 0 = uitgeschakeld (alleen pre-roll). Standaard: 0. Wordt alleen gebruikt wanneer de Mini-NVR-modus van de camera is ingesteld op 'Gebeurtenis-gebufferd (vooropname)'.",
               "nvr_preroll_cache_dir": "Map voor de pre-roll-segmentcache. Moet een tmpfs-mount (RAM-schijf) zijn — /dev/shm/bosch_nvr_cache is de standaard op Linux. Alleen wijzigen als /dev/shm niet beschikbaar is."
             }
           },

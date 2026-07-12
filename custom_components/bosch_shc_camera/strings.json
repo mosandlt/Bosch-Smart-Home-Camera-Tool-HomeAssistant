@@ -190,6 +190,7 @@
               "nvr_retention_days": "NVR retention (days)",
               "nvr_quality": "NVR recording quality",
               "nvr_preroll_seconds": "Pre-roll buffer (seconds)",
+              "nvr_postroll_seconds": "Post-roll capture (seconds)",
               "nvr_preroll_cache_dir": "Pre-roll cache directory"
             },
             "data_description": {
@@ -200,6 +201,7 @@
               "nvr_retention_days": "Delete NVR segments older than this many days. Range: 1-365. Default: 3. Runs once per day.",
               "nvr_quality": "**Auto** uses the full-quality stream (inst=1, ~30 Mbps). **Low** uses the low-bandwidth stream (inst=4, ~2 Mbps) — saves ~90% disk space at the cost of resolution. LAN-only; the cloud relay does not support inst=4.",
               "nvr_preroll_seconds": "Keep a rolling buffer of this many seconds in RAM (/dev/shm). When motion is detected, a motion clip is created that includes this pre-roll. 0 = disabled. Default: 0. RAM cost: ~250 KB/s per camera.",
+              "nvr_postroll_seconds": "Record this many extra seconds live after a motion event and append them to the pre-roll clip. 0 = disabled (pre-roll only). Default: 0. Only used when the camera's Mini-NVR mode select is set to \"Event-buffered (pre-roll)\".",
               "nvr_preroll_cache_dir": "Directory for the pre-roll segment cache. Must be a tmpfs mount (RAM disk) — /dev/shm/bosch_nvr_cache is the default on Linux. Change only if /dev/shm is not available."
             }
           },

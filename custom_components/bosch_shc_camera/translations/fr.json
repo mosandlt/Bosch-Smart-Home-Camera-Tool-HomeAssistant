@@ -190,6 +190,7 @@
               "nvr_retention_days": "Conservation NVR (jours)",
               "nvr_quality": "Qualité d'enregistrement NVR",
               "nvr_preroll_seconds": "Tampon pré-roll (secondes)",
+              "nvr_postroll_seconds": "Capture post-roll (secondes)",
               "nvr_preroll_cache_dir": "Répertoire du cache pré-roll"
             },
             "data_description": {
@@ -200,6 +201,7 @@
               "nvr_retention_days": "Suppression automatique des segments NVR plus anciens que ce nombre de jours. Plage : 1-365. Défaut : 3. S'exécute une fois par jour.",
               "nvr_quality": "**Auto** utilise le stream pleine qualité (inst=1, ~30 Mbps). **Basse** utilise le stream faible débit (inst=4, ~2 Mbps) — économise ~90 % d'espace disque au détriment de la résolution. LAN uniquement ; le relais Cloud ne supporte pas inst=4.",
               "nvr_preroll_seconds": "Conserve un tampon glissant de ce nombre de secondes en RAM (/dev/shm). Lors d'une détection de mouvement, un clip est créé incluant ce pré-roll. 0 = désactivé. Défaut : 0. Coût RAM : ~250 Ko/s par caméra.",
+              "nvr_postroll_seconds": "Enregistre en direct ce nombre de secondes supplémentaires après un événement de mouvement et les ajoute au clip pré-roll. 0 = désactivé (pré-roll uniquement). Défaut : 0. Utilisé uniquement lorsque le mode Mini-NVR de la caméra est réglé sur « Mis en mémoire tampon par événement (pré-enregistrement) ».",
               "nvr_preroll_cache_dir": "Répertoire du cache de segments pré-roll. Doit être un montage tmpfs (disque RAM) — /dev/shm/bosch_nvr_cache est le défaut sous Linux. Ne modifier que si /dev/shm n'est pas disponible."
             }
           },

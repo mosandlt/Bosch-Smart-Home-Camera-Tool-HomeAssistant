@@ -190,6 +190,7 @@
               "nvr_retention_days": "NVR 保留期限（天）",
               "nvr_quality": "NVR 录制质量",
               "nvr_preroll_seconds": "预录缓冲（秒）",
+              "nvr_postroll_seconds": "后录捕获（秒）",
               "nvr_preroll_cache_dir": "预录缓存目录"
             },
             "data_description": {
@@ -200,6 +201,7 @@
               "nvr_retention_days": "删除超过此天数的 NVR 片段。范围：1-365。默认值：3。每天运行一次。",
               "nvr_quality": "**Auto** 使用全质量流（inst=1，约 30 Mbps）。**Low** 使用低带宽流（inst=4，约 2 Mbps） — 以分辨率为代价节省约 90% 磁盘空间。仅限 LAN；云端中继不支持 inst=4。",
               "nvr_preroll_seconds": "在 RAM（/dev/shm）中保留此秒数的滚动缓冲。检测到运动时，将创建包含此预录内容的运动片段。0 = 禁用。默认值：0。RAM 消耗：每台摄像头约 250 KB/s。",
+              "nvr_postroll_seconds": "在运动事件发生后额外实时录制这些秒数，并附加到预录片段。0 = 禁用（仅预录）。默认值：0。仅当摄像头的 Mini-NVR 模式选择为“事件缓冲（预录）”时才会使用。",
               "nvr_preroll_cache_dir": "预录片段缓存目录。必须是 tmpfs 挂载（RAM 磁盘） — Linux 上默认为 /dev/shm/bosch_nvr_cache。仅在 /dev/shm 不可用时更改。"
             }
           },

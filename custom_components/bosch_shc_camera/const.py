@@ -94,6 +94,9 @@ TIMEOUT_RECORDER_GRACE = 20.0
 TIMEOUT_RECORDER_KILL_WAIT = 2.0
 TIMEOUT_RECORDER_STDERR_DRAIN = 1.0
 TIMEOUT_RECORDER_FFMPEG_INIT = 30.0
+# Extra grace on top of nvr_postroll_seconds when waiting for the postroll
+# capture ffmpeg to exit on its own -t deadline (RTSP handshake + flush).
+TIMEOUT_RECORDER_POSTROLL_GRACE = 10.0
 
 # tls_proxy.py — TCP connect to camera + RTSP pre-warm DESCRIBE response wait.
 TIMEOUT_TLS_PROXY_CONNECT = 10
@@ -186,6 +189,7 @@ DEFAULT_OPTIONS = {
     # Phase 4: pre-roll buffer — 0 = disabled; 10-60 s = keep rolling cache in tmpfs
     "nvr_preroll_seconds": 0,
     "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",  # noqa: S108 # default tmpfs cache dir, overridable via config options
+    "nvr_postroll_seconds": 0,
     "enable_go2rtc": True,
     # Green IT (power/bandwidth saving). Currently: the idle-session reaper tears
     # a camera's live session down once nobody is watching it for

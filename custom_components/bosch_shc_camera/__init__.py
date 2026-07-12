@@ -1148,6 +1148,11 @@ class BoschCameraCoordinator(
         # _live_connections[cam_id] — closes the remaining race window from
         # issue #42 rather than only tolerating its 401 symptom.
         self._nvr_recorder_locks: dict[str, asyncio.Lock] = {}
+        # _nvr_clip_assembly_locks: per-camera lock guarding
+        # recorder.assemble_and_ship_motion_clip — prevents overlapping FCM
+        # events for the same camera from racing the concat-file write
+        # (issue #43 follow-up, event_buffered mode).
+        self._nvr_clip_assembly_locks: dict[str, asyncio.Lock] = {}
         self._last_nvr_cleanup: float = float(
             "-inf"
         )  # float('-inf') → runs on first tick
@@ -3120,6 +3125,10 @@ class BoschCameraCoordinator(
     def _get_nvr_recorder_lock(self, cam_id: str) -> asyncio.Lock:
         """Get or create per-camera Mini-NVR recorder-spawn lock."""
         return get_or_create_lock(self._nvr_recorder_locks, cam_id)
+
+    def _get_nvr_clip_assembly_lock(self, cam_id: str) -> asyncio.Lock:
+        """Get or create per-camera Mini-NVR motion-clip-assembly lock."""
+        return get_or_create_lock(self._nvr_clip_assembly_locks, cam_id)
 
     def _get_session(self, cam_id: str) -> CameraSessionState:
         """Get or create per-camera session bookkeeping (generation counter,

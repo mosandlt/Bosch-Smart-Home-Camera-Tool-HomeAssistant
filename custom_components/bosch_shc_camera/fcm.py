@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 import aiohttp
 
 from .cloud_ssl import async_get_bosch_cloud_session
+from .recorder import assemble_and_ship_motion_clip, should_record
 from .snapshot_store import save_snapshot
 
 # ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
@@ -1254,6 +1255,43 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
                     coordinator.hass.bus.async_fire(
                         "bosch_shc_camera_person", event_payload
                     )
+
+                # Mini-NVR event_buffered clip assembly (issue #43 follow-up,
+                # realKim-dotcom): on a movement/person event for a camera in
+                # event_buffered mode with the NVR switch ON and LOCAL, assemble
+                # the pre-roll(+post-roll) clip and drop it into the NVR staging
+                # tree so the existing drain watcher ships it. Independent of the
+                # notification switches below — a user may want clips without
+                # push alerts (or vice versa).
+                #
+                # Defensive against minimal test-fixture coordinators (no
+                # `__init__`) that don't define `get_nvr_mode` — mirrors the
+                # `_is_rcp_lan_denied` pattern elsewhere in this integration:
+                # treat "no Mini-NVR support on this stub" as "nothing to do"
+                # rather than raising.
+                _get_nvr_mode = getattr(coordinator, "get_nvr_mode", None)
+                if (
+                    event_type in ("MOVEMENT", "PERSON")
+                    and callable(_get_nvr_mode)
+                    and _get_nvr_mode(cam_id) == "event_buffered"
+                ):
+                    _nvr_opts = coordinator.options
+                    if (
+                        _nvr_opts.get("enable_nvr")
+                        and (
+                            int(_nvr_opts.get("nvr_preroll_seconds") or 0) > 0
+                            or int(_nvr_opts.get("nvr_postroll_seconds") or 0) > 0
+                        )
+                    ) and should_record(
+                        coordinator,
+                        cam_id,
+                        switch_on=coordinator._nvr_user_intent.get(cam_id, False),
+                    ):
+                        _clip_task = coordinator.hass.async_create_task(
+                            assemble_and_ship_motion_clip(coordinator, cam_id)
+                        )
+                        coordinator._bg_tasks.add(_clip_task)
+                        _clip_task.add_done_callback(coordinator._bg_tasks.discard)
 
                 # Check notification switches before sending alert.
                 # Master switch (switch.bosch_{name}_notifications) must be ON,

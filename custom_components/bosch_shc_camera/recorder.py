@@ -34,6 +34,7 @@ from .const import (
     TIMEOUT_RECORDER_FFMPEG_INIT,
     TIMEOUT_RECORDER_GRACE,
     TIMEOUT_RECORDER_KILL_WAIT,
+    TIMEOUT_RECORDER_POSTROLL_GRACE,
     TIMEOUT_RECORDER_STDERR_DRAIN,
 )
 from .smb import _safe_name
@@ -363,7 +364,10 @@ async def start_preroll_recorder(
     coordinator: BoschCameraCoordinator, cam_id: str
 ) -> None:
     """Spawn parallel pre-roll ffmpeg for one camera to tmpfs."""
-    await stop_preroll_recorder(coordinator, cam_id)
+    # This is a respawn (fresh creds / restart), not a genuine stop — keep
+    # the accumulated ring buffer instead of wiping it (see prune_cache
+    # docstring on stop_preroll_recorder).
+    await stop_preroll_recorder(coordinator, cam_id, prune_cache=False)
 
     live = coordinator._live_connections.get(cam_id, {})
     if live.get("_connection_type") != "LOCAL":
@@ -436,9 +440,22 @@ async def start_preroll_recorder(
 
 
 async def stop_preroll_recorder(
-    coordinator: BoschCameraCoordinator, cam_id: str
+    coordinator: BoschCameraCoordinator, cam_id: str, *, prune_cache: bool = True
 ) -> None:
-    """Stop pre-roll recorder for one camera."""
+    """Stop pre-roll recorder for one camera and clear its tmpfs ring cache.
+
+    Leftover segments from the just-stopped ring buffer are unlinked so they
+    don't sit in ``/dev/shm`` until the next ``start_preroll_recorder()``
+    happens to overwrite them (issue #43 follow-up, realKim-dotcom).
+
+    ``prune_cache=False`` is used by ``start_preroll_recorder``'s own leading
+    self-call (a respawn, e.g. LOCAL session/cred-rotation renewal) so the
+    ring buffer keeps its accumulated context across a restart instead of
+    being wiped to empty every renewal — a bug-hunt finding from the same
+    issue #43 follow-up: an unconditional wipe here fired on every renewal
+    (via ``start_recorder``'s own leading ``stop_recorder`` call), not just
+    genuine stops, defeating the pre-roll buffer's purpose.
+    """
     # Cancel the periodic prune watcher first.
     tasks = getattr(coordinator, "_nvr_preroll_tasks", {})
     watcher = tasks.pop(cam_id, None)
@@ -447,25 +464,39 @@ async def stop_preroll_recorder(
 
     coordinator._nvr_preroll_segment_counts.pop(cam_id, None)
     proc = coordinator._nvr_preroll_processes.pop(cam_id, None)
-    if proc is None:
-        return
-    if proc.returncode is not None:
-        return
-    try:
-        proc.send_signal(signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=_STOP_GRACE_SECONDS)
-    except TimeoutError:
+    if proc is not None and proc.returncode is None:
         try:
-            proc.kill()
+            proc.send_signal(signal.SIGTERM)
         except ProcessLookupError:
-            pass
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=TIMEOUT_RECORDER_KILL_WAIT)
-        except TimeoutError:
-            pass
+            proc = None
+        else:
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=_STOP_GRACE_SECONDS)
+            except TimeoutError:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(
+                        proc.wait(), timeout=TIMEOUT_RECORDER_KILL_WAIT
+                    )
+                except TimeoutError:
+                    pass
+
+    if not prune_cache:
+        return
+
+    opts = coordinator.options
+    cache_dir = (
+        opts.get("nvr_preroll_cache_dir") or "/dev/shm/bosch_nvr_cache"  # noqa: S108 # tmpfs NVR cache default, user-overridable via options
+    ).strip()
+    cam_name = coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
+    cam_dir = _preroll_dir(cache_dir, cam_name)
+    try:
+        await coordinator.hass.async_add_executor_job(prune_preroll_cache, cam_dir, 0)
+    except Exception:  # best-effort cleanup; non-fatal if cache dir missing  # noqa: S110 # best-effort ring cleanup on stop, non-fatal if dir missing
+        pass
 
 
 async def stop_all_preroll(coordinator: BoschCameraCoordinator) -> None:
@@ -512,14 +543,26 @@ def create_motion_clip_args(preroll_paths: list[str], output_path: str) -> list[
 
 
 async def create_motion_clip(
-    coordinator: BoschCameraCoordinator, cam_id: str, output_path: str
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    output_path: str,
+    *,
+    extra_segments: list[str] | None = None,
 ) -> bool:
-    """Concatenate available pre-roll segments into output_path. Returns True on success."""
+    """Concatenate available pre-roll segments into output_path.
+
+    ``extra_segments`` (optional) are appended, in order, after the pre-roll
+    segments — used for the post-roll capture file (issue #43 follow-up) so
+    a single clip covers both sides of the event without a second ffmpeg
+    pass. Returns True on success.
+    """
     paths = await coordinator.hass.async_add_executor_job(
         list_preroll_files,
         coordinator,
         cam_id,
     )
+    if extra_segments:
+        paths = [*paths, *extra_segments]
     if not paths:
         _LOGGER.debug("NVR motion clip: no pre-roll segments for %s", cam_id[:8])
         return False
@@ -586,6 +629,211 @@ async def create_motion_clip(
     return True
 
 
+# ── Phase 5: post-roll capture + event→clip assembly (issue #43) ────────────
+
+
+def _build_postroll_capture_args(
+    rtsp_url: str, output_path: str, duration_secs: int
+) -> list[str]:
+    """ffmpeg argv for a single-shot fixed-duration live capture.
+
+    Used to record the post-roll window right after an FCM motion event —
+    ``-t`` makes ffmpeg exit on its own once the window has elapsed, no
+    external signal needed. ``-c copy`` — no transcoding, matches every
+    other recorder path in this module.
+    """
+    return [
+        "ffmpeg",
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "warning",
+        "-rtsp_transport",
+        "tcp",
+        "-i",
+        rtsp_url,
+        "-map",
+        "0",
+        "-c",
+        "copy",
+        "-t",
+        str(duration_secs),
+        "-movflags",
+        "+faststart",
+        "-y",
+        output_path,
+    ]
+
+
+async def _capture_postroll(
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    output_path: str,
+    duration_secs: int,
+) -> bool:
+    """Record ``duration_secs`` of live LOCAL stream to ``output_path``.
+
+    Returns True on success (rc=0 and file exists). Best-effort: any failure
+    (camera not LOCAL, ffmpeg missing, timeout) just means the resulting clip
+    falls back to pre-roll-only — never blocks or raises into the caller.
+    """
+    live = coordinator._live_connections.get(cam_id, {})
+    if live.get("_connection_type") != "LOCAL":
+        return False
+    rtsp_url = live.get("rtspsUrl") or live.get("rtspUrl") or ""
+    if not rtsp_url.startswith("rtsp://"):
+        return False
+
+    args = _build_postroll_capture_args(rtsp_url, output_path, duration_secs)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        _LOGGER.error("NVR post-roll capture: ffmpeg not found on PATH")
+        return False
+    except OSError as err:
+        _LOGGER.warning("NVR post-roll capture: ffmpeg spawn failed: %s", err)
+        return False
+
+    try:
+        _, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=duration_secs + TIMEOUT_RECORDER_POSTROLL_GRACE,
+        )
+    except TimeoutError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        _LOGGER.warning("NVR post-roll capture: ffmpeg timed out for %s", cam_id[:8])
+        return False
+
+    if proc.returncode != 0:
+        tail = (stderr_bytes or b"").decode("utf-8", errors="replace").strip()[-300:]
+        _LOGGER.warning(
+            "NVR post-roll capture: ffmpeg rc=%d for %s. Tail: %s",
+            proc.returncode,
+            cam_id[:8],
+            tail,
+        )
+        return False
+    return True
+
+
+async def assemble_and_ship_motion_clip(
+    coordinator: BoschCameraCoordinator, cam_id: str
+) -> bool:
+    """On an FCM motion/person event, assemble a pre-roll(+post-roll) clip
+    for a camera running in `event_buffered` Mini-NVR mode and drop it into
+    the staging tree so the existing drain watcher promotes/uploads it like
+    any continuous-mode segment.
+
+    Guarded by a per-camera lock so overlapping FCM events don't race the
+    concat-file write for the same camera; if an assembly is already in
+    flight for this camera the new one is skipped rather than queued (a
+    burst of events during one ongoing motion episode should not pile up
+    redundant, mostly-overlapping clips). Returns True iff a clip was
+    written to staging.
+    """
+    lock = coordinator._get_nvr_clip_assembly_lock(cam_id)
+    if lock.locked():
+        _LOGGER.debug(
+            "NVR motion clip: assembly already in progress for %s, skipping",
+            cam_id[:8],
+        )
+        return False
+
+    async with lock:
+        opts = coordinator.options
+        base_path = (opts.get("nvr_base_path") or DEFAULT_BASE_PATH).strip()
+        cam_name = coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
+        now = datetime.datetime.now(UTC)
+        date_str = now.strftime("%Y-%m-%d")
+        # Microsecond precision (not just HH-MM-SS): two motion events for
+        # the same camera within the same wall-clock second would otherwise
+        # collide on the output filename and the second ffmpeg -y silently
+        # overwrites the first clip (bug-hunt finding, issue #43 follow-up).
+        fname = now.strftime("%H-%M-%S-%f") + "_motion.mp4"
+        staging_cam = _staging_dir(base_path, cam_name)
+        dest_dir = os.path.join(staging_cam, date_str)
+        output_path = os.path.join(dest_dir, fname)
+
+        postroll_secs = int(opts.get("nvr_postroll_seconds") or 0)
+        extra_segments: list[str] | None = None
+        # NOT `_preroll_dir()` — that directory is scanned wholesale by
+        # `list_preroll_files`/`_list_preroll_segments` with no filename
+        # filter. Writing the post-roll capture there made it get picked up
+        # as an extra "pre-roll" segment and concatenated into the clip
+        # TWICE (bug-hunt finding, issue #43 follow-up). A dedicated sibling
+        # directory keeps it invisible to the ring scan.
+        postroll_tmp: str | None = None
+        if postroll_secs > 0:
+            cache_dir = (
+                opts.get("nvr_preroll_cache_dir") or "/dev/shm/bosch_nvr_cache"  # noqa: S108 # tmpfs NVR cache default, user-overridable via options
+            ).strip()
+            postroll_dir = os.path.join(
+                cache_dir, "_postroll_tmp", _safe_name(cam_name)
+            )
+            postroll_tmp = os.path.join(postroll_dir, fname)
+            try:
+                await coordinator.hass.async_add_executor_job(
+                    os.makedirs, postroll_dir, 0o755, True
+                )
+            except OSError as err:
+                _LOGGER.warning(
+                    "NVR motion clip: cannot create postroll temp dir for %s: %s",
+                    cam_name,
+                    err,
+                )
+                postroll_tmp = None
+            if postroll_tmp is not None and await _capture_postroll(
+                coordinator, cam_id, postroll_tmp, postroll_secs
+            ):
+                extra_segments = [postroll_tmp]
+            # else: capture failed — `postroll_tmp` is deliberately kept
+            # (not cleared) so the `finally` block below still unlinks any
+            # partial file ffmpeg wrote before failing (bug-hunt finding:
+            # previously this branch discarded the path, leaking the file).
+
+        try:
+            try:
+                await coordinator.hass.async_add_executor_job(
+                    os.makedirs, dest_dir, 0o755, True
+                )
+            except OSError as err:
+                _LOGGER.warning(
+                    "NVR motion clip: cannot create staging dir for %s: %s",
+                    cam_name,
+                    err,
+                )
+                return False
+
+            shipped = await create_motion_clip(
+                coordinator, cam_id, output_path, extra_segments=extra_segments
+            )
+        finally:
+            if postroll_tmp is not None:
+                try:
+                    await coordinator.hass.async_add_executor_job(
+                        os.unlink, postroll_tmp
+                    )
+                except OSError:
+                    pass
+
+        if shipped:
+            _LOGGER.info(
+                "NVR motion clip assembled for %s -> %s (postroll=%ds)",
+                cam_name,
+                output_path,
+                postroll_secs if extra_segments else 0,
+            )
+        return shipped
+
+
 def should_record(
     coordinator: BoschCameraCoordinator,
     cam_id: str,
@@ -635,7 +883,9 @@ async def start_recorder(
     it, since those are legitimate "give this a fresh budget" moments.
     """
     # Replace any pre-existing recorder (cred rotation, switch re-toggle).
-    await stop_recorder(coordinator, cam_id)
+    # This is a respawn, not a genuine stop — keep the pre-roll ring buffer
+    # instead of wiping it (issue #43 follow-up bug-hunt finding).
+    await stop_recorder(coordinator, cam_id, prune_preroll_cache=False)
 
     live = coordinator._live_connections.get(cam_id, {})
     if live.get("_connection_type") != "LOCAL":
@@ -680,6 +930,11 @@ async def start_recorder(
         preroll_secs = int(opts.get("nvr_preroll_seconds") or 0)
         if preroll_secs > 0:
             await start_preroll_recorder(coordinator, cam_id)
+            # Push an immediate entity update so `mini_nvr_state`'s
+            # preroll_running/preroll_segments attributes reflect reality the
+            # instant the ring spawns, instead of waiting for the next
+            # coordinator tick (issue #43 follow-up, realKim-dotcom).
+            coordinator.async_update_listeners()
         return
 
     base_path = (opts.get("nvr_base_path") or DEFAULT_BASE_PATH).strip()
@@ -789,9 +1044,20 @@ async def start_recorder(
         await start_preroll_recorder(coordinator, cam_id)
 
 
-async def stop_recorder(coordinator: BoschCameraCoordinator, cam_id: str) -> None:
-    """Stop the recorder for one camera, giving ffmpeg up to 5 s to flush MP4."""
-    await stop_preroll_recorder(coordinator, cam_id)
+async def stop_recorder(
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    *,
+    prune_preroll_cache: bool = True,
+) -> None:
+    """Stop the recorder for one camera, giving ffmpeg up to 5 s to flush MP4.
+
+    ``prune_preroll_cache=False`` passes through to ``stop_preroll_recorder``
+    — used by ``start_recorder``'s own leading self-call (a respawn, not a
+    genuine stop) so a LOCAL session/cred-rotation renewal doesn't wipe the
+    pre-roll ring buffer every time (issue #43 follow-up bug-hunt finding).
+    """
+    await stop_preroll_recorder(coordinator, cam_id, prune_cache=prune_preroll_cache)
     proc = coordinator._nvr_processes.pop(cam_id, None)
     if proc is None:
         return

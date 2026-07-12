@@ -124,6 +124,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "nvr_retention_days",
         "nvr_quality",
         "nvr_preroll_seconds",
+        "nvr_postroll_seconds",
         "nvr_preroll_cache_dir",
     ],
     # NOTE: literal strings here (not the CONF_* constants) — this dict
@@ -1211,6 +1212,10 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     vol.Optional(
                         "nvr_preroll_seconds",
                         default=int(opts.get("nvr_preroll_seconds", 0)),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
+                    vol.Optional(
+                        "nvr_postroll_seconds",
+                        default=int(opts.get("nvr_postroll_seconds", 0)),
                     ): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
                     vol.Optional(
                         "nvr_preroll_cache_dir",

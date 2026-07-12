@@ -1248,9 +1248,9 @@ cameras:
 
 #### Event-Buffer-Only Mode
 
-Set `nvr_event_only: true` in the options to run **only** the pre-roll ring buffer without 24/7 continuous recording. FFmpeg writes 10-second segments to the cache; on FCM motion the cached segments are assembled into a clip. Disk usage is negligible (a few MB per camera).
+Set `nvr_event_only: true` (or set a camera's Mini-NVR mode `select` entity to `event_buffered`) to run **only** the pre-roll ring buffer without 24/7 continuous recording. FFmpeg writes 10-second segments to the cache; on an FCM movement/person event the cached segments are assembled into a clip (optionally extended with a live-captured `nvr_postroll_seconds` window) and dropped into the NVR staging tree, where it's shipped exactly like a continuous-mode segment (local / SMB / FTP, per `nvr_storage_target`). Disk usage is negligible (a few MB per camera in the RAM ring; the assembled clip itself lands in normal NVR storage).
 
-Requires `nvr_preroll_seconds > 0`. The main continuous recorder is skipped — no 5-minute segments are written to `nvr_base_path`.
+Requires `nvr_preroll_seconds > 0` and/or `nvr_postroll_seconds > 0` — at least one must be non-zero or there is nothing to assemble. The main continuous recorder is skipped — no 5-minute segments are written to `nvr_base_path`.
 
 #### Automation Examples
 

@@ -2286,6 +2286,199 @@ class TestPathAMovement:
         cam_entity._async_trigger_image_refresh.assert_called_once_with(delay=0)
 
 
+def _make_nvr_push_coord(
+    *,
+    mode: str = "event_buffered",
+    switch_on: bool = True,
+    preroll_seconds: int = 30,
+    postroll_seconds: int = 0,
+    conn_type: str = "LOCAL",
+    online: bool = True,
+    enable_nvr: bool = True,
+    **overrides: Any,
+) -> Any:
+    """`_make_push_coord` extended with the Mini-NVR fields the new
+    event_buffered clip-assembly dispatch hook in `async_handle_fcm_push`
+    reads (issue #43 follow-up)."""
+    coord = _make_push_coord(**overrides)
+    coord.options = {
+        "enable_nvr": enable_nvr,
+        "nvr_preroll_seconds": preroll_seconds,
+        "nvr_postroll_seconds": postroll_seconds,
+    }
+    coord.get_nvr_mode = MagicMock(return_value=mode)
+    coord._nvr_user_intent = {CAM_ID: switch_on}
+    coord._live_connections = {CAM_ID: {"_connection_type": conn_type}}
+    coord.is_camera_online = MagicMock(return_value=online)
+    return coord
+
+
+class TestNvrEventBufferedClipDispatch:
+    """FCM movement/person event -> Mini-NVR event_buffered clip assembly
+    dispatch (issue #43 follow-up, realKim-dotcom): create_motion_clip()
+    previously had zero call sites anywhere in the integration."""
+
+    async def _fire_movement(self, coord) -> None:
+        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+
+        session = MagicMock()
+        session.get = MagicMock(
+            return_value=_resp_cm(
+                200, json_data=_one_event("new-evt", event_type="MOVEMENT")
+            )
+        )
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(
+                f"{MODULE}.asyncio.timeout",
+                return_value=MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()),
+            ),
+        ):
+            await async_handle_fcm_push(coord)
+
+    @pytest.mark.asyncio
+    async def test_event_buffered_switch_on_schedules_assembly(self) -> None:
+        coord = _make_nvr_push_coord(
+            _last_event_ids={CAM_ID: "old-evt"}, _camera_entities={}
+        )
+        with patch(
+            f"{MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)
+        mock_assemble.assert_called_once_with(coord, CAM_ID)
+        coord.hass.async_create_task.assert_any_call("stub-coro")
+
+    @pytest.mark.asyncio
+    async def test_continuous_mode_not_scheduled(self) -> None:
+        """mode='continuous' — the always-on recorder already handles this
+        camera; no separate clip assembly needed."""
+        coord = _make_nvr_push_coord(
+            mode="continuous", _last_event_ids={CAM_ID: "old-evt"}, _camera_entities={}
+        )
+        with patch(
+            f"{MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)
+        mock_assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_switch_off_not_scheduled(self) -> None:
+        coord = _make_nvr_push_coord(
+            switch_on=False,
+            _last_event_ids={CAM_ID: "old-evt"},
+            _camera_entities={},
+        )
+        with patch(
+            f"{MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)
+        mock_assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_enable_nvr_false_not_scheduled(self) -> None:
+        """Mini-NVR feature itself disabled (`enable_nvr=False`) — defense
+        in depth: even if mode/switch state somehow looked event_buffered
+        + on, the feature-level gate must win (bug-hunt finding, issue #43
+        follow-up)."""
+        coord = _make_nvr_push_coord(
+            enable_nvr=False,
+            _last_event_ids={CAM_ID: "old-evt"},
+            _camera_entities={},
+        )
+        with patch(
+            f"{MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)
+        mock_assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_preroll_and_postroll_both_zero_not_scheduled(self) -> None:
+        """Nothing configured to assemble from → skip, don't spawn ffmpeg
+        for an empty clip."""
+        coord = _make_nvr_push_coord(
+            preroll_seconds=0,
+            postroll_seconds=0,
+            _last_event_ids={CAM_ID: "old-evt"},
+            _camera_entities={},
+        )
+        with patch(
+            f"{MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)
+        mock_assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_postroll_only_configured_still_scheduled(self) -> None:
+        """preroll=0 but postroll>0 — a post-roll-only clip is still valid,
+        must not be skipped."""
+        coord = _make_nvr_push_coord(
+            preroll_seconds=0,
+            postroll_seconds=15,
+            _last_event_ids={CAM_ID: "old-evt"},
+            _camera_entities={},
+        )
+        with patch(
+            f"{MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)
+        mock_assemble.assert_called_once_with(coord, CAM_ID)
+
+    @pytest.mark.asyncio
+    async def test_not_local_not_scheduled(self) -> None:
+        """Camera on cloud relay (REMOTE) — LAN-only gate applies to event
+        clip assembly the same as continuous recording."""
+        coord = _make_nvr_push_coord(
+            conn_type="REMOTE",
+            _last_event_ids={CAM_ID: "old-evt"},
+            _camera_entities={},
+        )
+        with patch(
+            f"{MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)
+        mock_assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_camera_offline_not_scheduled(self) -> None:
+        coord = _make_nvr_push_coord(
+            online=False,
+            _last_event_ids={CAM_ID: "old-evt"},
+            _camera_entities={},
+        )
+        with patch(
+            f"{MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)
+        mock_assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_missing_get_nvr_mode_on_stub_coordinator_no_crash(self) -> None:
+        """Minimal test-fixture coordinators without `get_nvr_mode` (most of
+        this file's other push-coord factories) must not raise — mirrors the
+        `_is_rcp_lan_denied` defensive-getattr pattern elsewhere."""
+        coord = _make_push_coord(
+            _last_event_ids={CAM_ID: "old-evt"}, _camera_entities={}
+        )
+        assert not hasattr(coord, "get_nvr_mode")
+        with patch(
+            f"{MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)  # must not raise
+        mock_assemble.assert_not_called()
+
+
 class TestPathAPersonEvent:
     """PERSON event → _async_trigger_image_refresh called exactly once."""
 
