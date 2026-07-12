@@ -2,7 +2,19 @@
 
 Recent releases. Full changelog: [`CHANGELOG.md`](../CHANGELOG.md) or [GitHub Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases).
 
-## Card v14.1.6 — 2026-07-12 (not yet released — local main only, per Thomas's "bundle everything for next release")
+## v14.8.0 — 2026-07-12
+
+Minor — two feature requests from realKim-dotcom's `#43` follow-up feedback on v14.7.1, both opt-in and backward compatible. Bundled with the already-committed card i18n fix below (NEXT_RELEASE_BUNDLE_EVERYTHING).
+
+New `nvr_finalize_ring_on_event` option (default off): normally the ring's actively-written newest pre-roll segment is always dropped before assembling an FCM-triggered clip (it may not have a finalized moov atom yet), costing the ~0-10s of footage closest to the trigger moment. When enabled, the ring is briefly stop-finalized (SIGTERM, confirmed clean exit) and immediately restarted, so that segment can be safely re-attached instead of discarded — at the cost of a small (~1s) ring-coverage gap per event. Mirrors realKim-dotcom's own fork.
+
+New per-camera `Mini-NVR event clip` switch (default ON, hidden by default): lets installs that orchestrate their own clip-saving externally (e.g. HA automations driving `continuous` mode for the whole motion window) opt out of the integration's own native FCM-triggered clip per camera, without affecting the underlying pre-roll ring other consumers rely on.
+
+THREE_PER_ISSUE_PER_CHANGE 3-agent bug-hunt found and fixed two real issues: the finalized segment was initially handed back from inside the ring's own cache directory, letting `list_preroll_files()` pick it up a second time and concatenate it into the clip twice once newer segments made it no longer "the newest" (fixed by relocating it to a dedicated directory first, mirroring the existing postroll-file fix); and the new switch's restore-on-restart logic wrote `False` for any non-"on" persisted state, including HA's own "unavailable" placeholder, silently disabling a default-enabled feature after a coordinator hiccup at shutdown (fixed to only act on an explicit "on"/"off").
+
+5964+ pytest / mypy --strict / ruff / codespell clean.
+
+## Card v14.1.6 — 2026-07-12
 
 Patch — card i18n regression fixed (GitHub #45, realKim-dotcom): ~90 static UI labels (accordion headers, light/notification/diagnostics controls, service-row buttons, tooltips/aria-labels) were hardcoded German and ignored `hass.language`, even though the card ships a working `_t()`/`CARD_I18N` i18n system with 11 locale blocks. Re-keyed every string the reporter listed (plus several more found in the same investigation) through `_t()`, adding 81 new keys translated across all 11 locales (de/en/es/fr/it/nl/pl/pt/ru/uk/zh-Hans).
 

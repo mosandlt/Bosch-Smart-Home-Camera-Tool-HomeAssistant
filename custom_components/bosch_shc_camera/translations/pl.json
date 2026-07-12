@@ -191,7 +191,8 @@
               "nvr_quality": "Jakość nagrywania NVR",
               "nvr_preroll_seconds": "Bufor pre-roll (sekundy)",
               "nvr_postroll_seconds": "Przechwytywanie post-roll (sekundy)",
-              "nvr_preroll_cache_dir": "Katalog pamięci podręcznej pre-roll"
+              "nvr_preroll_cache_dir": "Katalog pamięci podręcznej pre-roll",
+              "nvr_finalize_ring_on_event": "Odzyskaj najnowszy segment pre-roll przy zdarzeniu"
             },
             "data_description": {
               "enable_nvr": "Ciągle nagrywaj strumień LOCAL każdej kamery na dysk w 5-minutowych segmentach MP4. Tylko LAN — nagrywanie zatrzymuje się, gdy kamera jest na przekaźniku chmury. Dodaje przełącznik nagrywania na kamerę (domyślnie wyłączony; włączaj każdą kamerę indywidualnie). Wymaga ffmpeg.",
@@ -202,7 +203,8 @@
               "nvr_quality": "**Auto** używa strumienia pełnej jakości (inst=1, ~30 Mbps). **Low** używa strumienia o niskiej przepustowości (inst=4, ~2 Mbps) — oszczędza ~90% miejsca na dysku kosztem rozdzielczości. Tylko LAN; przekaźnik chmury nie obsługuje inst=4.",
               "nvr_preroll_seconds": "Przechowuj bufor kołowy tej liczby sekund w RAM (/dev/shm). Po wykryciu ruchu tworzony jest klip zawierający ten pre-roll. 0 = wyłączony. Domyślnie: 0. Koszt RAM: ~250 KB/s na kamerę.",
               "nvr_postroll_seconds": "Nagrywa na żywo tę dodatkową liczbę sekund po zdarzeniu ruchu i dołącza je do klipu pre-roll. 0 = wyłączone (tylko pre-roll). Domyślnie: 0. Używane tylko wtedy, gdy tryb Mini-NVR kamery jest ustawiony na \"Buforowany zdarzeniami (nagranie wstępne)\".",
-              "nvr_preroll_cache_dir": "Katalog dla pamięci podręcznej segmentów pre-roll. Musi być montem tmpfs (dysk RAM) — /dev/shm/bosch_nvr_cache jest domyślny na Linuksie. Zmień tylko jeśli /dev/shm jest niedostępny."
+              "nvr_preroll_cache_dir": "Katalog dla pamięci podręcznej segmentów pre-roll. Musi być montem tmpfs (dysk RAM) — /dev/shm/bosch_nvr_cache jest domyślny na Linuksie. Zmień tylko jeśli /dev/shm jest niedostępny.",
+              "nvr_finalize_ring_on_event": "Zwykle najnowszy segment pre-roll (~0-10s) jest odrzucany, ponieważ może być jeszcze nagrywany. Gdy WŁ., ten segment jest krótko finalizowany i ponownie dołączany przed wznowieniem bufora pierścieniowego, co kosztuje około 1 sekundy pokrycia na zdarzenie. Domyślnie: wyłączone."
             }
           },
           "webhook": {
@@ -412,6 +414,9 @@
       },
       "nvr_recording": {
         "name": "Nagrywanie Mini-NVR"
+      },
+      "nvr_event_clip": {
+        "name": "Klip zdarzenia Mini-NVR"
       },
       "external_stream": {
         "name": "Opublikuj zewnętrzny URL strumienia"

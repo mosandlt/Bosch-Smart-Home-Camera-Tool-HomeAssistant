@@ -1252,6 +1252,10 @@ Set `nvr_event_only: true` (or set a camera's Mini-NVR mode `select` entity to `
 
 Requires `nvr_preroll_seconds > 0` and/or `nvr_postroll_seconds > 0` — at least one must be non-zero or there is nothing to assemble. The main continuous recorder is skipped — no 5-minute segments are written to `nvr_base_path`.
 
+By default, the freshest ring segment (roughly the last 0-10s before the event) is dropped before assembly, since it may still be mid-write. Enable `nvr_finalize_ring_on_event` to recover it instead — the ring briefly stop-finalizes and restarts (costing a ~1s gap in coverage per event) so that segment can be safely re-attached.
+
+If you save clips your own way (e.g. via an HA automation), turn off the per-camera **Mini-NVR event clip** switch (default on, hidden by default — enable it from the camera device's entity list) to stop the integration producing its own native clip on top of yours. The pre-roll ring itself keeps running either way.
+
 #### Automation Examples
 
 **Away-mode: start recording when leaving home**
@@ -2187,11 +2191,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.5.13** — see the GitHub release page for full notes:
-[**v14.5.13 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.5.13)
+Latest: **v14.8.0** — see the GitHub release page for full notes:
+[**v14.8.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.8.0)
 
 | Version | Highlights |
 |---|---|
+| **v14.8.0** | **Two Mini-NVR event-clip feature requests, both opt-in.** A new option lets the pre-roll ring briefly finalize and re-attach its freshest segment on a motion event instead of always dropping it, recovering the last ~0-10s of footage closest to the trigger — at the cost of a small (~1s) gap in ring coverage per event. A new per-camera *Mini-NVR event clip* switch (default on) lets installs that already save clips their own way (e.g. via automations) turn off the integration's own native clip without affecting the shared pre-roll ring. |
 | **v14.5.13** | **Internal cleanup only, no user-facing change.** Continuation of the coordinator-rewrite work from v14.5.7-v14.5.10: the main coordinator class shrank from 9385 to 6636 lines, split into focused modules and mixins (token/auth lifecycle, FCM push, Frigate front-doors, SHC/cloud setters, HA service handlers, and the live-session-open logic). Live-verified end to end against a real camera (WebRTC, snapshot, privacy toggle, service call) before release. |
 | **v14.5.12** | **First-time setup: the native camera view no longer stays black until the "Live Stream" switch is toggled by hand.** Opening a fresh camera via Cast or the built-in HLS card already auto-started video on demand; the native WebRTC path used by Home Assistant's own more-info dialog and the Companion app did not — so a camera that had never had its switch manually turned on simply showed no video the first time. It now auto-starts the same way on every path. README also gets a new "Quick Start" section up front and a troubleshooting checklist for "I don't see any image / video". |
 | **v14.5.11** | **The Mini-NVR "recording"/"idle" sensor no longer lags behind reality.** It could show "idle" for up to ~20 seconds after recording had actually started, or "recording" for 1-2 minutes after it had actually stopped — the underlying state was always correct, it just wasn't pushed to Home Assistant until the next routine check. It now updates immediately at every real state change. |

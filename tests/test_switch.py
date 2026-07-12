@@ -2225,6 +2225,124 @@ class TestNvrSwitchIntent:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# NVR event-clip opt-out switch (issue #43 follow-up feature request,
+# realKim-dotcom) — default ON, per-camera opt-out of the native
+# FCM-triggered event→clip assembly.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _nvr_event_clip_coord(**overrides):
+    base = dict(
+        data={CAM_ID: {"info": _base_info()}},
+        _nvr_event_clip_enabled={},
+    )
+    base.update(overrides)
+    coord = SimpleNamespace(**base)
+    coord.get_nvr_event_clip_enabled = lambda cid: coord._nvr_event_clip_enabled.get(
+        cid, True
+    )
+    coord.set_nvr_event_clip_enabled = lambda cid, enabled: (
+        coord._nvr_event_clip_enabled.__setitem__(cid, enabled)
+    )
+    return coord
+
+
+class TestNvrEventClipSwitch:
+    """Default ON (backward compatible); OFF disables only the native
+    event→clip assembly, not the underlying pre-roll ring."""
+
+    def test_is_on_defaults_true(self):
+        from custom_components.bosch_shc_camera.switch import BoschNvrEventClipSwitch
+
+        coord = _nvr_event_clip_coord()
+        sw = BoschNvrEventClipSwitch(coord, CAM_ID, _stub_entry())
+        assert sw.is_on is True
+
+    @pytest.mark.asyncio
+    async def test_turn_off_sets_disabled(self):
+        from custom_components.bosch_shc_camera.switch import BoschNvrEventClipSwitch
+
+        coord = _nvr_event_clip_coord()
+        sw = BoschNvrEventClipSwitch(coord, CAM_ID, _stub_entry())
+        _bind_hass(sw)
+
+        await sw.async_turn_off()
+
+        assert coord._nvr_event_clip_enabled[CAM_ID] is False
+        assert sw.is_on is False
+        sw.async_write_ha_state.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_turn_on_after_off_restores_true(self):
+        from custom_components.bosch_shc_camera.switch import BoschNvrEventClipSwitch
+
+        coord = _nvr_event_clip_coord(_nvr_event_clip_enabled={CAM_ID: False})
+        sw = BoschNvrEventClipSwitch(coord, CAM_ID, _stub_entry())
+        _bind_hass(sw)
+
+        assert sw.is_on is False
+        await sw.async_turn_on()
+
+        assert coord._nvr_event_clip_enabled[CAM_ID] is True
+        assert sw.is_on is True
+
+    @pytest.mark.asyncio
+    async def test_restore_off_state_from_previous_session(self):
+        """async_added_to_hass must restore OFF — RestoreEntity persistence
+        across HA restarts, same discipline as BoschNvrRecordingSwitch."""
+        from custom_components.bosch_shc_camera.switch import BoschNvrEventClipSwitch
+
+        coord = _nvr_event_clip_coord()
+        sw = BoschNvrEventClipSwitch(coord, CAM_ID, _stub_entry())
+        _bind_hass(sw)
+        sw.async_get_last_state = AsyncMock(return_value=MagicMock(state="off"))
+
+        with patch.object(type(sw).__bases__[0], "async_added_to_hass", AsyncMock()):
+            await sw.async_added_to_hass()
+
+        assert sw.is_on is False
+
+    @pytest.mark.asyncio
+    async def test_restore_noop_when_no_previous_state_stays_default_true(self):
+        """No previous state (fresh install / entity never toggled) — must
+        stay at the coordinator's default (True), not silently flip to
+        False."""
+        from custom_components.bosch_shc_camera.switch import BoschNvrEventClipSwitch
+
+        coord = _nvr_event_clip_coord()
+        sw = BoschNvrEventClipSwitch(coord, CAM_ID, _stub_entry())
+        _bind_hass(sw)
+        sw.async_get_last_state = AsyncMock(return_value=None)
+
+        with patch.object(type(sw).__bases__[0], "async_added_to_hass", AsyncMock()):
+            await sw.async_added_to_hass()
+
+        assert sw.is_on is True
+        assert CAM_ID not in coord._nvr_event_clip_enabled
+
+    @pytest.mark.asyncio
+    async def test_restore_unavailable_state_does_not_disable(self):
+        """Regression (bug-hunt finding, issue #43 follow-up): HA persists
+        the restore-cache entry as "unavailable" if the coordinator's last
+        update failed at shutdown. Since this entity defaults to enabled,
+        blindly writing `last.state == "on"` for that case would silently
+        disable a feature the user never turned off — must be a no-op,
+        same as no previous state at all."""
+        from custom_components.bosch_shc_camera.switch import BoschNvrEventClipSwitch
+
+        coord = _nvr_event_clip_coord()
+        sw = BoschNvrEventClipSwitch(coord, CAM_ID, _stub_entry())
+        _bind_hass(sw)
+        sw.async_get_last_state = AsyncMock(return_value=MagicMock(state="unavailable"))
+
+        with patch.object(type(sw).__bases__[0], "async_added_to_hass", AsyncMock()):
+            await sw.async_added_to_hass()
+
+        assert sw.is_on is True
+        assert CAM_ID not in coord._nvr_event_clip_enabled
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # async_setup_entry — enable_snapshot_button option must not gate switches
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -7231,6 +7349,60 @@ class TestAsyncSetupEntry:
         ):
             await async_setup_entry(hass, stub_entry_sprintma, fake_add)
         assert not any(isinstance(e, BoschNvrRecordingSwitch) for e in added)
+
+    @pytest.mark.asyncio
+    async def test_creates_nvr_event_clip_switch_when_enabled(
+        self, stub_coord_sprintma, stub_entry_sprintma
+    ):
+        """BoschNvrEventClipSwitch added alongside BoschNvrRecordingSwitch
+        whenever enable_nvr=True (issue #43 follow-up feature request)."""
+        from custom_components.bosch_shc_camera.switch import (
+            BoschNvrEventClipSwitch,
+            async_setup_entry,
+        )
+
+        stub_entry_sprintma.options = {
+            "enable_snapshot_button": True,
+            "enable_nvr": True,
+        }
+        stub_entry_sprintma.runtime_data = stub_coord_sprintma
+        added = []
+
+        def fake_add(ents, **kw):
+            added.extend(ents)
+
+        hass = MagicMock()
+        with patch(
+            "custom_components.bosch_shc_camera.switch.get_options",
+            return_value=stub_entry_sprintma.options,
+        ):
+            await async_setup_entry(hass, stub_entry_sprintma, fake_add)
+        assert any(isinstance(e, BoschNvrEventClipSwitch) for e in added)
+
+    @pytest.mark.asyncio
+    async def test_skips_nvr_event_clip_switch_when_disabled(
+        self, stub_coord_sprintma, stub_entry_sprintma
+    ):
+        """NvrEventClipSwitch NOT added when enable_nvr=False, mirroring
+        BoschNvrRecordingSwitch's own gating."""
+        from custom_components.bosch_shc_camera.switch import (
+            BoschNvrEventClipSwitch,
+            async_setup_entry,
+        )
+
+        stub_entry_sprintma.runtime_data = stub_coord_sprintma
+        added = []
+
+        def fake_add(ents, **kw):
+            added.extend(ents)
+
+        hass = MagicMock()
+        with patch(
+            "custom_components.bosch_shc_camera.switch.get_options",
+            return_value=stub_entry_sprintma.options,
+        ):
+            await async_setup_entry(hass, stub_entry_sprintma, fake_add)
+        assert not any(isinstance(e, BoschNvrEventClipSwitch) for e in added)
 
     @pytest.mark.asyncio
     async def test_creates_indoor_privacy_sound_switch(

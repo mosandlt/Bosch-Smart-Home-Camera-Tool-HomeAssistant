@@ -126,6 +126,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "nvr_preroll_seconds",
         "nvr_postroll_seconds",
         "nvr_preroll_cache_dir",
+        "nvr_finalize_ring_on_event",
     ],
     # NOTE: literal strings here (not the CONF_* constants) — this dict
     # is built before the .const import at module load time.
@@ -1226,6 +1227,10 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                             )
                         },
                     ): str,
+                    vol.Optional(
+                        "nvr_finalize_ring_on_event",
+                        default=bool(opts.get("nvr_finalize_ring_on_event", False)),
+                    ): bool,
                 }
             ),
             {"collapsed": True},

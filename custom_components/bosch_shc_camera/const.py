@@ -190,6 +190,12 @@ DEFAULT_OPTIONS = {
     "nvr_preroll_seconds": 0,
     "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",  # noqa: S108 # default tmpfs cache dir, overridable via config options
     "nvr_postroll_seconds": 0,
+    # Opt-in: stop-finalize the ring's actively-written segment (SIGTERM,
+    # wait for moov atom) and re-attach it before dropping the newest
+    # segment on an FCM event, instead of always discarding it. Costs a
+    # small (~1s) ring gap per event. Default OFF — issue #43 follow-up
+    # feature request, realKim-dotcom.
+    "nvr_finalize_ring_on_event": False,
     "enable_go2rtc": True,
     # Green IT (power/bandwidth saving). Currently: the idle-session reaper tears
     # a camera's live session down once nobody is watching it for

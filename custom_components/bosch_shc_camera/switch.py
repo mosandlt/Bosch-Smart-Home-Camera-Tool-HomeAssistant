@@ -295,6 +295,11 @@ async def async_setup_entry(
         # Disabled by default; user enables in options, then toggles per camera.
         if opts.get("enable_nvr", False):
             entities.append(BoschNvrRecordingSwitch(coordinator, cam_id, config_entry))
+            # Opt-out for the native FCM-triggered event→clip assembly —
+            # default ON (backward compatible); installs that orchestrate
+            # their own clip-saving externally can turn this off per camera
+            # while the pre-roll ring keeps running for their own consumer.
+            entities.append(BoschNvrEventClipSwitch(coordinator, cam_id, config_entry))
         # External stream URL exposure — per-camera opt-in for Frigate / BlueIris users.
         # The switch is always registered (default OFF, disabled in entity registry by
         # default); user enables in HA UI per camera, then the two stream_url sensors
@@ -2376,6 +2381,69 @@ class BoschNvrRecordingSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
         _LOGGER.info("NVR OFF for %s", self._cam_title)
         self.coordinator._nvr_user_intent[self._cam_id] = False
         await self.coordinator.stop_recorder(self._cam_id)
+        self.async_write_ha_state()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschNvrEventClipSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc]
+    """Switch: ON (default) = assemble+ship a native clip on FCM motion/person
+    events while this camera is in ``event_buffered`` Mini-NVR mode.
+
+    Opt-out for installs that orchestrate their own clip-saving externally
+    (e.g. HA automations driving a fork's own service) and don't want a
+    second, native clip produced on top of theirs on every event (feature
+    request, realKim-dotcom, issue #43 follow-up). Turning this OFF only
+    skips `recorder.assemble_and_ship_motion_clip` — the underlying
+    pre-roll/post-roll ring buffer keeps running unaffected, since other
+    consumers (this switch's whole reason to exist) still need it.
+
+    Always available — unlike `BoschNvrRecordingSwitch` this does not gate
+    on the LAN-only recorder path; it purely toggles the FCM-event
+    dispatch, which is itself LAN-gated further downstream.
+
+    State persists across HA restarts via RestoreEntity, default ON if no
+    previous state (backward compatible with every install predating this
+    entity).
+    """
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id = f"bosch_shc_nvr_event_clip_{cam_id.lower()}"
+        self._attr_translation_key = "nvr_event_clip"
+        self._attr_entity_category = EntityCategory.CONFIG
+        # Opt-in visibility — hide from "default-enabled" entity list, same
+        # as BoschNvrRecordingSwitch; most installs never need to touch this.
+        self._attr_entity_registry_enabled_default = False
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.get_nvr_event_clip_enabled(self._cam_id))
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        # Only act on an explicit on/off — NOT "unavailable"/"unknown" (HA
+        # persists those to the restore cache if the coordinator's last
+        # update failed at shutdown). This entity defaults to enabled, so
+        # blindly writing `last.state == "on"` for a non-on state would
+        # silently disable a feature the user never turned off (bug-hunt
+        # finding, issue #43 follow-up — the inverse of the gotcha already
+        # solved on BoschNvrRecordingSwitch, whose default is off).
+        if last is not None and last.state in ("on", "off"):
+            self.coordinator.set_nvr_event_clip_enabled(
+                self._cam_id, last.state == "on"
+            )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        _LOGGER.info("NVR event clip ON for %s", self._cam_title)
+        self.coordinator.set_nvr_event_clip_enabled(self._cam_id, True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        _LOGGER.info("NVR event clip OFF for %s", self._cam_title)
+        self.coordinator.set_nvr_event_clip_enabled(self._cam_id, False)
         self.async_write_ha_state()
 
 

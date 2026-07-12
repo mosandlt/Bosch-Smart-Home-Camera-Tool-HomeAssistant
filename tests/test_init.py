@@ -10977,6 +10977,38 @@ class TestNvrModePreference:
         assert BoschCameraCoordinator.get_nvr_mode(coord, CAM_A) == "continuous"
 
 
+class TestNvrEventClipEnabled:
+    """get/set_nvr_event_clip_enabled — per-camera opt-out of the native
+    FCM-triggered event->clip assembly (issue #43 follow-up feature
+    request, realKim-dotcom)."""
+
+    def test_defaults_true_when_unset(self):
+        """Backward compatible: no prior state (fresh install, or install
+        predating this entity) → native assembly still runs by default."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_coordinator_pure_helpers(_nvr_event_clip_enabled={})
+        assert BoschCameraCoordinator.get_nvr_event_clip_enabled(coord, CAM_A) is True
+
+    def test_set_false_then_get_reflects_it(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_coordinator_pure_helpers(_nvr_event_clip_enabled={})
+        BoschCameraCoordinator.set_nvr_event_clip_enabled(coord, CAM_A, False)
+        assert coord._nvr_event_clip_enabled[CAM_A] is False
+        assert BoschCameraCoordinator.get_nvr_event_clip_enabled(coord, CAM_A) is False
+
+    def test_set_does_not_affect_other_cameras(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_coordinator_pure_helpers(_nvr_event_clip_enabled={})
+        BoschCameraCoordinator.set_nvr_event_clip_enabled(coord, CAM_A, False)
+        assert (
+            BoschCameraCoordinator.get_nvr_event_clip_enabled(coord, "cam-b-not-set")
+            is True
+        )
+
+
 class TestSettingsReaders:
     def test_motion_settings_empty_when_no_data(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator

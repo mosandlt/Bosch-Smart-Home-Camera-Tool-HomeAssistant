@@ -5,6 +5,31 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.8.0] - 2026-07-12
+
+Minor — two feature requests from realKim-dotcom's `#43` follow-up feedback on v14.7.1, both opt-in and backward compatible. Also bundles the card i18n fix already sitting on `main` (v14.1.6, see below).
+
+### Added
+
+- **Opt-in "recover freshest pre-roll segment" mode** (`nvr_finalize_ring_on_event` option, default off). Normally the ring's actively-written newest segment is always dropped before assembling an FCM-triggered clip, since it may not have a finalized moov atom yet — safe, but it can cost the ~0-10s of footage closest to the actual trigger moment, which is often the most valuable part of the clip. When enabled, the ring is briefly stop-finalized (SIGTERM, confirmed clean exit) and immediately restarted before the newest-segment cutoff is applied, so that segment can be safely re-attached instead of discarded — at the cost of a small (~1s) gap in ring coverage on every event. Mirrors the approach realKim-dotcom's own fork already uses.
+- **Per-camera opt-out of the native FCM-triggered clip** — new `Mini-NVR event clip` switch (default ON, hidden by default like the existing recording switch). Installs that orchestrate their own clip-saving externally (e.g. HA automations flipping the camera to `continuous` for the whole motion window) can turn this off per camera so the integration doesn't also produce its own shorter native clip on every event. Turning it off only skips the native clip assembly — the underlying pre-roll ring buffer keeps running unaffected for other consumers.
+
+A 3-agent bug-hunt (THREE_PER_ISSUE_PER_CHANGE) on the new code found and fixed two real issues before release: the finalized segment was initially returned from inside the ring's own cache directory, which let `list_preroll_files()`'s normal scan pick it back up and concatenate it into the clip a second time once newer segments made it no longer "the newest" (now relocated to a dedicated directory before being handed back, mirroring the fix already applied to the post-roll capture file); and the new opt-out switch's restore-on-restart logic wrote `False` for any non-"on" persisted state, including HA's own "unavailable" placeholder — silently disabling a feature that defaults to enabled after a coordinator hiccup at shutdown (now only acts on an explicit "on"/"off").
+
+5964+ pytest / mypy --strict / ruff / codespell clean.
+
+## Card v14.1.6 — 2026-07-12
+
+Patch — card i18n regression fixed (GitHub #45, realKim-dotcom): ~90 static UI labels (accordion headers, light/notification/diagnostics controls, service-row buttons, tooltips/aria-labels) were hardcoded German and ignored `hass.language`, even though the card ships a working `_t()`/`CARD_I18N` i18n system with 11 locale blocks. Re-keyed every string the reporter listed (plus several more found in the same investigation) through `_t()`, adding 81 new keys translated across all 11 locales (de/en/es/fr/it/nl/pl/pt/ru/uk/zh-Hans).
+
+Found and fixed two adjacent bugs in the same code while there:
+- The quality-select dropdown's `<option value="...">` attributes were the German display text (`"Hoch (30 Mbps)"` etc.), but the real backend HA select entity (`select.py`, `BoschVideoQualitySelect`) has canonical options `["auto","high","low"]` — a bug-hunt agent confirmed this made the dropdown non-functional end-to-end (HA core's `select.select_option` validates against the entity's declared options before the integration ever sees the call, so the old German-text value would have been rejected outright). Fixed by using the canonical values while keeping the visible text localized.
+- The Apple-style stream pill's `title` attribute was re-set to hardcoded German on every stream state change (`isStreaming ? "Live-Stream stoppen" : "Live-Stream starten"`), silently overwriting the already-localized title `_render()` set on mount — meaning any non-German user saw German the moment the stream state first changed after page load. New regression test pins this across three browsers.
+
+A 3-agent bug-hunt (THREE_PER_ISSUE_PER_CHANGE) on the diff found no hard bugs in the key-wiring itself (zero missing/typo'd keys across 93 call sites × 11 locales, zero duplicate keys, all placeholder tokens intact) but caught two real completeness gaps against the reporter's own list: the dynamic stream-pill title (fixed, see above) and the "Regel erstellen" create-rule dialog itself, which is deliberately scoped OUT as a documented follow-up (see TODO) since it's a separate dynamic-modal surface, not a `_render()` template label.
+
+234/234 Playwright e2e tests green (chromium/firefox/webkit), 0 new eslint/stylelint errors, 5964 pytest / mypy --strict / ruff / codespell clean.
+
 ## [v14.7.1] - 2026-07-12
 
 Patch — `event_buffered` Mini-NVR mode now actually assembles and ships motion clips, plus two correctness fixes for the pre-roll ring the feature reads from.

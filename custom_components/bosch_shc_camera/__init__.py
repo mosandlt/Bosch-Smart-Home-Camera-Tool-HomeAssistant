@@ -1153,6 +1153,13 @@ class BoschCameraCoordinator(
         # events for the same camera from racing the concat-file write
         # (issue #43 follow-up, event_buffered mode).
         self._nvr_clip_assembly_locks: dict[str, asyncio.Lock] = {}
+        # _nvr_event_clip_enabled: per-camera switch state for the native
+        # FCM-triggered event→clip assembly (default True, backward
+        # compatible). Installs that orchestrate their own clip-saving
+        # externally can turn this off per camera while the underlying
+        # pre-roll ring keeps running for their own consumers (feature
+        # request, realKim-dotcom, issue #43 follow-up).
+        self._nvr_event_clip_enabled: dict[str, bool] = {}
         self._last_nvr_cleanup: float = float(
             "-inf"
         )  # float('-inf') → runs on first tick
@@ -5288,6 +5295,19 @@ class BoschCameraCoordinator(
     def set_nvr_mode(self, cam_id: str, mode: str) -> None:
         """Set the per-camera Mini-NVR mode override. mode must be 'continuous' or 'event_buffered'."""
         self._nvr_mode_preference[cam_id] = mode
+
+    def get_nvr_event_clip_enabled(self, cam_id: str) -> bool:
+        """Return whether native FCM-triggered event→clip assembly is on for this camera.
+
+        Defaults to True (backward compatible with every install that
+        predates the ``BoschNvrEventClipSwitch`` entity) unless explicitly
+        turned off.
+        """
+        return self._nvr_event_clip_enabled.get(cam_id, True)
+
+    def set_nvr_event_clip_enabled(self, cam_id: str, enabled: bool) -> None:
+        """Set whether native FCM-triggered event→clip assembly runs for this camera."""
+        self._nvr_event_clip_enabled[cam_id] = enabled
 
     def motion_settings(self, cam_id: str) -> dict[str, Any]:
         """Return motion detection settings dict, or empty dict."""

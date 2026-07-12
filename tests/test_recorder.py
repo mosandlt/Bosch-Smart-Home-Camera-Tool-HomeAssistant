@@ -3104,6 +3104,236 @@ class TestStopPrerollRecorder:
         mock_task.cancel.assert_called_once()
         assert cam_id not in coord._nvr_preroll_tasks
 
+    @pytest.mark.asyncio
+    async def test_returns_true_on_clean_sigterm_exit(self, tmp_path):
+        """stop_preroll_recorder now returns True iff SIGTERM exit was
+        clean within the grace window — finalize_and_restart_preroll_recorder
+        depends on this to know whether the newest segment's moov atom can
+        be trusted (issue #43 follow-up feature)."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_preroll_coord(tmp_path)
+        proc = _mock_proc(returncode=None)
+        coord._nvr_preroll_processes[CAM_ID] = proc
+
+        with patch.object(asyncio, "wait_for", return_value=None):
+            result = await recorder.stop_preroll_recorder(coord, CAM_ID)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_hard_kill(self, tmp_path):
+        """A SIGTERM timeout forcing a hard kill must return False — no
+        moov-atom guarantee on the segment that was mid-write."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_preroll_coord(tmp_path)
+        proc = _mock_proc(returncode=None)
+        coord._nvr_preroll_processes[CAM_ID] = proc
+
+        with patch.object(asyncio, "wait_for", side_effect=[TimeoutError(), None]):
+            result = await recorder.stop_preroll_recorder(coord, CAM_ID)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_returns_false_when_nothing_to_stop(self, tmp_path):
+        """No active process registered → nothing was stopped → False."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_preroll_coord(tmp_path)
+        result = await recorder.stop_preroll_recorder(coord, CAM_ID)
+        assert result is False
+
+
+class TestFinalizeAndRestartPrerollRecorder:
+    """Opt-in stop-finalize-then-restart assembly mode (issue #43 follow-up
+    feature request, realKim-dotcom's fork): recovers the freshest ring
+    segment for FCM-triggered clips instead of always dropping it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_active_process_returns_none(self):
+        """Ring not running for this camera yet — nothing to finalize."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_phase_coord()
+        # _nvr_preroll_processes has no entry for CAM_ID_SHORT.
+        result = await recorder.finalize_and_restart_preroll_recorder(
+            coord, CAM_ID_SHORT
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_dead_process_returns_none(self):
+        """A process handle that already exited must be treated as
+        nothing-to-finalize, same as no handle at all."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_phase_coord()
+        proc = _mock_proc(returncode=0)
+        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
+        result = await recorder.finalize_and_restart_preroll_recorder(
+            coord, CAM_ID_SHORT
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_empty_ring_returns_none_without_stopping(self):
+        """The ring writer is alive but has produced no segments yet
+        (`_newest_preroll_path` returns None) — must not stop/respawn a
+        perfectly healthy ring writer for no benefit."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_phase_coord()
+        coord.hass.async_add_executor_job = AsyncMock(
+            side_effect=lambda fn, *a, **kw: fn(*a, **kw)
+        )
+        proc = _mock_proc(returncode=None)
+        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
+
+        with (
+            patch.object(recorder, "_newest_preroll_path", return_value=None),
+            patch.object(recorder, "stop_preroll_recorder") as mock_stop,
+            patch.object(recorder, "_spawn_preroll_recorder_locked") as mock_spawn,
+        ):
+            result = await recorder.finalize_and_restart_preroll_recorder(
+                coord, CAM_ID_SHORT
+            )
+
+        assert result is None
+        mock_stop.assert_not_called()
+        mock_spawn.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_clean_exit_returns_finalized_path_and_restarts(self, tmp_path):
+        """The common path: an active ring with a newest segment, clean
+        SIGTERM exit → returns the RELOCATED segment's path (moved out of
+        the ring's own cache dir — regression coverage for the bug-hunt
+        finding that returning the in-place path let `list_preroll_files()`
+        pick it back up and concatenate it a second time) AND restarts the
+        ring."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_phase_coord(
+            opts={
+                "nvr_base_path": "/config/bosch_nvr",
+                "nvr_preroll_cache_dir": str(tmp_path),
+                "nvr_preroll_seconds": 30,
+                "nvr_quality": "auto",
+            }
+        )
+        coord.hass.async_add_executor_job = AsyncMock(
+            side_effect=lambda fn, *a, **kw: fn(*a, **kw)
+        )
+        proc = _mock_proc(returncode=None)
+        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
+        cam_dir = recorder._preroll_dir(str(tmp_path), "Terrasse")
+        os.makedirs(cam_dir)
+        newest = os.path.join(cam_dir, "120000.mp4")
+        with open(newest, "wb") as f:
+            f.write(b"x" * 2048)
+
+        with (
+            patch.object(recorder, "_newest_preroll_path", return_value=newest),
+            patch.object(
+                recorder, "stop_preroll_recorder", new=AsyncMock(return_value=True)
+            ) as mock_stop,
+            patch.object(
+                recorder, "_spawn_preroll_recorder_locked", new=AsyncMock()
+            ) as mock_spawn,
+        ):
+            result = await recorder.finalize_and_restart_preroll_recorder(
+                coord, CAM_ID_SHORT
+            )
+
+        assert result is not None
+        assert result != newest
+        assert os.path.isfile(result)
+        assert not os.path.exists(newest)  # moved, not copied
+        finalized_root = os.path.join(str(tmp_path), "_finalized_tmp")
+        assert result.startswith(finalized_root + os.sep)
+        mock_stop.assert_awaited_once_with(coord, CAM_ID_SHORT, prune_cache=False)
+        mock_spawn.assert_awaited_once_with(coord, CAM_ID_SHORT)
+
+    @pytest.mark.asyncio
+    async def test_hard_kill_returns_none_but_still_restarts(self, tmp_path):
+        """A forced kill (no moov-atom guarantee) must return None — but
+        the ring is still restarted regardless, so recording resumes even
+        when the freshest segment can't be trusted."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_phase_coord(
+            opts={
+                "nvr_base_path": "/config/bosch_nvr",
+                "nvr_preroll_cache_dir": str(tmp_path),
+                "nvr_preroll_seconds": 30,
+                "nvr_quality": "auto",
+            }
+        )
+        coord.hass.async_add_executor_job = AsyncMock(
+            side_effect=lambda fn, *a, **kw: fn(*a, **kw)
+        )
+        proc = _mock_proc(returncode=None)
+        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
+        cam_dir = recorder._preroll_dir(str(tmp_path), "Terrasse")
+        os.makedirs(cam_dir)
+        newest = os.path.join(cam_dir, "120000.mp4")
+        with open(newest, "wb") as f:
+            f.write(b"x" * 2048)
+
+        with (
+            patch.object(recorder, "_newest_preroll_path", return_value=newest),
+            patch.object(
+                recorder, "stop_preroll_recorder", new=AsyncMock(return_value=False)
+            ),
+            patch.object(
+                recorder, "_spawn_preroll_recorder_locked", new=AsyncMock()
+            ) as mock_spawn,
+        ):
+            result = await recorder.finalize_and_restart_preroll_recorder(
+                coord, CAM_ID_SHORT
+            )
+
+        assert result is None
+        # Relocated-but-untrustworthy file must be cleaned up, not leaked.
+        assert not os.path.exists(newest)
+        finalized_root = os.path.join(str(tmp_path), "_finalized_tmp")
+        if os.path.isdir(finalized_root):
+            for _root, _dirs, files in os.walk(finalized_root):
+                assert files == []
+        mock_spawn.assert_awaited_once_with(coord, CAM_ID_SHORT)
+
+    @pytest.mark.asyncio
+    async def test_holds_recorder_lock_across_stop_and_restart(self):
+        """Same serialization discipline as issue #44's fix: the per-camera
+        recorder lock must stay held for the whole stop+respawn sequence so
+        a concurrent start_preroll_recorder/switch-toggle can't race in
+        between and leak a second untracked ring writer."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_phase_coord()
+        coord.hass.async_add_executor_job = AsyncMock(
+            side_effect=lambda fn, *a, **kw: fn(*a, **kw)
+        )
+        proc = _mock_proc(returncode=None)
+        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
+        lock = coord._get_nvr_recorder_lock(CAM_ID_SHORT)
+        observed_locked_during_stop = False
+
+        async def _fake_stop(_coord, _cam_id, *, prune_cache):
+            nonlocal observed_locked_during_stop
+            observed_locked_during_stop = lock.locked()
+            return True
+
+        with (
+            patch.object(recorder, "_newest_preroll_path", return_value="/x/y.mp4"),
+            patch.object(recorder, "stop_preroll_recorder", side_effect=_fake_stop),
+            patch.object(recorder, "_spawn_preroll_recorder_locked", new=AsyncMock()),
+        ):
+            await recorder.finalize_and_restart_preroll_recorder(coord, CAM_ID_SHORT)
+
+        assert observed_locked_during_stop is True
+        assert not lock.locked()
+
 
 # =============================================================================
 # Section: watch loops (_watch_recorder / _watch_preroll_recorder)
@@ -6100,7 +6330,13 @@ class TestCapturePostroll:
         assert result is True
 
 
-def _make_assembly_coord(tmp_path, *, postroll_seconds: int = 0):
+def _make_assembly_coord(
+    tmp_path,
+    *,
+    postroll_seconds: int = 0,
+    finalize_ring_on_event: bool = False,
+    event_clip_enabled: bool = True,
+):
     """Stub coordinator for `assemble_and_ship_motion_clip` tests."""
 
     async def _run_executor(fn, *args, **kwargs):
@@ -6113,6 +6349,7 @@ def _make_assembly_coord(tmp_path, *, postroll_seconds: int = 0):
             "nvr_preroll_cache_dir": str(tmp_path / "cache"),
             "nvr_preroll_seconds": 30,
             "nvr_postroll_seconds": postroll_seconds,
+            "nvr_finalize_ring_on_event": finalize_ring_on_event,
         },
         _live_connections={
             CAM_ID: {
@@ -6121,6 +6358,7 @@ def _make_assembly_coord(tmp_path, *, postroll_seconds: int = 0):
             }
         },
         _nvr_clip_assembly_locks={},
+        _nvr_event_clip_enabled={CAM_ID: event_clip_enabled},
     )
     coord.hass = SimpleNamespace(async_add_executor_job=_run_executor)
 
@@ -6132,6 +6370,9 @@ def _make_assembly_coord(tmp_path, *, postroll_seconds: int = 0):
         return lock
 
     coord._get_nvr_clip_assembly_lock = _get_lock
+    coord.get_nvr_event_clip_enabled = lambda cam_id: coord._nvr_event_clip_enabled.get(
+        cam_id, True
+    )
     return coord
 
 
@@ -6412,6 +6653,157 @@ class TestAssembleAndShipMotionClip:
             result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
 
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_event_clip_switch_off_skips_entirely(self, tmp_path):
+        """Feature request (realKim-dotcom, issue #43 follow-up): the
+        per-camera nvr_event_clip switch OFF must skip native assembly
+        entirely, without ever touching the assembly lock, pre-roll list,
+        or spawning ffmpeg — the ring buffer stays untouched for other
+        consumers (e.g. a fork's own clip-saving service)."""
+        coord = _make_assembly_coord(tmp_path, event_clip_enabled=False)
+
+        with (
+            patch.object(recorder, "list_preroll_files") as mock_list,
+            patch("asyncio.create_subprocess_exec") as mock_spawn,
+        ):
+            result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
+
+        assert result is False
+        mock_list.assert_not_called()
+        mock_spawn.assert_not_called()
+        assert not coord._get_nvr_clip_assembly_lock(CAM_ID).locked()
+
+    @pytest.mark.asyncio
+    async def test_event_clip_switch_on_by_default(self, tmp_path):
+        """Backward compatibility: with no explicit switch state, native
+        assembly proceeds exactly as before this feature existed."""
+        coord = _make_assembly_coord(tmp_path)
+
+        with patch.object(
+            recorder, "list_preroll_files", return_value=[str(tmp_path / "pre0.mp4")]
+        ):
+            (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
+            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+                result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_finalize_ring_on_event_disabled_by_default(self, tmp_path):
+        """nvr_finalize_ring_on_event defaults to off: the assembly must
+        never call finalize_and_restart_preroll_recorder unless the option
+        is explicitly turned on."""
+        coord = _make_assembly_coord(tmp_path)
+
+        with (
+            patch.object(
+                recorder,
+                "list_preroll_files",
+                return_value=[str(tmp_path / "pre0.mp4")],
+            ),
+            patch.object(
+                recorder, "finalize_and_restart_preroll_recorder"
+            ) as mock_finalize,
+        ):
+            (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
+            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+                result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
+
+        assert result is True
+        mock_finalize.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_finalize_ring_on_event_attaches_finalized_segment(self, tmp_path):
+        """nvr_finalize_ring_on_event=True: the finalized segment path is
+        appended to the concat list, after the (drop-newest) pre-roll list
+        and before any postroll capture — recovering the freshest footage
+        instead of losing it (feature request, realKim-dotcom)."""
+        coord = _make_assembly_coord(
+            tmp_path, postroll_seconds=5, finalize_ring_on_event=True
+        )
+        finalized_path = str(tmp_path / "finalized.mp4")
+        (tmp_path / "finalized.mp4").write_bytes(b"x" * 2048)
+        (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
+
+        seen_paths: dict[str, list[str]] = {}
+
+        async def _fake_capture_postroll(_coord, _cam_id, output_path, _secs):
+            with open(output_path, "wb") as f:
+                f.write(b"x" * 2048)
+            return True
+
+        def _fake_create_motion_clip_args(preroll_paths, output_path):
+            seen_paths["paths"] = list(preroll_paths)
+            return ["ffmpeg", "-y", output_path]
+
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc.returncode = 0
+
+        with (
+            patch.object(
+                recorder,
+                "list_preroll_files",
+                return_value=[str(tmp_path / "pre0.mp4")],
+            ),
+            patch.object(
+                recorder,
+                "finalize_and_restart_preroll_recorder",
+                new=AsyncMock(return_value=finalized_path),
+            ) as mock_finalize,
+            patch.object(
+                recorder, "_capture_postroll", side_effect=_fake_capture_postroll
+            ),
+            patch.object(
+                recorder,
+                "create_motion_clip_args",
+                side_effect=_fake_create_motion_clip_args,
+            ),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
+
+        assert result is True
+        mock_finalize.assert_awaited_once_with(coord, CAM_ID)
+        assert seen_paths["paths"][0] == str(tmp_path / "pre0.mp4")
+        assert seen_paths["paths"][1] == finalized_path
+        # postroll (3rd) comes after the finalized segment.
+        assert len(seen_paths["paths"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_finalize_ring_on_event_none_falls_back_silently(self, tmp_path):
+        """finalize_and_restart_preroll_recorder returning None (nothing to
+        finalize, or had to hard-kill) must not break the assembly — it
+        just ships without the extra segment, same as before this feature."""
+        coord = _make_assembly_coord(tmp_path, finalize_ring_on_event=True)
+
+        with (
+            patch.object(
+                recorder,
+                "list_preroll_files",
+                return_value=[str(tmp_path / "pre0.mp4")],
+            ),
+            patch.object(
+                recorder,
+                "finalize_and_restart_preroll_recorder",
+                new=AsyncMock(return_value=None),
+            ),
+        ):
+            (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            mock_proc.returncode = 0
+            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+                result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
+
+        assert result is True
 
 
 class TestStopPrerollRecorderCachePrune:

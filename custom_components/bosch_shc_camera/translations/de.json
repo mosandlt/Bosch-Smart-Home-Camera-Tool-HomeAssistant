@@ -191,7 +191,8 @@
               "nvr_quality": "NVR-Aufnahmequalität",
               "nvr_preroll_seconds": "Pre-Roll-Puffer (Sekunden)",
               "nvr_postroll_seconds": "Post-Roll-Aufnahme (Sekunden)",
-              "nvr_preroll_cache_dir": "Pre-Roll-Cache-Verzeichnis"
+              "nvr_preroll_cache_dir": "Pre-Roll-Cache-Verzeichnis",
+              "nvr_finalize_ring_on_event": "Neuestes Pre-Roll-Segment bei Ereignis retten"
             },
             "data_description": {
               "enable_nvr": "Den LOCAL-Stream jeder Kamera kontinuierlich in 5-Minuten-MP4-Segmenten auf Disk aufzeichnen. Nur LAN — die Aufnahme pausiert wenn die Kamera über den Cloud-Proxy läuft. Fügt pro Kamera einen Aufnahme-Schalter hinzu (standardmäßig aus; pro Kamera einzeln aktivieren). Benötigt ffmpeg.",
@@ -202,7 +203,8 @@
               "nvr_quality": "**Auto** nutzt den Vollqualitäts-Stream (inst=1, ~30 Mbps). **Niedrig** nutzt den Niedrigbandbreiten-Stream (inst=4, ~2 Mbps) — spart ~90% Speicherplatz. Nur LAN; der Cloud-Proxy unterstützt inst=4 nicht.",
               "nvr_preroll_seconds": "Rollendes RAM-Puffer dieser Sekunden (/dev/shm). Bei Bewegungserkennung wird ein Clip erstellt, der diesen Vorlauf enthält. 0 = deaktiviert. Standard: 0. RAM-Bedarf: ~250 KB/s pro Kamera.",
               "nvr_postroll_seconds": "Nimmt bei einem Bewegungsereignis zusätzlich diese Anzahl Sekunden live auf und hängt sie an den Pre-Roll-Clip an. 0 = deaktiviert (nur Pre-Roll). Standard: 0. Wird nur verwendet, wenn der Mini-NVR-Modus der Kamera auf „Ereignisgepuffert (Vorlauf)\" steht.",
-              "nvr_preroll_cache_dir": "Verzeichnis für den Pre-Roll-Segment-Cache. Muss ein tmpfs-Mount (RAM-Disk) sein — Standard /dev/shm/bosch_nvr_cache unter Linux. Nur ändern falls /dev/shm nicht verfügbar ist."
+              "nvr_preroll_cache_dir": "Verzeichnis für den Pre-Roll-Segment-Cache. Muss ein tmpfs-Mount (RAM-Disk) sein — Standard /dev/shm/bosch_nvr_cache unter Linux. Nur ändern falls /dev/shm nicht verfügbar ist.",
+              "nvr_finalize_ring_on_event": "Normalerweise wird das neueste ca. 0–10s Pre-Roll-Segment verworfen, da es noch aufgezeichnet werden könnte. Bei AN wird dieses Segment kurz finalisiert und wieder angehängt, bevor der Ringpuffer fortgesetzt wird — das kostet etwa 1 Sekunde Ringpuffer-Abdeckung pro Ereignis. Standard: aus."
             }
           },
           "webhook": {
@@ -412,6 +414,9 @@
       },
       "nvr_recording": {
         "name": "Mini-NVR Aufnahme"
+      },
+      "nvr_event_clip": {
+        "name": "Mini-NVR-Ereignisclip"
       },
       "external_stream": {
         "name": "Externe Stream-URL veröffentlichen"

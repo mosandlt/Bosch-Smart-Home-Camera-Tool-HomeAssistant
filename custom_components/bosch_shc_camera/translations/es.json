@@ -191,7 +191,8 @@
               "nvr_quality": "Calidad de grabación del NVR",
               "nvr_preroll_seconds": "Búfer pre-roll (segundos)",
               "nvr_postroll_seconds": "Captura post-roll (segundos)",
-              "nvr_preroll_cache_dir": "Directorio de caché del pre-roll"
+              "nvr_preroll_cache_dir": "Directorio de caché del pre-roll",
+              "nvr_finalize_ring_on_event": "Recuperar el segmento de pre-roll más reciente en el evento"
             },
             "data_description": {
               "enable_nvr": "Grabar continuamente el stream LOCAL de cada cámara en disco en segmentos MP4 de 5 minutos. Solo LAN — la grabación se pausa si la cámara usa el relé Cloud. Añade un interruptor de grabación por cámara (desactivado por defecto; activar cada cámara individualmente). Requiere ffmpeg.",
@@ -202,7 +203,8 @@
               "nvr_quality": "**Auto** usa el stream de calidad completa (inst=1, ~30 Mbps). **Baja** usa el stream de bajo ancho de banda (inst=4, ~2 Mbps) — ahorra ~90% de espacio en disco a costa de la resolución. Solo LAN; el relé Cloud no admite inst=4.",
               "nvr_preroll_seconds": "Mantener un búfer deslizante de este número de segundos en RAM (/dev/shm). Cuando se detecta movimiento, se crea un clip que incluye este pre-roll. 0 = desactivado. Predeterminado: 0. Coste RAM: ~250 KB/s por cámara.",
               "nvr_postroll_seconds": "Graba en directo estos segundos adicionales tras un evento de movimiento y los añade al clip de pre-roll. 0 = desactivado (solo pre-roll). Predeterminado: 0. Solo se usa cuando el modo Mini-NVR de la cámara está ajustado a \"Almacenado por eventos (pregrabación)\".",
-              "nvr_preroll_cache_dir": "Directorio para la caché de segmentos del pre-roll. Debe ser un montaje tmpfs (disco RAM) — /dev/shm/bosch_nvr_cache es el predeterminado en Linux. Cambiar solo si /dev/shm no está disponible."
+              "nvr_preroll_cache_dir": "Directorio para la caché de segmentos del pre-roll. Debe ser un montaje tmpfs (disco RAM) — /dev/shm/bosch_nvr_cache es el predeterminado en Linux. Cambiar solo si /dev/shm no está disponible.",
+              "nvr_finalize_ring_on_event": "Normalmente el segmento de pre-roll más reciente (~0-10s) se descarta porque podría seguir grabándose. Si está ACTIVADO, ese segmento se finaliza brevemente y se vuelve a adjuntar antes de que el buffer circular se reanude, lo que cuesta aproximadamente 1 segundo de cobertura por evento. Predeterminado: desactivado."
             }
           },
           "webhook": {
@@ -412,6 +414,9 @@
       },
       "nvr_recording": {
         "name": "Grabación Mini-NVR"
+      },
+      "nvr_event_clip": {
+        "name": "Clip de evento Mini-NVR"
       },
       "external_stream": {
         "name": "Publicar URL de stream externo"

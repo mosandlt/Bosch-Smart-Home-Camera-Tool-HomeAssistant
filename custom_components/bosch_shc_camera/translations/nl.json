@@ -191,7 +191,8 @@
               "nvr_quality": "NVR-opnamekwaliteit",
               "nvr_preroll_seconds": "Pre-roll-buffer (seconden)",
               "nvr_postroll_seconds": "Post-roll opname (seconden)",
-              "nvr_preroll_cache_dir": "Pre-roll-cachemap"
+              "nvr_preroll_cache_dir": "Pre-roll-cachemap",
+              "nvr_finalize_ring_on_event": "Nieuwste pre-roll segment herstellen bij gebeurtenis"
             },
             "data_description": {
               "enable_nvr": "Neemt de LOCAL-stream van elke camera continu op schijf op in MP4-segmenten van 5 minuten. Alleen LAN — opname pauzeert als de camera via de Cloud-relay loopt. Voegt een opnameschakelaar per camera toe (standaard uitgeschakeld; per camera afzonderlijk inschakelen). Vereist ffmpeg.",
@@ -202,7 +203,8 @@
               "nvr_quality": "**Auto** gebruikt de volledige kwaliteitsstream (inst=1, ~30 Mbps). **Laag** gebruikt de lage-bandbreedtestream (inst=4, ~2 Mbps) — bespaart ~90% schijfruimte ten koste van resolutie. Alleen LAN; de Cloud-relay ondersteunt inst=4 niet.",
               "nvr_preroll_seconds": "Bewaart een rollende buffer van dit aantal seconden in RAM (/dev/shm). Bij bewegingsdetectie wordt een clip gemaakt die deze pre-roll bevat. 0 = uitgeschakeld. Standaard: 0. RAM-gebruik: ~250 KB/s per camera.",
               "nvr_postroll_seconds": "Neemt bij een bewegingsgebeurtenis dit aantal extra seconden live op en voegt ze toe aan de pre-roll-clip. 0 = uitgeschakeld (alleen pre-roll). Standaard: 0. Wordt alleen gebruikt wanneer de Mini-NVR-modus van de camera is ingesteld op 'Gebeurtenis-gebufferd (vooropname)'.",
-              "nvr_preroll_cache_dir": "Map voor de pre-roll-segmentcache. Moet een tmpfs-mount (RAM-schijf) zijn — /dev/shm/bosch_nvr_cache is de standaard op Linux. Alleen wijzigen als /dev/shm niet beschikbaar is."
+              "nvr_preroll_cache_dir": "Map voor de pre-roll-segmentcache. Moet een tmpfs-mount (RAM-schijf) zijn — /dev/shm/bosch_nvr_cache is de standaard op Linux. Alleen wijzigen als /dev/shm niet beschikbaar is.",
+              "nvr_finalize_ring_on_event": "Normaal wordt het nieuwste pre-roll segment (~0-10s) verwijderd omdat het mogelijk nog wordt opgenomen. Indien AAN wordt dit segment kort afgerond en opnieuw gekoppeld voordat de ringbuffer wordt hervat, wat ongeveer 1 seconde dekking per gebeurtenis kost. Standaard: uit."
             }
           },
           "webhook": {
@@ -412,6 +414,9 @@
       },
       "nvr_recording": {
         "name": "Mini-NVR opname"
+      },
+      "nvr_event_clip": {
+        "name": "Mini-NVR gebeurtenisclip"
       },
       "external_stream": {
         "name": "Externe stream-URL publiceren"
