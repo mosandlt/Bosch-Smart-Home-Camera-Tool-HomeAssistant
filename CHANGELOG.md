@@ -5,6 +5,26 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v14.7.1] - 2026-07-12
+
+Patch — `event_buffered` Mini-NVR mode now actually assembles and ships motion clips, plus two correctness fixes for the pre-roll ring the feature reads from.
+
+### Fixed
+
+- **`event_buffered` mode now produces recordings** (#43 follow-up, realKim-dotcom). v14.7.0 added the per-camera mode select, but `event_buffered` only ever ran the pre-roll ring buffer — `create_motion_clip()` existed but had zero call sites anywhere in the integration, contradicting the README's own description. A movement/person FCM event for a camera in `event_buffered` mode with the NVR switch on and LOCAL now assembles the pre-roll ring (plus an optional new `nvr_postroll_seconds` live-captured window) into a clip and drops it into the existing NVR staging tree, where it ships exactly like a continuous-mode segment (local/SMB/FTP).
+- `mini_nvr_state`'s `preroll_running`/`preroll_segments` attributes now refresh immediately when the pre-roll ring spawns, instead of lagging until the next coordinator tick.
+- Leftover pre-roll ring segments are cleaned up on a genuine stop — previously they lingered in tmpfs until the next start happened to overwrite them. A new internal distinction between a genuine stop and an internal respawn (LOCAL-session/cred-rotation renewal) means this cleanup does NOT fire on every renewal, which would otherwise wipe the ring's accumulated context far more often than intended.
+- The ring writer's ffmpeg process keeps exactly one file open at a time, so the newest segment on disk can still be mid-write with no finalized moov atom — concatenating it could produce a corrupt/failing clip. The pre-roll segment list now always excludes the newest segment before handing it to the concat step (costs at most ~10s of the freshest footage, never risks a corrupt clip). This is the exact race realKim-dotcom's own local patch for #43 independently discovered and had to work around.
+- **#44** (realKim-dotcom): `start_preroll_recorder()` was unserialized, unlike the main recorder spawn — concurrent callers (switch turn-on, the stream-up hook, the NVR mode select) could each pass the leading stop-then-spawn sequence and leak a second untracked ffmpeg ring writer that interleaves segments with the first. Now serialized on the same per-camera lock the main recorder spawn already uses.
+
+### Added
+
+- New `nvr_postroll_seconds` option (0-60 seconds, default 0) — records this many extra seconds live after a motion event and appends them to the pre-roll clip. 12-locale translated.
+
+A 3-agent bug-hunt pass (THREE_PER_ISSUE_PER_CHANGE) on the new clip-assembly code found and fixed three further issues before release: the post-roll capture was written into the same directory the pre-roll ring scans (duplicating it in the assembled clip), a failed post-roll capture leaked its partial file, and same-second motion events could collide on the output filename.
+
+5964 pytest (1 pre-existing skip) / mypy --strict / ruff / codespell clean, 100% coverage.
+
 ## [v14.7.0] - 2026-07-11
 
 Minor — new per-camera Mini-NVR mode select entity: a mixed camera fleet can now run different recording strategies per camera instead of one global setting.
