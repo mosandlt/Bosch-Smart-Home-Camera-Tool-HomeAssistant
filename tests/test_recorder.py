@@ -1487,6 +1487,38 @@ class TestListPrerollFiles:
             assert paths == []
 
 
+class TestNewestPrerollPath:
+    """`_newest_preroll_path` — direct unit coverage of the real filesystem
+    scan (every other test patches it out with a mock, so the function body
+    itself needs its own dedicated coverage)."""
+
+    def test_returns_newest_by_mtime(self):
+        import custom_components.bosch_shc_camera.recorder as recorder
+        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+
+        with tempfile.TemporaryDirectory() as cam_dir:
+            now = time.time()
+            for i, name in enumerate(["c.mp4", "b.mp4", "a.mp4"]):
+                p = os.path.join(cam_dir, name)
+                with open(p, "wb") as f:
+                    f.write(b"x" * _PREROLL_MIN_SIZE_BYTES)
+                os.utime(p, (now - (3 - i), now - (3 - i)))
+            result = recorder._newest_preroll_path(cam_dir)
+            assert result is not None
+            assert result.endswith("a.mp4")
+
+    def test_empty_dir_returns_none(self):
+        import custom_components.bosch_shc_camera.recorder as recorder
+
+        with tempfile.TemporaryDirectory() as cam_dir:
+            assert recorder._newest_preroll_path(cam_dir) is None
+
+    def test_missing_dir_returns_none(self):
+        import custom_components.bosch_shc_camera.recorder as recorder
+
+        assert recorder._newest_preroll_path("/nonexistent/path/xyz") is None
+
+
 # =============================================================================
 # Section: retention purge — mocked filesystem
 # =============================================================================
@@ -3300,6 +3332,50 @@ class TestFinalizeAndRestartPrerollRecorder:
         if os.path.isdir(finalized_root):
             for _root, _dirs, files in os.walk(finalized_root):
                 assert files == []
+        mock_spawn.assert_awaited_once_with(coord, CAM_ID_SHORT)
+
+    @pytest.mark.asyncio
+    async def test_hard_kill_cleanup_unlink_failure_swallowed(self, tmp_path):
+        """If the untrustworthy relocated file can't even be unlinked (e.g.
+        it's already gone, or a permissions race), that must not raise into
+        the caller — best-effort cleanup only, same discipline as every
+        other cache-prune path in this module."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_phase_coord(
+            opts={
+                "nvr_base_path": "/config/bosch_nvr",
+                "nvr_preroll_cache_dir": str(tmp_path),
+                "nvr_preroll_seconds": 30,
+                "nvr_quality": "auto",
+            }
+        )
+        coord.hass.async_add_executor_job = AsyncMock(
+            side_effect=lambda fn, *a, **kw: fn(*a, **kw)
+        )
+        proc = _mock_proc(returncode=None)
+        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
+        cam_dir = recorder._preroll_dir(str(tmp_path), "Terrasse")
+        os.makedirs(cam_dir)
+        newest = os.path.join(cam_dir, "120000.mp4")
+        with open(newest, "wb") as f:
+            f.write(b"x" * 2048)
+
+        with (
+            patch.object(recorder, "_newest_preroll_path", return_value=newest),
+            patch.object(
+                recorder, "stop_preroll_recorder", new=AsyncMock(return_value=False)
+            ),
+            patch.object(
+                recorder, "_spawn_preroll_recorder_locked", new=AsyncMock()
+            ) as mock_spawn,
+            patch("os.unlink", side_effect=OSError("already gone")),
+        ):
+            result = await recorder.finalize_and_restart_preroll_recorder(
+                coord, CAM_ID_SHORT
+            )
+
+        assert result is None
         mock_spawn.assert_awaited_once_with(coord, CAM_ID_SHORT)
 
     @pytest.mark.asyncio
