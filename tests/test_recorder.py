@@ -1086,15 +1086,20 @@ class TestCreateMotionClip:
         from custom_components.bosch_shc_camera import recorder
         from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
 
-        # Write a real pre-roll segment so list_preroll_files returns something
+        # Write two real pre-roll segments so list_preroll_files returns
+        # something — it always drops the newest (possibly still being
+        # written by the ring), so a single segment alone would yield [].
         cam_name = CAM_TITLE
         cache_dir = str(tmp_path / "cache")
         os.makedirs(cache_dir, exist_ok=True)
         cam_cache = os.path.join(cache_dir, cam_name)
         os.makedirs(cam_cache, exist_ok=True)
-        seg = os.path.join(cam_cache, "seg.mp4")
-        with open(seg, "wb") as f:
-            f.write(b"x" * _PREROLL_MIN_SIZE_BYTES)
+        now = time.time()
+        for i, name in enumerate(["seg0.mp4", "seg1.mp4"]):
+            p = os.path.join(cam_cache, name)
+            with open(p, "wb") as f:
+                f.write(b"x" * _PREROLL_MIN_SIZE_BYTES)
+            os.utime(p, (now - (1 - i), now - (1 - i)))
 
         coord = _make_preroll_coord(tmp_path)
         coord.options["nvr_preroll_cache_dir"] = cache_dir
@@ -1173,9 +1178,13 @@ class TestCreateMotionClip:
         cache_dir = str(tmp_path / "cache")
         cam_cache = os.path.join(cache_dir, cam_name)
         os.makedirs(cam_cache, exist_ok=True)
-        seg = os.path.join(cam_cache, "seg.mp4")
-        with open(seg, "wb") as f:
-            f.write(b"x" * _PREROLL_MIN_SIZE_BYTES)
+        # Two segments — list_preroll_files always drops the newest.
+        now = time.time()
+        for i, name in enumerate(["seg0.mp4", "seg1.mp4"]):
+            p = os.path.join(cam_cache, name)
+            with open(p, "wb") as f:
+                f.write(b"x" * _PREROLL_MIN_SIZE_BYTES)
+            os.utime(p, (now - (1 - i), now - (1 - i)))
 
         coord = _make_preroll_coord(tmp_path)
         coord.options["nvr_preroll_cache_dir"] = cache_dir
@@ -1410,7 +1419,14 @@ class TestCreateMotionClipExtraSegments:
 
 
 class TestListPrerollFiles:
-    def test_returns_sorted_paths(self):
+    """`list_preroll_files` always drops the newest segment — the ring
+    writer's ffmpeg `-f segment` process keeps exactly one file open at a
+    time, so the newest file on disk may still be mid-write with no
+    finalized moov atom (issue #43 follow-up: realKim-dotcom's own local
+    event→clip patch hit exactly this and had to stop the ring writer
+    first before concatenating)."""
+
+    def test_returns_sorted_paths_minus_newest(self):
         import custom_components.bosch_shc_camera.recorder as recorder
         from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
 
@@ -1424,16 +1440,51 @@ class TestListPrerollFiles:
             cam_dir = recorder._preroll_dir(cache_dir, "Terrasse")
             os.makedirs(cam_dir, exist_ok=True)
             now = time.time()
-            for i, name in enumerate(["b.mp4", "a.mp4"]):
+            for i, name in enumerate(["c.mp4", "b.mp4", "a.mp4"]):
                 p = os.path.join(cam_dir, name)
                 with open(p, "wb") as f:
                     f.write(b"x" * _PREROLL_MIN_SIZE_BYTES)
-                os.utime(p, (now - (2 - i), now - (2 - i)))
+                os.utime(p, (now - (3 - i), now - (3 - i)))
             paths = recorder.list_preroll_files(coord, cam_id)
-            # Should be sorted oldest-first
+            # Sorted oldest-first, newest ("a.mp4" — possibly still being
+            # written by the ring writer) excluded.
             assert len(paths) == 2
-            assert paths[0].endswith("b.mp4")  # older
-            assert paths[1].endswith("a.mp4")  # newer
+            assert paths[0].endswith("c.mp4")  # oldest
+            assert paths[1].endswith("b.mp4")  # middle
+            assert not any(p.endswith("a.mp4") for p in paths)
+
+    def test_single_segment_excluded_returns_empty(self):
+        """Only one segment on disk — it's almost certainly the one
+        actively being written, so it must NOT be returned (no reliable
+        pre-roll yet, not a partial/corrupt clip)."""
+        import custom_components.bosch_shc_camera.recorder as recorder
+        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+
+        cam_id = CAM_ID_SHORT
+        with tempfile.TemporaryDirectory() as cache_dir:
+            coord = _make_phase_coord(
+                opts={"nvr_preroll_cache_dir": cache_dir, "nvr_preroll_seconds": 30},
+                cam_id=cam_id,
+            )
+            cam_dir = recorder._preroll_dir(cache_dir, "Terrasse")
+            os.makedirs(cam_dir, exist_ok=True)
+            p = os.path.join(cam_dir, "only.mp4")
+            with open(p, "wb") as f:
+                f.write(b"x" * _PREROLL_MIN_SIZE_BYTES)
+            paths = recorder.list_preroll_files(coord, cam_id)
+            assert paths == []
+
+    def test_no_segments_returns_empty(self):
+        import custom_components.bosch_shc_camera.recorder as recorder
+
+        cam_id = CAM_ID_SHORT
+        with tempfile.TemporaryDirectory() as cache_dir:
+            coord = _make_phase_coord(
+                opts={"nvr_preroll_cache_dir": cache_dir, "nvr_preroll_seconds": 30},
+                cam_id=cam_id,
+            )
+            paths = recorder.list_preroll_files(coord, cam_id)
+            assert paths == []
 
 
 # =============================================================================
@@ -2676,6 +2727,76 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
 
         asyncio.get_event_loop().run_until_complete(_run())
         assert set(stopped) == {"cam1", "cam2"}
+
+
+class TestStartPrerollRecorderSerialization:
+    """issue #44 (realKim-dotcom): concurrent start_preroll_recorder callers
+    for the same camera (switch turn-on, stream-up hook, mode select can
+    all reach this) must not race — the second must wait for the first to
+    finish (serialized on the same per-camera lock `start_recorder`'s main
+    spawn uses), not leak a second untracked ffmpeg ring writer that
+    interleaves segments with the first."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_calls_do_not_overlap_spawns(self, tmp_path):
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
+        coord.options["nvr_preroll_seconds"] = 30
+
+        active = 0
+        max_active = 0
+
+        async def _spawn(*_a, **_kw):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return _mock_proc(returncode=None)
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await asyncio.gather(
+                recorder.start_preroll_recorder(coord, CAM_ID),
+                recorder.start_preroll_recorder(coord, CAM_ID),
+            )
+
+        assert max_active == 1, (
+            "two ffmpeg ring writers spawned concurrently — the race is not serialized"
+        )
+
+    @pytest.mark.asyncio
+    async def test_concurrent_calls_leave_exactly_one_tracked_process(self, tmp_path):
+        """After two concurrent calls settle, exactly the LAST spawn is
+        tracked — the first caller's process was cleanly stopped by the
+        second caller's leading stop_preroll_recorder(), not silently
+        overwritten while still running (the actual leak in #44)."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
+        coord.options["nvr_preroll_seconds"] = 30
+
+        procs: list[MagicMock] = []
+
+        async def _spawn(*_a, **_kw):
+            proc = _mock_proc(returncode=None)
+            procs.append(proc)
+            return proc
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await asyncio.gather(
+                recorder.start_preroll_recorder(coord, CAM_ID),
+                recorder.start_preroll_recorder(coord, CAM_ID),
+            )
+
+        assert len(procs) == 2
+        assert coord._nvr_preroll_processes[CAM_ID] is procs[-1]
+        # The first caller's process must have been asked to stop (not
+        # leaked as an untracked orphan) — the second call's leading
+        # stop_preroll_recorder() SIGTERMs whatever is currently tracked.
+        procs[0].send_signal.assert_called_once_with(signal.SIGTERM)
 
 
 class TestStartPrerollRecorder:
