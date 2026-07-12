@@ -7,4 +7,4 @@ skip = ./.git,*.json,*.min.js,www,build,node_modules,package-lock.json,htmlcov,.
 # protocol_support URL query param (client=haV<version>) — both real strings.
 # Trailing block (responde…erro) = real es/fr/it/nl/pt words from the card's
 # inline i18n table (translation strings live in the .js, not in *.json).
-ignore-words-list = hass,als,browseable,checkin,explizit,ist,lokal,lokales,oder,passt,pre-emptive,pre-emptively,re-use,re-uses,sie,tage,ue,unparseable,uptodate,vor,wenn,alle,unter,titel,segmente,beginn,ende,wenns,statt,manuell,attribut,februar,cros,hav,responde,cristal,connexion,remplace,nome,celle,te,leeg,som,erro,mouvement,visibile,paket,normale
+ignore-words-list = hass,als,browseable,checkin,explizit,ist,lokal,lokales,oder,passt,pre-emptive,pre-emptively,re-use,re-uses,sie,tage,ue,unparseable,uptodate,vor,wenn,alle,unter,titel,segmente,beginn,ende,wenns,statt,manuell,attribut,februar,cros,hav,responde,cristal,connexion,remplace,nome,celle,te,leeg,som,erro,mouvement,visibile,paket,normale,rouge

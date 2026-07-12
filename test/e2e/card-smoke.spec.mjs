@@ -903,6 +903,55 @@ test("config editors localise labels by hass.language (de/en)", async ({ page })
   expect(r.overviewDe).not.toContain("Columns");
 });
 
+// Regression (issue #45, realKim-dotcom): the Apple-style stream pill's title
+// attribute was updated on every stream-state change via a hardcoded German
+// ternary (`isStreaming ? "Live-Stream stoppen" : "Live-Stream starten"`),
+// which silently overwrote the localized title `_render()` had set on mount.
+// A German-profile user would never notice; any other language always saw
+// German the moment the stream state first changed. Pins that the dynamic
+// update now follows hass.language like the rest of the pill bar.
+test("stream pill title follows hass.language on state change, not hardcoded German (#45)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+
+  const r = await page.evaluate(async () => {
+    const mkHass = (lang, streaming) => ({
+      language: lang, localize: () => "", config: {}, callService: () => Promise.resolve(),
+      states: {
+        "camera.test": { state: streaming ? "streaming" : "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+        // _isStreaming() reads this switch first — must reflect the intended
+        // idle/streaming state, not the camera entity's own state.
+        "switch.test_live_stream": { state: streaming ? "on" : "off", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      },
+    });
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = mkHass("en", false);
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    const pill = card.shadowRoot.getElementById("ap-btn-stream");
+    const enIdleTitle = pill?.getAttribute("title");
+    // Force a genuine state change (idle -> streaming) so the dynamic-update
+    // branch (not just the initial _render()) sets the title.
+    card.hass = mkHass("en", true);
+    await new Promise((res) => setTimeout(res, 200));
+    const enStreamingTitle = pill?.getAttribute("title");
+    // Same transition in German.
+    card.hass = mkHass("de", false);
+    await new Promise((res) => setTimeout(res, 200));
+    card.hass = mkHass("de", true);
+    await new Promise((res) => setTimeout(res, 200));
+    const deStreamingTitle = pill?.getAttribute("title");
+    card.remove();
+    return { enIdleTitle, enStreamingTitle, deStreamingTitle };
+  });
+
+  expect(r.enIdleTitle, "English, idle: title in English").toBe("Start live stream");
+  expect(r.enStreamingTitle, "English, streaming: title in English, not German").toBe("Stop live stream");
+  expect(r.enStreamingTitle, "must not leak the old hardcoded German string").not.toContain("Live-Stream");
+  expect(r.deStreamingTitle, "German, streaming: title in German").toBe("Live-Stream stoppen");
+});
+
 // Regression (bug-hunt 2026-06-02): the schedule-rule list interpolates rule
 // values into innerHTML. Text values must be HTML-escaped (_escHtml) and values
 // placed inside double-quoted attributes must additionally escape the quote

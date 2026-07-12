@@ -119,7 +119,7 @@
  *
  * Changes vs 1.5.10:
  *   - Added video quality dropdown inside card (select entity):
- *     Qualität: Auto / Hoch (30 Mbps) / Niedrig (1.9 Mbps)
+ *     Quality: Auto / High (30 Mbps) / Low (1.9 Mbps)
  *     Hidden automatically when the select entity doesn't exist or is unavailable.
  *     Configure with quality_entity: select.bosch_xxx_video_quality in card YAML.
  *
@@ -149,7 +149,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.5";
+const CARD_VERSION = "14.1.6";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -377,6 +377,88 @@ const CARD_I18N = {
     ed_border_radius: "Corner radius (CSS, e.g. 16px)",
     ed_box_shadow: "Box shadow (CSS)",
     ed_show_motion_zones: "Show motion-zone overlay",
+    // ── card view: static labels (issue #45 — were hardcoded German) ──
+    accordion_notif_types: "Notification Types",
+    accordion_advanced: "Advanced",
+    accordion_auto_security: "Automation & Security",
+    accordion_automations: "Automations",
+    accordion_light_camera: "Light & Camera",
+    accordion_diagnostics: "Diagnostics",
+    accordion_services: "Services",
+    light_details_header: "Brightness & Colors",
+    light_front: "Front light",
+    light_top: "Top light",
+    light_bottom: "Bottom light",
+    light_top_bottom: "Top + Bottom",
+    light_slider_front: "Front",
+    light_slider_top: "Top",
+    light_slider_bottom: "Bottom",
+    light_slider_colortemp: "Color temp.",
+    privacy_short: "Privacy",
+    notif_section_title: "Notifications",
+    intercom_label: "Intercom",
+    quality_label: "Quality",
+    quality_auto: "Auto",
+    quality_high: "High (30 Mbps)",
+    quality_low: "Low (1.9 Mbps)",
+    notif_movement: "Movement",
+    notif_person: "Person",
+    notif_audio: "Audio",
+    notif_trouble: "Trouble",
+    notif_camera_alarm: "Camera alarm",
+    diag_timestamp: "Timestamp",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Motion detection",
+    record_sound: "Record sound",
+    privacy_sound: "Privacy sound",
+    light_on_motion: "Light on motion",
+    light_always_on: "Always on",
+    intrusion_detection: "Intrusion detection",
+    motion_sensitivity: "Sensitivity",
+    alarm_armed: "Alarm armed",
+    siren_75db: "Siren (75 dB)",
+    pre_alarm_led: "Pre-alarm (red LED)",
+    power_led: "Power LED",
+    color_temperature: "Color temperature",
+    color_top: "Top color",
+    color_bottom: "Bottom color",
+    status_led: "Status LED",
+    microphone_label: "Microphone",
+    show_motion_zones_btn: "Show motion zones",
+    show_privacy_masks_btn: "Show privacy masks",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Ambient light",
+    diag_motion_today: "Motion today",
+    diag_audio_today: "Audio today",
+    diag_schedules: "Schedules",
+    diag_motion_zones: "Motion zones",
+    diag_privacy_masks: "Privacy masks",
+    info_status: "Status",
+    info_connection: "Connection",
+    info_reaction: "Reaction",
+    info_reaction_tooltip: "Bosch API reaction time (LOCAL=500 ms, REMOTE=1000 ms). Not the player buffer — that's set via 'Buffer behavior' in the integration options.",
+    svc_snapshot: "Snapshot",
+    svc_read_zones: "Read zones",
+    svc_friends: "Friends",
+    svc_create_rule: "Create rule",
+    svc_light_schedule: "Light schedule",
+    svc_siren: "Siren",
+    svc_rule_creating: 'Creating rule "{name}"…',
+    svc_running: "{label} running…",
+    svc_done: "{label} done.",
+    pan_full_left_title: "Far left",
+    pan_full_left_aria: "Pan camera all the way left",
+    pan_left_short_title: "Left",
+    pan_center_title: "Center",
+    pan_center_aria: "Center camera",
+    pan_right_short_title: "Right",
+    pan_full_right_title: "Far right",
+    pan_full_right_aria: "Pan camera all the way right",
+    pill_pip_blocked_title: "Picture-in-Picture is active for another camera",
+    pill_fullscreen_exit_title: "Exit fullscreen",
+    pill_stream_title_start: "Start live stream",
+    pill_stream_title_stop: "Stop live stream",
   },
   de: {
     // ── runtime chrome ──
@@ -509,6 +591,88 @@ const CARD_I18N = {
     ed_border_radius: "Eckenradius (CSS, z.B. 16px)",
     ed_box_shadow: "Schlagschatten (CSS)",
     ed_show_motion_zones: "Bewegungszonen-Overlay anzeigen",
+    // ── card view: static labels (issue #45 — were hardcoded German) ──
+    accordion_notif_types: "Benachrichtigungs-Typen",
+    accordion_advanced: "Erweitert",
+    accordion_auto_security: "Automatik & Sicherheit",
+    accordion_automations: "Automationen",
+    accordion_light_camera: "Licht & Kamera",
+    accordion_diagnostics: "Diagnose",
+    accordion_services: "Services",
+    light_details_header: "Helligkeit & Farben",
+    light_front: "Frontlicht",
+    light_top: "Oberes Licht",
+    light_bottom: "Unteres Licht",
+    light_top_bottom: "Oben + Unten",
+    light_slider_front: "Front",
+    light_slider_top: "Oben",
+    light_slider_bottom: "Unten",
+    light_slider_colortemp: "Farbt.",
+    privacy_short: "Privat",
+    notif_section_title: "Benachrichtigungen",
+    intercom_label: "Gegensprech.",
+    quality_label: "Qualität",
+    quality_auto: "Auto",
+    quality_high: "Hoch (30 Mbps)",
+    quality_low: "Niedrig (1.9 Mbps)",
+    notif_movement: "Bewegung",
+    notif_person: "Person",
+    notif_audio: "Audio",
+    notif_trouble: "Störung",
+    notif_camera_alarm: "Kamera-Alarm",
+    diag_timestamp: "Zeitstempel",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Bewegungserkennung",
+    record_sound: "Ton aufnehmen",
+    privacy_sound: "Privat-Ton",
+    light_on_motion: "Licht bei Bewegung",
+    light_always_on: "Dauerlicht",
+    intrusion_detection: "Einbrucherkennung",
+    motion_sensitivity: "Empfindlichkeit",
+    alarm_armed: "Alarmanlage scharf",
+    siren_75db: "Sirene (75 dB)",
+    pre_alarm_led: "Pre-Alarm (rote LED)",
+    power_led: "Power-LED",
+    color_temperature: "Farbtemperatur",
+    color_top: "Farbe Oben",
+    color_bottom: "Farbe Unten",
+    status_led: "Status-LED",
+    microphone_label: "Mikrofon",
+    show_motion_zones_btn: "Motion-Zonen anzeigen",
+    show_privacy_masks_btn: "Privacy-Masken anzeigen",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Umgebungslicht",
+    diag_motion_today: "Bewegung heute",
+    diag_audio_today: "Audio heute",
+    diag_schedules: "Zeitpläne",
+    diag_motion_zones: "Motion-Zonen",
+    diag_privacy_masks: "Privacy-Masken",
+    info_status: "Status",
+    info_connection: "Verbindung",
+    info_reaction: "Reaktion",
+    info_reaction_tooltip: "Bosch-API Reaktionszeit (LOCAL=500 ms, REMOTE=1000 ms). Nicht der Player-Puffer — den stellt 'Puffer-Verhalten' in den Integrations-Einstellungen ein.",
+    svc_snapshot: "Snapshot",
+    svc_read_zones: "Zonen lesen",
+    svc_friends: "Freunde",
+    svc_create_rule: "Regel erstellen",
+    svc_light_schedule: "Licht-Zeitplan",
+    svc_siren: "Sirene",
+    svc_rule_creating: 'Regel "{name}" wird erstellt...',
+    svc_running: "{label} wird ausgeführt...",
+    svc_done: "{label} abgeschlossen.",
+    pan_full_left_title: "Ganz links",
+    pan_full_left_aria: "Kamera ganz nach links schwenken",
+    pan_left_short_title: "Links",
+    pan_center_title: "Mitte",
+    pan_center_aria: "Kamera zentrieren",
+    pan_right_short_title: "Rechts",
+    pan_full_right_title: "Ganz rechts",
+    pan_full_right_aria: "Kamera ganz nach rechts schwenken",
+    pill_pip_blocked_title: "Bild-im-Bild läuft für eine andere Kamera",
+    pill_fullscreen_exit_title: "Vollbild verlassen",
+    pill_stream_title_start: "Live-Stream starten",
+    pill_stream_title_stop: "Live-Stream stoppen",
   },
 
   es: {
@@ -605,6 +769,88 @@ const CARD_I18N = {
     ed_border_radius: "Radio de esquina (CSS, p. ej. 16px)",
     ed_box_shadow: "Sombra (CSS)",
     ed_show_motion_zones: "Mostrar superposición de zonas de movimiento",
+    // ── card view: static labels (issue #45 — were hardcoded German) ──
+    accordion_notif_types: "Tipos de notificación",
+    accordion_advanced: "Avanzado",
+    accordion_auto_security: "Automatización y seguridad",
+    accordion_automations: "Automatizaciones",
+    accordion_light_camera: "Luz y cámara",
+    accordion_diagnostics: "Diagnóstico",
+    accordion_services: "Servicios",
+    light_details_header: "Brillo y colores",
+    light_front: "Luz frontal",
+    light_top: "Luz superior",
+    light_bottom: "Luz inferior",
+    light_top_bottom: "Superior + Inferior",
+    light_slider_front: "Frontal",
+    light_slider_top: "Superior",
+    light_slider_bottom: "Inferior",
+    light_slider_colortemp: "Temp. color",
+    privacy_short: "Privacidad",
+    notif_section_title: "Notificaciones",
+    intercom_label: "Intercomunicador",
+    quality_label: "Calidad",
+    quality_auto: "Auto",
+    quality_high: "Alta (30 Mbps)",
+    quality_low: "Baja (1.9 Mbps)",
+    notif_movement: "Movimiento",
+    notif_person: "Persona",
+    notif_audio: "Audio",
+    notif_trouble: "Fallo",
+    notif_camera_alarm: "Alarma de cámara",
+    diag_timestamp: "Marca de tiempo",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Detección de movimiento",
+    record_sound: "Grabar sonido",
+    privacy_sound: "Sonido privado",
+    light_on_motion: "Luz con movimiento",
+    light_always_on: "Siempre encendida",
+    intrusion_detection: "Detección de intrusión",
+    motion_sensitivity: "Sensibilidad",
+    alarm_armed: "Alarma armada",
+    siren_75db: "Sirena (75 dB)",
+    pre_alarm_led: "Pre-alarma (LED rojo)",
+    power_led: "LED de encendido",
+    color_temperature: "Temperatura de color",
+    color_top: "Color superior",
+    color_bottom: "Color inferior",
+    status_led: "LED de estado",
+    microphone_label: "Micrófono",
+    show_motion_zones_btn: "Mostrar zonas de movimiento",
+    show_privacy_masks_btn: "Mostrar máscaras de privacidad",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Luz ambiental",
+    diag_motion_today: "Movimiento hoy",
+    diag_audio_today: "Audio hoy",
+    diag_schedules: "Horarios",
+    diag_motion_zones: "Zonas de movimiento",
+    diag_privacy_masks: "Máscaras de privacidad",
+    info_status: "Estado",
+    info_connection: "Conexión",
+    info_reaction: "Reacción",
+    info_reaction_tooltip: "Tiempo de reacción de la API de Bosch (LOCAL=500 ms, REMOTE=1000 ms). No es el búfer del reproductor — eso se ajusta en 'Comportamiento del búfer' en las opciones de la integración.",
+    svc_snapshot: "Instantánea",
+    svc_read_zones: "Leer zonas",
+    svc_friends: "Amigos",
+    svc_create_rule: "Crear regla",
+    svc_light_schedule: "Horario de luz",
+    svc_siren: "Sirena",
+    svc_rule_creating: 'Creando regla "{name}"…',
+    svc_running: "{label} en ejecución…",
+    svc_done: "{label} completado.",
+    pan_full_left_title: "Extremo izquierdo",
+    pan_full_left_aria: "Girar la cámara totalmente a la izquierda",
+    pan_left_short_title: "Izquierda",
+    pan_center_title: "Centro",
+    pan_center_aria: "Centrar cámara",
+    pan_right_short_title: "Derecha",
+    pan_full_right_title: "Extremo derecho",
+    pan_full_right_aria: "Girar la cámara totalmente a la derecha",
+    pill_pip_blocked_title: "Imagen en imagen activo para otra cámara",
+    pill_fullscreen_exit_title: "Salir de pantalla completa",
+    pill_stream_title_start: "Iniciar transmisión en vivo",
+    pill_stream_title_stop: "Detener transmisión en vivo",
   },
   fr: {
     play_gate_label: "Démarrer le flux",
@@ -700,6 +946,88 @@ const CARD_I18N = {
     ed_border_radius: "Rayon des coins (CSS, p. ex. 16px)",
     ed_box_shadow: "Ombre portée (CSS)",
     ed_show_motion_zones: "Afficher la superposition des zones de mouvement",
+    // ── card view: static labels (issue #45 — were hardcoded German) ──
+    accordion_notif_types: "Types de notification",
+    accordion_advanced: "Avancé",
+    accordion_auto_security: "Automatisation et sécurité",
+    accordion_automations: "Automatisations",
+    accordion_light_camera: "Lumière et caméra",
+    accordion_diagnostics: "Diagnostic",
+    accordion_services: "Services",
+    light_details_header: "Luminosité et couleurs",
+    light_front: "Lumière avant",
+    light_top: "Lumière supérieure",
+    light_bottom: "Lumière inférieure",
+    light_top_bottom: "Haut + Bas",
+    light_slider_front: "Avant",
+    light_slider_top: "Haut",
+    light_slider_bottom: "Bas",
+    light_slider_colortemp: "Temp. couleur",
+    privacy_short: "Confidentialité",
+    notif_section_title: "Notifications",
+    intercom_label: "Interphone",
+    quality_label: "Qualité",
+    quality_auto: "Auto",
+    quality_high: "Élevée (30 Mbps)",
+    quality_low: "Faible (1.9 Mbps)",
+    notif_movement: "Mouvement",
+    notif_person: "Personne",
+    notif_audio: "Audio",
+    notif_trouble: "Anomalie",
+    notif_camera_alarm: "Alarme caméra",
+    diag_timestamp: "Horodatage",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Détection de mouvement",
+    record_sound: "Enregistrer le son",
+    privacy_sound: "Son privé",
+    light_on_motion: "Lumière sur mouvement",
+    light_always_on: "Toujours allumée",
+    intrusion_detection: "Détection d'intrusion",
+    motion_sensitivity: "Sensibilité",
+    alarm_armed: "Alarme armée",
+    siren_75db: "Sirène (75 dB)",
+    pre_alarm_led: "Pré-alarme (LED rouge)",
+    power_led: "LED d'alimentation",
+    color_temperature: "Température de couleur",
+    color_top: "Couleur supérieure",
+    color_bottom: "Couleur inférieure",
+    status_led: "LED d'état",
+    microphone_label: "Microphone",
+    show_motion_zones_btn: "Afficher les zones de mouvement",
+    show_privacy_masks_btn: "Afficher les masques de confidentialité",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Luminosité ambiante",
+    diag_motion_today: "Mouvement aujourd'hui",
+    diag_audio_today: "Audio aujourd'hui",
+    diag_schedules: "Horaires",
+    diag_motion_zones: "Zones de mouvement",
+    diag_privacy_masks: "Masques de confidentialité",
+    info_status: "Statut",
+    info_connection: "Connexion",
+    info_reaction: "Réaction",
+    info_reaction_tooltip: "Temps de réaction de l'API Bosch (LOCAL=500 ms, REMOTE=1000 ms). Pas le tampon du lecteur — celui-ci se règle via « Comportement du tampon » dans les options de l'intégration.",
+    svc_snapshot: "Instantané",
+    svc_read_zones: "Lire les zones",
+    svc_friends: "Amis",
+    svc_create_rule: "Créer une règle",
+    svc_light_schedule: "Horaire lumière",
+    svc_siren: "Sirène",
+    svc_rule_creating: 'Création de la règle « {name} »…',
+    svc_running: "{label} en cours…",
+    svc_done: "{label} terminé.",
+    pan_full_left_title: "Extrême gauche",
+    pan_full_left_aria: "Pivoter la caméra tout à fait à gauche",
+    pan_left_short_title: "Gauche",
+    pan_center_title: "Centre",
+    pan_center_aria: "Centrer la caméra",
+    pan_right_short_title: "Droite",
+    pan_full_right_title: "Extrême droite",
+    pan_full_right_aria: "Pivoter la caméra tout à fait à droite",
+    pill_pip_blocked_title: "Image dans l'image active pour une autre caméra",
+    pill_fullscreen_exit_title: "Quitter le plein écran",
+    pill_stream_title_start: "Démarrer le direct",
+    pill_stream_title_stop: "Arrêter le direct",
   },
   it: {
     play_gate_label: "Avvia stream",
@@ -795,6 +1123,88 @@ const CARD_I18N = {
     ed_border_radius: "Raggio angoli (CSS, es. 16px)",
     ed_box_shadow: "Ombra (CSS)",
     ed_show_motion_zones: "Mostra overlay zone di movimento",
+    // ── card view: static labels (issue #45 — were hardcoded German) ──
+    accordion_notif_types: "Tipi di notifica",
+    accordion_advanced: "Avanzate",
+    accordion_auto_security: "Automazione e sicurezza",
+    accordion_automations: "Automazioni",
+    accordion_light_camera: "Luce e telecamera",
+    accordion_diagnostics: "Diagnostica",
+    accordion_services: "Servizi",
+    light_details_header: "Luminosità e colori",
+    light_front: "Luce frontale",
+    light_top: "Luce superiore",
+    light_bottom: "Luce inferiore",
+    light_top_bottom: "Superiore + Inferiore",
+    light_slider_front: "Frontale",
+    light_slider_top: "Superiore",
+    light_slider_bottom: "Inferiore",
+    light_slider_colortemp: "Temp. colore",
+    privacy_short: "Privacy",
+    notif_section_title: "Notifiche",
+    intercom_label: "Citofono",
+    quality_label: "Qualità",
+    quality_auto: "Auto",
+    quality_high: "Alta (30 Mbps)",
+    quality_low: "Bassa (1.9 Mbps)",
+    notif_movement: "Movimento",
+    notif_person: "Persona",
+    notif_audio: "Audio",
+    notif_trouble: "Anomalia",
+    notif_camera_alarm: "Allarme telecamera",
+    diag_timestamp: "Timestamp",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Rilevamento movimento",
+    record_sound: "Registra suono",
+    privacy_sound: "Suono privacy",
+    light_on_motion: "Luce su movimento",
+    light_always_on: "Sempre accesa",
+    intrusion_detection: "Rilevamento intrusione",
+    motion_sensitivity: "Sensibilità",
+    alarm_armed: "Allarme inserito",
+    siren_75db: "Sirena (75 dB)",
+    pre_alarm_led: "Pre-allarme (LED rosso)",
+    power_led: "LED di alimentazione",
+    color_temperature: "Temperatura colore",
+    color_top: "Colore superiore",
+    color_bottom: "Colore inferiore",
+    status_led: "LED di stato",
+    microphone_label: "Microfono",
+    show_motion_zones_btn: "Mostra zone di movimento",
+    show_privacy_masks_btn: "Mostra maschere privacy",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Luce ambientale",
+    diag_motion_today: "Movimento oggi",
+    diag_audio_today: "Audio oggi",
+    diag_schedules: "Pianificazioni",
+    diag_motion_zones: "Zone di movimento",
+    diag_privacy_masks: "Maschere privacy",
+    info_status: "Stato",
+    info_connection: "Connessione",
+    info_reaction: "Reazione",
+    info_reaction_tooltip: "Tempo di reazione dell'API Bosch (LOCAL=500 ms, REMOTE=1000 ms). Non è il buffer del player — si imposta in 'Comportamento buffer' nelle opzioni dell'integrazione.",
+    svc_snapshot: "Istantanea",
+    svc_read_zones: "Leggi zone",
+    svc_friends: "Amici",
+    svc_create_rule: "Crea regola",
+    svc_light_schedule: "Programma luce",
+    svc_siren: "Sirena",
+    svc_rule_creating: 'Creazione regola "{name}"…',
+    svc_running: "{label} in esecuzione…",
+    svc_done: "{label} completato.",
+    pan_full_left_title: "Tutto a sinistra",
+    pan_full_left_aria: "Ruota la telecamera tutta a sinistra",
+    pan_left_short_title: "Sinistra",
+    pan_center_title: "Centro",
+    pan_center_aria: "Centra telecamera",
+    pan_right_short_title: "Destra",
+    pan_full_right_title: "Tutto a destra",
+    pan_full_right_aria: "Ruota la telecamera tutta a destra",
+    pill_pip_blocked_title: "Immagine nell'immagine attiva per un'altra telecamera",
+    pill_fullscreen_exit_title: "Esci da schermo intero",
+    pill_stream_title_start: "Avvia streaming live",
+    pill_stream_title_stop: "Ferma streaming live",
   },
   nl: {
     play_gate_label: "Stream starten",
@@ -890,6 +1300,88 @@ const CARD_I18N = {
     ed_border_radius: "Hoekradius (CSS, bijv. 16px)",
     ed_box_shadow: "Slagschaduw (CSS)",
     ed_show_motion_zones: "Bewegingszone-overlay tonen",
+    // ── card view: static labels (issue #45 — were hardcoded German) ──
+    accordion_notif_types: "Meldingstypen",
+    accordion_advanced: "Geavanceerd",
+    accordion_auto_security: "Automatisering & Beveiliging",
+    accordion_automations: "Automatiseringen",
+    accordion_light_camera: "Licht & Camera",
+    accordion_diagnostics: "Diagnose",
+    accordion_services: "Services",
+    light_details_header: "Helderheid & Kleuren",
+    light_front: "Voorlicht",
+    light_top: "Bovenlicht",
+    light_bottom: "Onderlicht",
+    light_top_bottom: "Boven + Onder",
+    light_slider_front: "Voor",
+    light_slider_top: "Boven",
+    light_slider_bottom: "Onder",
+    light_slider_colortemp: "Kleurtemp.",
+    privacy_short: "Privacy",
+    notif_section_title: "Meldingen",
+    intercom_label: "Intercom",
+    quality_label: "Kwaliteit",
+    quality_auto: "Auto",
+    quality_high: "Hoog (30 Mbps)",
+    quality_low: "Laag (1.9 Mbps)",
+    notif_movement: "Beweging",
+    notif_person: "Persoon",
+    notif_audio: "Audio",
+    notif_trouble: "Storing",
+    notif_camera_alarm: "Cameraalarm",
+    diag_timestamp: "Tijdstempel",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Bewegingsdetectie",
+    record_sound: "Geluid opnemen",
+    privacy_sound: "Privacygeluid",
+    light_on_motion: "Licht bij beweging",
+    light_always_on: "Altijd aan",
+    intrusion_detection: "Inbraakdetectie",
+    motion_sensitivity: "Gevoeligheid",
+    alarm_armed: "Alarm ingeschakeld",
+    siren_75db: "Sirene (75 dB)",
+    pre_alarm_led: "Voor-alarm (rode LED)",
+    power_led: "Voedings-LED",
+    color_temperature: "Kleurtemperatuur",
+    color_top: "Kleur boven",
+    color_bottom: "Kleur onder",
+    status_led: "Status-LED",
+    microphone_label: "Microfoon",
+    show_motion_zones_btn: "Bewegingszones tonen",
+    show_privacy_masks_btn: "Privacymaskers tonen",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Omgevingslicht",
+    diag_motion_today: "Beweging vandaag",
+    diag_audio_today: "Audio vandaag",
+    diag_schedules: "Schema's",
+    diag_motion_zones: "Bewegingszones",
+    diag_privacy_masks: "Privacymaskers",
+    info_status: "Status",
+    info_connection: "Verbinding",
+    info_reaction: "Reactie",
+    info_reaction_tooltip: "Bosch API-reactietijd (LOCAL=500 ms, REMOTE=1000 ms). Niet de spelerbuffer — die stel je in via 'Bufferedrag' in de integratie-opties.",
+    svc_snapshot: "Snapshot",
+    svc_read_zones: "Zones lezen",
+    svc_friends: "Vrienden",
+    svc_create_rule: "Regel maken",
+    svc_light_schedule: "Lichtschema",
+    svc_siren: "Sirene",
+    svc_rule_creating: 'Regel "{name}" wordt aangemaakt…',
+    svc_running: "{label} wordt uitgevoerd…",
+    svc_done: "{label} voltooid.",
+    pan_full_left_title: "Helemaal links",
+    pan_full_left_aria: "Camera helemaal naar links draaien",
+    pan_left_short_title: "Links",
+    pan_center_title: "Midden",
+    pan_center_aria: "Camera centreren",
+    pan_right_short_title: "Rechts",
+    pan_full_right_title: "Helemaal rechts",
+    pan_full_right_aria: "Camera helemaal naar rechts draaien",
+    pill_pip_blocked_title: "Beeld-in-beeld actief voor een andere camera",
+    pill_fullscreen_exit_title: "Volledig scherm verlaten",
+    pill_stream_title_start: "Livestream starten",
+    pill_stream_title_stop: "Livestream stoppen",
   },
   pl: {
     play_gate_label: "Uruchom strumień",
@@ -985,6 +1477,88 @@ const CARD_I18N = {
     ed_border_radius: "Promień zaokrąglenia (CSS, np. 16px)",
     ed_box_shadow: "Cień (CSS)",
     ed_show_motion_zones: "Pokaż nakładkę stref ruchu",
+    // ── card view: static labels (issue #45 — were hardcoded German) ──
+    accordion_notif_types: "Typy powiadomień",
+    accordion_advanced: "Zaawansowane",
+    accordion_auto_security: "Automatyka i bezpieczeństwo",
+    accordion_automations: "Automatyzacje",
+    accordion_light_camera: "Światło i kamera",
+    accordion_diagnostics: "Diagnostyka",
+    accordion_services: "Usługi",
+    light_details_header: "Jasność i kolory",
+    light_front: "Światło przednie",
+    light_top: "Górne światło",
+    light_bottom: "Dolne światło",
+    light_top_bottom: "Góra + Dół",
+    light_slider_front: "Przód",
+    light_slider_top: "Góra",
+    light_slider_bottom: "Dół",
+    light_slider_colortemp: "Temp. barwowa",
+    privacy_short: "Prywatność",
+    notif_section_title: "Powiadomienia",
+    intercom_label: "Domofon",
+    quality_label: "Jakość",
+    quality_auto: "Auto",
+    quality_high: "Wysoka (30 Mbps)",
+    quality_low: "Niska (1.9 Mbps)",
+    notif_movement: "Ruch",
+    notif_person: "Osoba",
+    notif_audio: "Audio",
+    notif_trouble: "Usterka",
+    notif_camera_alarm: "Alarm kamery",
+    diag_timestamp: "Znacznik czasu",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Wykrywanie ruchu",
+    record_sound: "Nagrywaj dźwięk",
+    privacy_sound: "Dźwięk prywatności",
+    light_on_motion: "Światło przy ruchu",
+    light_always_on: "Zawsze włączone",
+    intrusion_detection: "Wykrywanie włamania",
+    motion_sensitivity: "Czułość",
+    alarm_armed: "Alarm uzbrojony",
+    siren_75db: "Syrena (75 dB)",
+    pre_alarm_led: "Przed-alarm (czerwona LED)",
+    power_led: "LED zasilania",
+    color_temperature: "Temperatura barwowa",
+    color_top: "Kolor góra",
+    color_bottom: "Kolor dół",
+    status_led: "LED statusu",
+    microphone_label: "Mikrofon",
+    show_motion_zones_btn: "Pokaż strefy ruchu",
+    show_privacy_masks_btn: "Pokaż maski prywatności",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Światło otoczenia",
+    diag_motion_today: "Ruch dzisiaj",
+    diag_audio_today: "Audio dzisiaj",
+    diag_schedules: "Harmonogramy",
+    diag_motion_zones: "Strefy ruchu",
+    diag_privacy_masks: "Maski prywatności",
+    info_status: "Status",
+    info_connection: "Połączenie",
+    info_reaction: "Reakcja",
+    info_reaction_tooltip: "Czas reakcji API Bosch (LOCAL=500 ms, REMOTE=1000 ms). Nie bufor odtwarzacza — ten ustawia się w 'Zachowanie bufora' w opcjach integracji.",
+    svc_snapshot: "Zrzut",
+    svc_read_zones: "Odczytaj strefy",
+    svc_friends: "Znajomi",
+    svc_create_rule: "Utwórz regułę",
+    svc_light_schedule: "Harmonogram światła",
+    svc_siren: "Syrena",
+    svc_rule_creating: 'Tworzenie reguły "{name}"…',
+    svc_running: "{label} w trakcie…",
+    svc_done: "{label} zakończone.",
+    pan_full_left_title: "Całkiem w lewo",
+    pan_full_left_aria: "Obróć kamerę całkiem w lewo",
+    pan_left_short_title: "Lewo",
+    pan_center_title: "Środek",
+    pan_center_aria: "Wyśrodkuj kamerę",
+    pan_right_short_title: "Prawo",
+    pan_full_right_title: "Całkiem w prawo",
+    pan_full_right_aria: "Obróć kamerę całkiem w prawo",
+    pill_pip_blocked_title: "Obraz w obrazie aktywny dla innej kamery",
+    pill_fullscreen_exit_title: "Zakończ pełny ekran",
+    pill_stream_title_start: "Rozpocznij transmisję na żywo",
+    pill_stream_title_stop: "Zatrzymaj transmisję na żywo",
   },
   pt: {
     play_gate_label: "Iniciar stream",
@@ -1080,6 +1654,88 @@ const CARD_I18N = {
     ed_border_radius: "Raio dos cantos (CSS, ex. 16px)",
     ed_box_shadow: "Sombra (CSS)",
     ed_show_motion_zones: "Mostrar sobreposição de zonas de movimento",
+    // ── card view: static labels (issue #45 — were hardcoded German) ──
+    accordion_notif_types: "Tipos de notificação",
+    accordion_advanced: "Avançado",
+    accordion_auto_security: "Automação e segurança",
+    accordion_automations: "Automações",
+    accordion_light_camera: "Luz e câmara",
+    accordion_diagnostics: "Diagnóstico",
+    accordion_services: "Serviços",
+    light_details_header: "Brilho e cores",
+    light_front: "Luz frontal",
+    light_top: "Luz superior",
+    light_bottom: "Luz inferior",
+    light_top_bottom: "Superior + Inferior",
+    light_slider_front: "Frontal",
+    light_slider_top: "Superior",
+    light_slider_bottom: "Inferior",
+    light_slider_colortemp: "Temp. cor",
+    privacy_short: "Privacidade",
+    notif_section_title: "Notificações",
+    intercom_label: "Intercomunicador",
+    quality_label: "Qualidade",
+    quality_auto: "Auto",
+    quality_high: "Alta (30 Mbps)",
+    quality_low: "Baixa (1.9 Mbps)",
+    notif_movement: "Movimento",
+    notif_person: "Pessoa",
+    notif_audio: "Áudio",
+    notif_trouble: "Falha",
+    notif_camera_alarm: "Alarme da câmara",
+    diag_timestamp: "Marca temporal",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Deteção de movimento",
+    record_sound: "Gravar som",
+    privacy_sound: "Som de privacidade",
+    light_on_motion: "Luz ao movimento",
+    light_always_on: "Sempre ligada",
+    intrusion_detection: "Deteção de intrusão",
+    motion_sensitivity: "Sensibilidade",
+    alarm_armed: "Alarme armado",
+    siren_75db: "Sirene (75 dB)",
+    pre_alarm_led: "Pré-alarme (LED vermelho)",
+    power_led: "LED de alimentação",
+    color_temperature: "Temperatura de cor",
+    color_top: "Cor superior",
+    color_bottom: "Cor inferior",
+    status_led: "LED de estado",
+    microphone_label: "Microfone",
+    show_motion_zones_btn: "Mostrar zonas de movimento",
+    show_privacy_masks_btn: "Mostrar máscaras de privacidade",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Luz ambiente",
+    diag_motion_today: "Movimento hoje",
+    diag_audio_today: "Áudio hoje",
+    diag_schedules: "Horários",
+    diag_motion_zones: "Zonas de movimento",
+    diag_privacy_masks: "Máscaras de privacidade",
+    info_status: "Estado",
+    info_connection: "Ligação",
+    info_reaction: "Reação",
+    info_reaction_tooltip: "Tempo de reação da API Bosch (LOCAL=500 ms, REMOTE=1000 ms). Não é o buffer do leitor — esse é definido em 'Comportamento do buffer' nas opções da integração.",
+    svc_snapshot: "Captura",
+    svc_read_zones: "Ler zonas",
+    svc_friends: "Amigos",
+    svc_create_rule: "Criar regra",
+    svc_light_schedule: "Horário de luz",
+    svc_siren: "Sirene",
+    svc_rule_creating: 'A criar regra "{name}"…',
+    svc_running: "{label} em execução…",
+    svc_done: "{label} concluído.",
+    pan_full_left_title: "Extremo esquerdo",
+    pan_full_left_aria: "Rodar a câmara totalmente para a esquerda",
+    pan_left_short_title: "Esquerda",
+    pan_center_title: "Centro",
+    pan_center_aria: "Centrar câmara",
+    pan_right_short_title: "Direita",
+    pan_full_right_title: "Extremo direito",
+    pan_full_right_aria: "Rodar a câmara totalmente para a direita",
+    pill_pip_blocked_title: "Imagem em imagem ativo para outra câmara",
+    pill_fullscreen_exit_title: "Sair do ecrã inteiro",
+    pill_stream_title_start: "Iniciar transmissão ao vivo",
+    pill_stream_title_stop: "Parar transmissão ao vivo",
   },
   ru: {
     play_gate_label: "Запустить трансляцию",
@@ -1175,6 +1831,88 @@ const CARD_I18N = {
     ed_border_radius: "Радиус скругления (CSS, напр. 16px)",
     ed_box_shadow: "Тень (CSS)",
     ed_show_motion_zones: "Показывать зоны движения",
+    // ── card view: static labels (issue #45 — were hardcoded German) ──
+    accordion_notif_types: "Типы уведомлений",
+    accordion_advanced: "Дополнительно",
+    accordion_auto_security: "Автоматизация и безопасность",
+    accordion_automations: "Автоматизации",
+    accordion_light_camera: "Свет и камера",
+    accordion_diagnostics: "Диагностика",
+    accordion_services: "Сервисы",
+    light_details_header: "Яркость и цвета",
+    light_front: "Переднее освещение",
+    light_top: "Верхний свет",
+    light_bottom: "Нижний свет",
+    light_top_bottom: "Верх + Низ",
+    light_slider_front: "Перед",
+    light_slider_top: "Верх",
+    light_slider_bottom: "Низ",
+    light_slider_colortemp: "Цвет. темп.",
+    privacy_short: "Приватность",
+    notif_section_title: "Уведомления",
+    intercom_label: "Домофон",
+    quality_label: "Качество",
+    quality_auto: "Авто",
+    quality_high: "Высокое (30 Мбит/с)",
+    quality_low: "Низкое (1.9 Мбит/с)",
+    notif_movement: "Движение",
+    notif_person: "Человек",
+    notif_audio: "Аудио",
+    notif_trouble: "Неисправность",
+    notif_camera_alarm: "Тревога камеры",
+    diag_timestamp: "Метка времени",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Обнаружение движения",
+    record_sound: "Запись звука",
+    privacy_sound: "Звук приватности",
+    light_on_motion: "Свет при движении",
+    light_always_on: "Постоянно вкл.",
+    intrusion_detection: "Обнаружение вторжения",
+    motion_sensitivity: "Чувствительность",
+    alarm_armed: "Сигнализация на охране",
+    siren_75db: "Сирена (75 дБ)",
+    pre_alarm_led: "Пред-тревога (красный LED)",
+    power_led: "LED питания",
+    color_temperature: "Цветовая температура",
+    color_top: "Цвет верха",
+    color_bottom: "Цвет низа",
+    status_led: "LED статуса",
+    microphone_label: "Микрофон",
+    show_motion_zones_btn: "Показать зоны движения",
+    show_privacy_masks_btn: "Показать маски приватности",
+    diag_wifi: "WiFi",
+    diag_firmware: "Прошивка",
+    diag_ambient_light: "Освещённость",
+    diag_motion_today: "Движение сегодня",
+    diag_audio_today: "Аудио сегодня",
+    diag_schedules: "Расписания",
+    diag_motion_zones: "Зоны движения",
+    diag_privacy_masks: "Маски приватности",
+    info_status: "Статус",
+    info_connection: "Соединение",
+    info_reaction: "Реакция",
+    info_reaction_tooltip: "Время реакции API Bosch (LOCAL=500 мс, REMOTE=1000 мс). Не буфер плеера — он настраивается в разделе «Поведение буфера» в параметрах интеграции.",
+    svc_snapshot: "Снимок",
+    svc_read_zones: "Считать зоны",
+    svc_friends: "Друзья",
+    svc_create_rule: "Создать правило",
+    svc_light_schedule: "Расписание света",
+    svc_siren: "Сирена",
+    svc_rule_creating: 'Создание правила «{name}»…',
+    svc_running: "{label} выполняется…",
+    svc_done: "{label} завершено.",
+    pan_full_left_title: "Крайний левый",
+    pan_full_left_aria: "Повернуть камеру полностью влево",
+    pan_left_short_title: "Влево",
+    pan_center_title: "Центр",
+    pan_center_aria: "Центрировать камеру",
+    pan_right_short_title: "Вправо",
+    pan_full_right_title: "Крайний правый",
+    pan_full_right_aria: "Повернуть камеру полностью вправо",
+    pill_pip_blocked_title: "Картинка в картинке активна для другой камеры",
+    pill_fullscreen_exit_title: "Выйти из полноэкранного режима",
+    pill_stream_title_start: "Начать прямую трансляцию",
+    pill_stream_title_stop: "Остановить прямую трансляцию",
   },
   uk: {
     play_gate_label: "Розпочати трансляцію",
@@ -1270,6 +2008,88 @@ const CARD_I18N = {
     ed_border_radius: "Радіус заокруглення (CSS, напр. 16px)",
     ed_box_shadow: "Тінь (CSS)",
     ed_show_motion_zones: "Показувати зони руху",
+    // ── card view: static labels (issue #45 — were hardcoded German) ──
+    accordion_notif_types: "Типи сповіщень",
+    accordion_advanced: "Додатково",
+    accordion_auto_security: "Автоматизація та безпека",
+    accordion_automations: "Автоматизації",
+    accordion_light_camera: "Світло та камера",
+    accordion_diagnostics: "Діагностика",
+    accordion_services: "Сервіси",
+    light_details_header: "Яскравість і кольори",
+    light_front: "Переднє освітлення",
+    light_top: "Верхнє світло",
+    light_bottom: "Нижнє світло",
+    light_top_bottom: "Верх + Низ",
+    light_slider_front: "Перед",
+    light_slider_top: "Верх",
+    light_slider_bottom: "Низ",
+    light_slider_colortemp: "Кол. темп.",
+    privacy_short: "Приватність",
+    notif_section_title: "Сповіщення",
+    intercom_label: "Домофон",
+    quality_label: "Якість",
+    quality_auto: "Авто",
+    quality_high: "Висока (30 Мбіт/с)",
+    quality_low: "Низька (1.9 Мбіт/с)",
+    notif_movement: "Рух",
+    notif_person: "Людина",
+    notif_audio: "Аудіо",
+    notif_trouble: "Несправність",
+    notif_camera_alarm: "Тривога камери",
+    diag_timestamp: "Мітка часу",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Виявлення руху",
+    record_sound: "Записувати звук",
+    privacy_sound: "Звук приватності",
+    light_on_motion: "Світло при русі",
+    light_always_on: "Постійно увімк.",
+    intrusion_detection: "Виявлення вторгнення",
+    motion_sensitivity: "Чутливість",
+    alarm_armed: "Сигналізація на охороні",
+    siren_75db: "Сирена (75 дБ)",
+    pre_alarm_led: "Перед-тривога (червоний LED)",
+    power_led: "LED живлення",
+    color_temperature: "Колірна температура",
+    color_top: "Колір верху",
+    color_bottom: "Колір низу",
+    status_led: "LED статусу",
+    microphone_label: "Мікрофон",
+    show_motion_zones_btn: "Показати зони руху",
+    show_privacy_masks_btn: "Показати маски приватності",
+    diag_wifi: "WiFi",
+    diag_firmware: "Прошивка",
+    diag_ambient_light: "Освітленість",
+    diag_motion_today: "Рух сьогодні",
+    diag_audio_today: "Аудіо сьогодні",
+    diag_schedules: "Розклади",
+    diag_motion_zones: "Зони руху",
+    diag_privacy_masks: "Маски приватності",
+    info_status: "Статус",
+    info_connection: "З'єднання",
+    info_reaction: "Реакція",
+    info_reaction_tooltip: "Час реакції API Bosch (LOCAL=500 мс, REMOTE=1000 мс). Не буфер плеєра — він налаштовується в «Поведінка буфера» в параметрах інтеграції.",
+    svc_snapshot: "Знімок",
+    svc_read_zones: "Зчитати зони",
+    svc_friends: "Друзі",
+    svc_create_rule: "Створити правило",
+    svc_light_schedule: "Розклад світла",
+    svc_siren: "Сирена",
+    svc_rule_creating: 'Створення правила «{name}»…',
+    svc_running: "{label} виконується…",
+    svc_done: "{label} завершено.",
+    pan_full_left_title: "Крайній лівий",
+    pan_full_left_aria: "Повернути камеру повністю ліворуч",
+    pan_left_short_title: "Ліворуч",
+    pan_center_title: "Центр",
+    pan_center_aria: "Центрувати камеру",
+    pan_right_short_title: "Праворуч",
+    pan_full_right_title: "Крайній правий",
+    pan_full_right_aria: "Повернути камеру повністю праворуч",
+    pill_pip_blocked_title: "Картинка в картинці активна для іншої камери",
+    pill_fullscreen_exit_title: "Вийти з повноекранного режиму",
+    pill_stream_title_start: "Почати пряму трансляцію",
+    pill_stream_title_stop: "Зупинити пряму трансляцію",
   },
   "zh-Hans": {
     play_gate_label: "启动直播",
@@ -1365,6 +2185,88 @@ const CARD_I18N = {
     ed_border_radius: "圆角半径（CSS，如 16px）",
     ed_box_shadow: "阴影（CSS）",
     ed_show_motion_zones: "显示移动区域叠加",
+    // ── card view: static labels (issue #45 — were hardcoded German) ──
+    accordion_notif_types: "通知类型",
+    accordion_advanced: "高级",
+    accordion_auto_security: "自动化与安全",
+    accordion_automations: "自动化",
+    accordion_light_camera: "灯光与摄像头",
+    accordion_diagnostics: "诊断",
+    accordion_services: "服务",
+    light_details_header: "亮度与颜色",
+    light_front: "前灯",
+    light_top: "上灯",
+    light_bottom: "下灯",
+    light_top_bottom: "上 + 下",
+    light_slider_front: "前",
+    light_slider_top: "上",
+    light_slider_bottom: "下",
+    light_slider_colortemp: "色温",
+    privacy_short: "隐私",
+    notif_section_title: "通知",
+    intercom_label: "对讲",
+    quality_label: "画质",
+    quality_auto: "自动",
+    quality_high: "高 (30 Mbps)",
+    quality_low: "低 (1.9 Mbps)",
+    notif_movement: "移动",
+    notif_person: "人员",
+    notif_audio: "音频",
+    notif_trouble: "故障",
+    notif_camera_alarm: "摄像头警报",
+    diag_timestamp: "时间戳",
+    diag_autofollow: "自动跟随",
+    motion_detection: "移动侦测",
+    record_sound: "录制声音",
+    privacy_sound: "隐私声音",
+    light_on_motion: "移动触发灯光",
+    light_always_on: "常亮",
+    intrusion_detection: "入侵检测",
+    motion_sensitivity: "灵敏度",
+    alarm_armed: "警报已布防",
+    siren_75db: "警笛 (75 dB)",
+    pre_alarm_led: "预警报（红色LED）",
+    power_led: "电源指示灯",
+    color_temperature: "色温",
+    color_top: "上部颜色",
+    color_bottom: "下部颜色",
+    status_led: "状态指示灯",
+    microphone_label: "麦克风",
+    show_motion_zones_btn: "显示移动区域",
+    show_privacy_masks_btn: "显示隐私遮罩",
+    diag_wifi: "WiFi",
+    diag_firmware: "固件",
+    diag_ambient_light: "环境光",
+    diag_motion_today: "今日移动",
+    diag_audio_today: "今日音频",
+    diag_schedules: "计划",
+    diag_motion_zones: "移动区域",
+    diag_privacy_masks: "隐私遮罩",
+    info_status: "状态",
+    info_connection: "连接",
+    info_reaction: "响应",
+    info_reaction_tooltip: "Bosch API 响应时间（本地=500毫秒，远程=1000毫秒）。不是播放器缓冲区——缓冲区在集成选项的“缓冲行为”中设置。",
+    svc_snapshot: "快照",
+    svc_read_zones: "读取区域",
+    svc_friends: "好友",
+    svc_create_rule: "创建规则",
+    svc_light_schedule: "灯光计划",
+    svc_siren: "警笛",
+    svc_rule_creating: "正在创建规则「{name}」…",
+    svc_running: "{label} 运行中…",
+    svc_done: "{label} 已完成。",
+    pan_full_left_title: "最左",
+    pan_full_left_aria: "将摄像头转到最左侧",
+    pan_left_short_title: "左",
+    pan_center_title: "居中",
+    pan_center_aria: "居中摄像头",
+    pan_right_short_title: "右",
+    pan_full_right_title: "最右",
+    pan_full_right_aria: "将摄像头转到最右侧",
+    pill_pip_blocked_title: "画中画正用于另一台摄像头",
+    pill_fullscreen_exit_title: "退出全屏",
+    pill_stream_title_start: "开始直播",
+    pill_stream_title_stop: "停止直播",
   },
 };
 
@@ -4759,48 +5661,48 @@ class BoschCameraCard extends HTMLElement {
 
         <div class="info-row">
           <div class="info-item">
-            <span class="info-label">Status</span>
+            <span class="info-label">${this._t("info_status")}</span>
             <span class="info-value" id="info-status">—</span>
           </div>
           <div class="info-item">
-            <span class="info-label">Verbindung</span>
+            <span class="info-label">${this._t("info_connection")}</span>
             <span class="info-value" id="info-connection">—</span>
           </div>
-          <div class="info-item" style="text-align:right" title="Bosch-API Reaktionszeit (LOCAL=500 ms, REMOTE=1000 ms). Nicht der Player-Puffer — den stellt 'Puffer-Verhalten' in den Integrations-Einstellungen ein.">
-            <span class="info-label">Reaktion</span>
+          <div class="info-item" style="text-align:right" title="${this._t("info_reaction_tooltip")}">
+            <span class="info-label">${this._t("info_reaction")}</span>
             <span class="info-value" id="info-buffering">—</span>
           </div>
         </div>
 
         <div class="btn-row">
-            <button class="btn btn-snapshot" id="btn-snapshot" aria-label="Snapshot aufnehmen">
+            <button class="btn btn-snapshot" id="btn-snapshot" aria-label="${this._t("pill_snapshot_aria")}">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                 <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
                 <circle cx="12" cy="13" r="4"/>
               </svg>
               <span id="btn-snapshot-label">Snapshot</span>
             </button>
-            <button class="btn btn-privacy-inline" id="btn-privacy-inline" title="Privat-Modus" aria-label="Privat-Modus umschalten" aria-pressed="false">
+            <button class="btn btn-privacy-inline" id="btn-privacy-inline" title="${this._t("pill_privacy_title")}" aria-label="${this._t("pill_privacy_aria")}" aria-pressed="false">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                 <path d="M7 11V7a5 5 0 0110 0v4"/>
               </svg>
             </button>
-            <button class="btn btn-stream" id="btn-stream" aria-label="Live-Stream starten oder stoppen" aria-pressed="false">
+            <button class="btn btn-stream" id="btn-stream" aria-label="${this._t("pill_stream_aria")}" aria-pressed="false">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                 <polygon points="23 7 16 12 23 17 23 7"/>
                 <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
               </svg>
               <span id="btn-stream-label">Live Stream</span>
             </button>
-            <button class="btn btn-overflow" id="btn-overflow" title="Weitere Optionen" aria-label="Weitere Optionen" aria-haspopup="true" aria-expanded="false">
+            <button class="btn btn-overflow" id="btn-overflow" title="${this._t("pill_more_title")}" aria-label="${this._t("pill_more_aria")}" aria-haspopup="true" aria-expanded="false">
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
                 <circle cx="12" cy="5" r="2"/>
                 <circle cx="12" cy="12" r="2"/>
                 <circle cx="12" cy="19" r="2"/>
               </svg>
             </button>
-            <button class="btn btn-fullscreen" id="btn-fullscreen" title="Vollbild" aria-label="Vollbild-Ansicht">
+            <button class="btn btn-fullscreen" id="btn-fullscreen" title="${this._t("pill_fullscreen_title")}" aria-label="${this._t("pill_fullscreen_aria")}">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                 <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
               </svg>
@@ -4821,22 +5723,22 @@ class BoschCameraCard extends HTMLElement {
                   <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
                   <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
                 </svg>
-                <span>Licht</span>
+                <span>${this._t("pill_light_title")}</span>
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
             <!-- Light sub-controls: toggles + expandable details -->
             <div class="light-sub-controls" id="light-sub-controls" style="display:none;padding:0 0 0 28px;border-left:2px solid rgba(255,204,0,.3);margin:0 0 0 16px">
-              <div class="sw-row" id="btn-front-light" style="padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg><span style="font-size:13px">Frontlicht</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-              <div class="sw-row" id="btn-top-led" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M12 2v8l6-4M12 2v8l-6-4"/></svg><span style="font-size:13px">Oberes Licht</span></div><div id="top-led-color-mini" style="width:14px;height:14px;border-radius:50%;border:1px solid #666;margin-right:4px"></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-              <div class="sw-row" id="btn-bottom-led" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M12 22v-8l6 4M12 22v-8l-6 4"/></svg><span style="font-size:13px">Unteres Licht</span></div><div id="bottom-led-color-mini" style="width:14px;height:14px;border-radius:50%;border:1px solid #666;margin-right:4px"></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-              <div class="sw-row" id="btn-wallwasher" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M9 18h6M10 22h4M12 2v1"/><path d="M18 12a6 6 0 10-12 0c0 2.21 1.34 4.1 3 5h6c1.66-.9 3-2.79 3-5z"/></svg><span style="font-size:13px">Oben + Unten</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-              <div id="light-details-toggle" style="padding:4px;cursor:pointer;display:flex;align-items:center;gap:6px;color:#888;font-size:12px;user-select:none"><svg id="light-details-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:12px;height:12px;transition:transform .2s"><polyline points="6 9 12 15 18 9"/></svg><span>Helligkeit & Farben</span></div>
+              <div class="sw-row" id="btn-front-light" style="padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg><span style="font-size:13px">${this._t("light_front")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+              <div class="sw-row" id="btn-top-led" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M12 2v8l6-4M12 2v8l-6-4"/></svg><span style="font-size:13px">${this._t("light_top")}</span></div><div id="top-led-color-mini" style="width:14px;height:14px;border-radius:50%;border:1px solid #666;margin-right:4px"></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+              <div class="sw-row" id="btn-bottom-led" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M12 22v-8l6 4M12 22v-8l-6 4"/></svg><span style="font-size:13px">${this._t("light_bottom")}</span></div><div id="bottom-led-color-mini" style="width:14px;height:14px;border-radius:50%;border:1px solid #666;margin-right:4px"></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+              <div class="sw-row" id="btn-wallwasher" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M9 18h6M10 22h4M12 2v1"/><path d="M18 12a6 6 0 10-12 0c0 2.21 1.34 4.1 3 5h6c1.66-.9 3-2.79 3-5z"/></svg><span style="font-size:13px">${this._t("light_top_bottom")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+              <div id="light-details-toggle" style="padding:4px;cursor:pointer;display:flex;align-items:center;gap:6px;color:#888;font-size:12px;user-select:none"><svg id="light-details-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:12px;height:12px;transition:transform .2s"><polyline points="6 9 12 15 18 9"/></svg><span>${this._t("light_details_header")}</span></div>
               <div id="light-details-body" style="display:none">
-                <div id="intensity-row" style="display:flex;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">Front</span><input type="range" id="intensity-slider" min="0" max="100" step="5" style="flex:1;accent-color:#fc0;height:4px"><span id="intensity-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
-                <div id="top-bri-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">Oben</span><input type="range" id="top-bri-slider" min="0" max="100" step="5" style="flex:1;accent-color:#4DFF7D;height:4px"><span id="top-bri-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
-                <div id="bottom-bri-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">Unten</span><input type="range" id="bottom-bri-slider" min="0" max="100" step="5" style="flex:1;accent-color:#FF453A;height:4px"><span id="bottom-bri-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
-                <div id="colortemp-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">Farbt.</span><input type="range" id="colortemp-slider" min="-100" max="100" step="5" style="flex:1;accent-color:#f90;height:4px;background:linear-gradient(to right,#69f,#fff,#f90)"><span id="colortemp-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
+                <div id="intensity-row" style="display:flex;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">${this._t("light_slider_front")}</span><input type="range" id="intensity-slider" min="0" max="100" step="5" style="flex:1;accent-color:#fc0;height:4px"><span id="intensity-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
+                <div id="top-bri-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">${this._t("light_slider_top")}</span><input type="range" id="top-bri-slider" min="0" max="100" step="5" style="flex:1;accent-color:#4DFF7D;height:4px"><span id="top-bri-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
+                <div id="bottom-bri-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">${this._t("light_slider_bottom")}</span><input type="range" id="bottom-bri-slider" min="0" max="100" step="5" style="flex:1;accent-color:#FF453A;height:4px"><span id="bottom-bri-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
+                <div id="colortemp-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">${this._t("light_slider_colortemp")}</span><input type="range" id="colortemp-slider" min="-100" max="100" step="5" style="flex:1;accent-color:#f90;height:4px;background:linear-gradient(to right,#69f,#fff,#f90)"><span id="colortemp-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
               </div>
             </div>
             <div class="sw-row privacy-row" id="btn-privacy">
@@ -4845,7 +5747,7 @@ class BoschCameraCard extends HTMLElement {
                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                   <path d="M7 11V7a5 5 0 0110 0v4"/>
                 </svg>
-                <span>Privat</span>
+                <span>${this._t("privacy_short")}</span>
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
@@ -4862,7 +5764,7 @@ class BoschCameraCard extends HTMLElement {
                   <path d="M18 8a6 6 0 00-9.33-5"/>
                   <line x1="1" y1="1" x2="23" y2="23"/>
                 </svg>
-                <span>Benachrichtigungen</span>
+                <span>${this._t("notif_section_title")}</span>
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
@@ -4874,7 +5776,7 @@ class BoschCameraCard extends HTMLElement {
                   <line x1="12" y1="19" x2="12" y2="23"/>
                   <line x1="8" y1="23" x2="16" y2="23"/>
                 </svg>
-                <span>Gegensprech.</span>
+                <span>${this._t("intercom_label")}</span>
               </div>
               <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
             </div>
@@ -4882,29 +5784,29 @@ class BoschCameraCard extends HTMLElement {
 
           <div class="pan-section" id="pan-section" style="display:none">
             <div class="pan-row">
-              <button class="pan-btn" id="pan-full-left"  title="Ganz links" aria-label="Kamera ganz nach links schwenken">
+              <button class="pan-btn" id="pan-full-left"  title="${this._t("pan_full_left_title")}" aria-label="${this._t("pan_full_left_aria")}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">
                   <polyline points="11 18 5 12 11 6"/><polyline points="18 18 12 12 18 6"/>
                 </svg>
               </button>
-              <button class="pan-btn" id="pan-left"       title="Links" aria-label="Kamera nach links schwenken">
+              <button class="pan-btn" id="pan-left"       title="${this._t("pan_left_short_title")}" aria-label="${this._t("pan_left_aria")}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">
                   <polyline points="15 18 9 12 15 6"/>
                 </svg>
               </button>
-              <button class="pan-btn" id="pan-center"     title="Mitte" aria-label="Kamera zentrieren">
+              <button class="pan-btn" id="pan-center"     title="${this._t("pan_center_title")}" aria-label="${this._t("pan_center_aria")}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
                   <circle cx="12" cy="12" r="3"/>
                   <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
                   <line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
                 </svg>
               </button>
-              <button class="pan-btn" id="pan-right"      title="Rechts" aria-label="Kamera nach rechts schwenken">
+              <button class="pan-btn" id="pan-right"      title="${this._t("pan_right_short_title")}" aria-label="${this._t("pan_right_aria")}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">
                   <polyline points="9 18 15 12 9 6"/>
                 </svg>
               </button>
-              <button class="pan-btn" id="pan-full-right" title="Ganz rechts" aria-label="Kamera ganz nach rechts schwenken">
+              <button class="pan-btn" id="pan-full-right" title="${this._t("pan_full_right_title")}" aria-label="${this._t("pan_full_right_aria")}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">
                   <polyline points="13 18 19 12 13 6"/><polyline points="6 18 12 12 6 6"/>
                 </svg>
@@ -4920,11 +5822,11 @@ class BoschCameraCard extends HTMLElement {
                 <rect x="2" y="7" width="20" height="15" rx="2"/>
                 <polyline points="17 2 12 7 7 2"/>
               </svg>
-              <span class="quality-label">Qualität</span>
+              <span class="quality-label">${this._t("quality_label")}</span>
               <select class="quality-select" id="quality-select">
-                <option value="Auto">Auto</option>
-                <option value="Hoch (30 Mbps)">Hoch (30 Mbps)</option>
-                <option value="Niedrig (1.9 Mbps)">Niedrig (1.9 Mbps)</option>
+                <option value="auto">${this._t("quality_auto")}</option>
+                <option value="high">${this._t("quality_high")}</option>
+                <option value="low">${this._t("quality_low")}</option>
               </select>
             </div>
           </div>
@@ -4932,7 +5834,7 @@ class BoschCameraCard extends HTMLElement {
           <!-- Accordion: Notification Types -->
           <div class="accordion" id="acc-notif-types">
             <div class="accordion-header" id="acc-notif-types-header">
-              <span class="accordion-title">Benachrichtigungs-Typen</span>
+              <span class="accordion-title">${this._t("accordion_notif_types")}</span>
               <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="accordion-body">
@@ -4940,35 +5842,35 @@ class BoschCameraCard extends HTMLElement {
                 <div class="sw-row" id="btn-notif-movement">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                    <span>Bewegung</span>
+                    <span>${this._t("notif_movement")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
                 <div class="sw-row" id="btn-notif-person">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                    <span>Person</span>
+                    <span>${this._t("notif_person")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
                 <div class="sw-row" id="btn-notif-audio">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg>
-                    <span>Audio</span>
+                    <span>${this._t("notif_audio")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
                 <div class="sw-row" id="btn-notif-trouble">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                    <span>Störung</span>
+                    <span>${this._t("notif_trouble")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
                 <div class="sw-row" id="btn-notif-alarm">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                    <span>Kamera-Alarm</span>
+                    <span>${this._t("notif_camera_alarm")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
@@ -4979,7 +5881,7 @@ class BoschCameraCard extends HTMLElement {
           <!-- Accordion: Advanced Controls -->
           <div class="accordion" id="acc-advanced">
             <div class="accordion-header" id="acc-advanced-header">
-              <span class="accordion-title">Erweitert</span>
+              <span class="accordion-title">${this._t("accordion_advanced")}</span>
               <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="accordion-body">
@@ -4987,35 +5889,35 @@ class BoschCameraCard extends HTMLElement {
                 <div class="sw-row" id="btn-timestamp">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    <span>Zeitstempel</span>
+                    <span>${this._t("diag_timestamp")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
                 <div class="sw-row" id="btn-autofollow">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/></svg>
-                    <span>Auto-Follow</span>
+                    <span>${this._t("diag_autofollow")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
                 <div class="sw-row" id="btn-motion">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                    <span>Bewegungserkennung</span>
+                    <span>${this._t("motion_detection")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
                 <div class="sw-row" id="btn-record-sound">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
-                    <span>Ton aufnehmen</span>
+                    <span>${this._t("record_sound")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
                 <div class="sw-row" id="btn-privacy-sound">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg>
-                    <span>Privat-Ton</span>
+                    <span>${this._t("privacy_sound")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
@@ -5026,20 +5928,20 @@ class BoschCameraCard extends HTMLElement {
           <!-- Gen2 Accordion: Automatik & Sicherheit -->
           <div class="accordion" id="acc-gen2-auto" style="display:none">
             <div class="accordion-header" id="acc-gen2-auto-header">
-              <span class="accordion-title">Automatik & Sicherheit</span>
+              <span class="accordion-title">${this._t("accordion_auto_security")}</span>
               <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="accordion-body">
               <div class="accordion-content">
-                <div class="sw-row" id="btn-motion-light" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg><span>Licht bei Bewegung</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-                <div class="sw-row" id="btn-ambient-light" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg><span>Dauerlicht</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-                <div class="sw-row" id="btn-intrusion" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span>Einbrucherkennung</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-                <div id="motion-sens-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">Empfindlichkeit</span><input type="range" id="motion-sens-slider" min="1" max="5" step="1" style="flex:1;accent-color:#ff9500;height:4px"><span id="motion-sens-value" style="min-width:16px;text-align:right;color:#999">—</span></div>
+                <div class="sw-row" id="btn-motion-light" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg><span>${this._t("light_on_motion")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div class="sw-row" id="btn-ambient-light" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg><span>${this._t("light_always_on")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div class="sw-row" id="btn-intrusion" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span>${this._t("intrusion_detection")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div id="motion-sens-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">${this._t("motion_sensitivity")}</span><input type="range" id="motion-sens-slider" min="1" max="5" step="1" style="flex:1;accent-color:#ff9500;height:4px"><span id="motion-sens-value" style="min-width:16px;text-align:right;color:#999">—</span></div>
                 <!-- Gen2 Indoor II — Alarm system (75 dB siren) -->
-                <div class="sw-row" id="btn-alarm-arm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg><span>Alarmanlage scharf</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-                <div class="sw-row" id="btn-alarm-mode" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="7"/><path d="M12 9v4l2 2M5 3L2 6M19 3l3 3"/></svg><span>Sirene (75 dB)</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-                <div class="sw-row" id="btn-prealarm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg><span>Pre-Alarm (rote LED)</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-                <div id="power-led-row" style="display:none;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">Power-LED</span><input type="range" id="power-led-slider" min="0" max="100" step="5" style="flex:1;accent-color:#ff9500;height:4px"><span id="power-led-value" style="min-width:34px;text-align:right;color:#999">—</span></div>
+                <div class="sw-row" id="btn-alarm-arm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg><span>${this._t("alarm_armed")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div class="sw-row" id="btn-alarm-mode" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="7"/><path d="M12 9v4l2 2M5 3L2 6M19 3l3 3"/></svg><span>${this._t("siren_75db")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div class="sw-row" id="btn-prealarm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg><span>${this._t("pre_alarm_led")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div id="power-led-row" style="display:none;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">${this._t("power_led")}</span><input type="range" id="power-led-slider" min="0" max="100" step="5" style="flex:1;accent-color:#ff9500;height:4px"><span id="power-led-value" style="min-width:34px;text-align:right;color:#999">—</span></div>
               </div>
             </div>
           </div>
@@ -5047,7 +5949,7 @@ class BoschCameraCard extends HTMLElement {
           <!-- Automations Accordion (alle Kameras, konfigurierbar) -->
           <div class="accordion" id="acc-automations" style="display:none">
             <div class="accordion-header" id="acc-automations-header">
-              <span class="accordion-title">Automationen</span>
+              <span class="accordion-title">${this._t("accordion_automations")}</span>
               <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="accordion-body">
@@ -5060,18 +5962,18 @@ class BoschCameraCard extends HTMLElement {
           <!-- Gen2 Accordion: Licht & Kamera -->
           <div class="accordion" id="acc-gen2-light" style="display:none">
             <div class="accordion-header" id="acc-gen2-light-header">
-              <span class="accordion-title">Licht & Kamera</span>
+              <span class="accordion-title">${this._t("accordion_light_camera")}</span>
               <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="accordion-body">
               <div class="accordion-content">
-                <div id="colortemp-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">Farbtemperatur</span><input type="range" id="colortemp-slider" min="-100" max="100" step="5" style="flex:1;accent-color:#f90;height:4px;background:linear-gradient(to right,#69f,#fff,#f90)"><span id="colortemp-value" style="min-width:32px;text-align:right;color:#999">—</span></div>
+                <div id="colortemp-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">${this._t("color_temperature")}</span><input type="range" id="colortemp-slider" min="-100" max="100" step="5" style="flex:1;accent-color:#f90;height:4px;background:linear-gradient(to right,#69f,#fff,#f90)"><span id="colortemp-value" style="min-width:32px;text-align:right;color:#999">—</span></div>
                 <div id="rgb-lights-row" style="padding:4px 0;font-size:13px">
-                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span style="flex:1">Farbe Oben</span><div id="top-led-color" style="width:24px;height:24px;border-radius:50%;border:2px solid #444;cursor:pointer" title="Farbe wählen"></div><input type="color" id="top-led-picker" style="display:none"></div>
-                  <div style="display:flex;align-items:center;gap:10px"><span style="flex:1">Farbe Unten</span><div id="bottom-led-color" style="width:24px;height:24px;border-radius:50%;border:2px solid #444;cursor:pointer" title="Farbe wählen"></div><input type="color" id="bottom-led-picker" style="display:none"></div>
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span style="flex:1">${this._t("color_top")}</span><div id="top-led-color" style="width:24px;height:24px;border-radius:50%;border:2px solid #444;cursor:pointer" title="${this._t("pick_color")}"></div><input type="color" id="top-led-picker" style="display:none"></div>
+                  <div style="display:flex;align-items:center;gap:10px"><span style="flex:1">${this._t("color_bottom")}</span><div id="bottom-led-color" style="width:24px;height:24px;border-radius:50%;border:2px solid #444;cursor:pointer" title="${this._t("pick_color")}"></div><input type="color" id="bottom-led-picker" style="display:none"></div>
                 </div>
-                <div class="sw-row" id="btn-status-led" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>Status-LED</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
-                <div id="mic-level-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg><span style="white-space:nowrap">Mikrofon</span><input type="range" id="mic-slider" min="0" max="100" step="5" style="flex:1;accent-color:#0a84ff;height:4px"><span id="mic-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
+                <div class="sw-row" id="btn-status-led" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>${this._t("status_led")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>
+                <div id="mic-level-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg><span style="white-space:nowrap">${this._t("microphone_label")}</span><input type="range" id="mic-slider" min="0" max="100" step="5" style="flex:1;accent-color:#0a84ff;height:4px"><span id="mic-value" style="min-width:28px;text-align:right;color:#999">—</span></div>
                 <div id="lens-elev-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M12 22V2M5 12l7-10 7 10"/></svg><span style="white-space:nowrap">${this._t("height")}</span><input type="range" id="lens-slider" min="50" max="500" step="5" style="flex:1;accent-color:#30d158;height:4px"><span id="lens-value" style="min-width:36px;text-align:right;color:#999">—</span></div>
               </div>
             </div>
@@ -5080,7 +5982,7 @@ class BoschCameraCard extends HTMLElement {
           <!-- Accordion: Diagnostics & Services -->
           <div class="accordion" id="acc-diagnostics">
             <div class="accordion-header" id="acc-diagnostics-header">
-              <span class="accordion-title">Diagnose</span>
+              <span class="accordion-title">${this._t("accordion_diagnostics")}</span>
               <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="accordion-body">
@@ -5088,35 +5990,35 @@ class BoschCameraCard extends HTMLElement {
                 <div class="diag-row" id="diag-wifi">
                   <span class="diag-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0114.08 0"/><path d="M1.42 9a16 16 0 0121.16 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
-                    WiFi
+                    ${this._t("diag_wifi")}
                   </span>
                   <span class="diag-value" id="diag-wifi-val">—</span>
                 </div>
                 <div class="diag-row" id="diag-firmware">
                   <span class="diag-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/></svg>
-                    Firmware
+                    ${this._t("diag_firmware")}
                   </span>
                   <span class="diag-value" id="diag-firmware-val">—</span>
                 </div>
                 <div class="diag-row" id="diag-ambient">
                   <span class="diag-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>
-                    Umgebungslicht
+                    ${this._t("diag_ambient_light")}
                   </span>
                   <span class="diag-value" id="diag-ambient-val">—</span>
                 </div>
                 <div class="diag-row" id="diag-movement-today">
                   <span class="diag-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
-                    Bewegung heute
+                    ${this._t("diag_motion_today")}
                   </span>
                   <span class="diag-value" id="diag-movement-today-val">—</span>
                 </div>
                 <div class="diag-row" id="diag-audio-today">
                   <span class="diag-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg>
-                    Audio heute
+                    ${this._t("diag_audio_today")}
                   </span>
                   <span class="diag-value" id="diag-audio-today-val">—</span>
                 </div>
@@ -5127,7 +6029,7 @@ class BoschCameraCard extends HTMLElement {
           <!-- Accordion: Schedules & Zones -->
           <div class="accordion" id="acc-schedules">
             <div class="accordion-header" id="acc-schedules-header">
-              <span class="accordion-title">Zeitpläne & Zonen</span>
+              <span class="accordion-title">${this._t("schedules_zones")}</span>
               <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="accordion-body">
@@ -5135,7 +6037,7 @@ class BoschCameraCard extends HTMLElement {
                 <div class="diag-row">
                   <span class="diag-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                    Zeitpläne
+                    ${this._t("diag_schedules")}
                   </span>
                   <span class="diag-value" id="diag-rules-count">—</span>
                 </div>
@@ -5143,28 +6045,28 @@ class BoschCameraCard extends HTMLElement {
                 <div class="sw-row" id="btn-show-zones">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
-                    <span>Motion-Zonen anzeigen</span>
+                    <span>${this._t("show_motion_zones_btn")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
                 <div class="sw-row" id="btn-show-masks">
                   <div class="sw-left">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                    <span>Privacy-Masken anzeigen</span>
+                    <span>${this._t("show_privacy_masks_btn")}</span>
                   </div>
                   <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>
                 </div>
                 <div class="diag-row">
                   <span class="diag-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
-                    Motion-Zonen
+                    ${this._t("diag_motion_zones")}
                   </span>
                   <span class="diag-value" id="diag-zones-count">—</span>
                 </div>
                 <div class="diag-row">
                   <span class="diag-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-                    Privacy-Masken
+                    ${this._t("diag_privacy_masks")}
                   </span>
                   <span class="diag-value" id="diag-masks-count">—</span>
                 </div>
@@ -5175,7 +6077,7 @@ class BoschCameraCard extends HTMLElement {
           <!-- Accordion: Services -->
           <div class="accordion" id="acc-services">
             <div class="accordion-header" id="acc-services-header">
-              <span class="accordion-title">Services</span>
+              <span class="accordion-title">${this._t("accordion_services")}</span>
               <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="accordion-body">
@@ -7874,7 +8776,7 @@ class BoschCameraCard extends HTMLElement {
       apBtnStream.classList.toggle("on", isStreaming);
       apBtnStream.classList.toggle("connecting", streamBadgeState === "connecting");
       apBtnStream.setAttribute("aria-pressed", isStreaming ? "true" : "false");
-      apBtnStream.setAttribute("title", isStreaming ? "Live-Stream stoppen" : "Live-Stream starten");
+      apBtnStream.setAttribute("title", isStreaming ? this._t("pill_stream_title_stop") : this._t("pill_stream_title_start"));
       // Privacy ON → starting a stream is blocked backend-side; grey out + disable
       // the pill so the user can't tap into the error (see btn-stream above).
       apBtnStream.disabled = badgePrivacyOn;
@@ -8939,21 +9841,21 @@ class BoschCameraCard extends HTMLElement {
 
     const services = [
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>',
-        label: "Snapshot", svc: "trigger_snapshot", data: () => ({ entity_id: this._entities.camera }) },
+        label: this._t("svc_snapshot"), svc: "trigger_snapshot", data: () => ({ entity_id: this._entities.camera }) },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>',
-        label: "Zonen lesen", svc: "get_motion_zones", data: () => ({camera_id: camId()}) },
+        label: this._t("svc_read_zones"), svc: "get_motion_zones", data: () => ({camera_id: camId()}) },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',
-        label: "Privacy-Masken", svc: "get_privacy_masks", data: () => ({camera_id: camId()}) },
+        label: this._t("diag_privacy_masks"), svc: "get_privacy_masks", data: () => ({camera_id: camId()}) },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>',
-        label: "Freunde", svc: "list_friends", data: {} },
+        label: this._t("svc_friends"), svc: "list_friends", data: {} },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
-        label: "Regel erstellen", svc: "_prompt_create_rule", data: null },
+        label: this._t("svc_create_rule"), svc: "_prompt_create_rule", data: null },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>',
-        label: "Licht-Zeitplan", svc: "get_lighting_schedule", data: () => ({camera_id: camId()}) },
+        label: this._t("svc_light_schedule"), svc: "get_lighting_schedule", data: () => ({camera_id: camId()}) },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
-        label: "Verbindung", svc: "open_live_connection", data: () => ({camera_id: camId()}) },
+        label: this._t("info_connection"), svc: "open_live_connection", data: () => ({camera_id: camId()}) },
       { icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
-        label: "Sirene", svc: "_trigger_siren", data: null },
+        label: this._t("svc_siren"), svc: "_trigger_siren", data: null },
     ];
 
     grid.innerHTML = services.map((s, i) => `<button class="svc-btn" data-svc-idx="${i}">${s.icon}<span>${s.label}</span></button>`).join("");
@@ -8992,7 +9894,7 @@ class BoschCameraCard extends HTMLElement {
             start_time: start + ":00", end_time: end + ":00",
             weekdays: [0,1,2,3,4,5,6], is_active: true,
           });
-          if (resultEl) { resultEl.style.display = ""; resultEl.textContent = `Regel "${name}" wird erstellt...`; }
+          if (resultEl) { resultEl.style.display = ""; resultEl.textContent = this._t("svc_rule_creating").replace("{name}", name); }
           setTimeout(() => { btn.classList.remove("running"); }, 3000);
           return;
         }
@@ -9000,10 +9902,10 @@ class BoschCameraCard extends HTMLElement {
         btn.classList.add("running");
         const data = typeof svc.data === "function" ? svc.data() : svc.data;
         this._callService("bosch_shc_camera", svc.svc, data);
-        if (resultEl) { resultEl.style.display = ""; resultEl.textContent = `${svc.label} wird ausgeführt...`; }
+        if (resultEl) { resultEl.style.display = ""; resultEl.textContent = this._t("svc_running").replace("{label}", svc.label); }
         setTimeout(() => {
           btn.classList.remove("running");
-          if (resultEl) { resultEl.textContent = `${svc.label} abgeschlossen.`; setTimeout(() => { resultEl.style.display = "none"; }, 5000); }
+          if (resultEl) { resultEl.textContent = this._t("svc_done").replace("{label}", svc.label); setTimeout(() => { resultEl.style.display = "none"; }, 5000); }
         }, 3000);
       });
     });
@@ -9714,7 +10616,7 @@ class BoschCameraCard extends HTMLElement {
     btn.classList.toggle("on", mine);
     btn.setAttribute("aria-pressed", String(mine));
     btn.disabled = blocked; // greys out via .ap-pill-btn:disabled (opacity .4)
-    btn.title = blocked ? "Bild-im-Bild läuft für eine andere Kamera" : "Bild-im-Bild";
+    btn.title = blocked ? this._t("pill_pip_blocked_title") : this._t("pill_pip_title");
   }
 
   // Set the Media Session title shown in the PiP window's header (Chrome falls
@@ -10008,7 +10910,7 @@ class BoschCameraCard extends HTMLElement {
     const active = nativeFs || cssFs;
     btn.classList.toggle("on", active);
     btn.setAttribute("aria-pressed", active ? "true" : "false");
-    btn.setAttribute("title", active ? "Vollbild verlassen" : "Vollbild");
+    btn.setAttribute("title", active ? this._t("pill_fullscreen_exit_title") : this._t("pill_fullscreen_title"));
   }
 
   _callService(domain, service, data) {
