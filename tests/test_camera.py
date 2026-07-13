@@ -5135,6 +5135,47 @@ class TestEventSnapshot4xx:
         )
 
     @pytest.mark.asyncio
+    async def test_event_snapshot_timeout_capped_at_10s(self):
+        """Tier4 (latest event snapshot) asyncio.timeout must be 10s, not 20s.
+
+        Regression test for the stream-perf-stability-refactor plan Phase 1
+        item 4: the old 20s timeout on this last fallback tier exceeded HA's
+        CameraImageView outer timeout (10s), so an already-cancelled request
+        could still bind up to 20s of event-loop time. Pins the new value.
+        """
+        safe_url = "https://media.boschsecurity.com/ev1.jpg"
+        coord = self._event_coord(
+            [{"imageUrl": safe_url, "timestamp": "2026-01-01T00:00:00Z"}]
+        )
+        cam = _make_camera_r7(
+            coord=coord, _cached_image=None
+        )  # no cache → reach section 4
+
+        session = MagicMock()
+        session.get.return_value = _resp_cm(
+            200, body=b"\xff\xd8ev", content_type="image/jpeg"
+        )
+
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.asyncio.timeout",
+                wraps=asyncio.timeout,
+            ) as timeout_mock,
+        ):
+            from custom_components.bosch_shc_camera.camera import BoschCamera
+
+            result = await BoschCamera._async_camera_image_impl(cam)
+
+        assert result == b"\xff\xd8ev"
+        # In this scenario (no proxyUrl, not-idle, no outage creds) tier4 is
+        # the ONLY asyncio.timeout call site reached — pin its argument.
+        timeout_mock.assert_called_once_with(10)
+
+    @pytest.mark.asyncio
     async def test_403_tries_next_event_then_returns_placeholder(self):
         """403 on first event → try next event; 403 again → all failed → placeholder.
 

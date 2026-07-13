@@ -2053,6 +2053,19 @@ async def async_send_alert(
                 bool(found_clip_url),
                 bool(_smb_prefetch),
             )
+            # NOTE: sync_smb_upload runs in an executor thread, and asyncio
+            # can only abandon the *await* on a timeout — it cannot kill the
+            # underlying OS thread, which would otherwise keep running the
+            # upload indefinitely on a hung NAS (thread leak, and a delayed
+            # write could still land after a retry has already re-sent the
+            # same event). The real cutoff now happens inside sync_smb_upload
+            # itself via socket.setdefaulttimeout(_SMB_TRANSFER_TIMEOUT), which
+            # bounds every blocking smbclient/smbprotocol call in the transfer
+            # loop. This outer wait_for(timeout=30.0) is only a safety margin
+            # in case that inner bound is ever bypassed (e.g. a future
+            # smbclient version issuing calls outside the socket module) — it
+            # is deliberately longer than _SMB_TRANSFER_TIMEOUT so the inner
+            # timeout fires first under normal conditions.
             await asyncio.wait_for(
                 coordinator.hass.async_add_executor_job(
                     sync_smb_upload,

@@ -1,0 +1,131 @@
+# Stream-Performance & Stabilitäts-Refactoring — Plan (2026-07-13)
+
+Basis: 4 parallele Sonnet-Explore-Analysen (Backend-Lifecycle, Card, Recorder/NVR/Frigate/SMB, Coordinator/Ticks/FCM), synthetisiert von Fable 5. Umsetzung: Sonnet-Agents (MODEL_RULE), je Change THREE_PER_ISSUE_PER_CHANGE + Quality Gates + Deploy auf Test-HA + WATCHDOG_AFTER_DEPLOY. Alles lokal auf `main`, kein Push/Release ohne explizites Go (NEVER_AUTO_PUSH).
+
+## Phase 0 — Baseline messen (vor jedem Umbau)
+- Zeit-bis-erstes-Bild (Card, WebRTC + HLS-Fallback) und LOCAL-Session-Aufbauzeit auf Test-HA für beide Kameras messen und notieren (Log-Timestamps `try_live_connection` → go2rtc-Track). Ohne Baseline ist "Performance-Refactoring" nicht verifizierbar.
+
+## Phase 1 — Quick Wins Performance (low/med risk, hoher Nutzen)
+1. **Gepoolte Cloud-Session im Hot Path** — `live_connection.py:80-83`: jeder Verbindungsaufbau/Renewal öffnet frische `aiohttp.ClientSession` (+TCP/TLS-Handshake) statt `cloud_ssl.async_bosch_cloud_session_cm` (dafür gebaut). PERF, med.
+2. **Geteilte localhost-Session für go2rtc** — `__init__.py:1889/4347/4435`: `_go2rtc_consumer_count` (alle 30s pro Stream!), Register/Unregister öffnen je eine frische Session. Eine Coordinator-Session, Close in `_async_cancel_coordinator_tasks`. PERF, med.
+3. **RCP-Slow-Tier gepoolte Session** — `__init__.py:2350-2406`: eigener TCPConnector pro Kamera pro 5-Min-Tick. PERF, low.
+4. **Snapshot-Timeout-Budget kappen** — `camera.py:1410`: 20s-Fallback-Timeout > HA-Proxy-Timeout; auf ≤10s + Gesamtbudget der 5-Tier-Kaskade loggen. PERF, low.
+5. **`_maybe_announce_cloud_state` inline statt Task pro Tick** — `tick_housekeeping.py:151-153`. PERF, low.
+
+## Phase 2 — Stabilitäts-Härtung (low/med risk)
+6. **Timeout um Token-Refresh** — `token_auth.py:180`: `_do_refresh` ohne Timeout; hängender Keycloak blockiert `_token_refresh_lock` bis ~300s → ALLE 401-Recovery-Pfade stehen. `asyncio.timeout(15)` in `_refresh_token_locked`. STABILITÄT, low. **Wichtigster Einzelfix des Plans.**
+7. **In-Flight-Guard für go2rtc-Re-Register bei Heartbeat** — `__init__.py:1414-1419`: jeder Heartbeat (Gen1: 15s!) spawnt `_register_go2rtc_stream` ohne Guard → parallele Re-Registrierungen derselben Stream-ID können interleaven. Per-Cam Lock/Coalescing. STABILITÄT, med-high (sorgfältig testen).
+8. **`_spawn_tracked`-Helper** — `event_dispatch.py:171-211`, `tick_failure.py:38-63`, `tick_housekeeping.py:55-153`, `camera_status.py:126-128`: Tasks ohne `_bg_tasks`-Registrierung → bei Unload/HA-Stop nicht cancelbar. Einheitlicher Helper überall. STABILITÄT, med.
+9. **SMB/FTP-Timeout-Härtung** — `smb.py:287-295` (Transfer ohne Timeout blockiert Executor-Thread unbegrenzt), `fcm.py:2055-2064` (`wait_for` um Executor-Job leakt den Thread — Socket-Timeouts im Upload selbst statt äußerem wait_for), `recorder.py:1953-2060` (`_walk_and_delete` ohne Deadline, hängender NAS blockiert Cleanup-Job). STABILITÄT, low.
+10. **Frigate-Socket-Hygiene** — `frigate_endpoint.py:556-688`: `writer.close()` ohne `wait_closed()` (7 Stellen). STABILITÄT, low.
+11. **Zombie-Stream-Worker nach Stop-Timeout** — `live_connection.py:456-478`: nach `wait_for(stale.stop(), 5)`-Timeout läuft Worker unbeobachtet weiter. Explizit canceln/tracken. STABILITÄT, med (HA-Stream-Interna).
+12. **Media-Source SMB-Session-Reuse** — `media_source.py:358-630`: 4-5 volle SMB-Handshakes pro Browse-Drilldown; Session pro `_browse()`-Aufruf cachen (Credit-Starvation-Kommentar beachten). PERF, low-med. Plus `media_source.py:1619-1626`: 256-KiB-Chunks je Executor-Hop → größere Chunks/Producer-Queue.
+
+## Phase 3 — Strukturelles Refactoring `__init__.py` (Fortsetzung des großen Refactorings)
+Die Stream-/Session-Statemaschine (~1200 Zeilen) ist der stabilitätskritischste noch-inline-Block (Quelle der Live-Incidents 2026-07-04/2026-06-03). Extraktion in 4 Schritten, je Schritt volle Suite + Deploy-Verify, KEINE Verhaltensänderung im selben Commit wie ein Umzug:
+- `stream_lifecycle.py`: `_tear_down_live_stream`, `_handle_stream_worker_error`, `_idle_session_reaper`, `_has_active_consumer`, `_go2rtc_consumer_count` (~1487-2081)
+- `session_renewal.py`: `_refresh_local_creds_from_heartbeat`, `_auto_renew_local_session`, `_promote_to_local`, `_remote_session_terminator` (~1307-1486, 4587-4926)
+- go2rtc-Client-Modul: `_register_go2rtc_stream`, `_unregister_go2rtc_stream`, `_ensure_go2rtc_schemes_fresh` (~4197-4460)
+- TLS-Proxy-Wiring: `_start_tls_proxy`, `_on_tls_proxy_died`, `_stop_tls_proxy` (~4461-4587)
+Reihenfolge: NACH Phase 1+2, damit die Verhaltens-Fixes nicht mit Code-Moves vermischt werden.
+
+## Phase 4 — Card (nach Backend, eigene Runde, CARD_VERSION Internal-Test-Bumps)
+13. **Gemeinsamer getStats-Snapshot-Cache** — Dead-Track-Watchdog (Z. 7088-7215) + Stall-Checker (Z. 8028-8102) pollen `pc.getStats()` überlappend in den ersten ~9s; TTL-Cache ~1s, beide konsumieren ihn. PERF, low.
+14. **Zentrales Timer-Registry** — >30 verstreute `clearTimeout`-Wächter, Leak bereits einmal passiert (Kommentar Z. 8216-8221). `_armTimer()/_clearAllTimers()`. STABILITÄT, low.
+15. **Adaptive Recovery-Pause** — `_scheduleLiveRecovery` feste 1000ms Teardown-Pause (Z. 8186-8200); "pc bereits geschlossen"-Erkennung statt starr. PERF, med (go2rtc-Race, Kommentar warnt vor <1s — konservativ angehen).
+16. **FreezeOracle-Konsolidierung (optional/später)** — drei parallele Freeze-Detektoren (rVFC, Stall-Interval, Worker-Heartbeat) in eine Klasse. Verhalten ist fein austariert → nur mit vollem E2E-Lauf, med Regressionsrisiko.
+- Card-Monolith-Split: NICHT als Big-Bang. Falls überhaupt, schrittweise nach Punkt 13-16, je Modul E2E-grün.
+
+## GEPARKT / erst diskutieren (Thomas-Entscheid nötig)
+- **Frigate-Relay vom Event-Loop nehmen** (`frigate_endpoint.py:333-489`): "läuft auf HA-Loop, kein bg-Thread" war bewusste v14.1.0-Designentscheidung. Erst unter Last messen (Frigate mit 2 Kameras High-Stream), nur bei nachgewiesener Loop-Contention umbauen. Risiko med-high.
+- **tls_proxy Thread-per-Connection → Pool** (`tls_proxy.py:293-304`): Kernstück des Proxys, high risk, Nutzen nur bei Reconnect-Flapping. Nicht anfassen ohne Messung.
+- **Cross-Version**: gepoolte Sessions/Timeout-Härtung Kandidaten für Python-CLI/ioBroker (CROSS_VERSION_FIXES) — nach HA-Verifikation prüfen.
+
+## Ausführungsmodell
+- Pro Nummer: 1 Sonnet-Agent implementiert, dann 3 Sonnet-Bug-Hunt-Agents (THREE_PER_ISSUE_PER_CHANGE), Regression-Tests, Quality Gates (mypy --strict, ruff, codespell, betroffene pytest; Card: eslint+stylelint+e2e), scp-Deploy + `ha core restart` + 60s Watchdog, dann nächste Nummer (AUTO_CONTINUE_PIPELINE).
+- Fallback-Test LOCAL→REMOTE (skill bosch-release) nach Phase 1 und nach Phase 3.
+- Commits einzeln auf lokalem `main`, Version/Release-Disposition am Ende via POST_FIX_DIALOG.
+
+## Verifiziert sauber (keine Aktion)
+`_watch_recorder`-Sentinels (float('-inf')), moov-atom/Doppel-Spawn-Locks (v14.7.1), image.py/mjpeg_snapshot.py Zombie-Reap, `_render()`-Fingerprint-Guard der Card, `session_state.py`/`lock_utils.py` Lock-Disziplin.
+
+## Umsetzungsstand (2026-07-13)
+Phase 0-2 + 4 committed auf lokalem `main` (Commits `4303e78`…`cf1209a`), 6023 pytest / mypy --strict / ruff / codespell / 234 e2e grün, alle mit THREE_PER_ISSUE_PER_CHANGE-Bug-Hunt verifiziert. Phase 3 (Struktur-Extraktion) läuft in isoliertem Worktree, noch nicht gemerged. Kein Push — wartet auf explizites Go von Thomas.
+
+---
+
+# Runde 2 — weitere Stabilität/Performance/Robustheit (Anhang 2026-07-13)
+
+Zweite Recherche-Runde NACH Phase 0-2+4, bewusst breiter als nur Stream: Config-Flow, Diagnostics, Test-Suite-Struktur, Memory-Footprint, Migration-Pfade, Logging-Qualität.
+
+## P1 — Stabilität
+1. **Unbegrenzt wachsende per-Kamera-Dicts bei Kamera-Tausch** — `__init__.py:3244` (`_cleanup_stale_devices`): räumt nur den Device-Registry-Eintrag auf, aber keinen der ~50 per-`cam_id`-gekeyten Coordinator-Dicts (`_rcp_*_cache`, `_shc_state_cache`, `_pan_cache`, `_audio_cache`, Locks, …). Bei Kamera-Austausch/-Umbenennung wachsen diese über die Lebensdauer der Coordinator-Instanz unbegrenzt. Vorschlag: zentrale `_purge_cam_id(cam_id)`-Helper-Funktion mit einer zentral gepflegten Liste aller per-cam-Dicts, plus Test der die Liste gegen alle `self._*: dict[str, ...]`-Deklarationen abgleicht (verhindert vergessene Einträge). Risiko: mittel.
+2. **Webhook-URL ohne Format-Validierung** — `config_flow.py:1247-1249` (`CONF_WEBHOOK_URL`): kein Schema-Check, anders als `diagnostic_cloud_api_override` (das `https://`-Prefix prüft). Ein Tippfehler schlägt erst zur Laufzeit beim Event-Push fehl. Vorschlag: gleiche `startswith(("http://","https://"))`-Prüfung ergänzen. Risiko: niedrig.
+
+## P2 — Wartbarkeit/Performance
+3. **`quality_scale.yaml` Coverage-Kommentar veraltet** — Zeile 35 nennt "99% / 3533 Tests / 2026-05-12", real inzwischen ~6023 Tests. Driftet von der Realität weg, wirkt bei HA-Core-Review unglaubwürdig. Bei nächstem Release aktualisieren. Risiko: keins.
+4. **CI-Testlauf komplett seriell** — `.github/workflows/tests.yml` + `pytest.ini`: kein `pytest-xdist`/`-n auto`, ~6023 Tests laufen seriell (~165s lokal). Vorschlag: `pytest-xdist` einführen (`-n auto --dist=loadgroup`), Coverage-Combine für `--cov-fail-under=100` verifizieren. Risiko: mittel (Coverage-Merge + Testisolation bei geteiltem `hass`-Fixture-State prüfen).
+5. **Streudicts statt zentraler Session-State-Facade** — Coordinator-`__init__` (~640-980) hat ~50 separate per-cam_id-Dict-Attribute statt eines `CameraSessionState`-artigen Objekts (das Muster aus `session_state.py` wurde nur für 2 Felder genutzt). Erschwert Punkt 1 und generelles Lifecycle-Reasoning. Passt als natürliche Fortsetzung von Phase 3 — inkrementelle Slices statt großem Wurf. Risiko: hoch bei Big-Bang, niedrig inkrementell. **ZURÜCKGESTELLT (2026-07-13, Thomas-Entscheid)**: nicht Teil des heutigen Release-Umfangs — eigenes Folgeprojekt in Größenordnung von Phase 3, nicht sinnvoll in derselben Nacht. Punkt 1 (Purge bei Kamera-Tausch) wurde ohne diese Facade umgesetzt (direkt auf den bestehenden Streudicts).
+6. **Doppelte `async_update_entry`-Aufrufe bei Config-Migration** — `__init__.py:5804-5835` (`async_migrate_entry`): v1→v2 und v2→v3 rufen `async_update_entry` je einzeln statt kumuliert am Ende, löst pro Migrationsschritt einen Reload/Event aus. Bei künftigen Versionsschritten setzt sich das fort. Vorschlag: Daten/Optionen akkumulieren, ein finaler Call. Risiko: niedrig.
+
+## P3 — Robustheit/Logging
+7. **Tick-Level-Logging-Audit** — Stichprobe ob `tick_housekeeping.py`/`__init__.py` versehentlich `_LOGGER.info` statt `.debug` für Pro-Tick-Events nutzen (130 debug + 39 info allein in `__init__.py`); bei kurzem `scan_interval` und vielen Kameras potenzielle Log-Flut. Audit + gezielte Downgrades. Risiko: niedrig.
+8. **Frigate-IP-Allowlist-Validierung bricht ohne Detail ab** — `config_flow.py:800-805`: bricht beim ersten ungültigen Token mit `break` ab, meldet nur generischen Fehler ohne welches Token betroffen war. Vorschlag: fehlerhaftes Token in `description_placeholders` zurückmelden. Risiko: niedrig.
+
+Keine TODO/FIXME/XXX/HACK-Marker im Produktivcode gefunden. `guards.py`/`session_state.py`/`diagnostics.py`/`models.py` sauber, keine neuen Antipatterns über obige hinaus.
+
+---
+
+# Feature-Gap-Analyse — Schwesterprojekte (Anhang 2026-07-13)
+
+Abgleich HA-Integration (führendes Repo) gegen Python-CLI, MCP, Node-RED, Python-Frontend (NiceGUI), ioBroker. Basis: `docs/family-parity-plan.md`/`docs/family-parity-status.md` (bereits sehr aktuell, Sync-Session ⑤-⑦ 2026-07-11/12) plus Code-Grep-Verifikation in allen 5 Repos, abgeglichen bis HA v14.8.0 + die 6 heutigen (2026-07-13) lokalen Commits.
+
+## Fehlt in ALLEN 5 Schwesterprojekten komplett
+- **Per-camera Mini-NVR Mode-Select** (`continuous`/`event_buffered`, v14.7.0) — 0 Treffer überall.
+- **`event_buffered`-Clip-Assembly + `nvr_postroll_seconds`** (v14.7.1) — 0 Treffer überall.
+- **`nvr_finalize_ring_on_event` Opt-in + per-camera Native-Clip-Opt-out** (v14.8.0) — 0 Treffer überall.
+- **Heutige Session-Pooling/Timeout-Härtung/Zombie-Worker-Tracking/getStats-Cache** (2026-07-13, lokal, ungepusht) — ausschließlich in HA, noch nirgendwo Cross-Port-Kandidat (erst nach HA-Release relevant, CROSS_VERSION_FIXES).
+
+## Pro Repo
+- **Python CLI**: hat ein EIGENES, kleineres Mini-NVR-Konzept (`bosch_camera.py:3781`, "BETA: motion-triggered continuous"), aber kein `event_buffered`, kein Postroll, kein per-Camera-Select — eigenständige Lücke, kein reiner Nachzügler. Firmware-Install/glass-break/fire bereits vorhanden.
+- **MCP**: Firmware-Install + glass-break/fire vorhanden. Mini-NVR komplett abwesend (MCP hat kein NVR-Konzept generell).
+- **ioBroker**: Firmware-Install vorhanden (mit explizitem Verweis auf die HA-Guard-Logik aus v14.4.10). Mini-NVR fehlt — strukturell delegiert ioBroker Aufzeichnung an externe Recorder via Frigate/RTSP-Front-Door statt eigenem Recorder zu bauen (bewusste Architekturentscheidung, keine reine Lücke).
+- **Python-Frontend (NiceGUI)**: Firmware nur read-only (korrekt so in README markiert). Mini-NVR fehlt.
+- **Node-RED**: Firmware komplett abwesend (0 Treffer). Mini-NVR fehlt. Glass-break/fire-alarm dagegen vollständig vorhanden.
+- **PiP-Survival** (v14.0.0, Browser-Feature): nur für Repos mit eigener Video-UI relevant — Frontend + ioBroker-Widget haben PiP-Handling, aber keins hat den spezifischen Survival-Fix. Python-CLI/MCP/Node-RED strukturell N/A (keine Browser-UI).
+
+## README_TABLES_SYNC ist gebrochen
+Alle 6 "Integration Comparison"-Tabellen zeigen veraltete Versionsstände (HA `v13.5+` statt real v14.8.0, ioBroker `v1.5+` statt v1.8.0, MCP `v1.5+` statt v1.7.0, Node-RED `v0.2.3` statt v0.3.0-alpha) — der letzte echte Full-Sync liegt vor den 6 parallelen Feature-Releases von 2026-07-11/12. Frontend hat zusätzlich nur seine EIGENE Spalte lokal aktualisiert (`v0.1.2`→`v0.3.0`), die anderen 5 Spalten unverändert gelassen → zusätzliche Divergenz zwischen den 6 Kopien der Tabelle.
+
+**Empfehlung**: Einmaliger Full-Resync aller 6 README-Vergleichstabellen (Versionsnummern + neue Mini-NVR/Firmware/Session-Pooling-Zeilen) vor dem nächsten Release-Zyklus alle 6 Repos betreffend — aktuell suggeriert die Tabelle allen Nutzern einen ~1 Monat alten Featurestand. Separates Follow-up, nicht Teil dieses HA-only-Refactorings.
+
+---
+
+# Session-State-Facade — inkrementeller Migrationsplan (Anhang 2026-07-13, Thomas: "arbeite es schritt für schritt ab")
+
+Ziel: die ~50 per-`cam_id`-Streudicts im Coordinator (`self._rcp_cache`, `self._audio_cache`, `self._pan_cache`, ... — je ein Dict pro Datenfeld) schrittweise durch EIN zentrales `self._camera_states: dict[cam_id, CameraSessionState]` ersetzen, wobei `CameraSessionState` alle Felder als benannte Attribute bündelt. Bewusst NICHT als Big-Bang (siehe Risikobegründung oben) — stattdessen Slice für Slice, jede Slice eigener Commit mit vollen Gates + THREE_PER_ISSUE_PER_CHANGE.
+
+**Startvorteil**: Runde2-A hat bei der `_purge_cam_id`-Arbeit bereits ALLE betroffenen Attribute systematisch auditiert und in `_PURGE_CAM_DICT_ATTRS`/`_PURGE_CAM_SET_ATTRS` (~100 Einträge, zwei Tupel in `__init__.py`) inventarisiert — das ist die exakte Feldliste für die Migration, keine erneute Bestandsaufnahme nötig.
+
+## Prinzip pro Slice
+1. Neues/erweitertes Dataclass-Feld auf `CameraSessionState` (in `session_state.py`, das Muster existiert dort schon für 2 Felder) hinzufügen.
+2. ALLE Lese-/Schreibstellen des alten Streudicts im gesamten Paket (`__init__.py` + die 4 Phase-3-Module `stream_lifecycle.py`/`session_renewal.py`/`go2rtc_client.py`/`tls_proxy_wiring.py` + `switch.py`/`camera.py`/etc. wo relevant) auf das neue Facade-Feld umstellen — `grep -rn "self\._<altes_dict_name>\b"` als Vollständigkeits-Check vor Abschluss der Slice.
+3. Altes Dict-Attribut löschen (kein Parallelbetrieb über eine Slice hinaus — sonst zwei Wahrheitsquellen).
+4. `_purge_cam_id` für dieses Feld anpassen (Facade-Feld statt Dict-Pop).
+5. Volle Gates + volle Suite + THREE_PER_ISSUE_PER_CHANGE, dann Commit. Erst danach nächste Slice.
+
+## Vorgeschlagene Slice-Reihenfolge (nach Kopplungsgrad, lose gekoppelte zuerst)
+1. **Slice 1 — Diagnostik/Zeitstempel-Felder** (geringstes Risiko, nur gelesen/geschrieben, keine Lock-Semantik): `_offline_seen_at`, die `*_set_at`-Write-Lock-Timestamps (`_motion_set_at`, `_privacy_set_at`, `_firmware_set_at`, etc.), `_notif_disabled_logged`, `_fw_update_alerted`, `_slow_tier_deferred`.
+2. **Slice 2 — Cache-Felder ohne Cross-Kamera-Zugriff**: `_rcp_*_cache` (motion-zones/lighting/ledlights/etc.), `_shc_state_cache`, `_pan_cache`, `_audio_cache`, `_local_creds_cache`, `_nvr_*` Status-Dicts.
+3. **Slice 3 — Session-/Stream-Zustand** (höheres Risiko, aktiv von Phase-1/2/3-Code aus heute gelesen): `_sessions`, `_live_connections`, `_live_opened_at`, `_stream_warming`, `_user_intent_streams`.
+4. **Slice 4 — Locks** (höchstes Risiko, Timing-kritisch): `_stream_locks`, `_nvr_recorder_locks`, `_snapshot_fetch_locks`, `_go2rtc_reregister_locks`. Zuletzt, nachdem 1-3 das Facade-Muster im Code etabliert haben.
+
+**Explizit NICHT migrieren** (falsche Passform für per-cam-Facade, wie von Runde2-A bereits identifiziert): `_rcp_session_cache`/`_rcp_session_locks` (proxy_hash-gekeyt, nicht cam_id), `_alert_sent_ids` (event_id-gekeyt), `_feature_flags` (account-global), `_rcp_lan_denied_until` (tuple-gekeyt `(cam_id, opcode_hex)` — eigener Sonderfall, ggf. später eigenes Muster).
+
+## Status
+- [x] Slice 1 (Diagnostik/Zeitstempel) — commit `d426bba` (lokal, main, ungepusht), 2026-07-13. Migriert: `_offline_seen_at` + 13 `*_set_at`-Write-Lock-Timestamps (`_light_set_at`/`_notif_set_at`/`_privacy_set_at`/`_privacy_sound_set_at`/`_timestamp_set_at`/`_ledlights_set_at`/`_arming_set_at`/`_intrusion_config_set_at`/`_audio_detection_set_at`/`_motion_set_at`/`_alarm_settings_set_at`/`_lighting_options_set_at`/`_firmware_set_at`) + 3 Flags (`_notif_disabled_logged`/`_fw_update_alerted`/`_slow_tier_deferred`) → generische `FloatFieldView`/`BoolFieldView` (Verallgemeinerung von `LiveOpenedAtView`/`StreamWarmingView`) über `self._sessions`/`CameraSessionState`, `session_state.py`. `_purge_cam_id`: alle 17 Namen aus `_PURGE_CAM_DICT_ATTRS`/`_PURGE_CAM_SET_ATTRS` entfernt (bereits über `_sessions`-Pop abgedeckt, wie `_live_opened_at`/`_stream_warming`). Betroffene Dateien: `__init__.py`, `session_state.py`, `slow_tier.py`, `switch.py`, `tests/test_init.py`. 6035 pytest (1 skip) / mypy --strict / ruff / codespell grün. THREE_PER_ISSUE_PER_CHANGE (3 Sub-Agents: Call-Site-Vollständigkeit, Purge-Korrektheit, semantische Äquivalenz inkl. Live-Smoke-Script) — 0 echte Bugs gefunden.
+- [x] Slice 2 (Caches) — commit `8918515` (lokal, main, ungepusht), 2026-07-13. Migriert: 27 Felder — alle `_rcp_*_cache` (`_rcp_state_cache`/`_rcp_dimmer_cache`/`_rcp_privacy_cache`/`_rcp_clock_offset_cache`/`_rcp_lan_ip_cache`/`_rcp_product_name_cache`/`_rcp_bitrate_cache`/`_rcp_alarm_catalog_cache`/`_rcp_motion_zones_cache`/`_rcp_motion_coords_cache`/`_rcp_tls_cert_cache`/`_rcp_network_services_cache`/`_rcp_iva_catalog_cache`/`_rcp_onvif_scopes_cache`/`_rcp_version_cache`), `_shc_state_cache`, `_pan_cache`, `_audio_cache`, `_local_creds_cache`, `_nvr_mode_preference`, plus die reinen Mini-NVR-Status/Cache-Dicts `_nvr_user_intent`/`_nvr_error_state`/`_nvr_recent_crash`/`_nvr_auth_retry_count`/`_nvr_event_clip_enabled`/`_nvr_preroll_last_crash`/`_nvr_preroll_segment_counts` → neue generische `CacheFieldView[_T]`-Klasse (`session_state.py`), ein `collections.abc.MutableMapping[str, _T]`-Facade über `self._sessions`/`CameraSessionState` — nur `__getitem__`/`__setitem__`/`__delitem__`/`__iter__`/`__len__` handgeschrieben, Rest (`.get()`/`.pop()`/`.setdefault()`/`.update()`/`.clear()`/`.items()`/`.values()`/`.keys()`/`in`/`==`/`bool()`) kommt vom Mixin — inkl. der beiden Ganzdict-Iterationsstellen (`_rcp_lan_ip_cache` in `__init__.py`'s Outage-Ping-Loop + `tick_housekeeping.py`'s Snapshot-Comprehension; `_local_creds_cache` im selben Snapshot-Pfad). Neuer Sentinel `_UNSET`/`_Unset` (statt `None`) für "noch kein Wert", da mehrere Felder selbst `Optional`-wertig sind (`rcp_privacy_cache: int | None` etc.) — ein gespeichertes `None` muss von "nie abgefragt" unterscheidbar bleiben. `_PURGE_CAM_DICT_ATTRS`: alle 27 Namen entfernt (bereits über `_sessions`-Pop abgedeckt, analog Slice 1). Audit-Fund (kein Bug, aber Korrektur der ursprünglichen Slice-Einteilung): `_nvr_drain_state`/`_nvr_drain_failures` sahen wie per-cam_id-Caches aus (`dict[str, ...]`-Type-Hint + `_PURGE_CAM_DICT_ATTRS`-Mitgliedschaft), sind es aber nicht — `_nvr_drain_state` ist ein einzelnes flaches Dict mit festen String-Keys ("target"/"pending"/…), jeden Drain-Tick komplett ersetzt; `_nvr_drain_failures` ist nach Staging-Dateipfad geschlüsselt, nicht nach cam_id (`recorder.py::sync_drain_tick`). Beide bewusst NICHT migriert, in `_PURGE_CAM_DICT_ATTRS` belassen (harmloses No-op). Betroffene Dateien: `__init__.py`, `session_state.py`, `tests/test_cam_id_purge_completeness.py` (neuer Test `test_purge_cam_id_all_slice2_cache_fields` deckt alle 27 Felder explizit ab, nicht nur die 3 vom Auto-Discovery-Mechanismus ohnehin erfassten). 6036 pytest (1 skip) / mypy --strict / ruff / codespell grün. THREE_PER_ISSUE_PER_CHANGE (3 Sub-Agents: Call-Site-Vollständigkeit über gesamtes Paket, Purge-Korrektheit inkl. TTL/Sentinel-Semantik, semantische Äquivalenz inkl. Iterationsreihenfolge-Smoke-Test) — 0 echte Bugs gefunden; 1 Test-Coverage-Lücke gefunden und noch in derselben Runde geschlossen (s.o., neuer Test).
+- [ ] Slice 3 (Session/Stream)
+- [ ] Slice 4 (Locks)
+
+Jede Slice hier nach Abschluss abhaken + kurzer Ergebnis-Vermerk (Testzahlen, Commit-Hash).

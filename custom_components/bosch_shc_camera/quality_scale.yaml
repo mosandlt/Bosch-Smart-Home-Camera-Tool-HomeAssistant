@@ -32,7 +32,7 @@ rules:
   test-coverage:
     status: done
     comment: |
-      99% line-coverage across 3533 tests / 135 files (2026-05-12).
+      99% line-coverage across 6023 tests / 53 source files (2026-07-13).
       All entity platforms at 100%: camera, image, switch, sensor, binary_sensor,
       light, number, select, button, update, config_flow, diagnostics,
       local_rcp, media_source, models, smb, cf_unbuffer, snapshot_store.

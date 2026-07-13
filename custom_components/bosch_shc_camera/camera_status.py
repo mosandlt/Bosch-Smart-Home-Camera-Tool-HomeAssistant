@@ -123,8 +123,9 @@ async def _check_one_camera_status(
                             "attempting live LOCAL promotion via renewal",
                             cam_id[:8],
                         )
-                        coordinator.hass.async_create_task(
-                            coordinator._promote_to_local(cam_id)
+                        coordinator._spawn_tracked(
+                            coordinator._promote_to_local(cam_id),
+                            name=f"bosch_shc_camera_promote_local_{cam_id[:8]}",
                         )
         return (cam_id, "ONLINE")
 
@@ -193,7 +194,10 @@ async def _check_one_camera_status(
     if status == "SESSION_LIMIT":
         _handle_quota = getattr(coordinator, "_async_handle_session_quota_hit", None)
         if _handle_quota is not None:
-            coordinator.hass.async_create_task(_handle_quota(cam_id))
+            coordinator._spawn_tracked(
+                _handle_quota(cam_id),
+                name=f"bosch_shc_camera_session_quota_{cam_id[:8]}",
+            )
     return (cam_id, status)
 
 

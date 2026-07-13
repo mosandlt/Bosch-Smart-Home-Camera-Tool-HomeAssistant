@@ -56,7 +56,20 @@ _YEAR_RE = re.compile(r"^\d{4}$")
 # NVR segment files: "HH-MM.mp4" (5-min wall-aligned segments).
 _NVR_SEG_RE = re.compile(r"^(?P<time>\d{2}-\d{2})\.mp4$")
 _NVR_DATE_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_CHUNK = 256 * 1024
+# SMB clip/thumbnail streaming chunk size. Each chunk is one
+# `hass.async_add_executor_job` hop (fobj.read is blocking smbclient I/O),
+# so a large clip at the old 256 KiB was ~2000 executor hops for a 500 MB
+# file. Bumped to 1 MiB: smbprotocol/SMB2 negotiates a max read size per
+# connection (commonly up to 1 MiB with a single server-side credit on the
+# NAS/Windows servers this integration targets; larger reads either get
+# split by smbprotocol into multiple wire requests transparently or need
+# multi-credit negotiation this integration doesn't rely on), so this stays
+# within one wire-request's worth of data per hop while cutting the hop
+# count ~4x. Not raised further (e.g. to 4 MiB): that would risk exceeding
+# some servers' negotiated max read size per single request, and the
+# per-chunk buffer is held in memory for the duration of one `response.write`
+# — 1 MiB is a reasonable ceiling for concurrent range-request streams.
+_CHUNK = 1024 * 1024
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -412,11 +425,32 @@ class _SmbBackend:
         return "\\\\" + self.server + "\\" + "\\".join(all_parts)
 
     def _scandir_filtered(
-        self, *segments: str, want_dirs: bool
+        self,
+        *segments: str,
+        want_dirs: bool,
+        session: dict[str, Any] | None = None,
     ) -> Generator[str, None, None]:
+        """List one directory's entries.
+
+        `session` lets a caller that is about to make several of these calls
+        in a row (one `_browse()` step can descend through 1-2 listing calls
+        for a single tree node, e.g. `_browse_smb`'s year-first vs. flat-date
+        probe) supply an already-open connection_cache to reuse instead of
+        paying a fresh TCP+SMB2-session handshake per call. This is safe
+        WITHIN one sequential browse step — the credit-starvation risk this
+        class's docstring describes is about *concurrent* callers (parallel
+        HTTP range-requests via open_file/open_flat_file, which still always
+        get a fresh per-call cache, unchanged) contending on one connection's
+        SMB2 credit pool, not about reusing a cache across a handful of
+        sequential scandir calls issued one after another by the same
+        browse() invocation. When `session` is omitted (the default), the
+        pre-existing per-call behavior is unchanged: a fresh cache is opened
+        and closed here.
+        """
         from smbclient import scandir
 
-        cache = self._new_session_cache()
+        owns_cache = session is None
+        cache = session if session is not None else self._new_session_cache()
         try:
             path = self._path(*segments)
             for e in scandir(path, connection_cache=cache):
@@ -430,41 +464,54 @@ class _SmbBackend:
                 elif not want_dirs and e.is_file():
                     yield e.name
         finally:
-            self._close_session_cache(cache)
+            if owns_cache:
+                self._close_session_cache(cache)
 
     # tree (camera-first: camera/year/month/day)
-    def list_cameras(self) -> list[str]:
+    def list_cameras(self, session: dict[str, Any] | None = None) -> list[str]:
         return sorted(
-            (n for n in self._scandir_filtered(want_dirs=True)),
+            (n for n in self._scandir_filtered(want_dirs=True, session=session)),
             key=str.casefold,
         )
 
     # ── year-first methods (year/month/day at root, no camera subdir) ───────────
-    def list_year_first_months(self, year: str) -> list[str]:
+    def list_year_first_months(
+        self, year: str, session: dict[str, Any] | None = None
+    ) -> list[str]:
         return sorted(
             (
                 n
-                for n in self._scandir_filtered(year, want_dirs=True)
+                for n in self._scandir_filtered(year, want_dirs=True, session=session)
                 if _DATE_DIR_RE.match(n)
             ),
             reverse=True,
         )
 
-    def list_year_first_days(self, year: str, month: str) -> list[str]:
+    def list_year_first_days(
+        self, year: str, month: str, session: dict[str, Any] | None = None
+    ) -> list[str]:
         return sorted(
             (
                 n
-                for n in self._scandir_filtered(year, month, want_dirs=True)
+                for n in self._scandir_filtered(
+                    year, month, want_dirs=True, session=session
+                )
                 if _DATE_DIR_RE.match(n)
             ),
             reverse=True,
         )
 
     def list_year_first_events(
-        self, year: str, month: str, day: str
+        self,
+        year: str,
+        month: str,
+        day: str,
+        session: dict[str, Any] | None = None,
     ) -> list[tuple[str, str | None, dict[str, str]]]:
         groups: dict[str, dict[str, Any]] = {}
-        for name in self._scandir_filtered(year, month, day, want_dirs=False):
+        for name in self._scandir_filtered(
+            year, month, day, want_dirs=False, session=session
+        ):
             parsed = _parse_filename(name)
             if not parsed:
                 continue
@@ -481,42 +528,63 @@ class _SmbBackend:
                 out.append((preferred, image, groups[stem]["parsed"]))
         return out
 
-    def list_years(self, camera: str) -> list[str]:
+    def list_years(
+        self, camera: str, session: dict[str, Any] | None = None
+    ) -> list[str]:
         return sorted(
             (
                 n
-                for n in self._scandir_filtered(camera, want_dirs=True)
+                for n in self._scandir_filtered(camera, want_dirs=True, session=session)
                 if _YEAR_RE.match(n)
             ),
             reverse=True,
         )
 
-    def list_months(self, camera: str, year: str) -> list[str]:
+    def list_months(
+        self, camera: str, year: str, session: dict[str, Any] | None = None
+    ) -> list[str]:
         return sorted(
             (
                 n
-                for n in self._scandir_filtered(camera, year, want_dirs=True)
+                for n in self._scandir_filtered(
+                    camera, year, want_dirs=True, session=session
+                )
                 if _DATE_DIR_RE.match(n)
             ),
             reverse=True,
         )
 
-    def list_days(self, camera: str, year: str, month: str) -> list[str]:
+    def list_days(
+        self,
+        camera: str,
+        year: str,
+        month: str,
+        session: dict[str, Any] | None = None,
+    ) -> list[str]:
         return sorted(
             (
                 n
-                for n in self._scandir_filtered(camera, year, month, want_dirs=True)
+                for n in self._scandir_filtered(
+                    camera, year, month, want_dirs=True, session=session
+                )
                 if _DATE_DIR_RE.match(n)
             ),
             reverse=True,
         )
 
     def list_events(
-        self, camera: str, year: str, month: str, day: str
+        self,
+        camera: str,
+        year: str,
+        month: str,
+        day: str,
+        session: dict[str, Any] | None = None,
     ) -> list[tuple[str, str | None, dict[str, str]]]:
         """Return [(preferred_filename, image_filename_or_none, parsed)]."""
         groups: dict[str, dict[str, Any]] = {}
-        for name in self._scandir_filtered(camera, year, month, day, want_dirs=False):
+        for name in self._scandir_filtered(
+            camera, year, month, day, want_dirs=False, session=session
+        ):
             parsed = _parse_filename(name)
             if not parsed:
                 continue
@@ -569,11 +637,15 @@ class _SmbBackend:
             raise
 
     # ── flat-file methods (files directly in camera/ folder on NAS) ──────────
-    def list_flat_dates(self, camera: str) -> list[str]:
+    def list_flat_dates(
+        self, camera: str, session: dict[str, Any] | None = None
+    ) -> list[str]:
         """Dates from files directly in camera/ (legacy flat layout)."""
         dates: set[str] = set()
         try:
-            for name in self._scandir_filtered(camera, want_dirs=False):
+            for name in self._scandir_filtered(
+                camera, want_dirs=False, session=session
+            ):
                 parsed = _parse_filename(name)
                 if parsed:
                     dates.add(parsed["date"])
@@ -582,12 +654,14 @@ class _SmbBackend:
         return sorted(dates, reverse=True)
 
     def list_flat_events(
-        self, camera: str, date: str
+        self, camera: str, date: str, session: dict[str, Any] | None = None
     ) -> list[tuple[str, str | None, dict[str, str]]]:
         """Events directly in camera/ folder, filtered by date."""
         groups: dict[str, dict[str, Any]] = {}
         try:
-            for name in self._scandir_filtered(camera, want_dirs=False):
+            for name in self._scandir_filtered(
+                camera, want_dirs=False, session=session
+            ):
                 parsed = _parse_filename(name)
                 if not parsed or parsed["date"] != date:
                     continue
@@ -1151,6 +1225,39 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
         single_source: bool,
         root: bool = False,
     ) -> BrowseMediaSource:
+        """Render one SMB tree node, sharing ONE SMB session across every
+        directory-listing call this single browse step makes.
+
+        A single node can need 1-2 sequential `scandir` calls (e.g. the
+        "years + flat dates" probe at the camera level tries both
+        `list_years` and `list_flat_dates`) — each used to be a brand-new
+        TCP+SMB2-session handshake. `_SmbBackend`'s per-call-cache design
+        (see its class docstring) exists to stop *concurrent* callers (HTTP
+        Range-request streaming via open_file/open_flat_file — untouched
+        here, still per-call) from starving one connection's SMB2 credit
+        pool; reusing a cache across a handful of *sequential* listing calls
+        within one browse() invocation doesn't hit that failure mode, and
+        the cache is still closed at the end of this method — it never
+        outlives a single browse step.
+        """
+        session = backend._new_session_cache()
+        try:
+            return self._browse_smb_inner(
+                src, backend, rest, session, single_source=single_source, root=root
+            )
+        finally:
+            backend._close_session_cache(session)
+
+    def _browse_smb_inner(
+        self,
+        src: _Source,
+        backend: _SmbBackend,
+        rest: list[str],
+        session: dict[str, Any],
+        *,
+        single_source: bool,
+        root: bool = False,
+    ) -> BrowseMediaSource:
         prefix = src.entry_id if single_source else f"{src.entry_id}/{src.kind}"
 
         def ident(*parts: str) -> str:
@@ -1167,7 +1274,7 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
             if not rest:
                 children = [
                     _node(identifier=ident(cam), title=cam)
-                    for cam in backend.list_cameras()
+                    for cam in backend.list_cameras(session=session)
                 ]
                 return _node(
                     identifier="" if root else prefix,
@@ -1180,16 +1287,16 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
                     # Year-first folder: camera IS the year — show months directly
                     children = [
                         _node(identifier=ident(camera, m), title=m)
-                        for m in backend.list_year_first_months(camera)
+                        for m in backend.list_year_first_months(camera, session=session)
                     ]
                     return _node(
                         identifier=ident(camera), title=camera, children=children
                     )
                 children = [
                     _node(identifier=ident(camera, y), title=y)
-                    for y in backend.list_years(camera)
+                    for y in backend.list_years(camera, session=session)
                 ]
-                for d in backend.list_flat_dates(camera):
+                for d in backend.list_flat_dates(camera, session=session):
                     children.append(_node(identifier=ident(camera, d), title=d))
                 return _node(identifier=ident(camera), title=camera, children=children)
             if len(rest) == 2:  # months or flat-date events
@@ -1199,7 +1306,9 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
                     actual_year, month = camera, year
                     children = [
                         _node(identifier=ident(actual_year, month, d), title=d)
-                        for d in backend.list_year_first_days(actual_year, month)
+                        for d in backend.list_year_first_days(
+                            actual_year, month, session=session
+                        )
                     ]
                     return _node(
                         identifier=ident(actual_year, month),
@@ -1209,7 +1318,7 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
                 if _YEAR_RE.match(year):
                     children = [
                         _node(identifier=ident(camera, year, m), title=m)
-                        for m in backend.list_months(camera, year)
+                        for m in backend.list_months(camera, year, session=session)
                     ]
                     return _node(
                         identifier=ident(camera, year), title=year, children=children
@@ -1217,7 +1326,9 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
                 # rest[1] is a full "YYYY-MM-DD" date → flat events in camera/ folder
                 date = year
                 children = []
-                for fname, image, parsed in backend.list_flat_events(camera, date):
+                for fname, image, parsed in backend.list_flat_events(
+                    camera, date, session=session
+                ):
                     ext = fname.rsplit(".", 1)[-1].lower()
                     mime = "video/mp4" if ext == "mp4" else "image/jpeg"
                     mc = MediaClass.VIDEO if ext == "mp4" else MediaClass.IMAGE
@@ -1250,7 +1361,7 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
                     actual_year, actual_month, day = camera, year, month
                     children = []
                     for fname, image, parsed in backend.list_year_first_events(
-                        actual_year, actual_month, day
+                        actual_year, actual_month, day, session=session
                     ):
                         ext = fname.rsplit(".", 1)[-1].lower()
                         mime = "video/mp4" if ext == "mp4" else "image/jpeg"
@@ -1279,7 +1390,7 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
                     )
                 children = [
                     _node(identifier=ident(camera, year, month, d), title=d)
-                    for d in backend.list_days(camera, year, month)
+                    for d in backend.list_days(camera, year, month, session=session)
                 ]
                 return _node(
                     identifier=ident(camera, year, month),
@@ -1290,7 +1401,7 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
                 camera, year, month, day = rest
                 children = []
                 for fname, image, parsed in backend.list_events(
-                    camera, year, month, day
+                    camera, year, month, day, session=session
                 ):
                     ext = fname.rsplit(".", 1)[-1].lower()
                     mime = "video/mp4" if ext == "mp4" else "image/jpeg"
@@ -1322,7 +1433,8 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
             # camera arg is "" (filtered by _path so path traversal is correct)
             if not rest:
                 children = [
-                    _node(identifier=ident(y), title=y) for y in backend.list_years("")
+                    _node(identifier=ident(y), title=y)
+                    for y in backend.list_years("", session=session)
                 ]
                 return _node(
                     identifier="" if root else prefix,
@@ -1333,14 +1445,14 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
                 year = rest[0]
                 children = [
                     _node(identifier=ident(year, m), title=m)
-                    for m in backend.list_months("", year)
+                    for m in backend.list_months("", year, session=session)
                 ]
                 return _node(identifier=ident(year), title=year, children=children)
             if len(rest) == 2:  # days
                 year, month = rest
                 children = [
                     _node(identifier=ident(year, month, d), title=f"{year}-{month}-{d}")
-                    for d in backend.list_days("", year, month)
+                    for d in backend.list_days("", year, month, session=session)
                 ]
                 return _node(
                     identifier=ident(year, month),
@@ -1350,7 +1462,9 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
             if len(rest) == 3:  # events
                 year, month, day = rest
                 children = []
-                for fname, image, parsed in backend.list_events("", year, month, day):
+                for fname, image, parsed in backend.list_events(
+                    "", year, month, day, session=session
+                ):
                     ext = fname.rsplit(".", 1)[-1].lower()
                     mime = "video/mp4" if ext == "mp4" else "image/jpeg"
                     mc = MediaClass.VIDEO if ext == "mp4" else MediaClass.IMAGE

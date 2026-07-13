@@ -87,7 +87,10 @@ async def run_housekeeping(
     if not is_first_tick and data and _announce is not None and _compute is not None:
         for _cam_id, _cam_data in data.items():
             new_status = _compute(_cam_id, _cam_data)
-            coordinator.hass.async_create_task(_announce(_cam_id, new_status))
+            coordinator._spawn_tracked(
+                _announce(_cam_id, new_status),
+                name=f"bosch_shc_camera_status_announce_{_cam_id[:8]}",
+            )
 
     # Persist LAN IPs (cam_id → IP) so the next cloud-degraded
     # startup can ping cameras without first needing a cloud call.
@@ -98,7 +101,9 @@ async def run_housekeeping(
         _prev = getattr(coordinator, "_lan_ips_snapshot", None)
         if _snapshot and _snapshot != _prev:
             coordinator._lan_ips_snapshot = _snapshot
-            coordinator.hass.async_create_task(_store.async_save(_snapshot))
+            coordinator._spawn_tracked(
+                _store.async_save(_snapshot), name="bosch_shc_camera_lan_ips_save"
+            )
 
     # Persist hardware versions (cam_id → hw_version) for the same
     # cloud-degraded-startup reason — without this, _is_gen2() defaults
@@ -111,7 +116,10 @@ async def run_housekeeping(
         _hw_prev = getattr(coordinator, "_hw_version_snapshot", None)
         if _hw_snapshot and _hw_snapshot != _hw_prev:
             coordinator._hw_version_snapshot = _hw_snapshot
-            coordinator.hass.async_create_task(_hw_store.async_save(_hw_snapshot))
+            coordinator._spawn_tracked(
+                _hw_store.async_save(_hw_snapshot),
+                name="bosch_shc_camera_hw_version_save",
+            )
 
     # Persist LOCAL Digest creds so LAN-fallback privacy / light
     # writes survive HA restarts during a Bosch cloud outage. Without
@@ -132,7 +140,10 @@ async def run_housekeeping(
         _cred_prev = getattr(coordinator, "_local_creds_snapshot", None)
         if _cred_snapshot and _cred_snapshot != _cred_prev:
             coordinator._local_creds_snapshot = _cred_snapshot
-            coordinator.hass.async_create_task(_creds_store.async_save(_cred_snapshot))
+            coordinator._spawn_tracked(
+                _creds_store.async_save(_cred_snapshot),
+                name="bosch_shc_camera_local_creds_save",
+            )
 
     # Periodic background refresh of the Bosch community maintenance
     # feed — once per hour on a healthy coordinator tick. Reactive
@@ -142,12 +153,23 @@ async def run_housekeeping(
     _maint_interval = getattr(coordinator, "_MAINTENANCE_INTERVAL_S", 3600.0)
     _maint_refresh = getattr(coordinator, "_async_refresh_maintenance", None)
     if _maint_refresh is not None and (now - _maint_last) >= _maint_interval:
-        coordinator.hass.async_create_task(_maint_refresh(reactive=False))
+        coordinator._spawn_tracked(
+            _maint_refresh(reactive=False),
+            name="bosch_shc_camera_maint_refresh_periodic",
+        )
 
-    # Cloud-state transition notifier (v12.4.11). Schedule as a
-    # background task so the coordinator main loop is not delayed by
-    # a slow notify service. getattr handles stub coordinators in
-    # tests that bypass __init__.
+    # Cloud-state transition notifier (v12.4.11). Called directly
+    # (awaited) rather than spawned as a task: this call site always
+    # passes success=True, and `_async_maybe_announce_cloud_state`
+    # early-returns immediately (a couple of in-memory attribute
+    # checks, no I/O) unless a prior outage was actually announced —
+    # the rare "recovery" branch it can fall into only fires
+    # `hass.services.async_call(..., blocking=False)`, which schedules
+    # the notify service without waiting for it to finish, so it's
+    # cheap too. Spawning a fresh `async_create_task` every tick for a
+    # call that almost always no-ops was pure overhead (perf-refactor
+    # Phase 1 step 5). getattr handles stub coordinators in tests that
+    # bypass __init__.
     _cloud_alert = getattr(coordinator, "_async_maybe_announce_cloud_state", None)
     if _cloud_alert is not None:
-        coordinator.hass.async_create_task(_cloud_alert(True))
+        await _cloud_alert(True)

@@ -33,6 +33,7 @@ import pytest
 from homeassistant.components.media_source.error import Unresolvable
 
 from custom_components.bosch_shc_camera.media_source import (
+    _CHUNK,
     BoschCameraMediaSource,
     BoschCameraMediaView,
     _enabled_sources,
@@ -2470,7 +2471,7 @@ class TestSmbBackendYearFirst:
         raw = ["03", "04", "junk", "not-a-month"]
         with patch.object(b, "_scandir_filtered", return_value=iter(raw)) as mock_scan:
             result = b.list_year_first_months("2026")
-        mock_scan.assert_called_once_with("2026", want_dirs=True)
+        mock_scan.assert_called_once_with("2026", want_dirs=True, session=None)
         assert result == ["04", "03"], (
             f"SMB list_year_first_months must return ['04','03'] newest-first, got {result}"
         )
@@ -2482,7 +2483,7 @@ class TestSmbBackendYearFirst:
         raw = ["25", "26", "notaday"]
         with patch.object(b, "_scandir_filtered", return_value=iter(raw)) as mock_scan:
             result = b.list_year_first_days("2026", "03")
-        mock_scan.assert_called_once_with("2026", "03", want_dirs=True)
+        mock_scan.assert_called_once_with("2026", "03", want_dirs=True, session=None)
         assert result == ["26", "25"], (
             f"SMB list_year_first_days must return ['26','25'] newest-first, got {result}"
         )
@@ -2497,7 +2498,9 @@ class TestSmbBackendYearFirst:
         ]
         with patch.object(b, "_scandir_filtered", return_value=iter(raw)) as mock_scan:
             result = b.list_year_first_events("2026", "03", "25")
-        mock_scan.assert_called_once_with("2026", "03", "25", want_dirs=False)
+        mock_scan.assert_called_once_with(
+            "2026", "03", "25", want_dirs=False, session=None
+        )
         assert len(result) == 1, (
             f"SMB list_year_first_events must return 1 event (random.txt not parsed), got {len(result)}"
         )
@@ -2543,6 +2546,15 @@ def _make_smb_media_source(tmp_path):
     )
     src = _Source(entry_id="01ENT", kind="S", label="NAS")
     media = BoschCameraMediaSource(hass)
+    # `_browse_smb` now unconditionally opens ONE session cache for the
+    # whole browse step (session-reuse fix, stream-perf-stability-refactor
+    # Phase 2 #12) before dispatching into the tree-walk logic. These
+    # fixture-based tests patch a single leaf `list_*` method directly and
+    # never intend to exercise real smbclient network I/O — stub the
+    # session open/close on this instance so `_new_session_cache()` doesn't
+    # attempt a real `register_session()`/socket connect.
+    backend._new_session_cache = MagicMock(return_value={})
+    backend._close_session_cache = MagicMock()
     return media, src, backend
 
 
@@ -2842,6 +2854,125 @@ class TestSmbConnectionCachePerCall:
             assert "connection_cache" in kw, (
                 "smbclient.scandir must be called with connection_cache="
             )
+
+
+class TestSmbSessionReuseWithinBrowseStep:
+    """Session-reuse fix (stream-perf-stability-refactor Phase 2 #12):
+    ONE `_browse()` step (== one `_browse_smb`/`_browse_smb_inner`
+    invocation) must reuse a single SMB session across however many
+    sequential `list_*` calls it makes for that one tree node, instead of
+    opening (and immediately closing) a fresh TCP+SMB2-session handshake
+    per call. This is deliberately scoped to *one sequential browse step*
+    only — it does NOT change `open_file`/`open_flat_file` (still per-call,
+    still isolated per concurrent HTTP range-request, per
+    TestSmbConnectionCachePerCall above) and does NOT hold a session open
+    across separate browse() invocations.
+    """
+
+    def test_scandir_filtered_reuses_supplied_session(self):
+        """Passing an explicit `session=` to `_scandir_filtered` must skip
+        opening (and closing) a fresh cache — the caller owns its lifecycle."""
+        backend = _backend_credit_starvation()
+        fake = _fake_smbclient_default()
+        supplied_cache: dict = {}
+
+        with patch.dict(sys.modules, {"smbclient": fake}):
+            list(
+                backend._scandir_filtered(
+                    "Innenbereich", want_dirs=True, session=supplied_cache
+                )
+            )
+
+        fake.register_session.assert_not_called()
+        fake.delete_session.assert_not_called()
+        scan_kwargs = fake.scandir.call_args.kwargs
+        assert scan_kwargs["connection_cache"] is supplied_cache, (
+            "_scandir_filtered must scandir() using the caller-supplied "
+            "cache, not open a new one"
+        )
+
+    def test_list_methods_forward_session_without_opening_new_one(self):
+        """Every browse-time list_* method must forward an explicit
+        `session=` straight through to `_scandir_filtered` rather than
+        defaulting to a fresh per-call cache."""
+        backend = _backend_credit_starvation()
+        fake = _fake_smbclient_default()
+        supplied_cache: dict = {}
+
+        with patch.dict(sys.modules, {"smbclient": fake}):
+            backend.list_cameras(session=supplied_cache)
+            backend.list_years("Innenbereich", session=supplied_cache)
+            backend.list_months("Innenbereich", "2026", session=supplied_cache)
+            backend.list_days("Innenbereich", "2026", "05", session=supplied_cache)
+            backend.list_flat_dates("Innenbereich", session=supplied_cache)
+
+        fake.register_session.assert_not_called()
+        assert fake.scandir.call_count == 5
+        for call in fake.scandir.call_args_list:
+            assert call.kwargs["connection_cache"] is supplied_cache
+
+    def test_omitted_session_keeps_legacy_per_call_behavior(self):
+        """Without an explicit `session=`, behavior is byte-for-byte the
+        pre-existing per-call open+close (regression guard for every
+        existing direct caller of these methods, e.g. open_file's own
+        credit-starvation isolation elsewhere in this file)."""
+        backend = _backend_credit_starvation()
+        fake = _fake_smbclient_default()
+
+        with patch.dict(sys.modules, {"smbclient": fake}):
+            list(backend._scandir_filtered("Innenbereich", want_dirs=True))
+
+        fake.register_session.assert_called_once()
+        fake.delete_session.assert_called_once()
+
+    def test_browse_smb_opens_and_closes_exactly_one_session_per_step(self):
+        """The real regression target: `_browse_smb` on the "years + flat
+        dates" node makes TWO sequential backend calls (`list_years` +
+        `list_flat_dates`, see media_source.py's camera-first len(rest)==1
+        branch) for one single browse click. Before the fix that was 2
+        independent TCP+SMB2 handshakes; after the fix it must be exactly
+        1 `register_session` + 1 `delete_session` for the whole step."""
+        from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_shc_camera.media_source import _Source
+
+        backend = _backend_credit_starvation()
+        fake = _fake_smbclient_default()
+        # camera-level scandir: called for both list_years (dir names) and
+        # list_flat_dates (file names) -- same underlying scandir() result
+        # works for both since the fake just needs *a* iterable of entries.
+        fake.scandir = MagicMock(
+            side_effect=lambda *a, **kw: iter(
+                [_dir_entry("2026", is_dir=True, is_file=False)]
+            )
+        )
+
+        src = _Source(entry_id="01ENT", kind="S", label="NAS")
+        hass = MagicMock()
+        hass.data = {}
+        media = BoschCameraMediaSource(hass)
+
+        with (
+            patch.dict(sys.modules, {"smbclient": fake}),
+            patch.object(ms, "_enabled_sources", return_value=[(src, backend)]),
+        ):
+            media._browse("01ENT/Innenbereich")
+
+        assert fake.register_session.call_count == 1, (
+            "one browse() step over a node needing 2 sequential SMB "
+            f"listing calls must open exactly 1 session, got "
+            f"{fake.register_session.call_count}"
+        )
+        assert fake.delete_session.call_count == 1, (
+            "the single reused session must be closed exactly once, at "
+            f"the end of the browse step, got {fake.delete_session.call_count}"
+        )
+        # Both scandir calls must have used that SAME cache.
+        caches = [c.kwargs["connection_cache"] for c in fake.scandir.call_args_list]
+        assert len(caches) >= 2, "expected both list_years and list_flat_dates to scan"
+        assert len({id(c) for c in caches}) == 1, (
+            "list_years and list_flat_dates must share the SAME connection_cache "
+            "within one browse step, not each open their own"
+        )
 
 
 class TestSmbParallelBurst:
@@ -4503,7 +4634,13 @@ class TestBrowseYearFirstRouting:
         """_browse_smb/_browse_local source must contain all three year-first method calls."""
         import inspect
 
-        src_smb = inspect.getsource(BoschCameraMediaSource._browse_smb)
+        # `_browse_smb` is now a thin wrapper that opens/closes ONE session
+        # cache and delegates the actual tree-walk logic (where these
+        # list_year_first_* calls live) to `_browse_smb_inner` — include
+        # both in the source scanned here.
+        src_smb = inspect.getsource(
+            BoschCameraMediaSource._browse_smb
+        ) + inspect.getsource(BoschCameraMediaSource._browse_smb_inner)
         src_local = inspect.getsource(BoschCameraMediaSource._browse_local)
         assert (
             "list_year_first_months" in src_smb or "list_year_first_months" in src_local
@@ -4525,9 +4662,11 @@ class TestBrowseYearFirstRouting:
         """browse handler must use _YEAR_RE.match(camera) to detect year-first folders."""
         import inspect
 
-        src_smb = inspect.getsource(BoschCameraMediaSource._browse_smb)
+        src_smb = inspect.getsource(
+            BoschCameraMediaSource._browse_smb
+        ) + inspect.getsource(BoschCameraMediaSource._browse_smb_inner)
         src_local = inspect.getsource(BoschCameraMediaSource._browse_local)
-        assert_in_source(  # browse handler (_browse_smb or _browse_local) must call _YEAR_RE.match(camera) to detect year-first folders at len(rest)==1/2/3 inside the camera_first block
+        assert_in_source(  # browse handler (_browse_smb/_browse_smb_inner or _browse_local) must call _YEAR_RE.match(camera) to detect year-first folders at len(rest)==1/2/3 inside the camera_first block
             src_smb + src_local, "_YEAR_RE.match(camera)"
         )
 
@@ -4959,6 +5098,65 @@ class TestMediaViewDispatch:
             with patch(f"{MODULE}.web.StreamResponse", return_value=real_response):
                 resp = await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
         assert resp is real_response
+
+    @pytest.mark.asyncio
+    async def test_smb_read_uses_1mib_chunk_size(self):
+        """Chunk-size fix (stream-perf-stability-refactor Phase 2 #12): a
+        clip larger than one chunk must be read in 1 MiB (not the old
+        256 KiB) hops — each hop is one `hass.async_add_executor_job`
+        round-trip, so a large clip used to need ~4x as many of them."""
+        assert _CHUNK == 1024 * 1024, (
+            "_CHUNK must be 1 MiB; if this is intentionally changed again, "
+            "update this pin and the reasoning comment above _CHUNK in "
+            "media_source.py"
+        )
+
+        hass = _smb_hass_for_view()
+        view = BoschCameraMediaView(hass)
+
+        # 2.5 chunks' worth of payload -> 3 fobj.read() calls, first two at
+        # the full chunk size, last one for the remainder.
+        size = int(_CHUNK * 2.5)
+        fobj = MagicMock()
+        fobj.seek = MagicMock()
+        fobj.read = MagicMock(
+            side_effect=[b"A" * _CHUNK, b"A" * _CHUNK, b"A" * (size - 2 * _CHUNK), b""]
+        )
+        fobj.close = MagicMock()
+
+        backend_mock = MagicMock()
+        backend_mock.open_file = MagicMock(return_value=(fobj, size))
+
+        request = MagicMock()
+        request.headers = {}
+
+        real_response = MagicMock()
+        real_response.prepare = AsyncMock()
+        real_response.write = AsyncMock()
+        real_response.write_eof = AsyncMock()
+
+        async def _exec(fn, *args):
+            return fn(*args)
+
+        hass.async_add_executor_job = _exec
+
+        with (
+            patch(
+                f"{MODULE}._find_source",
+                return_value=(MagicMock(kind="S"), backend_mock),
+            ),
+            patch(f"{MODULE}.web.StreamResponse", return_value=real_response),
+        ):
+            await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
+
+        read_sizes = [c.args[0] for c in fobj.read.call_args_list]
+        assert read_sizes[0] == _CHUNK, (
+            f"first read() must request a full {_CHUNK}-byte chunk, got {read_sizes[0]}"
+        )
+        assert read_sizes[1] == _CHUNK
+        assert read_sizes[2] == size - 2 * _CHUNK, (
+            "final read() must request only the remaining bytes"
+        )
 
 
 class TestMediaViewSmbFlatPath:

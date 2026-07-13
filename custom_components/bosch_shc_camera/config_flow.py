@@ -751,6 +751,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
         is_legacy_client = current_client == "residential_app"
 
         errors: dict[str, str] = {}
+        invalid_allowlist_token = ""
 
         if user_input is not None:
             # HA's section() helper nests fields under the section key; flatten
@@ -794,6 +795,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 except ValueError:
                     errors["frigate_bind_host"] = "invalid_ip_address"
             allowlist_raw = str(user_input.get("frigate_ip_allowlist", "")).strip()
+            invalid_allowlist_token = ""
             if allowlist_raw:
                 for _token in (
                     t.strip() for t in allowlist_raw.split(",") if t.strip()
@@ -802,7 +804,17 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                         ipaddress.ip_network(_token, strict=False)
                     except ValueError:
                         errors["frigate_ip_allowlist"] = "invalid_ip_allowlist"
+                        invalid_allowlist_token = _token
                         break
+
+            webhook_url_raw = str(user_input.get(CONF_WEBHOOK_URL, "")).strip()
+            # Scheme is case-insensitive per RFC 3986 — check lowercased but
+            # store/keep webhook_url_raw as typed (matches _flatten_sections'
+            # merge below, which uses user_input verbatim).
+            if webhook_url_raw and not webhook_url_raw.lower().startswith(
+                ("http://", "https://")
+            ):
+                errors[CONF_WEBHOOK_URL] = "invalid_webhook_url"
 
             if not errors:
                 if migrate_to_oss:
@@ -1499,6 +1511,9 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 "date": "{date}",
                 "time": "{time}",
                 "id": "{id}",
+                # Only populated when frigate_ip_allowlist validation actually
+                # fails (Runde2 P3 #8) — empty string is harmless when unused.
+                "invalid_allowlist_token": invalid_allowlist_token,
             },
         )
 

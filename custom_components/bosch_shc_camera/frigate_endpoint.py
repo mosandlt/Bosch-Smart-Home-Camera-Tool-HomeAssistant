@@ -291,6 +291,26 @@ def build_public_url(
     return f"rtsp://{cred}{url_host}:{port}/{prefix}{path}"
 
 
+async def _close_writer(writer: asyncio.StreamWriter) -> None:
+    """Close ``writer`` and wait for the close to actually complete.
+
+    A bare ``writer.close()`` only schedules the close — under load the
+    underlying TCP socket can stay open into TIME_WAIT/linger past the point
+    the caller has already moved on and reused the slot (semaphore release,
+    idle-linger rearm, etc.), so every close site here now awaits
+    ``wait_closed()`` too. ``wait_closed()`` can itself raise on an
+    already-broken connection (reset/broken-pipe/OS-level errors) — that's
+    expected on an abrupt client/camera disconnect, not a bug, so it's
+    swallowed here rather than propagated (matches the file's existing
+    best-effort-teardown pattern elsewhere).
+    """
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except Exception as err:  # best-effort close of an already-abrupt connection
+        _LOGGER.debug("frigate front-door: wait_closed() error (non-fatal): %s", err)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-connection relay (Digest auth dance + steady injection).
 # ─────────────────────────────────────────────────────────────────────────────
@@ -337,7 +357,7 @@ class _Relay:
         finally:
             for w in (iw, self._cw):
                 if not w.is_closing():
-                    w.close()
+                    await _close_writer(w)
 
     async def _read_message(self, reader: asyncio.StreamReader) -> bytes:
         """Read one full RTSP message head (+body if Content-Length present).
@@ -428,7 +448,7 @@ class _Relay:
             pass
         finally:
             if not self._iw.is_closing():
-                self._iw.close()
+                await _close_writer(self._iw)
 
     async def _drain_requests(self, buf: bytes) -> bytes:
         """Emit every complete request in ``buf``, return the unparsed tail."""
@@ -486,7 +506,7 @@ class _Relay:
             pass
         finally:
             if not self._cw.is_closing():
-                self._cw.close()
+                await _close_writer(self._cw)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -553,7 +573,7 @@ class _CameraServer:
                 cam,
                 peer_ip,
             )
-            writer.close()
+            await _close_writer(writer)
             return
 
         if self._sem.locked():
@@ -563,7 +583,7 @@ class _CameraServer:
                 self.config.max_connections,
                 peer_ip,
             )
-            writer.close()
+            await _close_writer(writer)
             return
         await self._sem.acquire()
 
@@ -629,19 +649,19 @@ class _CameraServer:
             TimeoutError,
             OSError,
         ):
-            writer.close()
+            await _close_writer(writer)
             return
         body = content_length(first)
         if body:
             try:
                 first += await reader.readexactly(body)
             except (asyncio.IncompleteReadError, OSError):
-                writer.close()
+                await _close_writer(writer)
                 return
 
         parsed = parse_request_start_line(first)
         if parsed is None:
-            writer.close()
+            await _close_writer(writer)
             return
         _method, uri = parsed
 
@@ -655,7 +675,7 @@ class _CameraServer:
                     cam,
                     peer_ip,
                 )
-                writer.close()
+                await _close_writer(writer)
                 return
             first = _rewrite_request_uri(first, rewritten)
         elif cfg.auth_mode == AUTH_BASIC and cfg.token:
@@ -664,7 +684,7 @@ class _CameraServer:
                     b'RTSP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic realm="bosch-frigate"\r\n\r\n'
                 )
                 await writer.drain()
-                writer.close()
+                await _close_writer(writer)
                 return
             # Strip the gate header so the inner Digest dance starts clean.
             first = _strip_authorization(first)
@@ -685,7 +705,7 @@ class _CameraServer:
                 await writer.drain()
             except OSError:
                 pass
-            writer.close()
+            await _close_writer(writer)
             return
 
         relay = _Relay(self.cam_id, reader, writer, target, first)

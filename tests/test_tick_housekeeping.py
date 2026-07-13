@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -35,6 +35,12 @@ def _make_coord(**overrides):
         _hw_version=overrides.pop("_hw_version", {}),
         _local_creds_cache=overrides.pop("_local_creds_cache", {}),
     )
+    # `_spawn_tracked` mirrors BoschCameraCoordinator._spawn_tracked closely
+    # enough for these direct-module unit tests: routes through
+    # hass.async_create_task (a MagicMock here, asserted on directly below)
+    # instead of needing a real _bg_tasks set on this bare SimpleNamespace
+    # stub.
+    coord._spawn_tracked = lambda coro, **kw: coord.hass.async_create_task(coro, **kw)
     for k, v in overrides.items():
         setattr(coord, k, v)
     return coord
@@ -371,12 +377,17 @@ class TestMaintenanceFeedRefresh:
 
 class TestCloudStateNotifier:
     @pytest.mark.asyncio
-    async def test_notifier_scheduled_when_present(self):
-        notifier = MagicMock(return_value="coro")
+    async def test_notifier_awaited_directly_when_present(self):
+        # Called directly (awaited), NOT scheduled via hass.async_create_task
+        # — the early-return-heavy success=True path is cheap enough that
+        # spawning a task per tick was pure overhead (perf-refactor Phase 1
+        # step 5). Must be an AsyncMock: a real `await` on the return value
+        # of a plain MagicMock would raise TypeError.
+        notifier = AsyncMock()
         coord = _make_coord(_async_maybe_announce_cloud_state=notifier)
         await run_housekeeping(coord, {}, {}, NOW, False)
-        notifier.assert_called_once_with(True)
-        coord.hass.async_create_task.assert_called()
+        notifier.assert_awaited_once_with(True)
+        coord.hass.async_create_task.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_stub_coordinator_without_notifier_no_crash(self):

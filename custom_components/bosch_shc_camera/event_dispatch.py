@@ -168,8 +168,9 @@ async def build_data_and_dispatch(
                     )
                     cam_entity = coordinator._camera_entities.get(cam_id)
                     if cam_entity:
-                        coordinator.hass.async_create_task(
-                            cam_entity._async_trigger_image_refresh(delay=2)
+                        coordinator._spawn_tracked(
+                            cam_entity._async_trigger_image_refresh(delay=2),
+                            name=f"bosch_shc_camera_image_refresh_{cam_id[:8]}",
                         )
                     newest_event = events[0]
                     event_type = newest_event.get("eventType", "")
@@ -198,7 +199,7 @@ async def build_data_and_dispatch(
                         coordinator.hass.bus.async_fire(
                             "bosch_shc_camera_person", event_payload
                         )
-                    coordinator.hass.async_create_task(
+                    coordinator._spawn_tracked(
                         coordinator._async_send_alert(
                             cam_name,
                             event_type,
@@ -207,7 +208,8 @@ async def build_data_and_dispatch(
                             newest_event.get("videoClipUrl", ""),
                             newest_event.get("videoClipUploadStatus", ""),
                             event_id=newest_id,
-                        )
+                        ),
+                        name=f"bosch_shc_camera_send_alert_{cam_id[:8]}",
                     )
                     if coordinator.options.get("mark_events_read", False):
                         try:

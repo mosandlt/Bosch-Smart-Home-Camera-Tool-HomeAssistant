@@ -54,8 +54,17 @@ def _make_coord(**overrides):
         coro.close()
         return MagicMock()
 
+    def _spawn_tracked(coro, **kwargs):
+        # Mirrors BoschCameraCoordinator._spawn_tracked closely enough for
+        # these direct-module unit tests: routes through
+        # hass.async_create_task (assertable via coord.hass.async_create_task)
+        # and closes the coroutine to avoid "never awaited" warnings, without
+        # needing a real _bg_tasks set on this bare SimpleNamespace stub.
+        return coord.hass.async_create_task(coro, **kwargs)
+
     base = dict(
         hass=SimpleNamespace(async_create_task=MagicMock(side_effect=_create_task)),
+        _spawn_tracked=_spawn_tracked,
         _should_check_status=MagicMock(return_value=True),
         _cached_status={},
         _async_local_tcp_ping=AsyncMock(return_value=False),
@@ -71,7 +80,8 @@ def _make_coord(**overrides):
         _promote_to_local=AsyncMock(),
     )
     base.update(overrides)
-    return SimpleNamespace(**base)
+    coord = SimpleNamespace(**base)
+    return coord
 
 
 class TestCheckOneCameraStatusGating:

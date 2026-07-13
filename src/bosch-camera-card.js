@@ -149,7 +149,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.6";
+const CARD_VERSION = "14.1.7";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -377,6 +377,7 @@ const CARD_I18N = {
     ed_border_radius: "Corner radius (CSS, e.g. 16px)",
     ed_box_shadow: "Box shadow (CSS)",
     ed_show_motion_zones: "Show motion-zone overlay",
+    ed_fs_auto_hide: "Auto-hide fullscreen controls after idle",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Notification Types",
     accordion_advanced: "Advanced",
@@ -591,6 +592,7 @@ const CARD_I18N = {
     ed_border_radius: "Eckenradius (CSS, z.B. 16px)",
     ed_box_shadow: "Schlagschatten (CSS)",
     ed_show_motion_zones: "Bewegungszonen-Overlay anzeigen",
+    ed_fs_auto_hide: "Vollbild-Bedienelemente bei Inaktivität automatisch ausblenden",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Benachrichtigungs-Typen",
     accordion_advanced: "Erweitert",
@@ -769,6 +771,7 @@ const CARD_I18N = {
     ed_border_radius: "Radio de esquina (CSS, p. ej. 16px)",
     ed_box_shadow: "Sombra (CSS)",
     ed_show_motion_zones: "Mostrar superposición de zonas de movimiento",
+    ed_fs_auto_hide: "Ocultar automáticamente los controles de pantalla completa tras inactividad",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipos de notificación",
     accordion_advanced: "Avanzado",
@@ -946,6 +949,7 @@ const CARD_I18N = {
     ed_border_radius: "Rayon des coins (CSS, p. ex. 16px)",
     ed_box_shadow: "Ombre portée (CSS)",
     ed_show_motion_zones: "Afficher la superposition des zones de mouvement",
+    ed_fs_auto_hide: "Masquer automatiquement les commandes plein écran après inactivité",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Types de notification",
     accordion_advanced: "Avancé",
@@ -1123,6 +1127,7 @@ const CARD_I18N = {
     ed_border_radius: "Raggio angoli (CSS, es. 16px)",
     ed_box_shadow: "Ombra (CSS)",
     ed_show_motion_zones: "Mostra overlay zone di movimento",
+    ed_fs_auto_hide: "Nascondi automaticamente i controlli a schermo intero dopo inattività",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipi di notifica",
     accordion_advanced: "Avanzate",
@@ -1300,6 +1305,7 @@ const CARD_I18N = {
     ed_border_radius: "Hoekradius (CSS, bijv. 16px)",
     ed_box_shadow: "Slagschaduw (CSS)",
     ed_show_motion_zones: "Bewegingszone-overlay tonen",
+    ed_fs_auto_hide: "Volledig scherm-bediening automatisch verbergen bij inactiviteit",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Meldingstypen",
     accordion_advanced: "Geavanceerd",
@@ -1477,6 +1483,7 @@ const CARD_I18N = {
     ed_border_radius: "Promień zaokrąglenia (CSS, np. 16px)",
     ed_box_shadow: "Cień (CSS)",
     ed_show_motion_zones: "Pokaż nakładkę stref ruchu",
+    ed_fs_auto_hide: "Automatycznie ukrywaj elementy sterujące pełnego ekranu po bezczynności",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Typy powiadomień",
     accordion_advanced: "Zaawansowane",
@@ -1654,6 +1661,7 @@ const CARD_I18N = {
     ed_border_radius: "Raio dos cantos (CSS, ex. 16px)",
     ed_box_shadow: "Sombra (CSS)",
     ed_show_motion_zones: "Mostrar sobreposição de zonas de movimento",
+    ed_fs_auto_hide: "Ocultar automaticamente os controlos de ecrã inteiro após inatividade",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipos de notificação",
     accordion_advanced: "Avançado",
@@ -1831,6 +1839,7 @@ const CARD_I18N = {
     ed_border_radius: "Радиус скругления (CSS, напр. 16px)",
     ed_box_shadow: "Тень (CSS)",
     ed_show_motion_zones: "Показывать зоны движения",
+    ed_fs_auto_hide: "Автоматически скрывать элементы управления в полноэкранном режиме при бездействии",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Типы уведомлений",
     accordion_advanced: "Дополнительно",
@@ -2008,6 +2017,7 @@ const CARD_I18N = {
     ed_border_radius: "Радіус заокруглення (CSS, напр. 16px)",
     ed_box_shadow: "Тінь (CSS)",
     ed_show_motion_zones: "Показувати зони руху",
+    ed_fs_auto_hide: "Автоматично приховувати елементи керування на весь екран при бездіяльності",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Типи сповіщень",
     accordion_advanced: "Додатково",
@@ -2185,6 +2195,7 @@ const CARD_I18N = {
     ed_border_radius: "圆角半径（CSS，如 16px）",
     ed_box_shadow: "阴影（CSS）",
     ed_show_motion_zones: "显示移动区域叠加",
+    ed_fs_auto_hide: "全屏时空闲后自动隐藏控件",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "通知类型",
     accordion_advanced: "高级",
@@ -2305,6 +2316,26 @@ class BoschCameraCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._hass           = null;
     this._config         = null;
+    // Central timer registry (Phase 4 point 14, 2026-07-13): every setTimeout/
+    // setInterval armed via _armTimer()/_armInterval() is tracked here so
+    // _clearAllTimers() can sweep any leftover handle in one place. A prior
+    // timer leak (a re-arming setTimeout chain that outlived a disconnected
+    // card, see _stopLiveVideo's _uptimeTimer/_waitForStreamReady comment
+    // below) motivated this — individual `if (this._xTimer) clearTimeout(...)`
+    // guards are migrated to it incrementally, starting with the ones
+    // referenced from disconnectedCallback/_stopLiveVideo (the most
+    // leak-relevant teardown paths), not all >30 call sites at once.
+    this._timers = new Map(); // timer id -> "timeout" | "interval"
+    // Fullscreen controls auto-hide (Thomas, 2026-07-13): per-instance state so
+    // multiple cards on one dashboard each get their own independent idle clock
+    // — deliberately NOT a module-level `_bosch*` shared var like the PiP/fs-owner
+    // singletons above, since every card can be fullscreen-idle independently.
+    this._fsAutoHideWired  = false;  // listeners currently attached?
+    this._fsControlsHidden = false;  // pill-bar currently faded out?
+    this._fsIdleTimer      = null;   // _armInterval id, registry-tracked
+    this._fsLastActivityAt = 0;
+    this._fsActivityHandler = null;
+    this._fsTouchHandler    = null;
     this._refreshTimer   = null;
     this._imgTimestamp   = Date.now();
     this._lastStreaming   = null;    // last known streaming state (true/false/null)
@@ -2388,6 +2419,9 @@ class BoschCameraCard extends HTMLElement {
     this._webrtcStatsPrev    = null;  // {frames,bytes} baseline for the dead-track watchdog. 2026-06-23
     this._webrtcDeadPolls    = 0;     // consecutive getStats polls with bytes flowing but framesDecoded flat (decoder stall). 2026-06-23
     this._webrtcRecoveryStreak = 0;   // consecutive live WebRTC recoveries with no healthy frame in between → escalate to sticky HLS. Reset by the rVFC onFrame. 2026-06-23
+    this._statsCachePc       = null;  // pc identity the cached getStats() snapshot belongs to (dead-track watchdog + freeze oracle share one poll). 2026-07-13
+    this._statsCacheAt       = 0;     // performance.now() the cached snapshot was taken
+    this._statsCachePromise  = null;  // in-flight/last pc.getStats() Promise for the TTL window above
     this._timerStreaming     = false; // whether refresh timer is running at streaming interval
     this._optimistic        = {};    // optimistic entity states { entityId: "on"/"off"/"pending" }
     this._optimisticTimers  = {};    // timers to auto-clear optimistic states
@@ -2619,7 +2653,26 @@ class BoschCameraCard extends HTMLElement {
         config.ai_description_overlay_timeout === undefined
           ? 12
           : Number(config.ai_description_overlay_timeout),
+      // Fullscreen pill-bar auto-hide after 10s idle (2026-07-13, fb3410c).
+      // Default true (opt-out) so every pre-existing card config is
+      // unaffected — set to false to keep the controls permanently visible
+      // in fullscreen, exactly like before that feature shipped. When false,
+      // the idle watcher (_wireFsAutoHide/_fsIdleTimer) is never armed at
+      // all, so no background timer ticks for cards that don't want it.
+      fullscreen_auto_hide_controls: config.fullscreen_auto_hide_controls !== false,
     };
+    // Bug found by a 2026-07-13 bug-hunt agent: _syncFsAutoHide() is normally
+    // only invoked from _updateFullscreenButtonState() on an actual fullscreen
+    // enter/exit transition — a `setConfig()` call while the card is ALREADY
+    // fullscreen (e.g. the visual editor's live-preview firing config-changed
+    // as the user toggles the new checkbox) previously left the watcher wired
+    // (or unwired) against the STALE value for the rest of that fullscreen
+    // session, so unchecking the option mid-fullscreen had no visible effect
+    // until the user exited and re-entered. Re-sync immediately whenever
+    // setConfig runs while fullscreen is already active. `_inFullscreen` only
+    // reads classList/document.fullscreenElement, safe to call before shadowRoot
+    // exists (first-ever setConfig, not yet fullscreen, so this is a no-op then).
+    if (this._inFullscreen && this._inFullscreen()) this._syncFsAutoHide(true);
 
     const newStorageKey = `bosch_cam_${config.camera_entity}`;
     // If the card was re-pointed at a different camera (entity rename / edited
@@ -3481,7 +3534,7 @@ class BoschCameraCard extends HTMLElement {
     if (_boschPipActive === this) this._setBackgroundKeepAlive(false);
     if (_boschPipActive === this) _boschPipSetActive(null);
     this._stopRefreshTimer();
-    if (this._aiCaptionTimer) { clearTimeout(this._aiCaptionTimer); this._aiCaptionTimer = null; }
+    this._clearTimer(this._aiCaptionTimer); this._aiCaptionTimer = null;
     // Volume slider: remove the input listener to avoid a leak when the card is
     // removed from the DOM. The slider element itself lives in the shadow root
     // which gets GC'd, but the handler closure keeps `this` alive. 2026-06-16.
@@ -3508,15 +3561,19 @@ class BoschCameraCard extends HTMLElement {
     }
     // Defensive cleanup: if card gets removed while CSS-fullscreen is active,
     // these document-level listeners would leak via `this`-closure.
-    if (this._fsWireTimer) { clearTimeout(this._fsWireTimer); this._fsWireTimer = null; }
+    this._clearTimer(this._fsWireTimer); this._fsWireTimer = null;
     if (this._fsClickOut) { document.removeEventListener("pointerup", this._fsClickOut); this._fsClickOut = null; }
     if (this._fsKeyDown)  { document.removeEventListener("keydown", this._fsKeyDown);  this._fsKeyDown  = null; }
-    if (this._loadingTimeout)    clearTimeout(this._loadingTimeout);
-    if (this._snapshotPollTimer) clearTimeout(this._snapshotPollTimer);
+    // Fullscreen controls auto-hide: explicit teardown (removes the wrapper
+    // listeners immediately) on top of the _clearAllTimers() net below, which
+    // only catches the interval id, not the pointermove/touchstart listeners.
+    if (this._fsAutoHideWired) this._unwireFsAutoHide();
+    this._clearTimer(this._loadingTimeout);
+    this._clearTimer(this._snapshotPollTimer);
     Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
-    if (this._privacyCooldownTimer) { clearInterval(this._privacyCooldownTimer); this._privacyCooldownTimer = null; }
-    if (this._streamCooldownTimer) { clearInterval(this._streamCooldownTimer); this._streamCooldownTimer = null; }
-    if (this._panPosTimer) { clearTimeout(this._panPosTimer); this._panPosTimer = null; }
+    this._clearTimer(this._privacyCooldownTimer); this._privacyCooldownTimer = null;
+    this._clearTimer(this._streamCooldownTimer); this._streamCooldownTimer = null;
+    this._clearTimer(this._panPosTimer); this._panPosTimer = null;
     if (this._audioPopDismiss) { document.removeEventListener("pointerdown", this._audioPopDismiss); this._audioPopDismiss = null; }
     // Clear any lingering error-feedback timers set by _callServiceWithRollback
     if (this._errorFeedbackTimers) {
@@ -3549,6 +3606,11 @@ class BoschCameraCard extends HTMLElement {
       el.removeEventListener("wheel", onWheel);
       this._zoomHandlers = null;
     }
+    // Last-resort net: sweep anything armed via _armTimer/_armInterval that an
+    // individual `this._xTimer` guard above (or a not-yet-migrated one) missed.
+    // Registry-tracked timers are cleared+removed by their own guards already,
+    // so this is normally a no-op; it only catches leftovers. 2026-07-13.
+    this._clearAllTimers();
   }
 
   // ── Timer ─────────────────────────────────────────────────────────────────
@@ -3571,9 +3633,9 @@ class BoschCameraCard extends HTMLElement {
     // the first staggered tick stays at `interval`.
     const base = interval * 1000;
     const jitter = Math.floor(Math.random() * Math.min(10000, base));
-    this._refreshKickoff = setTimeout(() => {
+    this._refreshKickoff = this._armTimer(() => {
       this._triggerFreshSnapshot();
-      this._refreshTimer = setInterval(() => {
+      this._refreshTimer = this._armInterval(() => {
         this._triggerFreshSnapshot();
       }, base);
     }, base + jitter);
@@ -3823,8 +3885,8 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _stopRefreshTimer() {
-    if (this._refreshKickoff) { clearTimeout(this._refreshKickoff); this._refreshKickoff = null; }
-    if (this._refreshTimer) { clearInterval(this._refreshTimer); this._refreshTimer = null; }
+    this._clearTimer(this._refreshKickoff); this._refreshKickoff = null;
+    this._clearTimer(this._refreshTimer); this._refreshTimer = null;
   }
 
   _isStreaming() {
@@ -4132,6 +4194,38 @@ class BoschCameraCard extends HTMLElement {
            specificity (.fs-active.cam-offline) + !important wins. (2026-06-17) */
         :host(.fs-active.cam-offline) .ap-pill-bar,
         :host(.fs-active.cam-offline) .ap-top { display: none !important; }
+
+        /* Fullscreen controls auto-hide after 10s idle (Thomas, 2026-07-13).
+           .fs-controls-hidden is a plain JS-driven host class (NOT gated on
+           :fullscreen/.fs-active in the selector) so it works uniformly for
+           BOTH the native Fullscreen API path and the CSS-fallback (.fs-active,
+           iOS) path from one place — the JS side only ever adds this class while
+           one of those two is actually active (see _syncFsAutoHide). Opacity +
+           pointer-events, never display:none, so the fade is smooth and toggling
+           it back doesn't force a reflow. .ap-vol-pop is a DESCENDANT of
+           .ap-pill-bar (inside .ap-audio-wrap) so it fades with the parent
+           for free — no separate selector needed, and pointer-events:none also
+           cascades to it so a floating, unanchored volume popup can't linger. */
+        :host(.fs-controls-hidden) .ap-pill-bar {
+          opacity: 0 !important; pointer-events: none !important;
+        }
+        /* .ap-vol-pop needs its OWN override here, not just the parent's: the
+           parent's opacity:0 already hides it visually (opacity applies to the
+           whole subtree, not just the element it's set on), but pointer-events
+           is an INHERITED property — an explicit declaration on the element
+           itself (the :hover/.show rule below, which sets pointer-events:auto
+           on .ap-vol-pop directly) always wins over an inherited value, no
+           matter how the ancestor's own pointer-events is specified/!important.
+           Without this, hovering the audio button, then going idle for 10s
+           with the mouse stationary over the (now invisible) popup, left its
+           slider still clickable/draggable at that screen position — found by
+           the 2026-07-13 auto-hide bug-hunt (agent #3). */
+        :host(.fs-controls-hidden) .ap-vol-pop { pointer-events: none !important; }
+        /* Idle cursor hides too (nice-to-have) — scoped to the hidden state so
+           it never affects the normal (non-fullscreen) card. */
+        :host(.fs-controls-hidden) .img-wrapper,
+        :host(.fs-controls-hidden) .cam-img,
+        :host(.fs-controls-hidden) .cam-video { cursor: none; }
 
         /* ── Pan edge-arrow overlay (#33) ──────────────────────────────────
            Big left/right chevrons on the video edges. Inside .img-wrapper so
@@ -4805,6 +4899,9 @@ class BoschCameraCard extends HTMLElement {
              minimal overview tile that exceeds max-width. Scroll horizontally
              instead of clipping the row, and hide the scrollbar chrome. */
           overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
+          /* Fullscreen auto-hide fade (see .fs-controls-hidden below) — harmless
+             outside fullscreen since opacity never changes there. */
+          transition: opacity .3s ease;
         }
         .ap-pill-btn {
           width: 42px; height: 42px; border-radius: 50%;
@@ -6573,8 +6670,8 @@ class BoschCameraCard extends HTMLElement {
       if (!badge) return;
       badge.textContent = `${val > 0 ? "+" : ""}${val}°`;
       badge.classList.add("flash");
-      clearTimeout(this._panPosTimer);
-      this._panPosTimer = setTimeout(() => badge.classList.remove("flash"), 1500);
+      this._clearTimer(this._panPosTimer);
+      this._panPosTimer = this._armTimer(() => badge.classList.remove("flash"), 1500);
     };
     this.shadowRoot.getElementById("pan-edge-left")?.addEventListener("click", () => {
       const v = Math.max(-120, getCurPan() - PAN_STEP); setPan(v); flashPanPos(v);
@@ -6817,12 +6914,12 @@ class BoschCameraCard extends HTMLElement {
       // Safety timeout — shorter for snapshot refreshes, longer during stream start.
       // During stream start (_startingLiveVideo or _waitingForStream), the overlay
       // should stay visible until the video actually plays (outdoor cam takes 80s+).
-      if (this._loadingTimeout) clearTimeout(this._loadingTimeout);
+      this._clearTimer(this._loadingTimeout);
       const isStreamStart = this._startingLiveVideo || this._waitingForStream || this._liveVideoActive;
       const safetyMs = isStreamStart ? 120000 : 15000;
-      this._loadingTimeout = setTimeout(() => this._setLoadingOverlay(false), safetyMs);
+      this._loadingTimeout = this._armTimer(() => this._setLoadingOverlay(false), safetyMs);
     } else {
-      if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
+      this._clearTimer(this._loadingTimeout); this._loadingTimeout = null;
     }
   }
 
@@ -7092,8 +7189,8 @@ class BoschCameraCard extends HTMLElement {
       // Safety timeout: if video never plays after 120s, hide overlay but
       // keep snapshot visible (don't call clearOverlay which hides the image).
       // Outdoor camera can take 80s+ for first HLS frame.
-      if (this._activateSafetyTimer) clearTimeout(this._activateSafetyTimer);
-      this._activateSafetyTimer = setTimeout(() => {
+      this._clearTimer(this._activateSafetyTimer);
+      this._activateSafetyTimer = this._armTimer(() => {
         if (!this.isConnected) return;   // card removed during the 120s window
         if (!video.paused && video.currentTime > 0) {
           // Video is actually playing — full cleanup
@@ -7106,12 +7203,12 @@ class BoschCameraCard extends HTMLElement {
       }, 120000);
 
       // Stall detector: if video.currentTime stops advancing for 15s, recover
-      if (this._stallChecker) clearInterval(this._stallChecker);
+      this._clearTimer(this._stallChecker);
       let lastTime = 0;
       let stallCount = 0;
-      this._stallChecker = setInterval(() => {
+      this._stallChecker = this._armInterval(() => {
         if (!this._liveVideoActive || !video) {
-          clearInterval(this._stallChecker);
+          this._clearTimer(this._stallChecker);
           return;
         }
         // Tab hidden: suppress reconnect-escalation ONLY when no PiP is active.
@@ -7497,8 +7594,8 @@ class BoschCameraCard extends HTMLElement {
         hls.attachMedia(video);
         // HLS keepalive: prevent HA's 30s idle timeout from killing FFmpeg.
         // Even with maxBufferLength=10, belt-and-suspenders measure.
-        if (this._hlsKeepaliveTimer) clearInterval(this._hlsKeepaliveTimer);
-        this._hlsKeepaliveTimer = setInterval(() => {
+        this._clearTimer(this._hlsKeepaliveTimer);
+        this._hlsKeepaliveTimer = this._armInterval(() => {
           if (this._hls && this._liveVideoActive) {
             this._hls.startLoad(-1); // restart loading from current position
           }
@@ -7662,7 +7759,7 @@ class BoschCameraCard extends HTMLElement {
           // Stale handler after a reconnect swapped `pc` — ignore. Matches the
           // connectionstatechange guard above. B1 recovery-loop fix 2026-06-22.
           if (this._webrtcPc !== pc) return;
-          if (this._trackMuteTimer) { clearTimeout(this._trackMuteTimer); this._trackMuteTimer = null; }
+          this._clearTimer(this._trackMuteTimer); this._trackMuteTimer = null;
         };
         ev.track.onmute = () => {
           // A track from a CLOSED old pc can still fire `mute` during teardown.
@@ -7671,8 +7768,8 @@ class BoschCameraCard extends HTMLElement {
           // that looked like "it keeps breaking". B1 fix 2026-06-22.
           if (this._webrtcPc !== pc) return;
           if (!this._liveVideoActive) return;
-          if (this._trackMuteTimer) clearTimeout(this._trackMuteTimer);
-          this._trackMuteTimer = setTimeout(() => {
+          this._clearTimer(this._trackMuteTimer);
+          this._trackMuteTimer = this._armTimer(() => {
             this._trackMuteTimer = null;
             // Re-check pc identity INSIDE the debounce: a reconnect may have swapped
             // the peer connection during the 6s window — recovering then would tear
@@ -7955,6 +8052,26 @@ class BoschCameraCard extends HTMLElement {
   // "connected", zero track events) OR Chrome 145+ paused our muted background
   // <video> (decoding stops). Returns true when framesDecoded has not advanced for
   // >10s on a live WebRTC stream. Single-flight; never throws. 2026-06-22.
+  // Shared TTL cache (~1s) for pc.getStats() so the dead-track watchdog
+  // (_webrtcStatsSnapshot, every 2s) and the stall-checker freeze oracle
+  // (_checkWebrtcFreeze, every 5s) don't each fire their own getStats() call
+  // when both are polling concurrently in the first ~9s of a connection —
+  // they read the same underlying RTCStatsReport. Keyed on pc identity so a
+  // reconnect (new RTCPeerConnection) never serves a stale snapshot. Caches
+  // the in-flight Promise too, so two callers racing within the same tick
+  // share one call instead of issuing two. 2026-07-13 (Phase 4 point 13).
+  _getStatsCached(pc) {
+    const now = performance.now();
+    if (this._statsCachePc === pc && this._statsCachePromise
+        && (now - this._statsCacheAt) < 1000) {
+      return this._statsCachePromise;
+    }
+    this._statsCachePc      = pc;
+    this._statsCacheAt      = now;
+    this._statsCachePromise = pc.getStats();
+    return this._statsCachePromise;
+  }
+
   async _checkWebrtcFreeze() {
     if (this._streamTransport !== "webrtc") return false;   // HLS uses currentTime/rVFC
     const pc = this._webrtcPc;
@@ -7962,7 +8079,7 @@ class BoschCameraCard extends HTMLElement {
     if (this._statsCheckInFlight) return false;             // a check is already running
     this._statsCheckInFlight = true;
     try {
-      const stats = await pc.getStats();
+      const stats = await this._getStatsCached(pc);
       let framesDecoded = null;
       stats.forEach((r) => {
         if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video")
@@ -8000,7 +8117,7 @@ class BoschCameraCard extends HTMLElement {
     const pc = this._webrtcPc;
     if (!pc || typeof pc.getStats !== "function") return null;
     try {
-      const stats = await pc.getStats();
+      const stats = await this._getStatsCached(pc);
       let frames = null, bytes = 0;
       stats.forEach((r) => {
         if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video")
@@ -8026,7 +8143,7 @@ class BoschCameraCard extends HTMLElement {
   // Visible-only (re-arms while hidden so an alt-tab mid-connect can't false-fire,
   // matching the iOS thread-suspend caveat). 2026-06-23.
   _armWebrtcDeadTrackWatchdog(video) {
-    if (this._webrtcFirstFrameTimer) { clearTimeout(this._webrtcFirstFrameTimer); this._webrtcFirstFrameTimer = null; }
+    this._clearTimer(this._webrtcFirstFrameTimer); this._webrtcFirstFrameTimer = null;
     this._webrtcStatsPrev = null;
     this._webrtcDeadPolls = 0;
     const FIRST_POLL_MS = 2500;  // give ICE + the first keyframe a head start
@@ -8050,7 +8167,7 @@ class BoschCameraCard extends HTMLElement {
       // so the hidden gap is never added to visibleElapsed when we resume.
       if (document.visibilityState !== "visible") {
         lastTick = null;
-        this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
+        this._webrtcFirstFrameTimer = this._armTimer(poll, POLL_MS);
         return;
       }
       // Visible: accrue only the interval since the last visible tick toward the deadline.
@@ -8069,7 +8186,7 @@ class BoschCameraCard extends HTMLElement {
         // Keep polling; at the deadline give up SILENTLY — the stall checker /
         // freeze oracle still cover a genuinely stuck stream. 2026-06-23 (verify-agent: no false-positive).
         if (pastDeadline) return;
-        this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
+        this._webrtcFirstFrameTimer = this._armTimer(poll, POLL_MS);
         return;
       }
       if (snap.frames > 0) { this._webrtcRecoveryStreak = 0; this._hasEverDecodedFrames = true; return; } // decoder is producing frames → alive
@@ -8084,9 +8201,9 @@ class BoschCameraCard extends HTMLElement {
       // evidence the decoder never produced a frame → dead. (The null-report case
       // above is excluded, so a getStats-less healthy stream is never touched.) 2026-06-23.
       if (pastDeadline) { this._forceHlsFallback("0 frames decoded within deadline"); return; }
-      this._webrtcFirstFrameTimer = setTimeout(poll, POLL_MS);
+      this._webrtcFirstFrameTimer = this._armTimer(poll, POLL_MS);
     };
-    this._webrtcFirstFrameTimer = setTimeout(poll, FIRST_POLL_MS);
+    this._webrtcFirstFrameTimer = this._armTimer(poll, FIRST_POLL_MS);
   }
 
   // Escalate a dead WebRTC transport to HLS for the rest of this mount (sticky),
@@ -8111,12 +8228,12 @@ class BoschCameraCard extends HTMLElement {
   // (removeAttribute+load resets AVPlayer, then re-assign). 2026-06-23 (verify-agent /
   // Apple Dev Forums #739368).
   _armNativeHlsLoadWatchdog(video, url) {
-    if (this._nativeHlsLoadTimer) { clearTimeout(this._nativeHlsLoadTimer); this._nativeHlsLoadTimer = null; }
+    this._clearTimer(this._nativeHlsLoadTimer); this._nativeHlsLoadTimer = null;
     const onPlaying = () => {
-      if (this._nativeHlsLoadTimer) { clearTimeout(this._nativeHlsLoadTimer); this._nativeHlsLoadTimer = null; }
+      this._clearTimer(this._nativeHlsLoadTimer); this._nativeHlsLoadTimer = null;
     };
     video.addEventListener("playing", onPlaying, { once: true });
-    this._nativeHlsLoadTimer = setTimeout(() => {
+    this._nativeHlsLoadTimer = this._armTimer(() => {
       this._nativeHlsLoadTimer = null;
       if (!this.isConnected || !this._liveVideoActive) return;
       if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
@@ -8191,7 +8308,17 @@ class BoschCameraCard extends HTMLElement {
       // async, and re-offering too fast can collide with the still-held Bosch
       // session slot (scarce, per-camera) → the new offer fails into HLS. 1s is the
       // safe middle. B4 fix 2026-06-22 (+ verify-agent go2rtc-teardown guard).
-      setTimeout(() => {
+      // EVALUATED 2026-07-13 (Phase 4 point 15, adaptive pause): considered
+      // shortening this when the pc can be shown to already be cleanly closed.
+      // Deliberately NOT done: `_stopLiveVideo()` above calls `pc.close()`
+      // synchronously and `connectionState`/`iceConnectionState` flip to
+      // "closed" in the same tick, so there is no later client-side signal to
+      // poll for — but the race this pause guards against is on go2rtc's
+      // SERVER side (its own ICE/DTLS teardown + session-slot release), which
+      // a synchronous JS-side close() says nothing about. No safe "already
+      // torn down" detection exists at this layer, so left at the fixed 1000ms
+      // rather than risk reintroducing the B4 regression.
+      this._armTimer(() => {
         this._reconnectingLiveVideo = false;
         if (this.isConnected && !this._liveVideoActive) this._startLiveVideo();
       }, 1000);
@@ -8200,26 +8327,67 @@ class BoschCameraCard extends HTMLElement {
     }
   }
 
+  // Central timer registry helpers (Phase 4 point 14, 2026-07-13). Prefer these
+  // over raw setTimeout/setInterval for any NEW timer that needs teardown
+  // discipline; existing `this._xTimer` fields keep their own name (so the
+  // surrounding comments/guards stay meaningful) but are armed/cleared through
+  // here so _clearAllTimers() can catch anything an individual guard missed.
+  _armTimer(fn, delay) {
+    const id = setTimeout(() => {
+      this._timers.delete(id);
+      fn();
+    }, delay);
+    this._timers.set(id, "timeout");
+    return id;
+  }
+
+  _armInterval(fn, delay) {
+    const id = setInterval(fn, delay);
+    this._timers.set(id, "interval");
+    return id;
+  }
+
+  // Clears a single timer/interval id armed via the two helpers above (or any
+  // id we want the registry to also forget). Safe to call with null/undefined.
+  _clearTimer(id) {
+    if (id == null) return;
+    const type = this._timers.get(id);
+    if (type === "interval") clearInterval(id); else clearTimeout(id);
+    this._timers.delete(id);
+  }
+
+  // Sweeps every timer/interval still tracked by the registry. Not yet a full
+  // replacement for the individual `this._xTimer` guards (only timers armed
+  // via _armTimer/_armInterval are tracked so far — a stepwise migration, see
+  // the registry comment in the constructor), but callable defensively from
+  // disconnectedCallback as a last-resort net.
+  _clearAllTimers() {
+    for (const [id, type] of this._timers) {
+      if (type === "interval") clearInterval(id); else clearTimeout(id);
+    }
+    this._timers.clear();
+  }
+
   _stopLiveVideo() {
     // Mark teardown so the <video> pause-guard (added in activateVideo) doesn't
     // auto-resume the stream we are intentionally stopping here. 2026-06-03.
     this._stoppingLiveVideo = true;
     this._disarmAutoUnmute();
     if (this._hls) { this._hls.destroy(); this._hls = null; }
-    if (this._stallChecker) { clearInterval(this._stallChecker); this._stallChecker = null; }
+    this._clearTimer(this._stallChecker); this._stallChecker = null;
     this._stopLiveStallWorker();
-    if (this._trackMuteTimer) { clearTimeout(this._trackMuteTimer); this._trackMuteTimer = null; }
-    if (this._webrtcFirstFrameTimer) { clearTimeout(this._webrtcFirstFrameTimer); this._webrtcFirstFrameTimer = null; }
-    if (this._nativeHlsLoadTimer) { clearTimeout(this._nativeHlsLoadTimer); this._nativeHlsLoadTimer = null; }
-    if (this._hlsKeepaliveTimer) { clearInterval(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null; }
-    if (this._activateSafetyTimer) { clearTimeout(this._activateSafetyTimer); this._activateSafetyTimer = null; }
+    this._clearTimer(this._trackMuteTimer); this._trackMuteTimer = null;
+    this._clearTimer(this._webrtcFirstFrameTimer); this._webrtcFirstFrameTimer = null;
+    this._clearTimer(this._nativeHlsLoadTimer); this._nativeHlsLoadTimer = null;
+    this._clearTimer(this._hlsKeepaliveTimer); this._hlsKeepaliveTimer = null;
+    this._clearTimer(this._activateSafetyTimer); this._activateSafetyTimer = null;
     // Stop the uptime-badge interval and the stream-ready poll chain on teardown.
     // Both outlive the card otherwise: _uptimeTimer is only cleared in set hass()
     // on !isStreaming (never fires if the card is disconnected mid-stream), and
     // _waitForStreamReady() re-arms via setTimeout guarded only by
     // _waitingForStream — which nothing reset here, so the 1s poll kept ticking
     // (and could call _startLiveVideo) against a detached card after disconnect.
-    if (this._uptimeTimer) { clearInterval(this._uptimeTimer); this._uptimeTimer = null; }
+    this._clearTimer(this._uptimeTimer); this._uptimeTimer = null;
     this._waitingForStream = false;
     if (this._webrtcPc) { this._webrtcPc.close(); this._webrtcPc = null; }
     // try/catch: on page reload / WS close the subscription may already be
@@ -8274,6 +8442,11 @@ class BoschCameraCard extends HTMLElement {
     // Reset the dead-track watchdog baseline too — a stale snapshot from the old pc
     // must not look "frozen" or "byte-flat" to the next stream's first poll. 2026-06-23.
     this._webrtcStatsPrev     = null;
+    // Drop the shared getStats() cache too — pc-identity keying already stops a
+    // stale snapshot from being served to a new pc, this just frees the reference
+    // promptly instead of waiting for the 1s TTL. 2026-07-13.
+    this._statsCachePc        = null;
+    this._statsCachePromise   = null;
     this._webrtcDeadPolls     = 0;
     this._hlsNetworkErrorCount = 0;
     if (this._waitForStreamRetryTimer) { clearTimeout(this._waitForStreamRetryTimer); this._waitForStreamRetryTimer = null; }
@@ -8298,7 +8471,7 @@ class BoschCameraCard extends HTMLElement {
     // Cancel the loading-overlay safety timeout — otherwise the 120s timer set
     // in _setLoadingOverlay() outlives the stop and fires _setLoadingOverlay(false)
     // on a since-idle/other-state card up to 2 min later.
-    if (this._loadingTimeout) { clearTimeout(this._loadingTimeout); this._loadingTimeout = null; }
+    this._clearTimer(this._loadingTimeout); this._loadingTimeout = null;
     // Reset the stale-source latch so the NEXT cold start judges the source
     // fresh; leaving it true made a healthy source's first transient WebRTC miss
     // force an unnecessary backend rewarm instead of the normal HLS fallback.
@@ -8379,7 +8552,7 @@ class BoschCameraCard extends HTMLElement {
         this._callService("bosch_shc_camera", "trigger_snapshot", { entity_id: this._entities.camera });
       // First poll after 500ms — RCP refresh completes in ~100ms, so 500ms is plenty
       const startTime = Date.now();
-      this._snapshotPollTimer = setTimeout(
+      this._snapshotPollTimer = this._armTimer(
         () => this._pollSnapshotImage(prevBytes, startTime), 500
       );
     };
@@ -8414,14 +8587,14 @@ class BoschCameraCard extends HTMLElement {
         if (changed || elapsed >= TIMEOUT) {
           this._showSnapshotBlob(blob);
         } else {
-          this._snapshotPollTimer = setTimeout(
+          this._snapshotPollTimer = this._armTimer(
             () => this._pollSnapshotImage(prevBytes, startTime), INTERVAL
           );
         }
       })
       .catch(() => {
         if (elapsed < TIMEOUT) {
-          this._snapshotPollTimer = setTimeout(
+          this._snapshotPollTimer = this._armTimer(
             () => this._pollSnapshotImage(prevBytes, startTime), INTERVAL
           );
         } else {
@@ -8454,7 +8627,7 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _finishSnapshot() {
-    if (this._snapshotPollTimer) { clearTimeout(this._snapshotPollTimer); this._snapshotPollTimer = null; }
+    this._clearTimer(this._snapshotPollTimer); this._snapshotPollTimer = null;
     const btn   = this.shadowRoot.getElementById("btn-snapshot");
     const label = this.shadowRoot.getElementById("btn-snapshot-label");
     if (btn) {
@@ -8851,8 +9024,8 @@ class BoschCameraCard extends HTMLElement {
     if (isStreaming && !this._lastStreaming) {
       this._streamStartTime = Date.now();
       // Start uptime counter interval (1s updates)
-      if (this._uptimeTimer) clearInterval(this._uptimeTimer);
-      this._uptimeTimer = setInterval(() => {
+      this._clearTimer(this._uptimeTimer);
+      this._uptimeTimer = this._armInterval(() => {
         if (!this._streamStartTime) return;
         const s = Math.floor((Date.now() - this._streamStartTime) / 1000);
         const mm = String(Math.floor(s / 60)).padStart(2, "0");
@@ -8863,7 +9036,7 @@ class BoschCameraCard extends HTMLElement {
     }
     if (!isStreaming) {
       this._streamStartTime = 0;
-      if (this._uptimeTimer) { clearInterval(this._uptimeTimer); this._uptimeTimer = null; }
+      this._clearTimer(this._uptimeTimer); this._uptimeTimer = null;
     }
 
     // shouldVideo: always use HLS video when stream is ON.
@@ -10010,11 +10183,11 @@ class BoschCameraCard extends HTMLElement {
     if (!el) return;
     el.classList.add("visible");
     this._aiCaptionShownAt = Date.now();
-    if (this._aiCaptionTimer) { clearTimeout(this._aiCaptionTimer); this._aiCaptionTimer = null; }
+    this._clearTimer(this._aiCaptionTimer); this._aiCaptionTimer = null;
     const secs = Number(this._config && this._config.ai_description_overlay_timeout);
     const timeout = Number.isFinite(secs) ? secs : 12;
     if (timeout > 0) {
-      this._aiCaptionTimer = setTimeout(() => {
+      this._aiCaptionTimer = this._armTimer(() => {
         const e = this.shadowRoot && this.shadowRoot.getElementById("ap-ai-caption");
         if (e) e.classList.remove("visible");
         this._aiCaptionTimer = null;
@@ -10030,7 +10203,7 @@ class BoschCameraCard extends HTMLElement {
 
   // Hide the AI caption overlay and cancel any pending auto-hide timer.
   _hideAiCaption() {
-    if (this._aiCaptionTimer) { clearTimeout(this._aiCaptionTimer); this._aiCaptionTimer = null; }
+    this._clearTimer(this._aiCaptionTimer); this._aiCaptionTimer = null;
     this._aiCaptionShownAt = 0;
     const el = this.shadowRoot && this.shadowRoot.getElementById("ap-ai-caption");
     if (el) el.classList.remove("visible");
@@ -10221,7 +10394,7 @@ class BoschCameraCard extends HTMLElement {
           // to stop it again (the backend lockout only starts on a real
           // turn_off, so blocking the retry here would be wrong).
           this._streamCooldownUntil = 0;
-          if (this._streamCooldownTimer) { clearInterval(this._streamCooldownTimer); this._streamCooldownTimer = null; }
+          this._clearTimer(this._streamCooldownTimer); this._streamCooldownTimer = null;
           this._renderStreamCooldown();
         }
         this._flashEntityError(this._entities.switch);
@@ -10385,14 +10558,14 @@ class BoschCameraCard extends HTMLElement {
 
   _startPrivacyCooldown() {
     this._privacyCooldownUntil = Date.now() + this._PRIVACY_COOLDOWN_MS;
-    if (this._privacyCooldownTimer) clearInterval(this._privacyCooldownTimer);
+    this._clearTimer(this._privacyCooldownTimer);
     this._renderPrivacyCooldown();
     // Wall-time-anchored interval (immune to event-loop jank) — recompute the
     // remaining seconds each tick rather than decrementing a counter.
-    this._privacyCooldownTimer = setInterval(() => {
+    this._privacyCooldownTimer = this._armInterval(() => {
       this._renderPrivacyCooldown();
       if (Date.now() >= this._privacyCooldownUntil) {
-        clearInterval(this._privacyCooldownTimer);
+        this._clearTimer(this._privacyCooldownTimer);
         this._privacyCooldownTimer = null;
         this._privacyCooldownUntil = 0;
         this._renderPrivacyCooldown(); // final pass clears the disabled state
@@ -10425,14 +10598,14 @@ class BoschCameraCard extends HTMLElement {
 
   _startStreamCooldown() {
     this._streamCooldownUntil = Date.now() + this._STREAM_COOLDOWN_MS;
-    if (this._streamCooldownTimer) clearInterval(this._streamCooldownTimer);
+    this._clearTimer(this._streamCooldownTimer);
     this._renderStreamCooldown();
     // Wall-time-anchored interval (immune to event-loop jank) — recompute the
     // remaining seconds each tick rather than decrementing a counter.
-    this._streamCooldownTimer = setInterval(() => {
+    this._streamCooldownTimer = this._armInterval(() => {
       this._renderStreamCooldown();
       if (Date.now() >= this._streamCooldownUntil) {
-        clearInterval(this._streamCooldownTimer);
+        this._clearTimer(this._streamCooldownTimer);
         this._streamCooldownTimer = null;
         this._streamCooldownUntil = 0;
         this._renderStreamCooldown(); // final pass clears the disabled state
@@ -10710,7 +10883,7 @@ class BoschCameraCard extends HTMLElement {
     };
     // Press Escape to exit
     this._fsKeyDown = (e) => { if (e.key === "Escape") this._exitCssFullscreen(); };
-    this._fsWireTimer = setTimeout(() => {
+    this._fsWireTimer = this._armTimer(() => {
       this._fsWireTimer = null;
       // Card may have been torn down (or fullscreen already exited) within the
       // 100ms gap — don't attach document listeners that would then outlive it.
@@ -10911,6 +11084,105 @@ class BoschCameraCard extends HTMLElement {
     btn.classList.toggle("on", active);
     btn.setAttribute("aria-pressed", active ? "true" : "false");
     btn.setAttribute("title", active ? this._t("pill_fullscreen_exit_title") : this._t("pill_fullscreen_title"));
+    // Fullscreen controls auto-hide (Thomas, 2026-07-13): this is THE single
+    // place both fullscreen paths (native Fullscreen API's fullscreenchange
+    // listener, and the CSS-fallback enter/exit) already funnel through to
+    // keep the button in sync, so it's also the correct single place to
+    // arm/disarm the auto-hide idle watcher — avoids duplicating the
+    // native-vs-CSS detection logic a second time.
+    this._syncFsAutoHide(active);
+  }
+
+  // ── Fullscreen controls auto-hide ────────────────────────────────────────
+  // After 10s with no pointer movement / touch while in fullscreen (native OR
+  // CSS-fallback), fade the bottom pill-bar out so it doesn't obscure the
+  // video; any activity brings it right back. Deliberately per-instance (not
+  // a module-level singleton like `_boschFsOwner`) so multiple cards on one
+  // dashboard each track their own idle clock independently. Outside
+  // fullscreen the icons are ALWAYS visible — never wired at all.
+  //
+  // `fullscreen_auto_hide_controls: false` (config, default true) disables
+  // this entirely: the watcher is never wired, so the pill-bar stays
+  // permanently visible in fullscreen and no idle timer runs in the
+  // background — exactly the pre-fb3410c behavior.
+  _syncFsAutoHide(active) {
+    const enabled = this._config?.fullscreen_auto_hide_controls !== false;
+    if (active && enabled && !this._fsAutoHideWired) this._wireFsAutoHide();
+    else if ((!active || !enabled) && this._fsAutoHideWired) this._unwireFsAutoHide();
+  }
+
+  _wireFsAutoHide() {
+    const wrapper = this.shadowRoot?.getElementById("img-wrapper");
+    if (!wrapper) return;
+    this._fsAutoHideWired = true;
+    this._fsLastActivityAt = Date.now();
+    // Desktop/mouse: pointermove fires very often, so the handler does the
+    // cheapest possible thing — write a timestamp + ensure controls are
+    // shown. The actual idle *decision* happens on a separate, fixed-cadence
+    // interval below (researched best practice: don't re-arm a fresh
+    // setTimeout on every mousemove).
+    this._fsActivityHandler = () => {
+      this._fsLastActivityAt = Date.now();
+      this._showFsControls();
+    };
+    wrapper.addEventListener("pointermove", this._fsActivityHandler);
+    // Touch devices have no hover/mousemove-while-idle signal — tap on the
+    // video/wrapper itself reshows the controls. Buttons/vol-pop/top pill
+    // stay normally clickable (excluded here) rather than being swallowed.
+    //
+    // Deliberately SHOW-ONLY (mirrors the desktop pointermove handler above),
+    // NOT a hide/show toggle — a toggle-on-touchstart was tried first and
+    // found (bug-hunt agent, 2026-07-13) to collide with the pre-existing
+    // pinch/pan/double-tap-zoom machinery on this same wrapper (`_wireZoom`):
+    // touchstart fires on every gesture START, not just discrete taps, so a
+    // toggle would (a) hide the bar the instant a user began a one-finger pan
+    // on a zoomed-in image (mid-gesture, controls visible → touchstart →
+    // hide, even though the user is actively touching the screen), and
+    // (b) flicker hidden→shown→hidden on a double-tap-to-zoom (two
+    // touchstarts <300ms apart each toggling). Auto-re-hide after another 10s
+    // idle already covers "user is done interacting" without needing an
+    // explicit hide gesture, so show-only removes both failure modes for
+    // free while still satisfying "tap shows the controls again".
+    this._fsTouchHandler = (e) => {
+      if (e.target.closest && e.target.closest(".ap-pill-bar, .ap-top, .ap-vol-pop")) return;
+      this._fsLastActivityAt = Date.now();
+      this._showFsControls();
+    };
+    wrapper.addEventListener("touchstart", this._fsTouchHandler, { passive: true });
+    this._showFsControls();
+    // Registry-tracked (see _armInterval/_clearAllTimers) so a card removed
+    // mid-fullscreen never leaks this — belt-and-suspenders on top of the
+    // explicit _unwireFsAutoHide() call from disconnectedCallback.
+    this._fsIdleTimer = this._armInterval(() => {
+      if (Date.now() - this._fsLastActivityAt >= 10000) this._hideFsControls();
+    }, 1000);
+  }
+
+  _unwireFsAutoHide() {
+    const wrapper = this.shadowRoot?.getElementById("img-wrapper");
+    if (wrapper) {
+      if (this._fsActivityHandler) wrapper.removeEventListener("pointermove", this._fsActivityHandler);
+      if (this._fsTouchHandler)    wrapper.removeEventListener("touchstart", this._fsTouchHandler);
+    }
+    this._fsActivityHandler = null;
+    this._fsTouchHandler = null;
+    this._clearTimer(this._fsIdleTimer);
+    this._fsIdleTimer = null;
+    this._fsAutoHideWired = false;
+    // Never let a hidden state bleed into the normal (non-fullscreen) view.
+    this._showFsControls();
+  }
+
+  _hideFsControls() {
+    if (this._fsControlsHidden) return;
+    this._fsControlsHidden = true;
+    this.classList.add("fs-controls-hidden");
+  }
+
+  _showFsControls() {
+    if (!this._fsControlsHidden) return;
+    this._fsControlsHidden = false;
+    this.classList.remove("fs-controls-hidden");
   }
 
   _callService(domain, service, data) {
@@ -11125,6 +11397,7 @@ class BoschCameraCardEditor extends HTMLElement {
 
         <h4>${this._t("ed_h_advanced")}</h4>
         ${chk("show_motion_zones", this._t("ed_show_motion_zones"), false)}
+        ${chk("fullscreen_auto_hide_controls", this._t("ed_fs_auto_hide"), true)}
         <label>${this._t("ed_border_radius")}
           <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />
         </label>
@@ -11151,6 +11424,7 @@ class BoschCameraCardEditor extends HTMLElement {
     root.querySelector('input[name="hide_redundant_privacy"]')?.addEventListener("change", e => fire({ hide_redundant_privacy: e.target.checked }));
     root.querySelector('select[name="pan_overlay"]')?.addEventListener("change", e => fire({ pan_overlay: e.target.value }));
     root.querySelector('input[name="show_motion_zones"]')?.addEventListener("change", e => fire({ show_motion_zones: e.target.checked }));
+    root.querySelector('input[name="fullscreen_auto_hide_controls"]')?.addEventListener("change", e => fire({ fullscreen_auto_hide_controls: e.target.checked }));
     root.querySelector('input[name="border_radius"]')?.addEventListener("change", e => fire({ border_radius: e.target.value || undefined }));
     root.querySelector('input[name="box_shadow"]')?.addEventListener("change", e => fire({ box_shadow: e.target.value || undefined }));
     root.querySelector('select[name="autoplay"]').addEventListener("change", e => fire({ auto_play: e.target.value || undefined }));

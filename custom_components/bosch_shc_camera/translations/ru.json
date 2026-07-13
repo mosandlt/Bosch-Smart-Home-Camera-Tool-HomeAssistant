@@ -329,8 +329,9 @@
       "token_exchange_failed": "Вход не выполнен — код истёк. Попробуйте снова.",
       "cannot_connect": "Невозможно подключиться к серверам Bosch.",
       "invalid_ip_address": "Неверный IP-адрес — введите корректный адрес IPv4 или IPv6.",
-      "invalid_ip_allowlist": "Неверная запись allowlist — используйте IP-адреса или диапазоны CIDR через запятую (например, 192.168.1.0/24).",
-      "invalid_cloud_api_override": "Собственный URL API камеры должен начинаться с https://"
+      "invalid_ip_allowlist": "Неверная запись allowlist: {invalid_allowlist_token} — используйте IP-адреса или диапазоны CIDR через запятую (например, 192.168.1.0/24).",
+      "invalid_cloud_api_override": "Собственный URL API камеры должен начинаться с https://",
+      "invalid_webhook_url": "URL веб-хука должен начинаться с http:// или https://"
     },
     "abort": {
       "migration_started": "Миграция запущена — завершите процесс перенастройки на карточке интеграции."

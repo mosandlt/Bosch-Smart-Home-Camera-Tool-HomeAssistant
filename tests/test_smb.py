@@ -717,6 +717,73 @@ class TestSyncSmbUploadEarlyExits:
                 sync_smb_upload(coord, {}, "tok")  # must not raise
 
 
+class TestSmbTransferSocketTimeout:
+    """Regression: the actual file-transfer loop must run under its own
+    socket timeout (_SMB_TRANSFER_TIMEOUT), separate from the 10s
+    connection-setup timeout — see docs/stream-perf-stability-refactor-plan.md
+    Phase 2 point 9 (smb.py ~287-295: a hung open_file()/write() previously
+    had no timeout at all and could block the executor thread forever)."""
+
+    def test_transfer_wrapped_in_its_own_socket_timeout(self):
+        """setdefaulttimeout sequence must be: 10 (connect) -> None -> the
+        transfer timeout -> None (final reset), even on a fully successful
+        upload with no errors."""
+        from custom_components.bosch_shc_camera import smb
+        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
+        coord = _smb_upload_coord()
+        ev = _smb_event()
+        data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": [ev]}}
+
+        fake_smb = _fake_smb()
+        calls: list[float | None] = []
+
+        with (
+            patch.dict(sys.modules, {"smbclient": fake_smb}),
+            patch.object(
+                smb.socket,
+                "setdefaulttimeout",
+                side_effect=lambda v=None: calls.append(v),
+            ),
+            patch(f"{MODULE}._http_get", return_value=(200, b"DATA")),
+        ):
+            sync_smb_upload(coord, data, "tok")
+
+        assert calls == [10, None, smb._SMB_TRANSFER_TIMEOUT, None]
+
+    def test_transfer_timeout_reset_even_when_transfer_raises(self):
+        """A hard failure inside the transfer loop must still reset the
+        socket default timeout afterward (no leaked global state for the
+        next executor job on the same thread)."""
+        from custom_components.bosch_shc_camera import smb
+        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
+        coord = _smb_upload_coord()
+        fake_smb = _fake_smb()
+        calls: list[float | None] = []
+
+        with (
+            patch.dict(sys.modules, {"smbclient": fake_smb}),
+            patch.object(
+                smb.socket,
+                "setdefaulttimeout",
+                side_effect=lambda v=None: calls.append(v),
+            ),
+            patch.object(
+                smb,
+                "_sync_smb_upload_events",
+                side_effect=TimeoutError("simulated hung NAS write"),
+            ),
+        ):
+            with pytest.raises(TimeoutError):
+                sync_smb_upload(coord, {}, "tok")
+
+        # Final call must be the reset back to None, regardless of the
+        # exception raised inside the transfer loop.
+        assert calls[-1] is None
+        assert smb._SMB_TRANSFER_TIMEOUT in calls
+
+
 class TestEnableToggleGuards:
     """Regression: smb.py functions must respect their enable-toggle even when
     called directly (defense-in-depth — callers already guard, but the function

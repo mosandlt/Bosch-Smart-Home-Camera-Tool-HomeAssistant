@@ -1619,10 +1619,13 @@ show_last_event: false
 | `snapshot_during_warmup` | `true` | Show the last snapshot under the loading overlay while the stream warms up. |
 | `hide_redundant_privacy` | `true` | Hides the standalone privacy switch row when the apple-style pill bar already shows a privacy button — avoids showing the same control twice. Since v13.5.5. |
 | `pan_overlay` | `auto` | On-video edge pan chevrons for pan/tilt cameras: `auto` (visible on hover, touch, and fullscreen), `always`, or `never` (use the menu row instead). Shown only for cameras that expose `number.<cam>_pan_position`. Since v13.5.5. |
+| `fullscreen_auto_hide_controls` | `true` | While in fullscreen, fade out the bottom pill-bar (Snapshot/Stream/⋮/Fullscreen/…) after 10s of no pointer movement or touch, and instantly reshow it on any activity. Set `false` to keep the controls permanently visible in fullscreen, as before this feature existed. |
 
 > **Fullscreen toggle** — the ⛶ fullscreen button now toggles: tap it once to enter fullscreen, tap it again (or the camera name button when shown) to exit. `Esc` and a tap outside the video also exit, as before.
 
 > **Fullscreen zoom** — while in fullscreen you can zoom into the picture: pinch with two fingers (touch), scroll the mouse wheel (desktop), or double-tap / double-click to toggle 2× at that spot. Drag to pan when zoomed in. Zoom resets automatically when you leave fullscreen. Outside fullscreen the gestures are left untouched so normal page scrolling/pinch still works.
+
+> **Fullscreen controls auto-hide** — the bottom pill-bar (Snapshot/Stream/⋮/Fullscreen/…) now fades out on its own after 10 seconds without any mouse movement or touch while you're in fullscreen, so it doesn't sit over the picture — any pointer movement or tap brings it right back instantly. Outside fullscreen nothing changes, controls are always visible. Set `fullscreen_auto_hide_controls: false` in the card YAML (or the matching editor toggle) to keep them permanently visible in fullscreen instead.
 
 > **Picture-in-Picture** — the ⧉ PiP button pops the live stream out into the browser's floating, always-on-top window so you can keep watching while you work in other apps. On **macOS Safari** the window floats over every app; on Chrome it stays above the browser's own windows. The floating window's title shows the camera name (instead of the page address). Start the live stream first, then tap PiP. The browser allows only **one** PiP window at a time, so while one camera is floating the PiP button on every other camera greys out automatically; tap it again to close. The window keeps playing through a stream reconnect **and while the tab sits in the background** — since v14.0.0 the card keeps the dashboard alive while a Picture-in-Picture window is open, so the floating stream no longer freezes after a few minutes in a backgrounded tab (it used to need a page reload). The button is hidden on browsers without PiP support (most iOS/Android in-app WebViews). Since v13.5.x.
 
@@ -2191,11 +2194,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v14.8.0** — see the GitHub release page for full notes:
-[**v14.8.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v14.8.0)
+Latest: **v15.0.0** — see the GitHub release page for full notes:
+[**v15.0.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v15.0.0)
 
 | Version | Highlights |
 |---|---|
+| **v15.0.0** | **Large internal performance/stability refactor, plus a new fullscreen behavior.** The bottom video controls now auto-hide after 10s idle in fullscreen (with an option to turn that off). Under the hood: pooled network sessions instead of a fresh connection per call, several race conditions and timeout gaps fixed (found via a new chaos-engineering fault-injection test suite), and the main coordinator module further split into focused files. No breaking changes, no action needed to upgrade. |
 | **v14.8.0** | **Two Mini-NVR event-clip feature requests, both opt-in.** A new option lets the pre-roll ring briefly finalize and re-attach its freshest segment on a motion event instead of always dropping it, recovering the last ~0-10s of footage closest to the trigger — at the cost of a small (~1s) gap in ring coverage per event. A new per-camera *Mini-NVR event clip* switch (default on) lets installs that already save clips their own way (e.g. via automations) turn off the integration's own native clip without affecting the shared pre-roll ring. |
 | **v14.5.13** | **Internal cleanup only, no user-facing change.** Continuation of the coordinator-rewrite work from v14.5.7-v14.5.10: the main coordinator class shrank from 9385 to 6636 lines, split into focused modules and mixins (token/auth lifecycle, FCM push, Frigate front-doors, SHC/cloud setters, HA service handlers, and the live-session-open logic). Live-verified end to end against a real camera (WebRTC, snapshot, privacy toggle, service call) before release. |
 | **v14.5.12** | **First-time setup: the native camera view no longer stays black until the "Live Stream" switch is toggled by hand.** Opening a fresh camera via Cast or the built-in HLS card already auto-started video on demand; the native WebRTC path used by Home Assistant's own more-info dialog and the Companion app did not — so a camera that had never had its switch manually turned on simply showed no video the first time. It now auto-starts the same way on every path. README also gets a new "Quick Start" section up front and a troubleshooting checklist for "I don't see any image / video". |
@@ -2288,7 +2292,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling p
 
 | Feature | [Home Assistant Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | [Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | [ioBroker Adapter](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | [MCP Server](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | [Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) | [Node-RED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) |
 |---|---|---|---|---|---|---|
-| **Maturity** | v13.5+ — HA Quality Scale **Platinum** | v10.10+ stable (Mini-NVR BETA) | v1.5+ stable · npm | v1.5+ stable · PyPI | v0.1.2 **alpha** · PyPI | v0.2.3 **alpha** · npm |
+| **Maturity** | v14.8+ — HA Quality Scale **Platinum** | v10.11+ stable (Mini-NVR BETA) | v1.8+ stable · npm | v1.7+ stable · PyPI | v0.3.0 **alpha** · PyPI | v0.3.0 **alpha** · npm |
 | **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) | Python 3.10+ · pipx / uvx · stdio + streamable-HTTP for MCP clients (Claude Desktop, Claude Code, custom) | NiceGUI web app · Python 3.10+ | Node-RED palette · npm |
 | **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser, one-time) | ◑ shares CLI `bosch_config.json` | ◑ refresh-token from CLI |
 | **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP | ✅ `bosch_camera_snapshot` (LAN-only) | ✅ live + event fallback | ✅ `snapshot` node |
@@ -2297,24 +2301,24 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling p
 | **Dual-stream URL (main + sub)** | ✅ `sensor.bosch_<n>_stream_url` + `_sub` *(v12.4.0, opt-in per cam)* | ✅ `info` shows both · `live --sub` *(v10.5.0)* | ✅ `stream_url` + `stream_url_sub` *(v0.5.3 experimental)* | ◑ `bosch_camera_stream_url` — main stream only | ❌ *(sub-stream only)* | ◑ URL only — no sub option |
 | **External recorder (BlueIris, Frigate)** | ✅ via go2rtc | ✅ stdout pipe | ✅ Digest-creds URL + LAN bind option | ✅ URL returned, hand off to ffmpeg / go2rtc downstream | ❌ | ◑ `stream-url` → wire downstream |
 | **Privacy mode** | ✅ switch entity | ✅ command | ✅ DP | ✅ `bosch_camera_privacy_set` (LAN-fallback via `prefer_local`) | ✅ toggle | ✅ `privacy` node |
-| **Front spotlight (Gen1/Gen2)** | ✅ light entity | ✅ command | ✅ DP | ✅ `bosch_camera_light_set` (LAN-fallback) | ❌ *(Phase 2 stub)* | ❌ |
-| **RGB wallwasher (Gen2 Outdoor II)** | ✅ light w/ RGB | ◑ on/off only — no RGB | ✅ color + brightness DPs | ❌ *(on/off only — RGB not exposed)* | ❌ | ❌ |
-| **Panic-alarm siren** | ✅ button entity *(Gen2 Indoor II)* | ✅ command *(Gen2 Indoor II only)* | ✅ DP | ✅ `bosch_camera_siren_trigger` *(Gen2 Indoor II only)* | ❌ | ❌ |
+| **Front spotlight (Gen1/Gen2)** | ✅ light entity | ✅ command | ✅ DP | ✅ `bosch_camera_light_set` (LAN-fallback) | ❌ *(Phase 2 stub)* | ✅ `bosch-camera-light` node *(v0.3.0-alpha)* |
+| **RGB wallwasher (Gen2 Outdoor II)** | ✅ light w/ RGB | ◑ on/off only — no RGB | ✅ color + brightness DPs | ❌ *(on/off only — RGB not exposed)* | ❌ | ◑ on/off + intensity only — no RGB *(v0.3.0-alpha)* |
+| **Panic-alarm siren** | ✅ button entity *(Gen2 Indoor II)* | ✅ command *(Gen2 Indoor II only)* | ✅ DP | ✅ `bosch_camera_siren_trigger` *(Gen2 Indoor II only)* | ✅ trigger + duration *(Gen2 Indoor II only)* | ❌ |
 | **Image rotation 180°** | ✅ switch | ❌ | ✅ DP | ❌ | ❌ | ❌ |
 | **Motion / person / audio events** | ✅ FCM push + polling fallback | ◑ `watch` command only (events cmd removed) | ✅ FCM push + polling fallback | ✅ `bosch_camera_events` (on-demand pull) | ◑ pull-only events table | ✅ `event` node (poll) |
 | **Motion edge-trigger state** | ✅ `binary_sensor.motion` | n/a | ✅ `motion_active` DP *(v0.5.3)* | n/a *(request-response, no subscription)* | ❌ | ❌ |
 | **Auto-snapshot on motion** | ✅ refreshes Camera entity | n/a | ✅ writes `last_event_image` base64 *(v0.5.3)* | n/a *(no background loop)* | ❌ | ❌ |
 | **Synthetic motion trigger (external sensor)** | ✅ service | n/a | ✅ DP | ❌ | ❌ | ❌ |
-| **Motion zones / privacy masks (read)** | ✅ | ✅ | ✅ read-only *(v1.2.0)* | ❌ | ❌ | ❌ |
-| **Automation rules / schedules (read)** | ✅ | ✅ | ◑ read-only count + JSON *(v1.2.0)* | ❌ | ❌ | ❌ |
-| **Lighting schedule (read)** | ✅ | ✅ | ✅ read *(Gen1-only, v1.2.0)* | ❌ | ❌ | ❌ |
+| **Motion zones / privacy masks** | ✅ read + write | ✅ read + write | ✅ read + write *(v1.8.0)* | ✅ get / set / clear *(v1.7.0)* | ❌ *(no visual editor yet)* | ❌ |
+| **Automation rules / schedules** | ✅ read + write | ✅ read + write | ✅ full CRUD *(v1.8.0)* | ✅ list / add / edit / delete *(v1.7.0)* | ✅ full CRUD (list/add/edit/delete) | ❌ |
+| **Lighting schedule** | ✅ read (write via service, Gen1 Eyes Outdoor only) | ✅ read + write | ✅ read *(Gen1-only, v1.2.0)* | ✅ get / set *(v1.7.0)* | ✅ read + write *(outdoor Eyes cameras)* | ❌ |
 | **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ❌ | ❌ *(parked — no community request yet)* | ❌ *(intentionally not exposed — large payloads)* | ❌ *(use CLI)* | ◑ `clip_url` in event payload |
 | **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ✅ *(v10.7.0 BETA)* | ❌ | ❌ | ❌ | ❌ |
 | **SMB / NAS clip upload** | ✅ | ✅ *(v10.7.0 BETA)* | ❌ | ❌ | ❌ | ❌ |
-| **Camera sharing (friends)** | ✅ services (share / invite / list) | ✅ command | ◑ read-only list *(v1.2.0)* | ❌ *(intentionally not exposed — needs user-driven flow)* | ❌ | ❌ |
-| **Pan / tilt (360° Gen1)** | ✅ services | ✅ command | ✅ `pan_position` DP | ✅ `bosch_camera_pan` | ❌ *(Phase 2 stub)* | ❌ |
+| **Camera sharing (friends)** | ✅ services (share / invite / list) | ✅ command | ✅ share / invite / remove *(Gen2 only, v1.8.0)* | ✅ list / invite / share / unshare / remove *(v1.7.0)* | ✅ list/invite/remove/share/unshare | ❌ |
+| **Pan / tilt (360° Gen1)** | ✅ services | ✅ command | ✅ `pan_position` DP | ✅ `bosch_camera_pan` | ✅ slider wired to live API | ❌ |
 | **Named pan presets (home / left / right / back-left / back-right)** | ✅ opt-in select entity | ✅ `pan --preset` flag | ✅ `pan_preset` DP | ✅ `bosch_camera_pan preset=` | ❌ | ❌ |
-| **Two-way audio / intercom** | ❌ | ✅ command | ❌ | ❌ *(intentionally not exposed — timing-sensitive)* | ❌ | ❌ |
+| **Two-way audio / intercom** | ❌ | ✅ command | ❌ | ◑ listen-only `bosch_camera_intercom_open` *(v1.7.0)* | ❌ | ❌ |
 | **Webhook delivery on events** | ✅ service + opt-in options | ✅ `watch --webhook URL` | ✅ via MQTT bridge | ❌ *(request-response model)* | ❌ | ❌ |
 | **MQTT event bridge (motion / audio / person)** | n/a *(HA event bus native)* | n/a *(single-run)* | ✅ admin-config | n/a | ❌ | ❌ |
 | **Apple HomeKit (via HA Core bridge)** | ✅ documented | n/a | n/a | n/a | n/a | n/a |

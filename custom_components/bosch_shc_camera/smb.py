@@ -230,6 +230,33 @@ def sync_local_save(
 
 # ── SMB/NAS upload (runs in executor thread) ──────────────────────────────────
 
+# Bounds every blocking smbclient/smbprotocol socket op during the actual
+# transfer loop below (separate from the 10s connection-setup timeout used for
+# register_session). smbprotocol has no per-call timeout parameter of its own
+# — it relies on the stdlib socket module's default timeout — so this is the
+# only lever available short of a hard executor-thread kill (which Python
+# cannot do). The caller (fcm.py async_handle_fcm_push) wraps this whole
+# executor job in `asyncio.wait_for(..., timeout=30.0)`, but that only
+# abandons the *await* — it cannot stop the underlying thread, so a hang here
+# without its own socket timeout would leak the thread forever. This timeout
+# is deliberately shorter than that 30s so a hung op fails and unwinds via the
+# normal per-transfer try/except *before* the outer wait_for gives up — the
+# outer wait_for is now just a safety margin, not the real cutoff.
+_SMB_TRANSFER_TIMEOUT = 20.0
+
+# socket.setdefaulttimeout() is PROCESS-GLOBAL, not per-thread — it affects
+# every new socket created anywhere in the process, on any thread, for as
+# long as it's set. Multiple cameras can each trigger a concurrent FCM push
+# (async_add_executor_job runs sync_smb_upload on HA's shared executor pool),
+# so without serialization two overlapping calls can race on the default:
+# thread B's `finally: socket.setdefaulttimeout(None)` can fire while thread
+# A is still mid-transfer, silently stripping A's timeout protection (or vice
+# versa for the register_session 10s window below). This lock makes the
+# whole "mutate default → do blocking I/O → restore default" span atomic
+# across threads so one call's cleanup can never undo another's in-flight
+# timeout.
+_SOCKET_TIMEOUT_LOCK = threading.Lock()
+
 
 def sync_smb_upload(
     coordinator: BoschCameraCoordinator,
@@ -260,11 +287,6 @@ def sync_smb_upload(
     share = opts.get("smb_share", "").strip()
     username = opts.get("smb_username", "").strip()
     password = opts.get("smb_password", "")
-    base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
-    folder_pattern = opts.get("folder_pattern", "{camera}/{year}/{month}/{day}").strip()
-    file_pattern = opts.get(
-        "file_pattern", "{camera}_{date}_{time}_{type}_{id}"
-    ).strip()
 
     if not opts.get("enable_smb_upload") or not server or not share:
         return
@@ -284,15 +306,56 @@ def sync_smb_upload(
         )
         return
 
-    try:
-        socket.setdefaulttimeout(10)
+    # Held for the entire register_session()+transfer span below (see
+    # _SOCKET_TIMEOUT_LOCK docstring) — socket.setdefaulttimeout() is
+    # process-global, so a concurrent sync_smb_upload call for another
+    # camera must not be allowed to reset it out from under this one.
+    with _SOCKET_TIMEOUT_LOCK:
         try:
-            register_session(server, username=username, password=password)
+            socket.setdefaulttimeout(10)
+            try:
+                register_session(server, username=username, password=password)
+            finally:
+                socket.setdefaulttimeout(None)
+        except Exception as err:
+            _LOGGER.warning("SMB session to %s failed: %s", server, err)
+            return
+
+        # Bound the actual transfer below with its own socket timeout — see
+        # _SMB_TRANSFER_TIMEOUT docstring above. Explicit per-call `timeout=`
+        # kwargs on the urllib.request calls further down (clip downloads) take
+        # precedence over this default and are unaffected.
+        socket.setdefaulttimeout(_SMB_TRANSFER_TIMEOUT)
+        try:
+            _sync_smb_upload_events(
+                coordinator, data, token, prefetched_image, open_file, smb_stat
+            )
         finally:
             socket.setdefaulttimeout(None)
-    except Exception as err:
-        _LOGGER.warning("SMB session to %s failed: %s", server, err)
-        return
+
+
+def _sync_smb_upload_events(
+    coordinator: BoschCameraCoordinator,
+    data: dict[str, Any],
+    token: str,
+    prefetched_image: bytes | None,
+    open_file: Any,
+    smb_stat: Any,
+) -> None:
+    """Per-event SMB transfer loop, run under _SMB_TRANSFER_TIMEOUT.
+
+    Split out of sync_smb_upload purely so the socket-timeout `try/finally`
+    scope (set right before this call) cleanly wraps only the actual transfer
+    work, not the session setup above it.
+    """
+    opts = coordinator.options
+    server = opts.get("smb_server", "").strip()
+    share = opts.get("smb_share", "").strip()
+    base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
+    folder_pattern = opts.get("folder_pattern", "{camera}/{year}/{month}/{day}").strip()
+    file_pattern = opts.get(
+        "file_pattern", "{camera}_{date}_{time}_{type}_{id}"
+    ).strip()
 
     for cam_id, cam_data in data.items():
         cam_name = _safe_name(cam_data["info"].get("title", cam_id))

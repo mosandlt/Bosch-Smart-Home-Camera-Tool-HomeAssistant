@@ -37,6 +37,11 @@ def _make_coord(**overrides):
         async_mark_events_read=AsyncMock(),
         _async_send_alert=AsyncMock(),
     )
+    # `_spawn_tracked` mirrors BoschCameraCoordinator._spawn_tracked closely
+    # enough for these direct-module unit tests: routes through
+    # hass.async_create_task (already asserted on directly below) instead of
+    # needing a real _bg_tasks set on this bare SimpleNamespace stub.
+    coord._spawn_tracked = lambda coro, **kw: coord.hass.async_create_task(coro, **kw)
     for k, v in overrides.items():
         setattr(coord, k, v)
     return coord

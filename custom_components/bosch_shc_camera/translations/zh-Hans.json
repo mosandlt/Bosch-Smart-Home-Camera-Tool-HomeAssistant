@@ -329,8 +329,9 @@
       "token_exchange_failed": "登录失败 — 授权码已过期。请重试。",
       "cannot_connect": "无法连接至 Bosch 服务器。",
       "invalid_ip_address": "无效的 IP 地址 — 请输入有效的 IPv4 或 IPv6 地址。",
-      "invalid_ip_allowlist": "无效的允许列表条目 — 请使用逗号分隔的 IP 地址或 CIDR 范围（例如 192.168.1.0/24）。",
-      "invalid_cloud_api_override": "自定义摄像头 API URL 必须以 https:// 开头"
+      "invalid_ip_allowlist": "无效的允许列表条目：{invalid_allowlist_token} — 请使用逗号分隔的 IP 地址或 CIDR 范围（例如 192.168.1.0/24）。",
+      "invalid_cloud_api_override": "自定义摄像头 API URL 必须以 https:// 开头",
+      "invalid_webhook_url": "Webhook URL 必须以 http:// 或 https:// 开头"
     },
     "abort": {
       "migration_started": "迁移已启动 — 请在集成卡片上完成重新配置流程。"

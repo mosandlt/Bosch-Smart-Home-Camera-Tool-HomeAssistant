@@ -329,8 +329,9 @@
       "token_exchange_failed": "Anmeldung fehlgeschlagen — Code abgelaufen. Erneut versuchen.",
       "cannot_connect": "Verbindung zu Bosch-Servern fehlgeschlagen.",
       "invalid_ip_address": "Ungültige IP-Adresse — bitte eine gültige IPv4- oder IPv6-Adresse eingeben.",
-      "invalid_ip_allowlist": "Ungültiger Allowlist-Eintrag — kommagetrennte IP-Adressen oder CIDR-Bereiche verwenden (z.B. 192.168.1.0/24).",
-      "invalid_cloud_api_override": "Die eigene Kamera-API-URL muss mit https:// beginnen"
+      "invalid_ip_allowlist": "Ungültiger Allowlist-Eintrag: {invalid_allowlist_token} — kommagetrennte IP-Adressen oder CIDR-Bereiche verwenden (z.B. 192.168.1.0/24).",
+      "invalid_cloud_api_override": "Die eigene Kamera-API-URL muss mit https:// beginnen",
+      "invalid_webhook_url": "Die Webhook-URL muss mit http:// oder https:// beginnen"
     },
     "abort": {
       "migration_started": "Migration gestartet — bitte schließe den Neu-konfigurieren-Flow auf der Integrationskarte ab."

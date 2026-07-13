@@ -174,18 +174,51 @@ class TokenAuthCoordinatorMixin:
         # broken state.
         # Server outage (5xx) raises AuthServerOutageError — we back off
         # and retry later without triggering reauth (nothing for the user to fix).
+        #
+        # Outer 15s ceiling on the WHOLE retry loop (attempts + sleeps),
+        # in addition to `_do_refresh`'s own per-attempt 15s timeout
+        # (config_flow.py): defense in depth. Without this, a hanging
+        # Keycloak response could still let 3 attempts x (15s timeout + 2s
+        # sleep) = ~49s of _token_refresh_lock hold time, during which every
+        # other caller of `_ensure_valid_token` (including all 401-recovery
+        # paths in live_connection.py) blocks. Bounding the whole loop to a
+        # single 15s ceiling caps the lock hold time regardless of how many
+        # attempts were already spent, and stays correct even if
+        # `_do_refresh`'s own timeout is ever changed or removed upstream.
         tokens = None
         try:
-            for attempt in range(3):
-                tokens = await _do_refresh(session, refresh)
-                if tokens:
-                    break
-                if attempt < 2:
-                    _LOGGER.debug(
-                        "Token refresh attempt %d failed (transient), retrying in 2s...",
-                        attempt + 1,
-                    )
-                    await asyncio.sleep(2)
+            async with asyncio.timeout(15):
+                for attempt in range(3):
+                    tokens = await _do_refresh(session, refresh)
+                    if tokens:
+                        break
+                    if attempt < 2:
+                        _LOGGER.debug(
+                            "Token refresh attempt %d failed (transient), retrying in 2s...",
+                            attempt + 1,
+                        )
+                        await asyncio.sleep(2)
+        except TimeoutError:
+            # The retry loop itself timed out (Keycloak unresponsive across
+            # one or more attempts) — treat exactly like a transient failure
+            # so the caller's fail-count/reauth escalation still applies,
+            # but abort the loop early instead of letting it run to ~49s.
+            self._token_fail_count += 1
+            _LOGGER.warning(
+                "Token refresh timed out after 15s (attempt %d) — Keycloak "
+                "unresponsive, aborting retry loop early to release the "
+                "token-refresh lock",
+                self._token_fail_count,
+            )
+            if self._token_fail_count >= 3:
+                raise ConfigEntryAuthFailed(
+                    "Token refresh timed out repeatedly — please "
+                    "re-authenticate via the Reconfigure button on the "
+                    "integration card."
+                ) from None
+            raise UpdateFailed(
+                "Token refresh timed out after 15s — will retry"
+            ) from None
         except RefreshTokenInvalidError:
             # Do not log the exception body — Keycloak error responses can echo
             # token material back in the payload.

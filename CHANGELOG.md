@@ -5,6 +5,46 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v15.0.0] - 2026-07-13
+
+Major — a large internal performance/stability refactoring round, one new card feature, and the start of a deeper structural cleanup of the coordinator. No breaking changes to the config schema or public entities; existing installs upgrade with zero action needed. Bumped as a major version because of the scale of the internal architecture change (coordinator split into 4 new modules, first slice of a per-camera state consolidation), not because anything public changed.
+
+### Added
+
+- **Fullscreen auto-hide controls**: the bottom pill-bar (live/audio/PiP/etc. buttons) now fades out after 10s of no mouse movement/touch while in fullscreen, and reappears instantly on activity — standard video-player UX. New card option `fullscreen_auto_hide_controls` (default `true`) lets you opt back out to the always-visible behavior. Desktop uses throttled pointer-move tracking; touch devices show-on-tap. Outside fullscreen, nothing changes.
+
+### Performance
+
+- Pooled `aiohttp` sessions instead of a fresh `ClientSession` (+ TCP/TLS handshake) per call for the live-connection setup path, the three go2rtc API calls, and the per-camera RCP slow-tier fetch.
+- Capped the snapshot fallback cascade's final timeout from 20s to 10s.
+- Removed a per-tick task-spawn for the (almost-always-no-op) cloud-state announce check.
+- CI test suite parallelized (`pytest-xdist`) — 3.3x faster.
+- Card: dead-track watchdog and stall checker now share a cached `getStats()` snapshot instead of polling independently.
+
+### Stability
+
+- Bounded the token-refresh lock's total hold time to 15s — a hanging Keycloak response could previously block every 401-recovery path for much longer.
+- Coalesced go2rtc stream re-registration on LOCAL credential-rotation heartbeats — concurrent heartbeats no longer risk two overlapping registrations for the same stream.
+- Background tasks spawned from event/tick/status handlers are now tracked and properly cancelled on integration unload/HA stop instead of leaking.
+- Fixed a `socket.setdefaulttimeout()` race in the SMB upload path (this call is process-global, not thread-local — concurrent camera uploads could silently strip each other's timeout protection).
+- Bounded deadline added to the SMB/FTP NVR-cleanup directory walk.
+- Frigate RTSP front-door sockets now properly drain on close instead of just disconnecting.
+- Stale live-stream teardown timeouts are now tracked per-camera with diagnostic logging.
+- Media Source SMB browsing now reuses one session per browse step instead of reconnecting repeatedly; clip-streaming chunk size increased.
+- Per-camera coordinator state is now purged when a camera is removed/replaced, instead of growing unbounded across the integration's lifetime.
+- Config-entry migration across multiple versions now writes once instead of once per version step.
+- Webhook URL and Frigate IP-allowlist config fields now validate their input and report specifically what's wrong.
+- **Found by a new chaos-engineering fault-injection test suite** (20 tests simulating cloud-API errors, connection resets, credential races, and more): a malformed-but-200 cloud API response on one of three slow-tier diagnostic endpoints could have crashed the entire coordinator update cycle with an unhandled exception. Fixed with the same defensive check every neighboring endpoint already had.
+
+### Structure
+
+- Extracted the stream/session lifecycle logic out of the ~6700-line main module into four focused files (`stream_lifecycle.py`, `session_renewal.py`, `go2rtc_client.py`, `tls_proxy_wiring.py`) — pure reorganization, no behavior change.
+- Began consolidating the coordinator's ~90 scattered per-camera data structures into a single per-camera state object — done in reviewable slices rather than one large rewrite; roughly half are migrated so far, the rest is tracked as an ongoing internal cleanup.
+
+Every change above went through an independent adversarial review pass before being committed, which is how the SMB timeout race, a go2rtc-session teardown race, two fullscreen-feature edge cases, and the chaos-test-suite bug above were all caught and fixed pre-release rather than post-release.
+
+6056 automated tests (1 pre-existing skip) / mypy --strict / ruff / codespell clean, 255+ browser (e2e) tests green across Chromium/Firefox/WebKit. Deploy-verified twice on a live test instance with zero integration-related errors after restart, plus a live stream start/stop cycle on real hardware confirming the new module structure and pooled sessions work end-to-end.
+
 ## [v14.8.0] - 2026-07-12
 
 Minor — two feature requests from realKim-dotcom's `#43` follow-up feedback on v14.7.1, both opt-in and backward compatible. Also bundles the card i18n fix already sitting on `main` (v14.1.6, see below).

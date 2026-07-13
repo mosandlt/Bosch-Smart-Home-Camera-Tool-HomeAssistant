@@ -5325,6 +5325,129 @@ class TestSyncNvrCleanupSmbDeepWalk:
             recorder._sync_nvr_cleanup_smb(coord)
         assert removed == [r"\\fritz.box\FRITZ.NAS\Bosch\NVR\Terrasse\old.mp4"]
 
+    def test_smb_walk_stops_at_deadline_instead_of_hanging_forever(self, tmp_path):
+        """A hung/unreachable share must not block the cleanup job forever.
+
+        Simulates a stalled scandir() by advancing a fake monotonic clock
+        past _NVR_CLEANUP_MAX_SECONDS on every call — the walk must give up
+        and return instead of looping/recursing indefinitely. Regression for
+        docs/stream-perf-stability-refactor-plan.md Phase 2 point 9 (recorder.py
+        ~1953-2060: `_walk_and_delete` had no per-call deadline).
+        """
+        coord = _make_coord(
+            tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
+        )
+
+        class Entry:
+            def __init__(self, name, is_dir):
+                self.name = name
+                self._is_dir = is_dir
+
+            def is_dir(self):
+                return self._is_dir
+
+        # An infinitely-deep tree: every directory contains one more
+        # subdirectory plus one file. Without a deadline this recurses
+        # forever; the test fails via a hang/RecursionError if the deadline
+        # check regresses.
+        scandir_calls = {"n": 0}
+
+        def fake_scandir(path):
+            scandir_calls["n"] += 1
+            return iter([Entry("child", True), Entry("leaf.mp4", False)])
+
+        def fake_stat(path):
+            return SimpleNamespace(st_mtime=time.time() - 10 * 86400)
+
+        # Fake monotonic clock that's already past the deadline on the very
+        # first check, so the walk must stop immediately instead of
+        # recursing into the infinite tree.
+        fake_now = {"t": 0.0}
+
+        def fake_monotonic():
+            fake_now["t"] += recorder._NVR_CLEANUP_MAX_SECONDS + 1.0
+            return fake_now["t"]
+
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    "smbclient": MagicMock(
+                        register_session=MagicMock(),
+                        scandir=fake_scandir,
+                        remove=MagicMock(),
+                        stat=fake_stat,
+                    ),
+                },
+            ),
+            patch.object(recorder.time, "monotonic", fake_monotonic),
+        ):
+            recorder._sync_nvr_cleanup_smb(coord)
+
+        # The deadline fires on the very first check (before the initial
+        # scandir), so the walk must never have recursed into the tree.
+        assert scandir_calls["n"] == 0
+
+    def test_smb_walk_stops_mid_loop_when_deadline_expires_between_entries(
+        self, tmp_path
+    ):
+        """The deadline check ALSO runs inside the per-entry loop (not just
+        once at function entry) — a share that responds fine at first but
+        stalls partway through a large directory listing must still bail out
+        instead of grinding through remaining entries past the deadline.
+        Regression for the mid-loop check at recorder.py's
+        `_walk_and_delete` (SMB), distinct from the top-of-function check
+        already covered by test_smb_walk_stops_at_deadline_instead_of_hanging_forever.
+        """
+        coord = _make_coord(
+            tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
+        )
+
+        class Entry:
+            def __init__(self, name):
+                self.name = name
+
+            def is_dir(self):
+                return False
+
+        root = r"\\fritz.box\FRITZ.NAS\Bosch\NVR"
+
+        def fake_scandir(path):
+            assert path == root
+            return iter([Entry("a.mp4"), Entry("b.mp4")])
+
+        removed: list[str] = []
+
+        def fake_stat(path):
+            return SimpleNamespace(st_mtime=time.time() - 10 * 86400)
+
+        # monotonic() call order: (1) deadline = now + MAX, (2) top-of-function
+        # check for root — both still under deadline, (3) per-entry check for
+        # "a.mp4" — still under deadline, entry is processed, (4) per-entry
+        # check for "b.mp4" — now past deadline, must stop before processing it.
+        calls = iter([0.0, 1.0, 2.0, recorder._NVR_CLEANUP_MAX_SECONDS + 1.0])
+
+        def fake_monotonic():
+            return next(calls, recorder._NVR_CLEANUP_MAX_SECONDS + 1.0)
+
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    "smbclient": MagicMock(
+                        register_session=MagicMock(),
+                        scandir=fake_scandir,
+                        remove=removed.append,
+                        stat=fake_stat,
+                    ),
+                },
+            ),
+            patch.object(recorder.time, "monotonic", fake_monotonic),
+        ):
+            recorder._sync_nvr_cleanup_smb(coord)
+
+        assert removed == [f"{root}\\a.mp4"]
+
     def test_smb_scandir_exception_swallowed(self, tmp_path):
         """A scandir failure deep in the tree must not propagate."""
         coord = _make_coord(
@@ -5420,6 +5543,89 @@ class TestSyncNvrCleanupFtpDeepWalk:
             recorder._sync_nvr_cleanup_ftp(coord)
         # B13-6 regression pin: delete must use the absolute path, not just the filename.
         ftp.delete.assert_called_once_with("/Bosch/NVR/Terrasse/old.mp4")
+
+    def test_ftp_walk_stops_at_deadline_instead_of_hanging_forever(self, tmp_path):
+        """A hung/unreachable FTP server must not block cleanup forever.
+
+        Mirrors the SMB deadline test: fake_monotonic is already past
+        _NVR_CLEANUP_MAX_SECONDS on the first check inside _walk_and_delete,
+        so ftp.cwd() (the first blocking call per directory) must never be
+        reached. Regression for docs/stream-perf-stability-refactor-plan.md
+        Phase 2 point 9.
+        """
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
+        ftp = MagicMock()
+
+        # Fake monotonic clock that jumps past the deadline between the
+        # initial `deadline = time.monotonic() + _NVR_CLEANUP_MAX_SECONDS`
+        # call and the very first in-walk check.
+        fake_now = {"t": 0.0}
+
+        def fake_monotonic():
+            fake_now["t"] += recorder._NVR_CLEANUP_MAX_SECONDS + 1.0
+            return fake_now["t"]
+
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.smb._ftp_connect",
+                return_value=ftp,
+            ),
+            patch.object(recorder.time, "monotonic", fake_monotonic),
+        ):
+            recorder._sync_nvr_cleanup_ftp(coord)
+
+        ftp.cwd.assert_not_called()
+        ftp.delete.assert_not_called()
+
+    def test_ftp_walk_stops_mid_loop_when_deadline_expires_between_files(
+        self, tmp_path
+    ):
+        """Mirrors test_smb_walk_stops_mid_loop_when_deadline_expires_between_entries
+        for the FTP `_walk_and_delete`'s per-file deadline check (distinct
+        from the top-of-function check already covered by
+        test_ftp_walk_stops_at_deadline_instead_of_hanging_forever): a
+        server that lists fine but stalls partway through MDTM/DELETE calls
+        for a large file list must still bail out.
+        """
+        coord = _make_coord(
+            tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
+        )
+        ftp = MagicMock()
+
+        listing = [
+            "-rw-r--r-- 1 owner group 100 Jan 01 00:00 a.mp4",
+            "-rw-r--r-- 1 owner group 100 Jan 01 00:00 b.mp4",
+        ]
+
+        def fake_retrlines(cmd, cb):
+            for line in listing:
+                cb(line)
+
+        ftp.retrlines.side_effect = fake_retrlines
+        ftp.cwd.return_value = None
+        ftp.sendcmd.return_value = "213 20260101010000"
+
+        # monotonic() call order: (1) deadline = now + MAX, (2) top-of-function
+        # check for the root path — both under deadline, (3) per-file check for
+        # "a.mp4" — still under deadline, MDTM+DELETE proceed, (4) per-file
+        # check for "b.mp4" — now past deadline, must stop before it.
+        calls = iter([0.0, 1.0, 2.0, recorder._NVR_CLEANUP_MAX_SECONDS + 1.0])
+
+        def fake_monotonic():
+            return next(calls, recorder._NVR_CLEANUP_MAX_SECONDS + 1.0)
+
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.smb._ftp_connect",
+                return_value=ftp,
+            ),
+            patch.object(recorder.time, "monotonic", fake_monotonic),
+        ):
+            recorder._sync_nvr_cleanup_ftp(coord)
+
+        ftp.delete.assert_called_once_with("/Bosch/NVR/a.mp4")
 
     def test_ftp_cwd_failure_returns_cleanly(self, tmp_path):
         """ftp.cwd raising error_perm — entire walk returns early w/o delete."""

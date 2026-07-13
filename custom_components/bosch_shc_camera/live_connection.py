@@ -44,7 +44,7 @@ async def try_live_connection_inner(
         _redact_creds as _redact_creds,
     )
     from . import (
-        async_get_bosch_cloud_ssl_context as async_get_bosch_cloud_ssl_context,
+        async_get_bosch_cloud_session as async_get_bosch_cloud_session,
     )
     from . import (
         nvr_recorder as nvr_recorder,
@@ -69,18 +69,16 @@ async def try_live_connection_inner(
         _LOGGER.warning("try_live_connection: no token available")
         return None
 
-    # Use a dedicated session with SSL verification disabled.
-    # Bosch Cloud API uses a private CA (Video CA 2A).
-    # NOTE: explicit try/finally around session.close() (rather than
-    # `async with aiohttp.ClientSession(...)`) is deliberate here —
-    # this method spans ~270 lines of stream-setup logic and the extra
-    # indent level is a readability liability. ClientSession's default
-    # connector_owner=True makes session.close() also close the connector,
-    # so the finally block below is leak-free.
-    connector = aiohttp.TCPConnector(
-        ssl=await async_get_bosch_cloud_ssl_context(coordinator.hass)
-    )
-    session = aiohttp.ClientSession(connector=connector)
+    # Pooled, process-wide Bosch-cloud session (TLS-verified against the
+    # Bosch private CA — see cloud_ssl.py). This method spans ~270 lines of
+    # stream-setup logic and used to open (and close, in the `finally`
+    # below) a fresh TCPConnector+ClientSession on every single call — a
+    # fresh TCP+TLS handshake per stream start/renewal/heartbeat. Reusing
+    # the shared session gives connection pooling on this hot path; the
+    # session itself is closed exactly once, on EVENT_HOMEASSISTANT_STOP
+    # (cloud_ssl.async_get_bosch_cloud_session), so the `finally` below must
+    # NOT close it anymore (see comment there).
+    session = await async_get_bosch_cloud_session(coordinator.hass)
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -457,11 +455,50 @@ async def try_live_connection_inner(
                                 try:
                                     await asyncio.wait_for(stale.stop(), timeout=5)
                                 except TimeoutError:
+                                    # HA's `Stream.stop()` already set its
+                                    # internal `_thread_quit` Event before
+                                    # awaiting the worker thread's join (see
+                                    # homeassistant.components.stream.Stream._stop)
+                                    # — so by the time OUR 5s wait_for gives
+                                    # up, the quit signal is already in
+                                    # flight. `Stream` runs the worker as a
+                                    # raw `threading.Thread` (name
+                                    # "stream_worker") with no public cancel
+                                    # API beyond that Event; Python offers
+                                    # no safe way to force-kill a thread
+                                    # blocked in a foreign-code (PyAV/FFmpeg
+                                    # read) call. Reaching into `Stream`'s
+                                    # private `_thread`/`_thread_quit`
+                                    # attributes here to attempt a harder
+                                    # cancel would be exactly the kind of
+                                    # HA-internals coupling this module
+                                    # otherwise avoids, for a thread that
+                                    # (per the quit Event already being set)
+                                    # should exit on its own once the
+                                    # blocking call unblocks. Known
+                                    # limitation, not silently swallowed:
+                                    # best-effort detach + a WARNING with a
+                                    # per-cam repeat counter so a camera
+                                    # that keeps tripping this (accumulating
+                                    # zombie workers) is visible in the logs.
+                                    zombie_count = (
+                                        coordinator._zombie_stream_worker_count.get(
+                                            cam_id, 0
+                                        )
+                                        + 1
+                                    )
+                                    coordinator._zombie_stream_worker_count[cam_id] = (
+                                        zombie_count
+                                    )
                                     _LOGGER.warning(
-                                        "%s: stale Stream.stop() for %s timed out — "
-                                        "force-detaching",
+                                        "%s: stale Stream.stop() for %s timed out after "
+                                        "5s — force-detaching. Its stream_worker thread "
+                                        "may still be running (HA exposes no cancel API "
+                                        "for a stuck worker); this camera has now hit "
+                                        "this timeout %d time(s) since startup",
                                         "Renewal" if is_renewal else "Fresh toggle",
                                         cam_id[:8],
+                                        zombie_count,
                                     )
                                 except Exception as _exc:
                                     _LOGGER.debug(
@@ -755,7 +792,14 @@ async def try_live_connection_inner(
                     err,
                 )
     finally:
-        await session.close()
+        # Do NOT close `session` here — it is the pooled, process-wide Bosch
+        # cloud session (cloud_ssl.async_get_bosch_cloud_session), shared
+        # across every coordinator tick/renewal/heartbeat and every other
+        # module that talks to the Bosch cloud. It is closed exactly once,
+        # on EVENT_HOMEASSISTANT_STOP, by cloud_ssl.py itself. Closing it
+        # here (as the previous per-call ClientSession was) would tear down
+        # every other in-flight Bosch cloud call sharing this session.
+        pass
 
     _LOGGER.warning("Could not open live connection for %s — all types failed", cam_id)
     return None

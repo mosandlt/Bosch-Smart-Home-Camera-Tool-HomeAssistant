@@ -329,8 +329,9 @@
       "token_exchange_failed": "Accesso non riuscito — codice scaduto. Riprovare.",
       "cannot_connect": "Impossibile connettersi ai server Bosch.",
       "invalid_ip_address": "Indirizzo IP non valido — inserire un indirizzo IPv4 o IPv6 valido.",
-      "invalid_ip_allowlist": "Voce allowlist non valida — usare indirizzi IP o intervalli CIDR separati da virgola (es. 192.168.1.0/24).",
-      "invalid_cloud_api_override": "L'URL API fotocamera personalizzato deve iniziare con https://"
+      "invalid_ip_allowlist": "Voce allowlist non valida: {invalid_allowlist_token} — usare indirizzi IP o intervalli CIDR separati da virgola (es. 192.168.1.0/24).",
+      "invalid_cloud_api_override": "L'URL API fotocamera personalizzato deve iniziare con https://",
+      "invalid_webhook_url": "L'URL webhook deve iniziare con http:// o https://"
     },
     "abort": {
       "migration_started": "Migrazione avviata — completare il flusso Riconfigura nella card dell'integrazione."

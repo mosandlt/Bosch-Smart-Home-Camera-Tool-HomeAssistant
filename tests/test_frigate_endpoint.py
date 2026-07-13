@@ -1480,3 +1480,108 @@ async def test_front_door_rejects_client_when_connection_cap_reached() -> None:
 
     # Restore semaphore so it isn't leaked.
     server._sem.release()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Section: _close_writer socket hygiene (docs/stream-perf-stability-refactor-
+# plan.md Phase 2 point 10 — frigate_endpoint.py:556-688, 7+ writer.close()
+# sites had no wait_closed(), risking sockets lingering in TIME_WAIT under load)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_close_writer_closes_and_awaits_wait_closed() -> None:
+    """_close_writer must call close() AND await wait_closed() — not just
+    schedule the close and move on."""
+    writer = MagicMock()
+    writer.close = MagicMock()
+    writer.wait_closed = AsyncMock()
+
+    await fe._close_writer(writer)
+
+    writer.close.assert_called_once()
+    writer.wait_closed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_close_writer_swallows_wait_closed_exception() -> None:
+    """A wait_closed() failure on an already-abrupt/broken connection (reset,
+    broken pipe) must not propagate — it's expected, not a bug."""
+    writer = MagicMock()
+    writer.close = MagicMock()
+    writer.wait_closed = AsyncMock(side_effect=ConnectionResetError("reset"))
+
+    await fe._close_writer(writer)  # must not raise
+
+    writer.close.assert_called_once()
+    writer.wait_closed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_front_door_reject_awaits_wait_closed_on_cap_reached() -> None:
+    """End-to-end: the connection-cap-rejection path (one of the 7 sites)
+    must actually await wait_closed(), not just call close()."""
+    config = FrontDoorConfig(max_connections=1)
+    server = fe._CameraServer(
+        cam_id="11111111-1111-1111-1111-111111111111",
+        config=config,
+        resolve_inner=AsyncMock(),
+        on_active=None,
+        on_idle=None,
+    )
+    await server._sem.acquire()
+
+    writer = MagicMock()
+    writer.get_extra_info = MagicMock(return_value=("127.0.0.1", 5000))
+    writer.close = MagicMock()
+    writer.wait_closed = AsyncMock()
+
+    await server._handle(MagicMock(), writer)
+
+    writer.close.assert_called_once()
+    writer.wait_closed.assert_awaited_once()
+
+    server._sem.release()
+
+
+@pytest.mark.asyncio
+async def test_relay_run_awaits_wait_closed_on_both_writers() -> None:
+    """_Relay.run()'s finally block must await wait_closed() on both the
+    inner and client writers, not just close() them."""
+
+    class _FakeWriter:
+        def __init__(self) -> None:
+            self.closed = False
+            self.wait_closed = AsyncMock()
+
+        def is_closing(self) -> bool:
+            return self.closed
+
+        def close(self) -> None:
+            self.closed = True
+
+    relay = fe._Relay.__new__(fe._Relay)
+    relay._cam = "camBBBBBBB"
+    relay._cr = MagicMock()
+    relay._cw = _FakeWriter()
+    relay._target = InnerTarget(9999, "user", "pass")
+    relay._first = b"OPTIONS rtsp://x RTSP/1.0\r\nCSeq: 1\r\n\r\n"
+    relay._challenge = None
+    relay._ir = None
+    relay._iw = None
+
+    inner_writer = _FakeWriter()
+
+    async def _fake_open_connection(host, port):
+        return MagicMock(), inner_writer
+
+    with (
+        patch.object(asyncio, "open_connection", _fake_open_connection),
+        patch.object(fe._Relay, "_auth_dance", AsyncMock(return_value=None)),
+        patch.object(fe._Relay, "_pipe_client_to_inner", AsyncMock(return_value=None)),
+        patch.object(fe._Relay, "_pipe_inner_to_client", AsyncMock(return_value=None)),
+    ):
+        await relay.run()
+
+    inner_writer.wait_closed.assert_awaited_once()
+    relay._cw.wait_closed.assert_awaited_once()

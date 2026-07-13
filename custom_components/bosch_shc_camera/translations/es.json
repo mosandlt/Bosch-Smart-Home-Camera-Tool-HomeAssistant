@@ -329,8 +329,9 @@
       "token_exchange_failed": "Inicio de sesión fallido — el código ha caducado. Volver a intentarlo.",
       "cannot_connect": "No es posible conectar con los servidores de Bosch.",
       "invalid_ip_address": "Dirección IP no válida — introduzca una dirección IPv4 o IPv6 válida.",
-      "invalid_ip_allowlist": "Entrada de lista de permitidos no válida — use direcciones IP o rangos CIDR separados por comas (p.ej. 192.168.1.0/24).",
-      "invalid_cloud_api_override": "La URL de API de cámara personalizada debe empezar por https://"
+      "invalid_ip_allowlist": "Entrada de lista de permitidos no válida: {invalid_allowlist_token} — use direcciones IP o rangos CIDR separados por comas (p.ej. 192.168.1.0/24).",
+      "invalid_cloud_api_override": "La URL de API de cámara personalizada debe empezar por https://",
+      "invalid_webhook_url": "La URL del webhook debe empezar por http:// o https://"
     },
     "abort": {
       "migration_started": "Migración iniciada — completar el flujo de Reconfigurar en la tarjeta de la integración."

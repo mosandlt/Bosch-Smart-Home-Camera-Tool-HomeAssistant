@@ -131,8 +131,12 @@ def _compute_cam_context(
     # lack these attributes; the real coordinator always sets them in
     # __init__. Lazy-init keeps the gate robust without forcing every
     # stub to mirror the fields.
+    # The real coordinator always sets a `BoolFieldView` here (Session-State-
+    # Facade Slice 1, see session_state.py) — a plain set is only ever
+    # assigned on a bare test stub, never on the real class, hence the
+    # ignore comment below.
     if not hasattr(coordinator, "_slow_tier_deferred"):
-        coordinator._slow_tier_deferred = set()
+        coordinator._slow_tier_deferred = set()  # type: ignore[assignment]
     if not hasattr(coordinator, "_slow_tier_defer_since"):
         coordinator._slow_tier_defer_since = {}
     stream_active = cam_id in coordinator._live_connections
@@ -493,8 +497,22 @@ async def _poll_slow_tier_endpoints(
         if ep == "wifiinfo":
             coordinator._wifiinfo_cache[cam_id] = ep_data
         elif ep == "ambient_light_sensor_level":
-            coordinator._ambient_light_cache[cam_id] = ep_data.get(
-                "ambientLightSensorLevel"
+            # isinstance guard (chaos-fault-injection regression,
+            # tests/test_chaos_fault_injection.py): every sibling branch in
+            # this loop already guards against a malformed-but-200 body
+            # (a JSON array/string/number instead of an object) — this one
+            # didn't, so a single such response from the cloud raised an
+            # unhandled AttributeError that propagated out of
+            # `_poll_slow_tier_endpoints` uncaught (the `_fetch` closure's
+            # try/except only covers network-level failures, not shape
+            # validation of an already-200 body) and crashed the WHOLE
+            # coordinator tick — `_async_update_data`'s outer handler only
+            # catches `UpdateFailed`/`TimeoutError`/`aiohttp.ClientError`,
+            # not AttributeError.
+            coordinator._ambient_light_cache[cam_id] = (
+                ep_data.get("ambientLightSensorLevel")
+                if isinstance(ep_data, dict)
+                else None
             )
         elif ep == "motion":
             # Skip within the write-lock window so a poll that
@@ -520,17 +538,28 @@ async def _poll_slow_tier_endpoints(
             elif isinstance(ep_data, (int, float)):
                 coordinator._unread_events_cache[cam_id] = int(ep_data)
         elif ep == "privacy_sound_override":
+            # isinstance guard — see the "ambient_light_sensor_level" branch
+            # above (chaos-fault-injection regression) for why this is
+            # required: an unguarded `.get()` on a malformed-but-200 body
+            # crashes the whole coordinator tick uncaught.
             if not coordinator._is_write_locked(
                 cam_id, coordinator._privacy_sound_set_at
             ):
-                coordinator._privacy_sound_cache[cam_id] = ep_data.get("result", False)
+                coordinator._privacy_sound_cache[cam_id] = (
+                    ep_data.get("result", False) if isinstance(ep_data, dict) else False
+                )
         elif ep == "commissioned":
             coordinator._commissioned_cache[cam_id] = ep_data
         elif ep == "autofollow":
             data[cam_id]["autofollow"] = ep_data
         elif ep == "timestamp":
+            # isinstance guard — see the "ambient_light_sensor_level" branch
+            # above (chaos-fault-injection regression) for why this is
+            # required.
             if not coordinator._is_write_locked(cam_id, coordinator._timestamp_set_at):
-                coordinator._timestamp_cache[cam_id] = ep_data.get("result", False)
+                coordinator._timestamp_cache[cam_id] = (
+                    ep_data.get("result", False) if isinstance(ep_data, dict) else False
+                )
         elif ep == "notifications":
             coordinator._notifications_cache[cam_id] = ep_data
         elif ep == "rules":

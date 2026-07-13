@@ -80,6 +80,15 @@ IDLE_FRAME_INTERVAL = (
     60  # seconds — how often HA's camera proxy calls async_camera_image
 )
 
+# Worst-case cumulative time budget of the 5-tier snapshot fallback cascade in
+# _async_camera_image_impl, if every tier is attempted and every tier times
+# out: tier1 LOCAL live-proxy snap (6s) OR REMOTE live-proxy snap + one renew
+# retry (10s + 10s), tier2b LOCAL outage snap.jpg (12s), tier4 latest-event
+# snapshot (10s, capped from 20s — see call site). Logged at DEBUG for
+# visibility into how long a single async_camera_image() call can bind the
+# event loop before falling back to the cached image/placeholder.
+SNAPSHOT_FALLBACK_MAX_BUDGET_SEC = 10 + 10 + 12 + 10
+
 
 def _rotate_jpeg_180(jpeg_bytes: bytes) -> bytes:
     """Rotate a JPEG image by 180° using PIL. Sync — call via executor.
@@ -1034,6 +1043,11 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         headers_bearer = {"Authorization": f"Bearer {token}", "Accept": "*/*"}
         # True when card requests a mobile/thumbnail-sized image
         prefer_small = width is not None and width <= 640
+        _LOGGER.debug(
+            "%s: snapshot fallback chain start (worst-case budget %ds)",
+            self._display_name,
+            SNAPSHOT_FALLBACK_MAX_BUDGET_SEC,
+        )
 
         # ── 0. MJPEG inst=3 snapshot (Gen2 opt-in, LAN-only) ─────────────────
         # When use_mjpeg_snapshot is enabled: capture one JPEG frame directly
@@ -1407,7 +1421,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 _LOGGER.warning("Unsafe imageUrl rejected: %s", img_url[:60])
                 continue
             try:
-                async with asyncio.timeout(20):
+                # Capped from 20s to 10s: this is the last tier of the
+                # snapshot fallback cascade (6/10/10/12/10s) — a 20s budget
+                # here alone exceeded HA's CameraImageView outer timeout
+                # (CAMERA_IMAGE_TIMEOUT, 10s), so an already-cancelled
+                # request could still bind up to 20s of event-loop time on a
+                # discarded fetch. 10s matches the other proxy-fetch tiers.
+                async with asyncio.timeout(10):
                     async with session.get(img_url, headers=headers_bearer) as resp:
                         if resp.status == 200:
                             self._cached_image = await resp.read()

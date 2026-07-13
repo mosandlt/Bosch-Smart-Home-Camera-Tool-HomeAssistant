@@ -3098,6 +3098,220 @@ async def test_options_flow_invalid_ip_allowlist_sets_error() -> None:
     assert captured["errors"].get("frigate_ip_allowlist") == "invalid_ip_allowlist"
 
 
+@pytest.mark.asyncio
+async def test_options_flow_invalid_ip_allowlist_reports_offending_token() -> None:
+    """Runde2 P3 #8: the bad token must be surfaced via description_placeholders
+    so the user knows WHICH entry in a comma-separated list is invalid, instead
+    of only a generic error. The first invalid token in a mixed valid/invalid
+    list is reported (loop breaks on first failure, same as before)."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+
+    entry = SimpleNamespace(
+        entry_id="01TEST",
+        data={"bearer_token": "", "refresh_token": "rt"},
+        options={},
+    )
+    flow = BoschCameraOptionsFlow(entry)
+    captured: dict[str, dict] = {}
+    flow.async_show_form = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda **kw: (
+            captured.update(
+                {
+                    "errors": kw.get("errors", {}),
+                    "placeholders": kw.get("description_placeholders", {}),
+                }
+            )
+            or {"type": "form"}
+        )
+    )
+
+    await flow.async_step_init(
+        user_input={"frigate_ip_allowlist": "192.168.1.0/24, not_a_cidr, 10.0.0.5"}
+    )
+
+    assert captured["errors"].get("frigate_ip_allowlist") == "invalid_ip_allowlist"
+    assert captured["placeholders"].get("invalid_allowlist_token") == "not_a_cidr"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_valid_ip_allowlist_no_error_empty_placeholder() -> None:
+    """A fully valid allowlist sets no error — the flow proceeds straight to
+    async_create_entry (mirrors the existing valid-bind-host success path),
+    so async_show_form is never invoked at all."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+
+    entry = SimpleNamespace(
+        entry_id="01TEST",
+        data={"bearer_token": "", "refresh_token": "rt"},
+        options={},
+    )
+    flow = BoschCameraOptionsFlow(entry)
+    flow.async_show_form = MagicMock()  # type: ignore[method-assign]
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})  # type: ignore[method-assign]
+
+    await flow.async_step_init(
+        user_input={"frigate_ip_allowlist": "192.168.1.0/24, 10.0.0.5"}
+    )
+
+    flow.async_show_form.assert_not_called()
+    flow.async_create_entry.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_options_flow_empty_ip_allowlist_no_error() -> None:
+    """Empty/whitespace-only allowlist is valid (feature opt-out) — must not
+    error, proceeds straight to async_create_entry like the valid case."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+
+    entry = SimpleNamespace(
+        entry_id="01TEST",
+        data={"bearer_token": "", "refresh_token": "rt"},
+        options={},
+    )
+    flow = BoschCameraOptionsFlow(entry)
+    flow.async_show_form = MagicMock()  # type: ignore[method-assign]
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})  # type: ignore[method-assign]
+
+    await flow.async_step_init(user_input={"frigate_ip_allowlist": "   "})
+
+    flow.async_show_form.assert_not_called()
+    flow.async_create_entry.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Section: options-flow webhook URL validation (Runde2 P1 #2 —
+# CONF_WEBHOOK_URL had no format check, unlike diagnostic_cloud_api_override)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_options_flow_invalid_webhook_url_sets_error() -> None:
+    """webhook_url without an http(s):// prefix → errors['webhook_url'] ==
+    'invalid_webhook_url', mirroring the existing diagnostic_cloud_api_override
+    pattern (startswith check, same error style)."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_shc_camera.const import CONF_WEBHOOK_URL
+
+    entry = SimpleNamespace(
+        entry_id="01TEST",
+        data={"bearer_token": "", "refresh_token": "rt"},
+        options={},
+    )
+    flow = BoschCameraOptionsFlow(entry)
+    captured: dict[str, dict] = {}
+    flow.async_show_form = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda **kw: (
+            captured.update({"errors": kw.get("errors", {})}) or {"type": "form"}
+        )
+    )
+
+    await flow.async_step_init(
+        user_input={CONF_WEBHOOK_URL: "example.com/hook-no-scheme"}
+    )
+
+    assert captured["errors"].get(CONF_WEBHOOK_URL) == "invalid_webhook_url"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_valid_webhook_url_variants_no_error() -> None:
+    """Both http:// and https:// prefixes are accepted (local-network webhook
+    receivers commonly run plain http, matching CLAUDE.md LOCAL_OVER_REMOTE)."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_shc_camera.const import CONF_WEBHOOK_URL
+
+    for valid_url in (
+        "https://example.com/hook",
+        "http://192.168.1.50:8123/api/webhook/abc",
+    ):
+        entry = SimpleNamespace(
+            entry_id="01TEST",
+            data={"bearer_token": "", "refresh_token": "rt"},
+            options={},
+        )
+        flow = BoschCameraOptionsFlow(entry)
+        flow.async_show_form = MagicMock()  # type: ignore[method-assign]
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})  # type: ignore[method-assign]
+
+        await flow.async_step_init(user_input={CONF_WEBHOOK_URL: valid_url})
+
+        flow.async_show_form.assert_not_called()
+        flow.async_create_entry.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_options_flow_webhook_url_uppercase_scheme_no_error() -> None:
+    """Scheme is case-insensitive per RFC 3986 — some clipboard/paste sources
+    and third-party webhook-URL generators uppercase it (e.g. HTTPS://...).
+    Found during THREE_PER_ISSUE_PER_CHANGE review; the check must not
+    false-positive a technically-valid uppercase-scheme URL as invalid."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_shc_camera.const import CONF_WEBHOOK_URL
+
+    for mixed_case_url in (
+        "HTTPS://example.com/hook",
+        "Http://192.168.1.50:8123/api/webhook/abc",
+    ):
+        entry = SimpleNamespace(
+            entry_id="01TEST",
+            data={"bearer_token": "", "refresh_token": "rt"},
+            options={},
+        )
+        flow = BoschCameraOptionsFlow(entry)
+        flow.async_show_form = MagicMock()  # type: ignore[method-assign]
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})  # type: ignore[method-assign]
+
+        await flow.async_step_init(user_input={CONF_WEBHOOK_URL: mixed_case_url})
+
+        flow.async_show_form.assert_not_called()
+        flow.async_create_entry.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_options_flow_empty_webhook_url_no_error() -> None:
+    """Empty webhook_url is valid (feature disabled/unset) — must not error,
+    same opt-out semantics as the empty-allowlist and empty-cloud-api-override
+    cases elsewhere in this flow. Proceeds straight to async_create_entry."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_shc_camera.const import CONF_WEBHOOK_URL
+
+    entry = SimpleNamespace(
+        entry_id="01TEST",
+        data={"bearer_token": "", "refresh_token": "rt"},
+        options={},
+    )
+    flow = BoschCameraOptionsFlow(entry)
+    flow.async_show_form = MagicMock()  # type: ignore[method-assign]
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})  # type: ignore[method-assign]
+
+    await flow.async_step_init(user_input={CONF_WEBHOOK_URL: ""})
+
+    flow.async_show_form.assert_not_called()
+    flow.async_create_entry.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_options_flow_webhook_url_whitespace_only_no_error() -> None:
+    """Whitespace-only webhook_url strips to empty → treated as unset, not a
+    format error (guards against a stray-space typo blocking unrelated saves).
+    Proceeds straight to async_create_entry."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_shc_camera.const import CONF_WEBHOOK_URL
+
+    entry = SimpleNamespace(
+        entry_id="01TEST",
+        data={"bearer_token": "", "refresh_token": "rt"},
+        options={},
+    )
+    flow = BoschCameraOptionsFlow(entry)
+    flow.async_show_form = MagicMock()  # type: ignore[method-assign]
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})  # type: ignore[method-assign]
+
+    await flow.async_step_init(user_input={CONF_WEBHOOK_URL: "   "})
+
+    flow.async_show_form.assert_not_called()
+    flow.async_create_entry.assert_called_once()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Section: GH#5 — Reauth/Reconfigure flow (relocated from
 # tests/test_github_issues.py)

@@ -52,6 +52,16 @@ DEFAULT_SEGMENT_SECONDS = 300  # 5 minutes, wall-aligned
 # Crash-loop guard: if ffmpeg exits twice within this window we give up.
 _RESPAWN_WINDOW_SECONDS = 30.0
 _RESPAWN_DELAY_SECONDS = 5.0
+# Per-call deadline for the NVR SMB/FTP cleanup walk (_sync_nvr_cleanup_smb /
+# _sync_nvr_cleanup_ftp): a hung/unreachable NAS share has no other backstop
+# — these run in an executor thread with no depth limit and no per-op
+# timeout of their own, so a stalled scandir()/LIST call could otherwise
+# block the whole cleanup job (and the executor thread) indefinitely. Checked
+# with time.monotonic() (SENTINEL_RULE — never 0.0) at the top of every
+# recursive call; on expiry the walk unwinds without deleting further files
+# rather than raising, so files already found within the deadline are still
+# removed.
+_NVR_CLEANUP_MAX_SECONDS = 60.0
 # Auth-retry guard (issue #42 follow-up): a single 401 is almost always a
 # transient heartbeat cred-rotation race and is retried without counting
 # toward the crash-window give-up above — but a GENUINE broken credential
@@ -1946,14 +1956,22 @@ def _sync_nvr_cleanup_smb(coordinator: BoschCameraCoordinator) -> None:
     cutoff = time.time() - retention_days * 86400
     root = f"\\\\{server}\\{share}\\{base_path}\\{sub}"
     deleted = 0
+    deadline = time.monotonic() + _NVR_CLEANUP_MAX_SECONDS
+    deadline_hit = False
 
     def _walk_and_delete(path: str) -> None:
-        nonlocal deleted
+        nonlocal deleted, deadline_hit
+        if time.monotonic() > deadline:
+            deadline_hit = True
+            return
         try:
             entries = list(scandir(path))
         except Exception:
             return
         for entry in entries:
+            if time.monotonic() > deadline:
+                deadline_hit = True
+                return
             full = f"{path}\\{entry.name}"
             if entry.is_dir():
                 _walk_and_delete(full)
@@ -1967,6 +1985,13 @@ def _sync_nvr_cleanup_smb(coordinator: BoschCameraCoordinator) -> None:
                     _LOGGER.debug("NVR cleanup (smb): error on %s: %s", entry.name, err)
 
     _walk_and_delete(root)
+    if deadline_hit:
+        _LOGGER.warning(
+            "NVR cleanup (smb): deadline (%.0fs) exceeded, walk stopped early — "
+            "some old files under %s may remain until the next cleanup run",
+            _NVR_CLEANUP_MAX_SECONDS,
+            root,
+        )
     if deleted:
         _LOGGER.info(
             "NVR cleanup (smb): deleted %d file(s) older than %d days from %s",
@@ -2000,9 +2025,14 @@ def _sync_nvr_cleanup_ftp(coordinator: BoschCameraCoordinator) -> None:
 
     cutoff = time.time() - retention_days * 86400
     deleted = 0
+    deadline = time.monotonic() + _NVR_CLEANUP_MAX_SECONDS
+    deadline_hit = False
 
     def _walk_and_delete(path: str) -> None:
-        nonlocal deleted
+        nonlocal deleted, deadline_hit
+        if time.monotonic() > deadline:
+            deadline_hit = True
+            return
         try:
             ftp.cwd(path)
         except ftplib.error_perm:
@@ -2028,6 +2058,9 @@ def _sync_nvr_cleanup_ftp(coordinator: BoschCameraCoordinator) -> None:
                 files.append(name)
 
         for name in files:
+            if time.monotonic() > deadline:
+                deadline_hit = True
+                return
             # B13-6: use absolute paths for MDTM and DELETE so the commands are
             # position-independent even if a recursive _walk_and_delete call
             # left the FTP working-directory pointing at a subdirectory.
@@ -2069,6 +2102,13 @@ def _sync_nvr_cleanup_ftp(coordinator: BoschCameraCoordinator) -> None:
             Exception
         ):  # best-effort FTP quit on cleanup teardown, failure non-actionable
             pass
+    if deadline_hit:
+        _LOGGER.warning(
+            "NVR cleanup (ftp): deadline (%.0fs) exceeded, walk stopped early — "
+            "some old files under %s may remain until the next cleanup run",
+            _NVR_CLEANUP_MAX_SECONDS,
+            f"{server}/{base_path}/{sub}",
+        )
     if deleted:
         _LOGGER.info(
             "NVR cleanup (ftp): deleted %d file(s) older than %d days from %s",

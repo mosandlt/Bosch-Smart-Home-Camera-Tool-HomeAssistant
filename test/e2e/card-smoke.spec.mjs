@@ -713,6 +713,345 @@ test("fullscreen double-tap zooms the video and exit resets it", async ({ page }
   expect(r.vtAfter, "transform cleared on exit").toBe("");
 });
 
+// Fullscreen controls auto-hide (Thomas, 2026-07-13): the bottom pill-bar
+// fades out after 10s of no pointer movement/touch while in fullscreen, and
+// must NEVER affect the non-fullscreen view. Uses Playwright's clock API to
+// fast-forward virtual time instead of sleeping for real seconds — the idle
+// check runs on a 1s _armInterval (see _wireFsAutoHide), not a per-mousemove
+// setTimeout, so ticking the clock forward exercises the real code path.
+test("outside fullscreen the pill bar stays visible no matter how long we wait", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    return { wired: card._fsAutoHideWired, hidden: card.classList.contains("fs-controls-hidden") };
+  });
+  await page.clock.fastForward(60000); // 60s, well past the 10s fullscreen timeout
+  const after = await page.evaluate(() => {
+    const card = document.querySelector("bosch-camera-card");
+    const hidden = card.classList.contains("fs-controls-hidden");
+    card.remove();
+    return hidden;
+  });
+  expect(r.wired, "auto-hide is never wired outside fullscreen").toBe(false);
+  expect(r.hidden, "controls start visible").toBe(false);
+  expect(after, "controls stay visible after 60s outside fullscreen").toBe(false);
+});
+
+test("fullscreen: pill bar auto-hides after 10s idle, reappears on pointermove/tap, and un-hides on exit", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+
+  const enter = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    // Force the pill-bar's opacity transition to apply synchronously
+    // (inline style wins over the stylesheet's ".3s ease" rule on
+    // specificity). page.clock.install() replaces this page's timers with
+    // virtual ones, and WebKit's implementation appears to also stall
+    // requestAnimationFrame / compositor-driven CSS transitions while a
+    // fake clock is installed — under that condition the real transition
+    // never progresses at all (not just slowly), so no amount of real-wall-
+    // clock waiting/polling can observe it settle. The class toggle itself
+    // (the actual application logic under test) is unaffected either way;
+    // only the decorative fade's timing depends on rAF.
+    card.shadowRoot.querySelector(".ap-pill-bar").style.transition = "none";
+    card._enterCssFullscreen();
+    return {
+      wired: card._fsAutoHideWired,
+      hiddenOnEnter: card.classList.contains("fs-controls-hidden"),
+    };
+  });
+  expect(enter.wired, "auto-hide watcher wired on fullscreen enter").toBe(true);
+  expect(enter.hiddenOnEnter, "controls visible right after entering fullscreen").toBe(false);
+
+  // Idle 10s+ → hidden. With the transition disabled above, the opacity
+  // change lands in the same tick as the class toggle — no real-wall-clock
+  // wait needed.
+  await page.clock.fastForward(10500);
+  const idleState = await page.evaluate(() => ({
+    hidden: document.querySelector("bosch-camera-card").classList.contains("fs-controls-hidden"),
+    pillOpacity: getComputedStyle(
+      document.querySelector("bosch-camera-card").shadowRoot.querySelector(".ap-pill-bar"),
+    ).opacity,
+  }));
+  expect(idleState.hidden, "controls hidden after 10s idle in fullscreen").toBe(true);
+  expect(idleState.pillOpacity, "pill bar faded to opacity 0").toBe("0");
+
+  // Pointer movement resets it immediately.
+  const afterMove = await page.evaluate(() => {
+    const card = document.querySelector("bosch-camera-card");
+    const wrap = card.shadowRoot.getElementById("img-wrapper");
+    wrap.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: 50, clientY: 50 }));
+    return card.classList.contains("fs-controls-hidden");
+  });
+  expect(afterMove, "pointermove immediately reshows the controls").toBe(false);
+
+  // Idle again, this time verify a touch tap on the video reshows it too.
+  await page.clock.fastForward(10500);
+  const afterTouch = await page.evaluate(() => {
+    const card = document.querySelector("bosch-camera-card");
+    const wasHidden = card.classList.contains("fs-controls-hidden");
+    const wrap = card.shadowRoot.getElementById("img-wrapper");
+    const video = card.shadowRoot.getElementById("cam-video");
+    // Dispatch on the video itself (not a pill-bar button) to match a real tap.
+    const ev = new Event("touchstart", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "target", { value: video, configurable: true });
+    wrap.dispatchEvent(ev);
+    return { wasHidden, nowHidden: card.classList.contains("fs-controls-hidden") };
+  });
+  expect(afterTouch.wasHidden, "controls were hidden again after another 10s idle").toBe(true);
+  expect(afterTouch.nowHidden, "tap on the video reshows the controls").toBe(false);
+
+  // Exiting fullscreen must ALWAYS leave the controls visible + stop the timer,
+  // even if we exit while mid-idle (no state may bleed into the normal view).
+  await page.clock.fastForward(10500);
+  const afterExit = await page.evaluate(() => {
+    const card = document.querySelector("bosch-camera-card");
+    const wasHiddenBeforeExit = card.classList.contains("fs-controls-hidden");
+    card._exitCssFullscreen();
+    const r = {
+      wasHiddenBeforeExit,
+      wired: card._fsAutoHideWired,
+      hidden: card.classList.contains("fs-controls-hidden"),
+    };
+    card.remove();
+    return r;
+  });
+  expect(afterExit.wasHiddenBeforeExit, "sanity: controls were hidden right before exit").toBe(true);
+  expect(afterExit.wired, "auto-hide watcher torn down on fullscreen exit").toBe(false);
+  expect(afterExit.hidden, "controls forced visible again on fullscreen exit").toBe(false);
+});
+
+test("fullscreen auto-hide timer is cleared by disconnectedCallback (no leak)", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    card._enterCssFullscreen();
+    const idBefore = card._fsIdleTimer;
+    card.remove(); // triggers disconnectedCallback while fullscreen-idle-watching
+    return { idBefore, wiredAfter: card._fsAutoHideWired, timerAfter: card._fsIdleTimer };
+  });
+  expect(r.idBefore, "an interval id was armed while in fullscreen").not.toBeNull();
+  expect(r.wiredAfter, "watcher flag cleared on removal").toBe(false);
+  expect(r.timerAfter, "timer id cleared on removal").toBeNull();
+});
+
+// `fullscreen_auto_hide_controls` opt-out (Thomas, 2026-07-13 follow-up):
+// default true (auto-hide as above, no YAML needed), set to false to keep the
+// pre-fb3410c behavior — icons always visible in fullscreen AND no idle timer
+// running in the background at all (not just visually suppressed).
+test("fullscreen_auto_hide_controls defaults to enabled when unset", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    return { configValue: card._config.fullscreen_auto_hide_controls };
+  });
+  expect(r.configValue, "fullscreen_auto_hide_controls defaults to true (opt-out)").toBe(true);
+
+  const enter = await page.evaluate(() => {
+    const card = document.querySelector("bosch-camera-card");
+    card._enterCssFullscreen();
+    return { wired: card._fsAutoHideWired };
+  });
+  expect(enter.wired, "default config still wires the auto-hide watcher").toBe(true);
+
+  await page.clock.fastForward(10500);
+  await page.waitForTimeout(400);
+  const after = await page.evaluate(() => {
+    const card = document.querySelector("bosch-camera-card");
+    const hidden = card.classList.contains("fs-controls-hidden");
+    card._exitCssFullscreen();
+    card.remove();
+    return hidden;
+  });
+  expect(after, "default config still auto-hides after 10s idle").toBe(true);
+});
+
+test("fullscreen_auto_hide_controls:false keeps the pill bar always visible and never arms the idle timer", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const enter = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true, fullscreen_auto_hide_controls: false });
+    card.hass = { ...base, states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    card._enterCssFullscreen();
+    return { wired: card._fsAutoHideWired, timer: card._fsIdleTimer };
+  });
+  // The whole point of the opt-out: no watcher, no listeners, no background
+  // interval — not merely "hidden class never applied".
+  expect(enter.wired, "watcher is never wired when the option is disabled").toBe(false);
+  expect(enter.timer, "no idle interval is armed when the option is disabled").toBeNull();
+
+  await page.clock.fastForward(60000); // well past the 10s timeout
+  const after = await page.evaluate(() => {
+    const card = document.querySelector("bosch-camera-card");
+    const r = {
+      hidden: card.classList.contains("fs-controls-hidden"),
+      pillOpacity: getComputedStyle(card.shadowRoot.querySelector(".ap-pill-bar")).opacity,
+      wired: card._fsAutoHideWired,
+    };
+    card._exitCssFullscreen();
+    card.remove();
+    return r;
+  });
+  expect(after.hidden, "controls never gain fs-controls-hidden with the option disabled").toBe(false);
+  expect(after.pillOpacity, "pill bar stays fully opaque").toBe("1");
+  expect(after.wired, "watcher stays unwired for the whole fullscreen session").toBe(false);
+});
+
+// Regression (bug-hunt agent #1, 2026-07-13): setConfig() previously only
+// stored the new fullscreen_auto_hide_controls value into _config without
+// re-syncing the watcher — _syncFsAutoHide() was normally only ever invoked
+// from a real fullscreen enter/exit transition (_updateFullscreenButtonState),
+// so toggling the option via the visual editor's live "config-changed" preview
+// WHILE the card was already fullscreen had zero effect until the user
+// exited and re-entered fullscreen. Fixed by re-syncing inside setConfig()
+// whenever the card is already in fullscreen when it runs.
+test("toggling fullscreen_auto_hide_controls via setConfig while already fullscreen takes effect immediately", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+
+  // Case A: enabled -> disabled mid-fullscreen. The watcher must unwire and
+  // the pill bar must never go on to hide even after another 10s+ idle.
+  const caseA = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true }); // default: enabled
+    card.hass = { ...base, states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    card._enterCssFullscreen();
+    const wiredBefore = card._fsAutoHideWired;
+    // Simulate the editor's live-preview firing a config-changed event with
+    // the option now disabled, WITHOUT leaving fullscreen first.
+    card.setConfig({ camera_entity: "camera.test", apple_style: true, fullscreen_auto_hide_controls: false });
+    return { wiredBefore, wiredAfterDisable: card._fsAutoHideWired, timerAfterDisable: card._fsIdleTimer };
+  });
+  expect(caseA.wiredBefore, "sanity: watcher was wired before the mid-fullscreen setConfig").toBe(true);
+  expect(caseA.wiredAfterDisable, "watcher unwires immediately once disabled mid-fullscreen").toBe(false);
+  expect(caseA.timerAfterDisable, "idle interval is cleared immediately once disabled mid-fullscreen").toBeNull();
+
+  await page.clock.fastForward(60000);
+  const caseAAfterIdle = await page.evaluate(() => {
+    const card = document.querySelector("bosch-camera-card");
+    const hidden = card.classList.contains("fs-controls-hidden");
+    card._exitCssFullscreen();
+    card.remove();
+    return hidden;
+  });
+  expect(caseAAfterIdle, "controls never hide after being disabled mid-fullscreen, even after 60s idle").toBe(false);
+
+  // Case B: disabled -> enabled mid-fullscreen. The watcher must wire up and
+  // the idle-hide behavior must start working without a fullscreen re-entry.
+  const caseB = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true, fullscreen_auto_hide_controls: false });
+    card.hass = { ...base, states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    card._enterCssFullscreen();
+    const wiredBefore = card._fsAutoHideWired;
+    card.setConfig({ camera_entity: "camera.test", apple_style: true, fullscreen_auto_hide_controls: true });
+    return { wiredBefore, wiredAfterEnable: card._fsAutoHideWired };
+  });
+  expect(caseB.wiredBefore, "sanity: watcher was NOT wired before the mid-fullscreen setConfig").toBe(false);
+  expect(caseB.wiredAfterEnable, "watcher wires immediately once re-enabled mid-fullscreen").toBe(true);
+
+  await page.clock.fastForward(10500);
+  await page.waitForTimeout(400);
+  const caseBAfterIdle = await page.evaluate(() => {
+    const card = document.querySelector("bosch-camera-card");
+    const hidden = card.classList.contains("fs-controls-hidden");
+    card._exitCssFullscreen();
+    card.remove();
+    return hidden;
+  });
+  expect(caseBAfterIdle, "controls auto-hide after 10s idle once re-enabled mid-fullscreen, no re-entry needed").toBe(true);
+});
+
+// Regression (bug-hunt agent #3, 2026-07-13): pointer-events is an INHERITED
+// property, not a compositing one like opacity — the ancestor pill-bar's
+// `:host(.fs-controls-hidden) .ap-pill-bar { pointer-events: none !important }`
+// hides the volume popup VISUALLY via opacity (opacity applies to the whole
+// subtree regardless of a descendant's own value), but .ap-vol-pop's own
+// `:hover`/`.show` rule directly declares `pointer-events: auto` on itself —
+// a direct declaration always wins over an inherited value, no matter the
+// ancestor's !important. Without the fix, hovering the audio button and then
+// going idle (mouse stationary, so pointermove never fires to reset the
+// timer) left the invisible slider still draggable/clickable at that screen
+// position.
+test("fullscreen auto-hide also strips pointer-events from the (inherited-only) volume popup", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    card._enterCssFullscreen();
+    const volPop = card.shadowRoot.getElementById("ap-vol-pop");
+    if (!volPop) return { error: "no ap-vol-pop" };
+    // Simulate the popup being open (mirrors the CSS :hover state that keeps
+    // it interactive) via the pre-existing .show class hook, independent of
+    // real :hover so the test doesn't depend on synthesizing mouse hover.
+    volPop.classList.add("show");
+    return { error: null };
+  });
+  expect(r.error).toBeNull();
+
+  await page.clock.fastForward(10500);
+  await page.waitForTimeout(400); // let the opacity transition settle
+
+  const after = await page.evaluate(() => {
+    const card = document.querySelector("bosch-camera-card");
+    const volPop = card.shadowRoot.getElementById("ap-vol-pop");
+    const pointerEvents = getComputedStyle(volPop).pointerEvents;
+    // Read the hidden state BEFORE remove() — disconnectedCallback tears down
+    // the auto-hide watcher and force-shows the controls again, which would
+    // otherwise flip this back to false if read afterward.
+    const hidden = card.classList.contains("fs-controls-hidden");
+    card.remove();
+    return { hidden, pointerEvents };
+  });
+  expect(after.hidden, "controls hidden after 10s idle").toBe(true);
+  expect(after.pointerEvents, "volume popup is not clickable while faded, even with .show set").toBe("none");
+});
+
 test("tap-to-play / loading overlay sits UNDER the control pill bar (Stop stays tappable)", async ({ page }) => {
   await page.goto("/test/e2e/fixtures/card.html");
   await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
@@ -1443,8 +1782,16 @@ test("PiP-freeze fix is wired: rVFC heartbeat, track-mute + connection-failed re
   expect(CARD_SRC).toMatch(/connectionstatechange/);
   expect(CARD_SRC).toMatch(/connectionState\s*===\s*"failed"/);
   // Teardown cancels the rVFC heartbeat and the track-mute debounce timer.
+  // (2026-07-13: timer clearing now routes through the shared _clearTimer
+  // registry helper — Phase 4 point 14 — instead of a raw clearTimeout guard.
+  // Scoped to the _stopLiveVideo body specifically: `_clearTimer(this._trackMuteTimer)`
+  // also appears in the onmute/onunmute handlers, so an unscoped match would stay
+  // green even if the actual teardown call were accidentally removed — bug-hunt
+  // finding 2026-07-13.)
   expect(CARD_SRC).toMatch(/cancelVideoFrameCallback/);
-  expect(CARD_SRC).toMatch(/this\._trackMuteTimer\s*\)\s*\{\s*clearTimeout/);
+  const stopLiveVideoStart = CARD_SRC.indexOf("_stopLiveVideo() {");
+  const stopLiveVideoBody = CARD_SRC.slice(stopLiveVideoStart, CARD_SRC.indexOf("_onSnapshotClick()", stopLiveVideoStart));
+  expect(stopLiveVideoBody).toMatch(/_clearTimer\(this\._trackMuteTimer\)/);
 });
 
 test("background-freeze fix is wired: un-throttled Web Worker stall heartbeat (source pin)", () => {
@@ -1632,7 +1979,9 @@ test("2026-06-22 bug-hunt fixes are wired: stale-pc guard, getStats oracle, HLS 
   // The pc-identity guard must also be re-checked INSIDE the 6s mute debounce.
   const onmuteIdx = CARD_SRC.indexOf("ev.track.onmute =");
   const debounceSlice = CARD_SRC.slice(onmuteIdx, onmuteIdx + 1200);
-  expect(debounceSlice).toMatch(/_trackMuteTimer\s*=\s*setTimeout\([\s\S]*?if\s*\(this\._webrtcPc\s*!==\s*pc\)\s*return;/);
+  // 2026-07-13: armed via the shared _armTimer registry helper now (Phase 4
+  // point 14) instead of a raw setTimeout.
+  expect(debounceSlice).toMatch(/_trackMuteTimer\s*=\s*this\._armTimer\([\s\S]*?if\s*\(this\._webrtcPc\s*!==\s*pc\)\s*return;/);
 
   // getStats() framesDecoded freeze oracle — the cross-browser decoder-level signal.
   expect(CARD_SRC).toMatch(/async\s+_checkWebrtcFreeze\s*\(\)\s*\{/);
@@ -1689,7 +2038,13 @@ test("_checkWebrtcFreeze flags a decoder freeze and clears when frames advance",
     clock += 11_000;
     card._streamTransport = "webrtc";
     const frozen = await card._checkWebrtcFreeze();
-    // Frames advance → healthy again, baseline resets.
+    // Frames advance → healthy again, baseline resets. Advance the clock a
+    // little first (2026-07-13, Phase 4 point 13): _getStatsCached() now
+    // shares one pc.getStats() snapshot for ~1s across callers, so back-to-back
+    // calls with a literally unchanged clock (as real 5s-apart poll ticks never
+    // are) would otherwise replay the previous cached (still-frozen) snapshot
+    // instead of observing the frame advance.
+    clock += 1_200;
     card._streamTransport = "webrtc";
     frames = 130;
     const healthyAgain = await card._checkWebrtcFreeze();
@@ -2278,7 +2633,9 @@ test("HLS-mode banner shows for a mobile client on HLS (not just the remote-skip
 test("_stopLiveVideo clears the dead-track watchdog timer + resets its baseline", () => {
   const start = CARD_SRC.indexOf("_stopLiveVideo() {");
   const body = CARD_SRC.slice(start, CARD_SRC.indexOf("_onSnapshotClick()", start));
-  expect(body.includes("clearTimeout(this._webrtcFirstFrameTimer)"),
+  // 2026-07-13: cleared via the shared _clearTimer registry helper now
+  // (Phase 4 point 14) instead of a raw clearTimeout guard.
+  expect(body.includes("_clearTimer(this._webrtcFirstFrameTimer)"),
     "watchdog timer cleared on teardown").toBe(true);
   expect(body.includes("this._webrtcStatsPrev     = null;") || body.includes("this._webrtcStatsPrev = null;"),
     "stats baseline reset").toBe(true);
@@ -2332,7 +2689,9 @@ test("native iOS HLS load watchdog: armed on the native path, cleared on teardow
   // Cleared in _stopLiveVideo.
   const stop = CARD_SRC.indexOf("_stopLiveVideo() {");
   const stopBody = CARD_SRC.slice(stop, CARD_SRC.indexOf("_onSnapshotClick()", stop));
-  expect(stopBody.includes("clearTimeout(this._nativeHlsLoadTimer)"), "timer cleared on teardown").toBe(true);
+  // 2026-07-13: cleared via the shared _clearTimer registry helper now
+  // (Phase 4 point 14) instead of a raw clearTimeout guard.
+  expect(stopBody.includes("_clearTimer(this._nativeHlsLoadTimer)"), "timer cleared on teardown").toBe(true);
 });
 
 // ── Multi-instance audio registry: redundant setConfig must not swap roles ────

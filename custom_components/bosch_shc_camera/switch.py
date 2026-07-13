@@ -54,6 +54,7 @@ from . import BoschCameraCoordinator, get_options
 from .cloud_ssl import async_get_bosch_cloud_session
 from .const import DOMAIN, STREAM_START_SKIPPED
 from .guards import _INDOOR_HW, _get_cam_lock, _is_gen2_indoor, _warn_if_privacy_on
+from .session_state import FloatFieldView
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
         endpoint: str,
         body: dict[str, Any],
         cache: dict[str, Any],
-        set_at: dict[str, float],
+        set_at: dict[str, float] | FloatFieldView,
         cache_value: Any,
     ) -> None:
         """PUT `endpoint`; on success, cache `cache_value` + stamp `set_at`.
@@ -123,10 +124,12 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
         timestamp overlay, status LED, alarm arming, …) that were previously
         each copy-pasting this same write→cache→set_at→write_ha_state
         sequence with only the endpoint/body/cache dicts differing. `cache`
-        and `set_at` are the coordinator's existing per-feature dicts passed
-        by reference (other modules read them directly by name), so this
-        does not change any external cache identity — only removes the
-        duplication of the write sequence itself.
+        and `set_at` are the coordinator's existing per-feature dicts/views
+        passed by reference (other modules read them directly by name), so
+        this does not change any external cache identity — only removes the
+        duplication of the write sequence itself. `set_at` accepts either a
+        bare dict or a `FloatFieldView` (Session-State-Facade Slice 1, see
+        session_state.py) — both support `[cam_id] = value`.
         """
         success = await self.coordinator.async_put_camera(self._cam_id, endpoint, body)
         if success:

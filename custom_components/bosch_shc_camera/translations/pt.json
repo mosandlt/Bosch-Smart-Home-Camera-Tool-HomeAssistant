@@ -329,8 +329,9 @@
       "token_exchange_failed": "Login falhado — código expirado. Tente novamente.",
       "cannot_connect": "Não é possível ligar aos servidores Bosch.",
       "invalid_ip_address": "Endereço IP inválido — insira um endereço IPv4 ou IPv6 válido.",
-      "invalid_ip_allowlist": "Entrada de allowlist inválida — use endereços IP ou intervalos CIDR separados por vírgulas (ex. 192.168.1.0/24).",
-      "invalid_cloud_api_override": "O URL de API de câmara personalizado deve começar por https://"
+      "invalid_ip_allowlist": "Entrada de allowlist inválida: {invalid_allowlist_token} — use endereços IP ou intervalos CIDR separados por vírgulas (ex. 192.168.1.0/24).",
+      "invalid_cloud_api_override": "O URL de API de câmara personalizado deve começar por https://",
+      "invalid_webhook_url": "O URL do webhook deve começar por http:// ou https://"
     },
     "abort": {
       "migration_started": "Migração iniciada — conclua o fluxo de Reconfigurar no cartão de integração."

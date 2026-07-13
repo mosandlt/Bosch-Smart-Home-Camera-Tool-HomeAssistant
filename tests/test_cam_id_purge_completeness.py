@@ -1,0 +1,292 @@
+"""Completeness tests for `BoschCameraCoordinator._purge_cam_id` (Runde 2 P1 #1).
+
+`_cleanup_stale_devices` previously only removed the device-registry entry
+for a camera no longer present in the Bosch cloud account — none of the
+~100+ per-cam_id-keyed coordinator dict/set attributes were ever cleared, so
+they grew unbounded across camera swaps/renames over the coordinator
+instance's lifetime.
+
+This test builds a REAL coordinator (via `BoschCameraCoordinator(hass, entry)`,
+not a stub), populates every per-cam_id dict/set attribute discovered via
+`vars(coordinator)` with a known test cam_id, calls `_purge_cam_id`, and then
+asserts NONE of the expected-to-be-purged attributes still contain that
+cam_id — while the deliberately-excluded attributes (proxy_hash-keyed,
+event_id-keyed, account-level/global) are confirmed UNTOUCHED. A future new
+per-cam dict/set that is not added to
+`BoschCameraCoordinator._PURGE_CAM_DICT_ATTRS` /
+`_PURGE_CAM_SET_ATTRS` will fail this test automatically once populated with
+the test cam_id, because it is auto-discovered from `vars(coordinator)`
+rather than hand-listed here.
+"""
+
+from __future__ import annotations
+
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.bosch_shc_camera import BoschCameraCoordinator
+from custom_components.bosch_shc_camera.const import DOMAIN
+
+TEST_CAM_ID = "AABBCCDD-1111-2222-3333-444455556666"
+OTHER_CAM_ID = "EEFF0011-9999-8888-7777-666655554444"
+TEST_OPCODE = "0xABCD"
+
+# Attributes that are intentionally NOT purged by `_purge_cam_id` — audited
+# against `BoschCameraCoordinator.__init__` (see the comment block above
+# `_PURGE_CAM_DICT_ATTRS` in __init__.py for the full rationale per entry).
+# Each is populated with the test cam_id as a probe value and asserted to
+# still contain it after `_purge_cam_id` runs, proving purge did NOT touch it.
+EXCLUDED_STR_KEYED_DICTS = {
+    # keyed by proxy_hash, not cam_id
+    "_rcp_session_cache",
+    "_rcp_session_locks",
+    # keyed by event_id, not cam_id (pruned to 32 most recent separately)
+    "_alert_sent_ids",
+    # account-level (GET /v11/feature_flags once), keyed by flag name
+    "_feature_flags",
+    # coordinator-instance-level snapshot of options at creation time, not
+    # keyed by cam_id at all (str keys just happen to be option names)
+    "_options_snapshot",
+    # inherited from HA-core's DataUpdateCoordinator base class — listener
+    # callback registry, empty dict candidate but not ours / not cam-keyed
+    "_listeners",
+}
+
+# Same idea for `set` attributes — sets of non-str members (e.g. Task
+# objects) look identical to an empty `set[str]` candidate at construction
+# time. Audited: `_bg_tasks` holds `asyncio.Task` references, not cam_ids.
+EXCLUDED_SETS = {
+    "_bg_tasks",
+}
+
+# Attribute handled specially: dict[tuple[str, str], float] keyed by
+# (cam_id, opcode_hex) — not a plain str key, so it is excluded from the
+# generic str-keyed dict/set scan below and tested explicitly.
+TUPLE_KEYED_ATTR = "_rcp_lan_denied_until"
+
+
+def _make_entry(hass: HomeAssistant) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Bosch Smart Home Camera",
+        data={
+            "bearer_token": "test_bearer_token",
+            "refresh_token": "test_refresh_token",
+        },
+        options={},
+        unique_id=DOMAIN,
+        version=3,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+def _is_str_keyed_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if not value:
+        return True  # empty dict — assume str-keyed candidate, safe to probe
+    return all(isinstance(k, str) for k in value)
+
+
+def _is_str_set(value: object) -> bool:
+    return isinstance(value, set)
+
+
+async def test_purge_cam_id_completeness(hass: HomeAssistant) -> None:
+    """Populate every per-cam_id dict/set with TEST_CAM_ID, purge, verify gone."""
+    entry = _make_entry(hass)
+    coord = BoschCameraCoordinator(hass, entry)
+
+    purge_dict_attrs = set(coord._PURGE_CAM_DICT_ATTRS)
+    purge_set_attrs = set(coord._PURGE_CAM_SET_ATTRS)
+
+    # Discover every dict/set attribute on the real instance (auto-discovery
+    # is the whole point — a future new per-cam dict gets caught here without
+    # needing to be added to this test by hand).
+    candidate_dict_attrs: list[str] = []
+    candidate_set_attrs: list[str] = []
+    for name, value in vars(coord).items():
+        if not name.startswith("_") or name == TUPLE_KEYED_ATTR:
+            continue
+        if isinstance(value, dict) and _is_str_keyed_dict(value):
+            candidate_dict_attrs.append(name)
+        elif _is_str_set(value):
+            candidate_set_attrs.append(name)
+
+    # Sanity: every attribute this test intends to exercise must be either
+    # a purge target or an audited exclusion — otherwise the test itself has
+    # drifted from the source (e.g. a genuinely global dict added later with
+    # str keys that happens not to be cam-keyed would need adding to
+    # EXCLUDED_STR_KEYED_DICTS explicitly, forcing a conscious decision).
+    unaccounted_dicts = (
+        set(candidate_dict_attrs) - purge_dict_attrs - EXCLUDED_STR_KEYED_DICTS
+    )
+    unaccounted_sets = set(candidate_set_attrs) - purge_set_attrs - EXCLUDED_SETS
+    assert unaccounted_dicts == set(), (
+        f"New str-keyed dict attribute(s) {unaccounted_dicts} found on "
+        "BoschCameraCoordinator that are neither in _PURGE_CAM_DICT_ATTRS "
+        "nor in EXCLUDED_STR_KEYED_DICTS (tests/test_cam_id_purge_completeness.py) "
+        "— audit whether they are keyed by cam_id and add them to one list "
+        "or the other."
+    )
+    assert unaccounted_sets == set(), (
+        f"New set attribute(s) {unaccounted_sets} found on "
+        "BoschCameraCoordinator that are not in _PURGE_CAM_SET_ATTRS — audit "
+        "whether they are cam_id-membership sets and add them there."
+    )
+
+    # Populate every discovered dict/set (both purge-targets and exclusions)
+    # with the test cam_id as a probe.
+    for name in candidate_dict_attrs:
+        getattr(coord, name)[TEST_CAM_ID] = "probe"
+    for name in candidate_set_attrs:
+        getattr(coord, name).add(TEST_CAM_ID)
+    # Tuple-keyed attr: one entry for the cam under test, one for a
+    # different cam sharing the same opcode (must survive the purge).
+    getattr(coord, TUPLE_KEYED_ATTR)[(TEST_CAM_ID, TEST_OPCODE)] = 123.0
+    getattr(coord, TUPLE_KEYED_ATTR)[(OTHER_CAM_ID, TEST_OPCODE)] = 456.0
+
+    coord._purge_cam_id(TEST_CAM_ID)
+
+    # Every purge-target dict/set must no longer contain the test cam_id.
+    still_present_dicts = [
+        name for name in purge_dict_attrs if TEST_CAM_ID in getattr(coord, name)
+    ]
+    still_present_sets = [
+        name for name in purge_set_attrs if TEST_CAM_ID in getattr(coord, name)
+    ]
+    assert still_present_dicts == [], (
+        f"_purge_cam_id left TEST_CAM_ID behind in: {still_present_dicts}"
+    )
+    assert still_present_sets == [], (
+        f"_purge_cam_id left TEST_CAM_ID behind in: {still_present_sets}"
+    )
+
+    # Excluded dicts must be UNTOUCHED (probe still present).
+    for name in EXCLUDED_STR_KEYED_DICTS:
+        assert TEST_CAM_ID in getattr(coord, name), (
+            f"{name} is documented as excluded from cam_id purge but the "
+            "probe entry was removed — either the exclusion is wrong or "
+            "_purge_cam_id started touching it unexpectedly."
+        )
+
+    # Tuple-keyed attr: only the (TEST_CAM_ID, *) entry is purged.
+    tuple_dict = getattr(coord, TUPLE_KEYED_ATTR)
+    assert (TEST_CAM_ID, TEST_OPCODE) not in tuple_dict
+    assert (OTHER_CAM_ID, TEST_OPCODE) in tuple_dict
+
+
+async def test_purge_cam_id_representative_sample(hass: HomeAssistant) -> None:
+    """Focused check on a representative sample of well-known per-cam caches."""
+    entry = _make_entry(hass)
+    coord = BoschCameraCoordinator(hass, entry)
+
+    coord._rcp_dimmer_cache[TEST_CAM_ID] = 42
+    coord._shc_state_cache[TEST_CAM_ID] = {"privacy_mode": True}
+    coord._pan_cache[TEST_CAM_ID] = 10
+    coord._get_session(TEST_CAM_ID)  # populates coord._sessions[TEST_CAM_ID]
+    assert TEST_CAM_ID in coord._sessions
+
+    coord._purge_cam_id(TEST_CAM_ID)
+
+    assert TEST_CAM_ID not in coord._rcp_dimmer_cache
+    assert TEST_CAM_ID not in coord._shc_state_cache
+    assert TEST_CAM_ID not in coord._pan_cache
+    assert TEST_CAM_ID not in coord._sessions
+
+
+async def test_purge_cam_id_all_slice2_cache_fields(hass: HomeAssistant) -> None:
+    """All 27 Session-State-Facade Slice 2 `CacheFieldView` attributes purge.
+
+    `test_purge_cam_id_completeness`'s `vars(coord)` auto-discovery cannot
+    see these — they are `CacheFieldView` (a `MutableMapping`), not a bare
+    `dict` instance, since Slice 2 (docs/stream-perf-stability-refactor-
+    plan.md) backs them via `self._sessions`. Only 3 of the 27
+    (`_rcp_dimmer_cache`/`_shc_state_cache`/`_pan_cache`) had a dedicated
+    regression check before this test (`test_purge_cam_id_representative_
+    sample` below) — this covers the remaining 24 explicitly so a future
+    change to `CacheFieldView`/`get_or_create_session` that broke purge for
+    only some fields would be caught.
+    """
+    entry = _make_entry(hass)
+    coord = BoschCameraCoordinator(hass, entry)
+
+    slice2_probe_values: dict[str, object] = {
+        "_rcp_state_cache": {"privacy_mode": False},
+        "_shc_state_cache": {"privacy_mode": True},
+        "_pan_cache": 10,
+        "_rcp_dimmer_cache": 42,
+        "_rcp_privacy_cache": 1,
+        "_rcp_clock_offset_cache": 1.5,
+        "_rcp_lan_ip_cache": "192.0.2.10",
+        "_rcp_product_name_cache": "Eyes Outdoor",
+        "_rcp_bitrate_cache": [512, 1024],
+        "_rcp_alarm_catalog_cache": [{"id": 1}],
+        "_rcp_motion_zones_cache": [{"id": 1}],
+        "_rcp_motion_coords_cache": [{"x": 1, "y": 1}],
+        "_rcp_tls_cert_cache": {"issuer": "Bosch"},
+        "_rcp_network_services_cache": ["rtsp"],
+        "_rcp_iva_catalog_cache": [{"id": 1}],
+        "_rcp_onvif_scopes_cache": {"name": "cam"},
+        "_rcp_version_cache": "1.2",
+        "_nvr_mode_preference": "event_buffered",
+        "_local_creds_cache": {"user": "u", "password": "p"},
+        "_audio_cache": {"volume": 50},
+        "_nvr_user_intent": True,
+        "_nvr_error_state": "some error",
+        "_nvr_recent_crash": 123.0,
+        "_nvr_auth_retry_count": 2,
+        "_nvr_event_clip_enabled": True,
+        "_nvr_preroll_last_crash": 456.0,
+        "_nvr_preroll_segment_counts": 7,
+    }
+
+    for attr_name, probe_value in slice2_probe_values.items():
+        getattr(coord, attr_name)[TEST_CAM_ID] = probe_value
+        assert TEST_CAM_ID in getattr(coord, attr_name), (
+            f"{attr_name} did not accept the probe write"
+        )
+
+    coord._purge_cam_id(TEST_CAM_ID)
+
+    still_present = [
+        attr_name
+        for attr_name in slice2_probe_values
+        if TEST_CAM_ID in getattr(coord, attr_name)
+    ]
+    assert still_present == [], (
+        f"_purge_cam_id left TEST_CAM_ID behind in Slice 2 fields: {still_present}"
+    )
+
+
+async def test_cleanup_stale_devices_purges_removed_camera(hass: HomeAssistant) -> None:
+    """`_cleanup_stale_devices` purges the per-cam caches for a camera that
+    disappeared from the Bosch cloud account, not just the device registry."""
+    from homeassistant.helpers import device_registry as dr
+
+    entry = _make_entry(hass)
+    coord = BoschCameraCoordinator(hass, entry)
+
+    # Seed caches for a camera that is about to "disappear".
+    coord._rcp_dimmer_cache[TEST_CAM_ID] = 7
+    coord._shc_state_cache[TEST_CAM_ID] = {"privacy_mode": False}
+    coord._pan_cache[TEST_CAM_ID] = 3
+    coord._sessions[TEST_CAM_ID] = coord._get_session(TEST_CAM_ID)
+
+    dev_reg = dr.async_get(hass)
+    dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, TEST_CAM_ID)},
+        name="Bosch Test Cam",
+    )
+
+    # Camera no longer present in the fresh cloud list.
+    coord._cleanup_stale_devices(current_cam_ids=set())
+
+    assert TEST_CAM_ID not in coord._rcp_dimmer_cache
+    assert TEST_CAM_ID not in coord._shc_state_cache
+    assert TEST_CAM_ID not in coord._pan_cache
+    assert TEST_CAM_ID not in coord._sessions
+    # Device entry itself is gone too (pre-existing behaviour, still true).
+    assert dev_reg.async_get_device(identifiers={(DOMAIN, TEST_CAM_ID)}) is None
