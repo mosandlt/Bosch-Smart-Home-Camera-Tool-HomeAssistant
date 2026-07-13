@@ -5,6 +5,18 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v15.0.1] - 2026-07-13
+
+Patch — internal cleanup: Session-State-Facade migration complete (Slice 3 + Slice 4), no user-facing change
+
+### Changed
+
+- **Internal only.** Finished consolidating the coordinator's per-camera state (started in v15.0.0) into the single `CameraSessionState` facade. Slice 3 folded the live-connection session dict and the "user explicitly wants this stream" flag onto the facade; Slice 4 — the plan's highest-risk step, since it moves the coordinator's per-camera `asyncio.Lock` instances themselves (stream, Mini-NVR recorder, snapshot fetch, go2rtc re-registration, NVR clip assembly, and a sixth found during a systematic re-audit: fresh-event-snapshot coalescing) — moved all six onto the facade too, reusing the existing view abstraction rather than adding a new one.
+- Lock identity (two different lock objects are never interchangeable even both unlocked) was verified before any production call site was switched over, including a real two-coroutine mutual-exclusion test performed while a lock is held.
+- Every slice went through an independent 3-agent bug-hunt (call-site completeness across the whole package, TOCTOU + purge-safety analysis, semantic equivalence + test-fixture correctness) before being committed; the only real finding was a test-coverage gap in the new lock-identity test class, fixed in the same commit.
+
+6124 pytest (1 pre-existing skip), 100.00% coverage, mypy --strict / ruff / codespell clean.
+
 ## [v15.0.0] - 2026-07-13
 
 Major — a large internal performance/stability refactoring round, one new card feature, and the start of a deeper structural cleanup of the coordinator. No breaking changes to the config schema or public entities; existing installs upgrade with zero action needed. Bumped as a major version because of the scale of the internal architecture change (coordinator split into 4 new modules, first slice of a per-camera state consolidation), not because anything public changed.

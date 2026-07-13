@@ -595,7 +595,12 @@ class BoschCameraCoordinator(
         # facades backed by this same dict. Accessed via _get_session().
         self._sessions: dict[str, CameraSessionState] = {}
         # Live-stream proxy info — keyed by cam_id, cleared after LIVE_SESSION_TTL seconds
-        self._live_connections: dict[str, dict[str, Any]] = {}
+        # Session-State-Facade Slice 3: CacheFieldView over self._sessions
+        # (see session_state.py) — preserves the exact `dict[str, dict[str,
+        # Any]]` get/setitem/pop/in contract external callers use.
+        self._live_connections: CacheFieldView[dict[str, Any]] = CacheFieldView(
+            self._sessions, "live_connection"
+        )
         # timestamp when session was opened — dict-like facade over
         # CameraSessionState.opened_at (external readers in camera.py use
         # .get()/.pop(), preserved via LiveOpenedAtView; see session_state.py)
@@ -656,7 +661,10 @@ class BoschCameraCoordinator(
         # external teardowns (`_tear_down_live_stream` resets it because a
         # privacy-on / health-watchdog escalation cancels user intent too).
         # Bug 2026-05-20.
-        self._user_intent_streams: set[str] = set()
+        # Session-State-Facade Slice 3: BoolFieldView over self._sessions
+        # (see session_state.py) — preserves the exact `set[str]` in/.add()/
+        # .discard() contract external callers use.
+        self._user_intent_streams = BoolFieldView(self._sessions, "user_intent_stream")
         # Image entity references — registered on image platform setup
         # Keyed by cam_id; image entities call async_notify_refreshed() after
         # each disk-persist so WKWebView gets a fresh signed URL.
@@ -799,10 +807,19 @@ class BoschCameraCoordinator(
         # Per-camera lock serializing async_fetch_live_snapshot calls.
         # Prevents duplicate PUT /connection when first-load + proactive refresh
         # overlap, or when a user rapid-triggers snapshots.
-        self._snapshot_fetch_locks: dict[str, asyncio.Lock] = {}
+        # Session-State-Facade Slice 4: CacheFieldView over self._sessions
+        # (see session_state.py) — preserves the exact `dict[str,
+        # asyncio.Lock]` get/setitem/in contract get_or_create_lock relies
+        # on, with lock IDENTITY preserved (verified in
+        # tests/test_session_state_facade_slice4.py before this migration).
+        self._snapshot_fetch_locks: CacheFieldView[asyncio.Lock] = CacheFieldView(
+            self._sessions, "snapshot_fetch_lock"
+        )
         # Per-camera lock serializing try_live_connection(). Initialised here
         # (not lazily) so _get_stream_lock stays a plain dict lookup.
-        self._stream_locks: dict[str, asyncio.Lock] = {}
+        self._stream_locks: CacheFieldView[asyncio.Lock] = CacheFieldView(
+            self._sessions, "stream_lock"
+        )
         # _go2rtc_reregister_locks / _go2rtc_reregister_pending: coalesce
         # concurrent go2rtc re-registrations for the same camera, fired from
         # _refresh_local_creds_from_heartbeat on every heartbeat PUT (Gen1:
@@ -814,7 +831,12 @@ class BoschCameraCoordinator(
         # stashes its URL and returns; the in-flight call re-runs with the
         # freshest pending URL before releasing the lock, so no cred update
         # is silently lost.
-        self._go2rtc_reregister_locks: dict[str, asyncio.Lock] = {}
+        # Session-State-Facade Slice 4: CacheFieldView over self._sessions
+        # (see session_state.py) — same lock-identity-preserving migration
+        # as _snapshot_fetch_locks/_stream_locks above.
+        self._go2rtc_reregister_locks: CacheFieldView[asyncio.Lock] = CacheFieldView(
+            self._sessions, "go2rtc_reregister_lock"
+        )
         self._go2rtc_reregister_pending: dict[str, str] = {}
         # Short-lived cache for async_fetch_fresh_event_snapshot.
         # After an FCM push, async_update_listeners() wakes all HA consumers
@@ -825,7 +847,14 @@ class BoschCameraCoordinator(
         # after it releases, find the cache hit, and return without a network call.
         # TTL=8s covers the burst window while staying well inside the 60s scan cycle.
         self._fresh_snap_cache: dict[str, tuple[bytes, float]] = {}
-        self._fresh_snap_locks: dict[str, asyncio.Lock] = {}
+        # Session-State-Facade Slice 4: CacheFieldView over self._sessions
+        # (see session_state.py) — found during the mandatory systematic
+        # re-audit of every per-cam_id `dict[str, asyncio.Lock]` attribute
+        # (not just the 5 originally named); same lock-identity-preserving
+        # migration as _snapshot_fetch_locks/_stream_locks above.
+        self._fresh_snap_locks: CacheFieldView[asyncio.Lock] = CacheFieldView(
+            self._sessions, "fresh_snap_lock"
+        )
         # AI snapshot-description rate limiter (F3): per-camera cooldown +
         # global daily budget. monotonic sentinel = -inf (SENTINEL_RULE: CI VMs
         # boot ~200s monotonic, 0.0 would falsely satisfy the cooldown).
@@ -1277,12 +1306,19 @@ class BoschCameraCoordinator(
         # against _refresh_local_creds_from_heartbeat's in-place mutation of
         # _live_connections[cam_id] — closes the remaining race window from
         # issue #42 rather than only tolerating its 401 symptom.
-        self._nvr_recorder_locks: dict[str, asyncio.Lock] = {}
+        # Session-State-Facade Slice 4: CacheFieldView over self._sessions
+        # (see session_state.py) — same lock-identity-preserving migration
+        # as _snapshot_fetch_locks/_stream_locks above.
+        self._nvr_recorder_locks: CacheFieldView[asyncio.Lock] = CacheFieldView(
+            self._sessions, "nvr_recorder_lock"
+        )
         # _nvr_clip_assembly_locks: per-camera lock guarding
         # recorder.assemble_and_ship_motion_clip — prevents overlapping FCM
         # events for the same camera from racing the concat-file write
         # (issue #43 follow-up, event_buffered mode).
-        self._nvr_clip_assembly_locks: dict[str, asyncio.Lock] = {}
+        self._nvr_clip_assembly_locks: CacheFieldView[asyncio.Lock] = CacheFieldView(
+            self._sessions, "nvr_clip_assembly_lock"
+        )
         # _nvr_event_clip_enabled: per-camera switch state for the native
         # FCM-triggered event→clip assembly (default True, backward
         # compatible). Installs that orchestrate their own clip-saving
@@ -2747,9 +2783,9 @@ class BoschCameraCoordinator(
         "_sessions",  # also backs the _live_opened_at / _stream_warming views
         # (and, since Slice 2, every _rcp_*_cache / _shc_state_cache /
         # _pan_cache / _audio_cache / _local_creds_cache / _nvr_mode_preference /
-        # plain _nvr_* status CacheFieldView below — see the excluded-list
+        # plain _nvr_* status CacheFieldView below, plus, since Slice 3,
+        # _live_connections / _user_intent_streams — see the excluded-list
         # comment block at the end of this tuple)
-        "_live_connections",
         "_audio_enabled",
         "_audio_volume",
         "_auto_renew_tasks",  # legacy, kept for backwards-compat, never populated
@@ -2768,12 +2804,8 @@ class BoschCameraCoordinator(
         "_rcp_cmd_failures",
         "_quality_preference",
         "_proxy_url_cache",
-        "_snapshot_fetch_locks",
-        "_stream_locks",
-        "_go2rtc_reregister_locks",
         "_go2rtc_reregister_pending",
         "_fresh_snap_cache",
-        "_fresh_snap_locks",
         "_ai_last_call",
         "_last_event_ids",
         "_unread_events_cache",
@@ -2824,15 +2856,16 @@ class BoschCameraCoordinator(
         "_last_camera_status",
         "_session_quota_hits",
         "_nvr_processes",
-        "_nvr_recorder_locks",
-        "_nvr_clip_assembly_locks",
         "_nvr_preroll_processes",
         "_nvr_preroll_tasks",
         "_nvr_drain_state",
         "_nvr_drain_failures",
     )
     # `set[str]` attributes whose members are cam_id → `.discard()`.
-    _PURGE_CAM_SET_ATTRS: tuple[str, ...] = ("_user_intent_streams",)
+    # Empty since Slice 3: `_user_intent_streams` (the last member) is now a
+    # BoolFieldView facade over `_sessions` — see the excluded-list comment
+    # block below.
+    _PURGE_CAM_SET_ATTRS: tuple[str, ...] = ()
     # Deliberately EXCLUDED (audited, not an oversight):
     #   _rcp_session_cache / _rcp_session_locks — keyed by proxy_hash, not cam_id.
     #   _alert_sent_ids — keyed by event_id, not cam_id.
@@ -2870,6 +2903,26 @@ class BoschCameraCoordinator(
     #       keyed by staging file path, not cam_id. Left in this tuple as a
     #       harmless no-op (a cam_id never matches those keys) rather than
     #       moved, to avoid a second churn on this list for a non-bug.
+    #   _live_connections — thin `CacheFieldView` facade over _sessions
+    #       (Session-State-Facade Slice 3, see session_state.py); same
+    #       "_sessions purge covers it" reasoning as the Slice 2 list above.
+    #   _user_intent_streams — thin `BoolFieldView` facade over _sessions
+    #       (Session-State-Facade Slice 3, see session_state.py); no longer
+    #       a `set` instance so `test_cam_id_purge_completeness.py`'s
+    #       `vars(coord)` auto-discovery no longer sees it as a candidate,
+    #       same reasoning as the Slice 1 bool-flag list above. This is why
+    #       `_PURGE_CAM_SET_ATTRS` above is now empty.
+    #   _snapshot_fetch_locks / _stream_locks / _go2rtc_reregister_locks /
+    #       _nvr_recorder_locks / _nvr_clip_assembly_locks / _fresh_snap_locks
+    #       (the last found via systematic re-audit, not originally named) —
+    #       thin `CacheFieldView` facades over _sessions (Session-State-
+    #       Facade Slice 4, see session_state.py); same "_sessions purge
+    #       covers it, no longer a bare dict instance" reasoning as the
+    #       Slice 2/3 lists above. Popping the whole `_sessions[cam_id]`
+    #       entry only ever happens once a camera is confirmed gone from the
+    #       Bosch cloud account (see `_purge_cam_id`'s docstring) — never
+    #       mid-operation while one of that camera's locks could be held, so
+    #       this is safe for lock-typed fields too, not just plain data.
     #   Everything else in __init__ not listed above is a genuinely global/
     #   account-level attribute (counters, constants, locks keyed by
     #   proxy_hash, single Task/Store handles, etc.) — not per-cam.

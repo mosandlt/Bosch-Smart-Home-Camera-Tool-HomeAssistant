@@ -2194,11 +2194,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v15.0.0** — see the GitHub release page for full notes:
-[**v15.0.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v15.0.0)
+Latest: **v15.0.1** — see the GitHub release page for full notes:
+[**v15.0.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v15.0.1)
 
 | Version | Highlights |
 |---|---|
+| **v15.0.1** | **Internal cleanup only, no user-facing change.** Completes the Session-State-Facade migration started in v15.0.0 — the coordinator's remaining per-camera session data and lock objects now live on one shared per-camera state object instead of scattered dicts. Every step independently bug-hunted and verified before release. |
 | **v15.0.0** | **Large internal performance/stability refactor, plus a new fullscreen behavior.** The bottom video controls now auto-hide after 10s idle in fullscreen (with an option to turn that off). Under the hood: pooled network sessions instead of a fresh connection per call, several race conditions and timeout gaps fixed (found via a new chaos-engineering fault-injection test suite), and the main coordinator module further split into focused files. No breaking changes, no action needed to upgrade. |
 | **v14.8.0** | **Two Mini-NVR event-clip feature requests, both opt-in.** A new option lets the pre-roll ring briefly finalize and re-attach its freshest segment on a motion event instead of always dropping it, recovering the last ~0-10s of footage closest to the trigger — at the cost of a small (~1s) gap in ring coverage per event. A new per-camera *Mini-NVR event clip* switch (default on) lets installs that already save clips their own way (e.g. via automations) turn off the integration's own native clip without affecting the shared pre-roll ring. |
 | **v14.5.13** | **Internal cleanup only, no user-facing change.** Continuation of the coordinator-rewrite work from v14.5.7-v14.5.10: the main coordinator class shrank from 9385 to 6636 lines, split into focused modules and mixins (token/auth lifecycle, FCM push, Frigate front-doors, SHC/cloud setters, HA service handlers, and the live-session-open logic). Live-verified end to end against a real camera (WebRTC, snapshot, privacy toggle, service call) before release. |

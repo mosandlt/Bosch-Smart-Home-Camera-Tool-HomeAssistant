@@ -56,6 +56,10 @@ from custom_components.bosch_shc_camera.go2rtc_client import (
     unregister_go2rtc_stream,
 )
 from custom_components.bosch_shc_camera.lock_utils import get_or_create_lock
+from custom_components.bosch_shc_camera.session_state import (
+    BoolFieldView,
+    CacheFieldView,
+)
 from custom_components.bosch_shc_camera.tls_proxy import start_tls_proxy, stop_tls_proxy
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
@@ -957,6 +961,14 @@ def _make_purge_stub() -> BoschCameraCoordinator:
     for attr in BoschCameraCoordinator._PURGE_CAM_SET_ATTRS:
         setattr(coord, attr, set())
     coord._rcp_lan_denied_until = {}
+    # Session-State-Facade Slice 3: `_live_connections`/`_user_intent_streams`
+    # are no longer plain dict/set instances (folded into `_sessions`, which
+    # the loop above already wired up via `_PURGE_CAM_DICT_ATTRS`) — wire the
+    # same CacheFieldView/BoolFieldView facades the real coordinator uses in
+    # __init__, matching this stub's pre-existing pattern for the earlier
+    # slices' folded fields.
+    coord._live_connections = CacheFieldView(coord._sessions, "live_connection")
+    coord._user_intent_streams = BoolFieldView(coord._sessions, "user_intent_stream")
     return coord
 
 

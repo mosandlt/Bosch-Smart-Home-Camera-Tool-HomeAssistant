@@ -21,6 +21,8 @@ rather than hand-listed here.
 
 from __future__ import annotations
 
+import asyncio
+
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -258,6 +260,96 @@ async def test_purge_cam_id_all_slice2_cache_fields(hass: HomeAssistant) -> None
     assert still_present == [], (
         f"_purge_cam_id left TEST_CAM_ID behind in Slice 2 fields: {still_present}"
     )
+
+
+async def test_purge_cam_id_slice3_session_stream_fields(hass: HomeAssistant) -> None:
+    """`_live_connections` (CacheFieldView) and `_user_intent_streams`
+    (BoolFieldView) — Session-State-Facade Slice 3 — purge correctly.
+
+    Neither `test_purge_cam_id_completeness`'s `vars(coord)` auto-discovery
+    (they are no longer bare `dict`/`set` instances) nor
+    `test_purge_cam_id_all_slice2_cache_fields` (Slice 2 only) exercise
+    these — same reasoning as the Slice 2 dedicated test above.
+    """
+    entry = _make_entry(hass)
+    coord = BoschCameraCoordinator(hass, entry)
+
+    coord._live_connections[TEST_CAM_ID] = {"proxyUrl": "https://example.invalid"}
+    coord._user_intent_streams.add(TEST_CAM_ID)
+    assert TEST_CAM_ID in coord._live_connections
+    assert TEST_CAM_ID in coord._user_intent_streams
+
+    coord._purge_cam_id(TEST_CAM_ID)
+
+    assert TEST_CAM_ID not in coord._live_connections
+    assert TEST_CAM_ID not in coord._user_intent_streams
+
+
+async def test_purge_cam_id_slice4_lock_fields(hass: HomeAssistant) -> None:
+    """All six Session-State-Facade Slice 4 lock `CacheFieldView` attributes
+    (`_stream_locks`/`_nvr_recorder_locks`/`_snapshot_fetch_locks`/
+    `_go2rtc_reregister_locks`/`_nvr_clip_assembly_locks`/`_fresh_snap_locks`)
+    purge correctly.
+
+    Neither `test_purge_cam_id_completeness`'s `vars(coord)` auto-discovery
+    (they are no longer bare `dict` instances) nor the Slice 2/3 dedicated
+    tests exercise these — same reasoning as those tests. Also confirms the
+    purge does not leave a dangling reference to a lock that might still be
+    referenced (held) elsewhere — since `_purge_cam_id` only ever runs once
+    a camera is confirmed gone from the Bosch cloud account (never
+    mid-operation, per its own docstring), a fresh unlocked lock is
+    populated here as the probe rather than a held one, matching real usage.
+    """
+    entry = _make_entry(hass)
+    coord = BoschCameraCoordinator(hass, entry)
+
+    lock_attrs = [
+        "_stream_locks",
+        "_nvr_recorder_locks",
+        "_snapshot_fetch_locks",
+        "_go2rtc_reregister_locks",
+        "_nvr_clip_assembly_locks",
+        "_fresh_snap_locks",
+    ]
+    probes = {name: asyncio.Lock() for name in lock_attrs}
+    for name in lock_attrs:
+        getattr(coord, name)[TEST_CAM_ID] = probes[name]
+        assert getattr(coord, name)[TEST_CAM_ID] is probes[name]
+
+    coord._purge_cam_id(TEST_CAM_ID)
+
+    still_present = [name for name in lock_attrs if TEST_CAM_ID in getattr(coord, name)]
+    assert still_present == [], (
+        f"_purge_cam_id left TEST_CAM_ID behind in Slice 4 lock fields: {still_present}"
+    )
+
+
+async def test_purge_cam_id_set_attr_loop_mechanism_still_works(
+    hass: HomeAssistant,
+) -> None:
+    """`_PURGE_CAM_SET_ATTRS` became empty in Slice 3 (its last member,
+    `_user_intent_streams`, is now a `BoolFieldView` facade — see the
+    excluded-list comment above `_PURGE_CAM_DICT_ATTRS` in `__init__.py`).
+    The generic `for attr_name in self._PURGE_CAM_SET_ATTRS: ... .discard
+    (cam_id)` loop body in `_purge_cam_id` is therefore currently
+    unreached by any real attribute — this test exercises the loop
+    mechanism directly against a synthetic set attribute (monkeypatched
+    onto the tuple) so a future slice reintroducing a cam_id-keyed `set`
+    attribute can rely on tested, not just theoretical, purge behavior.
+    """
+    entry = _make_entry(hass)
+    coord = BoschCameraCoordinator(hass, entry)
+
+    coord._fake_purge_set_attr = {TEST_CAM_ID, OTHER_CAM_ID}
+    original = coord._PURGE_CAM_SET_ATTRS
+    coord._PURGE_CAM_SET_ATTRS = (*original, "_fake_purge_set_attr")
+    try:
+        coord._purge_cam_id(TEST_CAM_ID)
+    finally:
+        coord._PURGE_CAM_SET_ATTRS = original
+
+    assert TEST_CAM_ID not in coord._fake_purge_set_attr
+    assert OTHER_CAM_ID in coord._fake_purge_set_attr
 
 
 async def test_cleanup_stale_devices_purges_removed_camera(hass: HomeAssistant) -> None:
