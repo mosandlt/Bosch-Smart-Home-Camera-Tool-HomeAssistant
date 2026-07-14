@@ -52,7 +52,10 @@
     "abort": {
       "already_configured": "Już skonfigurowano.",
       "reauth_successful": "Ponowne uwierzytelnienie zakończone sukcesem — integracja Bosch Smart Home Camera została zaktualizowana z nowym tokenem. Wszystkie encje, automatyzacje i opcje są zachowane.",
-      "reconfigure_successful": "Ponowna konfiguracja zakończona sukcesem — integracja Bosch Smart Home Camera została zaktualizowana z nowym tokenem. Wszystkie encje, automatyzacje i opcje są zachowane."
+      "reconfigure_successful": "Ponowna konfiguracja zakończona sukcesem — integracja Bosch Smart Home Camera została zaktualizowana z nowym tokenem. Wszystkie encje, automatyzacje i opcje są zachowane.",
+      "missing_credentials": "Nie zarejestrowano poświadczenia aplikacji Bosch SingleKey ID. Uruchom ponownie Home Assistant i spróbuj ponownie — jeśli problem się powtarza, zgłoś błąd.",
+      "missing_configuration": "Integracja Bosch Smart Home Camera nie jest poprawnie skonfigurowana dla OAuth. Uruchom ponownie Home Assistant i spróbuj ponownie — jeśli problem się powtarza, zgłoś błąd.",
+      "oauth_implementation_unavailable": "Wybrana metoda logowania nie jest już dostępna. Rozpocznij od nowa."
     }
   },
   "options": {
@@ -923,6 +926,10 @@
     "doubled_prefix_entity_ids_migrated": {
       "title": "Bosch Camera — ID encji zmienione",
       "description": "**{count}** ID encji kamery Bosch miało podwójny prefiks `bosch_NAME_bosch_NAME_` (błąd v11.0.0–v12.2.1) i zostały zmienione na prawidłową formę.\n\nPrzykłady: {examples}\n\n**Musisz zaktualizować wszystkie automatyzacje, skrypty, sceny i pulpity Lovelace, które odwołują się do starych ID.** Home Assistant nie przepisuje automatycznie plików YAML ani kart Lovelace przy zmianie ID encji. Historia i statystyki są migrowane automatycznie.\n\nPełne mapowanie znajdziesz w informacjach o wersji v12.3.0."
+    },
+    "smb_unavailable": {
+      "title": "Bosch Camera — Pakiet SMB/NAS nie jest zainstalowany",
+      "description": "**{features}** jest skonfigurowane do korzystania z udziału sieciowego SMB/NAS, ale opcjonalny pakiet Pythona `smbprotocol` nie jest zainstalowany, więc przesyłanie/nagrywanie na udział jest wyłączone.\n\nTen pakiet jest zwykle instalowany automatycznie na podstawie wymagań integracji — spróbuj raz zrestartować Home Assistant. Jeśli nadal się nie zainstaluje (np. z powodu nieobsługiwanej architektury systemu/CPU), zmień cel przechowywania na **Lokalny** lub **FTP** w opcjach integracji."
     }
   },
   "system_health": {

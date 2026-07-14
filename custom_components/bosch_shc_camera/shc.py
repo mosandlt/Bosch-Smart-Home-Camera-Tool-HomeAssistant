@@ -36,6 +36,8 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
+from bosch_shc_camera_client.cloud import cloud_put_json
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .cloud_ssl import async_get_bosch_cloud_session
 
@@ -496,88 +498,69 @@ async def async_cloud_set_privacy_mode(
     token = coordinator.token
     if token and not cam_offline:
         session = await async_get_bosch_cloud_session(coordinator.hass)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy"
         body = {"privacyMode": "ON" if enabled else "OFF", "durationInSeconds": None}
 
-        try:
-            async with asyncio.timeout(10):
-                async with session.put(url, json=body, headers=headers) as resp:
-                    _token_refreshed = False
-                    if resp.status == 401:
-                        # Token expired -- refresh and retry once
-                        _LOGGER.info(
-                            "cloud_set_privacy_mode: 401 -- refreshing token and retrying"
-                        )
-                        try:
-                            token = await coordinator._ensure_valid_token(token)
-                            headers["Authorization"] = f"Bearer {token}"
-                            _token_refreshed = True
-                        except Exception:  # noqa: S110 # token refresh failed; fall through to local SHC path
-                            pass  # fall through to SHC
-                    if resp.status in (200, 201, 204):
-                        # Stamp the write-lock BEFORE updating the cache so the
-                        # SHC background tick can never see a window where the
-                        # cache was changed but _privacy_set_at is still unset
-                        # (the race that caused the first OFF-toggle to revert).
-                        coordinator._privacy_set_at[cam_id] = time.monotonic()
-                        coordinator._shc_state_cache.setdefault(cam_id, {})[
-                            "privacy_mode"
-                        ] = enabled
-                        coordinator.async_update_listeners()
-                        _LOGGER.debug(
-                            "cloud_set_privacy_mode: %s -> %s (HTTP %d)",
-                            cam_id,
-                            "ON" if enabled else "OFF",
-                            resp.status,
-                        )
-                        # NO async_request_refresh() here. The cache + listeners
-                        # above already push the new privacy state to the UI
-                        # optimistically. A forced (un-throttled) coordinator
-                        # refresh re-touches go2rtc stream registration for ALL
-                        # active cameras, which made go2rtc TEARDOWN + reconnect
-                        # an UNRELATED camera's live session (~1 s blip → "HLS
-                        # reload" overlay). Incident 2026-05-29, path C. The
-                        # regular 60 s tick confirms the state; privacy-OFF still
-                        # triggers a lightweight snapshot refresh below.
-                        if not enabled:
-                            _schedule_privacy_off_snapshot(coordinator, cam_id)
-                        return True
-                    if resp.status == 401 and _token_refreshed:
-                        # Retry with refreshed token
-                        async with asyncio.timeout(10):
-                            async with session.put(
-                                url, json=body, headers=headers
-                            ) as resp2:
-                                if resp2.status in (200, 201, 204):
-                                    coordinator._privacy_set_at[cam_id] = (
-                                        time.monotonic()
-                                    )
-                                    coordinator._shc_state_cache.setdefault(cam_id, {})[
-                                        "privacy_mode"
-                                    ] = enabled
-                                    coordinator.async_update_listeners()
-                                    # See primary path above: no forced refresh
-                                    # (path C — avoids tearing down unrelated
-                                    # cameras' live sessions). 2026-05-29.
-                                    if not enabled:
-                                        _schedule_privacy_off_snapshot(
-                                            coordinator, cam_id
-                                        )
-                                    return True
-                    if resp.status == 444 and hasattr(coordinator, "_cloud_444_at"):
-                        # Session quota / not-ready — remember so the next write
-                        # skips the cloud and uses the LAN/SHC fallback directly.
-                        coordinator._cloud_444_at[cam_id] = time.monotonic()
-                    _LOGGER.warning(
-                        "cloud_set_privacy_mode: HTTP %d for %s", resp.status, cam_id
-                    )
-        except (TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.warning("cloud_set_privacy_mode error for %s: %s", cam_id, err)
+        result = await cloud_put_json(session, token, url, body)
+        if result.ok:
+            # Stamp the write-lock BEFORE updating the cache so the
+            # SHC background tick can never see a window where the
+            # cache was changed but _privacy_set_at is still unset
+            # (the race that caused the first OFF-toggle to revert).
+            coordinator._privacy_set_at[cam_id] = time.monotonic()
+            coordinator._shc_state_cache.setdefault(cam_id, {})["privacy_mode"] = (
+                enabled
+            )
+            coordinator.async_update_listeners()
+            _LOGGER.debug(
+                "cloud_set_privacy_mode: %s -> %s (HTTP %d)",
+                cam_id,
+                "ON" if enabled else "OFF",
+                result.status,
+            )
+            # NO async_request_refresh() here. The cache + listeners
+            # above already push the new privacy state to the UI
+            # optimistically. A forced (un-throttled) coordinator
+            # refresh re-touches go2rtc stream registration for ALL
+            # active cameras, which made go2rtc TEARDOWN + reconnect
+            # an UNRELATED camera's live session (~1 s blip → "HLS
+            # reload" overlay). Incident 2026-05-29, path C. The
+            # regular 60 s tick confirms the state; privacy-OFF still
+            # triggers a lightweight snapshot refresh below.
+            if not enabled:
+                _schedule_privacy_off_snapshot(coordinator, cam_id)
+            return True
+
+        if result.status == 401:
+            # Token expired -- refresh and retry once
+            _LOGGER.info("cloud_set_privacy_mode: 401 -- refreshing token and retrying")
+            try:
+                token = await coordinator._ensure_valid_token(token)
+            except Exception:  # noqa: S110 # token refresh failed; fall through to local SHC path
+                pass  # fall through to SHC
+            else:
+                retry_result = await cloud_put_json(session, token, url, body)
+                if retry_result.ok:
+                    coordinator._privacy_set_at[cam_id] = time.monotonic()
+                    coordinator._shc_state_cache.setdefault(cam_id, {})[
+                        "privacy_mode"
+                    ] = enabled
+                    coordinator.async_update_listeners()
+                    # See primary path above: no forced refresh
+                    # (path C — avoids tearing down unrelated
+                    # cameras' live sessions). 2026-05-29.
+                    if not enabled:
+                        _schedule_privacy_off_snapshot(coordinator, cam_id)
+                    return True
+
+        if result.status == 444 and hasattr(coordinator, "_cloud_444_at"):
+            # Session quota / not-ready — remember so the next write
+            # skips the cloud and uses the LAN/SHC fallback directly.
+            coordinator._cloud_444_at[cam_id] = time.monotonic()
+        if result.status is not None:
+            _LOGGER.warning(
+                "cloud_set_privacy_mode: HTTP %d for %s", result.status, cam_id
+            )
 
     # -- Gen2 LOCAL RCP fallback (cloud outage) --------------------------------
     # When the Bosch cloud (auth server or API) is unreachable, Gen2 cameras
@@ -601,10 +584,11 @@ async def async_cloud_set_privacy_mode(
         local_user = creds.get("user") if creds else None
         local_pass = creds.get("password") if creds else None
         if cam_host:
-            from .rcp import rcp_local_write_privacy
+            from bosch_shc_camera_client.rcp import rcp_local_write_privacy
 
+            local_session = async_get_clientsession(coordinator.hass, verify_ssl=False)
             ok = await rcp_local_write_privacy(
-                coordinator.hass,
+                local_session,
                 cam_host,
                 enabled,
                 user=local_user,
@@ -676,12 +660,6 @@ async def async_cloud_set_camera_light(
     token = coordinator.token
     if token:
         session = await async_get_bosch_cloud_session(coordinator.hass)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-
         gen2 = _is_gen2(coordinator, cam_id)
         ok = False
 
@@ -689,27 +667,15 @@ async def async_cloud_set_camera_light(
             # Gen2: separate endpoints for front and top-down lights
             base = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting/switch"
             body_toggle = {"enabled": on}
-            try:
-                async with asyncio.timeout(10):
-                    async with session.put(
-                        f"{base}/front", json=body_toggle, headers=headers
-                    ) as r1:
-                        ok1 = r1.status in (200, 201, 204)
-                    async with session.put(
-                        f"{base}/topdown", json=body_toggle, headers=headers
-                    ) as r2:
-                        ok2 = r2.status in (200, 201, 204)
-                    ok = ok1 or ok2
-                    if not ok:
-                        _LOGGER.warning(
-                            "cloud_set_camera_light (gen2): front=%d topdown=%d for %s",
-                            r1.status,
-                            r2.status,
-                            cam_id,
-                        )
-            except (TimeoutError, aiohttp.ClientError) as err:
+            r1 = await cloud_put_json(session, token, f"{base}/front", body_toggle)
+            r2 = await cloud_put_json(session, token, f"{base}/topdown", body_toggle)
+            ok = r1.ok or r2.ok
+            if not ok:
                 _LOGGER.warning(
-                    "cloud_set_camera_light (gen2) error for %s: %s", cam_id, err
+                    "cloud_set_camera_light (gen2): front=%s topdown=%s for %s",
+                    r1.status,
+                    r2.status,
+                    cam_id,
                 )
         else:
             # Gen1: single endpoint with combined body
@@ -724,18 +690,12 @@ async def async_cloud_set_camera_light(
                 }
             else:
                 body = {"frontLightOn": False, "wallwasherOn": False}
-            try:
-                async with asyncio.timeout(10):
-                    async with session.put(url, json=body, headers=headers) as resp:
-                        ok = resp.status in (200, 201, 204)
-                        if not ok:
-                            _LOGGER.warning(
-                                "cloud_set_camera_light: HTTP %d for %s",
-                                resp.status,
-                                cam_id,
-                            )
-            except (TimeoutError, aiohttp.ClientError) as err:
-                _LOGGER.warning("cloud_set_camera_light error for %s: %s", cam_id, err)
+            result = await cloud_put_json(session, token, url, body)
+            ok = result.ok
+            if not ok:
+                _LOGGER.warning(
+                    "cloud_set_camera_light: HTTP %s for %s", result.status, cam_id
+                )
 
         if ok:
             cache_entry = coordinator._shc_state_cache.setdefault(cam_id, {})
@@ -783,13 +743,8 @@ async def async_cloud_set_light_component(
     # Session is only created when we have a token to use it with. The Gen2
     # LAN-RCP fallback at the end of this function works without a cloud
     # session, so we skip the (sometimes expensive) session+resolver setup
-    # entirely when token is missing. Type guard before each .put() call.
+    # entirely when token is missing. Type guard before each cloud_put_json call.
     session = await async_get_bosch_cloud_session(coordinator.hass) if token else None
-    headers = {
-        "Authorization": f"Bearer {token}" if token else "",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
     cache = coordinator._shc_state_cache.get(cam_id, {})
     gen2 = _is_gen2(coordinator, cam_id)
     ok = False
@@ -855,29 +810,17 @@ async def async_cloud_set_light_component(
                 "bottomLedLightSettings": bot_settings,
             }
             # Step 1: Set brightness via /lighting/switch
-            try:
-                assert session is not None  # narrowed by `if gen2 and token` above
-                async with asyncio.timeout(10):
-                    async with session.put(
-                        base, json=full_body, headers=headers
-                    ) as resp:
-                        if resp.status in (200, 201, 204):
-                            try:
-                                rsp = await resp.json()
-                                coordinator._lighting_switch_cache[cam_id] = rsp
-                            except Exception:
-                                coordinator._lighting_switch_cache[cam_id] = full_body
-                        else:
-                            _LOGGER.warning(
-                                "cloud_set_light_component (gen2): lighting/switch HTTP %d for %s",
-                                resp.status,
-                                cam_id[:8],
-                            )
-            except (TimeoutError, aiohttp.ClientError) as err:
+            assert session is not None  # narrowed by `if gen2 and token` above
+            step1 = await cloud_put_json(session, token, base, full_body)
+            if step1.ok:
+                coordinator._lighting_switch_cache[cam_id] = (
+                    step1.body if step1.body is not None else full_body
+                )
+            else:
                 _LOGGER.warning(
-                    "cloud_set_light_component (gen2) lighting/switch error for %s: %s",
-                    cam_id,
-                    err,
+                    "cloud_set_light_component (gen2): lighting/switch HTTP %s for %s",
+                    step1.status,
+                    cam_id[:8],
                 )
             # Step 2: Toggle topdown switch
             url = f"{base}/topdown"
@@ -909,21 +852,15 @@ async def async_cloud_set_light_component(
             }
         else:
             return False
-        try:
-            assert session is not None  # narrowed by `if gen2 and token` above
-            async with asyncio.timeout(10):
-                async with session.put(url, json=body, headers=headers) as resp:
-                    ok = resp.status in (200, 201, 204)
-                    if not ok:
-                        _LOGGER.warning(
-                            "cloud_set_light_component (gen2): HTTP %d for %s %s",
-                            resp.status,
-                            cam_id[:8],
-                            component,
-                        )
-        except (TimeoutError, aiohttp.ClientError) as err:
+        assert session is not None  # narrowed by `if gen2 and token` above
+        result = await cloud_put_json(session, token, url, body)
+        ok = result.ok
+        if not ok:
             _LOGGER.warning(
-                "cloud_set_light_component (gen2) error for %s: %s", cam_id, err
+                "cloud_set_light_component (gen2): HTTP %s for %s %s",
+                result.status,
+                cam_id[:8],
+                component,
             )
     elif not gen2 and token:
         # Gen1: single endpoint with combined body
@@ -946,22 +883,17 @@ async def async_cloud_set_light_component(
         if front:
             body["frontLightIntensity"] = intensity
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override"
-        try:
-            assert session is not None  # narrowed by `elif not gen2 and token` above
-            async with asyncio.timeout(10):
-                async with session.put(url, json=body, headers=headers) as resp:
-                    body_text = await resp.text()
-                    ok = resp.status in (200, 201, 204)
-                    if not ok:
-                        _LOGGER.warning(
-                            "cloud_set_light_component: HTTP %d for %s — body sent=%s, response=%s",
-                            resp.status,
-                            cam_id,
-                            body,
-                            body_text[:200],
-                        )
-        except (TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.warning("cloud_set_light_component error for %s: %s", cam_id, err)
+        assert session is not None  # narrowed by `elif not gen2 and token` above
+        result = await cloud_put_json(session, token, url, body)
+        ok = result.ok
+        if not ok:
+            _LOGGER.warning(
+                "cloud_set_light_component: HTTP %s for %s — body sent=%s, response=%s",
+                result.status,
+                cam_id,
+                body,
+                (result.text or "")[:200],
+            )
 
     if ok:
         cache_entry = coordinator._shc_state_cache.setdefault(cam_id, {})
@@ -1004,7 +936,7 @@ async def async_cloud_set_light_component(
         local_user = creds.get("user") if creds else None
         local_pass = creds.get("password") if creds else None
         if cam_host:
-            from .rcp import rcp_local_write_front_light
+            from bosch_shc_camera_client.rcp import rcp_local_write_front_light
 
             if component == "front":
                 # Boolean toggle: 0 = off, 100 = on (full brightness on restore)
@@ -1016,8 +948,9 @@ async def async_cloud_set_light_component(
                     if isinstance(value, float) and value <= 1.0
                     else int(value)
                 )
+            local_session = async_get_clientsession(coordinator.hass, verify_ssl=False)
             local_ok = await rcp_local_write_front_light(
-                coordinator.hass,
+                local_session,
                 cam_host,
                 brightness,
                 user=local_user,
@@ -1078,36 +1011,27 @@ async def async_cloud_set_notifications(
         _LOGGER.warning("cloud_set_notifications: no token for %s", cam_id)
     else:
         session = await async_get_bosch_cloud_session(coordinator.hass)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/enable_notifications"
         body = {"enabledNotificationsStatus": status}
 
-        try:
-            async with asyncio.timeout(10):
-                async with session.put(url, json=body, headers=headers) as resp:
-                    if resp.status in (200, 201, 204):
-                        coordinator._shc_state_cache.setdefault(cam_id, {})[
-                            "notifications_status"
-                        ] = status
-                        coordinator._notif_set_at[cam_id] = time.monotonic()
-                        coordinator.async_update_listeners()
-                        _LOGGER.debug(
-                            "cloud_set_notifications: %s -> %s (HTTP %d)",
-                            cam_id,
-                            status,
-                            resp.status,
-                        )
-                        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
-                        return True
-                    _LOGGER.warning(
-                        "cloud_set_notifications: HTTP %d for %s", resp.status, cam_id
-                    )
-        except (TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.warning("cloud_set_notifications error for %s: %s", cam_id, err)
+        result = await cloud_put_json(session, token, url, body)
+        if result.ok:
+            coordinator._shc_state_cache.setdefault(cam_id, {})[
+                "notifications_status"
+            ] = status
+            coordinator._notif_set_at[cam_id] = time.monotonic()
+            coordinator.async_update_listeners()
+            _LOGGER.debug(
+                "cloud_set_notifications: %s -> %s (HTTP %s)",
+                cam_id,
+                status,
+                result.status,
+            )
+            # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
+            return True
+        _LOGGER.warning(
+            "cloud_set_notifications: HTTP %s for %s", result.status, cam_id
+        )
 
     # No local/SHC fallback exists for this endpoint — cloud is the only path.
     await _notify_write_failed(
@@ -1135,44 +1059,29 @@ async def async_cloud_set_pan(
         return False
 
     session = await async_get_bosch_cloud_session(coordinator.hass)
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
     url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/pan"
 
-    try:
-        async with asyncio.timeout(10):
-            async with session.put(
-                url, json={"absolutePosition": position}, headers=headers
-            ) as resp:
-                if resp.status in (200, 201, 204):
-                    # 200 returns a JSON body with currentAbsolutePosition + ETA;
-                    # 204 has no body — fall back to the requested position.
-                    actual = position
-                    eta = 0
-                    if resp.status == 200:
-                        try:
-                            data = await resp.json()
-                            actual = data.get("currentAbsolutePosition", position)
-                            eta = data.get("estimatedTimeToCompletion", 0)
-                        except Exception:  # noqa: S110 # defensive JSON parse; position already sent, defaults are safe fallback
-                            pass
-                    coordinator._pan_cache[cam_id] = actual
-                    coordinator.async_update_listeners()
-                    _LOGGER.debug(
-                        "cloud_set_pan: %s -> %d deg (HTTP %d, ETA %dms)",
-                        cam_id,
-                        actual,
-                        resp.status,
-                        eta,
-                    )
-                    # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
-                    return True
-                _LOGGER.warning("cloud_set_pan: HTTP %d for %s", resp.status, cam_id)
-    except (TimeoutError, aiohttp.ClientError) as err:
-        _LOGGER.warning("cloud_set_pan error for %s: %s", cam_id, err)
+    result = await cloud_put_json(session, token, url, {"absolutePosition": position})
+    if result.ok:
+        # 200 returns a JSON body with currentAbsolutePosition + ETA;
+        # 204 has no body — fall back to the requested position.
+        actual = position
+        eta = 0
+        if result.body is not None:
+            actual = result.body.get("currentAbsolutePosition", position)
+            eta = result.body.get("estimatedTimeToCompletion", 0)
+        coordinator._pan_cache[cam_id] = actual
+        coordinator.async_update_listeners()
+        _LOGGER.debug(
+            "cloud_set_pan: %s -> %d deg (HTTP %s, ETA %dms)",
+            cam_id,
+            actual,
+            result.status,
+            eta,
+        )
+        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
+        return True
+    _LOGGER.warning("cloud_set_pan: HTTP %s for %s", result.status, cam_id)
     return False
 
 

@@ -52,7 +52,10 @@
     "abort": {
       "already_configured": "Déjà configuré.",
       "reauth_successful": "Reconnexion réussie — l'intégration Bosch Smart Home Camera a été mise à jour avec un nouveau token. Toutes les entités, automations et options sont conservées.",
-      "reconfigure_successful": "Reconfiguration réussie — l'intégration Bosch Smart Home Camera a été mise à jour avec un nouveau token. Toutes les entités, automatisations et options sont conservées."
+      "reconfigure_successful": "Reconfiguration réussie — l'intégration Bosch Smart Home Camera a été mise à jour avec un nouveau token. Toutes les entités, automatisations et options sont conservées.",
+      "missing_credentials": "Aucun identifiant d'application Bosch SingleKey ID n'est enregistré. Redémarrez Home Assistant et réessayez — si le problème persiste, veuillez signaler un problème.",
+      "missing_configuration": "L'intégration Bosch Smart Home Camera n'est pas correctement configurée pour OAuth. Redémarrez Home Assistant et réessayez — si le problème persiste, veuillez signaler un problème.",
+      "oauth_implementation_unavailable": "La méthode de connexion sélectionnée n'est plus disponible. Veuillez recommencer."
     }
   },
   "options": {
@@ -923,6 +926,10 @@
     "doubled_prefix_entity_ids_migrated": {
       "title": "Bosch Camera — IDs d'entités renommés",
       "description": "**{count}** ID(s) d'entité de caméra Bosch contenaient un préfixe doublé `bosch_NAME_bosch_NAME_` (bug v11.0.0–v12.2.1) et ont été renommés vers leur forme correcte.\n\nExemples : {examples}\n\n**Vous devez mettre à jour toutes les automations, scripts, scènes et tableaux de bord Lovelace qui référencent les anciens IDs.** Home Assistant ne réécrit pas automatiquement les fichiers YAML ni les cartes Lovelace lors d'un changement d'ID d'entité. L'historique et les statistiques sont migrés automatiquement.\n\nConsultez les notes de version v12.3.0 pour le mappage complet."
+    },
+    "smb_unavailable": {
+      "title": "Bosch Camera — Paquet SMB/NAS non installé",
+      "description": "**{features}** est configuré pour utiliser un partage réseau SMB/NAS, mais le paquet Python optionnel `smbprotocol` n'est pas installé — les téléversements/enregistrements vers le partage sont donc désactivés.\n\nCe paquet est normalement installé automatiquement à partir des prérequis de l'intégration — essayez de redémarrer Home Assistant une fois. S'il ne s'installe toujours pas (par ex. architecture OS/CPU non prise en charge), changez la cible de stockage vers **Local** ou **FTP** dans les options de l'intégration."
     }
   },
   "system_health": {

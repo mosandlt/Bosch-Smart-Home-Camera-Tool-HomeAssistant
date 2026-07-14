@@ -115,6 +115,56 @@ def _http_get_chunked(url: str, token: str, timeout: int = 60) -> Any:
     return urllib.request.urlopen(req, context=_bosch_ssl_ctx(), timeout=timeout)  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
 
 
+def smb_available() -> bool:
+    """Return True if the optional ``smbprotocol``/``smbclient`` package is importable.
+
+    ``smbprotocol`` ships as a `manifest.json` requirement, so under a normal
+    HACS install it's always present — this only returns False if pip's
+    install of that requirement failed (e.g. an unsupported OS/architecture
+    wheel) or the package was removed post-install. Every SMB call site in
+    this module already degrades gracefully on ``ImportError`` (logs a
+    warning and returns/no-ops instead of crashing); this helper lets
+    integration-wide callers (coordinator Repairs-issue check, media_source's
+    SMB browse backend) make the same "is it actually usable" decision
+    without duplicating a bare ``try/except ImportError`` themselves.
+    """
+    try:
+        import smbclient  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def smb_dependent_features(opts: dict[str, Any]) -> list[str]:
+    """Return English labels of currently-configured SMB-dependent features.
+
+    A feature is "SMB-dependent" only when its storage/upload target is
+    actually set to ``smb`` — FTP and Local targets reuse the same
+    ``enable_smb_upload``/``enable_nvr`` toggles but never touch
+    ``smbclient``, so they're excluded here.
+
+    Shared source of truth for two callers that both need to know "does the
+    currently-configured feature set actually require smbprotocol":
+    ``__init__.py``'s per-coordinator-tick Repairs-issue check
+    (``_refresh_smb_unavailable_issue``) and ``config_flow.py``'s options-flow
+    save handler (which raises the same issue immediately on save, so the
+    user gets feedback in the same request instead of waiting for the next
+    tick).
+    """
+    features: list[str] = []
+    if (
+        opts.get("enable_smb_upload")
+        and (opts.get("upload_protocol") or "smb").lower() == "smb"
+    ):
+        features.append("SMB event upload")
+    if (
+        opts.get("enable_nvr")
+        and (opts.get("nvr_storage_target") or "local").lower() == "smb"
+    ):
+        features.append("Mini-NVR SMB storage")
+    return features
+
+
 def _safe_name(name: str) -> str:
     """Sanitize a camera name for use as a directory/file name component.
 

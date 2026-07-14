@@ -3369,3 +3369,28 @@ class TestFtpPrefetchedImage:
             _sync_ftp_upload(coord, data, "tok", prefetched_image=None)
 
         mock_get.assert_called_once_with(img_url, "tok", timeout=30)
+
+
+# ── feature area: smb_available() — optional-dependency probe ───────────────
+#
+# `smbprotocol` is an optional manifest.json requirement (can fail to install
+# on an unsupported OS/CPU architecture). smb_available() is the single
+# source of truth other modules (coordinator's Repairs-issue check,
+# media_source.py's SMB browse-backend gate) use to decide whether SMB
+# features are actually usable, instead of each duplicating a bare
+# `try: import smbclient except ImportError` themselves.
+
+
+class TestSmbAvailable:
+    def test_returns_true_when_smbclient_importable(self) -> None:
+        from custom_components.bosch_shc_camera.smb import smb_available
+
+        fake_smb = MagicMock()
+        with patch.dict(sys.modules, {"smbclient": fake_smb}):
+            assert smb_available() is True
+
+    def test_returns_false_when_smbclient_absent(self) -> None:
+        from custom_components.bosch_shc_camera.smb import smb_available
+
+        with patch.dict(sys.modules, {"smbclient": None}):
+            assert smb_available() is False

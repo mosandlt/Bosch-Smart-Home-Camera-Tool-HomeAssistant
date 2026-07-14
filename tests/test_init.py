@@ -1405,6 +1405,7 @@ def _make_minimal_coord(active_cam_ids: list[str]) -> SimpleNamespace:
     coord._bg_tasks = set()
     coord._nvr_drain_task = None
     coord._tls_proxy_ports = {}
+    coord._tls_proxy_servers = {}
     coord._stream_log_listener = None
     coord._live_connections = {cid: {} for cid in active_cam_ids}
     coord._tear_down_live_stream = AsyncMock()
@@ -1424,7 +1425,7 @@ class TestUnloadTearsDownLiveStreams:
 
         bsc_mod_orig_stop_all = bsc_mod.stop_all_proxies
         bsc_mod_orig_nvr_stop = bsc_mod.nvr_recorder.stop_all
-        bsc_mod.stop_all_proxies = MagicMock()
+        bsc_mod.stop_all_proxies = AsyncMock()
         bsc_mod.nvr_recorder.stop_all = AsyncMock()
         try:
             await _async_cancel_coordinator_tasks(coord)
@@ -1445,7 +1446,7 @@ class TestUnloadTearsDownLiveStreams:
 
         bsc_mod_orig_stop_all = bsc_mod.stop_all_proxies
         bsc_mod_orig_nvr_stop = bsc_mod.nvr_recorder.stop_all
-        bsc_mod.stop_all_proxies = MagicMock()
+        bsc_mod.stop_all_proxies = AsyncMock()
         bsc_mod.nvr_recorder.stop_all = AsyncMock()
         try:
             await _async_cancel_coordinator_tasks(coord)
@@ -1466,7 +1467,7 @@ class TestUnloadTearsDownLiveStreams:
 
         bsc_mod_orig_stop_all = bsc_mod.stop_all_proxies
         bsc_mod_orig_nvr_stop = bsc_mod.nvr_recorder.stop_all
-        stop_all_mock = MagicMock()
+        stop_all_mock = AsyncMock()
         bsc_mod.stop_all_proxies = stop_all_mock
         bsc_mod.nvr_recorder.stop_all = AsyncMock()
         try:
@@ -1479,7 +1480,9 @@ class TestUnloadTearsDownLiveStreams:
         assert coord._tear_down_live_stream.await_count == 2
         # stop_all_proxies still ran (defensive fallback for anything that
         # slipped through per-cam teardown).
-        stop_all_mock.assert_called_once_with(coord._tls_proxy_ports)
+        stop_all_mock.assert_called_once_with(
+            coord._tls_proxy_ports, coord._tls_proxy_servers
+        )
 
     @pytest.mark.asyncio
     async def test_teardown_runs_before_stop_all_proxies(self) -> None:
@@ -1498,7 +1501,7 @@ class TestUnloadTearsDownLiveStreams:
 
         bsc_mod_orig_stop_all = bsc_mod.stop_all_proxies
         bsc_mod_orig_nvr_stop = bsc_mod.nvr_recorder.stop_all
-        bsc_mod.stop_all_proxies = MagicMock(
+        bsc_mod.stop_all_proxies = AsyncMock(
             side_effect=lambda *_a, **_kw: call_order.append("stop_all_proxies"),
         )
         bsc_mod.nvr_recorder.stop_all = AsyncMock(
@@ -2403,6 +2406,8 @@ def _make_coord():
         _camera_entities={},
         _live_stream_entities={},
         _stop_tls_proxy=AsyncMock(),
+        _stop_viewing_front_door=AsyncMock(),
+        _stop_remote_viewing_front_door=AsyncMock(),
         _unregister_go2rtc_stream=AsyncMock(),
         _nvr_processes={},
         _nvr_user_intent={},
@@ -3368,6 +3373,8 @@ def _make_coord_local_rescue_resilience(try_results):
         _local_rescue_attempts={},
         _local_rescue_at={},
         _stop_tls_proxy=AsyncMock(),
+        _stop_viewing_front_door=AsyncMock(),
+        _stop_remote_viewing_front_door=AsyncMock(),
         try_live_connection=AsyncMock(side_effect=list(try_results)),
         hass=MagicMock(),
     )
@@ -3582,6 +3589,8 @@ def _make_coord_stream_lifecycle(stream_obj=None):
         _camera_entities={CAM_ID: cam_entity},
         _live_stream_entities={},  # bug fix 2026-05-19 (teardown state-write)
         _stop_tls_proxy=AsyncMock(),
+        _stop_viewing_front_door=AsyncMock(),
+        _stop_remote_viewing_front_door=AsyncMock(),
         _unregister_go2rtc_stream=AsyncMock(),
         # Mini-NVR Phase 1 — _tear_down_live_stream stops the recorder before
         # the proxy goes away. Empty dict = no recorder running, branch skipped.
@@ -3650,6 +3659,40 @@ class TestTearDownLiveStream:
         coord, _ = _make_coord_stream_lifecycle()
         await BoschCameraCoordinator._tear_down_live_stream(coord, CAM_ID)
         coord._stop_tls_proxy.assert_called_once_with(CAM_ID)
+
+    @pytest.mark.asyncio
+    async def test_calls_viewing_front_door_stop(self):
+        """The viewing front-door (viewing_front_door.py) wraps the same TLS
+        proxy port — it must be stopped too, or its listener keeps relaying
+        against a proxy that's already gone. Bug-hunt finding: this call was
+        previously only ever exercised via an unasserted AsyncMock fixture
+        default across 100+ tests, so a dropped/misordered call would have
+        gone undetected by line coverage alone."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord, _ = _make_coord_stream_lifecycle()
+        await BoschCameraCoordinator._tear_down_live_stream(coord, CAM_ID)
+        coord._stop_viewing_front_door.assert_awaited_once_with(CAM_ID)
+
+    @pytest.mark.asyncio
+    async def test_viewing_front_door_stopped_after_tls_proxy_before_go2rtc(self):
+        """Ordering per the docstring: TLS proxy stop, THEN viewing
+        front-door stop (same port it wraps), THEN go2rtc unregister."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord, _ = _make_coord_stream_lifecycle()
+        call_order: list[str] = []
+        coord._stop_tls_proxy = AsyncMock(
+            side_effect=lambda cam_id: call_order.append("tls_proxy")
+        )
+        coord._stop_viewing_front_door = AsyncMock(
+            side_effect=lambda cam_id: call_order.append("viewing_front_door")
+        )
+        coord._unregister_go2rtc_stream = AsyncMock(
+            side_effect=lambda cam_id: call_order.append("go2rtc")
+        )
+        await BoschCameraCoordinator._tear_down_live_stream(coord, CAM_ID)
+        assert call_order == ["tls_proxy", "viewing_front_door", "go2rtc"]
 
     @pytest.mark.asyncio
     async def test_calls_go2rtc_unregister(self):
@@ -5212,6 +5255,7 @@ def _coord_stub():
     coord = SimpleNamespace()
     coord._tls_ssl_ctx = ssl.create_default_context()
     coord._tls_proxy_ports = {}
+    coord._tls_proxy_servers = {}
     coord._on_tls_proxy_died = AsyncMock(return_value=None)
     coord._bg_tasks = set()
     coord.hass = MagicMock()
@@ -5228,18 +5272,25 @@ def _coord_stub():
 
 @pytest.mark.asyncio
 class TestDiedCallbackBridge:
+    """`tls_proxy.py` is asyncio-native — `on_proxy_died` fires from a
+    coroutine already running on the HA event loop, so there is no
+    thread->event-loop `call_soon_threadsafe` hop anymore (removed in the
+    TLS-proxy Nest-pattern refactor). The bridge now just checks
+    `hass.is_stopping` and schedules the rebuild task directly."""
+
     async def test_callback_hops_to_event_loop_and_schedules_task(self):
-        """When the proxy fires the circuit breaker, the daemon-thread
-        callback must `call_soon_threadsafe` a lambda that schedules
-        `_on_tls_proxy_died(cam_id)`. Pins L4245-4246."""
+        """When the proxy fires the circuit breaker, the callback must
+        schedule `_on_tls_proxy_died(cam_id)` via `hass.async_create_task`
+        and track it in `_bg_tasks`."""
         captured = {}
 
-        def _fake_start(
+        async def _fake_start(
             ssl_ctx,
             cam_id,
             cam_host,
             cam_port,
             ports,
+            servers,
             *,
             is_renewal=False,
             on_proxy_died=None,
@@ -5259,23 +5310,23 @@ class TestDiedCallbackBridge:
                 443,
             )
         assert port == 50000
-        # Invoke the captured callback as if the proxy thread fired it.
+        # Invoke the captured callback as if the circuit breaker fired it.
         captured["cb"]()
-        coord.hass.loop.call_soon_threadsafe.assert_called_once()
         coord.hass.async_create_task.assert_called_once()
 
     async def test_callback_swallows_runtime_error_during_shutdown(self):
-        """`call_soon_threadsafe` raises RuntimeError("event loop is
-        closed") when HA is shutting down. The bridge must swallow it
-        silently so the proxy thread does not crash. Pins L4251-4252."""
+        """When `hass.is_stopping` is True (HA shutting down), the callback
+        must return early without scheduling a task — no exception, no
+        rebuild attempt during shutdown."""
         captured = {}
 
-        def _fake_start(
+        async def _fake_start(
             ssl_ctx,
             cam_id,
             cam_host,
             cam_port,
             ports,
+            servers,
             *,
             is_renewal=False,
             on_proxy_died=None,
@@ -5284,9 +5335,7 @@ class TestDiedCallbackBridge:
             return 50001
 
         coord = _coord_stub()
-        coord.hass.loop.call_soon_threadsafe = MagicMock(
-            side_effect=RuntimeError("event loop is closed"),
-        )
+        coord.hass.is_stopping = True
         with patch(
             "custom_components.bosch_shc_camera.tls_proxy_wiring.start_tls_proxy",
             side_effect=_fake_start,
@@ -5297,6 +5346,8 @@ class TestDiedCallbackBridge:
                 "1.2.3.4",
                 443,
             )
+        captured["cb"]()
+        coord.hass.async_create_task.assert_not_called()
         # Must NOT raise.
         captured["cb"]()
 
@@ -5799,9 +5850,6 @@ class TestMarkEventsReadCancellation:
 
 # Tests for `__init__.py` go2rtc integration + WebRTC watchdog.
 # Covers:
-# - `_register_go2rtc_stream` (~113 LOC) — endpoint discovery (11984 → 1984),
-# rtsps://→rtspx:// rewrite (skip TLS verify for Bosch cert mismatch),
-# yaml-persist HTTP-400 soft-success path, verify-GET probe.
 # - `_unregister_go2rtc_stream` (~26 LOC) — DELETE on both endpoints,
 # swallow ClientError so go2rtc-not-running doesn't surface.
 # - `_check_and_recover_webrtc` (~90 LOC) — the v10.3.24 watchdog for
@@ -5820,6 +5868,7 @@ def _make_coord_go2rtc(**overrides):
         _live_connections={},
         _rcp_state_cache={},
         _tls_proxy_ports={},
+        _tls_proxy_servers={},
         _tls_ssl_ctx=None,
         _last_schemes_refresh=0.0,
         _last_go2rtc_reload=float("-inf"),
@@ -5880,133 +5929,6 @@ def _make_session(put_responses=None, get_responses=None, delete_responses=None)
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=False)
     return session
-
-
-class TestRegisterGo2rtcStream:
-    """Pin the registration contract — name = camera.entity_id (HA's
-    bundled go2rtc provider uses this), rtsps→rtspx rewrite, verify
-    GET after PUT, yaml-persist HTTP-400 soft success."""
-
-    def _make_session_for_register(
-        self, put_status=200, put_body="", get_status=200, capture=None
-    ):
-        """Build a fake aiohttp.ClientSession matching how _register_go2rtc_stream
-        calls it: PUT is `await s.put(...)`, GET is `async with s.get(...)`."""
-
-        async def _put(*args, **kw):
-            if capture is not None:
-                capture["params"] = kw.get("params", {})
-            return SimpleNamespace(
-                status=put_status,
-                text=AsyncMock(return_value=put_body),
-            )
-
-        @asynccontextmanager
-        async def _get(*args, **kw):
-            yield SimpleNamespace(status=get_status)
-
-        session = MagicMock()
-        session.put = _put
-        session.get = _get
-        session.__aenter__ = AsyncMock(return_value=session)
-        session.__aexit__ = AsyncMock(return_value=False)
-        return session
-
-    @pytest.mark.asyncio
-    async def test_uses_entity_id_as_stream_name(self):
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        cam_entity = SimpleNamespace(entity_id="camera.bosch_terrasse")
-        coord = _make_coord_go2rtc(_camera_entities={CAM_A: cam_entity})
-        captured = {}
-        session = self._make_session_for_register(capture=captured)
-        with patch("aiohttp.ClientSession", return_value=session):
-            await BoschCameraCoordinator._register_go2rtc_stream(
-                coord,
-                CAM_A,
-                "rtsps://x:y@host/path",
-            )
-        assert captured["params"]["name"] == "camera.bosch_terrasse"
-
-    @pytest.mark.asyncio
-    async def test_rtsps_rewritten_to_rtspx(self):
-        """Bosch's RTSPS proxy returns a cert for *.residential.connect.bosch
-        but serves session URLs on proxy-NN.live.cbs.bosch — go2rtc's
-        Go RTSP client refuses the mismatch. Force rtspx:// (skip TLS
-        verify in go2rtc) so consumer requests don't 500."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        cam_entity = SimpleNamespace(entity_id="camera.bosch_terrasse")
-        coord = _make_coord_go2rtc(_camera_entities={CAM_A: cam_entity})
-        captured = {}
-        session = self._make_session_for_register(capture=captured)
-        with patch("aiohttp.ClientSession", return_value=session):
-            await BoschCameraCoordinator._register_go2rtc_stream(
-                coord,
-                CAM_A,
-                "rtsps://user:pass@cam.bosch/path",
-            )
-        assert captured["params"]["src"].startswith("rtspx://")
-        assert captured["params"]["src"] == "rtspx://user:pass@cam.bosch/path"
-
-    @pytest.mark.asyncio
-    async def test_falls_back_to_legacy_name_when_no_entity_id(self):
-        """First-registration race: cam_entity not yet added → use the
-        legacy `bosch_shc_cam_<id>` name."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        coord = _make_coord_go2rtc(_camera_entities={})  # no entity yet
-        captured = {}
-        session = self._make_session_for_register(capture=captured)
-        with patch("aiohttp.ClientSession", return_value=session):
-            await BoschCameraCoordinator._register_go2rtc_stream(
-                coord,
-                CAM_A,
-                "rtsps://x/y",
-            )
-        assert captured["params"]["name"] == f"bosch_shc_cam_{CAM_A.lower()}"
-
-    @pytest.mark.asyncio
-    async def test_yaml_persist_400_treated_as_success(self):
-        """go2rtc bundled with HA writes the stream to its in-memory
-        registry via URL params, then tries to persist to /config/go2rtc.yaml.
-        The YAML persist fails with HTTP 400 + body 'yaml: ...'. The
-        in-memory stream IS registered. Pin the soft-success path."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        cam_entity = SimpleNamespace(entity_id="camera.bosch_terrasse")
-        coord = _make_coord_go2rtc(_camera_entities={CAM_A: cam_entity})
-        session = self._make_session_for_register(
-            put_status=400,
-            put_body="yaml: line 5: did not find expected key",
-            get_status=200,
-        )
-        with patch("aiohttp.ClientSession", return_value=session):
-            # Must complete without raising, even though HTTP 400
-            await BoschCameraCoordinator._register_go2rtc_stream(
-                coord,
-                CAM_A,
-                "rtsps://x/y",
-            )
-
-    @pytest.mark.asyncio
-    async def test_all_endpoints_fail_no_exception(self):
-        """When go2rtc is not running on any port, the function must
-        log + return silently — fall back to TLS proxy + HLS."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        coord = _make_coord_go2rtc()
-
-        with patch(
-            "aiohttp.ClientSession",
-            side_effect=aiohttp_client_error,
-        ):
-            # Must NOT raise
-            await BoschCameraCoordinator._register_go2rtc_stream(
-                coord,
-                CAM_A,
-                "rtsps://x/y",
-            )
 
 
 def aiohttp_client_error(*args, **kwargs):
@@ -6295,6 +6217,24 @@ class TestSslContextAndStartTlsProxy:
         assert coord._tls_ssl_ctx == "MOCK_CTX"
 
     @pytest.mark.asyncio
+    async def test_start_tls_proxy_refuses_after_teardown(self):
+        """A straggler start_tls_proxy call racing _async_cancel_coordinator_
+        tasks's stop_all_proxies snapshot (unload/HA-stop) must raise
+        instead of starting a fresh proxy nothing will ever see/close
+        again — mirrors the go2rtc-session teardown guard."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_go2rtc(_tls_ssl_ctx=ssl.create_default_context())
+        coord._tls_proxy_teardown_done = True
+        with pytest.raises(RuntimeError, match="shutting down"):
+            await BoschCameraCoordinator._start_tls_proxy(
+                coord,
+                CAM_A,
+                "192.0.2.1",
+                443,
+            )
+
+    @pytest.mark.asyncio
     async def test_start_tls_proxy_reuses_cached_ssl_ctx(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -6320,9 +6260,92 @@ class TestSslContextAndStartTlsProxy:
         coord._tls_proxy_ports = {CAM_A: 12345}
         with patch(
             "custom_components.bosch_shc_camera.tls_proxy_wiring.stop_tls_proxy",
+            AsyncMock(),
         ) as stop:
             await BoschCameraCoordinator._stop_tls_proxy(coord, CAM_A)
-        stop.assert_called_once_with(CAM_A, coord._tls_proxy_ports)
+        stop.assert_called_once_with(
+            CAM_A, coord._tls_proxy_ports, coord._tls_proxy_servers
+        )
+
+    @pytest.mark.asyncio
+    async def test_start_viewing_front_door_delegates_to_module(self):
+        """Thin dispatch: coordinator._start_viewing_front_door forwards to
+        viewing_front_door.start_viewing_front_door with self + all kwargs,
+        and returns whatever it returns."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_go2rtc()
+        with patch(
+            "custom_components.bosch_shc_camera.start_viewing_front_door",
+            AsyncMock(return_value="rtsp://127.0.0.1:9999/rtsp_tunnel?inst=1"),
+        ) as start:
+            result = await BoschCameraCoordinator._start_viewing_front_door(
+                coord,
+                CAM_A,
+                inst=1,
+                audio_param="&enableaudio=1",
+                max_session_duration=3600,
+            )
+        start.assert_called_once_with(
+            coord,
+            CAM_A,
+            inst=1,
+            audio_param="&enableaudio=1",
+            max_session_duration=3600,
+        )
+        assert result == "rtsp://127.0.0.1:9999/rtsp_tunnel?inst=1"
+
+    @pytest.mark.asyncio
+    async def test_stop_viewing_front_door_delegates_to_module(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_go2rtc()
+        with patch(
+            "custom_components.bosch_shc_camera.stop_viewing_front_door",
+            AsyncMock(),
+        ) as stop:
+            await BoschCameraCoordinator._stop_viewing_front_door(coord, CAM_A)
+        stop.assert_called_once_with(coord, CAM_A)
+
+    @pytest.mark.asyncio
+    async def test_start_remote_viewing_front_door_delegates_to_module(self):
+        """Thin dispatch: coordinator._start_remote_viewing_front_door
+        forwards to remote_viewing_front_door.start_remote_viewing_front_door
+        with self + all kwargs, and returns whatever it returns."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_go2rtc()
+        with patch(
+            "custom_components.bosch_shc_camera.start_remote_viewing_front_door",
+            AsyncMock(return_value="rtsp://127.0.0.1:9999/rtsp_tunnel?inst=1"),
+        ) as start:
+            result = await BoschCameraCoordinator._start_remote_viewing_front_door(
+                coord,
+                CAM_A,
+                inst=1,
+                audio_param="&enableaudio=1",
+                max_session_duration=3600,
+            )
+        start.assert_called_once_with(
+            coord,
+            CAM_A,
+            inst=1,
+            audio_param="&enableaudio=1",
+            max_session_duration=3600,
+        )
+        assert result == "rtsp://127.0.0.1:9999/rtsp_tunnel?inst=1"
+
+    @pytest.mark.asyncio
+    async def test_stop_remote_viewing_front_door_delegates_to_module(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_go2rtc()
+        with patch(
+            "custom_components.bosch_shc_camera.stop_remote_viewing_front_door",
+            AsyncMock(),
+        ) as stop:
+            await BoschCameraCoordinator._stop_remote_viewing_front_door(coord, CAM_A)
+        stop.assert_called_once_with(coord, CAM_A)
 
 
 # Tests for the Frigate persistent-endpoint wiring: switches, sensors, and the
@@ -11944,11 +11967,6 @@ class TestRefreshLocalCredsFromHeartbeat:
     """
 
     @staticmethod
-    async def _fake_register_go2rtc(cam_id: str, url: str) -> bool:
-        """Stub coroutine for _register_go2rtc_stream — returns True (success)."""
-        return True
-
-    @staticmethod
     def _make_task_mock() -> MagicMock:
         """Return a MagicMock for hass.async_create_task that closes passed
         coroutines so the test does not emit RuntimeWarning about unawaited
@@ -11984,22 +12002,17 @@ class TestRefreshLocalCredsFromHeartbeat:
             _camera_entities={CAM_A: cam_entity},
             _nvr_processes={},
             _nvr_user_intent={},
-            # _bg_tasks: set used by go2rtc re-register task lifecycle tracking.
+            # _bg_tasks: set used by tracked background-task lifecycle bookkeeping.
             _bg_tasks=set(),
-            # _register_go2rtc_stream: stub coroutine (B2 fix — now called unconditionally).
-            _register_go2rtc_stream=self._fake_register_go2rtc,
-            # _reregister_go2rtc_stream_coalesced: the in-flight-guarded wrapper
-            # _refresh_local_creds_from_heartbeat actually schedules (stability
-            # fix 2026-07-13). The coalescing lock/pending-dict mechanics
-            # themselves are covered separately by
-            # TestReregisterGo2rtcStreamCoalesced — here we only need a stub
-            # matching the call signature so the task-scheduling path doesn't
-            # AttributeError on a SimpleNamespace coordinator.
-            _reregister_go2rtc_stream_coalesced=self._fake_register_go2rtc,
             hass=SimpleNamespace(async_create_task=self._make_task_mock()),
             debug=False,
             get_model_config=lambda cid: SimpleNamespace(max_session_duration=3600),
             _nvr_recorder_locks={},
+            # No viewing front-door bound by default — preserves the
+            # pre-existing "rebuild the raw credentialed URL" behavior these
+            # tests assert on. TestRefreshLocalCredsFrontDoorActive below
+            # covers the front-door-bound branch explicitly.
+            _viewing_front_door_runner=None,
         )
         base.update(overrides)
         ns = SimpleNamespace(**base)
@@ -12039,6 +12052,67 @@ class TestRefreshLocalCredsFromHeartbeat:
         # Cache also updated
         assert coord._local_creds_cache[CAM_A]["user"] == "new-user"
         assert coord._local_creds_cache[CAM_A]["password"] == "new-pass"
+
+    async def test_front_door_active_url_left_unchanged_creds_still_updated(self):
+        """When a viewing front-door is bound for this camera, the published
+        rtspsUrl/rtspUrl must NOT be overwritten with the freshly-rotated raw
+        credentialed URL — the front-door's published URL is stable and
+        reads creds live off _local_user/_local_password (updated here
+        regardless), so re-embedding new creds into the URL on every
+        heartbeat would silently re-leak them into stream_source() and
+        defeat the whole point of the front-door (go2rtc's native
+        registration dedupes on exact URL match and can never remove a
+        stale entry)."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord, _ = self._coord()
+        front_door_runner = MagicMock()
+        front_door_runner.has_server = MagicMock(return_value=True)
+        coord._viewing_front_door_runner = front_door_runner
+        old_url = coord._live_connections[CAM_A]["rtspsUrl"]
+
+        resp = '{"user": "new-user", "password": "new-pass"}'
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+            coord,
+            CAM_A,
+            resp,
+            generation=1,
+            elapsed=30.0,
+        )
+        live = coord._live_connections[CAM_A]
+        # Creds ARE still updated — the front-door reads these live.
+        assert live["_local_user"] == "new-user"
+        assert live["_local_password"] == "new-pass"
+        # Published URL is UNCHANGED (still the old, front-door-stable URL) —
+        # no new creds leaked into it.
+        assert live["rtspsUrl"] == old_url
+        assert live["rtspUrl"] == old_url
+        assert "new-user" not in live["rtspsUrl"]
+        assert "new-pass" not in live["rtspsUrl"]
+        front_door_runner.has_server.assert_called_once_with(CAM_A)
+
+    async def test_front_door_inactive_url_still_rebuilt_with_new_creds(self):
+        """A runner exists (feature used elsewhere) but no server is bound
+        for THIS camera — must fall back to the raw-credentialed rebuild
+        exactly like the no-runner-at-all case."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord, _ = self._coord()
+        front_door_runner = MagicMock()
+        front_door_runner.has_server = MagicMock(return_value=False)
+        coord._viewing_front_door_runner = front_door_runner
+
+        resp = '{"user": "new-user", "password": "new-pass"}'
+        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
+            coord,
+            CAM_A,
+            resp,
+            generation=1,
+            elapsed=30.0,
+        )
+        live = coord._live_connections[CAM_A]
+        assert "new-user" in live["rtspsUrl"]
+        assert "new-pass" in live["rtspsUrl"]
 
     async def test_url_keeps_inst_param(self):
         """The original rtspsUrl carries `inst=1` — the rebuilt URL must
@@ -12227,8 +12301,11 @@ class TestRefreshLocalCredsFromHeartbeat:
         (15 s heartbeat) that killed/respawned ffmpeg ~4x/minute, truncating
         every recorded segment to a few seconds. Genuine ffmpeg death is
         still recovered reactively by `_watch_recorder` using the freshly
-        cached `rtspsUrl` set by this same handler — only ONE background
-        task (go2rtc re-register) should fire per creds-rotation now."""
+        cached `rtspsUrl` set by this same handler. The manual go2rtc
+        re-registration task that used to fire here on every rotation has
+        since been removed entirely (HA-core's bundled go2rtc auto-registers
+        off `stream_source()` on every WebRTC offer) — no background task
+        should be scheduled for a cred rotation at all now."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord, _ = self._coord(
@@ -12243,175 +12320,8 @@ class TestRefreshLocalCredsFromHeartbeat:
             generation=1,
             elapsed=10.0,
         )
-        # Only 1 task now: go2rtc re-register. No NVR restart task.
-        assert coord.hass.async_create_task.call_count == 1
-
-    async def test_go2rtc_reregister_without_hls_stream(self):
-        """B2 regression: go2rtc re-registration must fire even when the
-        camera entity has stream=None (WebRTC-only viewer, no HLS stream
-        opened). Before the fix the go2rtc PUT was gated on `stream is not
-        None`, leaving WebRTC-only viewers with stale Digest creds after the
-        Bosch ~60 s rotation — 401 → silent video freeze with no client
-        event to trigger recovery.
-
-        Pin: creds-change + stream=None → async_create_task called exactly
-        once (go2rtc reregister). stream.update_source must NOT be called."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        # Default _coord() already sets cam_entity.stream = None
-        coord, cam_entity = self._coord()
-        assert cam_entity.stream is None  # pre-condition
-
-        await BoschCameraCoordinator._refresh_local_creds_from_heartbeat(
-            coord,
-            CAM_A,
-            '{"user": "webrtc-user", "password": "webrtc-pass"}',
-            generation=1,
-            elapsed=10.0,
-        )
-
-        # go2rtc re-register task must have been scheduled despite stream=None
-        coord.hass.async_create_task.assert_called_once()
-        task_coroutine_name = coord.hass.async_create_task.call_args.kwargs.get(
-            "name", ""
-        ) or coord.hass.async_create_task.call_args[1].get("name", "")
-        assert "go2rtc_reregister" in task_coroutine_name
-
-        # Creds and URL must still be updated in the live dict
-        live = coord._live_connections[CAM_A]
-        assert live["_local_user"] == "webrtc-user"
-        assert "webrtc-user" in live["rtspsUrl"]
-
-
-class TestReregisterGo2rtcStreamCoalesced:
-    """Stability fix (2026-07-13, stream-perf-stability-refactor plan Phase 2
-    #7): `_refresh_local_creds_from_heartbeat` fires a go2rtc re-register
-    task on EVERY heartbeat (Gen1: every 15s) with no in-flight guard. If
-    go2rtc responds slowly, two heartbeats in quick succession used to spawn
-    two overlapping `_register_go2rtc_stream` calls for the same stream
-    name — a real interleaving risk, not just a theoretical one.
-
-    `_reregister_go2rtc_stream_coalesced` must ensure at most one
-    `_register_go2rtc_stream` call is in flight per camera at a time, while
-    guaranteeing the newest URL is the one that ends up registered — a
-    call that arrives mid-registration must not be silently dropped.
-    """
-
-    def _coord(self, register_go2rtc):
-        from custom_components.bosch_shc_camera.lock_utils import get_or_create_lock
-
-        ns = SimpleNamespace(
-            _go2rtc_reregister_locks={},
-            _go2rtc_reregister_pending={},
-            _register_go2rtc_stream=register_go2rtc,
-        )
-        return ns
-
-    async def test_concurrent_calls_never_overlap_register_calls(self):
-        """Two near-simultaneous coalesced calls for the same camera must
-        result in at most one `_register_go2rtc_stream` call running at any
-        given instant — never two overlapping ones."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        concurrent = 0
-        max_concurrent = 0
-        calls: list[str] = []
-
-        async def slow_register(cam_id: str, url: str) -> bool:
-            nonlocal concurrent, max_concurrent
-            concurrent += 1
-            max_concurrent = max(max_concurrent, concurrent)
-            calls.append(url)
-            try:
-                await asyncio.sleep(0.05)
-            finally:
-                concurrent -= 1
-            return True
-
-        coord = self._coord(slow_register)
-
-        await asyncio.gather(
-            BoschCameraCoordinator._reregister_go2rtc_stream_coalesced(
-                coord, CAM_A, "rtsp://u1:p1@127.0.0.1:1/rtsp_tunnel"
-            ),
-            BoschCameraCoordinator._reregister_go2rtc_stream_coalesced(
-                coord, CAM_A, "rtsp://u2:p2@127.0.0.1:1/rtsp_tunnel"
-            ),
-        )
-
-        assert max_concurrent == 1, (
-            "_register_go2rtc_stream must never run concurrently for the "
-            "same camera — two overlapping heartbeat re-registrations raced"
-        )
-        # The freshest URL (u2) must be the one that actually got registered,
-        # even though it arrived while the first call was still in flight.
-        assert calls[-1] == "rtsp://u2:p2@127.0.0.1:1/rtsp_tunnel"
-        # No pending state should be left behind once both calls settle.
-        assert CAM_A not in coord._go2rtc_reregister_pending
-
-    async def test_second_call_returns_immediately_without_registering(self):
-        """While a registration is in flight, a second coalesced call for
-        the same camera must NOT itself invoke `_register_go2rtc_stream` —
-        it only stashes the newer URL for the in-flight call to pick up."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        register_calls: list[str] = []
-        started = asyncio.Event()
-        release = asyncio.Event()
-
-        async def gated_register(cam_id: str, url: str) -> bool:
-            register_calls.append(url)
-            started.set()
-            await release.wait()
-            return True
-
-        coord = self._coord(gated_register)
-
-        first_task = asyncio.create_task(
-            BoschCameraCoordinator._reregister_go2rtc_stream_coalesced(
-                coord, CAM_A, "rtsp://first@127.0.0.1:1/rtsp_tunnel"
-            )
-        )
-        await started.wait()
-        # Lock is now held by first_task's single register call (blocked on
-        # `release`). A second, "later" heartbeat arrives now.
-        await BoschCameraCoordinator._reregister_go2rtc_stream_coalesced(
-            coord, CAM_A, "rtsp://second@127.0.0.1:1/rtsp_tunnel"
-        )
-        # The second call must have returned WITHOUT calling register again
-        # yet — it only queued the newest URL.
-        assert register_calls == ["rtsp://first@127.0.0.1:1/rtsp_tunnel"]
-        assert coord._go2rtc_reregister_pending[CAM_A] == (
-            "rtsp://second@127.0.0.1:1/rtsp_tunnel"
-        )
-
-        release.set()
-        await first_task
-        # The in-flight call must have re-run once more with the newest URL.
-        assert register_calls == [
-            "rtsp://first@127.0.0.1:1/rtsp_tunnel",
-            "rtsp://second@127.0.0.1:1/rtsp_tunnel",
-        ]
-
-    async def test_register_exception_does_not_crash_or_deadlock(self):
-        """A `_register_go2rtc_stream` failure must be swallowed — the
-        heartbeat loop that scheduled this as a background task must not be
-        left holding a permanently-locked per-camera lock."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        from custom_components.bosch_shc_camera.lock_utils import get_or_create_lock
-
-        async def failing_register(cam_id: str, url: str) -> bool:
-            raise aiohttp.ClientError("boom")
-
-        coord = self._coord(failing_register)
-
-        await BoschCameraCoordinator._reregister_go2rtc_stream_coalesced(
-            coord, CAM_A, "rtsp://x@127.0.0.1:1/rtsp_tunnel"
-        )
-        # Lock must be released (not stuck locked) so the next heartbeat
-        # can proceed normally.
-        lock = get_or_create_lock(coord._go2rtc_reregister_locks, CAM_A)
-        assert not lock.locked()
+        # No NVR restart task, no go2rtc re-register task — zero tasks now.
+        assert coord.hass.async_create_task.call_count == 0
 
 
 class TestFCMNoiseFilter:
@@ -13760,6 +13670,8 @@ def _make_coord_async_methods(**overrides):
         _token_refresh_handle=None,
         _stream_worker_dispatch_pending=None,
         _stop_tls_proxy=AsyncMock(),
+        _stop_viewing_front_door=AsyncMock(),
+        _stop_remote_viewing_front_door=AsyncMock(),
         _ensure_valid_token=AsyncMock(return_value="fresh-token"),
         try_live_connection=AsyncMock(return_value=None),
         record_stream_error=MagicMock(),
@@ -15344,12 +15256,15 @@ class TestSetupEntryBranches:
         coord._nvr_drain_task = None
         coord._live_connections = {}
         coord._tls_proxy_ports = {"11111111-1111-1111-1111-111111111111": 12345}
+        coord._tls_proxy_servers = {}
         coord._stream_log_listener = None
         coord.async_stop_frigate_endpoints = MagicMock()
 
         with (
             patch(f"{MODULE}.nvr_recorder.stop_all", new=AsyncMock()),
-            patch(f"{MODULE}.stop_all_proxies") as mock_stop_all_proxies,
+            patch(
+                f"{MODULE}.stop_all_proxies", new=AsyncMock()
+            ) as mock_stop_all_proxies,
         ):
             with pytest.raises(asyncio.CancelledError):
                 await _async_cancel_coordinator_tasks(coord)
@@ -15358,7 +15273,9 @@ class TestSetupEntryBranches:
         refresh_handle.cancel.assert_called_once()
         assert coord._token_refresh_handle is None
         coord.async_stop_frigate_endpoints.assert_called_once()
-        mock_stop_all_proxies.assert_called_once_with(coord._tls_proxy_ports)
+        mock_stop_all_proxies.assert_called_once_with(
+            coord._tls_proxy_ports, coord._tls_proxy_servers
+        )
 
     @pytest.mark.asyncio
     async def test_fcm_push_start_when_option_enabled(self):
@@ -15533,16 +15450,17 @@ def _make_coord_sprint_j1(**overrides):
         _token_refresh_handle=None,
         _stream_worker_dispatch_pending=None,
         _stop_tls_proxy=AsyncMock(),
+        _stop_viewing_front_door=AsyncMock(),
+        _stop_remote_viewing_front_door=AsyncMock(),
+        # No viewing front-door bound by default — heartbeat cred-refresh
+        # falls back to rebuilding the raw credentialed URL, preserving
+        # this fixture's pre-existing behavior/assertions.
+        _viewing_front_door_runner=None,
         _ensure_valid_token=AsyncMock(return_value="fresh-token"),
         _refresh_token_locked=AsyncMock(return_value="refreshed-token"),
         _token_refresh_lock=None,  # overridden in specific tests
         _ensure_go2rtc_schemes_fresh=AsyncMock(),
         _unregister_go2rtc_stream=AsyncMock(),
-        _register_go2rtc_stream=AsyncMock(return_value=True),
-        # See TestReregisterGo2rtcStreamCoalesced for coverage of the
-        # coalescing lock itself — this stub just satisfies the call
-        # _refresh_local_creds_from_heartbeat schedules as a bg task.
-        _reregister_go2rtc_stream_coalesced=AsyncMock(return_value=None),
         # _get_stream_lock is a real method call inside try_live_connection;
         # provide a simple lambda so tests don't need BoschCameraCoordinator bound.
         # Individual tests that pre-populate _stream_locks can rely on this.
@@ -16378,8 +16296,6 @@ class TestTryLiveConnection:
 # - _check_and_recover_webrtc: direct-refresh exception + _last_go2rtc_reload init (lines 3310-3314)
 # - _check_and_recover_webrtc: go2rtc reload exception + async_refresh_providers exception (lines 3335-3346)
 # - _ensure_go2rtc_schemes_fresh: full flow (lines 3366-3412)
-# - _register_go2rtc_stream: Unix socket OSError (line 3474), verify GET exception (lines 3504-3505),
-# non-success HTTP path (lines 3515-3526)
 # - _run_smb_cleanup_bg exception path (lines 2812-2815)
 # - _run_nvr_cleanup_bg exception path (lines 2850-2853)
 # - async_fetch_live_snapshot: lock creation branch (lines 2886-2889) + proxy-cache eviction (line 2937)
@@ -17380,197 +17296,6 @@ class TestProxyCacheEviction:
         assert result is None
 
 
-def _make_go2rtc_session(put_status=200, put_body="", check_status=200):
-    """Build a mock aiohttp session for _register_go2rtc_stream.
-
-    s.put(...) is awaited directly (not async-with), so put is AsyncMock.
-    s.get(...) is used as async-with, so get returns a context-manager mock.
-    """
-    put_resp = MagicMock()
-    put_resp.status = put_status
-    put_resp.text = AsyncMock(return_value=put_body)
-
-    check_resp = MagicMock()
-    check_resp.status = check_status
-    check_resp.__aenter__ = AsyncMock(return_value=check_resp)
-    check_resp.__aexit__ = AsyncMock(return_value=None)
-
-    session_mock = MagicMock()
-    session_mock.__aenter__ = AsyncMock(return_value=session_mock)
-    session_mock.__aexit__ = AsyncMock(return_value=None)
-    session_mock.put = AsyncMock(return_value=put_resp)
-    session_mock.get = MagicMock(return_value=check_resp)
-    return session_mock, put_resp, check_resp
-
-
-class TestRegisterGo2rtcStream_sprint_j2:
-    @pytest.mark.asyncio
-    async def test_unix_socket_oserror_falls_back_to_http(self):
-        """aiohttp.UnixConnector raises OSError → falls back to HTTP endpoint (line 3474)."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        coord = _make_coord_sprint_j2()
-        coord.hass.config.config_dir = "/tmp"
-
-        session_mock, _put_resp, _check_resp = _make_go2rtc_session(
-            put_status=200, check_status=200
-        )
-
-        with (
-            patch("aiohttp.UnixConnector", side_effect=OSError("no socket")),
-            patch("aiohttp.ClientSession", return_value=session_mock),
-            patch(
-                "custom_components.bosch_shc_camera.async_bosch_cloud_session_cm",
-                return_value=session_mock,
-            ),
-        ):
-            await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://host/stream"
-            )
-
-        # session.put was called (fell back to HTTP endpoint)
-        session_mock.put.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_verify_get_exception_falls_through_to_next_endpoint(self):
-        """verify GET raises ClientError → continues to next endpoint (lines 3504-3505)."""
-        import aiohttp as aiohttp_real
-
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        coord = _make_coord_sprint_j2()
-        coord.hass.config.config_dir = None  # no Unix socket
-
-        put_resp = MagicMock()
-        put_resp.status = 200
-        put_resp.text = AsyncMock(return_value="")
-
-        # GET raises inside the async-with context
-        check_resp = MagicMock()
-        check_resp.__aenter__ = AsyncMock(
-            side_effect=aiohttp_real.ClientError("verify fail")
-        )
-        check_resp.__aexit__ = AsyncMock(return_value=None)
-
-        session_mock = MagicMock()
-        session_mock.__aenter__ = AsyncMock(return_value=session_mock)
-        session_mock.__aexit__ = AsyncMock(return_value=None)
-        session_mock.put = AsyncMock(return_value=put_resp)
-        session_mock.get = MagicMock(return_value=check_resp)
-
-        with patch("aiohttp.ClientSession", return_value=session_mock):
-            # Should complete without raising even though verify GET failed
-            await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://host/stream"
-            )
-
-    @pytest.mark.asyncio
-    async def test_non_success_http_logs_and_continues(self):
-        """PUT returns non-success non-yaml HTTP → logs debug, continues to next (lines 3515-3526)."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        coord = _make_coord_sprint_j2()
-        coord.hass.config.config_dir = None
-
-        session_mock, _put_resp, _check_resp = _make_go2rtc_session(
-            put_status=503, put_body="Service Unavailable"
-        )
-
-        with patch("aiohttp.ClientSession", return_value=session_mock):
-            # Should not raise — just logs and falls through
-            await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://host/stream"
-            )
-
-    @pytest.mark.asyncio
-    async def test_rtsps_rewritten_to_rtspx(self):
-        """rtsps:// src → rewritten to rtspx:// before PUT (lines 3454-3455)."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        coord = _make_coord_sprint_j2()
-        coord.hass.config.config_dir = None
-
-        session_mock, _put_resp, _check_resp = _make_go2rtc_session(
-            put_status=200, check_status=200
-        )
-
-        captured_params = {}
-        original_put = session_mock.put
-
-        async def _capture_put(url, **kwargs):
-            captured_params.update(kwargs.get("params", {}))
-            return await original_put(url, **kwargs)
-
-        session_mock.put = _capture_put
-
-        with patch("aiohttp.ClientSession", return_value=session_mock):
-            await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://host/stream"
-            )
-
-        # src param must have been rewritten
-        assert captured_params.get("src", "").startswith("rtspx://")
-
-    @pytest.mark.asyncio
-    async def test_stream_name_uses_entity_id_when_available(self):
-        """cam_entity with entity_id → stream name = entity_id (line 3441)."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        cam_ent = MagicMock()
-        cam_ent.entity_id = "camera.bosch_terrasse"
-        coord = _make_coord_sprint_j2(_camera_entities={CAM_A: cam_ent})
-        coord.hass.config.config_dir = None
-
-        session_mock, _put_resp, _check_resp = _make_go2rtc_session(
-            put_status=200, check_status=200
-        )
-
-        captured_params = {}
-        original_put = session_mock.put
-
-        async def _capture_put(url, **kwargs):
-            captured_params.update(kwargs.get("params", {}))
-            return await original_put(url, **kwargs)
-
-        session_mock.put = _capture_put
-
-        with patch("aiohttp.ClientSession", return_value=session_mock):
-            await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://host/stream"
-            )
-
-        assert captured_params.get("name") == "camera.bosch_terrasse"
-
-    @pytest.mark.asyncio
-    async def test_stream_name_fallback_when_no_entity(self):
-        """No cam_entity → stream name = bosch_shc_cam_{cam_id.lower()} (line 3443)."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        coord = _make_coord_sprint_j2()
-        coord.hass.config.config_dir = None
-
-        session_mock, _put_resp, _check_resp = _make_go2rtc_session(
-            put_status=200, check_status=200
-        )
-
-        captured_params = {}
-        original_put = session_mock.put
-
-        async def _capture_put(url, **kwargs):
-            captured_params.update(kwargs.get("params", {}))
-            return await original_put(url, **kwargs)
-
-        session_mock.put = _capture_put
-
-        with patch("aiohttp.ClientSession", return_value=session_mock):
-            await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://host/stream"
-            )
-
-        expected_name = f"bosch_shc_cam_{CAM_A.lower()}"
-        assert captured_params.get("name") == expected_name
-
-
 # Targets:
 # - async_setup (line 4213): _register_services(hass) call, HA-not-running path
 # - _async_cancel_coordinator_tasks: handle.cancel() raises RuntimeError (4427-4428)
@@ -17671,7 +17396,10 @@ class TestAsyncSetup:
 
         hass = self._make_lovelace_hass(is_running=True)
 
-        with patch(f"{MODULE}._register_services") as mock_reg:
+        with (
+            patch(f"{MODULE}._register_services") as mock_reg,
+            patch(f"{MODULE}.async_import_client_credential", new=AsyncMock()),
+        ):
             result = await async_setup(hass, {})
 
         mock_reg.assert_called_once_with(hass)
@@ -17685,7 +17413,10 @@ class TestAsyncSetup:
 
         hass = self._make_lovelace_hass(is_running=False)
 
-        with patch(f"{MODULE}._register_services"):
+        with (
+            patch(f"{MODULE}._register_services"),
+            patch(f"{MODULE}.async_import_client_credential", new=AsyncMock()),
+        ):
             result = await async_setup(hass, {})
 
         hass.bus.async_listen_once.assert_called_once()
@@ -17698,7 +17429,10 @@ class TestAsyncSetup:
 
         hass = self._make_lovelace_hass(is_running=True)
 
-        with patch(f"{MODULE}._register_services"):
+        with (
+            patch(f"{MODULE}._register_services"),
+            patch(f"{MODULE}.async_import_client_credential", new=AsyncMock()),
+        ):
             await async_setup(hass, {})
 
         hass.bus.async_listen_once.assert_not_called()
@@ -17712,7 +17446,10 @@ class TestAsyncSetup:
 
         hass = self._make_lovelace_hass(is_running=False)
 
-        with patch(f"{MODULE}._register_services"):
+        with (
+            patch(f"{MODULE}._register_services"),
+            patch(f"{MODULE}.async_import_client_credential", new=AsyncMock()),
+        ):
             await async_setup(hass, {})
 
         # Capture the listener and invoke it; it should schedule a task.
@@ -17720,6 +17457,41 @@ class TestAsyncSetup:
         started_cb = call.args[1]
         started_cb(MagicMock())
         hass.async_create_task.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_setup_imports_default_client_credential(self):
+        """application_credentials port (Core-submission prep): async_setup
+        must auto-import Bosch's fixed public OAuth2 client as the default
+        ClientCredential, using the SAME CLIENT_ID/CLIENT_SECRET as
+        config_flow.py's module constants — otherwise a fresh install would
+        hit application_credentials' 'missing_credentials' abort on first
+        setup instead of the previous zero-friction UX (manual
+        async_register_implementation, removed from config_flow.py by this
+        same change)."""
+        from custom_components.bosch_shc_camera import DOMAIN, async_setup
+        from custom_components.bosch_shc_camera.config_flow import (
+            CLIENT_ID,
+            CLIENT_SECRET,
+        )
+
+        hass = self._make_lovelace_hass(is_running=True)
+
+        with (
+            patch(f"{MODULE}._register_services"),
+            patch(
+                f"{MODULE}.async_import_client_credential", new=AsyncMock()
+            ) as mock_import,
+        ):
+            await async_setup(hass, {})
+
+        mock_import.assert_called_once()
+        call_args = mock_import.call_args
+        assert call_args.args[0] is hass
+        assert call_args.args[1] == DOMAIN
+        credential = call_args.args[2]
+        assert credential.client_id == CLIENT_ID
+        assert credential.client_secret == CLIENT_SECRET
+        assert credential.name == "Bosch SingleKey ID"
 
 
 class TestCancelCoordinatorTasksExceptions:
@@ -17800,7 +17572,7 @@ class TestCancelCoordinatorTasksExceptions:
         ):
             await _async_cancel_coordinator_tasks(coord)
 
-        mock_proxy.assert_called_once_with({"cam1": 9999})
+        mock_proxy.assert_called_once_with({"cam1": 9999}, {})
 
     @pytest.mark.asyncio
     async def test_go2rtc_session_closed_on_teardown(self):
@@ -17891,9 +17663,14 @@ class TestCancelCoordinatorTasksExceptions:
 
 class TestGo2rtcSessionPooling:
     """WP1 (stream-perf-stability-refactor): _go2rtc_consumer_count /
-    _register_go2rtc_stream / _unregister_go2rtc_stream used to open a fresh
-    `aiohttp.ClientSession()` on every single localhost go2rtc-API call.
-    Pins that they now share one lazily-created, pooled session instead."""
+    _unregister_go2rtc_stream used to open a fresh `aiohttp.ClientSession()`
+    on every single localhost go2rtc-API call. Pins that they now share one
+    lazily-created, pooled session instead. (The manual go2rtc PUT
+    registration this class also used to cover was removed 2026-07-14 —
+    HA-core's bundled go2rtc provider auto-registers off `stream_source()`
+    on every WebRTC offer now — leaving `_unregister_go2rtc_stream`, still
+    the only way to keep the go2rtc registry tidy on teardown since go2rtc
+    has no native removal API.)"""
 
     @pytest.mark.asyncio
     async def test_consumer_count_reuses_session_across_two_calls(self):
@@ -17932,8 +17709,8 @@ class TestGo2rtcSessionPooling:
         assert coord._go2rtc_session is session_mock
 
     @pytest.mark.asyncio
-    async def test_register_and_unregister_share_the_same_session(self):
-        """_register_go2rtc_stream and _unregister_go2rtc_stream on the same
+    async def test_consumer_count_and_unregister_share_the_same_session(self):
+        """_go2rtc_consumer_count and _unregister_go2rtc_stream on the same
         coordinator must reuse the SAME pooled session — not one each."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -17942,18 +17719,17 @@ class TestGo2rtcSessionPooling:
             hass=SimpleNamespace(config=SimpleNamespace(config_dir=None)),
         )
 
-        reg_resp = SimpleNamespace(status=200, text=AsyncMock(return_value=""))
-        get_resp = SimpleNamespace(status=200)
         del_resp = SimpleNamespace(status=204)
 
         session_mock = MagicMock()
         session_mock.closed = False
-        session_mock.put = AsyncMock(return_value=reg_resp)
         session_mock.delete = AsyncMock(return_value=del_resp)
 
         @asynccontextmanager
         async def _get(*a, **kw):
-            yield get_resp
+            yield SimpleNamespace(
+                status=200, json=AsyncMock(return_value={"consumers": []})
+            )
 
         session_mock.get = _get
 
@@ -17964,15 +17740,12 @@ class TestGo2rtcSessionPooling:
             return session_mock
 
         with patch("aiohttp.ClientSession", side_effect=_fake_session_ctor):
-            ok = await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM, "rtsps://u:p@127.0.0.1:1234/rtsp_tunnel"
-            )
+            await BoschCameraCoordinator._go2rtc_consumer_count(coord, CAM)
             await BoschCameraCoordinator._unregister_go2rtc_stream(coord, CAM)
 
-        assert ok is True
         assert len(created) == 1, (
             f"Expected exactly 1 pooled aiohttp.ClientSession shared between "
-            f"register+unregister, got {len(created)}"
+            f"consumer-count+unregister, got {len(created)}"
         )
         assert coord._go2rtc_session is session_mock
 
@@ -22429,7 +22202,15 @@ def _make_coord_sprint_kd(**overrides):
         _async_local_tcp_ping=AsyncMock(return_value=False),
         _start_tls_proxy=AsyncMock(return_value=12345),
         _stop_tls_proxy=AsyncMock(),
-        _register_go2rtc_stream=AsyncMock(),
+        _stop_viewing_front_door=AsyncMock(),
+        _stop_remote_viewing_front_door=AsyncMock(),
+        # Default: front-door bind "fails" (returns None) so
+        # try_live_connection_inner falls back to the raw credentialed URL —
+        # preserves this fixture's pre-existing rtspsUrl assertions.
+        # TestViewingFrontDoorLocalConnect below overrides this to a real
+        # URL to cover the success path.
+        _start_viewing_front_door=AsyncMock(return_value=None),
+        _start_remote_viewing_front_door=AsyncMock(return_value=None),
         _check_and_recover_webrtc=AsyncMock(),
         # These return coroutines passed to hass.async_create_task — use AsyncMock so
         # the coroutine is only created when called (avoids "never awaited" warnings).
@@ -23093,8 +22874,14 @@ class TestPut200LocalSuccess:
         assert call_args.args[2] == 443
 
     @pytest.mark.asyncio
-    async def test_local_200_registers_go2rtc_after_prewarm(self):
-        """PUT 200 LOCAL → _register_go2rtc_stream called after pre-warm."""
+    async def test_local_200_refreshes_webrtc_providers_after_prewarm(self):
+        """PUT 200 LOCAL → cam_ent.async_refresh_providers() called after
+        pre-warm. The manual go2rtc registration this call site used to also
+        fire has been removed (HA-core's bundled go2rtc provider
+        auto-registers off `stream_source()` on every WebRTC offer now), but
+        this explicit provider-refresh push is still needed on its own
+        merits — without it the card's WebRTC offer can race HA's async
+        auto-refresh and fall back to HLS for the whole session."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         local_body = json.dumps(
@@ -23105,7 +22892,7 @@ class TestPut200LocalSuccess:
                 "bufferingTime": 500,
             }
         )
-        reg_mock = AsyncMock()
+        cam_ent = SimpleNamespace(stream=None, async_refresh_providers=AsyncMock())
         coord = _make_coord_sprint_kd(
             _entry=SimpleNamespace(
                 data={"bearer_token": "tok-A"},
@@ -23116,7 +22903,7 @@ class TestPut200LocalSuccess:
             _get_cam_lan_ip=MagicMock(return_value=None),
             _start_tls_proxy=AsyncMock(return_value=12345),
             _tls_proxy_ports={CAM_A: 12345},
-            _register_go2rtc_stream=reg_mock,
+            _camera_entities={CAM_A: cam_ent},
         )
 
         resp = _put_resp(200, local_body)
@@ -23133,9 +22920,7 @@ class TestPut200LocalSuccess:
             result = await try_live_connection_inner(coord, CAM_A)
 
         assert result is not None
-        reg_mock.assert_awaited_once()
-        # First arg to _register_go2rtc_stream is cam_id
-        assert reg_mock.call_args.args[0] == CAM_A
+        cam_ent.async_refresh_providers.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_local_200_sets_rtsps_url_after_prewarm(self):
@@ -23180,6 +22965,237 @@ class TestPut200LocalSuccess:
         assert "127.0.0.1:54321" in result["rtspsUrl"]
 
 
+class TestViewingFrontDoorLocalConnect:
+    """LOCAL connect: `_start_viewing_front_door` success/failure branches
+    (live_connection.py, right after pre-warm) — the credential-free front-
+    door URL must win over the raw credentialed `local_rtsp_url` whenever
+    the front-door bind succeeds, and the raw URL must still be used as a
+    fallback when it doesn't."""
+
+    @pytest.mark.asyncio
+    async def test_front_door_success_publishes_credential_free_url(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        local_body = json.dumps(
+            {
+                "user": "u-secret",
+                "password": "p-secret",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
+        front_door_url = (
+            "rtsp://127.0.0.1:9999/rtsp_tunnel?inst=1&enableaudio=1"
+            "&fmtp=1&maxSessionDuration=3600"
+        )
+        coord = _make_coord_sprint_kd(
+            _entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "local"},
+            ),
+            _rcp_lan_ip_cache={},
+            _local_creds_cache={},
+            _get_cam_lan_ip=MagicMock(return_value=None),
+            _start_tls_proxy=AsyncMock(return_value=9999),
+            _tls_proxy_ports={CAM_A: 9999},
+            _start_viewing_front_door=AsyncMock(return_value=front_door_url),
+        )
+
+        resp = _put_resp(200, local_body)
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is not None
+        assert result["rtspsUrl"] == front_door_url
+        assert result["rtspUrl"] == front_door_url
+        # No embedded Digest credentials in the published URL.
+        assert "u-secret" not in result["rtspsUrl"]
+        assert "p-secret" not in result["rtspsUrl"]
+        assert "@" not in result["rtspsUrl"]
+        # The front-door was asked for the same quality/audio/session
+        # parameters the raw URL would have carried.
+        coord._start_viewing_front_door.assert_awaited_once()
+        call_kwargs = coord._start_viewing_front_door.call_args.kwargs
+        assert call_kwargs["inst"] == 1
+        assert call_kwargs["audio_param"] == "&enableaudio=1"
+        assert call_kwargs["max_session_duration"] == 3600
+
+    @pytest.mark.asyncio
+    async def test_front_door_failure_falls_back_to_credentialed_url(self):
+        """`_start_viewing_front_door` returning None (bind failed) must not
+        break streaming — the raw credentialed URL is used instead, exactly
+        as before this feature existed."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        local_body = json.dumps(
+            {
+                "user": "u-local",
+                "password": "p-local",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
+        coord = _make_coord_sprint_kd(
+            _entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "local"},
+            ),
+            _rcp_lan_ip_cache={},
+            _local_creds_cache={},
+            _get_cam_lan_ip=MagicMock(return_value=None),
+            _start_tls_proxy=AsyncMock(return_value=12345),
+            _tls_proxy_ports={CAM_A: 12345},
+            _start_viewing_front_door=AsyncMock(return_value=None),
+            _start_remote_viewing_front_door=AsyncMock(return_value=None),
+        )
+
+        resp = _put_resp(200, local_body)
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is not None
+        assert result["rtspsUrl"].startswith("rtsp://u-local:p-local@127.0.0.1:12345")
+        assert result["rtspUrl"] == result["rtspsUrl"]
+
+
+class TestRemoteViewingFrontDoorConnect:
+    """REMOTE connect: `_start_remote_viewing_front_door` success/failure
+    branches (live_connection.py, inside the REMOTE TLS-proxy try block) —
+    mirrors `TestViewingFrontDoorLocalConnect` above for the REMOTE path.
+    The stable-URL front-door must win over the raw hash-bearing
+    `local_rtsp_url` whenever the bind succeeds, and the raw URL must still
+    be used as a fallback when it doesn't (already covered by
+    `TestPut200RemoteSuccess.test_remote_200_urls_field_sets_rtsps_url`,
+    whose default fixture has `_start_remote_viewing_front_door` return
+    None)."""
+
+    @pytest.mark.asyncio
+    async def test_front_door_success_publishes_stable_hash_free_url(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashSECRET"],
+                "bufferingTime": 1000,
+            }
+        )
+        front_door_url = (
+            "rtsp://127.0.0.1:8888/rtsp_tunnel?inst=1&enableaudio=1"
+            "&fmtp=1&maxSessionDuration=3600"
+        )
+        coord = _make_coord_sprint_kd(
+            _entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "remote"},
+            ),
+            _start_tls_proxy=AsyncMock(return_value=54321),
+            _start_remote_viewing_front_door=AsyncMock(return_value=front_door_url),
+        )
+
+        resp = _put_resp(200, remote_body)
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is not None
+        assert result["rtspsUrl"] == front_door_url
+        assert result["rtspUrl"] == front_door_url
+        # No hash from the raw proxied URL leaks into the published one.
+        assert "hashSECRET" not in result["rtspsUrl"]
+        # _connection_type/_remote_path are set for remote_resolve_inner and
+        # the 3 previously-dead call sites (remote_session_terminator,
+        # promote_to_local, _rcp_read_active) that check for them.
+        assert result["_connection_type"] == "REMOTE"
+        assert (
+            result["_remote_path"]
+            == "/hashSECRET/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=3600"
+        )
+        # The front-door was asked for the same quality/audio parameters the
+        # raw URL would have carried, and REMOTE's fixed 3600s session
+        # duration (not the per-model LOCAL value).
+        coord._start_remote_viewing_front_door.assert_awaited_once()
+        call_kwargs = coord._start_remote_viewing_front_door.call_args.kwargs
+        assert call_kwargs["inst"] == 1
+        assert call_kwargs["audio_param"] == "&enableaudio=1"
+        assert call_kwargs["max_session_duration"] == 3600
+
+    @pytest.mark.asyncio
+    async def test_front_door_unexpected_exception_keeps_working_proxied_url(self):
+        """Bug-hunt finding (2026-07-14): an earlier draft ran
+        `_start_remote_viewing_front_door` inside the SAME try/except that
+        wraps the TLS-proxy start — so ANY exception from the front-door
+        (not just the `OSError` it already turns into a clean `None`
+        return) fell through to the handler that discards the
+        already-working TLS-proxied `local_rtsp_url` in favor of the raw,
+        un-proxied `cloud_rtsps_url` (cert-failing for WebRTC), logging a
+        misleading "TLS proxy start failed" message even though the proxy
+        had actually succeeded. `_start_remote_viewing_front_door` raising
+        something unexpected (e.g. a bug in the new module, not its own
+        documented OSError-bind-failure path) must fall back to the
+        already-working `local_rtsp_url` instead — the TLS proxy itself is
+        fine, only the optional front-door upgrade failed."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashUNEXPECTED"],
+                "bufferingTime": 1000,
+            }
+        )
+        coord = _make_coord_sprint_kd(
+            _entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "remote"},
+            ),
+            _start_tls_proxy=AsyncMock(return_value=54321),
+            _start_remote_viewing_front_door=AsyncMock(
+                side_effect=RuntimeError("synthetic front-door bug")
+            ),
+        )
+
+        resp = _put_resp(200, remote_body)
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is not None
+        # Still the working TLS-proxied URL — NOT the raw cloud_rtsps_url
+        # (which would start with "rtsps://proxy-01...", not
+        # "rtsp://127.0.0.1:...").
+        assert result["rtspsUrl"].startswith("rtsp://127.0.0.1:54321")
+        assert result["rtspUrl"] == result["rtspsUrl"]
+        # _connection_type/_remote_path still set — the TLS proxy succeeded,
+        # only the optional front-door upgrade raised.
+        assert result["_connection_type"] == "REMOTE"
+        assert "hashUNEXPECTED" in result["_remote_path"]
+
+
 class TestPut200RemoteSuccess:
     """Lines 2508-2563: REMOTE 200 response builds rtspsUrl via TLS proxy."""
 
@@ -23215,6 +23231,22 @@ class TestPut200RemoteSuccess:
         assert "rtspsUrl" in result
         assert result["rtspsUrl"].startswith("rtsp://127.0.0.1:")
         assert "54321" in result["rtspsUrl"]
+        # `_connection_type`/`_remote_path` must be set REGARDLESS of
+        # whether the front-door bind succeeds (this fixture's default
+        # `_start_remote_viewing_front_door` returns None — bind "failed" —
+        # exercising the fallback path) — 3 pre-existing call sites
+        # (session_renewal.remote_session_terminator, .promote_to_local,
+        # __init__.py's _rcp_read_active) depend on these being set whether
+        # or not the front-door itself is up. Regression test for a bug-hunt
+        # finding: an earlier draft only asserted these on the front-door
+        # SUCCESS path (TestRemoteViewingFrontDoorConnect), which would not
+        # have caught a regression moving these assignments inside that
+        # success branch.
+        assert result["_connection_type"] == "REMOTE"
+        assert (
+            result["_remote_path"]
+            == "/hashXXX/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=3600"
+        )
 
     @pytest.mark.asyncio
     async def test_remote_200_hash_field_sets_proxy_url(self):
@@ -26965,7 +26997,13 @@ def _make_coord_live(**overrides):
         _async_local_tcp_ping=AsyncMock(return_value=False),
         _start_tls_proxy=AsyncMock(return_value=12345),
         _stop_tls_proxy=AsyncMock(),
-        _register_go2rtc_stream=AsyncMock(),
+        _stop_viewing_front_door=AsyncMock(),
+        _stop_remote_viewing_front_door=AsyncMock(),
+        # Default: front-door bind "fails" (returns None) so
+        # try_live_connection_inner falls back to the raw credentialed URL —
+        # preserves this fixture's pre-existing rtspsUrl assertions.
+        _start_viewing_front_door=AsyncMock(return_value=None),
+        _start_remote_viewing_front_door=AsyncMock(return_value=None),
         _check_and_recover_webrtc=AsyncMock(),
         _auto_renew_local_session=AsyncMock(return_value=None),
         _idle_session_reaper=AsyncMock(return_value=None),
@@ -27386,6 +27424,8 @@ class TestLocalPrewarmFailedFallsBackToRemote:
             _tls_proxy_ports={CAM_A: 12345},
             _start_tls_proxy=AsyncMock(return_value=12345),
             _stop_tls_proxy=AsyncMock(),
+            _stop_viewing_front_door=AsyncMock(),
+            _stop_remote_viewing_front_door=AsyncMock(),
         )
 
         local_body = json.dumps(
@@ -28403,7 +28443,13 @@ def _make_coord_live_sprint_mc(**overrides):
         _async_local_tcp_ping=AsyncMock(return_value=False),
         _start_tls_proxy=AsyncMock(return_value=12345),
         _stop_tls_proxy=AsyncMock(),
-        _register_go2rtc_stream=AsyncMock(),
+        _stop_viewing_front_door=AsyncMock(),
+        _stop_remote_viewing_front_door=AsyncMock(),
+        # Default: front-door bind "fails" (returns None) so
+        # try_live_connection_inner falls back to the raw credentialed URL —
+        # preserves this fixture's pre-existing rtspsUrl assertions.
+        _start_viewing_front_door=AsyncMock(return_value=None),
+        _start_remote_viewing_front_door=AsyncMock(return_value=None),
         _check_and_recover_webrtc=AsyncMock(),
         _auto_renew_local_session=AsyncMock(return_value=None),
         _remote_session_terminator=AsyncMock(return_value=None),
@@ -28869,102 +28915,6 @@ def _make_hass_sprint_md() -> MagicMock:
 
 
 @pytest.mark.asyncio
-class TestRcpLocalWriteDigestErrors:
-    """rcp_local_write with user+password — non-200 and <err> body paths."""
-
-    def _make_digest_ctx(self, status: int, body: bytes) -> MagicMock:
-        resp = MagicMock()
-        resp.status = status
-        resp.read = AsyncMock(return_value=body)
-        resp_ctx = MagicMock()
-        resp_ctx.__aenter__ = AsyncMock(return_value=resp)
-        resp_ctx.__aexit__ = AsyncMock(return_value=None)
-        return resp_ctx
-
-    async def test_digest_non_200_returns_false(self) -> None:
-        """Digest path: HTTP 403 → _LOGGER.debug + return False. Pins L273-277."""
-        from custom_components.bosch_shc_camera.rcp import rcp_local_write
-
-        resp_ctx = self._make_digest_ctx(403, b"<forbidden/>")
-
-        # The function does `from .auth_utils import async_digest_request` at runtime.
-        # Patch at the auth_utils module level so the conditional local import picks it up.
-        with (
-            patch(
-                "custom_components.bosch_shc_camera.auth_utils.async_digest_request",
-                AsyncMock(return_value=resp_ctx),
-            ),
-            patch(
-                "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-                return_value=MagicMock(),
-            ),
-        ):
-            result = await rcp_local_write(
-                MagicMock(),
-                "192.0.2.149",
-                "0x0c22",
-                "0xdeadbeef",
-                user="cbs-XXXXXXXX",
-                password="secret",
-            )
-
-        assert result is False
-
-    async def test_digest_err_in_body_returns_false(self) -> None:
-        """Digest path: HTTP 200 but body contains <err> → return False. Pins L280-284."""
-        from custom_components.bosch_shc_camera.rcp import rcp_local_write
-
-        resp_ctx = self._make_digest_ctx(200, b"<err>auth failed</err>")
-
-        with (
-            patch(
-                "custom_components.bosch_shc_camera.auth_utils.async_digest_request",
-                AsyncMock(return_value=resp_ctx),
-            ),
-            patch(
-                "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-                return_value=MagicMock(),
-            ),
-        ):
-            result = await rcp_local_write(
-                MagicMock(),
-                "192.0.2.149",
-                "0x0c22",
-                "0xdeadbeef",
-                user="cbs-XXXXXXXX",
-                password="secret",
-            )
-
-        assert result is False
-
-    async def test_digest_200_no_err_returns_true(self) -> None:
-        """Digest path happy-path: HTTP 200, clean body → return True (baseline)."""
-        from custom_components.bosch_shc_camera.rcp import rcp_local_write
-
-        resp_ctx = self._make_digest_ctx(200, b"<result>OK</result>")
-
-        with (
-            patch(
-                "custom_components.bosch_shc_camera.auth_utils.async_digest_request",
-                AsyncMock(return_value=resp_ctx),
-            ),
-            patch(
-                "custom_components.bosch_shc_camera.rcp.async_get_clientsession",
-                return_value=MagicMock(),
-            ),
-        ):
-            result = await rcp_local_write(
-                MagicMock(),
-                "192.0.2.149",
-                "0x0c22",
-                "0xdeadbeef",
-                user="cbs-XXXXXXXX",
-                password="secret",
-            )
-
-        assert result is True
-
-
 class TestPanPresetDeviceInfo:
     """BoschPanPresetSelect.device_info returns correct identifiers dict."""
 
@@ -31887,7 +31837,116 @@ class TestAsyncCancelCoordinatorTasks:
             patch("asyncio.gather", AsyncMock(return_value=[])),
         ):
             await _async_cancel_coordinator_tasks(coord)
-        mock_stop.assert_called_once_with({"cam1": 12345})
+        mock_stop.assert_called_once_with({"cam1": 12345}, {})
+
+    @pytest.mark.asyncio
+    async def test_viewing_front_door_runner_stopped_and_cleared(self):
+        """Unload must stop_all() the viewing front-door runner (mirrors the
+        Frigate front-door stop right above it) and clear the reference so a
+        straggler task can't reuse a runner whose listeners are already gone."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        coord, _, _ = self._make_coord()
+        runner = MagicMock()
+        coord._viewing_front_door_runner = runner
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
+            await _async_cancel_coordinator_tasks(coord)
+        runner.stop_all.assert_called_once()
+        assert coord._viewing_front_door_runner is None
+
+    @pytest.mark.asyncio
+    async def test_viewing_front_door_runner_none_is_noop(self):
+        """No viewing front-door runner ever created (e.g. no LOCAL session
+        was ever opened this HA run) — unload must not raise."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        coord, _, _ = self._make_coord()
+        coord._viewing_front_door_runner = None
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
+            await _async_cancel_coordinator_tasks(coord)  # must not raise
+        assert coord._viewing_front_door_runner is None
+
+    @pytest.mark.asyncio
+    async def test_viewing_front_door_runner_stop_all_exception_swallowed(self):
+        """A raising stop_all() must be logged at DEBUG and swallowed —
+        unload must complete the rest of its teardown regardless."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        coord, _, _ = self._make_coord()
+        runner = MagicMock()
+        runner.stop_all = MagicMock(side_effect=RuntimeError("synthetic"))
+        coord._viewing_front_door_runner = runner
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies") as mock_stop,
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
+            await _async_cancel_coordinator_tasks(coord)  # must not raise
+        # Reference is still cleared even though stop_all() raised, and the
+        # LATER cleanup step (stop_all_proxies) still ran.
+        assert coord._viewing_front_door_runner is None
+        mock_stop.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_remote_viewing_front_door_runner_stopped_and_cleared(self):
+        """Same unload behaviour as the LOCAL viewing front-door runner
+        above, for the separate REMOTE runner."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        coord, _, _ = self._make_coord()
+        runner = MagicMock()
+        coord._remote_viewing_front_door_runner = runner
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
+            await _async_cancel_coordinator_tasks(coord)
+        runner.stop_all.assert_called_once()
+        assert coord._remote_viewing_front_door_runner is None
+
+    @pytest.mark.asyncio
+    async def test_remote_viewing_front_door_runner_none_is_noop(self):
+        """No REMOTE viewing front-door runner ever created (e.g. no REMOTE
+        session was ever opened this HA run) — unload must not raise."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        coord, _, _ = self._make_coord()
+        coord._remote_viewing_front_door_runner = None
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
+            await _async_cancel_coordinator_tasks(coord)  # must not raise
+        assert coord._remote_viewing_front_door_runner is None
+
+    @pytest.mark.asyncio
+    async def test_remote_viewing_front_door_runner_stop_all_exception_swallowed(self):
+        """A raising stop_all() must be logged at DEBUG and swallowed —
+        unload must complete the rest of its teardown regardless."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        coord, _, _ = self._make_coord()
+        runner = MagicMock()
+        runner.stop_all = MagicMock(side_effect=RuntimeError("synthetic"))
+        coord._remote_viewing_front_door_runner = runner
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies") as mock_stop,
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
+            await _async_cancel_coordinator_tasks(coord)  # must not raise
+        assert coord._remote_viewing_front_door_runner is None
+        mock_stop.assert_called_once()
 
 
 class TestAsyncUnloadEntry:
@@ -33609,131 +33668,17 @@ class TestSetPrivacyMasksCoordValueError:
         assert (exc_info.value.translation_placeholders or {}).get("kind") == "mask"
 
 
-class TestRegisterGo2rtcStreamUnixSocket:
-    """Lines 6139-6140: go2rtc.sock exists → sock_path set + break."""
-
-    @pytest.mark.asyncio
-    async def test_unix_socket_path_used_when_exists(self) -> None:
-        """Lines 6139-6140: os.path.exists returns True → sock_path assigned, loop breaks."""
-        import aiohttp as _aiohttp
-
-        fake_resp = MagicMock()
-        fake_resp.status = 200
-        fake_resp.text = AsyncMock(return_value="")
-        fake_check = MagicMock()
-        fake_check.status = 200
-        fake_check.__aenter__ = AsyncMock(return_value=fake_check)
-        fake_check.__aexit__ = AsyncMock(return_value=None)
-
-        fake_session = MagicMock()
-        fake_put_resp = MagicMock()
-        fake_put_resp.status = 200
-        fake_put_resp.text = AsyncMock(return_value="")
-        fake_session.put = AsyncMock(return_value=fake_put_resp)
-        fake_session.get = MagicMock(return_value=fake_check)
-        fake_session.__aenter__ = AsyncMock(return_value=fake_session)
-        fake_session.__aexit__ = AsyncMock(return_value=None)
-
-        fake_connector = MagicMock()
-        fake_connector.__enter__ = MagicMock(return_value=fake_connector)
-        fake_connector.__exit__ = MagicMock(return_value=None)
-
-        coord = SimpleNamespace(
-            _camera_entities={},
-            hass=SimpleNamespace(
-                config=SimpleNamespace(config_dir="/config"),
-            ),
-        )
-
-        sock_path_found: list[str] = []
-
-        with (
-            patch("os.path.exists", return_value=True),
-            patch(
-                "aiohttp.UnixConnector", return_value=fake_connector
-            ) as _mock_connector,
-            patch("aiohttp.ClientSession", return_value=fake_session),
-            patch(
-                "asyncio.timeout",
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=None),
-                    __aexit__=AsyncMock(return_value=None),
-                ),
-            ),
-        ):
-            # Capture what sock_path resolves to by running enough of the method
-            # The key assertion: os.path.exists was checked (line 6138) and
-            # the loop broke after finding the first candidate (lines 6139-6140).
-            # We verify UnixConnector was called with a path matching config_dir.
-            result = await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://cam.example.com:443/stream"
-            )
-
-        # UnixConnector should have been created with the first candidate path
-        if _mock_connector.called:
-            called_path = (
-                _mock_connector.call_args[1].get("path")
-                or _mock_connector.call_args[0][0]
-            )
-            assert (
-                "/config" in called_path or called_path == "/homeassistant/go2rtc.sock"
-            )
-
-    @pytest.mark.asyncio
-    async def test_unix_connector_oserror_falls_through(self) -> None:
-        """Lines 6148-6151: UnixConnector raises OSError → debug log, connector=None."""
-        import aiohttp as _aiohttp
-
-        fake_resp = MagicMock()
-        fake_resp.status = 200
-        fake_resp.text = AsyncMock(return_value="")
-        fake_check = MagicMock()
-        fake_check.status = 200
-        fake_check.__aenter__ = AsyncMock(return_value=fake_check)
-        fake_check.__aexit__ = AsyncMock(return_value=None)
-
-        fake_session = MagicMock()
-        fake_put_resp = MagicMock()
-        fake_put_resp.status = 200
-        fake_put_resp.text = AsyncMock(return_value="")
-        fake_session.put = AsyncMock(return_value=fake_put_resp)
-        fake_session.get = MagicMock(return_value=fake_check)
-        fake_session.__aenter__ = AsyncMock(return_value=fake_session)
-        fake_session.__aexit__ = AsyncMock(return_value=None)
-
-        coord = SimpleNamespace(
-            _camera_entities={},
-            hass=SimpleNamespace(
-                config=SimpleNamespace(config_dir="/config"),
-            ),
-        )
-
-        with (
-            patch("os.path.exists", return_value=True),
-            patch("aiohttp.UnixConnector", side_effect=OSError("no socket")),
-            patch("aiohttp.ClientSession", return_value=fake_session),
-            patch(
-                "asyncio.timeout",
-                return_value=MagicMock(
-                    __aenter__=AsyncMock(return_value=None),
-                    __aexit__=AsyncMock(return_value=None),
-                ),
-            ),
-        ):
-            # Should not raise — OSError is caught, connector stays None, PUT proceeds
-            result = await BoschCameraCoordinator._register_go2rtc_stream(
-                coord, CAM_A, "rtsps://cam.example.com:443/stream"
-            )
-        # Method completed without raising
-        assert isinstance(result, bool)
-
-
 class TestStartTlsProxyOnLoopIsStopping:
-    """Line 6286: _died_callback._on_loop returns early when hass.is_stopping."""
+    """tls_proxy_wiring._died_callback returns early when hass.is_stopping.
+
+    Since the tls_proxy asyncio rewrite, the proxy's on_proxy_died callback
+    runs directly on the event loop (tls_proxy.py is asyncio-native now) —
+    no more thread->loop call_soon_threadsafe hop. _died_callback itself
+    just guards on hass.is_stopping before scheduling the rebuild task."""
 
     @pytest.mark.asyncio
     async def test_on_loop_returns_early_when_stopping(self) -> None:
-        """Line 6286: hass.is_stopping=True inside _on_loop → no create_task called."""
+        """hass.is_stopping=True → _died_callback returns without create_task."""
         import ssl as _ssl
 
         create_task_mock = MagicMock()
@@ -33742,6 +33687,7 @@ class TestStartTlsProxyOnLoopIsStopping:
         coord = SimpleNamespace(
             _tls_ssl_ctx=MagicMock(spec=_ssl.SSLContext),
             _tls_proxy_ports={},
+            _tls_proxy_servers={},
             hass=SimpleNamespace(
                 is_stopping=True,
                 async_create_task=create_task_mock,
@@ -33757,7 +33703,7 @@ class TestStartTlsProxyOnLoopIsStopping:
         captured_callback: list = []
 
         def fake_start_tls_proxy(
-            ssl_ctx, cam_id, cam_host, cam_port, tls_proxy_ports, **kwargs
+            ssl_ctx, cam_id, cam_host, cam_port, tls_proxy_ports, server_cache, **kwargs
         ):
             died_cb = kwargs.get("on_proxy_died")
             if died_cb is not None:
@@ -33775,24 +33721,12 @@ class TestStartTlsProxyOnLoopIsStopping:
         assert port == 12345
         assert len(captured_callback) == 1
 
-        # Now simulate the _died_callback being called from a thread
+        # Invoke the captured on_proxy_died callback directly (it now runs
+        # on the event loop already — no thread hop to simulate).
         died_cb = captured_callback[0]
-
-        # _died_callback calls hass.loop.call_soon_threadsafe(_on_loop)
-        # We need to capture and invoke _on_loop ourselves
-        on_loop_captures: list = []
-
-        def fake_call_soon_threadsafe(fn):
-            on_loop_captures.append(fn)
-
-        coord.hass.loop.call_soon_threadsafe = MagicMock(
-            side_effect=fake_call_soon_threadsafe
-        )
         died_cb()
 
-        assert len(on_loop_captures) == 1
-        # Now invoke _on_loop — hass.is_stopping=True → should return without create_task
-        on_loop_captures[0]()
+        # hass.is_stopping was True → must return early, no task scheduled.
         create_task_mock.assert_not_called()
         assert len(bg_tasks) == 0
 
@@ -35781,15 +35715,20 @@ class TestDedupContinueDropsData:
 class TestUnregisterGo2rtcEndpoints:
     """BUG-2 regression: _unregister_go2rtc_stream misses port 11984.
 
-    _register_go2rtc_stream tries [11984, 1984, Unix socket].
-    _unregister_go2rtc_stream only tries localhost:1984.
-    On HA 2024+ where go2rtc listens on 11984 only, the DELETE is sent
-    to the wrong port and silently ignored. The stale stream entry
-    survives in go2rtc's registry.
+    On HA 2024+ where go2rtc listens on 11984 only, a DELETE sent only to
+    the legacy localhost:1984 endpoint is silently ignored — the stale
+    stream entry survives in go2rtc's registry. `unregister_go2rtc_stream`
+    is the only remaining go2rtc registration-cleanup function (the manual
+    `register_go2rtc_stream` PUT it used to have a sibling relationship
+    with was removed 2026-07-14 — HA-core's bundled go2rtc provider
+    auto-registers off `stream_source()` now; go2rtc has no native removal
+    API, so `unregister_go2rtc_stream` is still needed standalone to keep
+    the registry tidy on teardown), so this pin now stands on its own
+    rather than comparing against a sibling.
 
     Moved to go2rtc_client.py in the Phase 3 step 3 refactor
-    (register_go2rtc_stream/unregister_go2rtc_stream, module-level
-    functions — no longer indented coordinator methods).
+    (unregister_go2rtc_stream, module-level function — no longer an
+    indented coordinator method).
     """
 
     def test_unregister_tries_multiple_endpoints(self):
@@ -35811,32 +35750,6 @@ class TestUnregisterGo2rtcEndpoints:
         assert "1984" in func_body, (
             "unregister_go2rtc_stream must also try legacy port 1984."
         )
-
-    def test_unregister_and_register_share_port_set(self):
-        """The port list in unregister must be a subset of register's ports.
-
-        Structural pin: if register adds a new endpoint, unregister must
-        match it — otherwise cleanup lags registration.
-        """
-        source = (SRC / "go2rtc_client.py").read_text()
-        reg_start = source.find("async def register_go2rtc_stream")
-        unreg_start = source.find("async def unregister_go2rtc_stream")
-        assert reg_start != -1 and unreg_start != -1
-
-        reg_end = source.find("\nasync def ", reg_start + 1)
-        unreg_end = source.find("\nasync def ", unreg_start + 1)
-        reg_body = source[reg_start : reg_end if reg_end != -1 else reg_start + 1500]
-        unreg_body = source[
-            unreg_start : unreg_end if unreg_end != -1 else unreg_start + 1500
-        ]
-
-        # Both functions must reference both standard go2rtc ports
-        for port in ("11984", "1984"):
-            assert port in reg_body, f"register_go2rtc_stream missing port {port}"
-            assert port in unreg_body, (
-                f"unregister_go2rtc_stream missing port {port} — "
-                "DELETE sent to wrong port, stale stream entry survives"
-            )
 
 
 class TestStreamWarmingInit:
@@ -37322,6 +37235,7 @@ class TestRefreshLocalCredsInstParamEdgeCases:
             _audio_enabled={},
             get_model_config=lambda cid: SimpleNamespace(max_session_duration=3600),
             _get_nvr_recorder_lock=lambda cid: asyncio.Lock(),
+            _viewing_front_door_runner=None,
         )
 
         resp_json = json.dumps(
@@ -37611,6 +37525,7 @@ async def test_refresh_local_creds_invalid_inst_value():
         _audio_enabled={},
         get_model_config=lambda cid: SimpleNamespace(max_session_duration=3600),
         _get_nvr_recorder_lock=lambda cid: asyncio.Lock(),
+        _viewing_front_door_runner=None,
     )
 
     resp_json = json.dumps(
@@ -38259,3 +38174,239 @@ class TestIsUpdatingHelper:
         coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
         coord._firmware_cache = {CAM_ID: {"updating": False}}
         assert coord.is_updating(CAM_ID) is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regression tests for _refresh_smb_unavailable_issue.
+#
+# `smbprotocol` is an optional runtime dependency (manifest.json requirement
+# that can fail to install on an unsupported OS/CPU architecture). Every SMB
+# call site in smb.py/recorder.py already degrades gracefully on ImportError
+# (log-and-return), but without an integration-wide signal that degradation
+# was silent — easy to miss. _refresh_smb_unavailable_issue (called every
+# coordinator tick, same idempotent create/delete pattern as
+# _refresh_notifications_disabled_issues / _refresh_firmware_update_issues)
+# raises a non-fixable Repairs issue whenever an SMB-dependent feature is
+# configured (enable_smb_upload+upload_protocol=smb, or
+# enable_nvr+nvr_storage_target=smb) but smb_available() is False.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _make_coord_smb_unavailable(options: dict[str, object]) -> SimpleNamespace:
+    """Minimal coordinator stub for _refresh_smb_unavailable_issue."""
+    return SimpleNamespace(
+        hass=SimpleNamespace(),
+        options=options,
+        _smb_unavailable_logged=False,
+    )
+
+
+def _call_smb_unavailable(coord: SimpleNamespace) -> None:
+    from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+    BoschCameraCoordinator._refresh_smb_unavailable_issue(coord)
+
+
+class TestSmbUnavailableRepairs:
+    """Pin every mode: smb-upload-only, nvr-smb-only, both, neither, ftp/local
+    targets (which don't need smbprotocol at all), and smbprotocol present."""
+
+    @patch(f"{MODULE}.smb_available", return_value=False)
+    @patch(f"{MODULE}.ir")
+    def test_smb_upload_enabled_and_unavailable_creates_issue(
+        self, mock_ir: MagicMock, _mock_available: MagicMock
+    ) -> None:
+        coord = _make_coord_smb_unavailable(
+            {"enable_smb_upload": True, "upload_protocol": "smb"}
+        )
+        _call_smb_unavailable(coord)
+
+        mock_ir.async_create_issue.assert_called_once_with(
+            coord.hass,
+            DOMAIN,
+            "smb_unavailable",
+            is_fixable=False,
+            is_persistent=False,
+            severity=mock_ir.IssueSeverity.WARNING,
+            translation_key="smb_unavailable",
+            translation_placeholders={"features": "SMB event upload"},
+        )
+        mock_ir.async_delete_issue.assert_not_called()
+
+    @patch(f"{MODULE}.smb_available", return_value=False)
+    @patch(f"{MODULE}.ir")
+    def test_nvr_smb_target_enabled_and_unavailable_creates_issue(
+        self, mock_ir: MagicMock, _mock_available: MagicMock
+    ) -> None:
+        coord = _make_coord_smb_unavailable(
+            {"enable_nvr": True, "nvr_storage_target": "smb"}
+        )
+        _call_smb_unavailable(coord)
+
+        mock_ir.async_create_issue.assert_called_once()
+        _, kwargs = mock_ir.async_create_issue.call_args
+        assert kwargs["translation_placeholders"]["features"] == "Mini-NVR SMB storage"
+
+    @patch(f"{MODULE}.smb_available", return_value=False)
+    @patch(f"{MODULE}.ir")
+    def test_both_features_enabled_combines_placeholder(
+        self, mock_ir: MagicMock, _mock_available: MagicMock
+    ) -> None:
+        coord = _make_coord_smb_unavailable(
+            {
+                "enable_smb_upload": True,
+                "upload_protocol": "smb",
+                "enable_nvr": True,
+                "nvr_storage_target": "smb",
+            }
+        )
+        _call_smb_unavailable(coord)
+
+        _, kwargs = mock_ir.async_create_issue.call_args
+        assert (
+            kwargs["translation_placeholders"]["features"]
+            == "SMB event upload + Mini-NVR SMB storage"
+        )
+
+    @patch(f"{MODULE}.smb_available", return_value=True)
+    @patch(f"{MODULE}.ir")
+    def test_smb_available_deletes_issue_even_if_configured(
+        self, mock_ir: MagicMock, _mock_available: MagicMock
+    ) -> None:
+        """smbprotocol IS installed → normal case, no issue regardless of config."""
+        coord = _make_coord_smb_unavailable(
+            {"enable_smb_upload": True, "upload_protocol": "smb"}
+        )
+        _call_smb_unavailable(coord)
+
+        mock_ir.async_delete_issue.assert_called_once_with(
+            coord.hass, DOMAIN, "smb_unavailable"
+        )
+        mock_ir.async_create_issue.assert_not_called()
+
+    @patch(f"{MODULE}.smb_available", return_value=False)
+    @patch(f"{MODULE}.ir")
+    def test_neither_feature_enabled_deletes_issue(
+        self, mock_ir: MagicMock, _mock_available: MagicMock
+    ) -> None:
+        """Nothing SMB-dependent configured → no issue even if package missing."""
+        coord = _make_coord_smb_unavailable({})
+        _call_smb_unavailable(coord)
+
+        mock_ir.async_delete_issue.assert_called_once_with(
+            coord.hass, DOMAIN, "smb_unavailable"
+        )
+        mock_ir.async_create_issue.assert_not_called()
+
+    @patch(f"{MODULE}.smb_available", return_value=False)
+    @patch(f"{MODULE}.ir")
+    def test_ftp_upload_protocol_does_not_need_smbprotocol(
+        self, mock_ir: MagicMock, _mock_available: MagicMock
+    ) -> None:
+        """upload_protocol='ftp' doesn't touch smbclient → no issue."""
+        coord = _make_coord_smb_unavailable(
+            {"enable_smb_upload": True, "upload_protocol": "ftp"}
+        )
+        _call_smb_unavailable(coord)
+
+        mock_ir.async_create_issue.assert_not_called()
+        mock_ir.async_delete_issue.assert_called_once()
+
+    @patch(f"{MODULE}.smb_available", return_value=False)
+    @patch(f"{MODULE}.ir")
+    def test_nvr_local_target_does_not_need_smbprotocol(
+        self, mock_ir: MagicMock, _mock_available: MagicMock
+    ) -> None:
+        """nvr_storage_target='local' (default) doesn't touch smbclient → no issue."""
+        coord = _make_coord_smb_unavailable(
+            {"enable_nvr": True, "nvr_storage_target": "local"}
+        )
+        _call_smb_unavailable(coord)
+
+        mock_ir.async_create_issue.assert_not_called()
+        mock_ir.async_delete_issue.assert_called_once()
+
+    @patch(f"{MODULE}.smb_available", return_value=False)
+    @patch(f"{MODULE}.ir")
+    def test_nvr_ftp_target_does_not_need_smbprotocol(
+        self, mock_ir: MagicMock, _mock_available: MagicMock
+    ) -> None:
+        """nvr_storage_target='ftp' (the third valid mode, distinct from
+        upload_protocol='ftp' tested above) doesn't touch smbclient → no issue."""
+        coord = _make_coord_smb_unavailable(
+            {"enable_nvr": True, "nvr_storage_target": "ftp"}
+        )
+        _call_smb_unavailable(coord)
+
+        mock_ir.async_create_issue.assert_not_called()
+        mock_ir.async_delete_issue.assert_called_once()
+
+    @patch(f"{MODULE}.smb_available", return_value=False)
+    @patch(f"{MODULE}.ir")
+    def test_mixed_case_smb_values_still_match(
+        self, mock_ir: MagicMock, _mock_available: MagicMock
+    ) -> None:
+        """upload_protocol/nvr_storage_target values are compared via .lower() —
+        pin that a mixed-case 'SMB' (defensive normalization, not just the
+        lowercase value config_flow.py's SelectSelector always stores) still
+        triggers the issue for both features."""
+        coord = _make_coord_smb_unavailable(
+            {
+                "enable_smb_upload": True,
+                "upload_protocol": "SMB",
+                "enable_nvr": True,
+                "nvr_storage_target": "Smb",
+            }
+        )
+        _call_smb_unavailable(coord)
+
+        _, kwargs = mock_ir.async_create_issue.call_args
+        assert (
+            kwargs["translation_placeholders"]["features"]
+            == "SMB event upload + Mini-NVR SMB storage"
+        )
+
+    @patch(f"{MODULE}.smb_available", return_value=False)
+    @patch(f"{MODULE}.ir")
+    def test_warn_logged_once_then_not_again(
+        self,
+        mock_ir: MagicMock,
+        _mock_available: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        coord = _make_coord_smb_unavailable(
+            {"enable_smb_upload": True, "upload_protocol": "smb"}
+        )
+        with caplog.at_level(logging.WARNING, logger=MODULE):
+            _call_smb_unavailable(coord)  # first tick — should warn
+            _call_smb_unavailable(coord)  # second tick — must NOT warn again
+
+        warn_msgs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warn_msgs) == 1
+        assert "smbprotocol" in warn_msgs[0].message
+
+    @patch(f"{MODULE}.ir")
+    def test_warn_refires_after_package_becomes_available_then_unavailable_again(
+        self, mock_ir: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        coord = _make_coord_smb_unavailable(
+            {"enable_smb_upload": True, "upload_protocol": "smb"}
+        )
+        with (
+            patch(f"{MODULE}.smb_available", return_value=False),
+            caplog.at_level(logging.WARNING, logger=MODULE),
+        ):
+            _call_smb_unavailable(coord)  # warn #1, logged=True
+
+        with patch(f"{MODULE}.smb_available", return_value=True):
+            _call_smb_unavailable(coord)  # clears issue, resets logged=False
+        assert coord._smb_unavailable_logged is False
+
+        with (
+            patch(f"{MODULE}.smb_available", return_value=False),
+            caplog.at_level(logging.WARNING, logger=MODULE),
+        ):
+            _call_smb_unavailable(coord)  # warn #2
+
+        warn_msgs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warn_msgs) == 2

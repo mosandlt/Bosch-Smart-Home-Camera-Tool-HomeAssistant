@@ -100,6 +100,29 @@ async def refresh_local_creds_from_heartbeat(
             f"127.0.0.1:{proxy_port}/rtsp_tunnel?inst={inst_val}"
             f"{audio_param}&fmtp=1&maxSessionDuration={mcfg.max_session_duration}"
         )
+        # If the credential-free viewing front-door (viewing_front_door.py)
+        # is bound for this camera, stream_source() is already serving its
+        # stable, creds-never-in-the-URL address — that URL stays valid
+        # across this cred rotation completely unchanged (the front-door
+        # reads `_local_user`/`_local_password` fresh on every client
+        # connect, updated right below), so it must NOT be overwritten with
+        # the raw credentialed `new_url` here. Doing so would silently leak
+        # real Digest credentials back into stream_source()'s return value
+        # on every heartbeat (as fast as ~15s on Gen1) — exactly the
+        # go2rtc-native-registration leak the front-door exists to prevent
+        # (go2rtc dedupes purely on exact URL match and can never remove a
+        # stale entry, so a rotating URL leaks a fresh entry every
+        # rotation). Only the raw-fallback path (front-door bind failed at
+        # connect time, see live_connection.py) still needs its published
+        # URL rebuilt with the fresh creds here — `old_url` (scraped above,
+        # before this rotation touched anything) already IS the currently-
+        # published URL either way, so reusing it verbatim when the front-
+        # door is active is correct.
+        front_door_active = (
+            coordinator._viewing_front_door_runner is not None
+            and coordinator._viewing_front_door_runner.has_server(cam_id)
+        )
+        effective_url = old_url if front_door_active else new_url
         # Serialize against recorder.start_recorder's final creds
         # re-read + ffmpeg spawn (issue #42 follow-up) — without this,
         # a heartbeat rotation landing mid-spawn could still hand ffmpeg
@@ -107,8 +130,8 @@ async def refresh_local_creds_from_heartbeat(
         async with coordinator._get_nvr_recorder_lock(cam_id):
             live["_local_user"] = new_user
             live["_local_password"] = new_pass
-            live["rtspsUrl"] = new_url
-            live["rtspUrl"] = new_url
+            live["rtspsUrl"] = effective_url
+            live["rtspUrl"] = effective_url
             cache = coordinator._local_creds_cache.get(cam_id, {})
             cache.update(
                 {
@@ -122,34 +145,27 @@ async def refresh_local_creds_from_heartbeat(
         stream = getattr(cam_entity, "stream", None) if cam_entity else None
         if stream is not None:
             try:
-                stream.update_source(new_url)
+                stream.update_source(effective_url)
             except Exception as err:
                 _LOGGER.debug(
                     "Heartbeat: Stream.update_source for %s failed (will heal at next worker restart): %s",
                     cam_id[:8],
                     err,
                 )
-        # go2rtc (WebRTC) holds the proxy URL with the OLD embedded creds
-        # too. Re-register go2rtc with the fresh URL so WebRTC-only viewers
-        # (those never opening an HLS stream) don't 401 → silent video freeze
-        # once the camera rotates the old creds out (~60 s grace). This must
-        # run UNCONDITIONALLY — i.e. regardless of whether an HA HLS stream
-        # object exists — because a pure WebRTC viewer never opens one.
-        # HA Stream (HLS) was updated above (stream is not None path); go2rtc
-        # is always updated here. Tracked bg task (sync method — can't await).
-        # 2026-06-01, decoupled 2026-06-22 (B2 fix: WebRTC-only stale creds).
-        # Coalesced (2026-07-13, stability fix): on fast-rotating cameras
-        # (Gen1: 15s heartbeat) a slow go2rtc PUT could still be in
-        # flight when the next heartbeat fires — _reregister_go2rtc_
-        # stream_coalesced guards against two overlapping registrations
-        # for the same stream name while still guaranteeing the freshest
-        # creds are the ones that end up registered.
-        go2rtc_task = coordinator.hass.async_create_task(
-            coordinator._reregister_go2rtc_stream_coalesced(cam_id, new_url),
-            name=f"bosch_go2rtc_reregister_{cam_id[:8]}",
-        )
-        coordinator._bg_tasks.add(go2rtc_task)
-        go2rtc_task.add_done_callback(coordinator._bg_tasks.discard)
+        # go2rtc (WebRTC) previously needed an explicit re-registration PUT
+        # here so WebRTC-only viewers (those never opening an HLS stream)
+        # wouldn't 401 once the camera rotated the old creds out — the
+        # manual PUT/DELETE registration this served has been removed
+        # (HA-Core-submission-prep, 2026-07-14): HA-core's own bundled
+        # go2rtc provider auto-registers whatever stream_source() returns on
+        # every WebRTC offer, and since the credential-free viewing
+        # front-door (viewing_front_door.py) publishes a URL that stays
+        # identical across every heartbeat rotation (`effective_url` above
+        # is `old_url`, unchanged, whenever the front-door is active), there
+        # is no longer a "stale creds baked into an already-registered URL"
+        # problem for this to fix — go2rtc's existing registration is
+        # already correct and does not need refreshing on a rotation that
+        # never changes the published URL.
         # NVR sidecar: unlike a fresh connect, the ESTABLISHED ffmpeg RTSP
         # session survives cred rotation (see docstring above) — no
         # restart needed here. A proactive restart on every heartbeat used

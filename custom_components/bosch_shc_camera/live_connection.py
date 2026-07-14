@@ -443,6 +443,28 @@ async def try_live_connection_inner(
                                 result["rtspsUrl"] = local_rtsp_url
                                 result["rtspUrl"] = local_rtsp_url
                                 result["_remote_origin_url"] = cloud_rtsps_url
+                                # `_connection_type`/`_remote_path` power both
+                                # `remote_resolve_inner` (the credential-free-
+                                # in-spirit REMOTE front-door below) and 3
+                                # PRE-EXISTING call sites that already checked
+                                # for `_connection_type == "REMOTE"` but were
+                                # silently dead code because this field was
+                                # never actually set for REMOTE before now:
+                                # `session_renewal.remote_session_terminator`
+                                # (clean pre-cap session teardown),
+                                # `session_renewal.promote_to_local` (live
+                                # REMOTE->LOCAL promotion when LAN becomes
+                                # reachable again), and `_rcp_read_active`'s
+                                # REMOTE branch (opportunistic RCP+ reads via
+                                # the cloud-proxy hash). `_remote_path` is
+                                # `pq` — the same hash-bearing path+query
+                                # already used to build `local_rtsp_url`
+                                # above, kept as its own field (rather than
+                                # re-parsed from `_remote_origin_url`) so
+                                # `remote_resolve_inner` doesn't need to
+                                # re-run urlparse on every client connect.
+                                result["_connection_type"] = "REMOTE"
+                                result["_remote_path"] = pq
                                 _LOGGER.debug(
                                     "REMOTE TLS proxy %s: %s → %s",
                                     cam_id[:8],
@@ -458,6 +480,65 @@ async def try_live_connection_inner(
                                 )
                                 result["rtspsUrl"] = cloud_rtsps_url
                                 result["rtspUrl"] = cloud_rtsps_url
+                            else:
+                                # TLS proxy succeeded — result["rtspsUrl"] is
+                                # already the working, TLS-proxied
+                                # local_rtsp_url. Now try to upgrade it to
+                                # the stable-URL, hash-free REMOTE front-door
+                                # (remote_viewing_front_door.py) — same
+                                # go2rtc native-registration-leak rationale
+                                # as the LOCAL front-door below, just for the
+                                # lower-frequency (session-boundary, roughly
+                                # hourly) REMOTE URL churn.
+                                #
+                                # Deliberately its OWN narrow try/except, NOT
+                                # folded into the block above: that block's
+                                # `except Exception` falls back to the RAW,
+                                # un-proxied `cloud_rtsps_url` — appropriate
+                                # when the TLS proxy itself never came up,
+                                # but wrong here, where the proxy already
+                                # works. `start_remote_viewing_front_door`
+                                # already turns its own expected failure mode
+                                # (OSError — no free port) into a clean
+                                # `None` return; this guard is only for a
+                                # genuinely unexpected exception, and it must
+                                # not discard the already-working proxied
+                                # stream for a bug in an unrelated, optional
+                                # feature (bug-hunt finding 2026-07-14: an
+                                # earlier version of this code shared the
+                                # block above's except and could silently
+                                # downgrade a healthy REMOTE session to the
+                                # cert-failing raw URL on any front-door bug).
+                                try:
+                                    remote_front_door_url = await coordinator._start_remote_viewing_front_door(
+                                        cam_id,
+                                        inst=inst,
+                                        audio_param=audio_param,
+                                        # REMOTE's cloud_rtsps_url hardcodes
+                                        # maxSessionDuration=3600 above (not
+                                        # the per-model _mcfg value LOCAL
+                                        # uses) — match it so the published
+                                        # URL's query string stays consistent
+                                        # with what REMOTE has always sent.
+                                        max_session_duration=3600,
+                                    )
+                                except Exception as fd_err:
+                                    _LOGGER.warning(
+                                        "REMOTE viewing front-door start failed for %s "
+                                        "— falling back to the raw TLS-proxied URL "
+                                        "(front-door benefit lost, streaming still "
+                                        "works): %s",
+                                        cam_id[:8],
+                                        fd_err,
+                                    )
+                                    remote_front_door_url = None
+                                if remote_front_door_url is not None:
+                                    result["rtspsUrl"] = remote_front_door_url
+                                    result["rtspUrl"] = remote_front_door_url
+                                # else: front-door bind failed — fall back to
+                                # the already-set hash-bearing local_rtsp_url
+                                # (still TLS-proxied, still works) so
+                                # streaming isn't blocked by this feature.
                     coordinator._live_connections[cam_id] = result
                     coordinator._live_opened_at[cam_id] = time.monotonic()
 
@@ -670,9 +751,36 @@ async def try_live_connection_inner(
                                 cfg.min_total_wait,
                             )
                             await asyncio.sleep(remaining)
-                        # Set URL — encoder should be ready now
-                        result["rtspsUrl"] = local_rtsp_url
-                        result["rtspUrl"] = local_rtsp_url
+                        # Set URL — encoder should be ready now. Prefer the
+                        # credential-free, stable-port viewing front-door
+                        # (viewing_front_door.py) over the raw credentialed
+                        # local_rtsp_url: HA-core's own go2rtc integration
+                        # auto-registers whatever stream_source() returns on
+                        # every WebRTC offer, and can never remove a stale
+                        # entry (dedup is by exact URL string) — a rotating-
+                        # cred, rotating-port URL would leak a new go2rtc
+                        # entry on every credential rotation (as fast as
+                        # ~15s on Gen1 cameras). The front-door reuses this
+                        # same inner TLS proxy port + live session and
+                        # injects the Digest auth itself, so the published
+                        # URL never changes across cred rotations.
+                        front_door_url = await coordinator._start_viewing_front_door(
+                            cam_id,
+                            inst=inst,
+                            audio_param=audio_param,
+                            max_session_duration=_mcfg.max_session_duration,
+                        )
+                        if front_door_url is not None:
+                            result["rtspsUrl"] = front_door_url
+                            result["rtspUrl"] = front_door_url
+                        else:
+                            # Front-door bind failed (extremely rare — e.g.
+                            # no free ports at all) — fall back to the
+                            # credentialed URL so streaming still works,
+                            # just without the credential-free/stable-port
+                            # benefit this session.
+                            result["rtspsUrl"] = local_rtsp_url
+                            result["rtspUrl"] = local_rtsp_url
                         coordinator._live_connections[cam_id] = (
                             result  # update with URL
                         )
@@ -708,41 +816,41 @@ async def try_live_connection_inner(
                         else:
                             cam_entity.stream = None
 
-                    # ── Register with go2rtc (AFTER pre-warm) ────────
+                    # ── Push WebRTC provider discovery (AFTER pre-warm) ──
+                    # go2rtc registration itself is no longer done manually
+                    # here — HA-core's own bundled go2rtc WebRTCProvider
+                    # auto-registers whatever stream_source() returns on
+                    # every WebRTC offer / snapshot request (confirmed by
+                    # reading homeassistant/components/go2rtc/__init__.py's
+                    # _update_stream_source), and since both LOCAL
+                    # (viewing_front_door.py) and REMOTE
+                    # (remote_viewing_front_door.py) now publish a stable,
+                    # never-changing URL per session, native lazy
+                    # registration no longer risks leaking a fresh go2rtc
+                    # entry on every credential rotation the way it would
+                    # have with the old raw credentialed/hash-bearing URLs
+                    # (HA-Core-submission-prep, 2026-07-14). The explicit
+                    # provider-refresh push below is still needed on its own
+                    # merits, independent of registration: without it, HA's
+                    # auto-refresh runs async ~100 ms-4 s later and the
+                    # card's `camera/webrtc/offer` races against it — the
+                    # card sends the offer before the provider was wired, HA's
+                    # `require_webrtc_support` decorator rejects with
+                    # `Camera does not support WebRTC,
+                    # frontend_stream_types={HLS}`, card falls to HLS
+                    # for the whole session. Explicit refresh here
+                    # eliminates the race.
                     if rtsps_url:
-                        await coordinator._register_go2rtc_stream(cam_id, rtsps_url)
-                        # Synchronously push provider discovery on the cam
-                        # entity NOW so `frontend_stream_types` includes
-                        # WEB_RTC by the time the next state-write fires.
-                        # Otherwise HA's auto-refresh runs async ~100 ms-4 s
-                        # later and the card's `camera/webrtc/offer`
-                        # races against it — the card sends the offer
-                        # before the provider was wired, HA's
-                        # `require_webrtc_support` decorator rejects with
-                        # `Camera does not support WebRTC,
-                        # frontend_stream_types={HLS}`, card falls to HLS
-                        # for the whole session. Explicit refresh here
-                        # eliminates the race.
                         cam_ent = coordinator._camera_entities.get(cam_id)
                         if cam_ent is not None:
                             try:
                                 await cam_ent.async_refresh_providers()
                             except Exception as err:
                                 _LOGGER.debug(
-                                    "post-register refresh_providers failed for %s: %s",
+                                    "post-connect refresh_providers failed for %s: %s",
                                     cam_id[:8],
                                     err,
                                 )
-                        # NOTE: An earlier patch (2026-05-27) auto-stopped
-                        # HA's FFmpeg Stream after a successful go2rtc
-                        # register to avoid double-subscription on the
-                        # camera. Reverted: Lovelace cards may still use
-                        # LL-HLS (not WebRTC) — killing the Stream object
-                        # leaves the HLS pipeline dead, producing 404 on
-                        # /api/hls/.../playlist.m3u8?_HLS_part=N requests.
-                        # If double-subscription becomes a recurring
-                        # problem on weak setups, gate this behind an
-                        # opt-in option (e.g. "stream_mode=webrtc_only").
 
                     # ── LOCAL session auto-renewal ───────────────────
                     if type_val == "LOCAL" and local_user and local_pass:
@@ -778,16 +886,13 @@ async def try_live_connection_inner(
                         coordinator._replace_renewal_task(
                             cam_id, coordinator._remote_session_terminator(cam_id, gen)
                         )
-                    # Full coordinator refresh re-evaluates ALL cameras (and
-                    # re-touches their go2rtc registration). On a transparent
-                    # session RENEWAL nothing user-visible changes — the stream
-                    # stays up, this cam was already re-registered per-cam above
-                    # with its rotated creds — so skip the cross-camera refresh
-                    # on renewal (the regular ≤60 s tick confirms state). A fresh
-                    # toggle still refreshes so provider/state propagate now.
-                    # NOTE: the per-cam _register_go2rtc_stream above is NOT
-                    # skipped on renewal — LOCAL creds rotate, so go2rtc needs
-                    # the new rtsps_url or the renewed stream breaks. 2026-05-29.
+                    # Full coordinator refresh re-evaluates ALL cameras. On a
+                    # transparent session RENEWAL nothing user-visible
+                    # changes — the stream stays up, unaffected by the
+                    # rotated creds since the published front-door URL is
+                    # stable — so skip the cross-camera refresh on renewal
+                    # (the regular ≤60s tick confirms state). A fresh toggle
+                    # still refreshes so provider/state propagate now.
                     if not is_renewal:
                         coordinator.hass.async_create_task(
                             coordinator.async_request_refresh()

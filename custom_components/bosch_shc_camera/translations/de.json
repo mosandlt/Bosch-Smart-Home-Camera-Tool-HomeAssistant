@@ -52,7 +52,10 @@
     "abort": {
       "already_configured": "Bereits konfiguriert.",
       "reauth_successful": "Erneute Anmeldung erfolgreich — die Bosch Smart Home Camera Integration wurde mit einem neuen Token aktualisiert. Alle Entitäten, Automationen und Optionen sind erhalten geblieben.",
-      "reconfigure_successful": "Neukonfiguration erfolgreich — die Bosch Smart Home Camera Integration wurde mit einem neuen Token aktualisiert. Alle Entitäten, Automationen und Optionen sind erhalten geblieben."
+      "reconfigure_successful": "Neukonfiguration erfolgreich — die Bosch Smart Home Camera Integration wurde mit einem neuen Token aktualisiert. Alle Entitäten, Automationen und Optionen sind erhalten geblieben.",
+      "missing_credentials": "Es ist keine Bosch SingleKey ID Anwendungsanmeldeinformation registriert. Home Assistant neu starten und erneut versuchen — falls dies weiterhin auftritt, bitte ein Issue melden.",
+      "missing_configuration": "Die Bosch Smart Home Camera Integration ist nicht korrekt für OAuth eingerichtet. Home Assistant neu starten und erneut versuchen — falls dies weiterhin auftritt, bitte ein Issue melden.",
+      "oauth_implementation_unavailable": "Die gewählte Anmeldemethode ist nicht mehr verfügbar. Bitte von vorne beginnen."
     }
   },
   "options": {
@@ -941,6 +944,10 @@
           "install_failed": "Die Installationsanfrage konnte nicht abgeschlossen werden — die Kamera aktualisiert sich möglicherweise bereits, oder die Bosch-Cloud hat die Anfrage abgelehnt. Details siehe Firmware-Entität der Kamera, oder später erneut versuchen."
         }
       }
+    },
+    "smb_unavailable": {
+      "title": "Bosch Kamera — SMB/NAS-Paket nicht installiert",
+      "description": "**{features}** ist für ein SMB/NAS-Netzwerklaufwerk konfiguriert, aber das optionale Python-Paket `smbprotocol` ist nicht installiert — Uploads/Aufnahmen auf die Freigabe sind daher deaktiviert.\n\nDieses Paket wird normalerweise automatisch aus den Anforderungen der Integration installiert — starte Home Assistant einmal neu. Falls die Installation weiterhin fehlschlägt (z. B. bei einer nicht unterstützten OS-/CPU-Architektur), stelle das Speicherziel stattdessen in den Integrationsoptionen auf **Lokal** oder **FTP** um."
     }
   },
   "system_health": {

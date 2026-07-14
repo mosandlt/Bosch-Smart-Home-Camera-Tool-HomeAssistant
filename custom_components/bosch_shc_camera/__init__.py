@@ -50,6 +50,11 @@ def _is_safe_bosch_url(url: str) -> bool:
     )
 
 
+from bosch_shc_camera_client.auth_utils import async_digest_request
+from homeassistant.components.application_credentials import (
+    ClientCredential,
+    async_import_client_credential,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
@@ -66,7 +71,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from . import recorder as nvr_recorder
-from .auth_utils import async_digest_request
 from .camera_list import fetch_camera_list
 from .camera_status import poll_statuses
 from .cloud_ssl import (
@@ -92,14 +96,14 @@ from .frigate_endpoint import (
 )
 from .go2rtc_client import (
     ensure_go2rtc_schemes_fresh,
-    register_go2rtc_stream,
     unregister_go2rtc_stream,
 )
 from .live_connection import try_live_connection_inner
 from .lock_utils import get_or_create_lock
 from .rcp import async_update_rcp_data
-from .rcp import (
-    get_cached_rcp_session as get_cached_rcp_session,  # re-export: mypy --no-implicit-reexport
+from .remote_viewing_front_door import (
+    start_remote_viewing_front_door,
+    stop_remote_viewing_front_door,
 )
 from .services import _register_services
 from .session_renewal import (
@@ -125,6 +129,8 @@ from .slow_tier import (
     _poll_slow_tier_endpoints,
 )
 from .smb import (
+    smb_available,
+    smb_dependent_features,
     sync_smb_cleanup,
 )
 from .smb import (
@@ -156,6 +162,10 @@ from .tls_proxy_wiring import (
     stop_tls_proxy_wiring,
 )
 from .token_auth import TokenAuthCoordinatorMixin
+from .viewing_front_door import (
+    start_viewing_front_door,
+    stop_viewing_front_door,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -820,24 +830,6 @@ class BoschCameraCoordinator(
         self._stream_locks: CacheFieldView[asyncio.Lock] = CacheFieldView(
             self._sessions, "stream_lock"
         )
-        # _go2rtc_reregister_locks / _go2rtc_reregister_pending: coalesce
-        # concurrent go2rtc re-registrations for the same camera, fired from
-        # _refresh_local_creds_from_heartbeat on every heartbeat PUT (Gen1:
-        # every 15s). Without this, a slow go2rtc PUT /api/streams response
-        # could still be in flight when the next heartbeat rotates creds
-        # again, spawning a second overlapping registration for the same
-        # stream name. Only the newest URL is ever kept pending — a call
-        # that finds a registration already in flight for this cam_id just
-        # stashes its URL and returns; the in-flight call re-runs with the
-        # freshest pending URL before releasing the lock, so no cred update
-        # is silently lost.
-        # Session-State-Facade Slice 4: CacheFieldView over self._sessions
-        # (see session_state.py) — same lock-identity-preserving migration
-        # as _snapshot_fetch_locks/_stream_locks above.
-        self._go2rtc_reregister_locks: CacheFieldView[asyncio.Lock] = CacheFieldView(
-            self._sessions, "go2rtc_reregister_lock"
-        )
-        self._go2rtc_reregister_pending: dict[str, str] = {}
         # Short-lived cache for async_fetch_fresh_event_snapshot.
         # After an FCM push, async_update_listeners() wakes all HA consumers
         # simultaneously; each calls async_image() → async_fetch_fresh_event_snapshot.
@@ -934,6 +926,10 @@ class BoschCameraCoordinator(
         self._last_smb_cleanup: float = float(
             "-inf"
         )  # float('-inf') → runs on first tick
+        # True once the "smbprotocol not installed" Repairs issue's WARNING
+        # log line has fired — avoids re-logging every coordinator tick while
+        # the issue stays open. Reset to False once the issue clears.
+        self._smb_unavailable_logged: bool = False
         # Token refresh failure tracking — alert once, not every 80s
         self._token_alert_sent: bool = False  # True after first alert sent
         self._token_fail_count: int = 0  # consecutive refresh failures
@@ -1119,6 +1115,18 @@ class BoschCameraCoordinator(
         # FFmpeg can't handle RTSPS + Digest auth with self-signed certs.
         # The proxy accepts plain TCP and forwards to camera over TLS.
         self._tls_proxy_ports: dict[str, int] = {}  # cam_id → local port
+        # asyncio.Server objects backing each proxy (tls_proxy.py is
+        # asyncio-native — no module-level socket state). Coordinator-owned
+        # so unload can close them deterministically per config entry.
+        self._tls_proxy_servers: dict[str, asyncio.base_events.Server] = {}
+        # Set right before the defensive `stop_all_proxies` sweep in
+        # `_async_cancel_coordinator_tasks` (mirrors `_go2rtc_teardown_done`)
+        # so a straggler `start_tls_proxy_wiring` call racing that sweep
+        # (a queued task, a manual switch/service call landing in the gap
+        # between per-cam teardown and platform unload) can't start a fresh
+        # proxy that `stop_all_proxies`'s already-taken snapshot will never
+        # see — orphaning it past config-entry unload.
+        self._tls_proxy_teardown_done = False
         # ── Frigate / external-recorder persistent RTSP front-doors ───────────
         # Per-camera always-on credential-free RTSP endpoint (frigate_endpoint.py).
         # Owned per-camera by the High/Low BoschFrigate*Switch (RestoreEntity);
@@ -1130,6 +1138,26 @@ class BoschCameraCoordinator(
         self._frigate_sticky_port: dict[
             str, int
         ] = {}  # cam_id → stable front-door port
+        # ── Main-viewing-path credential-free RTSP front-door ──────────────
+        # Always-reused (not opt-in like Frigate's) counterpart to the
+        # Frigate front-door above, published via stream_source() for LOCAL
+        # sessions — see viewing_front_door.py's module docstring for the
+        # go2rtc native-registration-leak rationale.
+        self._viewing_front_door_runner: FrontDoorRunner | None = None
+        self._viewing_sticky_port: dict[
+            str, int
+        ] = {}  # cam_id → stable viewing front-door port
+        # ── REMOTE viewing-path front-door (remote_viewing_front_door.py) ──
+        # Separate runner/sticky-port state from the LOCAL one above —
+        # deliberately NOT shared, see remote_viewing_front_door.py's module
+        # docstring for the cross-type-reuse hazard this avoids (a
+        # REMOTE<->LOCAL transition that bypasses _tear_down_live_stream,
+        # e.g. session_renewal.promote_to_local, could otherwise leave a
+        # shared runner's listener bound with the wrong relay type).
+        self._remote_viewing_front_door_runner: FrontDoorRunner | None = None
+        self._remote_viewing_sticky_port: dict[
+            str, int
+        ] = {}  # cam_id → stable REMOTE viewing front-door port
         # Auto-rebuild backoff: monotonic ts of last _on_tls_proxy_died rebuild.
         # Prevents a rebuild storm when the new proxy also immediately dies
         # because the camera is still flapping (WiFi jitter, brief Bosch FW glitch).
@@ -2144,6 +2172,17 @@ class BoschCameraCoordinator(
                     exc_info=True,
                 )
 
+            # Raise a Repairs issue when an SMB-dependent feature is
+            # configured but the optional smbprotocol package isn't
+            # installed — see _refresh_smb_unavailable_issue docstring.
+            try:
+                self._refresh_smb_unavailable_issue()
+            except Exception:
+                _LOGGER.debug(
+                    "SMB-unavailable Repairs check failed (non-fatal)",
+                    exc_info=True,
+                )
+
             return data
 
         except UpdateFailed:
@@ -2272,6 +2311,56 @@ class BoschCameraCoordinator(
             else:
                 ir.async_delete_issue(self.hass, DOMAIN, issue_id)
                 self._fw_update_alerted.discard(cam_id)
+
+    def _refresh_smb_unavailable_issue(self) -> None:
+        """Create or clear a Repairs issue when smbprotocol is missing but needed.
+
+        Called once per coordinator tick (inside _async_update_data), same
+        idempotent create/delete pattern as _refresh_notifications_disabled_issues
+        and _refresh_firmware_update_issues. `smbprotocol` is an optional
+        runtime dependency (manifest.json requirement that can fail to install
+        on an unsupported OS/architecture) — without this check, a user who
+        enables an SMB-dependent feature on such a system gets no signal at
+        all beyond a DEBUG/WARNING log line buried in the SMB upload/drain
+        code path (sync_smb_upload, recorder._upload_smb), which log-and-skip
+        by design so a transient NAS blip never breaks the coordinator tick.
+        This makes the "package genuinely missing" case loud instead of
+        silently-degraded.
+
+        Not fixable from within HA (installing a Python package isn't
+        something a Repairs fix flow can safely do) — the issue tells the
+        user to try restarting Home Assistant once (in case install merely
+        hadn't completed yet) or to switch the affected feature's storage
+        target to Local/FTP instead.
+        """
+        features = smb_dependent_features(self.options)
+
+        issue_id = "smb_unavailable"
+        if features and not smb_available():
+            features_str = " + ".join(features)
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                is_persistent=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="smb_unavailable",
+                translation_placeholders={"features": features_str},
+            )
+            if not self._smb_unavailable_logged:
+                self._smb_unavailable_logged = True
+                _LOGGER.warning(
+                    "smbprotocol is not installed, but %s %s configured — SMB "
+                    "upload/recording is disabled until the package is "
+                    "available. Try restarting Home Assistant once, or switch "
+                    "the affected feature to a Local/FTP target.",
+                    features_str,
+                    "is" if len(features) == 1 else "are",
+                )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            self._smb_unavailable_logged = False
 
     async def async_install_firmware(self, cam_id: str) -> None:
         """Install the pending firmware update for `cam_id` right now.
@@ -2822,7 +2911,6 @@ class BoschCameraCoordinator(
         "_rcp_cmd_failures",
         "_quality_preference",
         "_proxy_url_cache",
-        "_go2rtc_reregister_pending",
         "_fresh_snap_cache",
         "_ai_last_call",
         "_last_event_ids",
@@ -2857,9 +2945,12 @@ class BoschCameraCoordinator(
         "_user_token_cache",
         "_hw_version",
         "_tls_proxy_ports",
+        "_tls_proxy_servers",
         "_frigate_high_enabled",
         "_frigate_low_enabled",
         "_frigate_sticky_port",
+        "_viewing_sticky_port",
+        "_remote_viewing_sticky_port",
         "_tls_proxy_rebuild_last",
         "_stream_error_count",
         "_stream_error_at",
@@ -2956,7 +3047,109 @@ class BoschCameraCoordinator(
         already removed) — never mid-operation, so popping locks with no
         in-flight waiters is safe. See `_PURGE_CAM_DICT_ATTRS` /
         `_PURGE_CAM_SET_ATTRS` above for the audited attribute list.
+
+        `_tls_proxy_servers` is popped explicitly, BEFORE the generic loop
+        below (which also lists it, purely so the auto-discovery
+        completeness test in `tests/test_cam_id_purge_completeness.py`
+        confirms it's gone by the time this method returns): unlike every
+        other entry in that list (plain ints/dicts/caches), its value is a
+        live `asyncio.Server` — a bare `.pop()` with the reference
+        discarded would drop it without closing the listening socket,
+        leaking it for the rest of the HA process lifetime. The dict
+        removal itself stays synchronous (so callers/tests see it gone
+        immediately); only the actual socket-close I/O is deferred to a
+        tracked background task.
         """
+        server = self._tls_proxy_servers.pop(cam_id, None)
+        if server is not None:
+
+            async def _close_leftover_proxy() -> None:
+                try:
+                    server.close()
+                    server.close_clients()
+                    await server.wait_closed()
+                except Exception as exc:
+                    _LOGGER.debug(
+                        "TLS proxy for %s: close during camera-removal purge raised — %s",
+                        cam_id[:8],
+                        exc,
+                    )
+
+            t = self.hass.async_create_task(_close_leftover_proxy())
+            self._bg_tasks.add(t)
+            t.add_done_callback(self._bg_tasks.discard)
+
+        # Same rationale as the `_tls_proxy_servers` block above: the
+        # viewing front-door's *listener* lives inside
+        # `_viewing_front_door_runner` (a single shared object across all
+        # cameras), not in `_viewing_sticky_port` (which is just the plain
+        # int port number, safe for the generic pop-loop below). If a
+        # camera is removed while its front-door is still bound, it must be
+        # explicitly stopped here or the listener leaks for the rest of the
+        # HA process lifetime, same as an un-stopped `_tls_proxy_servers`
+        # entry would.
+        if cam_id in self._viewing_sticky_port:
+
+            async def _close_leftover_viewing_front_door() -> None:
+                # Bug-hunt finding: every OTHER mutator of the viewing
+                # front-door state (_start_viewing_front_door via
+                # try_live_connection_inner, _stop_viewing_front_door via
+                # tear_down_live_stream) runs under the per-cam stream lock
+                # — this purge-triggered stop is the sole caller that used
+                # to run unlocked. Without the lock, a concurrent renewal
+                # racing this purge could re-insert a fresh listener +
+                # `_viewing_sticky_port[cam_id]` entry for a camera that was
+                # just confirmed gone from the Bosch cloud account (TOCTOU:
+                # purge synchronously popped `_viewing_sticky_port` above/
+                # below this block, then the concurrent renewal's
+                # `start_viewing_front_door` re-adds it AFTER this stop
+                # already ran) — orphaning a bound socket for the rest of
+                # the HA process lifetime with nothing left to ever purge
+                # it again. Taking the lock here serializes against that
+                # renewal exactly like `tear_down_live_stream` already does.
+                try:
+                    async with self._get_stream_lock(cam_id):
+                        await self._stop_viewing_front_door(cam_id)
+                        # Re-pop defensively: if a renewal was mid-flight
+                        # and re-inserted this entry while we waited for
+                        # the lock, it must not survive a confirmed purge.
+                        self._viewing_sticky_port.pop(cam_id, None)
+                except Exception as exc:
+                    _LOGGER.debug(
+                        "Viewing front-door for %s: stop during camera-removal purge raised — %s",
+                        cam_id[:8],
+                        exc,
+                    )
+
+            t2 = self.hass.async_create_task(_close_leftover_viewing_front_door())
+            self._bg_tasks.add(t2)
+            t2.add_done_callback(self._bg_tasks.discard)
+
+        # Same again for the REMOTE viewing front-door's listener — separate
+        # runner (`_remote_viewing_front_door_runner`), same leak-if-
+        # unstopped / lock-against-a-racing-renewal reasoning as the LOCAL
+        # block immediately above.
+        if cam_id in self._remote_viewing_sticky_port:
+
+            async def _close_leftover_remote_viewing_front_door() -> None:
+                try:
+                    async with self._get_stream_lock(cam_id):
+                        await self._stop_remote_viewing_front_door(cam_id)
+                        self._remote_viewing_sticky_port.pop(cam_id, None)
+                except Exception as exc:
+                    _LOGGER.debug(
+                        "REMOTE viewing front-door for %s: stop during "
+                        "camera-removal purge raised — %s",
+                        cam_id[:8],
+                        exc,
+                    )
+
+            t3 = self.hass.async_create_task(
+                _close_leftover_remote_viewing_front_door()
+            )
+            self._bg_tasks.add(t3)
+            t3.add_done_callback(self._bg_tasks.discard)
+
         for attr_name in self._PURGE_CAM_DICT_ATTRS:
             attr = getattr(self, attr_name)
             attr.pop(cam_id, None)
@@ -3938,7 +4131,7 @@ class BoschCameraCoordinator(
             if not user or not pwd or not urls:
                 return None
             host = urls[0]  # "192.168.x.x:443"
-            from .local_rcp import rcp_read_local_sync
+            from bosch_shc_camera_client.local_rcp import rcp_read_local_sync
 
             return await self.hass.async_add_executor_job(
                 rcp_read_local_sync, host, user, pwd, command, type_
@@ -3949,7 +4142,7 @@ class BoschCameraCoordinator(
                 return None
             # Cloud-Proxy URL form: "proxy-XX.live.cbs.boschsecurity.com:42090/{hash}"
             proxy_with_hash = urls[0]
-            from .local_rcp import rcp_read_remote_sync
+            from bosch_shc_camera_client.local_rcp import rcp_read_remote_sync
 
             return await self.hass.async_add_executor_job(
                 rcp_read_remote_sync, proxy_with_hash, command, type_
@@ -4108,64 +4301,6 @@ class BoschCameraCoordinator(
         """
         await ensure_go2rtc_schemes_fresh(self)
 
-    async def _reregister_go2rtc_stream_coalesced(
-        self, cam_id: str, rtsps_url: str
-    ) -> None:
-        """Coalesce concurrent go2rtc re-registrations for the same camera.
-
-        `_refresh_local_creds_from_heartbeat` schedules this as a background
-        task on every heartbeat PUT (Gen1: every 15s). go2rtc's own
-        `PUT /api/streams` round-trip can occasionally take longer than that
-        (slow HA host, unix-socket + two HTTP endpoints tried in sequence,
-        3s timeout each) — without a guard, a second heartbeat's task could
-        start a parallel registration for the exact same stream name before
-        the first one finishes, and the two PUTs could interleave in
-        go2rtc's in-memory registry.
-
-        Only the newest URL is ever kept pending: a caller that finds a
-        registration already in flight for this cam_id just stores its URL
-        here and returns (mirrors `try_live_connection`'s
-        "already in progress — coalescing into it" pattern) — it does NOT
-        spawn a second call. The in-flight call picks up the freshest
-        pending URL and re-runs once more before releasing the lock, so a
-        cred update that arrives mid-registration is never silently dropped.
-        """
-        self._go2rtc_reregister_pending[cam_id] = rtsps_url
-        lock = get_or_create_lock(self._go2rtc_reregister_locks, cam_id)
-        if lock.locked():
-            _LOGGER.debug(
-                "go2rtc re-register already in progress for %s — "
-                "coalescing latest creds into it",
-                cam_id[:8],
-            )
-            return
-        async with lock:
-            while True:
-                url = self._go2rtc_reregister_pending.pop(cam_id, None)
-                if url is None:
-                    break
-                try:
-                    await self._register_go2rtc_stream(cam_id, url)
-                except Exception as err:
-                    _LOGGER.debug(
-                        "go2rtc re-register for %s failed: %s", cam_id[:8], err
-                    )
-
-    async def _register_go2rtc_stream(self, cam_id: str, rtsps_url: str) -> bool:
-        """Register the Bosch RTSP stream in go2rtc for WebRTC support.
-
-        Thin dispatch to `go2rtc_client.register_go2rtc_stream` — kept as a
-        bound method because it is called from other coordinator-facing
-        modules (live_connection.py, select.py, session_renewal.py) as
-        `coordinator._register_go2rtc_stream(...)` and patched directly in
-        tests via `AsyncMock()` /
-        `BoschCameraCoordinator._register_go2rtc_stream(coord, ...)`
-        unbound-style calls. See `go2rtc_client.py` for the full docstring
-        (endpoint discovery, rtspx rewrite, yaml-persist-warning handling)
-        — unchanged by this move.
-        """
-        return await register_go2rtc_stream(self, cam_id, rtsps_url)
-
     async def _unregister_go2rtc_stream(self, cam_id: str) -> None:
         """Remove the camera stream from go2rtc when the live session ends.
 
@@ -4237,6 +4372,71 @@ class BoschCameraCoordinator(
         full docstring — unchanged by this move.
         """
         await stop_tls_proxy_wiring(self, cam_id)
+
+    async def _start_viewing_front_door(
+        self, cam_id: str, *, inst: int, audio_param: str, max_session_duration: int
+    ) -> str | None:
+        """Start (or reuse) the credential-free front-door for the main viewing path.
+
+        Thin dispatch to `viewing_front_door.start_viewing_front_door` — kept
+        as a bound method because it is called from other coordinator-facing
+        modules (live_connection.py) as
+        `coordinator._start_viewing_front_door(...)` and patched directly in
+        tests via `AsyncMock()` /
+        `BoschCameraCoordinator._start_viewing_front_door(coord, ...)`
+        unbound-style calls. See `viewing_front_door.py` for the full
+        docstring — unchanged by this move.
+        """
+        return await start_viewing_front_door(
+            self,
+            cam_id,
+            inst=inst,
+            audio_param=audio_param,
+            max_session_duration=max_session_duration,
+        )
+
+    async def _stop_viewing_front_door(self, cam_id: str) -> None:
+        """Stop the credential-free front-door for the main viewing path.
+
+        Thin dispatch to `viewing_front_door.stop_viewing_front_door` — kept
+        as a bound method because it is called from other coordinator-facing
+        modules (stream_lifecycle.py) as
+        `coordinator._stop_viewing_front_door(cam_id)` and patched directly
+        in tests via `AsyncMock()` /
+        `BoschCameraCoordinator._stop_viewing_front_door(coord, ...)`
+        unbound-style calls. See `viewing_front_door.py` for the full
+        docstring — unchanged by this move.
+        """
+        await stop_viewing_front_door(self, cam_id)
+
+    async def _start_remote_viewing_front_door(
+        self, cam_id: str, *, inst: int, audio_param: str, max_session_duration: int
+    ) -> str | None:
+        """Start (or reuse) the stable-URL front-door for the REMOTE viewing path.
+
+        Thin dispatch to
+        `remote_viewing_front_door.start_remote_viewing_front_door` — kept as
+        a bound method for the same call-site/test-patching reasons as
+        `_start_viewing_front_door` above. See `remote_viewing_front_door.py`
+        for the full docstring.
+        """
+        return await start_remote_viewing_front_door(
+            self,
+            cam_id,
+            inst=inst,
+            audio_param=audio_param,
+            max_session_duration=max_session_duration,
+        )
+
+    async def _stop_remote_viewing_front_door(self, cam_id: str) -> None:
+        """Stop the stable-URL front-door for the REMOTE viewing path.
+
+        Thin dispatch to
+        `remote_viewing_front_door.stop_remote_viewing_front_door` — kept as
+        a bound method for the same call-site/test-patching reasons as
+        `_stop_viewing_front_door` above.
+        """
+        await stop_remote_viewing_front_door(self, cam_id)
 
     async def _auto_renew_local_session(self, cam_id: str, generation: int) -> None:
         """Keep LOCAL RTSP session alive via heartbeats + periodic full renewal.
@@ -4771,6 +4971,24 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     # the config entry is in setup_retry (e.g. token expired).
     # Without this, the Lovelace card shows "action not found" errors.
     _register_services(hass)
+
+    # Auto-import Bosch's fixed public OAuth2 client (identical in every
+    # Android APK, not a per-user secret) as the default application
+    # credential, so a fresh setup needs zero manual Settings →
+    # Application Credentials step — same pattern as overkiz/vicare/
+    # ondilo_ico. See application_credentials.py's module docstring for the
+    # full rationale. Idempotent (async_import_client_credential no-ops if
+    # already imported), so safe to call on every async_setup (e.g. reload).
+    # Local import (not top-level): CLIENT_ID/CLIENT_SECRET live in
+    # config_flow.py, which itself imports DEFAULT_OPTIONS/DOMAIN from this
+    # module — a top-level import here would be circular at module load time.
+    from .config_flow import CLIENT_ID, CLIENT_SECRET
+
+    await async_import_client_credential(
+        hass,
+        DOMAIN,
+        ClientCredential(CLIENT_ID, CLIENT_SECRET, name="Bosch SingleKey ID"),
+    )
 
     # Serve the bundled card JS files via HA's static path handler.
     # cache_headers=False → no-store so browsers always revalidate.
@@ -6009,6 +6227,26 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     stop_frigate = getattr(coord, "async_stop_frigate_endpoints", None)
     if stop_frigate is not None:
         stop_frigate()  # self-guarded — never raises
+    # Stop all main-viewing-path front-doors (viewing_front_door.py) —
+    # same rationale as the Frigate front-doors above, separate runner.
+    viewing_runner = getattr(coord, "_viewing_front_door_runner", None)
+    if viewing_runner is not None:
+        try:
+            viewing_runner.stop_all()
+        except Exception as err:
+            _LOGGER.debug("viewing front-door stop_all on unload raised: %s", err)
+        coord._viewing_front_door_runner = None
+    # Same for the REMOTE viewing-path front-door (remote_viewing_front_door.py)
+    # — separate runner, same unload rationale.
+    remote_viewing_runner = getattr(coord, "_remote_viewing_front_door_runner", None)
+    if remote_viewing_runner is not None:
+        try:
+            remote_viewing_runner.stop_all()
+        except Exception as err:
+            _LOGGER.debug(
+                "REMOTE viewing front-door stop_all on unload raised: %s", err
+            )
+        coord._remote_viewing_front_door_runner = None
     # Close the shared go2rtc-API session (Work Package 1,
     # stream-perf-stability-refactor) — opened lazily on first
     # register/unregister/consumer-count call. Distinct from the
@@ -6032,10 +6270,21 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     # async_unload_entry's later async_unload_platforms) raises instead of
     # lazily minting a session nothing will ever close again.
     coord._go2rtc_teardown_done = True
-    # Stop all TLS proxies (closes server sockets, terminates threads).
+    # Mark BEFORE the sweep below for the same reason as
+    # _go2rtc_teardown_done just above: a straggler start_tls_proxy_wiring
+    # call racing this point (e.g. a queued task) must refuse to start a
+    # fresh proxy that stop_all_proxies's already-taken snapshot can never
+    # see, rather than silently surviving past config-entry unload.
+    coord._tls_proxy_teardown_done = True
+    # Stop all TLS proxies (closes asyncio.Server objects).
     # Idempotent — _tear_down_live_stream already stopped per-cam proxies,
-    # this catches anything left in the port_cache (defensive).
-    stop_all_proxies(coord._tls_proxy_ports)
+    # this catches anything left in the server_cache (defensive).
+    # `getattr(..., {})` keeps minimal SimpleNamespace test fixtures
+    # (predating this attribute) working unchanged, matching the pattern
+    # used throughout this function.
+    await stop_all_proxies(
+        coord._tls_proxy_ports, getattr(coord, "_tls_proxy_servers", {})
+    )
     # Remove the stream-worker log listener so the handler doesn't outlive
     # the coordinator and keep a reference to a dead object.
     listener = getattr(coord, "_stream_log_listener", None)

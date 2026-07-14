@@ -52,7 +52,10 @@
     "abort": {
       "already_configured": "Ya está configurado.",
       "reauth_successful": "Reautenticación correcta — la integración Bosch Smart Home Camera se ha actualizado con un nuevo token. Se conservan todas las entidades, automatizaciones y opciones.",
-      "reconfigure_successful": "Reconfiguración correcta — la integración Bosch Smart Home Camera se ha actualizado con un nuevo token. Se conservan todas las entidades, automatizaciones y opciones."
+      "reconfigure_successful": "Reconfiguración correcta — la integración Bosch Smart Home Camera se ha actualizado con un nuevo token. Se conservan todas las entidades, automatizaciones y opciones.",
+      "missing_credentials": "No hay ninguna credencial de aplicación de Bosch SingleKey ID registrada. Reinicie Home Assistant e inténtelo de nuevo — si esto sigue ocurriendo, informe de un problema.",
+      "missing_configuration": "La integración Bosch Smart Home Camera no está configurada correctamente para OAuth. Reinicie Home Assistant e inténtelo de nuevo — si esto sigue ocurriendo, informe de un problema.",
+      "oauth_implementation_unavailable": "El método de inicio de sesión seleccionado ya no está disponible. Vuelva a empezar."
     }
   },
   "options": {
@@ -923,6 +926,10 @@
     "doubled_prefix_entity_ids_migrated": {
       "title": "Bosch Camera — IDs de entidad renombrados",
       "description": "**{count}** ID(s) de entidad de cámara Bosch tenían un prefijo duplicado `bosch_NAME_bosch_NAME_` (error en v11.0.0–v12.2.1) y han sido renombrados a su forma correcta.\n\nEjemplos: {examples}\n\n**Es necesario actualizar todas las automatizaciones, scripts, escenas y paneles de Lovelace que hagan referencia a los IDs anteriores.** Home Assistant no reescribe automáticamente los archivos YAML ni las tarjetas de Lovelace cuando cambian los IDs de entidad. El historial y las estadísticas se migran automáticamente.\n\nConsultar las notas de versión v12.3.0 para el mapeo completo."
+    },
+    "smb_unavailable": {
+      "title": "Bosch Camera — Paquete SMB/NAS no instalado",
+      "description": "**{features}** está configurado para usar un recurso compartido de red SMB/NAS, pero el paquete Python opcional `smbprotocol` no está instalado, por lo que las subidas/grabaciones al recurso compartido están deshabilitadas.\n\nEste paquete normalmente se instala automáticamente a partir de los requisitos de la integración — intenta reiniciar Home Assistant una vez. Si sigue sin instalarse (por ejemplo, una arquitectura de SO/CPU no compatible), cambia el destino de almacenamiento a **Local** o **FTP** en las opciones de la integración."
     }
   },
   "system_health": {

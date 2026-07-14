@@ -1062,7 +1062,6 @@ def _stub_coord_platform(gen2: bool = True):
         async_start_fcm_push=AsyncMock(),
         async_update_listeners=lambda: None,
         try_live_connection=AsyncMock(return_value={"rtspsUrl": "rtsps://new"}),
-        _register_go2rtc_stream=AsyncMock(),
     )
     return coord
 

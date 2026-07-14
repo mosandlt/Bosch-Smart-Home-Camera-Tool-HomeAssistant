@@ -26,6 +26,43 @@ def auto_enable_custom_integrations(enable_custom_integrations):
     yield
 
 
+@pytest.fixture(autouse=True)
+def auto_stub_application_credentials_import():
+    """Stub async_import_client_credential for every test.
+
+    Both __init__.py's async_setup() AND config_flow.py's
+    BoschCameraConfigFlow.async_step_user() call the real
+    homeassistant.components.application_credentials.async_import_client_credential
+    (application_credentials port — see those modules' docstrings; the
+    config_flow.py call site is load-bearing, not redundant: HA-core's
+    _load_integration does NOT run a fresh install's own async_setup()
+    before the config flow starts, so the credential import has to also
+    happen from inside the flow itself, or first-time auto_login would abort
+    with missing_credentials — found by the THREE_PER_ISSUE_PER_CHANGE
+    bug-hunt during this port). That function requires the real
+    application_credentials integration to have run its own async_setup
+    first (it raises ValueError otherwise) — most unit tests here build a
+    bare MagicMock `hass` without a real HA core instance, so the unpatched
+    call would fail every one of them. Tests that specifically want to
+    assert the import call happened (tests/test_init.py
+    TestAsyncSetup::test_async_setup_imports_default_client_credential,
+    tests/test_config_flow.py's TestAsyncStepUserShowsMenu import-related
+    tests) apply their own inner patch on top of this one and inspect that
+    instead.
+    """
+    with (
+        patch(
+            "custom_components.bosch_shc_camera.async_import_client_credential",
+            new=AsyncMock(),
+        ),
+        patch(
+            "custom_components.bosch_shc_camera.config_flow.async_import_client_credential",
+            new=AsyncMock(),
+        ),
+    ):
+        yield
+
+
 @pytest.fixture
 def mock_config_entry() -> MockConfigEntry:
     """Mock config entry with valid bearer + refresh tokens."""

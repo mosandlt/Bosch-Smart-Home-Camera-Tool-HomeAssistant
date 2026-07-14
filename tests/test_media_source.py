@@ -654,6 +654,62 @@ class TestEnabledSources:
         assert len(sources) == 1
         assert sources[0][0].kind == "L"
 
+    def test_smb_hidden_when_smbprotocol_not_installed(self, tmp_path: Path):
+        """Regression: `smbprotocol` is an optional runtime dependency (can fail
+        to install on an unsupported OS/CPU architecture). Without gating on
+        smb_available(), a configured-but-unavailable SMB source used to be
+        listed here and only crash with an uncaught ImportError the moment it
+        was actually browsed/opened deep inside _SmbBackend. Now the source
+        simply doesn't appear — __init__.py's _refresh_smb_unavailable_issue
+        surfaces the real cause via a Repairs issue instead."""
+        from custom_components.bosch_shc_camera import media_source as ms
+
+        hass = self._build_hass(
+            [
+                self._entry(
+                    options={
+                        "download_path": str(tmp_path),
+                        "enable_smb_upload": True,
+                        "smb_server": "192.168.1.1",
+                        "smb_share": "FRITZ.NAS",
+                        "smb_username": "user",
+                        "smb_password": "pass",
+                    }
+                )
+            ]
+        )
+        with patch.object(ms, "smb_available", return_value=False):
+            sources = _enabled_sources(hass)
+        kinds = {s.kind for s, _ in sources}
+        assert "S" not in kinds, (
+            "SMB backend must not appear when smbprotocol is missing"
+        )
+        assert "L" in kinds, "Local backend must still appear (unaffected)"
+
+    def test_smb_shown_when_smbprotocol_installed(self, tmp_path: Path):
+        """Sanity counterpart: smb_available()=True (the normal case) still
+        shows the SMB source exactly as before this gate was added."""
+        from custom_components.bosch_shc_camera import media_source as ms
+
+        hass = self._build_hass(
+            [
+                self._entry(
+                    options={
+                        "download_path": str(tmp_path),
+                        "enable_smb_upload": True,
+                        "smb_server": "192.168.1.1",
+                        "smb_share": "FRITZ.NAS",
+                        "smb_username": "user",
+                        "smb_password": "pass",
+                    }
+                )
+            ]
+        )
+        with patch.object(ms, "smb_available", return_value=True):
+            sources = _enabled_sources(hass)
+        kinds = {s.kind for s, _ in sources}
+        assert kinds == {"L", "S"}
+
 
 class TestEnabledSourcesNoRuntimeData:
     def test_entry_without_runtime_data_skipped(self):

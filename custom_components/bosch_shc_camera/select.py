@@ -163,17 +163,21 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
     async def async_select_option(self, option: str) -> None:
         """Handle quality selection — update coordinator preference and reconnect stream."""
         self.coordinator.set_quality(self._cam_id, option)
-        # If stream is currently active, reconnect with new quality
+        # If stream is currently active, reconnect with new quality.
+        # go2rtc re-registration is no longer done explicitly here —
+        # try_live_connection's own try_live_connection_inner already pushes
+        # WebRTC provider discovery after a successful (re)connect, and
+        # HA-core's bundled go2rtc provider auto-registers whatever
+        # stream_source() returns on the next WebRTC offer (both LOCAL and
+        # REMOTE front-doors publish a stable URL, so this stays a cheap,
+        # dedup-friendly no-op re-add rather than a fresh leaked entry).
         live = self.coordinator.data.get(self._cam_id, {}).get("live", {})
         if live.get("rtspsUrl") or live.get("proxyUrl"):
             try:
                 new_live = await self.coordinator.try_live_connection(self._cam_id)
                 if new_live:
                     self.coordinator.data[self._cam_id]["live"] = new_live
-                    await self.coordinator._register_go2rtc_stream(
-                        self._cam_id, new_live.get("rtspsUrl", "")
-                    )
-            except Exception:  # noqa: S110 # best-effort go2rtc re-registration on live-URL change, failure non-actionable
+            except Exception:  # noqa: S110 # best-effort live-URL reconnect on quality change, failure non-actionable
                 pass
         self.async_write_ha_state()
 

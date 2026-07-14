@@ -1,26 +1,45 @@
-"""go2rtc stream (de)registration + go2rtc WebRTC-provider scheme refresh.
+"""go2rtc stream unregistration + go2rtc WebRTC-provider scheme refresh.
 
-Phase 3 step 3 of the coordinator-rewrite split (see
-docs/stream-perf-stability-refactor-plan.md). Pure structural move: the
-bodies below are the former `BoschCameraCoordinator` methods
-`_ensure_go2rtc_schemes_fresh`, `_register_go2rtc_stream` and
-`_unregister_go2rtc_stream`, unchanged except for `self` → `coordinator`.
-`BoschCameraCoordinator` keeps a thin same-named method for each that
-delegates here — these functions are exercised extensively from other
-coordinator-facing modules (live_connection.py, select.py,
-session_renewal.py, stream_lifecycle.py) and from the test suite both as
-bound methods and via `BoschCameraCoordinator._method(coord, ...)`
+Originally Phase 3 step 3 of the coordinator-rewrite split (see
+docs/stream-perf-stability-refactor-plan.md): the bodies below were the
+former `BoschCameraCoordinator` methods `_ensure_go2rtc_schemes_fresh`,
+`_register_go2rtc_stream` and `_unregister_go2rtc_stream`, moved out
+unchanged except for `self` → `coordinator`.
+
+`register_go2rtc_stream` (the manual `PUT /api/streams` call) was removed
+2026-07-14 (HA-Core-submission-prep): HA-core's own bundled go2rtc
+integration already auto-registers whatever `camera.stream_source()`
+returns on every WebRTC offer (`homeassistant/components/go2rtc/__init__.py`
+`WebRTCProvider._update_stream_source`), so a manual PUT duplicated
+Core-owned protocol logic reviewers push back on. This only became safe
+once both LOCAL (`viewing_front_door.py`) and REMOTE
+(`remote_viewing_front_door.py`) started publishing a STABLE URL per
+session — go2rtc's registration is purely additive with no removal API, so
+registering a URL that changed on every credential rotation (as fast as
+~15s on Gen1 LOCAL sessions) would have leaked a fresh dead entry every
+time; native auto-registration only became viable once that churn was
+fixed at the source. `unregister_go2rtc_stream` (`DELETE /api/streams`) is
+KEPT — there is no native equivalent at all (go2rtc's registration API has
+no removal call, confirmed by reading `python-go2rtc-client`'s actual
+surface), so this remains the only way to keep the registry tidy on a
+genuine session teardown (as opposed to the URL churn problem the removed
+PUT call no longer needs to guard against).
+
+`ensure_go2rtc_schemes_fresh` is unrelated to registration — a separate
+workaround for an HA-core provider-initialization race — and unaffected.
+
+`BoschCameraCoordinator` keeps a thin same-named method for each remaining
+function that delegates here — exercised extensively from other
+coordinator-facing modules (stream_lifecycle.py) and from the test suite
+both as bound methods and via `BoschCameraCoordinator._method(coord, ...)`
 unbound-style calls plus direct `AsyncMock()` attribute patching — all of
-which requires the method to keep existing on the class. Keeping the thin
-dispatch avoids rewriting that entire call surface for a purely structural
-move.
+which requires the method to keep existing on the class.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -95,22 +114,20 @@ async def _get_go2rtc_session(
 
 @asynccontextmanager
 async def _go2rtc_client_session(
-    coordinator: BoschCameraCoordinator, connector: aiohttp.BaseConnector | None
+    coordinator: BoschCameraCoordinator,
 ) -> AsyncIterator[aiohttp.ClientSession]:
-    """Yield a session for one localhost go2rtc API call.
+    """Yield the shared, pooled session for one localhost go2rtc API call.
 
-    The common case (`connector is None`, plain TCP to 127.0.0.1) reuses the
-    shared, pooled `_get_go2rtc_session()` session and does NOT close it on
-    exit. A Unix-socket connector can't be attached to that shared TCP
-    session, so the (rare) socket path still gets its own private,
-    short-lived session — closed when this context manager exits, same as
-    the previous per-call `aiohttp.ClientSession(connector=...)`.
+    Used to take an optional `connector` param for the removed
+    `register_go2rtc_stream`'s Unix-socket-first-try path (HA-Core-
+    submission-prep, 2026-07-14 — see the module docstring) — the only
+    caller that ever needed a private, non-pooled session. The two
+    remaining callers (`unregister_go2rtc_stream`,
+    `stream_lifecycle.go2rtc_consumer_count`) always want the shared,
+    plain-TCP-to-127.0.0.1 session, so the connector branch was dead code
+    once removal landed; simplified accordingly rather than left unreachable.
     """
-    if connector is not None:
-        async with aiohttp.ClientSession(connector=connector) as session:
-            yield session
-    else:
-        yield await _get_go2rtc_session(coordinator)
+    yield await _get_go2rtc_session(coordinator)
 
 
 async def ensure_go2rtc_schemes_fresh(coordinator: BoschCameraCoordinator) -> None:
@@ -196,143 +213,6 @@ async def ensure_go2rtc_schemes_fresh(coordinator: BoschCameraCoordinator) -> No
                 )
 
 
-async def register_go2rtc_stream(
-    coordinator: BoschCameraCoordinator, cam_id: str, rtsps_url: str
-) -> bool:
-    """Register the Bosch RTSP stream in go2rtc for WebRTC support.
-
-    go2rtc is HA's built-in RTSP→WebRTC bridge. Once registered, HA's
-    camera card can display live 30fps H.264 + AAC audio via WebRTC
-    (~2s latency) or HLS (~12s latency) directly from go2rtc.
-
-    The stream is registered under the camera entity unique_id so HA's
-    stream component can find it automatically.
-
-    go2rtc API endpoints (tried in order):
-    1. Unix socket (HA 2024+): /config/go2rtc.sock or /homeassistant/go2rtc.sock
-    2. Port 11984 (HA 2024+ internal)
-    3. Port 1984 (legacy / standalone go2rtc)
-    """
-    # HA's bundled go2rtc provider (homeassistant/components/go2rtc/__init__.py
-    # line ~380) registers streams lazily under `camera.entity_id` when a
-    # WebRTC offer or snapshot request arrives. To have our pre-registration
-    # actually benefit HA's WebRTC / snapshot paths, we must use the same
-    # name — otherwise we create a parallel stream go2rtc knows about but
-    # HA never looks at. Falls back to the legacy internal name when the
-    # camera entity hasn't been added yet (first registration race).
-    cam_entity = coordinator._camera_entities.get(cam_id)
-    if cam_entity is not None and cam_entity.entity_id:
-        stream_name = cam_entity.entity_id
-    else:
-        stream_name = f"bosch_shc_cam_{cam_id.lower()}"
-    go2rtc_src = rtsps_url
-
-    # The rtspx:// scheme skips TLS verification in go2rtc. Bosch Cloud's
-    # RTSPS proxy returns a cert for *.residential.connect.boschsecurity.com
-    # but serves session URLs on proxy-NN.live.cbs.boschsecurity.com hosts —
-    # go2rtc's native Go RTSP client refuses the mismatch with `tls: failed
-    # to verify certificate`. Without the rewrite, registration succeeds but
-    # the first consumer request 500s and HA never consumes from go2rtc.
-    # Default behavior since v10.3.23 (was Beta-gated v10.3.21–v10.3.22).
-    # See: https://github.com/AlexxIT/go2rtc/blob/master/internal/rtsp/README.md
-    if go2rtc_src.startswith("rtsps://"):
-        go2rtc_src = "rtspx://" + go2rtc_src[len("rtsps://") :]
-
-    # Try multiple go2rtc API endpoints
-    endpoints = [
-        "http://localhost:11984/api/streams",
-        "http://localhost:1984/api/streams",
-    ]
-    # Also try Unix socket if available
-    config_dir = coordinator.hass.config.config_dir
-    sock_path: str | None = None
-    for _candidate in (
-        os.path.join(config_dir, "go2rtc.sock") if config_dir else None,
-        "/homeassistant/go2rtc.sock",
-    ):
-        if _candidate and os.path.exists(_candidate):
-            sock_path = _candidate
-            break
-
-    for url in endpoints:
-        try:
-            async with asyncio.timeout(3):
-                connector = None
-                if sock_path and url == endpoints[0]:
-                    # Try Unix socket first
-                    try:
-                        connector = aiohttp.UnixConnector(path=sock_path)
-                    except (OSError, RuntimeError) as err:
-                        _LOGGER.debug(
-                            "go2rtc Unix socket connector unavailable: %s", err
-                        )
-                async with _go2rtc_client_session(coordinator, connector) as s:
-                    put_url = url if not connector else "http://localhost/api/streams"
-                    resp = await s.put(
-                        put_url,
-                        params={"src": go2rtc_src, "name": stream_name},
-                    )
-                    body = await resp.text()
-                    # go2rtc bundled with HA writes the stream to its in-memory
-                    # registry via URL query params, THEN tries to persist to
-                    # /config/go2rtc.yaml. The YAML-persist step fails on HA
-                    # (minimal go2rtc.yaml not meant for writes) and returns
-                    # HTTP 400 with body `yaml: ... did not find expected key`
-                    # — but the in-memory stream is registered. Verified live
-                    # (go2rtc 1.9.12) + documented at
-                    # https://github.com/AlexxIT/go2rtc/issues/1386.
-                    is_yaml_persist_warning = resp.status == 400 and body.startswith(
-                        "yaml:"
-                    )
-                    if resp.status in (200, 201, 204) or is_yaml_persist_warning:
-                        # Verify by probing /api/streams?src=<name> — returns
-                        # producers/consumers JSON when registered, 404 when
-                        # not. This catches any silent mis-registration.
-                        verified = False
-                        try:
-                            async with s.get(
-                                put_url, params={"src": stream_name}
-                            ) as check_resp:
-                                if check_resp.status == 200:
-                                    verified = True
-                        except (TimeoutError, aiohttp.ClientError):
-                            pass
-                        if verified:
-                            _LOGGER.info(
-                                "go2rtc stream '%s' registered via %s (HTTP %d%s)",
-                                stream_name,
-                                "unix socket" if connector else url,
-                                resp.status,
-                                ", yaml-persist warn ignored"
-                                if is_yaml_persist_warning
-                                else "",
-                            )
-                            return True  # verified-registered success
-                        _LOGGER.debug(
-                            "go2rtc PUT returned %d via %s but verify GET missed '%s' — trying next endpoint",
-                            resp.status,
-                            "unix socket" if connector else url,
-                            stream_name,
-                        )
-                        continue
-                    _LOGGER.debug(
-                        "go2rtc stream '%s' → HTTP %d via %s (body: %s)",
-                        stream_name,
-                        resp.status,
-                        "unix socket" if connector else url,
-                        body[:80],
-                    )
-                    continue
-        except (TimeoutError, aiohttp.ClientError, OSError, RuntimeError):
-            # RuntimeError: the shared go2rtc session can be mid-close/
-            # closed if this call raced coordinator teardown — treat
-            # exactly like an unreachable endpoint, try the next one.
-            continue
-
-    _LOGGER.debug("go2rtc API not reachable on any endpoint — using TLS proxy + HLS")
-    return False
-
-
 async def unregister_go2rtc_stream(
     coordinator: BoschCameraCoordinator, cam_id: str
 ) -> None:
@@ -347,8 +227,9 @@ async def unregister_go2rtc_stream(
         stream_name = cam_entity.entity_id
     else:
         stream_name = f"bosch_shc_cam_{cam_id.lower()}"
-    # Try same endpoints as register_go2rtc_stream — DELETE must reach the
-    # port where the stream was actually registered (11984 on HA 2024+, 1984 legacy).
+    # Try both ports the stream could have been registered on (11984 on HA
+    # 2024+, 1984 legacy) — DELETE must reach whichever one HA-core's own
+    # go2rtc provider actually used to auto-register it.
     endpoints = [
         "http://localhost:11984/api/streams",
         "http://localhost:1984/api/streams",
@@ -356,7 +237,7 @@ async def unregister_go2rtc_stream(
     for url in endpoints:
         try:
             async with asyncio.timeout(3):
-                async with _go2rtc_client_session(coordinator, None) as s:
+                async with _go2rtc_client_session(coordinator) as s:
                     resp = await s.delete(url, params={"name": stream_name})
                     # Only a real removal (200/204) ends the loop. aiohttp
                     # does not raise on 4xx/5xx, so an unconditional break

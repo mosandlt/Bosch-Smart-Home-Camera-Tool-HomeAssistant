@@ -1,25 +1,29 @@
 """Coordinator-level wiring around the low-level TCP->TLS proxy in `tls_proxy.py`.
 
 Phase 3 step 4 of the coordinator-rewrite split (see
-docs/stream-perf-stability-refactor-plan.md). Pure structural move: the
-bodies below are the former `BoschCameraCoordinator` methods
-`_start_tls_proxy`, `_on_tls_proxy_died`, `_create_ssl_ctx` and
-`_stop_tls_proxy`, unchanged except for `self` -> `coordinator`.
-`BoschCameraCoordinator` keeps a thin same-named method for each that
-delegates here — these are exercised extensively from other
+docs/stream-perf-stability-refactor-plan.md). The bodies below are the
+former `BoschCameraCoordinator` methods `_start_tls_proxy`,
+`_on_tls_proxy_died`, `_create_ssl_ctx` and `_stop_tls_proxy`, `self` ->
+`coordinator`. `BoschCameraCoordinator` keeps a thin same-named method for
+each that delegates here — these are exercised extensively from other
 coordinator-facing modules (live_connection.py, stream_lifecycle.py,
 switch.py) as bound `coordinator._foo(...)` calls and from the test suite
 both as bound methods and via `BoschCameraCoordinator._method(coord, ...)`
 unbound-style calls plus direct `AsyncMock()` attribute patching — all of
 which requires the method to keep existing on the class. Keeping the thin
-dispatch avoids rewriting that entire call surface for a purely structural
-move.
+dispatch avoids rewriting that entire call surface.
 
 Named `tls_proxy_wiring.py` (not `tls_proxy.py`) to avoid colliding with
 the pre-existing `tls_proxy.py` module, which holds the actual low-level
 TCP<->TLS proxy server implementation (`start_tls_proxy`/`stop_tls_proxy`
 free functions, no coordinator dependency) that the functions below call
 into.
+
+`tls_proxy.py` is now asyncio-native (`asyncio.start_server`, no daemon
+threads) — the proxy's `on_proxy_died` callback fires from a coroutine
+already running on the HA event loop, so the old thread->event-loop
+`call_soon_threadsafe` hop is no longer needed; the callback below just
+schedules the rebuild task directly.
 """
 
 from __future__ import annotations
@@ -54,38 +58,46 @@ async def start_tls_proxy_wiring(
     is_renewal: bool = False,
 ) -> int:
     """Start a local TCP→TLS proxy for a LOCAL RTSPS stream."""
-    # Lazy-init SSL context in executor (blocking I/O, must not run in event loop)
+    if getattr(coordinator, "_tls_proxy_teardown_done", False):
+        # _async_cancel_coordinator_tasks already took its stop_all_proxies
+        # snapshot (unload/HA-stop) — a straggler call racing that point
+        # must not start a fresh proxy nothing will ever see or close
+        # again. Mirrors the go2rtc-session RuntimeError-on-teardown guard
+        # in go2rtc_client.py.
+        raise RuntimeError("TLS proxy unavailable — coordinator is shutting down")
+    # Lazy-init SSL context in executor (blocking I/O, must not run in event loop).
+    # Two cameras' first LOCAL start can race this check-then-act across the
+    # await (both see None, both schedule an executor job) — harmless in
+    # itself (both contexts are equivalent default CERT_NONE contexts), but
+    # re-checking after the await makes the cache genuinely single-flight
+    # instead of silently discarding one of the two built contexts.
     if coordinator._tls_ssl_ctx is None:
-        coordinator._tls_ssl_ctx = await coordinator.hass.async_add_executor_job(
+        new_ctx = await coordinator.hass.async_add_executor_job(
             coordinator._create_ssl_ctx
         )
+        if coordinator._tls_ssl_ctx is None:
+            coordinator._tls_ssl_ctx = new_ctx
     ssl_ctx: ssl.SSLContext = coordinator._tls_ssl_ctx
 
-    # Hop from the proxy daemon thread back to the HA event loop and
-    # schedule the rebuild coroutine. The circuit breaker fires on
-    # transient WiFi jitter; without this signal the stream stays dead
-    # until the next heartbeat (up to 3600s for Indoor Gen2).
+    # The circuit breaker fires on transient WiFi jitter; without this
+    # signal the stream stays dead until the next heartbeat (up to 3600s
+    # for Indoor Gen2). Runs on the event loop already (tls_proxy.py is
+    # asyncio-native) — just schedule the rebuild coroutine as a tracked
+    # background task.
     def _died_callback() -> None:
-        def _on_loop() -> None:
-            if coordinator.hass.is_stopping:
-                return
-            t = coordinator.hass.async_create_task(
-                coordinator._on_tls_proxy_died(cam_id)
-            )
-            coordinator._bg_tasks.add(t)
-            t.add_done_callback(coordinator._bg_tasks.discard)
+        if coordinator.hass.is_stopping:
+            return
+        t = coordinator.hass.async_create_task(coordinator._on_tls_proxy_died(cam_id))
+        coordinator._bg_tasks.add(t)
+        t.add_done_callback(coordinator._bg_tasks.discard)
 
-        try:
-            coordinator.hass.loop.call_soon_threadsafe(_on_loop)
-        except RuntimeError:
-            pass  # event loop closed (HA shutting down)
-
-    return start_tls_proxy(
+    return await start_tls_proxy(
         ssl_ctx,
         cam_id,
         cam_host,
         cam_port,
         coordinator._tls_proxy_ports,
+        coordinator._tls_proxy_servers,
         is_renewal=is_renewal,
         on_proxy_died=_died_callback,
     )
@@ -172,4 +184,6 @@ async def stop_tls_proxy_wiring(
     coordinator: BoschCameraCoordinator, cam_id: str
 ) -> None:
     """Stop the TLS proxy for a camera."""
-    stop_tls_proxy(cam_id, coordinator._tls_proxy_ports)
+    await stop_tls_proxy(
+        cam_id, coordinator._tls_proxy_ports, coordinator._tls_proxy_servers
+    )

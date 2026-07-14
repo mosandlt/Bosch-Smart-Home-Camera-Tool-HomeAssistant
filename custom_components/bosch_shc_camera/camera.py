@@ -31,6 +31,7 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+from bosch_shc_camera_client.auth_utils import async_digest_request
 from homeassistant.components.camera import (
     Camera,
     CameraEntityFeature,
@@ -48,7 +49,6 @@ from . import (
     _is_safe_bosch_url,
     get_options,
 )
-from .auth_utils import async_digest_request
 from .cloud_ssl import async_get_bosch_cloud_session
 from .const import (
     AUTO_PLAY_DEFAULT_VALUES,

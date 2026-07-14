@@ -52,6 +52,27 @@ SRC = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
+@pytest.fixture(autouse=True)
+def _mock_local_rcp_clientsession():
+    """The Gen2 LOCAL-RCP fallback paths (async_cloud_set_privacy_mode /
+    async_cloud_set_light_component) build a real aiohttp session via HA's
+    `async_get_clientsession(coordinator.hass, verify_ssl=False)` before
+    calling into the (now-external) rcp_local_write_privacy/front_light
+    library functions. Real `async_get_clientsession` needs a real
+    HomeAssistant instance for its connector pool -- the SimpleNamespace/
+    MagicMock coordinator.hass stubs used throughout this file aren't one.
+    Since every test that exercises this path also mocks
+    rcp_local_write_privacy/front_light wholesale (the session object is
+    just passed through, never actually used for a real request), a bare
+    MagicMock stand-in is sufficient here.
+    """
+    with patch(
+        "custom_components.bosch_shc_camera.shc.async_get_clientsession",
+        return_value=MagicMock(),
+    ):
+        yield
+
+
 def _mock_response(status: int, json_data=None, text: str = ""):
     """Build a mock aiohttp response async-context-manager."""
     resp = MagicMock()
@@ -1406,7 +1427,7 @@ class TestCloudSetPrivacyModeBranches:
                 "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
             ),
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_privacy",
+                "bosch_shc_camera_client.rcp.rcp_local_write_privacy",
                 AsyncMock(return_value=True),
             ),
         ):
@@ -1454,7 +1475,7 @@ class TestGen2RcpFallbackFailureDebugLog:
                 "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
             ),
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_privacy",
+                "bosch_shc_camera_client.rcp.rcp_local_write_privacy",
                 AsyncMock(return_value=False),
             ) as mock_rcp,
         ):
@@ -1500,7 +1521,7 @@ class TestGen2RcpFallbackFailureDebugLog:
                 "custom_components.bosch_shc_camera.shc.shc_ready", return_value=False
             ),
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_privacy",
+                "bosch_shc_camera_client.rcp.rcp_local_write_privacy",
                 AsyncMock(return_value=False),
             ) as mock_rcp,
         ):
@@ -2798,7 +2819,7 @@ class TestGen2LocalRcpLightFallback:
         mock_write = AsyncMock(return_value=True)
         with (
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                "bosch_shc_camera_client.rcp.rcp_local_write_front_light",
                 mock_write,
             ),
             patch(
@@ -2830,7 +2851,7 @@ class TestGen2LocalRcpLightFallback:
         mock_write = AsyncMock(return_value=True)
         with (
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                "bosch_shc_camera_client.rcp.rcp_local_write_front_light",
                 mock_write,
             ),
             patch(
@@ -2858,7 +2879,7 @@ class TestGen2LocalRcpLightFallback:
         mock_write = AsyncMock(return_value=True)
         with (
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                "bosch_shc_camera_client.rcp.rcp_local_write_front_light",
                 mock_write,
             ),
             patch(
@@ -2887,7 +2908,7 @@ class TestGen2LocalRcpLightFallback:
         mock_write = AsyncMock(return_value=True)
         with (
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                "bosch_shc_camera_client.rcp.rcp_local_write_front_light",
                 mock_write,
             ),
             patch(
@@ -2917,7 +2938,7 @@ class TestGen2LocalRcpLightFallback:
         mock_write = AsyncMock(return_value=True)
         with (
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                "bosch_shc_camera_client.rcp.rcp_local_write_front_light",
                 mock_write,
             ),
             patch(
@@ -2940,7 +2961,7 @@ class TestGen2LocalRcpLightFallback:
         mock_write = AsyncMock(return_value=False)
         with (
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                "bosch_shc_camera_client.rcp.rcp_local_write_front_light",
                 mock_write,
             ),
             patch(
@@ -2970,7 +2991,7 @@ class TestGen2LocalRcpLightFallback:
         mock_write = AsyncMock()
         with (
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                "bosch_shc_camera_client.rcp.rcp_local_write_front_light",
                 mock_write,
             ),
             patch(
@@ -2997,7 +3018,7 @@ class TestGen2LocalRcpLightFallback:
         mock_write = AsyncMock(return_value=True)
         with (
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                "bosch_shc_camera_client.rcp.rcp_local_write_front_light",
                 mock_write,
             ),
             patch(
@@ -3024,7 +3045,7 @@ class TestGen2LocalRcpLightFallback:
         mock_write = AsyncMock(return_value=True)
         with (
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                "bosch_shc_camera_client.rcp.rcp_local_write_front_light",
                 mock_write,
             ),
             patch(
@@ -3050,7 +3071,7 @@ class TestGen2LocalRcpLightFallback:
         mock_write = AsyncMock(return_value=True)
         with (
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_front_light",
+                "bosch_shc_camera_client.rcp.rcp_local_write_front_light",
                 mock_write,
             ),
             patch(
@@ -3768,7 +3789,7 @@ class TestLocalWriteTimestamp:
         coord.async_update_listeners = MagicMock()
         with (
             patch(
-                "custom_components.bosch_shc_camera.rcp.rcp_local_write_privacy",
+                "bosch_shc_camera_client.rcp.rcp_local_write_privacy",
                 new=AsyncMock(return_value=True),
             ),
             patch.object(shc, "_is_gen2", return_value=True),

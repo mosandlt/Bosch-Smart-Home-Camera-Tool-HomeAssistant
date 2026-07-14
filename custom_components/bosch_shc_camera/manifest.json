@@ -6,6 +6,7 @@
   ],
   "config_flow": true,
   "dependencies": [
+    "application_credentials",
     "my",
     "http",
     "media_source"
@@ -19,10 +20,11 @@
   ],
   "quality_scale": "platinum",
   "requirements": [
+    "bosch-shc-camera-client>=0.5.4,<0.6",
     "defusedxml>=0.7.1",
     "firebase-messaging>=0.4.5,<1",
     "smbprotocol>=1.10.0,<2"
   ],
   "single_config_entry": true,
-  "version": "15.0.2"
+  "version": "16.0.0"
 }

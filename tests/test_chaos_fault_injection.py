@@ -11,20 +11,21 @@ Seven focus areas, one class (or a small group of classes) each:
      fetch, per-camera status/events, RCP slow-tier.
   2. TLS-proxy / RTSP hard connection resets (tls_proxy.py).
   3. go2rtc unreachable while a camera is actively streaming
-     (go2rtc_client.py, WP1 teardown-race RuntimeError path).
+     (go2rtc_client.py `unregister_go2rtc_stream`, WP1 teardown-race
+     RuntimeError path — the manual `register_go2rtc_stream` PUT this area
+     used to also cover was removed 2026-07-14, HA-Core-submission-prep,
+     superseded by HA-core's own native go2rtc auto-registration).
   4. Token-refresh cascade failures (token_auth.py) — escalation to
      ConfigEntryAuthFailed, never hangs, self-heals.
   5. Camera-removal race (`_purge_cam_id` vs. an in-flight fetch for the
      same cam_id).
   6. SMB/FTP NVR-upload unreachable (smb.py `socket.setdefaulttimeout`
      hardening, no executor-thread hang).
-  7. Concurrent-heartbeat chaos (`_reregister_go2rtc_stream_coalesced`) —
-     no lock deadlock, no lost creds under a burst of failing heartbeats.
 
 Test-double conventions (deliberately copied, not reinvented, from
 tests/test_init.py's SimpleNamespace-based coordinator stubs —
 `_make_coord_sprint_kb`/`_url_session`/`_make_resp_sprint_kb`/
-`_make_coord_token_refresh`/`TestReregisterGo2rtcStreamCoalesced`): a
+`_make_coord_token_refresh`): a
 coordinator is a `SimpleNamespace` (or, where the real class body is
 needed — `_purge_cam_id`'s audited attribute tuples — a
 `BoschCameraCoordinator.__new__(BoschCameraCoordinator)` bare instance)
@@ -38,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import random
 import socket
+import ssl
 import struct
 import sys
 import threading
@@ -52,16 +54,33 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.bosch_shc_camera import BoschCameraCoordinator
+from custom_components.bosch_shc_camera import tls_proxy as _tls_proxy_mod
 from custom_components.bosch_shc_camera.go2rtc_client import (
-    register_go2rtc_stream,
     unregister_go2rtc_stream,
 )
-from custom_components.bosch_shc_camera.lock_utils import get_or_create_lock
 from custom_components.bosch_shc_camera.session_state import (
     BoolFieldView,
     CacheFieldView,
 )
 from custom_components.bosch_shc_camera.tls_proxy import start_tls_proxy, stop_tls_proxy
+
+# Captured BEFORE any patch.object() call below replaces
+# `asyncio.open_connection` — `_tls_proxy_mod.asyncio` is the same module
+# object as the global `asyncio`, so patching it patches this name too.
+# Calling the (unpatched) real function through this reference avoids
+# infinite recursion. (Same pattern as tests/test_tls_proxy.py.)
+_real_open_connection = asyncio.open_connection
+
+
+async def _no_tls_open_connection(
+    host: str, port: int, *, ssl: ssl.SSLContext | None = None, **kwargs: object
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Stand-in for `asyncio.open_connection` that skips the TLS handshake —
+    these chaos tests have no real cert for the fake-camera loopback
+    server, and the proxy's own TLS-connect logic isn't what's under test
+    here (that's `ssl`'s job); only the relay/circuit-breaker behavior is."""
+    return await _real_open_connection(host, port)
+
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 CAM_B = "22222222-2222-2222-2222-222222222222"
@@ -469,29 +488,6 @@ class TestCloudApiFaultInjectionPerCameraChaos:
         )
 
 
-class _FakeTlsSocket:
-    """Minimal SSL-wrap stand-in: satisfies `.version()`/`.cipher()` (used
-    for a debug log line) and delegates all real I/O to the raw socket."""
-
-    def __init__(self, raw: socket.socket) -> None:
-        self._raw = raw
-
-    def version(self) -> str:
-        return "TLSv1.3"
-
-    def cipher(self):
-        return ("FAKE-CIPHER-CHAOS",)
-
-    def __getattr__(self, name):
-        return getattr(self._raw, name)
-
-
-def _fake_tls_ctx():
-    ctx = MagicMock()
-    ctx.wrap_socket = lambda raw, **kwargs: _FakeTlsSocket(raw)
-    return ctx
-
-
 @pytest.fixture(autouse=True)
 def _enable_loopback_sockets_for_chaos(
     socket_enabled: None,
@@ -545,76 +541,82 @@ async def _streaming_fake_camera(reader, writer):
 class TestTlsProxyHardResetRecovery:
     """A mid-relay hard socket reset (ECONNRESET via `SO_LINGER(1,0)`, not
     a clean FIN) on one client connection must not kill the proxy's
-    accept-loop daemon thread — the NEXT client connection to the same
-    proxy port must still be served normally. This is the TLS-proxy
-    equivalent of "self-heals on the next tick"."""
+    asyncio accept loop — the NEXT client connection to the same proxy
+    port must still be served normally. This is the TLS-proxy equivalent
+    of "self-heals on the next tick".
+
+    tls_proxy.py is asyncio-native (`asyncio.start_server`, no daemon
+    threads) as of the 2026-07 HA-Core-submission rewrite — these tests
+    drive the real proxy the same way tests/test_tls_proxy.py does:
+    `asyncio.open_connection` is patched to skip the TLS handshake (no
+    real cert for the fake-camera loopback server), while INBOUND client
+    connections use raw, unpatched `socket.create_connection` so the
+    hard-reset (SO_LINGER) is a genuine OS-level RST hitting the proxy's
+    accepted connection, not anything mocked."""
 
     async def test_hard_reset_mid_relay_does_not_kill_accept_loop(self):
         cam_id = "CHAOS-TLS-RESET-A"
-        threads_before = frozenset(threading.enumerate())
 
         srv = await asyncio.start_server(_streaming_fake_camera, "127.0.0.1", 0)
         cam_port = srv.sockets[0].getsockname()[1]
         port_cache: dict[str, int] = {}
+        server_cache: dict[str, asyncio.base_events.Server] = {}
+        ctx = ssl.create_default_context()
         try:
-            port = start_tls_proxy(
-                _fake_tls_ctx(), cam_id, "127.0.0.1", cam_port, port_cache
-            )
-            await asyncio.sleep(0.05)
+            with patch.object(
+                _tls_proxy_mod.asyncio, "open_connection", _no_tls_open_connection
+            ):
+                port = await start_tls_proxy(
+                    ctx, cam_id, "127.0.0.1", cam_port, port_cache, server_cache
+                )
+                await asyncio.sleep(0.05)
 
-            # Client 1: connect, send a partial RTSP DESCRIBE, then hard
-            # reset instead of a clean close — SO_LINGER(on=1, linger=0)
-            # forces the OS to send RST instead of FIN on close().
-            c1 = socket.create_connection(("127.0.0.1", port), timeout=2)
-            c1.sendall(b"DESCRIBE rtsp://cam/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n")
-            await asyncio.sleep(0.1)
-            c1.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
-            c1.close()
+                # Client 1: connect, send a partial RTSP DESCRIBE, then hard
+                # reset instead of a clean close — SO_LINGER(on=1, linger=0)
+                # forces the OS to send RST instead of FIN on close().
+                c1 = socket.create_connection(("127.0.0.1", port), timeout=2)
+                c1.sendall(b"DESCRIBE rtsp://cam/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n")
+                await asyncio.sleep(0.1)
+                c1.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+                )
+                c1.close()
 
-            # Give the proxy's pipe threads a moment to observe the reset
-            # and run their (already-tested-elsewhere) close-once cleanup.
-            await asyncio.sleep(0.3)
+                # Give the proxy's relay coroutines a moment to observe the
+                # reset and run their (already-tested-elsewhere) close-once
+                # cleanup.
+                await asyncio.sleep(0.3)
 
-            # Client 2: a FRESH connection to the SAME proxy port. The
-            # accept loop must still be alive and serve it normally —
-            # proof the hard reset didn't crash/wedge the daemon thread.
-            c2 = socket.create_connection(("127.0.0.1", port), timeout=2)
-            c2.settimeout(2.0)
-            c2.sendall(b"PING_AFTER_RESET\r\n\r\n")
-            # `_fake_camera` is an asyncio coroutine — it only runs when
-            # THIS test's own event loop gets to spin. A subsequent
-            # blocking `socket.recv()` call would otherwise stall that
-            # very loop (single-threaded: recv() blocks the OS thread the
-            # loop runs on), so the echo could never be scheduled. Yield
-            # first so the camera-side echo (and the proxy's relay of it)
-            # has already happened and is sitting in the client's kernel
-            # receive buffer before we block on it.
-            await asyncio.sleep(0.3)
-            reply = b""
-            try:
-                reply = c2.recv(65536)
-            except TimeoutError:
-                pass
-            c2.close()
-            assert b"PING_AFTER_RESET" in reply, (
-                "TLS proxy accept loop must still serve a fresh connection "
-                "after a prior client hard-reset mid-relay"
-            )
+                # Client 2: a FRESH connection to the SAME proxy port. The
+                # accept loop must still be alive and serve it normally —
+                # proof the hard reset didn't crash/wedge it.
+                c2 = socket.create_connection(("127.0.0.1", port), timeout=2)
+                c2.settimeout(2.0)
+                c2.sendall(b"PING_AFTER_RESET\r\n\r\n")
+                # `_streaming_fake_camera` and the proxy's own relay
+                # coroutines only run when THIS test's own event loop gets
+                # to spin. A subsequent blocking `socket.recv()` call would
+                # otherwise stall that very loop (single-threaded: recv()
+                # blocks the OS thread the loop runs on), so the echo could
+                # never be scheduled. Yield first so the camera-side echo
+                # (and the proxy's relay of it) has already happened and is
+                # sitting in the client's kernel receive buffer before we
+                # block on it.
+                await asyncio.sleep(0.3)
+                reply = b""
+                try:
+                    reply = c2.recv(65536)
+                except TimeoutError:
+                    pass
+                c2.close()
+                assert b"PING_AFTER_RESET" in reply, (
+                    "TLS proxy accept loop must still serve a fresh connection "
+                    "after a prior client hard-reset mid-relay"
+                )
         finally:
             srv.close()
             await srv.wait_closed()
-            stop_tls_proxy(cam_id, port_cache)
-            deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline:
-                alive = [
-                    t
-                    for t in (frozenset(threading.enumerate()) - threads_before)
-                    if t.is_alive() and not t.name.startswith("waitpid-")
-                ]
-                if not alive:
-                    break
-                for t in alive:
-                    t.join(timeout=0.2)
+            await stop_tls_proxy(cam_id, port_cache, server_cache)
 
     async def test_burst_of_hard_resets_does_not_trip_connect_circuit_breaker(self):
         """The circuit breaker (`_MAX_BURST`=5 in `_BURST_WINDOW`=30s) only
@@ -623,71 +625,69 @@ class TestTlsProxyHardResetRecovery:
         succeeded) must never trip it. Proxy must remain usable after 5+
         consecutive client resets."""
         cam_id = "CHAOS-TLS-RESET-BURST"
-        threads_before = frozenset(threading.enumerate())
 
         srv = await asyncio.start_server(_streaming_fake_camera, "127.0.0.1", 0)
         cam_port = srv.sockets[0].getsockname()[1]
         port_cache: dict[str, int] = {}
+        server_cache: dict[str, asyncio.base_events.Server] = {}
+        ctx = ssl.create_default_context()
         try:
-            port = start_tls_proxy(
-                _fake_tls_ctx(), cam_id, "127.0.0.1", cam_port, port_cache
-            )
-            await asyncio.sleep(0.05)
-
-            for _ in range(6):  # > _MAX_BURST=5
-                c = socket.create_connection(("127.0.0.1", port), timeout=2)
-                c.sendall(b"SETUP rtsp://cam/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n")
-                await asyncio.sleep(0.05)
-                c.setsockopt(
-                    socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+            with patch.object(
+                _tls_proxy_mod.asyncio, "open_connection", _no_tls_open_connection
+            ):
+                port = await start_tls_proxy(
+                    ctx, cam_id, "127.0.0.1", cam_port, port_cache, server_cache
                 )
-                c.close()
                 await asyncio.sleep(0.05)
 
-            # Proxy must still be alive — a real connect-failure burst
-            # would have closed `srv`; these were all successful connects
-            # that then reset mid-relay, which the breaker never counts.
-            c_final = socket.create_connection(("127.0.0.1", port), timeout=2)
-            c_final.settimeout(2.0)
-            c_final.sendall(b"STILL_ALIVE\r\n\r\n")
-            # See the sibling test above for why this yield is required
-            # before a blocking recv(): `_fake_camera` is asyncio-based and
-            # needs this test's own event loop to actually spin.
-            await asyncio.sleep(0.3)
-            reply = b""
-            try:
-                reply = c_final.recv(65536)
-            except TimeoutError:
-                pass
-            c_final.close()
-            assert b"STILL_ALIVE" in reply, (
-                "a burst of client-side relay resets must not trip the "
-                "connect-failure circuit breaker"
-            )
+                for _ in range(6):  # > _MAX_BURST=5
+                    c = socket.create_connection(("127.0.0.1", port), timeout=2)
+                    c.sendall(b"SETUP rtsp://cam/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n")
+                    await asyncio.sleep(0.05)
+                    c.setsockopt(
+                        socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+                    )
+                    c.close()
+                    await asyncio.sleep(0.05)
+
+                # Proxy must still be alive — a real connect-failure burst
+                # would have closed `srv`; these were all successful connects
+                # that then reset mid-relay, which the breaker never counts.
+                c_final = socket.create_connection(("127.0.0.1", port), timeout=2)
+                c_final.settimeout(2.0)
+                c_final.sendall(b"STILL_ALIVE\r\n\r\n")
+                # See the sibling test above for why this yield is required
+                # before a blocking recv(): the fake camera and the proxy's
+                # relay are asyncio-based and need this test's own event
+                # loop to actually spin.
+                await asyncio.sleep(0.3)
+                reply = b""
+                try:
+                    reply = c_final.recv(65536)
+                except TimeoutError:
+                    pass
+                c_final.close()
+                assert b"STILL_ALIVE" in reply, (
+                    "a burst of client-side relay resets must not trip the "
+                    "connect-failure circuit breaker"
+                )
         finally:
             srv.close()
             await srv.wait_closed()
-            stop_tls_proxy(cam_id, port_cache)
-            deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline:
-                alive = [
-                    t
-                    for t in (frozenset(threading.enumerate()) - threads_before)
-                    if t.is_alive() and not t.name.startswith("waitpid-")
-                ]
-                if not alive:
-                    break
-                for t in alive:
-                    t.join(timeout=0.2)
+            await stop_tls_proxy(cam_id, port_cache, server_cache)
 
 
 class TestGo2rtcUnreachableWhileStreaming:
-    """`register_go2rtc_stream`/`unregister_go2rtc_stream` (go2rtc_client.py)
-    must swallow every realistic fault (timeout, connection error, generic
-    OSError, and the WP1 teardown-race RuntimeError from
-    `_get_go2rtc_session` — commit 4303e78) and fall back to
-    False/None-return instead of raising, exactly as the docstring
-    promises ("treat like an unreachable endpoint, try the next one")."""
+    """`unregister_go2rtc_stream` (go2rtc_client.py) must swallow every
+    realistic fault (timeout, connection error, generic OSError, and the
+    WP1 teardown-race RuntimeError from `_get_go2rtc_session` — commit
+    4303e78) and fall back to a clean None-return instead of raising,
+    exactly as the docstring promises ("treat like an unreachable
+    endpoint, try the next one"). The manual `register_go2rtc_stream` PUT
+    this class used to also cover was removed 2026-07-14
+    (HA-Core-submission-prep) — superseded by HA-core's own bundled
+    go2rtc provider, which auto-registers whatever `stream_source()`
+    returns on every WebRTC offer."""
 
     def _coord(self, *, session=None, teardown_done: bool = False) -> SimpleNamespace:
         return SimpleNamespace(
@@ -696,49 +696,6 @@ class TestGo2rtcUnreachableWhileStreaming:
             _go2rtc_session=session,
             _go2rtc_teardown_done=teardown_done,
         )
-
-    async def test_register_survives_mixed_faults_on_every_endpoint(self):
-        faults = iter([TimeoutError("chaos"), aiohttp.ClientError("chaos: reset")])
-        session = MagicMock()
-        session.closed = False
-
-        def _raise_next(*_a, **_kw):
-            raise next(faults)
-
-        session.put = AsyncMock(side_effect=_raise_next)
-        coord = self._coord(session=session)
-
-        result = await asyncio.wait_for(
-            register_go2rtc_stream(coord, CAM_A, "rtsps://u:p@127.0.0.1:1/rtsp_tunnel"),
-            timeout=5.0,
-        )
-        assert result is False  # both endpoints exhausted, no crash
-
-    async def test_register_survives_oserror(self):
-        session = MagicMock()
-        session.closed = False
-        session.put = AsyncMock(side_effect=OSError("chaos: network unreachable"))
-        coord = self._coord(session=session)
-
-        result = await asyncio.wait_for(
-            register_go2rtc_stream(coord, CAM_A, "rtsps://u:p@127.0.0.1:1/rtsp_tunnel"),
-            timeout=5.0,
-        )
-        assert result is False
-
-    async def test_register_races_teardown_raises_runtimeerror_handled(self):
-        """Commit 4303e78 (WP1 teardown-race fix): a caller racing
-        `_async_cancel_coordinator_tasks` sees `_go2rtc_teardown_done=True`
-        and `_get_go2rtc_session` raises RuntimeError — `register_go2rtc_stream`
-        must catch it on every endpoint attempt and return False cleanly,
-        not propagate."""
-        coord = self._coord(session=None, teardown_done=True)
-
-        result = await asyncio.wait_for(
-            register_go2rtc_stream(coord, CAM_A, "rtsps://u:p@127.0.0.1:1/rtsp_tunnel"),
-            timeout=5.0,
-        )
-        assert result is False
 
     async def test_unregister_survives_mixed_faults(self):
         session = MagicMock()
@@ -937,6 +894,14 @@ def _make_purge_stub() -> BoschCameraCoordinator:
     for attr in BoschCameraCoordinator._PURGE_CAM_SET_ATTRS:
         setattr(coord, attr, set())
     coord._rcp_lan_denied_until = {}
+    # `_tls_proxy_servers` is deliberately NOT in `_PURGE_CAM_DICT_ATTRS`
+    # (its value is a live asyncio.Server, closed explicitly by
+    # `_purge_cam_id` instead of a bare dict.pop) — wire it up separately so
+    # `_purge_cam_id`'s `cam_id in self._tls_proxy_servers` check has an
+    # attribute to read. Left empty: these tests don't exercise an active
+    # TLS proxy, so `_purge_cam_id` never reaches the async-close branch
+    # that would otherwise need `coord.hass`/`coord._bg_tasks` stubbed too.
+    coord._tls_proxy_servers = {}
     # Session-State-Facade Slice 3: `_live_connections`/`_user_intent_streams`
     # are no longer plain dict/set instances (folded into `_sessions`, which
     # the loop above already wired up via `_PURGE_CAM_DICT_ATTRS`) — wire the
@@ -1152,125 +1117,3 @@ class TestSmbFtpUnreachableChaos:
                 ),
                 timeout=2.0,
             )
-
-
-class TestConcurrentHeartbeatChaos:
-    """`_reregister_go2rtc_stream_coalesced` (commit 4b12f35) coalesces
-    concurrent go2rtc re-registrations for the same camera, fired on every
-    heartbeat (Gen1: every 15s). A burst of rapid heartbeats where EVERY
-    registration attempt fails must still: serialize to at most one
-    in-flight `_register_go2rtc_stream` call, release the per-camera lock
-    afterward (no deadlock), and not lose the next (healthy) heartbeat's
-    creds (self-heal)."""
-
-    async def test_many_rapid_failing_heartbeats_no_deadlock_no_lost_creds(self):
-        rng = random.Random(1337)
-        concurrent = 0
-        max_concurrent = 0
-        calls: list[str] = []
-        fault_types = [
-            TimeoutError,
-            aiohttp.ClientError,
-            OSError,
-            RuntimeError,
-            ValueError,
-        ]
-
-        async def flaky_register(cam_id: str, url: str) -> bool:
-            nonlocal concurrent, max_concurrent
-            concurrent += 1
-            max_concurrent = max(max_concurrent, concurrent)
-            calls.append(url)
-            try:
-                await asyncio.sleep(0.01)
-                exc_cls = rng.choice(fault_types)
-                raise exc_cls(f"chaos-{exc_cls.__name__}")
-            finally:
-                concurrent -= 1
-
-        coord = SimpleNamespace(
-            _go2rtc_reregister_locks={},
-            _go2rtc_reregister_pending={},
-            _register_go2rtc_stream=flaky_register,
-        )
-
-        await asyncio.wait_for(
-            asyncio.gather(
-                *[
-                    BoschCameraCoordinator._reregister_go2rtc_stream_coalesced(
-                        coord, CAM_A, f"rtsp://hb{i}@127.0.0.1:1/rtsp_tunnel"
-                    )
-                    for i in range(8)
-                ]
-            ),
-            timeout=8.0,
-        )
-
-        assert max_concurrent == 1, (
-            "coalescing must still serialize registrations even when every "
-            "attempt fails with a different exception type"
-        )
-        lock = get_or_create_lock(coord._go2rtc_reregister_locks, CAM_A)
-        assert not lock.locked(), (
-            "lock must be released after a burst of failing heartbeats"
-        )
-        assert CAM_A not in coord._go2rtc_reregister_pending, (
-            "no stale pending creds left behind after the burst settles"
-        )
-
-        # Self-heal: the NEXT heartbeat (real, healthy creds) right after
-        # the chaos burst must still register normally.
-        healthy_calls: list[str] = []
-
-        async def healthy_register(cam_id: str, url: str) -> bool:
-            healthy_calls.append(url)
-            return True
-
-        coord._register_go2rtc_stream = healthy_register
-        await asyncio.wait_for(
-            BoschCameraCoordinator._reregister_go2rtc_stream_coalesced(
-                coord, CAM_A, "rtsp://healthy@127.0.0.1:1/rtsp_tunnel"
-            ),
-            timeout=3.0,
-        )
-        assert healthy_calls == ["rtsp://healthy@127.0.0.1:1/rtsp_tunnel"]
-
-    async def test_concurrent_heartbeats_different_cameras_locks_stay_isolated(self):
-        """Two different cameras heartbeating and failing at the same
-        moment must not share/interfere with each other's per-camera
-        lock — a stuck lock on CAM_A must never block CAM_B."""
-
-        async def failing_register(cam_id: str, url: str) -> bool:
-            await asyncio.sleep(0.01)
-            raise aiohttp.ClientError(f"chaos: go2rtc unreachable for {cam_id}")
-
-        coord = SimpleNamespace(
-            _go2rtc_reregister_locks={},
-            _go2rtc_reregister_pending={},
-            _register_go2rtc_stream=failing_register,
-        )
-
-        await asyncio.wait_for(
-            asyncio.gather(
-                *[
-                    BoschCameraCoordinator._reregister_go2rtc_stream_coalesced(
-                        coord, CAM_A, "rtsp://a@127.0.0.1:1/rtsp_tunnel"
-                    )
-                    for _ in range(4)
-                ],
-                *[
-                    BoschCameraCoordinator._reregister_go2rtc_stream_coalesced(
-                        coord, CAM_B, "rtsp://b@127.0.0.1:1/rtsp_tunnel"
-                    )
-                    for _ in range(4)
-                ],
-            ),
-            timeout=8.0,
-        )
-
-        lock_a = get_or_create_lock(coord._go2rtc_reregister_locks, CAM_A)
-        lock_b = get_or_create_lock(coord._go2rtc_reregister_locks, CAM_B)
-        assert not lock_a.locked()
-        assert not lock_b.locked()
-        assert CAM_A not in coord._go2rtc_reregister_pending
-        assert CAM_B not in coord._go2rtc_reregister_pending

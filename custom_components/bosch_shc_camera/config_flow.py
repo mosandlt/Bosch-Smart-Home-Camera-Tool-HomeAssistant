@@ -19,6 +19,50 @@ OAuth2 details:
   Client ID:    oss_residential_app
   Redirect URI: https://my.home-assistant.io/redirect/oauth
   Scopes:       email offline_access profile openid
+
+application_credentials:
+  The (CLIENT_ID, CLIENT_SECRET) pair below is Bosch's public OSS client
+  credential — identical in every Android APK, not a per-user secret. It is
+  still routed through HA-core's `application_credentials` platform (see
+  `application_credentials.py`): the default `ClientCredential` is
+  auto-imported via `async_import_client_credential()`, the same pattern
+  `overkiz`/`vicare`/`ondilo_ico` use for a built-in public OAuth client.
+
+  The import is called from BOTH `__init__.py`'s `async_setup()` (so it is
+  present for already-configured installs, reloads, and anything else that
+  touches application_credentials outside a flow) AND
+  `BoschCameraConfigFlow.async_step_user` below (so it is present for a
+  BRAND NEW install too). The second call site is not redundant belt-and-
+  braces — it is load-bearing: HA-core's `_load_integration`
+  (`config_entries.py`) only sets up a fresh config flow's *dependency*
+  domains (here: `application_credentials` itself, via manifest.json) and
+  imports the `config_flow` platform module; it does NOT call this
+  integration's own `async_setup()` before the flow starts (that only
+  happens once a config ENTRY exists, i.e. after OAuth already succeeded
+  once). Relying solely on `__init__.py`'s `async_setup()` would mean a
+  first-time install's `auto_login` step reaches `AbstractOAuth2FlowHandler.
+  async_step_pick_implementation` with STILL zero client credentials
+  registered, which aborts the flow with `missing_credentials`/
+  `missing_configuration` instead of proceeding to OAuth (caught by the
+  THREE_PER_ISSUE_PER_CHANGE bug-hunt during this port — see git history).
+  `async_import_client_credential` is idempotent (no-ops if the credential ID
+  already exists), so calling it from both places is safe.
+
+  This means `BoschCameraConfigFlow.async_step_user` no longer calls
+  `async_register_implementation()` (removed) — HA-core's
+  application_credentials component supplies the single
+  `BoschOAuth2Implementation` implementation via its own provider mechanism
+  (`_async_provide_implementation` -> `application_credentials.py::
+  async_get_auth_implementation`), constructed from the imported
+  `ClientCredential`. The manual copy/paste login fallback (`manual_login`/
+  `manual_paste`/options `relogin_show`/`relogin_paste`) and the hand-rolled
+  token-refresh logic in `token_auth.py` are UNCHANGED — they never went
+  through `OAuth2Session`/`AbstractOAuth2Implementation.async_refresh_token`
+  and still call Keycloak directly via `_do_refresh`/`_exchange_code`, using
+  the same module-level CLIENT_ID/CLIENT_SECRET constants. Existing config
+  entries are unaffected: this integration has never persisted
+  `auth_implementation` in entry data (only `bearer_token`/`refresh_token`),
+  so there is nothing to migrate.
 """
 
 import asyncio
@@ -34,13 +78,17 @@ from urllib.parse import parse_qs, urlencode
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.components.application_credentials import (
+    ClientCredential,
+    async_import_client_credential,
+)
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.config_entry_oauth2_flow import (
     AbstractOAuth2FlowHandler,
     AbstractOAuth2Implementation,
     _encode_jwt,
-    async_register_implementation,
 )
 from homeassistant.helpers.selector import (
     EntitySelector,
@@ -250,6 +298,7 @@ from .const import (
     MOTION_ACTIVE_WINDOW_MAX,
     MOTION_ACTIVE_WINDOW_MIN,
 )
+from .smb import smb_available, smb_dependent_features
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -281,10 +330,26 @@ def _pkce_pair() -> tuple[str, str]:
 
 
 class BoschOAuth2Implementation(AbstractOAuth2Implementation):  # type: ignore[misc]
-    """Bosch Keycloak OAuth2 implementation with PKCE."""
+    """Bosch Keycloak OAuth2 implementation with PKCE.
 
-    def __init__(self, hass: Any) -> None:
+    `client_id`/`client_secret` default to the module-level constants (the
+    fixed public OSS client) so pre-existing direct instantiation (tests,
+    and any future manual construction) keeps working unchanged. In normal
+    operation `application_credentials.py::async_get_auth_implementation`
+    constructs this with the values from the imported `ClientCredential`
+    instead — same defaults today, but lets an admin override them via
+    Settings → Application Credentials without a code change.
+    """
+
+    def __init__(
+        self,
+        hass: Any,
+        client_id: str = CLIENT_ID,
+        client_secret: str = CLIENT_SECRET,
+    ) -> None:
         self.hass = hass
+        self._client_id = client_id
+        self._client_secret = client_secret
         self._last_verifier: str | None = None
 
     @property
@@ -311,7 +376,7 @@ class BoschOAuth2Implementation(AbstractOAuth2Implementation):  # type: ignore[m
             },
         )
         params = {
-            "client_id": CLIENT_ID,
+            "client_id": self._client_id,
             "response_type": "code",
             "scope": SCOPES,
             "redirect_uri": redirect_uri,
@@ -329,8 +394,8 @@ class BoschOAuth2Implementation(AbstractOAuth2Implementation):  # type: ignore[m
         async with session.post(
             f"{KEYCLOAK_BASE}/token",
             data={
-                "client_id": CLIENT_ID,
-                "client_secret": CLIENT_SECRET,
+                "client_id": self._client_id,
+                "client_secret": self._client_secret,
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -351,8 +416,8 @@ class BoschOAuth2Implementation(AbstractOAuth2Implementation):  # type: ignore[m
         async with session.post(
             f"{KEYCLOAK_BASE}/token",
             data={
-                "client_id": CLIENT_ID,
-                "client_secret": CLIENT_SECRET,
+                "client_id": self._client_id,
+                "client_secret": self._client_secret,
                 "grant_type": "refresh_token",
                 "refresh_token": token["refresh_token"],
             },
@@ -519,7 +584,8 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Register the OAuth2 implementation, then let the user pick a login method.
+        """Let the user pick a login method (the OAuth2 implementation itself
+        is supplied by HA-core's application_credentials platform).
 
         Offers a manual copy/paste fallback (mirrors the options-flow relogin
         path) alongside the automatic browser redirect: SingleKey ID's
@@ -528,6 +594,19 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
         tied to this flow's tab) can strand the automatic flow in the wrong
         tab/webview — reported for the HA Companion App and desktop Safari
         alike (Bosch community PM from SebastianHarder, 2026-07-05).
+
+        NOTE: this used to call `async_register_implementation()` here on
+        every flow start. That registered a SECOND, differently-keyed
+        implementation alongside the one now supplied by
+        `application_credentials.py`, which would make
+        `AbstractOAuth2FlowHandler.async_step_pick_implementation` see two
+        implementations instead of one and break its single-implementation
+        auto-pick fast path. Registration itself now happens exclusively via
+        the application_credentials provider — but importing the default
+        CREDENTIAL still has to happen here too (not just in `async_setup()`)
+        — see the module docstring's "application_credentials" section for
+        why a fresh (never-configured) install would otherwise reach
+        `auto_login` with zero credentials registered.
         """
         # Only enforce unique_id uniqueness on fresh setup. Reauth + reconfigure
         # both reuse the existing entry.
@@ -542,9 +621,14 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
             # reloads); this fresh-setup abort never needs to reload anyway.
             self._abort_if_unique_id_configured(reload_on_update=False)
 
-        # Register our OAuth2 implementation (idempotent — safe to call multiple times)
-        async_register_implementation(
-            self.hass, DOMAIN, BoschOAuth2Implementation(self.hass)
+        # Idempotent — see module docstring. Must run here (not only in
+        # __init__.py's async_setup()) so a brand-new install has a
+        # credential registered before async_step_auto_login's
+        # pick_implementation lookup runs.
+        await async_import_client_credential(
+            self.hass,
+            DOMAIN,
+            ClientCredential(CLIENT_ID, CLIENT_SECRET, name="Bosch SingleKey ID"),
         )
 
         return self.async_show_menu(
@@ -842,6 +926,43 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 # options dict.  Bug: without this merge, unedited suggested_value
                 # fields revert to DEFAULT_OPTIONS defaults on every save.
                 merged = {**opts, **user_input}
+
+                # Give the user an immediate (same-request) signal when they
+                # just enabled an SMB-dependent feature (SMB event upload or
+                # Mini-NVR SMB storage) but the optional `smbprotocol`
+                # package isn't installed — otherwise the only feedback was
+                # this same Repairs issue appearing on the *next* coordinator
+                # tick, potentially minutes later and on a different UI
+                # surface (Settings -> Repairs) the user isn't looking at
+                # right after saving. Mirrors __init__.py's
+                # _refresh_smb_unavailable_issue (same issue_id, so the two
+                # checks can never disagree/duplicate — the periodic tick
+                # check keeps it accurate afterward, e.g. once smbprotocol
+                # becomes available after a restart). Non-blocking: does NOT
+                # add to `errors` / prevent the save, since the config is
+                # still valid and will start working on its own once the
+                # package is available. `self.hass` is guarded because HA's
+                # FlowHandler base class defaults it to None until the flow
+                # manager attaches a running instance — always set in
+                # production, but this keeps the method safe for any caller
+                # that exercises async_step_init before that attachment.
+                if self.hass is not None:
+                    smb_features = smb_dependent_features(merged)
+                    if smb_features and not smb_available():
+                        ir.async_create_issue(
+                            self.hass,
+                            DOMAIN,
+                            "smb_unavailable",
+                            is_fixable=False,
+                            is_persistent=False,
+                            severity=ir.IssueSeverity.WARNING,
+                            translation_key="smb_unavailable",
+                            translation_placeholders={
+                                "features": " + ".join(smb_features)
+                            },
+                        )
+                    else:
+                        ir.async_delete_issue(self.hass, DOMAIN, "smb_unavailable")
 
                 if force_relogin:
                     self._pending_options = merged

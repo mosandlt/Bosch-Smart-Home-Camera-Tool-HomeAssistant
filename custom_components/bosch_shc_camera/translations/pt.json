@@ -52,7 +52,10 @@
     "abort": {
       "already_configured": "Já configurado.",
       "reauth_successful": "Re-autenticação bem-sucedida — a integração Bosch Smart Home Camera foi actualizada com um novo token. Todas as entidades, automações e opções estão preservadas.",
-      "reconfigure_successful": "Reconfiguração bem-sucedida — a integração Bosch Smart Home Camera foi actualizada com um novo token. Todas as entidades, automações e opções estão preservadas."
+      "reconfigure_successful": "Reconfiguração bem-sucedida — a integração Bosch Smart Home Camera foi actualizada com um novo token. Todas as entidades, automações e opções estão preservadas.",
+      "missing_credentials": "Nenhuma credencial de aplicação Bosch SingleKey ID está registada. Reinicie o Home Assistant e tente novamente — se isto continuar a acontecer, comunique um problema.",
+      "missing_configuration": "A integração Bosch Smart Home Camera não está configurada correctamente para OAuth. Reinicie o Home Assistant e tente novamente — se isto continuar a acontecer, comunique um problema.",
+      "oauth_implementation_unavailable": "O método de início de sessão selecionado já não está disponível. Comece novamente."
     }
   },
   "options": {
@@ -923,6 +926,10 @@
     "doubled_prefix_entity_ids_migrated": {
       "title": "Bosch Camera — IDs de entidade renomeados",
       "description": "**{count}** ID(s) de entidade de câmara Bosch tinham um prefixo duplicado `bosch_NAME_bosch_NAME_` (bug v11.0.0–v12.2.1) e foram renomeados para a forma correcta.\n\nExemplos: {examples}\n\n**Deve actualizar todas as automações, scripts, cenas e painéis Lovelace que referenciem os IDs antigos.** O Home Assistant não reescreve ficheiros YAML ou cartões Lovelace automaticamente quando os IDs de entidade mudam. O histórico e as estatísticas são migrados automaticamente.\n\nConsulte as notas de lançamento v12.3.0 para o mapeamento completo."
+    },
+    "smb_unavailable": {
+      "title": "Bosch Camera — Pacote SMB/NAS não instalado",
+      "description": "**{features}** está configurado para usar um compartilhamento de rede SMB/NAS, mas o pacote Python opcional `smbprotocol` não está instalado, portanto os envios/gravações para o compartilhamento estão desativados.\n\nEsse pacote normalmente é instalado automaticamente a partir dos requisitos da integração — tente reiniciar o Home Assistant uma vez. Se ainda assim não instalar (por exemplo, uma arquitetura de SO/CPU não suportada), altere o destino de armazenamento para **Local** ou **FTP** nas opções da integração."
     }
   },
   "system_health": {

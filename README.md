@@ -303,16 +303,17 @@ graph LR
     end
     subgraph HA["Home Assistant"]
         Card["Lovelace cards<br/>bosch-camera-card +<br/>bosch-camera-overview-card"]
-        Int["bosch_shc_camera<br/>(integration)"]
+        Int["bosch_shc_camera<br/>(integration, uses<br/>bosch-shc-camera-client library)"]
         Stream["stream component<br/>+ FFmpeg"]
-        G2["bundled go2rtc"]
-        TLS["TLS proxy<br/>(per camera)"]
+        G2["bundled go2rtc<br/>(native auto-registration)"]
+        FD["Viewing front-door<br/>(stable, credential-free URL)"]
+        TLS["TLS proxy (asyncio)<br/>(per camera)"]
     end
     subgraph LAN["Local Network"]
         Cam["Bosch Camera<br/>RTSPS :443"]
     end
     subgraph Cloud["Bosch Cloud"]
-        OAuth["SingleKey ID OAuth"]
+        OAuth["SingleKey ID OAuth<br/>(application_credentials)"]
         API["residential.cbs.<br/>boschsecurity.com"]
         CRP["RTSPS Proxy<br/>proxy-NN.live..."]
     end
@@ -324,13 +325,43 @@ graph LR
     Int -->|"OAuth"| OAuth
     Int -->|"REST: video_inputs,<br/>connection, lighting…"| API
     Int -->|"spawn"| TLS
+    Int -->|"spawn, publish stable URL"| FD
+    FD -->|"inject fresh Digest /<br/>rewrite session path"| TLS
     TLS -->|"RTSPS<br/>(plain TCP→TLS bridge)"| Cam
     TLS -.->|"RTSPS<br/>(plain TCP→TLS bridge)"| CRP
-    Stream -->|"rtsp://127.0.0.1"| TLS
-    G2 -->|"rtsp://127.0.0.1"| TLS
+    Stream -->|"rtsp://127.0.0.1<br/>(stable URL)"| FD
+    G2 -->|"rtsp://127.0.0.1<br/>(stable URL,<br/>auto-registered)"| FD
 ```
 
-Since **v10.3.24** the same Python TLS proxy carries both LOCAL and REMOTE — FFmpeg and go2rtc always connect to `rtsp://127.0.0.1:N`, the proxy decides whether to terminate TLS to the camera (LOCAL) or to the Bosch cloud proxy (REMOTE). Symmetric path means there's no scheme-switching trick (`rtspx://` etc.) on the consumer side, and the cert/hostname mismatch on `proxy-NN.live.cbs.boschsecurity.com` is handled in one place.
+Since **v10.3.24** the same TLS proxy carries both LOCAL and REMOTE — the proxy decides whether to terminate TLS to the camera (LOCAL) or to the Bosch cloud proxy (REMOTE), so there's no scheme-switching trick (`rtspx://` etc.) on the consumer side, and the cert/hostname mismatch on `proxy-NN.live.cbs.boschsecurity.com` is handled in one place. As of **v16.0.0** this proxy is a native `asyncio.start_server()` listener rather than a thread-per-camera raw-socket implementation — same behavior (Digest-auth injection, keepalive/pre-warm logic), but built entirely on the event loop HA already runs, with a cleaner, non-blocking shutdown while a session is active.
+
+Also new in **v16.0.0**: a small "viewing front-door" sits between HA's stream consumers (the `stream` component/FFmpeg for HLS, and go2rtc for WebRTC) and the TLS proxy. Previously, `stream_source()` returned the raw Bosch URL — for LOCAL that URL embeds Digest credentials that rotate on every heartbeat (as often as every ~15 s on some cameras), and for REMOTE it embeds an opaque per-session hash. Every rotation changed the URL string. That mattered once HA's own built-in go2rtc integration started auto-registering `stream_source()` with go2rtc on every WebRTC offer: a constantly-changing URL would register a new (and never removed) entry in go2rtc's stream table on every rotation. The front-door publishes one fixed, credential-free URL per camera per viewing session instead — it holds the real, rotating credentials internally and injects them fresh on every connection (LOCAL) or rewrites the request to the session's current internal path (REMOTE, which has no separate credential pair, just an opaque hash baked into the path). `stream_source()` now returns this stable URL, so go2rtc's native auto-registration stays a single, stable entry instead of leaking a new one on every rotation. A manual `DELETE` on session teardown is still used to remove that entry when a camera goes offline or the session ends — go2rtc has no API to do that automatically.
+
+The sequence below shows a LOCAL live-view request end to end after this change:
+
+```mermaid
+sequenceDiagram
+    participant Card as Lovelace card / HA stream
+    participant Int as Integration
+    participant FD as Viewing front-door<br/>(stable URL)
+    participant TLS as TLS proxy (asyncio)
+    participant Cam as Bosch camera
+
+    Card->>Int: request live stream
+    Int->>Cam: open LOCAL session (REST), get rotating Digest creds
+    Int->>TLS: spawn/reuse proxy for this camera
+    Int->>FD: spawn/reuse front-door, publish stable rtsp://127.0.0.1 URL
+    Int-->>Card: stream_source() = stable front-door URL
+    Card->>FD: RTSP connect (no credentials)
+    FD->>FD: inject current Digest credentials fresh
+    FD->>TLS: forward authenticated RTSP
+    TLS->>Cam: RTSPS (TLS-terminated)
+    Cam-->>Card: video/audio, relayed back through TLS proxy + front-door
+
+    Note over Int,Cam: Credentials rotate again on the next heartbeat —<br/>the published front-door URL does not change.
+```
+
+REMOTE sessions follow the same shape, except the front-door rewrites each connection's request path to the session's current hash instead of injecting a Digest header, and the TLS proxy terminates TLS to the Bosch cloud relay instead of the camera directly.
 
 ### Network Connectivity
 
@@ -374,6 +405,7 @@ flowchart LR
 - **IoT/guest network isolation** — many routers (FRITZ!Box "Gastzugang", Unifi guest network) block all LAN-to-LAN traffic by default. Move the camera off the guest network or add an explicit allow-rule.
 - **Camera reachable from the Bosch app but not from HA** — the app talks to the camera through the Bosch cloud, so this proves nothing about LAN reachability. The cloud path always works; the LAN path is what matters here.
 - **Privacy mode is ON** — the camera shutter is closed and snapshots are deliberately not refreshed. The last frame stays cached. This is by design, not a network issue.
+- **Camera's LAN IP changed (DHCP re-lease) and LOCAL streaming won't come back** — the integration has recovery logic for this on its own side, but Bosch's cloud API can independently keep reporting the camera's *old* IP address for a long time after a re-lease, which is outside the integration's control. If a camera that used to stream LOCAL keeps falling back to the cloud after a router reboot or a long time offline, the most reliable fix is a DHCP reservation (static lease) for the camera on your router, so its LAN IP never changes in the first place.
 
 #### Quick check from the HA host
 
@@ -1060,7 +1092,7 @@ Example file path on NAS (default camera-first layout):
 \\192.168.1.1\FRITZ.NAS\Bosch-Cameras\Garden\2026\03\25\Garden_2026-03-25_14-32-05_MOVEMENT_abc123.mp4
 ```
 
-> Requires the `smbprotocol` Python package, which is auto-installed via `manifest.json`.
+> Requires the `smbprotocol` Python package, listed as an optional dependency in `manifest.json`. If it isn't available in your environment, SMB-based media browsing degrades gracefully — the integration still sets up and works normally, and a Repairs issue explains what's missing.
 
 #### FRITZ!Box NAS Setup
 
@@ -1968,7 +2000,7 @@ Repeat the per-camera grid for each camera you have. The view uses the standard 
 ## Requirements
 
 - Home Assistant 2024.1+
-- Python packages: `firebase-messaging`, `smbprotocol` (auto-installed via manifest)
+- Python packages: `firebase-messaging`, `bosch-shc-camera-client` (auto-installed via manifest); `smbprotocol` is optional — enables NAS media browsing, everything else works without it
 - For live video: go2rtc (built into HA) or ffplay/mpv
 
 ---
@@ -2194,11 +2226,13 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v15.0.1** — see the GitHub release page for full notes:
-[**v15.0.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v15.0.1)
+Latest: **v16.0.0** — see the GitHub release page for full notes:
+[**v16.0.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v16.0.0)
 
 | Version | Highlights |
 |---|---|
+| **v16.0.0** | **Large internal architecture refactor, no user-facing change.** Preparation for eventual Home Assistant Core submission: the TLS video proxy is now built on Python's native async networking instead of a custom thread-based one, live-stream URLs stay stable for the whole session instead of changing on every credential rotation, streams register with the bundled go2rtc component the same way Core's own integrations do, sign-in now goes through Core's standard credential-storage mechanism, and the optional SMB-recordings-browsing feature degrades gracefully (with a clear Repairs notice) if its dependency isn't available instead of blocking setup. A large amount of protocol-handling code also moved into a separate, independently-published library, shrinking this integration's own codebase substantially. No breaking changes, no action needed to upgrade. |
+| **v15.0.2** | **iOS Picture-in-Picture, LAN-IP recovery, and translation fixes.** PiP could get permanently stuck after using iOS's native fullscreen video mode; fixed. A camera whose LAN IP changed (e.g. after a router/DHCP change) could get stuck never retrying its local connection; it now periodically retries. A few remaining hardcoded German strings in the card (from the v14.x translation cleanup) are now properly translated in all 11 supported languages. |
 | **v15.0.1** | **Internal cleanup only, no user-facing change.** Completes the Session-State-Facade migration started in v15.0.0 — the coordinator's remaining per-camera session data and lock objects now live on one shared per-camera state object instead of scattered dicts. Every step independently bug-hunted and verified before release. |
 | **v15.0.0** | **Large internal performance/stability refactor, plus a new fullscreen behavior.** The bottom video controls now auto-hide after 10s idle in fullscreen (with an option to turn that off). Under the hood: pooled network sessions instead of a fresh connection per call, several race conditions and timeout gaps fixed (found via a new chaos-engineering fault-injection test suite), and the main coordinator module further split into focused files. No breaking changes, no action needed to upgrade. |
 | **v14.8.0** | **Two Mini-NVR event-clip feature requests, both opt-in.** A new option lets the pre-roll ring briefly finalize and re-attach its freshest segment on a motion event instead of always dropping it, recovering the last ~0-10s of footage closest to the trigger — at the cost of a small (~1s) gap in ring coverage per event. A new per-camera *Mini-NVR event clip* switch (default on) lets installs that already save clips their own way (e.g. via automations) turn off the integration's own native clip without affecting the shared pre-roll ring. |

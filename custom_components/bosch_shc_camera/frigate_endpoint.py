@@ -44,10 +44,13 @@ import logging
 import socket
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar
 from urllib.parse import quote as _urlquote
 
-from .auth_utils import _build_digest_header, _parse_digest_challenge
+from bosch_shc_camera_client.auth_utils import (
+    _build_digest_header,
+    _parse_digest_challenge,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,10 +89,43 @@ class InnerTarget:
     digest_password: str
 
 
-# resolve_inner(cam_id) -> awaitable[InnerTarget | None]; None = camera currently
+# resolve_inner(cam_id) -> awaitable[target | None]; None = camera currently
 # unreachable / no session → the front-door drops the client cleanly so the
 # recorder retries later. Runs on the HA event loop (bridged thread-safely).
-ResolveInner = Callable[[str], Coroutine[Any, Any, "InnerTarget | None"]]
+#
+# The return type is deliberately `Any` (not `InnerTarget | None`) so this
+# same generic `_CameraServer`/`FrontDoorRunner` machinery can host a
+# DIFFERENT resolve+relay pair for a mechanism that has no Digest
+# challenge/response at all — see `remote_viewing_front_door.py`'s
+# `RemoteTarget`/`remote_resolve_inner`, built for REMOTE sessions (whose
+# "credential" is an opaque hash baked into the URL path, not a user:pass
+# pair) via the `relay_factory` hook on `FrontDoorRunner.start_server`
+# below. Every concrete resolve function still declares its own precise
+# return type (e.g. `InnerTarget | None`) at its definition site — `Any`
+# here only widens what this shared plumbing itself is willing to carry
+# through unexamined between resolve and relay-factory.
+ResolveInner = Callable[[str], Coroutine[Any, Any, Any]]
+
+
+class Relay(Protocol):
+    """What a `RelayFactory` must produce: something with an async `run()`.
+
+    `_Relay` (Digest-injecting, below) and `remote_viewing_front_door.py`'s
+    `_PathRewriteRelay` (URI path-rewriting, no credential dance at all —
+    REMOTE has no Authorization challenge to answer) both satisfy this
+    structurally; `_CameraServer._serve` only ever calls `.run()`.
+    """
+
+    async def run(self) -> None: ...
+
+
+# relay_factory(cam_id, client_reader, client_writer, target, first_request)
+# -> a Relay. `target` is typed `Any` for the same reason `ResolveInner`'s
+# return type is `Any` above — each factory pairs with a matching
+# resolve_inner and casts/uses `target`'s concrete attributes itself.
+RelayFactory = Callable[
+    [str, "asyncio.StreamReader", "asyncio.StreamWriter", Any, bytes], Relay
+]
 
 
 @dataclass
@@ -509,6 +545,22 @@ class _Relay:
                 await _close_writer(self._cw)
 
 
+def _default_relay_factory(
+    cam_id: str,
+    client_reader: asyncio.StreamReader,
+    client_writer: asyncio.StreamWriter,
+    target: Any,
+    first_request: bytes,
+) -> Relay:
+    """The historical, only-ever relay: Digest-injecting `_Relay`.
+
+    `FrontDoorRunner.start_server`'s default `relay_factory` — every
+    pre-existing caller (Frigate's own front-door, `viewing_front_door.py`)
+    keeps this behaviour unchanged.
+    """
+    return _Relay(cam_id, client_reader, client_writer, target, first_request)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Front-door server (one per camera) + shared background-loop runner.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -524,12 +576,14 @@ class _CameraServer:
         resolve_inner: ResolveInner,
         on_active: Callable[[], None] | None,
         on_idle: Callable[[], None] | None,
+        relay_factory: RelayFactory = _default_relay_factory,
     ) -> None:
         self.cam_id = cam_id
         self.config = config
         self._resolve = resolve_inner
         self._on_active = on_active
         self._on_idle = on_idle
+        self._relay_factory = relay_factory
         self._server: asyncio.base_events.Server | None = None
         self._sem = asyncio.Semaphore(self.config.max_connections)
         self.port = 0
@@ -708,7 +762,7 @@ class _CameraServer:
             await _close_writer(writer)
             return
 
-        relay = _Relay(self.cam_id, reader, writer, target, first)
+        relay = self._relay_factory(self.cam_id, reader, writer, target, first)
         try:
             await relay.run()
         except (asyncio.IncompleteReadError, ConnectionError, OSError) as err:
@@ -764,10 +818,19 @@ class FrontDoorRunner:
         preferred_port: int = 0,
         on_active: Callable[[], None] | None = None,
         on_idle: Callable[[], None] | None = None,
+        relay_factory: RelayFactory = _default_relay_factory,
     ) -> int:
-        """Start (or restart) the front-door for ``cam_id``; returns the port."""
+        """Start (or restart) the front-door for ``cam_id``; returns the port.
+
+        ``relay_factory`` defaults to the Digest-injecting `_Relay` used by
+        every pre-existing caller (Frigate, `viewing_front_door.py`).
+        `remote_viewing_front_door.py` passes its own path-rewriting relay —
+        see `Relay`/`RelayFactory` above for why this hook exists.
+        """
         self.stop_server(cam_id)
-        server = _CameraServer(cam_id, config, resolve_inner, on_active, on_idle)
+        server = _CameraServer(
+            cam_id, config, resolve_inner, on_active, on_idle, relay_factory
+        )
         port = await server.start(preferred_port)
         self._servers[cam_id] = server
         return port

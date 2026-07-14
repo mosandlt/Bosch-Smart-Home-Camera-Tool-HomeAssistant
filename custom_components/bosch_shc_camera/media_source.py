@@ -40,6 +40,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import raise_if_invalid_path
 
 from .const import DEFAULT_OPTIONS, DOMAIN
+from .smb import smb_available
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -812,7 +813,15 @@ def _enabled_sources(
         # Decoupled from upload_protocol: files uploaded via FTP land on the same
         # NAS share and are readable via SMB, so we browse via SMB regardless of
         # how they were uploaded.
-        if opts.get("enable_smb_upload"):
+        # smb_available() gate: `smbprotocol` is an optional runtime dependency
+        # (manifest.json requirement that can fail to install on an unsupported
+        # OS/architecture). Without this check, a configured-but-unavailable SMB
+        # source would be listed here and then raise an uncaught ImportError
+        # deep in _SmbBackend the moment it's actually browsed/opened — this
+        # keeps the degradation clean (source just doesn't appear) instead of a
+        # crash; __init__.py's _refresh_smb_unavailable_issue surfaces the real
+        # cause via a Repairs issue.
+        if opts.get("enable_smb_upload") and smb_available():
             smb = _SmbBackend(hass, opts)
             if smb.configured:
                 out.append((_Source(entry_id, "S", smb.label), smb))

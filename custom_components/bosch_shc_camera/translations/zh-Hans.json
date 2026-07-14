@@ -52,7 +52,10 @@
     "abort": {
       "already_configured": "已配置。",
       "reauth_successful": "重新认证成功 — Bosch Smart Home Camera 集成已使用新令牌更新。所有实体、自动化和选项均已保留。",
-      "reconfigure_successful": "重新配置成功 — Bosch Smart Home Camera 集成已使用新令牌更新。所有实体、自动化和选项均已保留。"
+      "reconfigure_successful": "重新配置成功 — Bosch Smart Home Camera 集成已使用新令牌更新。所有实体、自动化和选项均已保留。",
+      "missing_credentials": "未注册 Bosch SingleKey ID 应用凭据。请重启 Home Assistant 并重试 —— 如果问题持续出现，请提交问题反馈。",
+      "missing_configuration": "Bosch Smart Home Camera 集成未正确配置 OAuth。请重启 Home Assistant 并重试 —— 如果问题持续出现，请提交问题反馈。",
+      "oauth_implementation_unavailable": "所选登录方式已不再可用。请重新开始。"
     }
   },
   "options": {
@@ -923,6 +926,10 @@
     "doubled_prefix_entity_ids_migrated": {
       "title": "Bosch Camera — 实体 ID 已重命名",
       "description": "**{count}** 个 Bosch 摄像头实体 ID 带有重复前缀 `bosch_NAME_bosch_NAME_`（v11.0.0–v12.2.1 版本的 Bug），已更正为正确形式。\n\n示例：{examples}\n\n**您必须更新所有引用旧 ID 的自动化、脚本、场景和 Lovelace 控制面板。** Home Assistant 在实体 ID 更改时不会自动重写 YAML 文件或 Lovelace 卡片。历史记录和统计数据将自动迁移。\n\n完整映射请参阅 v12.3.0 版本说明。"
+    },
+    "smb_unavailable": {
+      "title": "Bosch Camera — 未安装 SMB/NAS 软件包",
+      "description": "**{features}** 已配置为使用 SMB/NAS 网络共享，但可选的 Python 软件包 `smbprotocol` 未安装，因此无法上传/录制到该共享。\n\n此软件包通常会根据集成的依赖要求自动安装——请尝试重启一次 Home Assistant。如果仍然无法安装（例如不受支持的操作系统/CPU 架构），请在集成选项中将存储目标改为**本地**或 **FTP**。"
     }
   },
   "system_health": {

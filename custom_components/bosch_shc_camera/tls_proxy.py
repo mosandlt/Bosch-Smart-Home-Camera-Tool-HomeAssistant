@@ -6,21 +6,22 @@ This module provides a TCP→TLS proxy that accepts plain TCP connections on
 localhost and forwards them to the camera over TLS. FFmpeg handles Digest
 auth itself — the proxy only unwraps TLS.
 
-Uses threading (not asyncio) because HA's stream_worker runs in a separate
-thread and the asyncio event loop may be busy during stream negotiation.
+Runs entirely on the HA asyncio event loop via `asyncio.start_server()` —
+no dedicated OS threads, no raw blocking sockets, no module-level listener
+state. All server/state ownership lives on the caller-supplied
+``port_cache``/``server_cache`` dicts (coordinator-owned in practice), so a
+config-entry unload can tear everything down deterministically without a
+defensive module-level sweep.
 """
 
 from __future__ import annotations
 
 import asyncio
-import errno
 import hashlib
 import logging
 import re
-import select as _select
 import socket
 import ssl
-import threading
 import time
 from collections.abc import Callable
 
@@ -28,17 +29,34 @@ from .const import TIMEOUT_TLS_PROXY_CONNECT, TIMEOUT_TLS_PROXY_RTSP_READ
 
 _LOGGER = logging.getLogger(__name__)
 
-# Track server sockets so we can close them on stop
-_proxy_servers: dict[str, socket.socket] = {}
+# Client→camera pipe idle timeout: FFmpeg sends RTSP control traffic
+# (SETUP/PLAY/keepalive) on this direction; a dead client silently stops
+# sending, so a read timeout is how we detect and clean up. Camera→client
+# has no timeout — dark/still scenes can have sparse RTP packets, and TCP
+# keepalive already handles a genuinely dead upstream connection.
+_CLIENT_TO_CAM_IDLE_TIMEOUT = 120
+
+# Burst-failure circuit breaker: when the camera goes physically offline
+# (Privacy hardware button, power cut, WiFi drop) HA's stream worker keeps
+# opening new client connections every few seconds, and each one triggers
+# an upstream connect attempt that times out. Without a cap we log dozens
+# of "failed to connect" warnings and burn time on repeated connect
+# timeouts. After _MAX_BURST consecutive failures within _BURST_WINDOW
+# seconds we close the server — coordinator will detect the situation and
+# either tear down the live session entirely or rebuild it once the
+# camera is reachable again (via the on_proxy_died callback).
+_MAX_BURST = 5
+_BURST_WINDOW = 30.0
 
 
-def start_tls_proxy(
+async def start_tls_proxy(
     ssl_ctx: ssl.SSLContext,
     cam_id: str,
     cam_host: str,
     cam_port: int,
     port_cache: dict[str, int],
-    is_renewal: bool = False,
+    server_cache: dict[str, asyncio.base_events.Server],
+    is_renewal: bool = False,  # kept for call-site/API compat (unused, matches prior behavior)
     on_proxy_died: Callable[[], None] | None = None,
 ) -> int:
     """Start a local TCP→TLS proxy for a LOCAL RTSPS stream.
@@ -48,274 +66,221 @@ def start_tls_proxy(
     RTSP URL with the new credentials instead of retrying cached old ones.
     """
     # Always stop any existing proxy first — fresh start per session
-    if cam_id in port_cache or cam_id in _proxy_servers:
-        stop_tls_proxy(cam_id, port_cache)
+    if cam_id in port_cache or cam_id in server_cache:
+        await stop_tls_proxy(cam_id, port_cache, server_cache)
 
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(("127.0.0.1", 0))
-    port: int = int(srv.getsockname()[1])
-    srv.listen(4)
-    srv.settimeout(None)
-    _proxy_servers[cam_id] = srv
+    # Closure-local circuit-breaker state. Single-threaded event loop means
+    # plain `nonlocal` is safe — no cross-thread races, no list-boxing needed
+    # (unlike the old thread-based implementation this replaces).
+    fail_count = 0
+    first_fail_at = float("-inf")
+    died_fired = False
 
-    # Burst-failure circuit breaker: when the camera goes physically offline
-    # (Privacy hardware button, power cut, WiFi drop) HA's stream worker keeps
-    # opening new client connections every few seconds, and each one triggers
-    # an upstream connect attempt that times out / returns Errno 113. Without
-    # a cap we log dozens of "failed to connect" warnings and burn CPU on
-    # 10 s connect timeouts. After _MAX_BURST consecutive failures within
-    # _BURST_WINDOW seconds we close the server socket — coordinator will
-    # detect the situation (privacy_mode flag, OFFLINE status) and either
-    # tear down the live session entirely or restart the proxy via
-    # try_live_connection() once the camera is reachable again.
-    _MAX_BURST = 5
-    _BURST_WINDOW = 30.0
-    fail_count = [0]
-    first_fail_at = [float("-inf")]
-
-    def _proxy_thread() -> None:
-        while True:
+    async def _fire_on_proxy_died() -> None:
+        nonlocal died_fired
+        if died_fired:
+            return
+        died_fired = True
+        # A slow-to-fail connect attempt from THIS generation can still be
+        # in flight after a renewal/rebuild has already replaced this
+        # proxy for the same cam_id (stop_tls_proxy only guarantees the
+        # listening socket + accepted clients are closed, not that every
+        # in-flight upstream-connect coroutine has unwound). Only touch the
+        # shared caches — and only fire the rebuild callback — if they
+        # still point at THIS server; otherwise this is a stale trip and
+        # must not evict/orphan the newer, healthy generation or trigger a
+        # spurious rebuild of an already-fine session.
+        is_current = server_cache.get(cam_id) is server
+        if is_current:
+            server_cache.pop(cam_id, None)
+            port_cache.pop(cam_id, None)
+        try:
+            server.close()
+        except Exception as close_exc:  # best-effort close, callback below still fires
+            _LOGGER.debug(
+                "TLS proxy %s: server.close() during circuit-breaker raised — %s",
+                cam_id[:8],
+                close_exc,
+            )
+        if not is_current:
+            _LOGGER.debug(
+                "TLS proxy %s: circuit breaker fired for a stale/superseded "
+                "generation — closed its own server but skipped caches and "
+                "on_proxy_died (a newer proxy is already active)",
+                cam_id[:8],
+            )
+            return
+        if on_proxy_died is not None:
             try:
-                client, _ = srv.accept()
-            except OSError:
-                break
-            try:
-                raw = socket.create_connection(
-                    (cam_host, cam_port), timeout=TIMEOUT_TLS_PROXY_CONNECT
-                )
-                # TCP keep-alive: prevent OS from dropping idle connections.
-                # SO_KEEPALIVE joins the platform-specific opts in the same
-                # guard — an OSError here is a benign keep-alive tuning failure,
-                # not a connect failure, so it must not fall through to the
-                # outer except and be miscounted toward the circuit breaker.
-                # (bug-hunt 2026-07-01)
-                try:
-                    raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                    raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
-                    raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
-                    raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
-                except (AttributeError, OSError):
-                    pass
-                try:
-                    tls = ssl_ctx.wrap_socket(raw, server_hostname=cam_host)
-                except Exception:
-                    raw.close()  # close raw socket if TLS handshake fails
-                    raise
+                on_proxy_died()
+            except Exception as cb_exc:
                 _LOGGER.debug(
-                    "TLS proxy %s: connected to %s:%d (TLS %s, cipher %s)",
+                    "TLS proxy %s: on_proxy_died callback raised — %s",
                     cam_id[:8],
-                    cam_host,
-                    cam_port,
-                    tls.version(),
-                    (tls.cipher() or ("?",))[0],
+                    cb_exc,
                 )
-                # Reset failure burst — a successful connect proves the
-                # camera is reachable again.
-                fail_count[0] = 0
-                first_fail_at[0] = float("-inf")
-            except Exception as exc:
-                now = time.monotonic()
-                if fail_count[0] == 0:
-                    first_fail_at[0] = now
-                fail_count[0] += 1
-                # Per-attempt failure is benign during a brief camera WLAN
-                # dropout — it auto-recovers and only the burst/circuit-breaker
-                # below (≥_MAX_BURST in _BURST_WINDOW) signals a real outage.
-                # → DEBUG here; the threshold log stays WARNING.
-                _LOGGER.debug(
-                    "TLS proxy %s: failed to connect to %s:%d — %s",
-                    cam_id[:8],
-                    cam_host,
-                    cam_port,
-                    exc,
-                )
-                client.close()
-                if (
-                    fail_count[0] >= _MAX_BURST
-                    and (now - first_fail_at[0]) <= _BURST_WINDOW
-                ):
-                    _LOGGER.warning(
-                        "TLS proxy %s: %d consecutive connect failures in %.0fs — "
-                        "closing server socket (camera unreachable). "
-                        "Coordinator will rebuild the session when the camera is back.",
-                        cam_id[:8],
-                        fail_count[0],
-                        now - first_fail_at[0],
-                    )
-                    try:
-                        srv.close()
-                    except Exception:  # pragma: no cover — daemon-thread close-race, tracer drops the record  # noqa: S110 # best-effort server socket close on unreachable-cam teardown
-                        pass
-                    # Signal the coordinator so it can rebuild the session
-                    # once the camera is reachable again — without this,
-                    # the proxy port stays dead until the next heartbeat
-                    # (up to renewal_interval seconds — 3600s for Indoor Gen2).
-                    if on_proxy_died is not None:
-                        try:
-                            on_proxy_died()
-                        except Exception as cb_exc:
-                            _LOGGER.debug(
-                                "TLS proxy %s: on_proxy_died callback raised — %s",
-                                cam_id[:8],
-                                cb_exc,
-                            )
-                    break
-                continue
 
-            # TCP keep-alive on client socket too (FFmpeg side). SO_KEEPALIVE was
-            # previously OUTSIDE this try — an OSError (e.g. FFmpeg already closed
-            # its end) propagated out of the accept loop and silently killed the
-            # daemon proxy thread while _proxy_servers/port_cache still reported
-            # it alive, bypassing the on_proxy_died rebuild signal. Guard it too.
-            # (bug-hunt 2026-07-01)
-            try:
-                client.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
-                client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
-                client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
-            except (AttributeError, OSError):
-                pass
-            _dbg_count = [0]  # shared debug exchange counter
-
-            # Shared close-once guards — each socket must only be closed once
-            # across both pipe threads.  Without this, when C→CAM's finally
-            # closes `tls`, the OS recycles the fd number; CAM→C's finally then
-            # calls tls.close() on the *recycled* fd, silently closing an
-            # unrelated file descriptor.  The guards are a list so the inner
-            # function can mutate them (Python 2 closure compatibility pattern;
-            # nonlocal would work too but lists are clearer about shared state).
-            _client_closed = [False]
-            _tls_closed = [False]
-            _close_lock = threading.Lock()
-
-            def _close_once(
-                sock: socket.socket,
-                flag: list[bool],
-                _lock: threading.Lock = _close_lock,
-            ) -> None:
-                """Close *sock* exactly once, even when called from two threads.
-
-                ``_lock`` is passed as a default argument to bind the *current*
-                iteration's lock object at function-definition time, avoiding
-                the B023 "loop variable not bound" issue.
-                """
-                with _lock:
-                    if flag[0]:
-                        return
-                    flag[0] = True
+    async def _pipe(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        *,
+        rewrite_transport: bool,
+        direction: str,
+        idle_timeout: float | None,
+    ) -> None:
+        """Forward bytes. If rewrite_transport=True, intercept RTSP SETUP
+        requests and force TCP interleaved transport so FFmpeg doesn't try
+        UDP (which can't work through the TCP proxy)."""
+        interleaved_counter = 0
+        dbg_count = 0
+        try:
+            while True:
                 try:
-                    sock.close()
-                except Exception:  # pragma: no cover — daemon-thread close-race  # noqa: S110 # best-effort pipe socket close on teardown, failure non-actionable
-                    pass
-
-            def _pipe(  # pylint: disable=dangerous-default-value
-                src: socket.socket,
-                dst: socket.socket,
-                rewrite_transport: bool = False,
-                direction: str = "???",
-                src_flag: list[bool] = _client_closed,
-                dst_flag: list[bool] = _tls_closed,
-            ) -> None:
-                """Forward bytes. If rewrite_transport=True, intercept RTSP
-                SETUP requests and force TCP interleaved transport so FFmpeg
-                doesn't try UDP (which can't work through the TCP proxy)."""
-                _interleaved_counter = [0]  # tracks next interleaved channel pair
-                try:
-                    while True:
-                        # CAM→C (rewrite_transport=False): no timeout — dark/still
-                        # scenes have sparse RTP packets; TCP keepalive handles dead
-                        # connections. C→CAM (rewrite_transport=True): 120s timeout.
-                        pipe_timeout = 120 if rewrite_transport else None
-                        r, _, _ = _select.select([src], [], [], pipe_timeout)
-                        if not r:
-                            break
-                        data = src.recv(65536)
-                        if not data:
-                            break
-                        # Debug: log first RTSP exchanges (text only, skip binary RTP)
-                        if _dbg_count[0] < 20 and len(data) < 2000 and data[:1] != b"$":  # noqa: B023 # mutable counter shared intentionally
-                            _dbg_count[0] += 1  # noqa: B023 # mutable counter shared intentionally
-                            preview = (
-                                data[:500]
-                                .decode("utf-8", errors="replace")
-                                .replace("\r\n", "\\r\\n")
-                            )
-                            # Redact auth headers — Authorization carries the
-                            # computed Digest response; WWW-Authenticate carries
-                            # realm/nonce from the camera challenge.
-                            preview = re.sub(
-                                r"(?i)(Authorization:|WWW-Authenticate:)[^\\]*",
-                                r"\1 <redacted>",
-                                preview,
-                            )
-                            _LOGGER.debug(
-                                "TLS proxy %s [%s] %d bytes: %.500s",
-                                cam_id[:8],
-                                direction,
-                                len(data),
-                                preview,
-                            )
-                        if rewrite_transport and b"SETUP " in data:
-                            # Replace UDP transport with TCP interleaved
-                            text = data.decode("utf-8", errors="replace")
-                            lo = _interleaved_counter[0]
-                            hi = lo + 1
-                            text = re.sub(
-                                r"Transport:\s*RTP/AVP[^;\r\n]*;unicast;client_port=[^\r\n]+",
-                                f"Transport: RTP/AVP/TCP;unicast;interleaved={lo}-{hi}",
-                                text,
-                            )
-                            _interleaved_counter[0] = hi + 1
-                            data = text.encode("utf-8")
-                        dst.sendall(data)
-                except Exception as exc:
-                    # OSError(EBADF) = the peer socket was closed by the other
-                    # pipe direction. When C→CAM ends it closes the shared TLS
-                    # socket; CAM→C's next recv() then raises EBADF. This is
-                    # expected during session teardown (e.g. after credential
-                    # rotation) — not a real error, so don't log it.
-                    is_ebadf = isinstance(exc, OSError) and exc.errno == errno.EBADF
-                    if not is_ebadf:
-                        _LOGGER.debug(
-                            "TLS proxy %s [%s] pipe error: %s",
-                            cam_id[:8],
-                            direction,
-                            exc,
+                    if idle_timeout is not None:
+                        data = await asyncio.wait_for(
+                            reader.read(65536), timeout=idle_timeout
                         )
-                finally:
-                    _close_once(src, src_flag)
-                    _close_once(dst, dst_flag)
-
-            # client→camera: rewrite SETUP Transport to force TCP interleaved.
-            # Each thread passes its own src/dst flags so each socket is only
-            # closed once regardless of which thread finishes first.
-            t1 = threading.Thread(
-                target=_pipe,
-                args=(client, tls, True, "C→CAM", _client_closed, _tls_closed),
-                daemon=True,
+                    else:
+                        data = await reader.read(65536)
+                except TimeoutError:
+                    break
+                if not data:
+                    break
+                if dbg_count < 20 and len(data) < 2000 and data[:1] != b"$":
+                    dbg_count += 1
+                    preview = (
+                        data[:500]
+                        .decode("utf-8", errors="replace")
+                        .replace("\r\n", "\\r\\n")
+                    )
+                    # Redact auth headers — Authorization carries the
+                    # computed Digest response; WWW-Authenticate carries
+                    # realm/nonce from the camera challenge.
+                    preview = re.sub(
+                        r"(?i)(Authorization:|WWW-Authenticate:)[^\\]*",
+                        r"\1 <redacted>",
+                        preview,
+                    )
+                    _LOGGER.debug(
+                        "TLS proxy %s [%s] %d bytes: %.500s",
+                        cam_id[:8],
+                        direction,
+                        len(data),
+                        preview,
+                    )
+                if rewrite_transport and b"SETUP " in data:
+                    # Replace UDP transport with TCP interleaved
+                    text = data.decode("utf-8", errors="replace")
+                    lo = interleaved_counter
+                    hi = lo + 1
+                    text = re.sub(
+                        r"Transport:\s*RTP/AVP[^;\r\n]*;unicast;client_port=[^\r\n]+",
+                        f"Transport: RTP/AVP/TCP;unicast;interleaved={lo}-{hi}",
+                        text,
+                    )
+                    interleaved_counter = hi + 1
+                    data = text.encode("utf-8")
+                writer.write(data)
+                await writer.drain()
+        except Exception as exc:
+            # Peer closed / reset / SSL error — expected during session
+            # teardown (e.g. after credential rotation), not a real error.
+            _LOGGER.debug(
+                "TLS proxy %s [%s] pipe error: %s", cam_id[:8], direction, exc
             )
-            t2 = threading.Thread(
-                target=_pipe,
-                args=(tls, client, False, "CAM→C", _tls_closed, _client_closed),
-                daemon=True,
-            )
-            t1.start()
-            t2.start()
+        finally:
+            writer.close()
 
-    # Port is already listening (srv.bind + srv.listen above) — the daemon
-    # thread only handles connections that arrive after this point. Don't
-    # block the event loop on a thread-start signal: even with a microsecond
-    # `ready.wait()`, the call was a sync primitive on the asyncio thread.
-    t = threading.Thread(
-        target=_proxy_thread,
-        daemon=True,
-        name=f"tls_proxy_{cam_id[:8]}",
-    )
-    t.start()
+    async def _handle_client(
+        client_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter
+    ) -> None:
+        nonlocal fail_count, first_fail_at
+        try:
+            tls_reader, tls_writer = await asyncio.wait_for(
+                asyncio.open_connection(
+                    cam_host,
+                    cam_port,
+                    ssl=ssl_ctx,
+                    server_hostname=cam_host,
+                ),
+                timeout=TIMEOUT_TLS_PROXY_CONNECT,
+            )
+        except Exception as exc:
+            now = time.monotonic()
+            if fail_count == 0:
+                first_fail_at = now
+            fail_count += 1
+            # Per-attempt failure is benign during a brief camera WLAN
+            # dropout — it auto-recovers and only the burst/circuit-breaker
+            # below (≥_MAX_BURST in _BURST_WINDOW) signals a real outage.
+            _LOGGER.debug(
+                "TLS proxy %s: failed to connect to %s:%d — %s",
+                cam_id[:8],
+                cam_host,
+                cam_port,
+                exc,
+            )
+            client_writer.close()
+            if fail_count >= _MAX_BURST and (now - first_fail_at) <= _BURST_WINDOW:
+                _LOGGER.warning(
+                    "TLS proxy %s: %d consecutive connect failures in %.0fs — "
+                    "closing server socket (camera unreachable). "
+                    "Coordinator will rebuild the session when the camera is back.",
+                    cam_id[:8],
+                    fail_count,
+                    now - first_fail_at,
+                )
+                # Awaited inline: server.close() is non-blocking and
+                # on_proxy_died() itself only schedules a coordinator task
+                # (never awaits), so this can't stall or deadlock this
+                # handler's own cleanup.
+                await _fire_on_proxy_died()
+            return
+
+        # Reset failure burst — a successful connect proves the camera is
+        # reachable again.
+        fail_count = 0
+        first_fail_at = float("-inf")
+        ssl_obj = tls_writer.get_extra_info("ssl_object")
+        _LOGGER.debug(
+            "TLS proxy %s: connected to %s:%d (TLS %s, cipher %s)",
+            cam_id[:8],
+            cam_host,
+            cam_port,
+            ssl_obj.version() if ssl_obj is not None else "?",
+            ((ssl_obj.cipher() or ("?",))[0] if ssl_obj is not None else "?"),
+        )
+        _set_keepalive(client_writer)
+        _set_keepalive(tls_writer)
+
+        try:
+            await asyncio.gather(
+                _pipe(
+                    client_reader,
+                    tls_writer,
+                    rewrite_transport=True,
+                    direction="C→CAM",
+                    idle_timeout=_CLIENT_TO_CAM_IDLE_TIMEOUT,
+                ),
+                _pipe(
+                    tls_reader,
+                    client_writer,
+                    rewrite_transport=False,
+                    direction="CAM→C",
+                    idle_timeout=None,
+                ),
+                return_exceptions=True,
+            )
+        finally:
+            client_writer.close()
+            tls_writer.close()
+
+    server = await asyncio.start_server(_handle_client, "127.0.0.1", 0)
+    port: int = server.sockets[0].getsockname()[1]
     port_cache[cam_id] = port
+    server_cache[cam_id] = server
     _LOGGER.info(
-        "TLS proxy for %s started on 127.0.0.1:%d -> %s:%d (threading)",
+        "TLS proxy for %s started on 127.0.0.1:%d -> %s:%d (asyncio)",
         cam_id[:8],
         port,
         cam_host,
@@ -324,40 +289,59 @@ def start_tls_proxy(
     return port
 
 
-def stop_tls_proxy(cam_id: str, port_cache: dict[str, int]) -> None:
-    """Stop the TLS proxy for a camera by closing its server socket."""
-    port_cache.pop(cam_id, None)
-    srv = _proxy_servers.pop(cam_id, None)
-    if srv is not None:
-        try:
-            srv.shutdown(
-                socket.SHUT_RDWR
-            )  # interrupt any blocking accept() before close
-        except OSError:
-            pass
-        try:
-            srv.close()
-            _LOGGER.debug("TLS proxy for %s: server socket closed", cam_id[:8])
-        except Exception:  # noqa: S110 # best-effort server socket close during stop, failure non-actionable
-            pass
+def _set_keepalive(writer: asyncio.StreamWriter) -> None:
+    """Best-effort TCP keep-alive tuning on a StreamWriter's socket."""
+    sock = writer.get_extra_info("socket")
+    if sock is None:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+    except (AttributeError, OSError):
+        pass
 
 
-def stop_all_proxies(port_cache: dict[str, int]) -> None:
-    """Stop all TLS proxies — called during integration unload.
+async def stop_tls_proxy(
+    cam_id: str,
+    port_cache: dict[str, int],
+    server_cache: dict[str, asyncio.base_events.Server],
+) -> None:
+    """Stop the TLS proxy for a camera by closing its server.
 
-    Clears ``_proxy_servers`` completely so that a HA reload (which does NOT
-    reimport the module) starts with a clean slate.  Without the clear a
-    crashed coordinator can leave stale entries in the module-level dict; the
-    next ``start_tls_proxy`` call finds ``cam_id in _proxy_servers``, calls
-    ``stop_tls_proxy`` on an already-closed socket (benign EBADF) but more
-    importantly skips allocating the fresh server socket, leaving the proxy
-    permanently broken until the next full HA restart.
+    `Server.close()` alone only stops accepting NEW connections — it
+    leaves any already-accepted client (FFmpeg/go2rtc) connections open.
+    `Server.wait_closed()` blocks until BOTH the server is closed AND every
+    active connection has dropped, so without also actively closing those
+    connections (`close_clients()`, Python 3.13+), this would hang forever
+    whenever a stream is actively connected at stop time — turning a
+    routine teardown (switch off, reconfigure, config-entry unload) into a
+    deadlock.
     """
-    for cam_id in list(_proxy_servers.keys()):
-        stop_tls_proxy(cam_id, port_cache)
+    port_cache.pop(cam_id, None)
+    server = server_cache.pop(cam_id, None)
+    if server is not None:
+        try:
+            server.close()
+            server.close_clients()
+            await server.wait_closed()
+            _LOGGER.debug("TLS proxy for %s: server closed", cam_id[:8])
+        except Exception:  # noqa: S110 — best-effort server close during stop, failure non-actionable
+            pass
+
+
+async def stop_all_proxies(
+    port_cache: dict[str, int],
+    server_cache: dict[str, asyncio.base_events.Server],
+) -> None:
+    """Stop all TLS proxies — called during integration unload."""
+    for cam_id in list(server_cache.keys()):
+        await stop_tls_proxy(cam_id, port_cache, server_cache)
     # Belt-and-suspenders: if stop_tls_proxy left any entries (shouldn't
-    # happen, but guards against future refactors), wipe them now.
-    _proxy_servers.clear()
+    # happen, but guards against future refactors).
+    port_cache.clear()
+    server_cache.clear()
 
 
 async def rtsp_keepalive(

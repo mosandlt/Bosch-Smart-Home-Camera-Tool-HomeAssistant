@@ -19,10 +19,13 @@ than real deduplication.
 
 ``store`` accepts any ``MutableMapping`` (not just a plain ``dict``) since
 Session-State-Facade Slice 4 (``docs/stream-perf-stability-refactor-plan.md``)
-backs the six per-cam_id coordinator lock dicts (``_stream_locks``/
+backs five per-cam_id coordinator lock dicts (``_stream_locks``/
 ``_nvr_recorder_locks``/``_snapshot_fetch_locks``/
-``_go2rtc_reregister_locks``/``_nvr_clip_assembly_locks``/
-``_fresh_snap_locks``) with ``session_state.CacheFieldView`` instead — a
+``_nvr_clip_assembly_locks``/``_fresh_snap_locks``) with
+``session_state.CacheFieldView`` instead (``_go2rtc_reregister_locks`` was a
+sixth, removed 2026-07-14 when the manual go2rtc PUT/DELETE registration it
+serialized was replaced by HA-core's native lazy auto-registration,
+HA-Core-submission-prep) — a
 full ``MutableMapping`` whose ``.get()``/``__setitem__`` behave identically
 to a plain dict's for this helper's purposes (verified in
 ``tests/test_session_state_facade_slice4.py``, including that a lock's

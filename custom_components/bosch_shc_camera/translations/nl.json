@@ -52,7 +52,10 @@
     "abort": {
       "already_configured": "Al geconfigureerd.",
       "reauth_successful": "Opnieuw koppelen geslaagd — de Bosch Smart Home Camera-integratie is bijgewerkt met een nieuw token. Alle entiteiten, automatiseringen en opties zijn behouden.",
-      "reconfigure_successful": "Herconfiguratie geslaagd — de Bosch Smart Home Camera-integratie is bijgewerkt met een nieuw token. Alle entiteiten, automatiseringen en opties zijn behouden."
+      "reconfigure_successful": "Herconfiguratie geslaagd — de Bosch Smart Home Camera-integratie is bijgewerkt met een nieuw token. Alle entiteiten, automatiseringen en opties zijn behouden.",
+      "missing_credentials": "Er is geen Bosch SingleKey ID-applicatiereferentie geregistreerd. Herstart Home Assistant en probeer het opnieuw — als dit blijft gebeuren, meld dan een issue.",
+      "missing_configuration": "De Bosch Smart Home Camera-integratie is niet correct ingesteld voor OAuth. Herstart Home Assistant en probeer het opnieuw — als dit blijft gebeuren, meld dan een issue.",
+      "oauth_implementation_unavailable": "De gekozen aanmeldmethode is niet meer beschikbaar. Begin opnieuw."
     }
   },
   "options": {
@@ -923,6 +926,10 @@
     "doubled_prefix_entity_ids_migrated": {
       "title": "Bosch Camera — Entiteit-ID's hernoemd",
       "description": "**{count}** Bosch-camera-entiteit-ID('s) bevatten een dubbel `bosch_NAME_bosch_NAME_`-voorvoegsel (bug v11.0.0–v12.2.1) en zijn hernoemd naar de correcte vorm.\n\nVoorbeelden: {examples}\n\n**U moet alle automatiseringen, scripts, scènes en Lovelace-dashboards bijwerken die de oude ID's gebruiken.** Home Assistant herschrijft YAML-bestanden en Lovelace-kaarten niet automatisch bij een wijziging van entiteit-ID's. Geschiedenis en statistieken worden automatisch gemigreerd.\n\nZie de v12.3.0 release-opmerkingen voor de volledige mapping."
+    },
+    "smb_unavailable": {
+      "title": "Bosch Camera — SMB/NAS-pakket niet geïnstalleerd",
+      "description": "**{features}** is geconfigureerd voor een SMB/NAS-netwerkshare, maar het optionele Python-pakket `smbprotocol` is niet geïnstalleerd, waardoor uploads/opnames naar de share zijn uitgeschakeld.\n\nDit pakket wordt normaal automatisch geïnstalleerd vanuit de vereisten van de integratie — probeer Home Assistant eenmaal opnieuw te starten. Als installatie nog steeds mislukt (bijv. een niet-ondersteunde OS/CPU-architectuur), zet dan het opslagdoel in de integratieopties op **Lokaal** of **FTP**."
     }
   },
   "system_health": {

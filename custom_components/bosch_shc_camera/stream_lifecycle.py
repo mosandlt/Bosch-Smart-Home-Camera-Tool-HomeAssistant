@@ -181,6 +181,23 @@ async def tear_down_live_stream(
                     exc,
                 )
         await coordinator._stop_tls_proxy(cam_id)
+        # Viewing front-door (viewing_front_door.py) wraps this same TLS
+        # proxy port — stop it right after the proxy so no stray client can
+        # be relayed into a proxy that's already gone, and before the
+        # go2rtc unregister below (same ordering rationale: tear the
+        # publishing layers down inside-out).
+        await coordinator._stop_viewing_front_door(cam_id)
+        # Same for the REMOTE viewing-path front-door
+        # (remote_viewing_front_door.py) — separate runner from the LOCAL
+        # one above, but wraps the same per-cam TLS proxy port and must be
+        # stopped on every teardown regardless of which connection type
+        # this session actually was (a safe no-op if REMOTE's front-door was
+        # never bound for this cam_id — same as the LOCAL call above being a
+        # no-op for a REMOTE-only session). This is also how
+        # `session_renewal.remote_session_terminator`'s pre-cap teardown
+        # reaches the front-door: it calls `_tear_down_live_stream` directly
+        # and needs no front-door-specific awareness of its own.
+        await coordinator._stop_remote_viewing_front_door(cam_id)
         await coordinator._unregister_go2rtc_stream(cam_id)
         cam_entity = coordinator._camera_entities.get(cam_id)
         if cam_entity is not None:
@@ -418,7 +435,7 @@ async def go2rtc_consumer_count(
     ):
         try:
             async with asyncio.timeout(3):
-                async with _go2rtc_client_session(coordinator, None) as s:
+                async with _go2rtc_client_session(coordinator) as s:
                     async with s.get(url, params={"src": stream_name}) as resp:
                         if resp.status != 200:
                             continue

@@ -1,8 +1,12 @@
 """Mini-NVR — local-only continuous recording sidecar.
 
 Phase 1 MVP: spawn one ffmpeg child per LOCAL-streaming camera that reads from
-the existing TLS-proxy RTSP URL (`rtsp://user:pass@127.0.0.1:NNN/...`) and
-segments the stream into 5-min wall-aligned MP4 files on local disk.
+the existing published RTSP URL (`_live_connections[cam_id]["rtspsUrl"]` —
+since viewing_front_door.py, this is normally the credential-free stable-port
+viewing front-door URL for LOCAL sessions, `rtsp://127.0.0.1:NNN/...`, falling
+back to the raw `rtsp://user:pass@127.0.0.1:NNN/...` TLS-proxy URL only if the
+front-door failed to bind) and segments the stream into 5-min wall-aligned MP4
+files on local disk.
 
 Constraint (LAN-only):
     The recorder is allowed to run only when the camera's live session is in

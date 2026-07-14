@@ -469,6 +469,99 @@ class TestBoschOAuth2ImplementationInit:
         assert impl.hass is fake_hass
         assert impl._last_verifier is None
 
+    def test_default_client_id_and_secret_match_module_constants(self):
+        """application_credentials port: client_id/client_secret default to
+        the module-level CLIENT_ID/CLIENT_SECRET constants when not passed
+        explicitly — pre-existing single-arg construction (this test file,
+        and any future direct instantiation) must keep behaving exactly as
+        before."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            CLIENT_ID,
+            CLIENT_SECRET,
+            BoschOAuth2Implementation,
+        )
+
+        impl = BoschOAuth2Implementation(MagicMock())
+        assert impl._client_id == CLIENT_ID
+        assert impl._client_secret == CLIENT_SECRET
+
+    def test_explicit_client_id_and_secret_are_stored(self):
+        """application_credentials.py's async_get_auth_implementation
+        constructs BoschOAuth2Implementation with the ClientCredential's
+        client_id/client_secret — verify those override the defaults
+        instead of being silently ignored."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschOAuth2Implementation,
+        )
+
+        impl = BoschOAuth2Implementation(
+            MagicMock(), "custom_client_id", "custom_client_secret"
+        )
+        assert impl._client_id == "custom_client_id"
+        assert impl._client_secret == "custom_client_secret"
+
+    @pytest.mark.asyncio
+    async def test_custom_client_id_appears_in_authorize_url(self):
+        """A ClientCredential-sourced client_id must actually be used to
+        build the authorize URL, not just stored — pins the wiring, not
+        just the constructor assignment."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschOAuth2Implementation,
+        )
+
+        impl = BoschOAuth2Implementation(MagicMock(), "override_id", "override_secret")
+        with (
+            patch(f"{MODULE}._pkce_pair", return_value=("v", "c")),
+            patch(f"{MODULE}._encode_jwt", return_value="s"),
+        ):
+            url = await impl.async_generate_authorize_url("flow-3")
+        assert "client_id=override_id" in url
+
+    @pytest.mark.asyncio
+    async def test_custom_client_credentials_used_in_token_exchange(self):
+        """A ClientCredential-sourced client_id/client_secret must be sent
+        in the authorization_code token-exchange POST body."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschOAuth2Implementation,
+        )
+
+        impl = BoschOAuth2Implementation(MagicMock(), "override_id", "override_secret")
+        impl._last_verifier = "v"
+        mock_session = MagicMock()
+        mock_session.post.return_value = _make_mock_cm(200, {"access_token": "at"})
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
+        ):
+            await impl.async_resolve_external_data(
+                {"code": "c", "state": {"redirect_uri": "https://r"}}
+            )
+        _, kwargs = mock_session.post.call_args
+        assert kwargs["data"]["client_id"] == "override_id"
+        assert kwargs["data"]["client_secret"] == "override_secret"
+
+    @pytest.mark.asyncio
+    async def test_custom_client_credentials_used_in_refresh(self):
+        """A ClientCredential-sourced client_id/client_secret must be sent
+        in the refresh_token POST body too (AbstractOAuth2Implementation's
+        own refresh path — distinct from token_auth.py's hand-rolled
+        _do_refresh, which always uses the module-level constants)."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschOAuth2Implementation,
+        )
+
+        impl = BoschOAuth2Implementation(MagicMock(), "override_id", "override_secret")
+        mock_session = MagicMock()
+        mock_session.post.return_value = _make_mock_cm(200, {"access_token": "new_at"})
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=mock_session),
+        ):
+            await impl._async_refresh_token({"refresh_token": "rt"})
+        _, kwargs = mock_session.post.call_args
+        assert kwargs["data"]["client_id"] == "override_id"
+        assert kwargs["data"]["client_secret"] == "override_secret"
+
 
 class TestAsyncGenerateAuthorizeUrl:
     @pytest.mark.asyncio
@@ -1061,16 +1154,34 @@ class TestConfigFlowSteps:
         assert isinstance(flow.logger, logging.Logger)
 
     @pytest.mark.asyncio
-    async def test_async_step_user_registers_implementation(self):
-        """async_step_user registers the OAuth2 impl, then shows the
-        auto/manual login menu (it no longer delegates straight to the
-        automatic OAuth2 flow — see the manual-login section below)."""
-        flow = self._make_flow(source="user")
-        with patch(f"{MODULE}.async_register_implementation") as mock_reg:
-            result = await flow.async_step_user(None)
-        assert mock_reg.called, (
-            "async_register_implementation must be called in async_step_user"
+    async def test_async_step_user_shows_menu_without_registering_implementation(
+        self,
+    ):
+        """async_step_user shows the auto/manual login menu (it no longer
+        delegates straight to the automatic OAuth2 flow — see the
+        manual-login section below).
+
+        Regression guard for the application_credentials port: async_step_user
+        must NOT call async_register_implementation() any more — that
+        function no longer exists in config_flow.py's namespace at all
+        (removed from the config_entry_oauth2_flow import). Implementation
+        registration now happens exactly once at integration setup, via
+        application_credentials.py's async_get_auth_implementation provider
+        (see __init__.py's async_setup -> async_import_client_credential).
+        Registering a second implementation here would make
+        AbstractOAuth2FlowHandler.async_step_pick_implementation see two
+        implementations instead of one and break its single-implementation
+        auto-pick fast path.
+        """
+        import custom_components.bosch_shc_camera.config_flow as config_flow_module
+
+        assert not hasattr(config_flow_module, "async_register_implementation"), (
+            "async_register_implementation must not be imported into "
+            "config_flow.py's namespace — registration is owned by "
+            "application_credentials.py now"
         )
+        flow = self._make_flow(source="user")
+        result = await flow.async_step_user(None)
         flow.async_show_menu.assert_called_once()
         assert result == {"type": "menu", "step_id": "user"}
 
@@ -1199,9 +1310,7 @@ class TestAsyncStepUserShowsMenu:
     @pytest.mark.asyncio
     async def test_fresh_setup_shows_auto_and_manual_options(self) -> None:
         flow = _make_flow(source="user")
-        with patch(f"{MODULE}.async_register_implementation") as mock_reg:
-            result = await flow.async_step_user(None)
-        assert mock_reg.called
+        result = await flow.async_step_user(None)
         # Fresh setup must still run the duplicate-entry guard *before* the
         # menu is shown — this proves the menu didn't replace that check.
         flow.async_set_unique_id.assert_called_once_with("bosch_shc_camera")
@@ -1217,10 +1326,59 @@ class TestAsyncStepUserShowsMenu:
         self,
     ) -> None:
         flow = _make_flow(source=config_entries.SOURCE_REAUTH)
-        with patch(f"{MODULE}.async_register_implementation"):
-            await flow.async_step_user(None)
+        await flow.async_step_user(None)
         flow.async_set_unique_id.assert_not_called()
         flow.async_show_menu.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_imports_default_client_credential_before_showing_menu(
+        self,
+    ) -> None:
+        """Regression guard: async_step_user must import the default
+        ClientCredential itself (not rely solely on __init__.py's
+        async_setup()) — a brand-new install never runs this integration's
+        own async_setup() before its FIRST config flow starts (HA-core's
+        _load_integration only sets up dependency domains + imports the
+        config_flow platform module), so without this call auto_login would
+        reach AbstractOAuth2FlowHandler.async_step_pick_implementation with
+        zero credentials registered and abort with missing_credentials.
+        Found by the THREE_PER_ISSUE_PER_CHANGE bug-hunt during the
+        application_credentials port."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            CLIENT_ID,
+            CLIENT_SECRET,
+            DOMAIN,
+        )
+
+        flow = _make_flow(source="user")
+        with patch(
+            f"{MODULE}.async_import_client_credential", new=AsyncMock()
+        ) as mock_import:
+            await flow.async_step_user(None)
+        mock_import.assert_called_once()
+        call_args = mock_import.call_args
+        assert call_args.args[0] is flow.hass
+        assert call_args.args[1] == DOMAIN
+        credential = call_args.args[2]
+        assert credential.client_id == CLIENT_ID
+        assert credential.client_secret == CLIENT_SECRET
+        # The import must happen BEFORE the menu is shown — a form/menu
+        # step could otherwise race the auto_login credential lookup on a
+        # slow event loop.
+        assert flow.async_show_menu.called
+
+    @pytest.mark.asyncio
+    async def test_reauth_source_also_imports_default_client_credential(
+        self,
+    ) -> None:
+        """Reauth doesn't skip credential import — application_credentials'
+        provider lookup runs identically on reauth's auto_login path."""
+        flow = _make_flow(source=config_entries.SOURCE_REAUTH)
+        with patch(
+            f"{MODULE}.async_import_client_credential", new=AsyncMock()
+        ) as mock_import:
+            await flow.async_step_user(None)
+        mock_import.assert_called_once()
 
 
 class TestAsyncStepAutoLogin:
@@ -3272,6 +3430,196 @@ async def test_options_flow_webhook_url_whitespace_only_no_error() -> None:
 
     flow.async_show_form.assert_not_called()
     flow.async_create_entry.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regression tests: options-flow save gives an IMMEDIATE (same-request) Repairs
+# signal when the user just enabled an SMB-dependent feature (SMB event upload
+# or Mini-NVR SMB storage) but the optional `smbprotocol` package isn't
+# installed — instead of waiting for the next coordinator tick (potentially
+# minutes later, on a different UI surface). Same issue_id/translation_key as
+# __init__.py's _refresh_smb_unavailable_issue (periodic tick check), so the
+# two can never disagree — this is purely about latency of the first signal.
+# Non-blocking: never added to `errors` / never prevents the save.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_options_flow_smb_unavailable_creates_issue_on_save() -> None:
+    """enable_smb_upload+upload_protocol=smb, smbprotocol missing → issue created
+    in the SAME request, not just on the next coordinator tick."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+
+    entry = SimpleNamespace(
+        entry_id="01TEST",
+        data={"bearer_token": "", "refresh_token": "rt"},
+        options={},
+    )
+    flow = BoschCameraOptionsFlow(entry)
+    flow.hass = MagicMock()
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})  # type: ignore[method-assign]
+
+    with (
+        patch(f"{MODULE}.smb_available", return_value=False),
+        patch(f"{MODULE}.ir") as mock_ir,
+    ):
+        await flow.async_step_init(
+            user_input={
+                "events_storage": {
+                    "enable_smb_upload": True,
+                    "upload_protocol": "smb",
+                }
+            }
+        )
+
+    mock_ir.async_create_issue.assert_called_once_with(
+        flow.hass,
+        "bosch_shc_camera",
+        "smb_unavailable",
+        is_fixable=False,
+        is_persistent=False,
+        severity=mock_ir.IssueSeverity.WARNING,
+        translation_key="smb_unavailable",
+        translation_placeholders={"features": "SMB event upload"},
+    )
+    mock_ir.async_delete_issue.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_options_flow_smb_available_deletes_issue_on_save() -> None:
+    """smbprotocol installed (normal case) → no create, issue cleared on save."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+
+    entry = SimpleNamespace(
+        entry_id="01TEST",
+        data={"bearer_token": "", "refresh_token": "rt"},
+        options={},
+    )
+    flow = BoschCameraOptionsFlow(entry)
+    flow.hass = MagicMock()
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})  # type: ignore[method-assign]
+
+    with (
+        patch(f"{MODULE}.smb_available", return_value=True),
+        patch(f"{MODULE}.ir") as mock_ir,
+    ):
+        await flow.async_step_init(
+            user_input={
+                "events_storage": {
+                    "enable_smb_upload": True,
+                    "upload_protocol": "smb",
+                }
+            }
+        )
+
+    mock_ir.async_create_issue.assert_not_called()
+    mock_ir.async_delete_issue.assert_called_once_with(
+        flow.hass, "bosch_shc_camera", "smb_unavailable"
+    )
+
+
+@pytest.mark.asyncio
+async def test_options_flow_smb_both_features_creates_issue_on_save() -> None:
+    """Both SMB-dependent features (event upload + Mini-NVR storage) enabled
+    together, smbprotocol missing → the combined ' + '-joined placeholder is
+    correct at THIS call site too, not just at _refresh_smb_unavailable_issue's
+    (test_init.py::test_both_features_enabled_combines_placeholder covers that
+    one; this pins the same logic driven through the real section-nested
+    options-flow submission shape)."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+
+    entry = SimpleNamespace(
+        entry_id="01TEST",
+        data={"bearer_token": "", "refresh_token": "rt"},
+        options={},
+    )
+    flow = BoschCameraOptionsFlow(entry)
+    flow.hass = MagicMock()
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})  # type: ignore[method-assign]
+
+    with (
+        patch(f"{MODULE}.smb_available", return_value=False),
+        patch(f"{MODULE}.ir") as mock_ir,
+    ):
+        await flow.async_step_init(
+            user_input={
+                "events_storage": {
+                    "enable_smb_upload": True,
+                    "upload_protocol": "smb",
+                },
+                "nvr": {
+                    "enable_nvr": True,
+                    "nvr_storage_target": "smb",
+                },
+            }
+        )
+
+    _, kwargs = mock_ir.async_create_issue.call_args
+    assert (
+        kwargs["translation_placeholders"]["features"]
+        == "SMB event upload + Mini-NVR SMB storage"
+    )
+    mock_ir.async_delete_issue.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_options_flow_smb_not_configured_deletes_issue_on_save() -> None:
+    """No SMB-dependent feature enabled → issue cleared regardless of
+    smb_available(), matching _refresh_smb_unavailable_issue's own logic."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+
+    entry = SimpleNamespace(
+        entry_id="01TEST",
+        data={"bearer_token": "", "refresh_token": "rt"},
+        options={},
+    )
+    flow = BoschCameraOptionsFlow(entry)
+    flow.hass = MagicMock()
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})  # type: ignore[method-assign]
+
+    with (
+        patch(f"{MODULE}.smb_available", return_value=False),
+        patch(f"{MODULE}.ir") as mock_ir,
+    ):
+        await flow.async_step_init(user_input={"polling": {"scan_interval": 45}})
+
+    mock_ir.async_create_issue.assert_not_called()
+    mock_ir.async_delete_issue.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_options_flow_smb_check_skipped_when_hass_not_attached() -> None:
+    """flow.hass is None (flow instantiated but never attached by HA's flow
+    manager, the state most of this test module's other _submit()-based
+    tests exercise) → the SMB Repairs check must not raise, and must not
+    touch the (unusable) issue registry."""
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+
+    entry = SimpleNamespace(
+        entry_id="01TEST",
+        data={"bearer_token": "", "refresh_token": "rt"},
+        options={},
+    )
+    flow = BoschCameraOptionsFlow(entry)
+    assert flow.hass is None
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})  # type: ignore[method-assign]
+
+    with (
+        patch(f"{MODULE}.smb_available", return_value=False),
+        patch(f"{MODULE}.ir") as mock_ir,
+    ):
+        result = await flow.async_step_init(
+            user_input={
+                "events_storage": {
+                    "enable_smb_upload": True,
+                    "upload_protocol": "smb",
+                }
+            }
+        )
+
+    assert result == {"type": "create_entry"}
+    mock_ir.async_create_issue.assert_not_called()
+    mock_ir.async_delete_issue.assert_not_called()
 
 
 class TestGH5ReauthReconfigureFlow:
