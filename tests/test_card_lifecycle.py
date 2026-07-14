@@ -7,6 +7,8 @@ string-searching the source — crude but it catches accidental deletion
 of critical event listeners.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest
@@ -49,22 +51,28 @@ def test_pagehide_listener_wired(card_source: str) -> None:
 def test_pagehide_calls_stop_live_video(card_source: str) -> None:
     """Pin the handler body: must call `_stopLiveVideo()` so the
     RTCPeerConnection + WS subscription are torn down before unload —
-    EXCEPT when this card owns the PiP window, in which case it must NOT
-    tear down (Chrome fires `pagehide` when it freezes a long-hidden tab;
-    tearing down then kills a watched floating stream — v14.0.0 fix)."""
+    EXCEPT when this card owns the PiP window or iOS native video
+    fullscreen, in which case it must NOT tear down (Chrome fires
+    `pagehide` when it freezes a long-hidden tab; tearing down then kills
+    a watched floating stream — v14.0.0 fix, extended v14.1.7.1 to also
+    cover iOS native fullscreen via `_ownsNativePresentation()`)."""
     assert "_pagehideHandler" in card_source
     handler_idx = card_source.find("_pagehideHandler =")
     assert handler_idx > 0, "_pagehideHandler assignment missing"
-    # Widened window: the handler now carries a PiP-guard (comment + ownsPip).
+    # Widened window: the handler now carries a PiP-guard (comment + _ownsNativePresentation).
     handler_window = card_source[handler_idx : handler_idx + 1200]
     assert "_stopLiveVideo()" in handler_window, (
         "pagehide handler must still call this._stopLiveVideo() to flush "
         "pc.close() + WS-unsubscribe before a real unload."
     )
-    # The v14 guard: a PiP-owned stream is NOT torn down on pagehide.
-    assert "ownsPip" in handler_window and "if (ownsPip) return;" in handler_window, (
+    # The v14 guard (extended v14.1.7.1): a PiP- or native-fullscreen-owned
+    # stream is NOT torn down on pagehide.
+    assert (
+        "_ownsNativePresentation" in handler_window
+        and "if (this._ownsNativePresentation(v)) return;" in handler_window
+    ), (
         "pagehide handler must skip teardown when this card owns the PiP "
-        "window (else a tab-freeze kills the floating stream)."
+        "window or iOS native fullscreen (else a tab-freeze kills the floating stream)."
     )
 
 

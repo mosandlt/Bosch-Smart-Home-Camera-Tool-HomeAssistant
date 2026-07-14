@@ -43,6 +43,8 @@ If the DCO check fails on your PR:
 - **One commit:** `git commit --amend -s --no-edit && git push --force-with-lease`
 - **Multiple commits:** `git rebase --signoff main && git push --force-with-lease`
 
+Only do this **before** a reviewer has left comments tied to specific commits on the PR — once review is underway, amending/rebasing rewrites the commits those comments reference and can silently drop or orphan feedback. After that point, push a new commit instead (even just to add the trailer) rather than rewriting history on an open review branch.
+
 ### Set sign-off as default
 
 Save typing `-s` every time:

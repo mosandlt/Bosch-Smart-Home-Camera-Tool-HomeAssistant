@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
-from .const import CLOUD_API, TIMEOUT_PUT_CONNECTION
+from .const import CLOUD_API, LAN_RECHECK_FORCE_INTERVAL_SEC, TIMEOUT_PUT_CONNECTION
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator
@@ -185,12 +185,52 @@ async def try_live_connection_inner(
                         "reachable" if tcp_ok else "unreachable",
                     )
                 if not tcp_ok:
-                    _LOGGER.info(
-                        "TCP pre-check: %s LAN unreachable — skipping LOCAL, using REMOTE",
-                        cam_id[:8],
+                    # issue #47: chicken-and-egg breaker. `lan_ip` may be
+                    # stale (camera got a new DHCP lease after a mesh
+                    # flap/reboot) — every future pre-check against that
+                    # same stale IP would fail forever, and skipping LOCAL
+                    # here also skips the ONE call (the LOCAL PUT below)
+                    # whose response would tell us the camera's *current*
+                    # IP. Rather than trusting an indefinitely-repeatable
+                    # "unreachable" verdict, periodically ignore it and let
+                    # LOCAL be attempted for real. Cheap: if the camera is
+                    # genuinely unreachable, the existing pre-warm-failure
+                    # fallback (below) still demotes to REMOTE gracefully —
+                    # this only costs one extra connection attempt every
+                    # LAN_RECHECK_FORCE_INTERVAL_SEC per camera.
+                    now_recheck = time.monotonic()
+                    last_forced = coordinator._lan_recheck_forced_at.get(
+                        cam_id, float("-inf")
                     )
-                    candidates = ["REMOTE"]
-                    coordinator._stream_fell_back[cam_id] = True
+                    if (now_recheck - last_forced) >= LAN_RECHECK_FORCE_INTERVAL_SEC:
+                        coordinator._lan_recheck_forced_at[cam_id] = now_recheck
+                        _LOGGER.info(
+                            "TCP pre-check: %s unreachable at cached LAN IP %s, "
+                            "but forcing a periodic LOCAL retry anyway (last "
+                            "forced %s ago) in case the camera's LAN IP changed "
+                            "(e.g. a DHCP re-lease) — will fall back to REMOTE "
+                            "if this LOCAL attempt genuinely fails",
+                            cam_id[:8],
+                            lan_ip,
+                            "never"
+                            if last_forced == float("-inf")
+                            else f"{now_recheck - last_forced:.0f}s",
+                        )
+                        # Deliberately do NOT strip LOCAL from `candidates`
+                        # here — let the normal LOCAL-then-REMOTE flow run.
+                    else:
+                        nvr_wants_local = bool(coordinator._nvr_user_intent.get(cam_id))
+                        _LOGGER.info(
+                            "TCP pre-check: %s LAN unreachable — skipping LOCAL, "
+                            "using REMOTE%s",
+                            cam_id[:8],
+                            " (Mini-NVR recording will stay stopped/unavailable "
+                            "while on REMOTE — LAN-only by design)"
+                            if nvr_wants_local
+                            else "",
+                        )
+                        candidates = ["REMOTE"]
+                        coordinator._stream_fell_back[cam_id] = True
 
         # A 401 on PUT /connection means the bearer token was rotated /
         # early-invalidated. _ensure_valid_token() is built for exactly this
@@ -296,6 +336,26 @@ async def try_live_connection_inner(
                                     "port": int(_port),
                                     "ts": time.monotonic(),
                                 }
+                                # issue #47: `_get_cam_lan_ip` prefers
+                                # `_rcp_lan_ip_cache` over `_local_creds_cache`
+                                # — so if that RCP-sourced cache already held a
+                                # (possibly stale, e.g. post-DHCP-re-lease) IP,
+                                # it would keep winning forever even after we
+                                # just confirmed a working LOCAL connection at
+                                # a DIFFERENT, definitely-current address. Sync
+                                # it here so both caches agree on the freshest
+                                # confirmed-working IP and the TCP pre-check
+                                # stops pinging a dead address indefinitely.
+                                if coordinator._rcp_lan_ip_cache.get(cam_id) != _host:
+                                    _LOGGER.info(
+                                        "LAN IP for %s updated via LOCAL "
+                                        "connection: %s -> %s",
+                                        cam_id[:8],
+                                        coordinator._rcp_lan_ip_cache.get(cam_id)
+                                        or "(unknown)",
+                                        _host,
+                                    )
+                                    coordinator._rcp_lan_ip_cache[cam_id] = _host
                             except Exception as _e:
                                 _LOGGER.debug(
                                     "LOCAL creds cache skip for %s: %s",

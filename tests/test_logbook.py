@@ -27,10 +27,6 @@ from custom_components.bosch_shc_camera.logbook import (
     async_describe_events,
 )
 
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
 
 def _make_event(event_type: str, data: dict[str, Any]) -> Event[dict[str, Any]]:
     """Create a minimal HA Event with the given data dict."""
@@ -51,11 +47,6 @@ def _collect_registrations(
 
     async_describe_events(hass, _register)
     return registrations
-
-
-# ---------------------------------------------------------------------------
-# Registration tests
-# ---------------------------------------------------------------------------
 
 
 class TestRegistration:
@@ -81,11 +72,6 @@ class TestRegistration:
     def test_all_callbacks_callable(self) -> None:
         for cb in self.registrations.values():
             assert callable(cb)
-
-
-# ---------------------------------------------------------------------------
-# Motion event tests
-# ---------------------------------------------------------------------------
 
 
 class TestMotionDescribe:
@@ -144,11 +130,6 @@ class TestMotionDescribe:
         assert result[LOGBOOK_ENTRY_NAME] == "Bosch Innenbereich"
 
 
-# ---------------------------------------------------------------------------
-# Audio alarm event tests
-# ---------------------------------------------------------------------------
-
-
 class TestAudioAlarmDescribe:
     """Tests for the bosch_shc_camera_audio_alarm describe callback."""
 
@@ -176,11 +157,6 @@ class TestAudioAlarmDescribe:
         ev = _make_event(EVENT_AUDIO_ALARM, {"camera_name": ""})
         result = self.cb(ev)
         assert result[LOGBOOK_ENTRY_NAME] == "Bosch unknown camera"
-
-
-# ---------------------------------------------------------------------------
-# Person detection event tests
-# ---------------------------------------------------------------------------
 
 
 class TestPersonDescribe:
@@ -217,11 +193,6 @@ class TestPersonDescribe:
         result = self.cb(ev)
         for v in result.values():
             assert isinstance(v, str)
-
-
-# ---------------------------------------------------------------------------
-# Event constant tests
-# ---------------------------------------------------------------------------
 
 
 class TestEventConstants:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,12 +22,12 @@ COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "bosch_shc_
 
 
 @pytest.fixture(scope="module")
-def manifest() -> dict:
+def manifest() -> dict[str, Any]:
     return json.loads((COMPONENT_DIR / "manifest.json").read_text())
 
 
 @pytest.fixture(scope="module")
-def quality_scale() -> dict:
+def quality_scale() -> dict[str, Any]:
     return yaml.safe_load((COMPONENT_DIR / "quality_scale.yaml").read_text())
 
 
@@ -97,7 +98,9 @@ def _is_done_or_exempt(entry) -> bool:
     return False
 
 
-def test_quality_scale_yaml_lists_all_known_rules(quality_scale) -> None:
+def test_quality_scale_yaml_lists_all_known_rules(
+    quality_scale: dict[str, Any],
+) -> None:
     """quality_scale.yaml must list every rule in Bronze + Silver + Gold."""
     listed = set(quality_scale["rules"].keys())
     expected = BRONZE_RULES | SILVER_RULES | GOLD_RULES
@@ -107,7 +110,9 @@ def test_quality_scale_yaml_lists_all_known_rules(quality_scale) -> None:
     )
 
 
-def test_manifest_tier_matches_yaml_completeness(manifest, quality_scale) -> None:
+def test_manifest_tier_matches_yaml_completeness(
+    manifest: dict[str, Any], quality_scale: dict[str, Any]
+) -> None:
     """If manifest declares a tier, quality_scale.yaml must back it up.
 
     Rule: every Bronze + Silver + Gold rule must be `done` (or `exempt`)
@@ -141,7 +146,7 @@ def test_manifest_tier_matches_yaml_completeness(manifest, quality_scale) -> Non
     )
 
 
-def test_no_unknown_rules_in_yaml(quality_scale) -> None:
+def test_no_unknown_rules_in_yaml(quality_scale: dict[str, Any]) -> None:
     """quality_scale.yaml shouldn't declare rules that don't exist upstream.
 
     Catches typos like `parallel_updates` instead of `parallel-updates`.
@@ -160,7 +165,7 @@ def test_no_unknown_rules_in_yaml(quality_scale) -> None:
     )
 
 
-def test_exempt_rules_have_comments(quality_scale) -> None:
+def test_exempt_rules_have_comments(quality_scale: dict[str, Any]) -> None:
     """Every `exempt` rule must include a `comment` explaining why."""
     rules = quality_scale["rules"]
     for name, body in rules.items():
@@ -171,7 +176,7 @@ def test_exempt_rules_have_comments(quality_scale) -> None:
             )
 
 
-def test_todo_rules_have_comments(quality_scale) -> None:
+def test_todo_rules_have_comments(quality_scale: dict[str, Any]) -> None:
     """Every `todo` rule must include a `comment` describing what's open."""
     rules = quality_scale["rules"]
     for name, body in rules.items():

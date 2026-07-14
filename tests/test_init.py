@@ -30,6 +30,7 @@ import time
 import time as _time
 import time as time_mod
 import types
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,6 +41,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 import pytest
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
@@ -64,6 +66,7 @@ from custom_components.bosch_shc_camera import (
 from custom_components.bosch_shc_camera.const import (
     DEFAULT_OPTIONS,
     DOMAIN,
+    LAN_RECHECK_FORCE_INTERVAL_SEC,
     SLOW_TIER_MAX_DEFER_SEC,
     STREAM_IDLE_REAP_SEC,
 )
@@ -80,9 +83,6 @@ from custom_components.bosch_shc_camera.session_state import (
 )
 from tests.source_match import assert_in_source
 
-# ============================================================================
-# --- Setup / unload / entry lifecycle ---
-# ============================================================================
 # Tests for `BoschCameraCoordinator.__init__` body (lines 273-611).
 # This is the load-bearing constructor — it allocates every per-camera and
 # per-coordinator state container the rest of the integration relies on
@@ -1905,7 +1905,7 @@ class TestMigrateDoubledPrefix:
     """End-to-end migration against a real HA entity_registry."""
 
     @pytest.fixture
-    def config_entry(self, hass) -> MockConfigEntry:
+    def config_entry(self, hass: HomeAssistant) -> MockConfigEntry:
         entry = MockConfigEntry(
             domain=DOMAIN,
             data={"bearer_token": "tok", "refresh_token": "rt"},
@@ -1914,7 +1914,9 @@ class TestMigrateDoubledPrefix:
         entry.add_to_hass(hass)
         return entry
 
-    async def test_renames_buggy_entity_ids(self, hass, config_entry):
+    async def test_renames_buggy_entity_ids(
+        self, hass: HomeAssistant, config_entry: MockConfigEntry
+    ):
         """Buggy entries are renamed; non-buggy ones are untouched."""
         ent_reg = er.async_get(hass)
         # 3 buggy entries (button refresh + button siren + update firmware)
@@ -1973,7 +1975,9 @@ class TestMigrateDoubledPrefix:
         # other-integration entity untouched
         assert ent_reg.async_get(e5.entity_id) is not None
 
-    async def test_creates_repair_issue_when_renames_happen(self, hass, config_entry):
+    async def test_creates_repair_issue_when_renames_happen(
+        self, hass: HomeAssistant, config_entry: MockConfigEntry
+    ):
         ent_reg = er.async_get(hass)
         ent_reg.async_get_or_create(
             "button",
@@ -2000,8 +2004,8 @@ class TestMigrateDoubledPrefix:
 
     async def test_examples_truncated_with_ellipsis_when_more_than_five(
         self,
-        hass,
-        config_entry,
+        hass: HomeAssistant,
+        config_entry: MockConfigEntry,
     ):
         """When >5 entries are renamed, the repair-issue `examples` field is
         truncated to the first 5 followed by ', …'. Pins L5103."""
@@ -2027,7 +2031,9 @@ class TestMigrateDoubledPrefix:
         assert examples.count("→") == 5
         assert examples.endswith(", …")
 
-    async def test_no_issue_when_no_buggy_entries(self, hass, config_entry):
+    async def test_no_issue_when_no_buggy_entries(
+        self, hass: HomeAssistant, config_entry: MockConfigEntry
+    ):
         ent_reg = er.async_get(hass)
         ent_reg.async_get_or_create(
             "switch",
@@ -2058,7 +2064,9 @@ class TestMigrateDoubledPrefix:
             is None
         )
 
-    async def test_skips_when_new_entity_id_already_exists(self, hass, config_entry):
+    async def test_skips_when_new_entity_id_already_exists(
+        self, hass: HomeAssistant, config_entry: MockConfigEntry
+    ):
         """Defensive: if both buggy and correct entries somehow coexist,
         skip rather than raise on the unique-entity_id constraint."""
         ent_reg = er.async_get(hass)
@@ -2086,9 +2094,6 @@ class TestMigrateDoubledPrefix:
         assert ent_reg.async_get("button.bosch_est_refresh_snapshot") is not None
 
 
-# ============================================================================
-# --- Token refresh / auth / cloud session ---
-# ============================================================================
 # Tests for token-refresh logic in BoschCameraCoordinator.
 # Token refresh is the single most common pain point in OAuth integrations —
 # historically the source of GH#2 (token refresh fails) and GH#5 (refresh-
@@ -2715,9 +2720,6 @@ class TestFcmWatchdogSupervisorSpawn:
         )
 
 
-# ============================================================================
-# --- Cloud/local fallback and rescue ---
-# ============================================================================
 # Tests for the cloud-degraded rehydration helper (v12.4.10).
 # When the first cloud refresh raises `ConfigEntryNotReady`, the integration
 # walks the HA registries to rediscover cam_ids + human-readable titles so
@@ -2994,7 +2996,7 @@ class TestIsLanReachable:
         coord._lan_tcp_reachable[CAM_A] = (False, 12345.0)
         assert BoschCameraCoordinator.is_lan_reachable(coord, CAM_A) is False
 
-    def test_grace_period_masks_recent_failure(self, freezer):
+    def test_grace_period_masks_recent_failure(self, freezer: FrozenDateTimeFactory):
         freezer.move_to("2026-05-19T10:00:00+00:00")
         coord = _make_coord_lan_fallback()
         with patch(
@@ -3538,9 +3540,6 @@ class TestRcpLanDeniedHelpers:
         assert BoschCameraCoordinator._RCP_LAN_DENIED_TTL == 86400.0
 
 
-# ============================================================================
-# --- Stream lifecycle / TLS proxy / WebRTC watchdog ---
-# ============================================================================
 # Tests for stream lifecycle: `_tear_down_live_stream` cleanup invariants.
 # Stream teardown is invoked from 4 different entry points:
 # - User toggles `switch.live_stream` OFF
@@ -3970,7 +3969,7 @@ class TestIdleSessionReaper:
         c._tear_down_live_stream.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_exits_on_stale_generation(self, caplog):
+    async def test_exits_on_stale_generation(self, caplog: pytest.LogCaptureFixture):
         """A newer session (OFF→ON / renewal) bumps the generation → exit.
 
         caplog pins WHICH of the three exit branches fired — asserting only
@@ -3993,7 +3992,7 @@ class TestIdleSessionReaper:
         assert "stale generation, exiting" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_exits_when_session_gone(self, caplog):
+    async def test_exits_when_session_gone(self, caplog: pytest.LogCaptureFixture):
         """Session already torn down → exit without reaping."""
         import logging
 
@@ -4011,7 +4010,9 @@ class TestIdleSessionReaper:
         assert "session gone, exiting" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_exits_when_connection_no_longer_local(self, caplog):
+    async def test_exits_when_connection_no_longer_local(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """A LOCAL→REMOTE fallback leaves a REMOTE session the reaper ignores."""
         import logging
 
@@ -5108,10 +5109,10 @@ def _coord(
 
 
 @pytest.fixture
-def no_sleep(monkeypatch):
+def no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skip the 5s pre-rebuild settle wait."""
 
-    async def _fast(_seconds):
+    async def _fast(_seconds: float) -> None:
         return None
 
     monkeypatch.setattr(asyncio, "sleep", _fast)
@@ -5119,7 +5120,9 @@ def no_sleep(monkeypatch):
 
 @pytest.mark.asyncio
 class TestOnTlsProxyDied:
-    async def test_backoff_skips_when_recent(self, monkeypatch, no_sleep):
+    async def test_backoff_skips_when_recent(
+        self, monkeypatch: pytest.MonkeyPatch, no_sleep: None
+    ):
         # last rebuild 1s ago, threshold = 30s → skip
         from custom_components.bosch_shc_camera import time as _m_time
 
@@ -5130,7 +5133,9 @@ class TestOnTlsProxyDied:
         c.try_live_connection.assert_not_awaited()
         c._stop_tls_proxy.assert_not_awaited()
 
-    async def test_stream_no_longer_active(self, monkeypatch, no_sleep):
+    async def test_stream_no_longer_active(
+        self, monkeypatch: pytest.MonkeyPatch, no_sleep: None
+    ):
         from custom_components.bosch_shc_camera import time as _m_time
 
         monkeypatch.setattr(_m_time, "monotonic", lambda: 1000.0)
@@ -5139,7 +5144,9 @@ class TestOnTlsProxyDied:
         c.try_live_connection.assert_not_awaited()
         c._stop_tls_proxy.assert_not_awaited()
 
-    async def test_skip_when_not_local(self, monkeypatch, no_sleep):
+    async def test_skip_when_not_local(
+        self, monkeypatch: pytest.MonkeyPatch, no_sleep: None
+    ):
         from custom_components.bosch_shc_camera import time as _m_time
 
         monkeypatch.setattr(_m_time, "monotonic", lambda: 1000.0)
@@ -5149,7 +5156,9 @@ class TestOnTlsProxyDied:
         # _stop_tls_proxy must NOT be called for a non-LOCAL flow.
         c._stop_tls_proxy.assert_not_awaited()
 
-    async def test_successful_rebuild(self, monkeypatch, no_sleep):
+    async def test_successful_rebuild(
+        self, monkeypatch: pytest.MonkeyPatch, no_sleep: None
+    ):
         from custom_components.bosch_shc_camera import time as _m_time
 
         monkeypatch.setattr(_m_time, "monotonic", lambda: 1000.0)
@@ -5164,7 +5173,9 @@ class TestOnTlsProxyDied:
         c._stop_tls_proxy.assert_not_awaited()
         c.try_live_connection.assert_awaited_once_with("C", force_reset=True)
 
-    async def test_rebuild_returns_none(self, monkeypatch, no_sleep):
+    async def test_rebuild_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch, no_sleep: None
+    ):
         from custom_components.bosch_shc_camera import time as _m_time
 
         monkeypatch.setattr(_m_time, "monotonic", lambda: 1000.0)
@@ -5173,7 +5184,9 @@ class TestOnTlsProxyDied:
         await BoschCameraCoordinator._on_tls_proxy_died(c, "C")
         c.try_live_connection.assert_awaited_once_with("C", force_reset=True)
 
-    async def test_rebuild_raises(self, monkeypatch, no_sleep):
+    async def test_rebuild_raises(
+        self, monkeypatch: pytest.MonkeyPatch, no_sleep: None
+    ):
         from custom_components.bosch_shc_camera import time as _m_time
 
         monkeypatch.setattr(_m_time, "monotonic", lambda: 1000.0)
@@ -5325,7 +5338,9 @@ def _make_coord_tls_proxy_rebuild(*, live_conn: dict | None = None):
 
 
 @pytest.mark.asyncio
-async def test_rebuild_when_local_stream_active(monkeypatch) -> None:
+async def test_rebuild_when_local_stream_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """When a LOCAL stream is active and proxy dies, rebuild via try_live_connection."""
     coord = _make_coord_tls_proxy_rebuild(live_conn={"_connection_type": "LOCAL"})
 
@@ -5347,7 +5362,7 @@ async def test_rebuild_when_local_stream_active(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_skip_when_no_live_connection(monkeypatch) -> None:
+async def test_skip_when_no_live_connection(monkeypatch: pytest.MonkeyPatch) -> None:
     """No active stream → nothing to rebuild (switch was turned off)."""
     coord = _make_coord_tls_proxy_rebuild(live_conn=None)
     monkeypatch.setattr("asyncio.sleep", AsyncMock(return_value=None))
@@ -5359,7 +5374,9 @@ async def test_skip_when_no_live_connection(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_skip_when_active_connection_is_remote(monkeypatch) -> None:
+async def test_skip_when_active_connection_is_remote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """REMOTE stream has no TLS proxy to rebuild — another flow owns recovery."""
     coord = _make_coord_tls_proxy_rebuild(live_conn={"_connection_type": "REMOTE"})
     monkeypatch.setattr("asyncio.sleep", AsyncMock(return_value=None))
@@ -5370,7 +5387,9 @@ async def test_skip_when_active_connection_is_remote(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_backoff_suppresses_second_call_within_window(monkeypatch) -> None:
+async def test_backoff_suppresses_second_call_within_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Two callbacks within 30s → only one rebuild fires.
 
     Prevents storm if the new proxy also immediately dies because camera
@@ -5395,7 +5414,9 @@ async def test_backoff_suppresses_second_call_within_window(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_backoff_allows_second_call_after_window(monkeypatch) -> None:
+async def test_backoff_allows_second_call_after_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """After backoff window elapses, a second rebuild is allowed."""
     coord = _make_coord_tls_proxy_rebuild(live_conn={"_connection_type": "LOCAL"})
     monkeypatch.setattr("asyncio.sleep", AsyncMock(return_value=None))
@@ -5415,7 +5436,9 @@ async def test_backoff_allows_second_call_after_window(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_first_call_not_blocked_by_zero_sentinel(monkeypatch) -> None:
+async def test_first_call_not_blocked_by_zero_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """First-ever rebuild must fire even on a freshly-booted CI VM.
 
     Bug shape: if default were 0.0 and time.monotonic() < 30s (boot), the
@@ -5774,9 +5797,6 @@ class TestMarkEventsReadCancellation:
         coord.async_mark_events_read.assert_awaited_once_with(["ev-2"])
 
 
-# ============================================================================
-# --- go2rtc integration ---
-# ============================================================================
 # Tests for `__init__.py` go2rtc integration + WebRTC watchdog.
 # Covers:
 # - `_register_go2rtc_stream` (~113 LOC) — endpoint discovery (11984 → 1984),
@@ -6305,9 +6325,6 @@ class TestSslContextAndStartTlsProxy:
         stop.assert_called_once_with(CAM_A, coord._tls_proxy_ports)
 
 
-# ============================================================================
-# --- Frigate / external recorder endpoint ---
-# ============================================================================
 # Tests for the Frigate persistent-endpoint wiring: switches, sensors, and the
 # coordinator helpers (`_frigate_config`, `frigate_endpoint_url`,
 # `async_sync_frigate_endpoint`, `_frigate_resolve_inner`, …).
@@ -6405,7 +6422,7 @@ def test_url_host_specific_ip_used_verbatim() -> None:
     assert c._frigate_url_host("192.168.1.50") == "192.168.1.50"
 
 
-def test_url_host_lan_detects_ip(monkeypatch) -> None:
+def test_url_host_lan_detects_ip(monkeypatch: pytest.MonkeyPatch) -> None:
     c = _make_coord_frigate_integration()
 
     class _FakeSock:
@@ -6426,7 +6443,7 @@ def test_url_host_lan_detects_ip(monkeypatch) -> None:
     assert c._frigate_url_host("0.0.0.0") == "192.168.1.50"
 
 
-def test_url_host_lan_fallback_on_oserror(monkeypatch) -> None:
+def test_url_host_lan_fallback_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
     c = _make_coord_frigate_integration()
 
     class _FailSock:
@@ -6521,7 +6538,7 @@ async def test_sync_starts_when_wanted() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sync_creates_real_runner_when_none(socket_enabled) -> None:
+async def test_sync_creates_real_runner_when_none(socket_enabled: None) -> None:
     """When wanted and no runner exists yet, a real FrontDoorRunner is created
     and binds a port. Covers the lazy-create path."""
     import asyncio
@@ -6722,7 +6739,7 @@ def _switch_coord() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_frigate_switches_default_off(stub_entry) -> None:
+async def test_frigate_switches_default_off(stub_entry: SimpleNamespace) -> None:
     from custom_components.bosch_shc_camera.switch import (
         BoschFrigateHighSwitch,
         BoschFrigateLowSwitch,
@@ -6738,7 +6755,9 @@ async def test_frigate_switches_default_off(stub_entry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_frigate_high_switch_toggles_only_high(stub_entry) -> None:
+async def test_frigate_high_switch_toggles_only_high(
+    stub_entry: SimpleNamespace,
+) -> None:
     from custom_components.bosch_shc_camera.switch import BoschFrigateHighSwitch
 
     coord = _switch_coord()
@@ -6755,7 +6774,7 @@ async def test_frigate_high_switch_toggles_only_high(stub_entry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_frigate_low_switch_uses_low_store(stub_entry) -> None:
+async def test_frigate_low_switch_uses_low_store(stub_entry: SimpleNamespace) -> None:
     from custom_components.bosch_shc_camera.switch import BoschFrigateLowSwitch
 
     coord = _switch_coord()
@@ -6767,7 +6786,7 @@ async def test_frigate_low_switch_uses_low_store(stub_entry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_frigate_switch_restores_on(stub_entry) -> None:
+async def test_frigate_switch_restores_on(stub_entry: SimpleNamespace) -> None:
     from custom_components.bosch_shc_camera.switch import BoschFrigateHighSwitch
 
     coord = _switch_coord()
@@ -6785,7 +6804,7 @@ async def test_frigate_switch_restores_on(stub_entry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_frigate_url_sensors(stub_entry) -> None:
+async def test_frigate_url_sensors(stub_entry: SimpleNamespace) -> None:
     from custom_components.bosch_shc_camera.sensor import (
         BoschFrigateUrlHighSensor,
         BoschFrigateUrlLowSensor,
@@ -6812,7 +6831,7 @@ async def test_frigate_url_sensors(stub_entry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_frigate_url_sensor_none(stub_entry) -> None:
+async def test_frigate_url_sensor_none(stub_entry: SimpleNamespace) -> None:
     from custom_components.bosch_shc_camera.sensor import BoschFrigateUrlHighSensor
 
     coord = SimpleNamespace(
@@ -6903,7 +6922,7 @@ def _make_running_coord(**extra_opts: object) -> object:
     return c
 
 
-def test_frigate_switch_always_available(stub_entry) -> None:
+def test_frigate_switch_always_available(stub_entry: SimpleNamespace) -> None:
     """Frigate switch must be always available (not tied to coordinator success).
 
     Root cause of HA#37 'Unknown' URL: when the camera went offline, the switch
@@ -7013,9 +7032,6 @@ async def test_frigate_on_idle_tears_down_local_session_when_truly_idle() -> Non
     coord._tear_down_live_stream.assert_called_once_with(CAM_ID, expected_generation=1)
 
 
-# ============================================================================
-# --- Firmware update + install + Repairs ---
-# ============================================================================
 # Regression tests for BoschCameraCoordinator.async_install_firmware().
 # Shared by two entry points: update.py's BoschFirmwareUpdate.async_install
 # (the update entity's Install button) and repairs.py's
@@ -7415,9 +7431,6 @@ class TestFirmwareUpdateAvailableRepairs:
         )
 
 
-# ============================================================================
-# --- Notifications-disabled issue / camera status announce / intrusion events ---
-# ============================================================================
 # Regression tests for Repairs issue when camera notifications are disabled.
 # When Bosch cloud notifications (movement / person) are disabled for a camera,
 # the corresponding binary sensors stay permanently "Clear" with no error shown
@@ -8196,9 +8209,6 @@ class TestIntrusionEventFire:
         coord.hass.bus.async_fire.assert_not_called()
 
 
-# ============================================================================
-# --- Services ---
-# ============================================================================
 # Covers missing lines 4607–5086: handle_update_rule (cache-miss API fetch,
 # field overlay, PUT 200/204/error, rule-not-found), handle_set_motion_zones
 # (zone coord validation: missing field, out-of-range; HTTP 200/443/500),
@@ -9649,7 +9659,7 @@ def _make_entry_services_filesystem(download_path: str):
 
 class TestHandleMigrateFlatEvents:
     @pytest.mark.asyncio
-    async def test_flat_file_moved_to_y_m_d(self, tmp_path):
+    async def test_flat_file_moved_to_y_m_d(self, tmp_path: Path):
         """Flat file `<cam>/<cam>_YYYY-MM-DD_HH-MM-SS_MOTION_ABC.mp4` must
         be moved into `<cam>/YYYY/MM/DD/<file>` (year-first hierarchy)."""
         from custom_components.bosch_shc_camera import _register_services
@@ -9678,7 +9688,7 @@ class TestHandleMigrateFlatEvents:
         assert moved.is_file(), f"file must land at {moved}"
 
     @pytest.mark.asyncio
-    async def test_skip_when_dest_exists(self, tmp_path):
+    async def test_skip_when_dest_exists(self, tmp_path: Path):
         """If destination already exists, source file must NOT be overwritten
         and must remain in place (caller can resolve manually)."""
         from custom_components.bosch_shc_camera import _register_services
@@ -9705,7 +9715,7 @@ class TestHandleMigrateFlatEvents:
         assert existing.read_bytes() == b"old", "destination not overwritten"
 
     @pytest.mark.asyncio
-    async def test_non_matching_files_left_untouched(self, tmp_path):
+    async def test_non_matching_files_left_untouched(self, tmp_path: Path):
         """Files that don't match the regex (no date prefix) must stay flat."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -9728,7 +9738,7 @@ class TestHandleMigrateFlatEvents:
         assert broken.exists()
 
     @pytest.mark.asyncio
-    async def test_persistent_notification_fired_once(self, tmp_path):
+    async def test_persistent_notification_fired_once(self, tmp_path: Path):
         """After migration, exactly one persistent_notification.create call
         must fire with the total moved count in the message."""
         from custom_components.bosch_shc_camera import _register_services
@@ -9753,7 +9763,7 @@ class TestHandleMigrateFlatEvents:
         assert "2 file" in call_args[0][2]["message"]
 
     @pytest.mark.asyncio
-    async def test_no_download_path_no_notification_skip(self, tmp_path):
+    async def test_no_download_path_no_notification_skip(self, tmp_path: Path):
         """When the coordinator has no `download_path` configured, the entry
         must be skipped (no crash). Notification still fires with 0 count."""
         from custom_components.bosch_shc_camera import _register_services
@@ -9772,7 +9782,7 @@ class TestHandleMigrateFlatEvents:
 
 class TestHandleDeleteEvent:
     @pytest.mark.asyncio
-    async def test_file_path_outside_base_rejected(self, tmp_path):
+    async def test_file_path_outside_base_rejected(self, tmp_path: Path):
         """Path-traversal: a `file_path` resolving outside the configured
         `download_path` must be rejected (0 deletions, warning logged)."""
         from custom_components.bosch_shc_camera import _register_services
@@ -9797,7 +9807,7 @@ class TestHandleDeleteEvent:
         assert "Deleted 0" in hass.services.async_call.call_args[0][2]["message"]
 
     @pytest.mark.asyncio
-    async def test_file_path_inside_base_deleted(self, tmp_path):
+    async def test_file_path_inside_base_deleted(self, tmp_path: Path):
         """A `file_path` resolving inside base must be unlinked."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -9820,7 +9830,7 @@ class TestHandleDeleteEvent:
         assert "Deleted 1" in hass.services.async_call.call_args[0][2]["message"]
 
     @pytest.mark.asyncio
-    async def test_by_camera_filter(self, tmp_path):
+    async def test_by_camera_filter(self, tmp_path: Path):
         """Without `date`, all files under `<base>/<camera>/` matching the
         pattern are deleted (recursive)."""
         from custom_components.bosch_shc_camera import _register_services
@@ -9855,7 +9865,7 @@ class TestHandleDeleteEvent:
         assert "Deleted 2" in hass.services.async_call.call_args[0][2]["message"]
 
     @pytest.mark.asyncio
-    async def test_by_camera_and_date_filter(self, tmp_path):
+    async def test_by_camera_and_date_filter(self, tmp_path: Path):
         """`date` filter narrows by-camera deletion to files whose filename
         date matches exactly."""
         from custom_components.bosch_shc_camera import _register_services
@@ -9882,7 +9892,7 @@ class TestHandleDeleteEvent:
         assert "Deleted 1" in hass.services.async_call.call_args[0][2]["message"]
 
     @pytest.mark.asyncio
-    async def test_empty_dirs_cleaned_up(self, tmp_path):
+    async def test_empty_dirs_cleaned_up(self, tmp_path: Path):
         """After deletion, empty Y/M/D parent dirs must be removed."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -9908,7 +9918,7 @@ class TestHandleDeleteEvent:
         assert not (cam / "2026").exists(), "empty year dir must be cleaned"
 
     @pytest.mark.asyncio
-    async def test_no_camera_no_path_zero_deletions(self, tmp_path):
+    async def test_no_camera_no_path_zero_deletions(self, tmp_path: Path):
         """Neither `file_path` nor `camera` given → ServiceValidationError raised."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -9974,7 +9984,7 @@ INVALID_INPUT_CASES = [
 
 
 @pytest.fixture
-async def setup_services(hass: HomeAssistant):
+async def setup_services(hass: HomeAssistant) -> AsyncGenerator[None, None]:
     """Register the services without a coordinator (no cloud calls happen).
 
     The service handlers raise ServiceValidationError BEFORE iterating
@@ -9990,7 +10000,7 @@ async def setup_services(hass: HomeAssistant):
 @pytest.mark.parametrize("service_name,bad_data,expected_key", INVALID_INPUT_CASES)
 async def test_service_rejects_missing_argument(
     hass: HomeAssistant,
-    setup_services,
+    setup_services: None,
     service_name: str,
     bad_data: dict,
     expected_key: str,
@@ -10010,7 +10020,7 @@ async def test_service_rejects_missing_argument(
 
 
 async def test_set_motion_zones_rejects_missing_field(
-    hass: HomeAssistant, setup_services
+    hass: HomeAssistant, setup_services: None
 ) -> None:
     """Zone missing 'x' must raise the missing_field translation key."""
     with pytest.raises(ServiceValidationError) as exc_info:
@@ -10027,7 +10037,7 @@ async def test_set_motion_zones_rejects_missing_field(
 
 
 async def test_set_motion_zones_rejects_out_of_range(
-    hass: HomeAssistant, setup_services
+    hass: HomeAssistant, setup_services: None
 ) -> None:
     """Zone coord >1.0 must raise the value_out_of_range translation key."""
     with pytest.raises(ServiceValidationError) as exc_info:
@@ -10044,7 +10054,7 @@ async def test_set_motion_zones_rejects_out_of_range(
 
 
 async def test_set_privacy_masks_rejects_missing_field(
-    hass: HomeAssistant, setup_services
+    hass: HomeAssistant, setup_services: None
 ) -> None:
     """Mask missing 'h' must raise missing_field with kind=mask."""
     with pytest.raises(ServiceValidationError) as exc_info:
@@ -10061,7 +10071,7 @@ async def test_set_privacy_masks_rejects_missing_field(
 
 
 async def test_delete_motion_zone_rejects_negative_index(
-    hass: HomeAssistant, setup_services
+    hass: HomeAssistant, setup_services: None
 ) -> None:
     """Negative zone_index is treated as missing — argument_required."""
     with pytest.raises(ServiceValidationError) as exc_info:
@@ -10074,9 +10084,6 @@ async def test_delete_motion_zone_rejects_negative_index(
     assert exc_info.value.translation_key == "argument_required"
 
 
-# ============================================================================
-# --- Security / generic coordinator helpers ---
-# ============================================================================
 # Tests for the security/SSRF helpers in __init__.py.
 # `_is_safe_bosch_url` is the SSRF gate — every image/video URL the
 # integration fetches goes through it. A regression here could let a
@@ -10292,7 +10299,7 @@ def _make_coord_coordinator_helpers(**overrides) -> _StubCoord:
 
 
 @pytest.fixture
-def bind_helpers():
+def bind_helpers() -> dict[str, Callable[..., Any]]:
     """Return functions that emulate the bound methods on a stub coord."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -10302,17 +10309,23 @@ def bind_helpers():
     }
 
 
-def test_is_camera_online_returns_true_for_ONLINE(bind_helpers) -> None:
+def test_is_camera_online_returns_true_for_ONLINE(
+    bind_helpers: dict[str, Callable[..., Any]],
+) -> None:
     coord = _make_coord_coordinator_helpers(data={"cam-A": {"status": "ONLINE"}})
     assert bind_helpers["is_camera_online"](coord, "cam-A") is True
 
 
-def test_is_camera_online_returns_false_for_OFFLINE(bind_helpers) -> None:
+def test_is_camera_online_returns_false_for_OFFLINE(
+    bind_helpers: dict[str, Callable[..., Any]],
+) -> None:
     coord = _make_coord_coordinator_helpers(data={"cam-A": {"status": "OFFLINE"}})
     assert bind_helpers["is_camera_online"](coord, "cam-A") is False
 
 
-def test_is_camera_online_false_for_unknown_status(bind_helpers) -> None:
+def test_is_camera_online_false_for_unknown_status(
+    bind_helpers: dict[str, Callable[..., Any]],
+) -> None:
     """UPDATING_REGULAR, UNKNOWN, missing — all return False."""
     coord = _make_coord_coordinator_helpers(
         data={"cam-A": {"status": "UPDATING_REGULAR"}}
@@ -10320,30 +10333,40 @@ def test_is_camera_online_false_for_unknown_status(bind_helpers) -> None:
     assert bind_helpers["is_camera_online"](coord, "cam-A") is False
 
 
-def test_is_camera_online_missing_camera_returns_false(bind_helpers) -> None:
+def test_is_camera_online_missing_camera_returns_false(
+    bind_helpers: dict[str, Callable[..., Any]],
+) -> None:
     """A cam_id not in coordinator.data must return False, not raise."""
     coord = _make_coord_coordinator_helpers(data={})
     assert bind_helpers["is_camera_online"](coord, "cam-MISSING") is False
 
 
-def test_is_camera_online_missing_status_field(bind_helpers) -> None:
+def test_is_camera_online_missing_status_field(
+    bind_helpers: dict[str, Callable[..., Any]],
+) -> None:
     """Camera entry without 'status' field returns False (defaults to UNKNOWN)."""
     coord = _make_coord_coordinator_helpers(data={"cam-A": {"info": {"title": "x"}}})
     assert bind_helpers["is_camera_online"](coord, "cam-A") is False
 
 
-def test_is_session_stale_default_false(bind_helpers) -> None:
+def test_is_session_stale_default_false(
+    bind_helpers: dict[str, Callable[..., Any]],
+) -> None:
     """No entry in `_session_stale` → not stale."""
     coord = _make_coord_coordinator_helpers()
     assert bind_helpers["is_session_stale"](coord, "cam-A") is False
 
 
-def test_is_session_stale_true_when_marked(bind_helpers) -> None:
+def test_is_session_stale_true_when_marked(
+    bind_helpers: dict[str, Callable[..., Any]],
+) -> None:
     coord = _make_coord_coordinator_helpers(_session_stale={"cam-A": True})
     assert bind_helpers["is_session_stale"](coord, "cam-A") is True
 
 
-def test_is_session_stale_false_when_explicit_false(bind_helpers) -> None:
+def test_is_session_stale_false_when_explicit_false(
+    bind_helpers: dict[str, Callable[..., Any]],
+) -> None:
     coord = _make_coord_coordinator_helpers(_session_stale={"cam-A": False})
     assert bind_helpers["is_session_stale"](coord, "cam-A") is False
 
@@ -10418,7 +10441,7 @@ def test_options_property_merges_defaults() -> None:
 
 
 @pytest.fixture
-def coord():
+def coord() -> SimpleNamespace:
     return SimpleNamespace(
         data={CAM_ID: {"info": {"title": "x"}}},
         _rcp_clock_offset_cache={},
@@ -10428,7 +10451,7 @@ def coord():
 
 
 @pytest.fixture
-def helpers():
+def helpers() -> dict[str, Callable[..., Any]]:
     """Bind the unbound methods from BoschCameraCoordinator."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -10441,40 +10464,58 @@ def helpers():
 
 
 class TestClockOffset:
-    def test_default_none_when_empty(self, coord, helpers):
+    def test_default_none_when_empty(
+        self, coord: SimpleNamespace, helpers: dict[str, Callable[..., Any]]
+    ):
         assert helpers["clock_offset"](coord, CAM_ID) is None
 
-    def test_returns_cached_value(self, coord, helpers):
+    def test_returns_cached_value(
+        self, coord: SimpleNamespace, helpers: dict[str, Callable[..., Any]]
+    ):
         coord._rcp_clock_offset_cache[CAM_ID] = -1.42
         assert helpers["clock_offset"](coord, CAM_ID) == -1.42
 
-    def test_zero_offset_returned_correctly(self, coord, helpers):
+    def test_zero_offset_returned_correctly(
+        self, coord: SimpleNamespace, helpers: dict[str, Callable[..., Any]]
+    ):
         """0.0 must NOT be confused with "not cached" — the camera is in sync."""
         coord._rcp_clock_offset_cache[CAM_ID] = 0.0
         assert helpers["clock_offset"](coord, CAM_ID) == 0.0
 
 
 class TestRcpHelpers:
-    def test_lan_ip_default_none(self, coord, helpers):
+    def test_lan_ip_default_none(
+        self, coord: SimpleNamespace, helpers: dict[str, Callable[..., Any]]
+    ):
         assert helpers["rcp_lan_ip"](coord, CAM_ID) is None
 
-    def test_lan_ip_returns_cached(self, coord, helpers):
+    def test_lan_ip_returns_cached(
+        self, coord: SimpleNamespace, helpers: dict[str, Callable[..., Any]]
+    ):
         coord._rcp_lan_ip_cache[CAM_ID] = "192.0.2.149"
         assert helpers["rcp_lan_ip"](coord, CAM_ID) == "192.0.2.149"
 
-    def test_product_name_default_none(self, coord, helpers):
+    def test_product_name_default_none(
+        self, coord: SimpleNamespace, helpers: dict[str, Callable[..., Any]]
+    ):
         assert helpers["rcp_product_name"](coord, CAM_ID) is None
 
-    def test_product_name_returns_cached(self, coord, helpers):
+    def test_product_name_returns_cached(
+        self, coord: SimpleNamespace, helpers: dict[str, Callable[..., Any]]
+    ):
         coord._rcp_product_name_cache[CAM_ID] = "HOME_Eyes_Outdoor"
         assert helpers["rcp_product_name"](coord, CAM_ID) == "HOME_Eyes_Outdoor"
 
 
 class TestMotionSettings:
-    def test_returns_empty_dict_when_no_motion_data(self, coord, helpers):
+    def test_returns_empty_dict_when_no_motion_data(
+        self, coord: SimpleNamespace, helpers: dict[str, Callable[..., Any]]
+    ):
         assert helpers["motion_settings"](coord, CAM_ID) == {}
 
-    def test_returns_motion_dict_from_data(self, coord, helpers):
+    def test_returns_motion_dict_from_data(
+        self, coord: SimpleNamespace, helpers: dict[str, Callable[..., Any]]
+    ):
         coord.data[CAM_ID]["motion"] = {
             "motionAlarmConfiguration": "MEDIUM_HIGH",
             "enabled": True,
@@ -10482,10 +10523,14 @@ class TestMotionSettings:
         result = helpers["motion_settings"](coord, CAM_ID)
         assert result["motionAlarmConfiguration"] == "MEDIUM_HIGH"
 
-    def test_returns_empty_dict_for_unknown_camera(self, coord, helpers):
+    def test_returns_empty_dict_for_unknown_camera(
+        self, coord: SimpleNamespace, helpers: dict[str, Callable[..., Any]]
+    ):
         assert helpers["motion_settings"](coord, "unknown-cam-id") == {}
 
-    def test_does_not_raise_on_missing_data_key(self, coord, helpers):
+    def test_does_not_raise_on_missing_data_key(
+        self, coord: SimpleNamespace, helpers: dict[str, Callable[..., Any]]
+    ):
         """If `data[cam_id]` exists but has no `motion` key, return {} (no NPE)."""
         coord.data[CAM_ID] = {"info": {"title": "x"}}  # no "motion" key
         assert helpers["motion_settings"](coord, CAM_ID) == {}
@@ -12486,9 +12531,6 @@ class TestModuleConstants:
         assert _INTEGRATION_VERSION == manifest["version"]
 
 
-# ============================================================================
-# --- Snapshot / AI describe / event cache ---
-# ============================================================================
 # Coverage for AI describe-snapshot closures in async_setup_entry.
 # Targets in __init__.py:
 # 8016-8017   _async_deliver_webhook: invalid URL scheme → rejected
@@ -13634,9 +13676,6 @@ class TestFreshSnapshotCacheFastPath:
         assert result == b"CONCURRENT_DATA"
 
 
-# ============================================================================
-# --- Misc coordinator branch coverage (previously scattered coverage-round files) ---
-# ============================================================================
 # Tests for `__init__.py` async methods + thin delegation wrappers.
 # Round-1B follow-up to `test_init_helpers.py`. Targets the async I/O
 # methods on `BoschCameraCoordinator` that delegate to other modules
@@ -14648,6 +14687,48 @@ class TestRecorderWrappers:
         start.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_start_recorder_warns_when_gate_closed_by_remote(self, caplog):
+        """issue #47: gate closed specifically because the live session is
+        REMOTE (not LOCAL) must log at WARNING, not DEBUG — this is the
+        exact silent-Mini-NVR-unavailable symptom reported."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_async_methods(
+            _live_connections={CAM_A: {"_connection_type": "REMOTE"}}
+        )
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.nvr_recorder.should_record",
+                return_value=False,
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            await BoschCameraCoordinator.start_recorder(coord, CAM_A)
+        assert any(
+            "REMOTE" in rec.message and "LOCAL" in rec.message
+            for rec in caplog.records
+            if rec.levelno == logging.WARNING
+        )
+
+    @pytest.mark.asyncio
+    async def test_start_recorder_no_warning_when_no_connection_at_all(self, caplog):
+        """Gate closed for a reason OTHER than an active REMOTE session
+        (e.g. camera fully offline, no live connection at all) stays at
+        DEBUG — only the REMOTE-specific case is upgraded."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_async_methods(_live_connections={})
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.nvr_recorder.should_record",
+                return_value=False,
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            await BoschCameraCoordinator.start_recorder(coord, CAM_A)
+        assert not any(rec.levelno == logging.WARNING for rec in caplog.records)
+
+    @pytest.mark.asyncio
     async def test_start_recorder_calls_through_when_gate_open(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -15035,7 +15116,7 @@ def _make_entry_remaining_lines(download_path):
 
 class TestMigrateEdgeCases:
     @pytest.mark.asyncio
-    async def test_entry_without_runtime_data_skipped(self, tmp_path):
+    async def test_entry_without_runtime_data_skipped(self, tmp_path: Path):
         """Line 5154: entry.runtime_data is None → continue (skip)."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -15048,7 +15129,7 @@ class TestMigrateEdgeCases:
         # No exception → success: the `continue` branch executed
 
     @pytest.mark.asyncio
-    async def test_entry_with_empty_download_path_skipped(self, tmp_path):
+    async def test_entry_with_empty_download_path_skipped(self, tmp_path: Path):
         """Line 5158: download_path empty → continue."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -15060,7 +15141,7 @@ class TestMigrateEdgeCases:
         await _get_handlers(hass)["migrate_flat_events"](MagicMock(data={}))
 
     @pytest.mark.asyncio
-    async def test_entry_with_nonexistent_base_skipped(self, tmp_path):
+    async def test_entry_with_nonexistent_base_skipped(self, tmp_path: Path):
         """Line 5161: base.is_dir() is False → continue."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -15072,7 +15153,7 @@ class TestMigrateEdgeCases:
         await _get_handlers(hass)["migrate_flat_events"](MagicMock(data={}))
 
     @pytest.mark.asyncio
-    async def test_non_directory_entries_in_base_skipped(self, tmp_path):
+    async def test_non_directory_entries_in_base_skipped(self, tmp_path: Path):
         """Line 5167: file (not dir) inside base → continue."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -15088,7 +15169,7 @@ class TestMigrateEdgeCases:
 
 class TestDeleteEdgeCases:
     @pytest.mark.asyncio
-    async def test_entry_without_runtime_data_skipped(self, tmp_path):
+    async def test_entry_without_runtime_data_skipped(self, tmp_path: Path):
         """Line 5206: entry.runtime_data is None → continue."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -15100,7 +15181,7 @@ class TestDeleteEdgeCases:
         await _get_handlers(hass)["delete_event"](MagicMock(data={"camera": "x"}))
 
     @pytest.mark.asyncio
-    async def test_entry_with_empty_download_path_skipped(self, tmp_path):
+    async def test_entry_with_empty_download_path_skipped(self, tmp_path: Path):
         """Line 5210: download_path empty → continue."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -15112,7 +15193,7 @@ class TestDeleteEdgeCases:
         await _get_handlers(hass)["delete_event"](MagicMock(data={"camera": "x"}))
 
     @pytest.mark.asyncio
-    async def test_camera_with_traversal_attempt_rejected(self, tmp_path):
+    async def test_camera_with_traversal_attempt_rejected(self, tmp_path: Path):
         """Lines 5237-5238: cam_dir resolves outside base → ValueError → return 0."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -15125,7 +15206,7 @@ class TestDeleteEdgeCases:
         await _get_handlers(hass)["delete_event"](call)
 
     @pytest.mark.asyncio
-    async def test_camera_directory_does_not_exist_returns_zero(self, tmp_path):
+    async def test_camera_directory_does_not_exist_returns_zero(self, tmp_path: Path):
         """Line 5240: cam_dir.is_dir() is False → return 0."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -15140,7 +15221,7 @@ class TestDeleteEdgeCases:
         await _get_handlers(hass)["delete_event"](call)
 
     @pytest.mark.asyncio
-    async def test_files_not_matching_pattern_skipped(self, tmp_path):
+    async def test_files_not_matching_pattern_skipped(self, tmp_path: Path):
         """Line 5246: file name doesn't match event regex → continue."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -15168,7 +15249,7 @@ class TestDeleteEdgeCases:
         ).exists()
 
     @pytest.mark.asyncio
-    async def test_rmdir_oserror_on_non_empty_subdir_swallowed(self, tmp_path):
+    async def test_rmdir_oserror_on_non_empty_subdir_swallowed(self, tmp_path: Path):
         """Lines 5256-5257: rmdir raises OSError (non-empty subdir) → pass."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -15314,7 +15395,7 @@ class TestSetupEntryBranches:
 
 
 @pytest.mark.asyncio
-async def test_delete_motion_zone_post_non_2xx_raises(tmp_path):
+async def test_delete_motion_zone_post_non_2xx_raises(tmp_path: Path):
     """Line 4957: when POST motion_sensitive_areas returns non-2xx,
     raise HomeAssistantError(http_error)."""
     from homeassistant.exceptions import HomeAssistantError
@@ -15548,7 +15629,9 @@ class TestIntegrationVersionFallback:
         assert isinstance(_INTEGRATION_VERSION, str)
         assert len(_INTEGRATION_VERSION) > 0
 
-    def test_integration_version_fallback_on_read_error(self, tmp_path, monkeypatch):
+    def test_integration_version_fallback_on_read_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         """If Path.read_text() raises, the module must fall back to 'unknown'.
 
         We can't re-import a cached module easily, so we replicate the exact
@@ -15586,7 +15669,9 @@ class TestRefreshLocalCredsDebugLog:
     to DEBUG level — no custom toggle needed.
     """
 
-    async def test_debug_log_emitted_on_cred_rotation(self, caplog):
+    async def test_debug_log_emitted_on_cred_rotation(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """The method always emits a debug log after successful cred rotation."""
         import logging
 
@@ -15636,7 +15721,7 @@ class TestRecordStreamError_sprint_j1:
     Line 747: `elif count > cfg.max_stream_errors` → debug
     """
 
-    def test_warning_at_exact_threshold(self, caplog):
+    def test_warning_at_exact_threshold(self, caplog: pytest.LogCaptureFixture):
         """Hitting max_stream_errors exactly triggers the WARNING log."""
         import logging
 
@@ -15660,7 +15745,7 @@ class TestRecordStreamError_sprint_j1:
         )
         assert coord._stream_error_count[CAM_A] == 3
 
-    def test_debug_above_threshold(self, caplog):
+    def test_debug_above_threshold(self, caplog: pytest.LogCaptureFixture):
         """Exceeding max_stream_errors triggers only the DEBUG 'repeat' log."""
         import logging
 
@@ -15763,7 +15848,9 @@ class TestTearDownLiveStream_sprint_j1:
         stop_recorder.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_stream_stop_exception_is_logged_not_raised(self, caplog):
+    async def test_stream_stop_exception_is_logged_not_raised(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """If stream.stop() raises an unexpected Exception, it is logged at DEBUG
         and teardown continues (no exception propagates to the caller).
 
@@ -15797,7 +15884,9 @@ class TestTearDownLiveStream_sprint_j1:
         )
 
     @pytest.mark.asyncio
-    async def test_stream_stop_timeout_logs_warning(self, caplog):
+    async def test_stream_stop_timeout_logs_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """asyncio.TimeoutError from stream.stop() produces a WARNING (line 826-830)."""
         import logging
 
@@ -15905,7 +15994,7 @@ class TestScheduleTokenRefresh:
     Lines 1235-1236: outer except catches bad-token parse error → DEBUG log.
     """
 
-    def test_cancel_exception_logs_debug(self, caplog):
+    def test_cancel_exception_logs_debug(self, caplog: pytest.LogCaptureFixture):
         """When prev.cancel() raises AttributeError, a DEBUG log is emitted."""
         import logging
 
@@ -15929,7 +16018,7 @@ class TestScheduleTokenRefresh:
             "Could not cancel prior token-refresh handle" in m for m in debug_msgs
         ), f"Expected debug about cancel failure, got: {debug_msgs}"
 
-    def test_runtime_error_cancel_logs_debug(self, caplog):
+    def test_runtime_error_cancel_logs_debug(self, caplog: pytest.LogCaptureFixture):
         """When prev.cancel() raises RuntimeError, a DEBUG log is emitted."""
         import logging
 
@@ -15953,7 +16042,7 @@ class TestScheduleTokenRefresh:
             "Could not cancel prior token-refresh handle" in m for m in debug_msgs
         )
 
-    def test_outer_except_on_bad_token(self, caplog):
+    def test_outer_except_on_bad_token(self, caplog: pytest.LogCaptureFixture):
         """When the token cannot be base64-decoded, the outer except logs DEBUG."""
         import logging
 
@@ -15973,7 +16062,7 @@ class TestScheduleTokenRefresh:
         # Verify no exception escaped:
         # (if we reach here the method returned normally)
 
-    def test_outer_except_on_bad_payload(self, caplog):
+    def test_outer_except_on_bad_payload(self, caplog: pytest.LogCaptureFixture):
         """When payload base64 is not valid JSON, outer except logs DEBUG (line 1235-1236)."""
         import logging
 
@@ -16133,7 +16222,7 @@ class TestTryLiveConnection:
     """
 
     @pytest.mark.asyncio
-    async def test_privacy_mode_returns_none(self, caplog):
+    async def test_privacy_mode_returns_none(self, caplog: pytest.LogCaptureFixture):
         """When privacy_mode is active the method returns None immediately."""
         import logging
 
@@ -16154,7 +16243,9 @@ class TestTryLiveConnection:
         )
 
     @pytest.mark.asyncio
-    async def test_lock_already_locked_not_renewal_returns_skip_sentinel(self, caplog):
+    async def test_lock_already_locked_not_renewal_returns_skip_sentinel(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """When the per-cam lock is held and is_renewal=False, skip and return the
         STREAM_START_SKIPPED sentinel (NOT None) at DEBUG level.
 
@@ -19577,7 +19668,9 @@ class TestCameraList401DoubleFailure:
         )
 
     @pytest.mark.asyncio
-    async def test_401_bodies_logged_at_debug_for_diagnosis(self, caplog):
+    async def test_401_bodies_logged_at_debug_for_diagnosis(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """Bosch's 401 response body must be captured at DEBUG on both attempts.
 
         Regression for 2026-07-06 SebastianHarder community report: after v14.4.4
@@ -19820,7 +19913,9 @@ class TestProtocolCheckSupported:
     """Lines 1413-1442: protocol check 200 SUPPORTED → no WARNING, _protocol_checked set."""
 
     @pytest.mark.asyncio
-    async def test_supported_state_no_warning_log(self, caplog):
+    async def test_supported_state_no_warning_log(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """Protocol endpoint returns state=SUPPORTED → no WARNING emitted."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -19907,7 +20002,9 @@ class TestProtocolCheckDeprecated:
     """Lines 1424-1431: state != SUPPORTED → WARNING log emitted."""
 
     @pytest.mark.asyncio
-    async def test_deprecated_state_emits_warning(self, caplog):
+    async def test_deprecated_state_emits_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """Protocol endpoint returns state=DEPRECATED → WARNING log contains 'may no longer be supported'."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -19943,7 +20040,9 @@ class TestProtocolCheckDeprecated:
         )
 
     @pytest.mark.asyncio
-    async def test_unsupported_state_emits_warning(self, caplog):
+    async def test_unsupported_state_emits_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """Protocol endpoint returns state=UNSUPPORTED → WARNING log emitted."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -22298,6 +22397,7 @@ def _make_coord_sprint_kd(**overrides):
         # Local promotion/TCP cache
         _local_promote_at={},
         _lan_tcp_reachable={},
+        _lan_recheck_forced_at={},  # issue #47 chicken-and-egg breaker state
         _rcp_lan_ip_cache={CAM_A: "192.168.1.1"},  # needed for TCP pre-check path
         # Cred/proxy caches
         _local_creds_cache={},
@@ -22620,7 +22720,13 @@ class TestTcpPreCheck:
 
     @pytest.mark.asyncio
     async def test_tcp_ping_fail_removes_local(self):
-        """Both LOCAL+REMOTE, TCP ping=False → candidates=['REMOTE'], _stream_fell_back=True."""
+        """Both LOCAL+REMOTE, TCP ping=False → candidates=['REMOTE'], _stream_fell_back=True.
+
+        Pre-populates `_lan_recheck_forced_at` with a recent timestamp so
+        this exercises the normal "skip LOCAL" path rather than issue #47's
+        periodic forced-retry override (covered separately by
+        TestTcpPreCheckChickenAndEggBreaker).
+        """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_sprint_kd(
@@ -22630,6 +22736,7 @@ class TestTcpPreCheck:
             },  # good WiFi → both candidates
             _async_local_tcp_ping=AsyncMock(return_value=False),
             _lan_tcp_reachable={},  # no cache → actual ping
+            _lan_recheck_forced_at={CAM_A: time_mod.monotonic()},  # recently forced
         )
 
         resp = _put_resp(404, "not found")
@@ -22697,6 +22804,195 @@ class TestTcpPreCheck:
 
         # Ping must NOT be called (cache hit)
         ping_mock.assert_not_called()
+
+
+class TestTcpPreCheckChickenAndEggBreaker:
+    """issue #47: a stale cached LAN IP (post-DHCP-re-lease) must not
+    permanently skip LOCAL forever — periodically force a real retry so a
+    fresh IP can be learned via the LOCAL PUT response itself."""
+
+    @pytest.mark.asyncio
+    async def test_first_failure_forces_local_retry_not_skipped(self):
+        """Never forced before (`_lan_recheck_forced_at` empty) + TCP ping
+        fails → LOCAL must still be attempted (not stripped to REMOTE-only),
+        and the forced-retry timestamp gets recorded."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_sprint_kd(
+            _stream_error_count={},
+            _wifiinfo_cache={CAM_A: {"signalStrength": 80}},
+            _async_local_tcp_ping=AsyncMock(return_value=False),
+            _lan_tcp_reachable={},
+            _lan_recheck_forced_at={},  # never forced
+        )
+
+        resp = _put_resp(404, "not found")
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            await try_live_connection_inner(coord, CAM_A)
+
+        # LOCAL must still have been tried first, despite the failed ping.
+        first_call = session_mock.put.call_args_list[0]
+        assert first_call.kwargs["json"]["type"] == "LOCAL"
+        # REMOTE tried next since both PUTs 404 in this test.
+        assert session_mock.put.call_args_list[1].kwargs["json"]["type"] == "REMOTE"
+        # Forced-retry timestamp recorded so the NEXT failure within the
+        # cooldown window goes back to skipping LOCAL.
+        assert CAM_A in coord._lan_recheck_forced_at
+
+    @pytest.mark.asyncio
+    async def test_second_failure_within_cooldown_still_skips_local(self):
+        """A forced retry that happened recently (< LAN_RECHECK_FORCE_INTERVAL_SEC
+        ago) must NOT force again — falls back to the normal skip-LOCAL
+        behavior, same as before this fix."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_sprint_kd(
+            _stream_error_count={},
+            _wifiinfo_cache={CAM_A: {"signalStrength": 80}},
+            _async_local_tcp_ping=AsyncMock(return_value=False),
+            _lan_tcp_reachable={},
+            _lan_recheck_forced_at={CAM_A: time_mod.monotonic()},  # just forced
+        )
+
+        resp = _put_resp(404, "not found")
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            await try_live_connection_inner(coord, CAM_A)
+
+        # Only REMOTE tried — LOCAL skipped, same as the pre-fix behavior.
+        assert session_mock.put.call_count == 1
+        assert session_mock.put.call_args.kwargs["json"]["type"] == "REMOTE"
+        assert coord._stream_fell_back.get(CAM_A) is True
+
+    @pytest.mark.asyncio
+    async def test_failure_after_cooldown_elapsed_forces_local_again(self):
+        """A forced retry from long ago (>= LAN_RECHECK_FORCE_INTERVAL_SEC)
+        must force again rather than staying stuck skipping LOCAL forever."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        long_ago = time_mod.monotonic() - LAN_RECHECK_FORCE_INTERVAL_SEC - 1
+        coord = _make_coord_sprint_kd(
+            _stream_error_count={},
+            _wifiinfo_cache={CAM_A: {"signalStrength": 80}},
+            _async_local_tcp_ping=AsyncMock(return_value=False),
+            _lan_tcp_reachable={},
+            _lan_recheck_forced_at={CAM_A: long_ago},
+        )
+
+        resp = _put_resp(404, "not found")
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            await try_live_connection_inner(coord, CAM_A)
+
+        first_call = session_mock.put.call_args_list[0]
+        assert first_call.kwargs["json"]["type"] == "LOCAL"
+        # Timestamp refreshed to "now" (much greater than the stale value).
+        assert coord._lan_recheck_forced_at[CAM_A] > long_ago + 1
+
+
+class TestLanIpCacheSyncOnLocalSuccess:
+    """issue #47: once a LOCAL PUT actually succeeds against a real
+    address, `_rcp_lan_ip_cache` (which `_get_cam_lan_ip` prefers over
+    `_local_creds_cache`) must be updated to match — otherwise a stale RCP-
+    sourced IP would keep winning `_get_cam_lan_ip` forever even after we
+    just confirmed the camera is reachable at a different address."""
+
+    @pytest.mark.asyncio
+    async def test_stale_rcp_lan_ip_cache_updated_to_fresh_host(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        local_body = json.dumps(
+            {
+                "user": "u-local",
+                "password": "p-local",
+                "urls": ["192.168.1.99:443"],  # camera's NEW (post-DHCP) IP
+                "bufferingTime": 500,
+            }
+        )
+        coord = _make_coord_sprint_kd(
+            _entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "local"},
+            ),
+            # Stale cached IP from before the camera's DHCP re-lease.
+            _rcp_lan_ip_cache={CAM_A: "192.168.1.1"},
+            _local_creds_cache={},
+            _get_cam_lan_ip=MagicMock(return_value=None),  # skip TCP pre-check
+            _start_tls_proxy=AsyncMock(return_value=12345),
+            _tls_proxy_ports={CAM_A: 12345},
+        )
+
+        resp = _put_resp(200, local_body)
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is not None
+        assert coord._rcp_lan_ip_cache[CAM_A] == "192.168.1.99"
+        assert coord._local_creds_cache[CAM_A]["host"] == "192.168.1.99"
+
+    @pytest.mark.asyncio
+    async def test_unchanged_host_does_not_rewrite_cache_needlessly(self):
+        """Same host as already cached → no-op (still correct), just
+        documents the common case doesn't misbehave."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        local_body = json.dumps(
+            {
+                "user": "u-local",
+                "password": "p-local",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
+        coord = _make_coord_sprint_kd(
+            _entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "local"},
+            ),
+            _rcp_lan_ip_cache={CAM_A: "192.168.1.1"},
+            _local_creds_cache={},
+            _get_cam_lan_ip=MagicMock(return_value=None),
+            _start_tls_proxy=AsyncMock(return_value=12345),
+            _tls_proxy_ports={CAM_A: 12345},
+        )
+
+        resp = _put_resp(200, local_body)
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is not None
+        assert coord._rcp_lan_ip_cache[CAM_A] == "192.168.1.1"
 
 
 class TestPut200LocalSuccess:
@@ -24748,7 +25044,9 @@ class TestCamListRetryPaths:
             await BoschCameraCoordinator._async_update_data(coord)
 
     @pytest.mark.asyncio
-    async def test_protocol_version_non200_warns(self, caplog):
+    async def test_protocol_version_non200_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """Protocol endpoint returns 404 → WARNING logged (lines 1433-1436)."""
         import logging
 
@@ -27870,7 +28168,7 @@ class TestRcpViaCloudPut200:
         assert "abc123hash" in call_args.args[2]
 
     @pytest.mark.asyncio
-    async def test_rcp_put_non200_logs_debug(self, caplog):
+    async def test_rcp_put_non200_logs_debug(self, caplog: pytest.LogCaptureFixture):
         """PUT /connection returns 403 → else branch (line 2098) → debug logged, no crash."""
         import logging
 
@@ -27906,7 +28204,7 @@ class TestRcpConnectError:
     """Line 2103: asyncio.TimeoutError or aiohttp.ClientError in RCP PUT → debug logged."""
 
     @pytest.mark.asyncio
-    async def test_rcp_timeout_error_caught(self, caplog):
+    async def test_rcp_timeout_error_caught(self, caplog: pytest.LogCaptureFixture):
         """asyncio.timeout fires during PUT /connection → TimeoutError caught at line 2103."""
         import logging
 
@@ -27966,7 +28264,7 @@ class TestShcReadyStatesUpdate:
         coord._async_update_shc_states.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_shc_states_exception_caught(self, caplog):
+    async def test_shc_states_exception_caught(self, caplog: pytest.LogCaptureFixture):
         """shc_ready=True, _async_update_shc_states raises → exception caught, debug logged."""
         import logging
 
@@ -28145,7 +28443,9 @@ class TestStreamUpdateSourceSuccess:
     """Line 2706: stream.update_source() succeeds → _LOGGER.debug on success path."""
 
     @pytest.mark.asyncio
-    async def test_stream_update_source_success_logs_debug(self, caplog):
+    async def test_stream_update_source_success_logs_debug(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """cam_ent.stream.update_source() succeeds → debug logged for 'Stream.update_source()'."""
         import logging
 
@@ -33138,7 +33438,7 @@ class TestHandleRefreshImageEdgeCases:
     """Lines 8523 (list entity_id) and 8527 (None runtime_data)."""
 
     @pytest.mark.asyncio
-    async def test_entity_id_list_is_unwrapped(self, hass) -> None:  # type: ignore[no-untyped-def]
+    async def test_entity_id_list_is_unwrapped(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
         """Line 8523: entity_id arrives as a list → target[0] taken."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -33167,7 +33467,7 @@ class TestHandleRefreshImageEdgeCases:
         hass.async_create_task.assert_called()
 
     @pytest.mark.asyncio
-    async def test_none_runtime_data_is_skipped(self, hass) -> None:  # type: ignore[no-untyped-def]
+    async def test_none_runtime_data_is_skipped(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
         """Line 8527: entry.runtime_data is None/falsy → continue (no crash)."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -33187,7 +33487,7 @@ class TestHandleRefreshImageEdgeCases:
         )
 
     @pytest.mark.asyncio
-    async def test_empty_list_entity_id_becomes_none(self, hass) -> None:  # type: ignore[no-untyped-def]
+    async def test_empty_list_entity_id_becomes_none(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
         """Line 8523: entity_id=[] → target becomes None → all-camera refresh path."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -33217,7 +33517,7 @@ class TestSetMotionZonesCoordValueError:
     """Lines 8803-8804: float(z[key]) raises TypeError/ValueError → ServiceValidationError."""
 
     @pytest.mark.asyncio
-    async def test_zone_non_numeric_coord_raises(self, hass) -> None:  # type: ignore[no-untyped-def]
+    async def test_zone_non_numeric_coord_raises(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
         from homeassistant.exceptions import ServiceValidationError
 
         from custom_components.bosch_shc_camera import _register_services
@@ -33240,7 +33540,7 @@ class TestSetMotionZonesCoordValueError:
         assert placeholders.get("field") == "x"
 
     @pytest.mark.asyncio
-    async def test_zone_none_coord_raises(self, hass) -> None:  # type: ignore[no-untyped-def]
+    async def test_zone_none_coord_raises(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
         from homeassistant.exceptions import ServiceValidationError
 
         from custom_components.bosch_shc_camera import _register_services
@@ -33265,7 +33565,7 @@ class TestSetPrivacyMasksCoordValueError:
     """Lines 9164-9165: float(m[key]) raises TypeError/ValueError → ServiceValidationError."""
 
     @pytest.mark.asyncio
-    async def test_mask_non_numeric_coord_raises(self, hass) -> None:  # type: ignore[no-untyped-def]
+    async def test_mask_non_numeric_coord_raises(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
         from homeassistant.exceptions import ServiceValidationError
 
         from custom_components.bosch_shc_camera import _register_services
@@ -33288,7 +33588,7 @@ class TestSetPrivacyMasksCoordValueError:
         assert placeholders.get("field") == "x"
 
     @pytest.mark.asyncio
-    async def test_mask_none_coord_raises(self, hass) -> None:  # type: ignore[no-untyped-def]
+    async def test_mask_none_coord_raises(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
         from homeassistant.exceptions import ServiceValidationError
 
         from custom_components.bosch_shc_camera import _register_services
@@ -35189,7 +35489,9 @@ def test_motion_sensitivity_known_value_returned():
     assert result in MOTION_SENSITIVITY_OPTIONS
 
 
-def test_motion_sensitivity_unknown_value_returns_default(caplog):
+def test_motion_sensitivity_unknown_value_returns_default(
+    caplog: pytest.LogCaptureFixture,
+):
     """M8: unknown API value must return first option and log a warning."""
     from custom_components.bosch_shc_camera.select import MOTION_SENSITIVITY_OPTIONS
 
@@ -35231,7 +35533,7 @@ def test_motion_sensitivity_all_known_values():
 
 
 @pytest.mark.asyncio
-async def test_invite_friend_does_not_log_full_email(caplog):
+async def test_invite_friend_does_not_log_full_email(caplog: pytest.LogCaptureFixture):
     """L1: invite_friend must not log the full email address (PII in logs)."""
     hass = _make_hass_backend_round2_fixes()
     entry, _coord = _entry_with_coord_backend_round2_fixes()
@@ -35268,7 +35570,9 @@ async def test_invite_friend_does_not_log_full_email(caplog):
 
 
 @pytest.mark.asyncio
-async def test_invite_friend_email_without_at_sign_handled_gracefully(caplog):
+async def test_invite_friend_email_without_at_sign_handled_gracefully(
+    caplog: pytest.LogCaptureFixture,
+):
     """L1: email without @ should not crash the domain extraction."""
     hass = _make_hass_backend_round2_fixes()
     entry, _coord = _entry_with_coord_backend_round2_fixes()
@@ -35931,10 +36235,8 @@ class TestOuterExceptBranches:
         coord._async_maybe_announce_cloud_state.assert_called_with(False)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: SENTINEL_RULE / cache-attribute regression fixes (relocated from
 # tests/test_bug_regression_v11.py during the per-module test consolidation)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestPrivacyCacheFix:
@@ -36240,10 +36542,8 @@ class TestHeartbeatRenewalFailsReset:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: async_fetch_live_snapshot_local ValueError propagation (relocated
 # from tests/test_camera_image_value_error.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestFetchLiveSnapshotLocalValueError:
@@ -36319,10 +36619,8 @@ class TestFetchLiveSnapshotLocalValueError:
         assert out is None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: `_refresh_token_locked` (OAuth refresh path) — relocated from
 # tests/test_init_token_refresh.py
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _make_coord_token_refresh(**overrides):
@@ -36989,7 +37287,6 @@ class TestTokenFailureAlertHelper:
             await BoschCameraCoordinator._async_token_failure_alert(coord, "msg")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: gap-fill additions from the fragment-file cleanup pass (2026-07-09)
 # — inst= parsing edge case, coordinator-level firebase-config delegation, and
 # a CancelledError-propagation guard for async_put_camera. Relocated from
@@ -36998,7 +37295,6 @@ class TestTokenFailureAlertHelper:
 # already-consolidated coverage in test_fcm.py and this file's own
 # TestAsyncPutCamera / TestIntegrationVersionFallback classes and were
 # dropped rather than duplicated).
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestRefreshLocalCredsInstParamEdgeCases:
@@ -37131,13 +37427,11 @@ async def test_async_put_camera_cancelled_error_propagates_on_token_refresh():
             )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: closed-GitHub-issue regression pins for the coordinator surface
 # (relocated from tests/test_github_issues.py — the config_flow.py/light.py/
 # models.py/const.py/camera.py siblings for the same issues live in
 # tests/test_config_flow.py, tests/test_light.py, tests/test_models.py,
 # tests/test_const.py, and tests/test_camera.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestGH2TokenRefreshCoordinatorSurface:
@@ -37170,12 +37464,10 @@ class TestGH2TokenRefreshCoordinatorSurface:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: simon42-forum issue #5 — polling must bootstrap `_last_event_ids`
 # on the first tick after a restart (relocated from
 # tests/test_forum_issues.py — the binary_sensor.py half of the same forum
 # issue lives in tests/test_binary_sensor.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_forum_issue5_polling_seeds_last_event_ids_on_first_tick():
@@ -37194,7 +37486,6 @@ def test_forum_issue5_polling_seeds_last_event_ids_on_first_tick():
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: concurrent-start "Live stream failed" false alarm — coordinator
 # side (relocated from tests/test_stream_start_in_progress.py — the
 # switch.py side (BoschLiveStreamSwitch.async_turn_on treating the sentinel
@@ -37204,7 +37495,6 @@ def test_forum_issue5_polling_seeds_last_event_ids_on_first_tick():
 # will publish the session. `try_live_connection` returns the dedicated
 # falsy sentinel `STREAM_START_SKIPPED` instead of `None` so callers can
 # distinguish "coalesced into an in-flight start" from a real failure.
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_stream_start_skipped_sentinel_is_falsy_singleton() -> None:
@@ -37245,12 +37535,10 @@ class TestTryLiveConnectionSkipReturnsSentinel:
             held.release()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: _INTEGRATION_VERSION manifest-fallback branches, _refresh_local_creds
 # _from_heartbeat's inst= parsing, _fetch_firebase_config delegation, and
 # async_put_camera token-refresh/CancelledError handling (relocated from
 # tests/test_sprint_mb.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_integration_version_fallback_branch_in_source():
@@ -37267,7 +37555,7 @@ def test_integration_version_fallback_branch_in_source():
     )
 
 
-def test_integration_version_fallback_to_unknown_on_bad_manifest(tmp_path):
+def test_integration_version_fallback_to_unknown_on_bad_manifest(tmp_path: Path):
     """When manifest.json contains invalid JSON, _INTEGRATION_VERSION falls back to
     'unknown'. Tests the logic in isolation by running the exact try/except block
     from __init__.py's module-level version lookup — no module reload needed."""
@@ -37480,12 +37768,10 @@ async def test_async_put_camera_401_then_token_refresh_fails():
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: webhook delivery of motion/audio/person/intrusion events
 # (relocated from tests/test_webhook_delivery.py). PIN_EVERY_MODE: one test
 # per discrete behaviour path (disabled/no-url/scheme-guard/each event
 # type/failure-handling/payload shape/stale-closure-after-reload).
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _webhook_make_event(
@@ -37942,12 +38228,10 @@ class TestWebhookDelivery:
         assert posted_url != old_url
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # BoschCameraCoordinator.is_updating() — defensive firmware-cache read
 # (relocated from tests/test_updating_unavailable.py; the camera/light/switch
 # entity `available()` consumers of this signal stayed in their own
 # test_camera.py / test_light.py / test_switch.py files)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestIsUpdatingHelper:

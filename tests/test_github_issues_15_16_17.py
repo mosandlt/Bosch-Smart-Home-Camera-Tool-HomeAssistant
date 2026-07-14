@@ -33,9 +33,6 @@ def card_src() -> str:
     return _CARD_SRC.read_text(encoding="utf-8")
 
 
-# ── GH#17: new card stuck on camera.bosch_garten, GUI can't change it ──────
-
-
 class TestGH17_CameraDefaultStuck:
     """Root cause: ``getStubConfig`` hard-coded ``camera.bosch_garten`` (an
     entity that only exists in the author's install) and the editor's camera
@@ -83,9 +80,6 @@ class TestGH17_CameraDefaultStuck:
         )
 
 
-# ── GH#16: fullscreen button should toggle (click again to exit) ───────────
-
-
 class TestGH16_FullscreenToggle:
     """The native (desktop/Android) path called requestFullscreen
     unconditionally. It must check whether we are already fullscreen and
@@ -128,9 +122,6 @@ class TestGH16_FullscreenToggle:
         body = card_src[idx : idx + 2000]
         assert 'classList.contains("fs-active")' in body
         assert "_exitCssFullscreen()" in body
-
-
-# ── GH#15: option to hide unnecessary UI on the single card ────────────────
 
 
 class TestGH15_HideOptions:
@@ -307,9 +298,6 @@ class TestOsChecks:
         assert "system-ui" in card_src and '"Segoe UI"' in card_src, (
             "font stack must fall back to system-ui / Segoe UI for non-Apple OSes"
         )
-
-
-# ── shared: src and bundled mirror stay in sync ────────────────────────────
 
 
 class TestCardBundleMirror:

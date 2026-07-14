@@ -157,7 +157,9 @@ class TestEnsureProtocolChecked:
         assert coord._protocol_checked is True
 
     @pytest.mark.asyncio
-    async def test_supported_logs_no_warning(self, caplog):
+    async def test_supported_logs_no_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         import logging
 
         coord = _make_coord()
@@ -169,7 +171,9 @@ class TestEnsureProtocolChecked:
         assert not any(r.levelno == logging.WARNING for r in caplog.records)
 
     @pytest.mark.asyncio
-    async def test_not_supported_logs_warning(self, caplog):
+    async def test_not_supported_logs_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         import logging
 
         coord = _make_coord()
@@ -181,7 +185,7 @@ class TestEnsureProtocolChecked:
         assert any("may no longer be supported" in r.message for r in caplog.records)
 
     @pytest.mark.asyncio
-    async def test_non_200_logs_warning(self, caplog):
+    async def test_non_200_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         import logging
 
         coord = _make_coord()

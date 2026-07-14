@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -41,14 +41,12 @@ from custom_components.bosch_shc_camera.frigate_endpoint import (
 
 
 @pytest.fixture(autouse=True)
-def _enable_loopback_sockets(socket_enabled):
+def _enable_loopback_sockets(socket_enabled: None) -> Generator[None, None, None]:
     """Allow 127.0.0.1 loopback for the fake camera + front-door servers."""
     yield
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Pure helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_find_rtsp_message_end():
@@ -119,7 +117,7 @@ def test_inject_auth_header_no_terminator_returns_input():
         ("192.168.1.5", frozenset({"", "bogus", "192.168.1.5"}), True),  # skips junk
     ],
 )
-def test_ip_allowed(peer, allow, expected):
+def test_ip_allowed(peer: str, allow: frozenset[str], expected: bool):
     assert ip_allowed(peer, allow) is expected
 
 
@@ -190,9 +188,7 @@ def test_module_private_rewrite_and_strip():
     assert fe._strip_authorization(b"no terminator") == b"no terminator"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # End-to-end relay against a fake camera
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class FakeCamera:
@@ -275,13 +271,13 @@ async def _client_request(port: int, request: bytes, *, read: int = 4096) -> byt
 
 
 @pytest.fixture
-def runner():
+def runner() -> Generator[FrontDoorRunner, None, None]:
     r = FrontDoorRunner()
     yield r
     r.stop_all()
 
 
-async def test_relay_none_injects_digest(runner):
+async def test_relay_none_injects_digest(runner: FrontDoorRunner):
     async with FakeCamera() as cam:
         target = InnerTarget(cam.port, "user", "pass")
         port = await runner.start_server(
@@ -300,7 +296,7 @@ async def test_relay_none_injects_digest(runner):
         assert any(b'realm="bosch"' not in r for r in cam.requests)
 
 
-async def test_relay_stale_creds_forwards_401(runner):
+async def test_relay_stale_creds_forwards_401(runner: FrontDoorRunner):
     async with FakeCamera(stale=True) as cam:
         target = InnerTarget(cam.port, "user", "pass")
         port = await runner.start_server(
@@ -313,7 +309,7 @@ async def test_relay_stale_creds_forwards_401(runner):
         assert len(cam.requests) == 2  # unauth probe + authed retry (both 401)
 
 
-async def test_relay_camera_no_challenge(runner):
+async def test_relay_camera_no_challenge(runner: FrontDoorRunner):
     async with FakeCamera(never_challenge=True) as cam:
         target = InnerTarget(cam.port, "user", "pass")
         port = await runner.start_server(
@@ -325,7 +321,7 @@ async def test_relay_camera_no_challenge(runner):
         assert resp.startswith(b"RTSP/1.0 200 OK")
 
 
-async def test_relay_passthrough_when_client_has_auth(runner):
+async def test_relay_passthrough_when_client_has_auth(runner: FrontDoorRunner):
     async with FakeCamera() as cam:
         target = InnerTarget(cam.port, "user", "pass")
         port = await runner.start_server(
@@ -340,7 +336,7 @@ async def test_relay_passthrough_when_client_has_auth(runner):
         assert resp.startswith(b"RTSP/1.0 200 OK")
 
 
-async def test_resolve_none_returns_503(runner):
+async def test_resolve_none_returns_503(runner: FrontDoorRunner):
     port = await runner.start_server("camEEEEEE", FrontDoorConfig(), _resolver(None))
     resp = await _client_request(
         port, b"DESCRIBE rtsp://127.0.0.1/rtsp_tunnel RTSP/1.0\r\nCSeq: 1\r\n\r\n"
@@ -348,7 +344,7 @@ async def test_resolve_none_returns_503(runner):
     assert resp.startswith(b"RTSP/1.0 503")
 
 
-async def test_ip_allowlist_denies(runner):
+async def test_ip_allowlist_denies(runner: FrontDoorRunner):
     cfg = FrontDoorConfig(ip_allowlist=frozenset({"10.99.99.99"}))
     async with FakeCamera() as cam:
         target = InnerTarget(cam.port, "u", "p")
@@ -367,7 +363,7 @@ async def test_ip_allowlist_denies(runner):
         assert resp == b""  # closed without any RTSP response
 
 
-async def test_path_token_gate(runner):
+async def test_path_token_gate(runner: FrontDoorRunner):
     cfg = FrontDoorConfig(auth_mode=AUTH_PATH_TOKEN, token="sek")
     async with FakeCamera() as cam:
         target = InnerTarget(cam.port, "u", "p")
@@ -386,7 +382,7 @@ async def test_path_token_gate(runner):
         assert bad == b""  # rejected, socket closed
 
 
-async def test_basic_auth_gate(runner):
+async def test_basic_auth_gate(runner: FrontDoorRunner):
     cfg = FrontDoorConfig(auth_mode=AUTH_BASIC, token="secret", basic_user="rec")
     async with FakeCamera() as cam:
         target = InnerTarget(cam.port, "u", "p")
@@ -406,7 +402,7 @@ async def test_basic_auth_gate(runner):
         assert ok.startswith(b"RTSP/1.0 200 OK")
 
 
-async def test_runner_active_count_and_restart(runner):
+async def test_runner_active_count_and_restart(runner: FrontDoorRunner):
     async with FakeCamera() as cam:
         target = InnerTarget(cam.port, "u", "p")
         port1 = await runner.start_server(
@@ -426,9 +422,7 @@ async def test_runner_active_count_and_restart(runner):
         runner.stop_server("camIIIIII")  # idempotent
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # ip_allowed: ValueError branch in the inner loop (line 200-201)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_ip_allowed_invalid_cidr_entry_skipped():
@@ -440,12 +434,10 @@ def test_ip_allowed_invalid_cidr_entry_skipped():
     assert ip_allowed("10.0.0.1", allow) is False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _serve: first-request body read (lines 514-515) + malformed first line (535-538)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
-async def test_serve_reads_body_when_content_length_present(runner):
+async def test_serve_reads_body_when_content_length_present(runner: FrontDoorRunner):
     """_serve reads an extra ``Content-Length`` body before passing to the relay."""
 
     async with FakeCamera() as cam:
@@ -465,7 +457,7 @@ async def test_serve_reads_body_when_content_length_present(runner):
         assert resp.startswith(b"RTSP/1.0 200 OK")
 
 
-async def test_serve_drops_malformed_request_line(runner):
+async def test_serve_drops_malformed_request_line(runner: FrontDoorRunner):
     """_serve closes the socket if the first line is not a valid RTSP request."""
     async with FakeCamera() as cam:
         target = InnerTarget(cam.port, "user", "pass")
@@ -482,12 +474,10 @@ async def test_serve_drops_malformed_request_line(runner):
         assert resp == b""  # closed without response
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _serve: resolve_inner raises (lines 611-615) + inner connect failure (628-629)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
-async def test_resolve_raises_returns_503(runner):
+async def test_resolve_raises_returns_503(runner: FrontDoorRunner):
     """If resolve_inner raises an exception the front-door returns 503."""
 
     async def _bad_resolve(_cam_id: str) -> InnerTarget | None:
@@ -500,7 +490,7 @@ async def test_resolve_raises_returns_503(runner):
     assert resp.startswith(b"RTSP/1.0 503")
 
 
-async def test_relay_run_inner_connect_failure(runner):
+async def test_relay_run_inner_connect_failure(runner: FrontDoorRunner):
     """When the inner proxy port is dead, _Relay.run raises OSError (line 628-629)."""
     # Use a port number that is (very likely) not listening.
     dead_target = InnerTarget(1, "user", "pass")  # port 1 = privileged, never open
@@ -514,9 +504,7 @@ async def test_relay_run_inner_connect_failure(runner):
     assert resp == b"" or resp.startswith(b"RTSP/1.0 503")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _auth_dance: 401 with no parseable challenge (lines 385-390)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class FakeCameraNoChallenge:
@@ -557,7 +545,7 @@ class FakeCameraNoChallenge:
                 writer.close()
 
 
-async def test_auth_dance_no_parseable_challenge_forwards_401(runner):
+async def test_auth_dance_no_parseable_challenge_forwards_401(runner: FrontDoorRunner):
     """401 with non-Digest WWW-Authenticate → challenge is None → forward 401."""
     async with FakeCameraNoChallenge() as cam:
         target = InnerTarget(cam.port, "user", "pass")
@@ -570,10 +558,8 @@ async def test_auth_dance_no_parseable_challenge_forwards_401(runner):
         assert resp.startswith(b"RTSP/1.0 401")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _pipe_client_to_inner + _drain_requests + _pipe_inner_to_client steady-state
 # (lines 411-449, 461-462)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class FakeCameraMultiRequest:
@@ -636,7 +622,9 @@ class FakeCameraMultiRequest:
                 writer.close()
 
 
-async def test_steady_state_relay_injects_digest_on_subsequent_requests(runner):
+async def test_steady_state_relay_injects_digest_on_subsequent_requests(
+    runner: FrontDoorRunner,
+):
     """After auth dance, SETUP/PLAY get Digest injected via _pipe_client_to_inner."""
     async with FakeCameraMultiRequest() as cam:
         target = InnerTarget(cam.port, "user", "pass")
@@ -672,7 +660,7 @@ async def test_steady_state_relay_injects_digest_on_subsequent_requests(runner):
             writer.close()
 
 
-async def test_drain_requests_interleaved_rtp_frame(runner):
+async def test_drain_requests_interleaved_rtp_frame(runner: FrontDoorRunner):
     """A '$'-prefixed interleaved RTP frame is forwarded raw without RTSP parsing."""
     async with FakeCameraMultiRequest() as cam:
         target = InnerTarget(cam.port, "user", "pass")
@@ -700,7 +688,7 @@ async def test_drain_requests_interleaved_rtp_frame(runner):
             writer.close()
 
 
-async def test_drain_requests_oversized_non_rtsp_flushed(runner):
+async def test_drain_requests_oversized_non_rtsp_flushed(runner: FrontDoorRunner):
     """A buffer > _MAX_HEAD_BYTES without RTSP header is forwarded raw (line 420-424)."""
     async with FakeCameraMultiRequest() as cam:
         target = InnerTarget(cam.port, "user", "pass")
@@ -727,7 +715,7 @@ async def test_drain_requests_oversized_non_rtsp_flushed(runner):
             writer.close()
 
 
-async def test_pipe_inner_to_client_relay(runner):
+async def test_pipe_inner_to_client_relay(runner: FrontDoorRunner):
     """_pipe_inner_to_client forwards data from inner→client verbatim."""
     async with FakeCameraMultiRequest() as cam:
         target = InnerTarget(cam.port, "user", "pass")
@@ -748,9 +736,7 @@ async def test_pipe_inner_to_client_relay(runner):
             writer.close()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _drain_requests: incomplete body wait (lines 429-430) + body complete (431)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def test_drain_requests_incomplete_body_waits_for_more():
@@ -829,9 +815,7 @@ async def test_drain_requests_complete_body_forwarded():
     assert b"Authorization:" in combined
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _drain_requests: inject_auth_header raises ValueError/KeyError (lines 444-445)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def test_drain_requests_auth_inject_exception_falls_back_to_raw():
@@ -874,12 +858,12 @@ async def test_drain_requests_auth_inject_exception_falls_back_to_raw():
     assert b"Authorization:" not in combined
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _serve: on_active callback raises (lines 535-538) + on_idle raises (544-547)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
-async def test_on_active_callback_exception_does_not_kill_connection(runner):
+async def test_on_active_callback_exception_does_not_kill_connection(
+    runner: FrontDoorRunner,
+):
     """on_active raising must not abort the connection (lines 535-538)."""
 
     def _boom():
@@ -900,7 +884,7 @@ async def test_on_active_callback_exception_does_not_kill_connection(runner):
         assert resp.startswith(b"RTSP/1.0 200 OK")
 
 
-async def test_on_idle_callback_exception_does_not_crash(runner):
+async def test_on_idle_callback_exception_does_not_crash(runner: FrontDoorRunner):
     """on_idle raising inside the idle-linger must not propagate. idle_timeout=0
     so on_idle fires promptly after the client disconnects (bug-hunt 2026-07-01)."""
 
@@ -926,7 +910,9 @@ async def test_on_idle_callback_exception_does_not_crash(runner):
         await asyncio.wait_for(idle_ran.wait(), timeout=5.0)
 
 
-async def test_idle_timeout_zero_fires_on_idle_after_last_client(runner):
+async def test_idle_timeout_zero_fires_on_idle_after_last_client(
+    runner: FrontDoorRunner,
+):
     """C5 (bug-hunt 2026-07-01): frigate_idle_timeout now actually drives the
     front-door. With idle_timeout=0 on_idle is signalled promptly once the last
     recorder client disconnects (previously the option was a dead no-op)."""
@@ -1001,7 +987,7 @@ async def test_close_cancels_pending_idle_linger():
 
 
 async def test_handle_reconnect_cancels_pending_idle_linger_via_real_connection(
-    runner,
+    runner: FrontDoorRunner,
 ):
     """C5 (bug-hunt 2026-07-01): a real client connection (not a direct
     _idle_linger manipulation) exercises _handle's own connect-time guard
@@ -1034,7 +1020,9 @@ async def test_handle_reconnect_cancels_pending_idle_linger_via_real_connection(
         assert calls == []  # the stale linger's on_idle never fired
 
 
-async def test_handle_finally_cancels_stale_idle_task_at_zero_clients(runner):
+async def test_handle_finally_cancels_stale_idle_task_at_zero_clients(
+    runner: FrontDoorRunner,
+):
     """Defensive guard (line 595) distinct from the connect-time one (line 573):
     if a pending idle-linger task is still set at the exact moment client_count
     reaches zero in _handle's finally block — e.g. another client disconnected
@@ -1085,12 +1073,10 @@ async def test_handle_finally_cancels_stale_idle_task_at_zero_clients(runner):
         assert server._idle_task is not stale
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _serve: first-request body read error path (lines 557-564 / 569-571)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
-async def test_serve_body_read_incomplete_closes_connection(runner):
+async def test_serve_body_read_incomplete_closes_connection(runner: FrontDoorRunner):
     """If reading the Content-Length body fails mid-stream, connection is closed."""
     async with FakeCamera() as cam:
         target = InnerTarget(cam.port, "user", "pass")
@@ -1109,9 +1095,7 @@ async def test_serve_body_read_incomplete_closes_connection(runner):
         assert resp == b""  # server closed cleanly, no RTSP response
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _CameraServer.stop: OSError branch (lines 513-515)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_camera_server_close_is_sync():
@@ -1134,12 +1118,10 @@ def test_camera_server_close_is_sync():
     assert server._server is None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # FrontDoorRunner.stop_server: broad-exception branch (lines 716-717)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
-async def test_runner_stop_server_calls_close_and_removes(runner):
+async def test_runner_stop_server_calls_close_and_removes(runner: FrontDoorRunner):
     """stop_server calls _CameraServer.close() and removes it from the registry."""
     async with FakeCamera() as cam:
         target = InnerTarget(cam.port, "user", "pass")
@@ -1153,12 +1135,10 @@ async def test_runner_stop_server_calls_close_and_removes(runner):
         runner.stop_server("camWWWWWW")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _serve: first-request read fails (timeout / incomplete) → close (lines 557-564)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
-async def test_serve_first_read_incomplete_closes_connection(runner):
+async def test_serve_first_read_incomplete_closes_connection(runner: FrontDoorRunner):
     """If readuntil raises IncompleteReadError (EOF before \\r\\n\\r\\n), close quietly."""
     async with FakeCamera() as cam:
         target = InnerTarget(cam.port, "user", "pass")
@@ -1175,9 +1155,7 @@ async def test_serve_first_read_incomplete_closes_connection(runner):
         assert resp == b""
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _pipe_client_to_inner: ConnectionError/OSError exception path (lines 403-404)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def test_pipe_client_to_inner_connection_error_handled():
@@ -1217,9 +1195,7 @@ async def test_pipe_client_to_inner_connection_error_handled():
     await relay._pipe_client_to_inner()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _drain_requests: else branch — no challenge (line 447)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def test_drain_requests_no_challenge_forwards_raw():
@@ -1253,9 +1229,7 @@ async def test_drain_requests_no_challenge_forwards_raw():
     assert b"Authorization:" not in combined
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _pipe_inner_to_client: ConnectionError/OSError exception path (lines 461-462)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def test_pipe_inner_to_client_oserror_handled():
@@ -1275,9 +1249,7 @@ async def test_pipe_inner_to_client_oserror_handled():
     await relay._pipe_inner_to_client()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _relay.run finally: writer.close() when not already closing (line 329)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def test_relay_run_finally_closes_writers():
@@ -1339,9 +1311,7 @@ async def test_relay_run_finally_closes_writers():
     assert client_closed  # client writer was closed in finally
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _serve: 503 drain OSError (lines 620-621)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def test_serve_503_drain_oserror_swallowed():
@@ -1389,9 +1359,7 @@ async def test_serve_503_drain_oserror_swallowed():
     assert b"503" in combined
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # ip_allowed: IPv4-mapped IPv6 branch (::ffff:x.x.x.x)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_ip_allowed_ipv4_mapped_ipv6():
@@ -1401,9 +1369,7 @@ def test_ip_allowed_ipv4_mapped_ipv6():
     assert ip_allowed("::ffff:10.0.0.1", frozenset({"192.168.1.5"})) is False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _read_message: TimeoutError / LimitOverrunError → ConnectionError
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def test_read_message_timeout_raises_connection_error():
@@ -1432,9 +1398,7 @@ async def test_read_message_limit_overrun_raises_connection_error():
         await relay._read_message(mock_reader)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # _CameraServer.close(): no-op when _server is None
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_camera_server_close_noop_when_no_server():
@@ -1448,10 +1412,8 @@ def test_camera_server_close_noop_when_no_server():
     server.close()  # must not raise
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: connection-cap rejection (relocated from
 # tests/test_coverage_gates_v14.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -1482,11 +1444,9 @@ async def test_front_door_rejects_client_when_connection_cap_reached() -> None:
     server._sem.release()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: _close_writer socket hygiene (docs/stream-perf-stability-refactor-
 # plan.md Phase 2 point 10 — frigate_endpoint.py:556-688, 7+ writer.close()
 # sites had no wait_closed(), risking sockets lingering in TIME_WAIT under load)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio

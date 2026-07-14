@@ -76,11 +76,6 @@ CAM_TITLE = "Terrasse"
 CAM_ID_SHORT = "11111111"
 
 
-# =============================================================================
-# Section: LAN-only gate (`should_record`)
-# =============================================================================
-
-
 def _make_gate_coord(
     *, conn_type: str = "LOCAL", online: bool = True
 ) -> SimpleNamespace:
@@ -148,11 +143,6 @@ class TestShouldRecord:
 
         coord = _make_gate_coord(conn_type="REMOTE", online=True)
         assert should_record(coord, CAM_ID, switch_on=False) is False
-
-
-# =============================================================================
-# Section: ffmpeg argv (pinned wire format) + quality switch
-# =============================================================================
 
 
 class TestBuildFfmpegArgs:
@@ -357,11 +347,6 @@ class TestQualitySwitch(unittest.TestCase):
         assert "inst=1" in " ".join(args)
 
 
-# =============================================================================
-# Section: file pattern / directory layout
-# =============================================================================
-
-
 class TestSegmentPattern:
     def test_basic_layout(self):
         """`{base}/{cam}/%Y-%m-%d/%H-%M.mp4` — pinned per concept §4.1."""
@@ -424,11 +409,6 @@ class TestSegmentPattern:
         assert rendered.endswith("/2026-05-06/14-35.mp4")
 
 
-# =============================================================================
-# Section: pre-roll ring-buffer pure helpers
-# =============================================================================
-
-
 class TestPrerollDirAndPattern(unittest.TestCase):
     def test_preroll_dir_safe_name(self):
         from custom_components.bosch_shc_camera.recorder import _preroll_dir
@@ -457,7 +437,7 @@ class TestPrerollDirAndPattern(unittest.TestCase):
 class TestListPrerollSegments:
     """Pin _list_preroll_segments behavior under several failure modes."""
 
-    def test_listdir_oserror_returns_empty(self, tmp_path):
+    def test_listdir_oserror_returns_empty(self, tmp_path: Path):
         """If `os.listdir` raises (permissions / vanished dir), return [].
 
         Pin: caller (prune / list_files) must never crash on a transient
@@ -479,7 +459,7 @@ class TestListPrerollSegments:
             result = _list_preroll_segments(str(cam_dir))
         assert result == []
 
-    def test_undersized_segments_filtered(self, tmp_path):
+    def test_undersized_segments_filtered(self, tmp_path: Path):
         """Segment smaller than `_PREROLL_MIN_SIZE_BYTES` is dropped.
 
         Pin: half-flushed corrupt segments must never reach the motion-clip
@@ -503,14 +483,14 @@ class TestListPrerollSegments:
         assert str(tiny) not in paths
         assert str(ok) in paths
 
-    def test_missing_directory_returns_empty(self, tmp_path):
+    def test_missing_directory_returns_empty(self, tmp_path: Path):
         """Pin: non-existent cam_dir returns [] (idempotent first call)."""
         from custom_components.bosch_shc_camera.recorder import _list_preroll_segments
 
         result = _list_preroll_segments(str(tmp_path / "does-not-exist"))
         assert result == []
 
-    def test_directory_entry_skipped(self, tmp_path):
+    def test_directory_entry_skipped(self, tmp_path: Path):
         """A subdirectory inside cam_dir must be skipped (non-file entry)."""
         from custom_components.bosch_shc_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
@@ -530,7 +510,7 @@ class TestListPrerollSegments:
         assert str(seg) in paths
         assert str(cam_dir / "subdir") not in paths
 
-    def test_stat_oserror_is_skipped(self, tmp_path):
+    def test_stat_oserror_is_skipped(self, tmp_path: Path):
         """If os.stat raises OSError (file vanished after listdir), skip it."""
         from custom_components.bosch_shc_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
@@ -558,7 +538,9 @@ class TestListPrerollSegments:
         assert str(good) in paths
         assert str(ghost) not in paths
 
-    def test_stat_race_between_listdir_and_stat_is_skipped(self, monkeypatch, tmp_path):
+    def test_stat_race_between_listdir_and_stat_is_skipped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
         """A file that vanishes between `os.listdir` and `os.stat` must be
         skipped silently (race-condition tolerance)."""
         from custom_components.bosch_shc_camera import recorder
@@ -593,14 +575,16 @@ class TestListPrerollSegments:
         assert any(p.endswith("000100.mp4") for p in paths)
         assert not any(p.endswith("000200.mp4") for p in paths)
 
-    def test_returns_empty_when_dir_missing(self, tmp_path):
+    def test_returns_empty_when_dir_missing(self, tmp_path: Path):
         """Calling with a nonexistent path returns [] without raising."""
         from custom_components.bosch_shc_camera import recorder
 
         result = recorder._list_preroll_segments(str(tmp_path / "no_such_dir"))
         assert result == []
 
-    def test_returns_empty_on_listdir_error(self, monkeypatch, tmp_path):
+    def test_returns_empty_on_listdir_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
         """`OSError` from `os.listdir` (e.g. EACCES) is swallowed — return []."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -650,7 +634,7 @@ class TestListPrerollSegments:
 class TestPrunePrerollCache:
     """Pin prune_preroll_cache deletes oldest, keeps the newest `max`."""
 
-    def test_keeps_three_newest_of_seven(self, tmp_path):
+    def test_keeps_three_newest_of_seven(self, tmp_path: Path):
         """7 segments, max=3 → 4 deleted, 3 kept; the 3 newest by mtime.
 
         Pin: ring buffer must be bounded by mtime so wall-clock skews
@@ -682,7 +666,7 @@ class TestPrunePrerollCache:
         for i in range(4, 7):
             assert files[i].exists(), f"newest seg {i} must survive"
 
-    def test_under_max_keeps_everything(self, tmp_path):
+    def test_under_max_keeps_everything(self, tmp_path: Path):
         """When count ≤ max_segments, no deletes."""
         from custom_components.bosch_shc_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
@@ -698,7 +682,7 @@ class TestPrunePrerollCache:
         deleted = prune_preroll_cache(str(cam_dir), max_segments=5)
         assert deleted == 0
 
-    def test_unlink_oserror_continues(self, tmp_path):
+    def test_unlink_oserror_continues(self, tmp_path: Path):
         """If unlink raises mid-prune, the loop continues — file might
         have already vanished due to a parallel sweep."""
         from custom_components.bosch_shc_camera.recorder import (
@@ -839,11 +823,6 @@ class TestBuildPrerollFfmpegArgs(unittest.TestCase):
         pattern = "/dev/shm/cache/cam/%H%M%S.mp4"
         args = _build_preroll_ffmpeg_args("rtsp://127.0.0.1:9000/stream", pattern)
         assert args[-1] == pattern
-
-
-# =============================================================================
-# Section: motion-clip concatenation (`create_motion_clip`)
-# =============================================================================
 
 
 def _make_preroll_coord(tmp_path, *, cam_title: str = CAM_TITLE) -> SimpleNamespace:
@@ -1013,7 +992,7 @@ class TestCreateMotionClip:
         return cam_dir
 
     @pytest.mark.asyncio
-    async def test_ffmpeg_not_found_returns_false(self, tmp_path):
+    async def test_ffmpeg_not_found_returns_false(self, tmp_path: Path):
         """ffmpeg missing on PATH → log error + return False, no crash.
 
         Pin: a misconfigured host (no ffmpeg) must not break the motion
@@ -1034,7 +1013,7 @@ class TestCreateMotionClip:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_concat_write_oserror_returns_false(self, tmp_path):
+    async def test_concat_write_oserror_returns_false(self, tmp_path: Path):
         """`_write_concat` raising OSError (read-only fs) → return False
         before ffmpeg is even spawned.
 
@@ -1063,7 +1042,7 @@ class TestCreateMotionClip:
         spawn.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_oserror_on_spawn_returns_false(self, tmp_path):
+    async def test_oserror_on_spawn_returns_false(self, tmp_path: Path):
         """Generic OSError (e.g. EAGAIN fork-limit) during spawn → False."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -1080,7 +1059,7 @@ class TestCreateMotionClip:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_communicate_timeout_returns_false(self, tmp_path):
+    async def test_communicate_timeout_returns_false(self, tmp_path: Path):
         """If ffmpeg's communicate() hangs past the timeout, kill it and
         return False."""
         from custom_components.bosch_shc_camera import recorder
@@ -1127,7 +1106,7 @@ class TestCreateMotionClip:
         proc.kill.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_kill_process_lookup_error_swallowed(self, tmp_path):
+    async def test_kill_process_lookup_error_swallowed(self, tmp_path: Path):
         """`proc.kill()` raises because ffmpeg already exited between the
         communicate() timeout and the kill; the helper must return False
         without propagating the exception."""
@@ -1168,7 +1147,7 @@ class TestCreateMotionClip:
         proc.kill.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_concat_unlink_oserror_swallowed(self, tmp_path):
+    async def test_concat_unlink_oserror_swallowed(self, tmp_path: Path):
         """OSError when removing the concat file after a successful clip must
         be swallowed."""
         from custom_components.bosch_shc_camera import recorder
@@ -1519,11 +1498,6 @@ class TestNewestPrerollPath:
         assert recorder._newest_preroll_path("/nonexistent/path/xyz") is None
 
 
-# =============================================================================
-# Section: retention purge — mocked filesystem
-# =============================================================================
-
-
 class TestSyncNvrCleanup:
     """`sync_nvr_cleanup` walks the base path, deletes files older than the
     cutoff, then prunes empty per-day folders. Never touches the base path
@@ -1656,11 +1630,6 @@ class TestSyncNvrCleanup:
         assert "/config/bosch_nvr" not in rmdir_calls
 
 
-# =============================================================================
-# Section: retention purge — real tmp_path files
-# =============================================================================
-
-
 def _make_lifecycle_coord(
     *, conn_type: str = "LOCAL", base_path: str = "/tmp/nvr_test"
 ):
@@ -1742,7 +1711,7 @@ def _make_lifecycle_coord(
 
 
 class TestNvrCleanupRealFiles:
-    def test_zero_retention_disables_cleanup(self, tmp_path):
+    def test_zero_retention_disables_cleanup(self, tmp_path: Path):
         """retention_days <= 0 → skip entirely. Hard rule: never delete
         all files just because user fat-fingered the option."""
         from custom_components.bosch_shc_camera import recorder
@@ -1768,7 +1737,7 @@ class TestNvrCleanupRealFiles:
         # Must not raise
         recorder.sync_nvr_cleanup(coord)
 
-    def test_deletes_files_older_than_cutoff(self, tmp_path):
+    def test_deletes_files_older_than_cutoff(self, tmp_path: Path):
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
@@ -1789,7 +1758,7 @@ class TestNvrCleanupRealFiles:
         assert not old_file.exists()
         assert recent_file.exists()
 
-    def test_prunes_empty_date_dirs_but_not_camera_root(self, tmp_path):
+    def test_prunes_empty_date_dirs_but_not_camera_root(self, tmp_path: Path):
         """After deleting files, empty date folders are removed. Camera
         root + base_path itself must NEVER be removed."""
         from custom_components.bosch_shc_camera import recorder
@@ -1810,7 +1779,7 @@ class TestNvrCleanupRealFiles:
         # But base_path stays
         assert tmp_path.exists()
 
-    def test_keeps_files_at_or_after_cutoff(self, tmp_path):
+    def test_keeps_files_at_or_after_cutoff(self, tmp_path: Path):
         """Boundary: file with mtime == cutoff must NOT be deleted
         (condition is `<`, not `<=`)."""
         from custom_components.bosch_shc_camera import recorder
@@ -1828,7 +1797,7 @@ class TestNvrCleanupRealFiles:
         recorder.sync_nvr_cleanup(coord)
         assert edge_file.exists()
 
-    def test_unreadable_file_skipped_not_crash(self, tmp_path):
+    def test_unreadable_file_skipped_not_crash(self, tmp_path: Path):
         """File that os.stat fails on (race: file disappeared mid-walk) must
         be silently skipped, not crash the cleanup loop."""
         from custom_components.bosch_shc_camera import recorder
@@ -1852,11 +1821,6 @@ class TestNvrCleanupRealFiles:
         # Must not have raised; the file is still there because we didn't
         # get to the unlink call.
         assert good.exists()
-
-
-# =============================================================================
-# Section: start_recorder lifecycle
-# =============================================================================
 
 
 def _mock_proc(
@@ -1892,7 +1856,7 @@ def _mock_proc(
 
 class TestStartRecorder:
     @pytest.mark.asyncio
-    async def test_skipped_when_not_local(self, tmp_path):
+    async def test_skipped_when_not_local(self, tmp_path: Path):
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord(conn_type="REMOTE", base_path=str(tmp_path))
@@ -1902,7 +1866,7 @@ class TestStartRecorder:
         assert CAM_ID not in coord._nvr_processes
 
     @pytest.mark.asyncio
-    async def test_skipped_when_no_proxy_url(self, tmp_path):
+    async def test_skipped_when_no_proxy_url(self, tmp_path: Path):
         """rtspsUrl missing or not rtsp:// → skip with warning, no spawn."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -1913,7 +1877,7 @@ class TestStartRecorder:
         spawn.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_skipped_when_proxy_url_is_https(self, tmp_path):
+    async def test_skipped_when_proxy_url_is_https(self, tmp_path: Path):
         """If only the rtsps:// URL is set (not rewritten through proxy),
         skip — recording over TLS to the camera bypasses our proxy."""
         from custom_components.bosch_shc_camera import recorder
@@ -1925,7 +1889,7 @@ class TestStartRecorder:
         spawn.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_happy_path_spawns_ffmpeg(self, tmp_path):
+    async def test_happy_path_spawns_ffmpeg(self, tmp_path: Path):
         """LOCAL + valid proxy URL → spawn, register process, register watcher."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -1943,7 +1907,7 @@ class TestStartRecorder:
         assert (tmp_path / "_staging" / "Terrasse").exists()
 
     @pytest.mark.asyncio
-    async def test_successful_spawn_clears_stale_error_state(self, tmp_path):
+    async def test_successful_spawn_clears_stale_error_state(self, tmp_path: Path):
         """Issue #42: _nvr_error_state must not stay stuck showing "error"
         forever after a give-up — a fresh successful spawn (manual toggle,
         or the stream-up hook reviving the recorder on the next LOCAL
@@ -1962,7 +1926,7 @@ class TestStartRecorder:
         assert CAM_ID not in coord._nvr_error_state
 
     @pytest.mark.asyncio
-    async def test_replaces_existing_process(self, tmp_path):
+    async def test_replaces_existing_process(self, tmp_path: Path):
         """Calling start_recorder while one is already running must stop
         the old before spawning new — required for cred rotation."""
         from custom_components.bosch_shc_camera import recorder
@@ -1983,7 +1947,7 @@ class TestStartRecorder:
         assert coord._nvr_processes[CAM_ID] is new_proc
 
     @pytest.mark.asyncio
-    async def test_ffmpeg_not_found_fails_silently(self, tmp_path):
+    async def test_ffmpeg_not_found_fails_silently(self, tmp_path: Path):
         """Missing ffmpeg binary must not crash HA — log error + return."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -1997,7 +1961,7 @@ class TestStartRecorder:
         assert CAM_ID not in coord._nvr_processes
 
     @pytest.mark.asyncio
-    async def test_oserror_on_spawn_returns(self, tmp_path):
+    async def test_oserror_on_spawn_returns(self, tmp_path: Path):
         """Generic OSError (permissions, OOM, fork limit) — log + return."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -2011,7 +1975,7 @@ class TestStartRecorder:
         assert CAM_ID not in coord._nvr_processes
 
     @pytest.mark.asyncio
-    async def test_makedirs_failure_aborts_spawn(self, tmp_path):
+    async def test_makedirs_failure_aborts_spawn(self, tmp_path: Path):
         """If we can't create the segment dir (read-only fs, no perms),
         skip the spawn — ffmpeg would just fail later anyway."""
         from custom_components.bosch_shc_camera import recorder
@@ -2455,11 +2419,6 @@ class TestPerCameraNvrModeOverrideMixedFleet:
         assert cam_premises in started_preroll, "premises cam must run pre-roll"
 
 
-# =============================================================================
-# Section: stop_recorder / stop_all lifecycle
-# =============================================================================
-
-
 class TestStopRecorder:
     @pytest.mark.asyncio
     async def test_no_op_when_not_running(self):
@@ -2664,9 +2623,101 @@ class TestStopAll:
         assert stop_all_preroll_called, "stop_all_preroll was not called from stop_all"
 
 
-# =============================================================================
-# Section: pre-roll recorder lifecycle (start/stop_preroll_recorder)
-# =============================================================================
+class TestNvrShutdownRace:
+    """issue #47: a recorder/ring ffmpeg spawn still in flight when a
+    config-entry unload/reload begins must not survive as an orphaned,
+    never-killed process."""
+
+    @pytest.mark.asyncio
+    async def test_start_recorder_refuses_to_spawn_when_shutting_down(self):
+        from custom_components.bosch_shc_camera import recorder
+
+        cam_id = CAM_ID_SHORT
+        coord = _make_phase_coord(cam_id=cam_id)
+        coord._nvr_shutting_down = True
+
+        with patch("asyncio.create_subprocess_exec") as spawn_mock:
+            await recorder.start_recorder(coord, cam_id)
+
+        spawn_mock.assert_not_called()
+        assert cam_id not in coord._nvr_processes
+
+    @pytest.mark.asyncio
+    async def test_spawn_preroll_refuses_when_shutting_down(self):
+        from custom_components.bosch_shc_camera import recorder
+
+        cam_id = CAM_ID_SHORT
+        coord = _make_phase_coord(cam_id=cam_id)
+        coord._nvr_shutting_down = True
+
+        with patch("asyncio.create_subprocess_exec") as spawn_mock:
+            await recorder.start_preroll_recorder(coord, cam_id)
+
+        spawn_mock.assert_not_called()
+        assert cam_id not in coord._nvr_preroll_processes
+
+    @pytest.mark.asyncio
+    async def test_shutting_down_defaults_false_on_bare_stub(self):
+        """A coordinator stub predating this fix (no `_nvr_shutting_down`
+        attribute at all) must behave exactly as before — spawn allowed."""
+        from custom_components.bosch_shc_camera import recorder
+
+        cam_id = CAM_ID_SHORT
+        coord = _make_phase_coord(cam_id=cam_id)
+        assert not hasattr(coord, "_nvr_shutting_down")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = None
+        mock_proc.wait = AsyncMock(return_value=0)
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            await recorder.start_recorder(coord, cam_id)
+
+        assert coord._nvr_processes.get(cam_id) is mock_proc
+
+    @pytest.mark.asyncio
+    async def test_stop_all_sweeps_cameras_known_only_via_camera_entities(self):
+        """A camera with no tracked process yet (e.g. its start_recorder
+        call is still in flight) but present in `_camera_entities` must
+        still have its per-cam lock acquired by the unload sweep — closes
+        the exact gap a stale `list(_nvr_processes.keys())` snapshot had."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        coord._camera_entities = {"cam-new": MagicMock()}
+        locked_cams = []
+        real_get_lock = coord._get_nvr_recorder_lock
+
+        def _tracking_get_lock(cam_id):
+            locked_cams.append(cam_id)
+            return real_get_lock(cam_id)
+
+        coord._get_nvr_recorder_lock = _tracking_get_lock
+        await recorder.stop_all(coord)
+        assert "cam-new" in locked_cams
+
+    @pytest.mark.asyncio
+    async def test_stop_all_serializes_on_per_cam_lock(self):
+        """stop_all must not touch a camera's process until it can acquire
+        that camera's `_get_nvr_recorder_lock` — proves it cannot race a
+        concurrent in-flight start_recorder holding the same lock."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = _mock_proc(returncode=None)
+        coord._nvr_processes[CAM_ID] = proc
+
+        lock = coord._get_nvr_recorder_lock(CAM_ID)
+        await lock.acquire()
+        try:
+            task = asyncio.ensure_future(recorder.stop_all(coord))
+            await asyncio.sleep(0)
+            # stop_all is blocked waiting for the lock we hold — the
+            # process must be untouched while blocked.
+            assert CAM_ID in coord._nvr_processes
+        finally:
+            lock.release()
+        await task
+        assert CAM_ID not in coord._nvr_processes
 
 
 class TestPrerollRecorderLifecycle(unittest.TestCase):
@@ -2770,7 +2821,7 @@ class TestStartPrerollRecorderSerialization:
     interleaves segments with the first."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_calls_do_not_overlap_spawns(self, tmp_path):
+    async def test_concurrent_calls_do_not_overlap_spawns(self, tmp_path: Path):
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
@@ -2799,7 +2850,9 @@ class TestStartPrerollRecorderSerialization:
         )
 
     @pytest.mark.asyncio
-    async def test_concurrent_calls_leave_exactly_one_tracked_process(self, tmp_path):
+    async def test_concurrent_calls_leave_exactly_one_tracked_process(
+        self, tmp_path: Path
+    ):
         """After two concurrent calls settle, exactly the LAST spawn is
         tracked — the first caller's process was cleanly stopped by the
         second caller's leading stop_preroll_recorder(), not silently
@@ -2836,7 +2889,7 @@ class TestStartPrerollRecorder:
     using the tmp_path-based lifecycle coordinator stub."""
 
     @pytest.mark.asyncio
-    async def test_skipped_when_not_local(self, tmp_path):
+    async def test_skipped_when_not_local(self, tmp_path: Path):
         """`_connection_type != "LOCAL"` → early return. No spawn, no proc
         registered. Pre-roll is LAN-only by design."""
         from custom_components.bosch_shc_camera import recorder
@@ -2850,7 +2903,7 @@ class TestStartPrerollRecorder:
         assert CAM_ID not in coord._nvr_preroll_processes
 
     @pytest.mark.asyncio
-    async def test_skipped_when_rtsp_url_missing(self, tmp_path):
+    async def test_skipped_when_rtsp_url_missing(self, tmp_path: Path):
         """rtspsUrl empty / not rtsp:// → return."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -2864,7 +2917,7 @@ class TestStartPrerollRecorder:
         assert CAM_ID not in coord._nvr_preroll_processes
 
     @pytest.mark.asyncio
-    async def test_happy_path_full_local(self, tmp_path):
+    async def test_happy_path_full_local(self, tmp_path: Path):
         """LOCAL + valid rtsp:// URL → walks the full path: makedirs,
         spawn, register proc, prune-on-spawn, register watcher task."""
         from custom_components.bosch_shc_camera import recorder
@@ -2906,7 +2959,7 @@ class TestStartPrerollRecorder:
         assert coord._nvr_preroll_tasks[CAM_ID] is not None
 
     @pytest.mark.asyncio
-    async def test_ffmpeg_not_found_cleanup(self, tmp_path):
+    async def test_ffmpeg_not_found_cleanup(self, tmp_path: Path):
         """`create_subprocess_exec` → `FileNotFoundError`. Must log error +
         return WITHOUT registering proc or task — otherwise stop_preroll
         would later iterate over a None proc."""
@@ -2928,7 +2981,7 @@ class TestStartPrerollRecorder:
         assert CAM_ID not in coord._nvr_preroll_tasks
 
     @pytest.mark.asyncio
-    async def test_spawn_oserror_cleanup(self, tmp_path):
+    async def test_spawn_oserror_cleanup(self, tmp_path: Path):
         """Generic OSError on spawn — same cleanup invariant as the
         FileNotFoundError path."""
         from custom_components.bosch_shc_camera import recorder
@@ -2947,7 +3000,7 @@ class TestStartPrerollRecorder:
         assert CAM_ID not in coord._nvr_preroll_tasks
 
     @pytest.mark.asyncio
-    async def test_makedirs_failure_aborts(self, tmp_path):
+    async def test_makedirs_failure_aborts(self, tmp_path: Path):
         """OSError during cache_dir creation → return, no spawn. Read-only
         fs / permission denied / NFS hiccup."""
         from custom_components.bosch_shc_camera import recorder
@@ -2969,7 +3022,7 @@ class TestStartPrerollRecorder:
         assert CAM_ID not in coord._nvr_preroll_processes
 
     @pytest.mark.asyncio
-    async def test_prune_exception_swallowed(self, tmp_path):
+    async def test_prune_exception_swallowed(self, tmp_path: Path):
         """If prune_preroll_cache raises any Exception, start_preroll continues."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -2993,7 +3046,7 @@ class TestStartPrerollRecorder:
         assert coord._nvr_preroll_processes.get(CAM_ID) is proc
 
     @pytest.mark.asyncio
-    async def test_preroll_tasks_auto_created_when_absent(self, tmp_path):
+    async def test_preroll_tasks_auto_created_when_absent(self, tmp_path: Path):
         """If coordinator has no _nvr_preroll_tasks attr, it is created."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -3020,7 +3073,7 @@ class TestStopPrerollRecorder:
     """SIGKILL escalation race paths + send_signal ProcessLookupError."""
 
     @pytest.mark.asyncio
-    async def test_kill_process_lookup_error_swallowed(self, tmp_path):
+    async def test_kill_process_lookup_error_swallowed(self, tmp_path: Path):
         """SIGTERM times out → proc.kill() raises ProcessLookupError → no crash.
 
         Race: process died between our SIGTERM-timeout and the SIGKILL call.
@@ -3049,7 +3102,7 @@ class TestStopPrerollRecorder:
         assert CAM_ID not in coord._nvr_preroll_processes
 
     @pytest.mark.asyncio
-    async def test_final_timeout_after_sigkill_swallowed(self, tmp_path):
+    async def test_final_timeout_after_sigkill_swallowed(self, tmp_path: Path):
         """Even SIGKILL hung in wait_for → final TimeoutError is swallowed.
 
         Under no circumstances may stop_preroll_recorder propagate a
@@ -3076,7 +3129,7 @@ class TestStopPrerollRecorder:
         proc.kill.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_no_process_registered_is_no_op(self, tmp_path):
+    async def test_no_process_registered_is_no_op(self, tmp_path: Path):
         """Pin idempotency: calling stop on a cam with no live process is safe."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -3087,7 +3140,7 @@ class TestStopPrerollRecorder:
         assert CAM_ID not in coord._nvr_preroll_processes
 
     @pytest.mark.asyncio
-    async def test_already_exited_returns_quickly(self, tmp_path):
+    async def test_already_exited_returns_quickly(self, tmp_path: Path):
         """If returncode is already set, send_signal is never called."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -3137,7 +3190,7 @@ class TestStopPrerollRecorder:
         assert cam_id not in coord._nvr_preroll_tasks
 
     @pytest.mark.asyncio
-    async def test_returns_true_on_clean_sigterm_exit(self, tmp_path):
+    async def test_returns_true_on_clean_sigterm_exit(self, tmp_path: Path):
         """stop_preroll_recorder now returns True iff SIGTERM exit was
         clean within the grace window — finalize_and_restart_preroll_recorder
         depends on this to know whether the newest segment's moov atom can
@@ -3153,7 +3206,7 @@ class TestStopPrerollRecorder:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_hard_kill(self, tmp_path):
+    async def test_returns_false_on_hard_kill(self, tmp_path: Path):
         """A SIGTERM timeout forcing a hard kill must return False — no
         moov-atom guarantee on the segment that was mid-write."""
         from custom_components.bosch_shc_camera import recorder
@@ -3167,7 +3220,7 @@ class TestStopPrerollRecorder:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_returns_false_when_nothing_to_stop(self, tmp_path):
+    async def test_returns_false_when_nothing_to_stop(self, tmp_path: Path):
         """No active process registered → nothing was stopped → False."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -3236,7 +3289,7 @@ class TestFinalizeAndRestartPrerollRecorder:
         mock_spawn.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_clean_exit_returns_finalized_path_and_restarts(self, tmp_path):
+    async def test_clean_exit_returns_finalized_path_and_restarts(self, tmp_path: Path):
         """The common path: an active ring with a newest segment, clean
         SIGTERM exit → returns the RELOCATED segment's path (moved out of
         the ring's own cache dir — regression coverage for the bug-hunt
@@ -3287,7 +3340,7 @@ class TestFinalizeAndRestartPrerollRecorder:
         mock_spawn.assert_awaited_once_with(coord, CAM_ID_SHORT)
 
     @pytest.mark.asyncio
-    async def test_hard_kill_returns_none_but_still_restarts(self, tmp_path):
+    async def test_hard_kill_returns_none_but_still_restarts(self, tmp_path: Path):
         """A forced kill (no moov-atom guarantee) must return None — but
         the ring is still restarted regardless, so recording resumes even
         when the freshest segment can't be trusted."""
@@ -3335,7 +3388,7 @@ class TestFinalizeAndRestartPrerollRecorder:
         mock_spawn.assert_awaited_once_with(coord, CAM_ID_SHORT)
 
     @pytest.mark.asyncio
-    async def test_hard_kill_cleanup_unlink_failure_swallowed(self, tmp_path):
+    async def test_hard_kill_cleanup_unlink_failure_swallowed(self, tmp_path: Path):
         """If the untrustworthy relocated file can't even be unlinked (e.g.
         it's already gone, or a permissions race), that must not raise into
         the caller — best-effort cleanup only, same discipline as every
@@ -3409,11 +3462,6 @@ class TestFinalizeAndRestartPrerollRecorder:
 
         assert observed_locked_during_stop is True
         assert not lock.locked()
-
-
-# =============================================================================
-# Section: watch loops (_watch_recorder / _watch_preroll_recorder)
-# =============================================================================
 
 
 class TestWatchRecorder:
@@ -3616,7 +3664,7 @@ class TestWatchRecorder:
         assert len(start_calls) == 0
 
     @pytest.mark.asyncio
-    async def test_stderr_drain_timeout_no_crash(self, tmp_path):
+    async def test_stderr_drain_timeout_no_crash(self, tmp_path: Path):
         """If `proc.stderr.read(2048)` never resolves, `asyncio.wait_for`
         raises `asyncio.TimeoutError` which is swallowed. The watcher must
         continue (not crash, not propagate) — production: a frozen TCP
@@ -3669,7 +3717,7 @@ class TestWatchRecorder:
         assert respawn_called["n"] == 1
 
     @pytest.mark.asyncio
-    async def test_stderr_drain_generic_exception_swallowed(self, tmp_path):
+    async def test_stderr_drain_generic_exception_swallowed(self, tmp_path: Path):
         """Same fall-through for non-Timeout exceptions (e.g. stderr already
         closed)."""
         from custom_components.bosch_shc_camera import recorder
@@ -3700,7 +3748,7 @@ class TestWatchPrerollRecorder:
     would block 10s/iteration; `asyncio.sleep` is patched to no-op."""
 
     @pytest.mark.asyncio
-    async def test_periodic_prune_called_then_exits_on_proc_exit(self, tmp_path):
+    async def test_periodic_prune_called_then_exits_on_proc_exit(self, tmp_path: Path):
         """One prune iteration → proc.returncode set → loop exits.
 
         Fake `asyncio.sleep` (no real-time wait). After the first wakeup
@@ -3750,7 +3798,7 @@ class TestWatchPrerollRecorder:
         assert sleep_count["n"] >= 2
 
     @pytest.mark.asyncio
-    async def test_exits_when_proc_missing_from_dict(self, tmp_path):
+    async def test_exits_when_proc_missing_from_dict(self, tmp_path: Path):
         """If `_nvr_preroll_processes[cam_id]` is gone (clean stop / crash
         race), the watcher must exit on the next tick."""
         from custom_components.bosch_shc_camera import recorder
@@ -3776,7 +3824,7 @@ class TestWatchPrerollRecorder:
         prune.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_prune_exception_swallowed_then_proc_exits(self, tmp_path):
+    async def test_prune_exception_swallowed_then_proc_exits(self, tmp_path: Path):
         """`prune_preroll_cache` raising must not kill the watcher. After the
         swallow we let the proc exit on the next tick so the test terminates."""
         from custom_components.bosch_shc_camera import recorder
@@ -3933,11 +3981,6 @@ class TestWatchPrerollRecorder:
         assert cam_id in coord._nvr_preroll_tasks, "watcher task not stored for cam_id"
 
 
-# =============================================================================
-# Section: pre-roll → recorder wiring (start/stop_recorder trigger preroll)
-# =============================================================================
-
-
 class TestPrerollWiring(unittest.TestCase):
     """Regression: start_preroll_recorder was never called from start_recorder
     (wiring omission found 2026-05-08 during live test). Verified by checking
@@ -4016,11 +4059,6 @@ class TestPrerollWiring(unittest.TestCase):
         assert cam_id not in started_preroll, (
             "start_preroll_recorder was called despite seconds=0"
         )
-
-
-# =============================================================================
-# Section: switch delegation (BoschNvrRecordingSwitch)
-# =============================================================================
 
 
 class TestNvrSwitchTurnOnOff:
@@ -4193,8 +4231,7 @@ class TestSwitchSetupGate:
         assert sw.unique_id.startswith("bosch_shc_nvr_recording_")
 
 
-# =============================================================================
-# Section: staging-drain pipeline (recorder._drain_staging_to_remote, sync_drain_tick
+# staging-drain pipeline (recorder._drain_staging_to_remote, sync_drain_tick
 # and friends) — NVR-storage-target upload/promote/retention flow introduced
 # in v11.0.4. Covers: _is_segment_finalized (mtime+size gate),
 # _list_staging_candidates (directory walker), sync_drain_tick (local/smb/ftp
@@ -4202,7 +4239,6 @@ class TestSwitchSetupGate:
 # retention purge respecting nvr_smb_subpath, and the watcher coroutine's
 # start/stop/exception-swallowing semantics. All filesystem and network I/O
 # is mocked; tests use tmp_path so nothing escapes the per-test sandbox.
-# =============================================================================
 
 CAM = "Terrasse"
 
@@ -4259,9 +4295,6 @@ def _make_segment(
     return p
 
 
-# ── 1. _is_segment_finalized ─────────────────────────────────────────────────
-
-
 class TestIsSegmentFinalized:
     def test_too_young_returns_false(self):
         assert (
@@ -4311,11 +4344,8 @@ class TestIsSegmentFinalized:
         )
 
 
-# ── 2. _list_staging_candidates ──────────────────────────────────────────────
-
-
 class TestListStagingCandidates:
-    def test_missing_root_returns_empty(self, tmp_path):
+    def test_missing_root_returns_empty(self, tmp_path: Path):
         assert (
             recorder._list_staging_candidates(
                 str(tmp_path / "does-not-exist"),
@@ -4323,7 +4353,7 @@ class TestListStagingCandidates:
             == []
         )
 
-    def test_walks_cam_date_files(self, tmp_path):
+    def test_walks_cam_date_files(self, tmp_path: Path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         _make_segment(tmp_path, CAM, "2026-05-06", "10-05.mp4")
         _make_segment(tmp_path, "Innen", "2026-05-06", "11-00.mp4")
@@ -4335,7 +4365,7 @@ class TestListStagingCandidates:
         # Three files total
         assert len(out) == 3
 
-    def test_skips_non_dir_entries_in_root(self, tmp_path):
+    def test_skips_non_dir_entries_in_root(self, tmp_path: Path):
         """A stray file under _staging/ must not blow up the walk."""
         staging = tmp_path / "_staging"
         staging.mkdir()
@@ -4343,7 +4373,7 @@ class TestListStagingCandidates:
         out = recorder._list_staging_candidates(str(staging))
         assert out == []
 
-    def test_skips_non_dir_date_entry(self, tmp_path):
+    def test_skips_non_dir_date_entry(self, tmp_path: Path):
         """A stray file under _staging/<cam>/ must not blow up."""
         staging = tmp_path / "_staging"
         staging.mkdir()
@@ -4354,11 +4384,8 @@ class TestListStagingCandidates:
         assert out == []
 
 
-# ── 3. sync_drain_tick — full target dispatch ────────────────────────────────
-
-
 class TestSyncDrainTickLocal:
-    def test_finalized_segment_promoted_to_local_layout(self, tmp_path):
+    def test_finalized_segment_promoted_to_local_layout(self, tmp_path: Path):
         """target=local → file moves from _staging tree to the canonical
         ``{base}/{cam}/{date}/...`` layout the Media Source already browses."""
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
@@ -4373,7 +4400,7 @@ class TestSyncDrainTickLocal:
         assert result["failed"] == 0
         assert result["pending"] == 0
 
-    def test_too_young_segment_left_in_staging(self, tmp_path):
+    def test_too_young_segment_left_in_staging(self, tmp_path: Path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4", age_seconds=5)
         coord = _make_coord(tmp_path, target="local")
         result = recorder.sync_drain_tick(coord)
@@ -4381,7 +4408,7 @@ class TestSyncDrainTickLocal:
         # File untouched.
         assert (tmp_path / "_staging" / CAM / "2026-05-06" / "10-00.mp4").exists()
 
-    def test_unknown_target_falls_through_to_local(self, tmp_path):
+    def test_unknown_target_falls_through_to_local(self, tmp_path: Path):
         """Misconfigured target → fail-safe to local promotion (never to nowhere)."""
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="garbage")
@@ -4390,7 +4417,7 @@ class TestSyncDrainTickLocal:
 
 
 class TestSyncDrainTickSmb:
-    def test_smb_target_invokes_upload(self, tmp_path):
+    def test_smb_target_invokes_upload(self, tmp_path: Path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="smb")
         with patch.object(recorder, "_upload_smb", return_value=True) as up:
@@ -4403,7 +4430,7 @@ class TestSyncDrainTickSmb:
         assert result["uploaded"] == 1
         assert result["failed"] == 0
 
-    def test_smb_failure_is_counted(self, tmp_path):
+    def test_smb_failure_is_counted(self, tmp_path: Path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="smb")
         with patch.object(recorder, "_upload_smb", return_value=False):
@@ -4415,7 +4442,7 @@ class TestSyncDrainTickSmb:
 
 
 class TestSyncDrainTickFtp:
-    def test_ftp_target_invokes_upload(self, tmp_path):
+    def test_ftp_target_invokes_upload(self, tmp_path: Path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="ftp")
         with patch.object(recorder, "_upload_ftp", return_value=True) as up:
@@ -4424,7 +4451,7 @@ class TestSyncDrainTickFtp:
         assert result["uploaded"] == 1
         assert not (tmp_path / "_staging" / CAM / "2026-05-06" / "10-00.mp4").exists()
 
-    def test_ftp_failure_is_counted(self, tmp_path):
+    def test_ftp_failure_is_counted(self, tmp_path: Path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="ftp")
         with patch.object(recorder, "_upload_ftp", return_value=False):
@@ -4435,7 +4462,7 @@ class TestSyncDrainTickFtp:
 class TestSyncDrainTickRetryCap:
     """5 failures → file moves to _failed/ + persistent_notification fired."""
 
-    def test_quarantine_after_max_retries(self, tmp_path):
+    def test_quarantine_after_max_retries(self, tmp_path: Path):
         path = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="smb")
         with patch.object(recorder, "_upload_smb", return_value=False):
@@ -4453,7 +4480,7 @@ class TestSyncDrainTickStateCounters:
     """The watcher persists state on the coordinator so the diagnostic sensor
     can render it. Pin the shape."""
 
-    def test_drain_state_populated(self, tmp_path):
+    def test_drain_state_populated(self, tmp_path: Path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="local")
         recorder.sync_drain_tick(coord, now=time.time())
@@ -4464,11 +4491,8 @@ class TestSyncDrainTickStateCounters:
         assert CAM in state["last_age_by_cam"]
 
 
-# ── 4. SMB / FTP retention purge with nvr_smb_subpath ────────────────────────
-
-
 class TestNvrCleanupSmbSubpath:
-    def test_smb_root_uses_nvr_subpath(self, tmp_path):
+    def test_smb_root_uses_nvr_subpath(self, tmp_path: Path):
         """``_sync_nvr_cleanup_smb`` must walk ONLY the NVR subtree, not the
         entire share — otherwise it would delete cloud-event uploads too."""
         coord = _make_coord(
@@ -4498,7 +4522,7 @@ class TestNvrCleanupSmbSubpath:
         assert seen, "_sync_nvr_cleanup_smb did not invoke scandir"
         assert seen[0].endswith("\\Bosch\\NVR")
 
-    def test_smb_skip_without_server(self, tmp_path):
+    def test_smb_skip_without_server(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="smb", smb_server="")
         with patch.dict(
             "sys.modules",
@@ -4516,7 +4540,7 @@ class TestNvrCleanupSmbSubpath:
 
 
 class TestNvrCleanupFtpSubpath:
-    def test_ftp_root_uses_nvr_subpath(self, tmp_path):
+    def test_ftp_root_uses_nvr_subpath(self, tmp_path: Path):
         coord = _make_coord(
             tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
         )
@@ -4541,7 +4565,7 @@ class TestNvrCleanupFtpSubpath:
         # First cwd targets the NVR subtree.
         assert cwd_calls[0] == "/Bosch/NVR"
 
-    def test_ftp_zero_retention_skipped(self, tmp_path):
+    def test_ftp_zero_retention_skipped(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="ftp", retention_days=0)
         # Should never even try to connect.
         with patch("custom_components.bosch_shc_camera.smb._ftp_connect") as conn:
@@ -4553,7 +4577,7 @@ class TestNvrCleanupDispatch:
     """``sync_nvr_cleanup`` is the public entry point — it dispatches to the
     target-specific helper plus always purges the local staging tree."""
 
-    def test_local_only_calls_local_helper(self, tmp_path):
+    def test_local_only_calls_local_helper(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="local")
         with (
             patch.object(recorder, "_sync_nvr_cleanup_local") as loc,
@@ -4565,7 +4589,7 @@ class TestNvrCleanupDispatch:
         smb.assert_not_called()
         ftp.assert_not_called()
 
-    def test_smb_target_calls_smb_and_local(self, tmp_path):
+    def test_smb_target_calls_smb_and_local(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="smb")
         with (
             patch.object(recorder, "_sync_nvr_cleanup_local") as loc,
@@ -4577,7 +4601,7 @@ class TestNvrCleanupDispatch:
         smb.assert_called_once_with(coord)
         ftp.assert_not_called()
 
-    def test_ftp_target_calls_ftp_and_local(self, tmp_path):
+    def test_ftp_target_calls_ftp_and_local(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="ftp")
         with (
             patch.object(recorder, "_sync_nvr_cleanup_local") as loc,
@@ -4589,19 +4613,16 @@ class TestNvrCleanupDispatch:
         smb.assert_not_called()
         ftp.assert_called_once_with(coord)
 
-    def test_zero_retention_short_circuits(self, tmp_path):
+    def test_zero_retention_short_circuits(self, tmp_path: Path):
         coord = _make_coord(tmp_path, retention_days=0)
         with patch.object(recorder, "_sync_nvr_cleanup_local") as loc:
             recorder.sync_nvr_cleanup(coord)
         loc.assert_not_called()
 
 
-# ── 5. Watcher start / stop coroutine ────────────────────────────────────────
-
-
 class TestDrainStagingWatcher:
     @pytest.mark.asyncio
-    async def test_watcher_runs_tick_then_sleeps(self, tmp_path):
+    async def test_watcher_runs_tick_then_sleeps(self, tmp_path: Path):
         """One tick on enable_nvr=True; sleep is what gets cancelled."""
         coord = _make_coord(tmp_path, target="local")
 
@@ -4634,7 +4655,7 @@ class TestDrainStagingWatcher:
         assert ticks, "watcher never invoked sync_drain_tick"
 
     @pytest.mark.asyncio
-    async def test_watcher_skips_when_nvr_disabled(self, tmp_path):
+    async def test_watcher_skips_when_nvr_disabled(self, tmp_path: Path):
         coord = _make_coord(tmp_path)
         coord.options["enable_nvr"] = False
 
@@ -4659,7 +4680,7 @@ class TestDrainStagingWatcher:
         tick.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_watcher_swallows_tick_exception(self, tmp_path):
+    async def test_watcher_swallows_tick_exception(self, tmp_path: Path):
         """A raising tick must not kill the watcher loop."""
         coord = _make_coord(tmp_path, target="local")
 
@@ -4691,11 +4712,8 @@ class TestDrainStagingWatcher:
         assert len(calls) >= 2, "watcher exited after first exception"
 
 
-# ── 6. Pure helpers — _remote_smb_path / _remote_ftp_path ────────────────────
-
-
 class TestRemotePathHelpers:
-    def test_smb_path_includes_subpath(self, tmp_path):
+    def test_smb_path_includes_subpath(self, tmp_path: Path):
         coord = _make_coord(
             tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
         )
@@ -4707,7 +4725,7 @@ class TestRemotePathHelpers:
         )
         assert path == r"\\fritz.box\FRITZ.NAS\Bosch\NVR\Terrasse\2026-05-06\10-00.mp4"
 
-    def test_smb_path_sanitizes_camera_name(self, tmp_path):
+    def test_smb_path_sanitizes_camera_name(self, tmp_path: Path):
         coord = _make_coord(
             tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
         )
@@ -4722,7 +4740,7 @@ class TestRemotePathHelpers:
         cam_component = head_after_root.split("\\", 1)[0]
         assert ".." not in cam_component
 
-    def test_ftp_path_starts_with_slash(self, tmp_path):
+    def test_ftp_path_starts_with_slash(self, tmp_path: Path):
         coord = _make_coord(
             tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
         )
@@ -4735,11 +4753,8 @@ class TestRemotePathHelpers:
         assert path == "/Bosch/NVR/Terrasse/2026-05-06/10-00.mp4"
 
 
-# ── 7. _upload_smb / _upload_ftp / _move_local — direct unit tests ───────────
-
-
 class TestMoveLocal:
-    def test_success_returns_true_and_creates_dest(self, tmp_path):
+    def test_success_returns_true_and_creates_dest(self, tmp_path: Path):
         src = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="local")
         ok = recorder._move_local(
@@ -4754,7 +4769,7 @@ class TestMoveLocal:
         assert (tmp_path / CAM / "2026-05-06" / "10-00.mp4").exists()
         assert not src.exists()
 
-    def test_oserror_returns_false(self, tmp_path):
+    def test_oserror_returns_false(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="local")
         with patch.object(recorder.shutil, "move", side_effect=OSError("nope")):
             ok = recorder._move_local(
@@ -4769,7 +4784,7 @@ class TestMoveLocal:
 
 
 class TestUploadSmb:
-    def test_returns_false_when_smbprotocol_missing(self, tmp_path):
+    def test_returns_false_when_smbprotocol_missing(self, tmp_path: Path):
         """``ImportError`` path — test environment has smbprotocol installed
         but the helper must still tolerate its absence on user systems."""
         coord = _make_coord(tmp_path, target="smb")
@@ -4786,7 +4801,7 @@ class TestUploadSmb:
             )
         assert ok is False
 
-    def test_returns_false_when_server_empty(self, tmp_path):
+    def test_returns_false_when_server_empty(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="smb", smb_server="")
         # smbclient is a real module; we only need to short-circuit before it
         # gets used.
@@ -4799,7 +4814,7 @@ class TestUploadSmb:
         )
         assert ok is False
 
-    def test_returns_false_on_session_failure(self, tmp_path):
+    def test_returns_false_on_session_failure(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="smb")
         import sys
 
@@ -4817,7 +4832,7 @@ class TestUploadSmb:
             )
         assert ok is False
 
-    def test_returns_false_on_mkdirs_failure(self, tmp_path):
+    def test_returns_false_on_mkdirs_failure(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="smb")
         import sys
 
@@ -4838,7 +4853,7 @@ class TestUploadSmb:
             )
         assert ok is False
 
-    def test_returns_false_on_upload_open_failure(self, tmp_path):
+    def test_returns_false_on_upload_open_failure(self, tmp_path: Path):
         """File-open or upload itself raising → caught and returns False."""
         coord = _make_coord(tmp_path, target="smb")
         import sys
@@ -4860,7 +4875,7 @@ class TestUploadSmb:
             )
         assert ok is False
 
-    def test_happy_path_writes_to_smb(self, tmp_path):
+    def test_happy_path_writes_to_smb(self, tmp_path: Path):
         """Successful write — smbclient.open_file gets the bytes."""
         src = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="smb")
@@ -4897,7 +4912,7 @@ class TestUploadSmb:
 
 
 class TestUploadFtp:
-    def test_returns_false_when_server_empty(self, tmp_path):
+    def test_returns_false_when_server_empty(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="ftp", smb_server="")
         ok = recorder._upload_ftp(
             coord,
@@ -4908,7 +4923,7 @@ class TestUploadFtp:
         )
         assert ok is False
 
-    def test_returns_false_on_login_failure(self, tmp_path):
+    def test_returns_false_on_login_failure(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="ftp")
         with patch(
             "custom_components.bosch_shc_camera.smb._ftp_connect",
@@ -4923,7 +4938,7 @@ class TestUploadFtp:
             )
         assert ok is False
 
-    def test_returns_false_on_mkdirs_failure(self, tmp_path):
+    def test_returns_false_on_mkdirs_failure(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="ftp")
         ftp = MagicMock()
         with (
@@ -4944,7 +4959,7 @@ class TestUploadFtp:
             )
         assert ok is False
 
-    def test_returns_false_on_storbinary_failure(self, tmp_path):
+    def test_returns_false_on_storbinary_failure(self, tmp_path: Path):
         src = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="ftp")
         ftp = MagicMock()
@@ -4964,7 +4979,7 @@ class TestUploadFtp:
             )
         assert ok is False
 
-    def test_happy_path_calls_storbinary(self, tmp_path):
+    def test_happy_path_calls_storbinary(self, tmp_path: Path):
         src = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="ftp")
         ftp = MagicMock()
@@ -4986,7 +5001,7 @@ class TestUploadFtp:
         # Quit attempt happens in finally block.
         ftp.quit.assert_called_once()
 
-    def test_quit_failure_falls_back_to_close(self, tmp_path):
+    def test_quit_failure_falls_back_to_close(self, tmp_path: Path):
         """ftp.quit() raising in the finally-block must fall through to close."""
         src = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="ftp")
@@ -5008,11 +5023,8 @@ class TestUploadFtp:
         ftp.close.assert_called_once()
 
 
-# ── 8. Quarantine helper ─────────────────────────────────────────────────────
-
-
 class TestQuarantineFailed:
-    def test_moves_file_into_failed_tree(self, tmp_path):
+    def test_moves_file_into_failed_tree(self, tmp_path: Path):
         src = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         recorder._quarantine_failed(
             str(tmp_path),
@@ -5024,7 +5036,7 @@ class TestQuarantineFailed:
         assert (tmp_path / "_failed" / CAM / "2026-05-06" / "10-00.mp4").exists()
         assert not src.exists()
 
-    def test_oserror_swallowed(self, tmp_path):
+    def test_oserror_swallowed(self, tmp_path: Path):
         """A move-failure must not raise — the watcher is best-effort."""
         with patch.object(
             recorder.shutil, "move", side_effect=OSError("permission denied")
@@ -5038,20 +5050,17 @@ class TestQuarantineFailed:
             )
 
 
-# ── 9. _sync_nvr_cleanup_local ───────────────────────────────────────────────
-
-
 class TestSyncNvrCleanupLocal:
-    def test_skips_when_path_missing(self, tmp_path):
+    def test_skips_when_path_missing(self, tmp_path: Path):
         coord = _make_coord(tmp_path / "doesnotexist", target="local")
         # No raise.
         recorder._sync_nvr_cleanup_local(coord)
 
-    def test_skips_when_zero_retention(self, tmp_path):
+    def test_skips_when_zero_retention(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="local", retention_days=0)
         recorder._sync_nvr_cleanup_local(coord)
 
-    def test_deletes_old_files(self, tmp_path):
+    def test_deletes_old_files(self, tmp_path: Path):
         # Old file
         old = tmp_path / CAM / "2026-04-01" / "10-00.mp4"
         old.parent.mkdir(parents=True)
@@ -5068,7 +5077,7 @@ class TestSyncNvrCleanupLocal:
         assert not old.exists()
         assert recent.exists()
 
-    def test_stat_failure_skipped(self, tmp_path):
+    def test_stat_failure_skipped(self, tmp_path: Path):
         """A file that disappears between os.walk and os.stat must not raise."""
         f = tmp_path / CAM / "2026-04-01" / "10-00.mp4"
         f.parent.mkdir(parents=True)
@@ -5077,7 +5086,7 @@ class TestSyncNvrCleanupLocal:
         with patch("os.stat", side_effect=OSError("vanished")):
             recorder._sync_nvr_cleanup_local(coord)
 
-    def test_remove_failure_swallowed(self, tmp_path):
+    def test_remove_failure_swallowed(self, tmp_path: Path):
         """An unlink failure must NOT bubble up — best-effort cleanup."""
         f = tmp_path / CAM / "2026-04-01" / "10-00.mp4"
         f.parent.mkdir(parents=True)
@@ -5097,7 +5106,7 @@ class TestSyncNvrCleanupLocal:
         # File still exists (remove failed silently).
         assert f.exists()
 
-    def test_rmdir_failure_swallowed(self, tmp_path):
+    def test_rmdir_failure_swallowed(self, tmp_path: Path):
         """An rmdir/listdir failure during the empty-folder prune pass must
         not raise — second pass is best-effort."""
         # Create one old file (will be deleted) leaving an empty per-day dir.
@@ -5125,18 +5134,15 @@ class TestSyncNvrCleanupLocal:
         assert not old.exists()
 
 
-# ── 10. _list_staging_candidates extra branches ──────────────────────────────
-
-
 class TestListStagingExtra:
-    def test_listdir_root_oserror(self, tmp_path):
+    def test_listdir_root_oserror(self, tmp_path: Path):
         """os.listdir(staging_root) raising — return empty list."""
         staging = tmp_path / "_staging"
         staging.mkdir()
         with patch("os.listdir", side_effect=OSError("perm")):
             assert recorder._list_staging_candidates(str(staging)) == []
 
-    def test_listdir_cam_oserror(self, tmp_path):
+    def test_listdir_cam_oserror(self, tmp_path: Path):
         """os.listdir on the cam-dir raising — skip that camera, continue."""
         staging = tmp_path / "_staging"
         cam = staging / CAM
@@ -5153,7 +5159,7 @@ class TestListStagingExtra:
             out = recorder._list_staging_candidates(str(staging))
         assert out == []
 
-    def test_listdir_date_oserror(self, tmp_path):
+    def test_listdir_date_oserror(self, tmp_path: Path):
         """os.listdir on the date-dir raising — skip that date."""
         staging = tmp_path / "_staging"
         date = staging / CAM / "2026-05-06"
@@ -5169,7 +5175,7 @@ class TestListStagingExtra:
             out = recorder._list_staging_candidates(str(staging))
         assert out == []
 
-    def test_stat_failure_skipped(self, tmp_path):
+    def test_stat_failure_skipped(self, tmp_path: Path):
         """A file vanishing between os.listdir and os.stat must not raise."""
         seg = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         real_stat = os.stat
@@ -5185,7 +5191,7 @@ class TestListStagingExtra:
             )
         assert out == []
 
-    def test_non_regular_file_skipped(self, tmp_path):
+    def test_non_regular_file_skipped(self, tmp_path: Path):
         """A directory disguised as a file (broken layout) is skipped."""
         staging = tmp_path / "_staging"
         date_dir = staging / CAM / "2026-05-06"
@@ -5198,11 +5204,8 @@ class TestListStagingExtra:
         assert out == []
 
 
-# ── 11. sync_drain_tick — successful upload but unlink fails ─────────────────
-
-
 class TestSyncDrainTickUnlinkFailure:
-    def test_smb_unlink_failure_only_logs(self, tmp_path):
+    def test_smb_unlink_failure_only_logs(self, tmp_path: Path):
         """A successful upload + failed unlink must NOT bump ``failed``."""
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="smb")
@@ -5214,7 +5217,7 @@ class TestSyncDrainTickUnlinkFailure:
         assert result["uploaded"] == 1
         assert result["failed"] == 0
 
-    def test_ftp_unlink_failure_only_logs(self, tmp_path):
+    def test_ftp_unlink_failure_only_logs(self, tmp_path: Path):
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="ftp")
         with (
@@ -5225,7 +5228,7 @@ class TestSyncDrainTickUnlinkFailure:
         assert result["uploaded"] == 1
         assert result["failed"] == 0
 
-    def test_persistent_notification_swallows_errors(self, tmp_path):
+    def test_persistent_notification_swallows_errors(self, tmp_path: Path):
         """If services.async_call raises, the watcher must not crash."""
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="smb")
@@ -5240,11 +5243,8 @@ class TestSyncDrainTickUnlinkFailure:
         assert (tmp_path / "_failed" / CAM / "2026-05-06" / "10-00.mp4").exists()
 
 
-# ── 12. _sync_nvr_cleanup_smb / _ftp — deeper walks ──────────────────────────
-
-
 class TestSyncNvrCleanupSmbDeepWalk:
-    def test_smb_skipped_when_no_share(self, tmp_path):
+    def test_smb_skipped_when_no_share(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="smb", smb_share="")
         with patch.dict(
             "sys.modules",
@@ -5259,7 +5259,7 @@ class TestSyncNvrCleanupSmbDeepWalk:
         ):
             recorder._sync_nvr_cleanup_smb(coord)
 
-    def test_smb_session_failure_returns(self, tmp_path):
+    def test_smb_session_failure_returns(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="smb")
         with patch.dict(
             "sys.modules",
@@ -5274,7 +5274,7 @@ class TestSyncNvrCleanupSmbDeepWalk:
         ):
             recorder._sync_nvr_cleanup_smb(coord)
 
-    def test_smb_walk_recurses_and_deletes(self, tmp_path):
+    def test_smb_walk_recurses_and_deletes(self, tmp_path: Path):
         coord = _make_coord(
             tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
         )
@@ -5325,7 +5325,9 @@ class TestSyncNvrCleanupSmbDeepWalk:
             recorder._sync_nvr_cleanup_smb(coord)
         assert removed == [r"\\fritz.box\FRITZ.NAS\Bosch\NVR\Terrasse\old.mp4"]
 
-    def test_smb_walk_stops_at_deadline_instead_of_hanging_forever(self, tmp_path):
+    def test_smb_walk_stops_at_deadline_instead_of_hanging_forever(
+        self, tmp_path: Path
+    ):
         """A hung/unreachable share must not block the cleanup job forever.
 
         Simulates a stalled scandir() by advancing a fake monotonic clock
@@ -5389,7 +5391,7 @@ class TestSyncNvrCleanupSmbDeepWalk:
         assert scandir_calls["n"] == 0
 
     def test_smb_walk_stops_mid_loop_when_deadline_expires_between_entries(
-        self, tmp_path
+        self, tmp_path: Path
     ):
         """The deadline check ALSO runs inside the per-entry loop (not just
         once at function entry) — a share that responds fine at first but
@@ -5448,7 +5450,7 @@ class TestSyncNvrCleanupSmbDeepWalk:
 
         assert removed == [f"{root}\\a.mp4"]
 
-    def test_smb_scandir_exception_swallowed(self, tmp_path):
+    def test_smb_scandir_exception_swallowed(self, tmp_path: Path):
         """A scandir failure deep in the tree must not propagate."""
         coord = _make_coord(
             tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
@@ -5467,7 +5469,7 @@ class TestSyncNvrCleanupSmbDeepWalk:
             # Should not raise.
             recorder._sync_nvr_cleanup_smb(coord)
 
-    def test_smb_stat_exception_swallowed(self, tmp_path):
+    def test_smb_stat_exception_swallowed(self, tmp_path: Path):
         """smb_stat raising on a leaf file must not bubble up."""
         coord = _make_coord(
             tmp_path, target="smb", smb_base_path="Bosch", smb_subpath="NVR"
@@ -5499,7 +5501,7 @@ class TestSyncNvrCleanupSmbDeepWalk:
 
 
 class TestSyncNvrCleanupFtpDeepWalk:
-    def test_ftp_walk_lists_and_deletes(self, tmp_path):
+    def test_ftp_walk_lists_and_deletes(self, tmp_path: Path):
         """End-to-end walk: cwd → LIST → MDTM → DELE for old files only."""
         coord = _make_coord(
             tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
@@ -5544,7 +5546,9 @@ class TestSyncNvrCleanupFtpDeepWalk:
         # B13-6 regression pin: delete must use the absolute path, not just the filename.
         ftp.delete.assert_called_once_with("/Bosch/NVR/Terrasse/old.mp4")
 
-    def test_ftp_walk_stops_at_deadline_instead_of_hanging_forever(self, tmp_path):
+    def test_ftp_walk_stops_at_deadline_instead_of_hanging_forever(
+        self, tmp_path: Path
+    ):
         """A hung/unreachable FTP server must not block cleanup forever.
 
         Mirrors the SMB deadline test: fake_monotonic is already past
@@ -5580,7 +5584,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ftp.delete.assert_not_called()
 
     def test_ftp_walk_stops_mid_loop_when_deadline_expires_between_files(
-        self, tmp_path
+        self, tmp_path: Path
     ):
         """Mirrors test_smb_walk_stops_mid_loop_when_deadline_expires_between_entries
         for the FTP `_walk_and_delete`'s per-file deadline check (distinct
@@ -5627,7 +5631,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
 
         ftp.delete.assert_called_once_with("/Bosch/NVR/a.mp4")
 
-    def test_ftp_cwd_failure_returns_cleanly(self, tmp_path):
+    def test_ftp_cwd_failure_returns_cleanly(self, tmp_path: Path):
         """ftp.cwd raising error_perm — entire walk returns early w/o delete."""
         import ftplib
 
@@ -5642,7 +5646,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
             recorder._sync_nvr_cleanup_ftp(coord)
         ftp.delete.assert_not_called()
 
-    def test_ftp_listing_exception_swallowed(self, tmp_path):
+    def test_ftp_listing_exception_swallowed(self, tmp_path: Path):
         coord = _make_coord(
             tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
         )
@@ -5653,7 +5657,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
-    def test_ftp_mdtm_failure_skips_file(self, tmp_path):
+    def test_ftp_mdtm_failure_skips_file(self, tmp_path: Path):
         coord = _make_coord(
             tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
         )
@@ -5677,7 +5681,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
             recorder._sync_nvr_cleanup_ftp(coord)
         ftp.delete.assert_not_called()
 
-    def test_ftp_delete_failure_swallowed(self, tmp_path):
+    def test_ftp_delete_failure_swallowed(self, tmp_path: Path):
         coord = _make_coord(
             tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
         )
@@ -5701,7 +5705,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
-    def test_ftp_cwd_in_recursion_swallowed(self, tmp_path):
+    def test_ftp_cwd_in_recursion_swallowed(self, tmp_path: Path):
         """``cwd`` failure when popping back up the tree must not raise."""
         coord = _make_coord(
             tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
@@ -5739,7 +5743,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
-    def test_ftp_quit_failure_swallowed(self, tmp_path):
+    def test_ftp_quit_failure_swallowed(self, tmp_path: Path):
         coord = _make_coord(
             tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
         )
@@ -5751,7 +5755,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
-    def test_ftp_mdtm_and_delete_use_absolute_paths(self, tmp_path):
+    def test_ftp_mdtm_and_delete_use_absolute_paths(self, tmp_path: Path):
         """B13-6 regression: MDTM and DELETE must use absolute paths so that
         the commands are position-independent after recursive _walk_and_delete
         calls leave the FTP cwd pointing at a subdirectory."""
@@ -5791,11 +5795,8 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ftp.delete.assert_called_once_with("/Bosch/NVR/clip.mp4")
 
 
-# ── 13. Upload_ftp close-fallback when both quit and close fail ──────────────
-
-
 class TestUploadFtpCloseFallback:
-    def test_quit_and_close_both_fail(self, tmp_path):
+    def test_quit_and_close_both_fail(self, tmp_path: Path):
         src = _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="ftp")
         ftp = MagicMock()
@@ -5817,11 +5818,10 @@ class TestUploadFtpCloseFallback:
             )
 
 
-# ── 14. Misc edge / warning paths in NEW functions ───────────────────────────
-
-
 class TestUploadSmbServerEmptyWarning:
-    def test_warning_logged_no_session(self, tmp_path, caplog):
+    def test_warning_logged_no_session(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ):
         """``smb_server`` empty must short-circuit (no register_session call)."""
         coord = _make_coord(tmp_path, target="smb", smb_server="")
         # Provide a real-ish smbclient that would crash if invoked — proves
@@ -5847,7 +5847,7 @@ class TestUploadSmbServerEmptyWarning:
 
 
 class TestSmbCleanupImportErrorBranch:
-    def test_smbclient_missing_returns_silently(self, tmp_path):
+    def test_smbclient_missing_returns_silently(self, tmp_path: Path):
         """Production environments without smbprotocol must not raise."""
         import builtins
         import sys
@@ -5867,7 +5867,7 @@ class TestSmbCleanupImportErrorBranch:
 
 
 class TestFtpCleanupConnectFailure:
-    def test_connect_failure_returns_silently(self, tmp_path):
+    def test_connect_failure_returns_silently(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="ftp")
         with patch(
             "custom_components.bosch_shc_camera.smb._ftp_connect",
@@ -5877,7 +5877,7 @@ class TestFtpCleanupConnectFailure:
 
 
 class TestFtpCleanupShortAndDotDotLines:
-    def test_short_line_skipped(self, tmp_path):
+    def test_short_line_skipped(self, tmp_path: Path):
         coord = _make_coord(
             tmp_path, target="ftp", smb_base_path="Bosch", smb_subpath="NVR"
         )
@@ -5903,9 +5903,6 @@ class TestFtpCleanupShortAndDotDotLines:
         ftp.delete.assert_not_called()
 
 
-# ── D-P2: persistent_notification scheduling — thread vs loop ─────────────────
-
-
 class TestPersistentNotificationScheduling:
     """D-P2 regression: verify the correct scheduling primitive is used in
     each caller context.
@@ -5922,8 +5919,6 @@ class TestPersistentNotificationScheduling:
       back onto the event loop — direct ``async_create_task`` is not
       thread-safe.
     """
-
-    # ── _watch_recorder disk-full path ─────────────────────────────────────
 
     @pytest.mark.asyncio
     async def test_watch_recorder_diskfull_uses_async_create_task_not_threadsafe(
@@ -6041,8 +6036,6 @@ class TestPersistentNotificationScheduling:
 
         assert coord._nvr_error_state.get(cam_id) == "disk full"
 
-    # ── sync_drain_tick quarantine path ────────────────────────────────────
-
     def test_drain_tick_quarantine_uses_call_soon_threadsafe(
         self, tmp_path: Path
     ) -> None:
@@ -6067,10 +6060,8 @@ class TestPersistentNotificationScheduling:
         assert (tmp_path / "_failed" / CAM / "2026-05-06" / "10-00.mp4").exists()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: `_nvr_recent_crash` SENTINEL_RULE default (relocated from
+# `_nvr_recent_crash` SENTINEL_RULE default (relocated from
 # tests/test_bug_regression_v11.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestNvrRecentCrashSentinel:
@@ -6125,17 +6116,15 @@ class TestNvrRecentCrashSentinel:
         )
 
 
-# =============================================================================
-# Section: issue #42 follow-up — cred-rotation race root-cause fix
+# issue #42 follow-up — cred-rotation race root-cause fix
 # (late re-read + shared lock with _refresh_local_creds_from_heartbeat) and
 # bounded auth-retry so a genuine broken credential surfaces instead of
 # retrying forever.
-# =============================================================================
 
 
 class TestStartRecorderCredRotationRace:
     @pytest.mark.asyncio
-    async def test_late_rotation_uses_fresh_url_not_stale_capture(self, tmp_path):
+    async def test_late_rotation_uses_fresh_url_not_stale_capture(self, tmp_path: Path):
         """A heartbeat cred rotation landing between the makedirs executor
         job and the ffmpeg spawn must NOT result in ffmpeg being launched
         with the stale, already-invalidated URL captured earlier in
@@ -6176,7 +6165,7 @@ class TestStartRecorderCredRotationRace:
         )
 
     @pytest.mark.asyncio
-    async def test_torn_down_mid_makedirs_aborts_spawn(self, tmp_path):
+    async def test_torn_down_mid_makedirs_aborts_spawn(self, tmp_path: Path):
         """If the LOCAL session is torn down (e.g. LOCAL→REMOTE fallback)
         while start_recorder awaits the makedirs job, the final re-read
         under the lock must detect this and abort rather than spawn ffmpeg
@@ -6198,7 +6187,7 @@ class TestStartRecorderCredRotationRace:
         assert CAM_ID not in coord._nvr_processes
 
     @pytest.mark.asyncio
-    async def test_spawn_serializes_against_heartbeat_lock(self, tmp_path):
+    async def test_spawn_serializes_against_heartbeat_lock(self, tmp_path: Path):
         """start_recorder's final re-read+spawn must run under the SAME
         per-camera lock instance _refresh_local_creds_from_heartbeat uses,
         so the two can never interleave mid-mutation."""
@@ -6226,7 +6215,7 @@ class TestStartRecorderCredRotationRace:
 
 class TestWatchRecorderBoundedAuthRetry:
     @pytest.mark.asyncio
-    async def test_retries_up_to_cap_then_gives_up(self, tmp_path):
+    async def test_retries_up_to_cap_then_gives_up(self, tmp_path: Path):
         """6 consecutive 401 exits must retry exactly 5 times (per
         _MAX_CONSECUTIVE_AUTH_RETRIES) and then give up with a distinct
         error message — a genuine broken credential must not retry
@@ -6309,7 +6298,7 @@ class TestWatchRecorderBoundedAuthRetry:
         assert coord._nvr_auth_retry_count[CAM_ID] == 1
 
     @pytest.mark.asyncio
-    async def test_auth_retry_counter_reset_on_successful_spawn(self, tmp_path):
+    async def test_auth_retry_counter_reset_on_successful_spawn(self, tmp_path: Path):
         """After one 401 retry, a later successful spawn must clear the
         auth-retry counter — a later isolated 401 must not inherit the
         prior streak toward the give-up cap."""
@@ -6338,7 +6327,7 @@ class TestNvrStateChangePushesImmediateUpdate:
     `coordinator.async_update_listeners()` immediately."""
 
     @pytest.mark.asyncio
-    async def test_successful_spawn_pushes_update(self, tmp_path):
+    async def test_successful_spawn_pushes_update(self, tmp_path: Path):
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         proc = _mock_proc(returncode=None)
 
@@ -6351,7 +6340,9 @@ class TestNvrStateChangePushesImmediateUpdate:
         coord.async_update_listeners.assert_called()
 
     @pytest.mark.asyncio
-    async def test_stop_recorder_pushes_update_when_process_was_running(self, tmp_path):
+    async def test_stop_recorder_pushes_update_when_process_was_running(
+        self, tmp_path: Path
+    ):
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord._nvr_processes[CAM_ID] = _mock_proc(returncode=None)
 
@@ -6360,7 +6351,7 @@ class TestNvrStateChangePushesImmediateUpdate:
         coord.async_update_listeners.assert_called()
 
     @pytest.mark.asyncio
-    async def test_stop_recorder_no_push_when_nothing_was_running(self, tmp_path):
+    async def test_stop_recorder_no_push_when_nothing_was_running(self, tmp_path: Path):
         """No process registered → nothing actually changed → no spurious push."""
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         assert CAM_ID not in coord._nvr_processes
@@ -6370,7 +6361,7 @@ class TestNvrStateChangePushesImmediateUpdate:
         coord.async_update_listeners.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_unexpected_crash_pushes_update(self, tmp_path):
+    async def test_unexpected_crash_pushes_update(self, tmp_path: Path):
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         proc = _mock_proc(returncode=1)
         coord._nvr_processes[CAM_ID] = proc
@@ -6384,7 +6375,7 @@ class TestNvrStateChangePushesImmediateUpdate:
         coord.async_update_listeners.assert_called()
 
     @pytest.mark.asyncio
-    async def test_disk_full_give_up_pushes_update(self, tmp_path):
+    async def test_disk_full_give_up_pushes_update(self, tmp_path: Path):
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         proc = _mock_proc(
             returncode=1, stderr_data=b"Error writing trailer: No space left on device"
@@ -6397,7 +6388,7 @@ class TestNvrStateChangePushesImmediateUpdate:
         coord.async_update_listeners.assert_called()
 
     @pytest.mark.asyncio
-    async def test_auth_retry_give_up_pushes_update(self, tmp_path):
+    async def test_auth_retry_give_up_pushes_update(self, tmp_path: Path):
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord._nvr_auth_retry_count[CAM_ID] = recorder._MAX_CONSECUTIVE_AUTH_RETRIES
         proc = _mock_proc(
@@ -6411,7 +6402,7 @@ class TestNvrStateChangePushesImmediateUpdate:
         coord.async_update_listeners.assert_called()
 
     @pytest.mark.asyncio
-    async def test_crash_twice_give_up_pushes_update(self, tmp_path):
+    async def test_crash_twice_give_up_pushes_update(self, tmp_path: Path):
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord._nvr_recent_crash[CAM_ID] = time.monotonic()
         proc = _mock_proc(returncode=1, stderr_data=b"some other ffmpeg error")
@@ -6424,9 +6415,7 @@ class TestNvrStateChangePushesImmediateUpdate:
         coord.async_update_listeners.assert_called()
 
 
-# =============================================================================
-# Section: Phase 5 — post-roll capture + event→clip assembly (issue #43)
-# =============================================================================
+# Phase 5 — post-roll capture + event→clip assembly (issue #43)
 
 
 class TestBuildPostrollCaptureArgs:
@@ -6662,7 +6651,7 @@ class TestAssembleAndShipMotionClip:
     """Orchestrator wiring FCM events -> create_motion_clip -> NVR staging."""
 
     @pytest.mark.asyncio
-    async def test_lock_already_held_skips(self, tmp_path):
+    async def test_lock_already_held_skips(self, tmp_path: Path):
         """A concurrent assembly in progress for the same camera → skip,
         don't queue (issue #43 follow-up: bursty motion events must not
         pile up overlapping ffmpeg concats)."""
@@ -6677,7 +6666,7 @@ class TestAssembleAndShipMotionClip:
 
     @pytest.mark.asyncio
     async def test_postroll_temp_dir_makedirs_oserror_falls_back_to_preroll_only(
-        self, tmp_path
+        self, tmp_path: Path
     ):
         """Cannot create the postroll temp dir (e.g. permission denied) —
         must not abort the whole assembly, just skip the postroll capture
@@ -6714,7 +6703,7 @@ class TestAssembleAndShipMotionClip:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_staging_dir_makedirs_oserror_returns_false(self, tmp_path):
+    async def test_staging_dir_makedirs_oserror_returns_false(self, tmp_path: Path):
         """Cannot create the staging dest dir — must return False and clean
         up any postroll temp file already captured, rather than leaving it
         behind or crashing."""
@@ -6754,7 +6743,7 @@ class TestAssembleAndShipMotionClip:
         assert not os.path.exists(captured_paths[0])
 
     @pytest.mark.asyncio
-    async def test_preroll_only_writes_into_staging_tree(self, tmp_path):
+    async def test_preroll_only_writes_into_staging_tree(self, tmp_path: Path):
         """No post-roll configured: assembled clip lands under
         {base}/_staging/{cam}/{date}/HH-MM-SS_motion.mp4 — the exact tree
         the existing drain watcher already scans."""
@@ -6797,7 +6786,7 @@ class TestAssembleAndShipMotionClip:
         assert files[0].endswith("_motion.mp4")
 
     @pytest.mark.asyncio
-    async def test_postroll_capture_appended_and_cleaned_up(self, tmp_path):
+    async def test_postroll_capture_appended_and_cleaned_up(self, tmp_path: Path):
         """postroll_seconds>0 + successful capture: clip ships, and the
         intermediate postroll capture temp file is removed afterward
         (must not linger in the tmpfs cache dir)."""
@@ -6828,7 +6817,7 @@ class TestAssembleAndShipMotionClip:
         assert not os.path.exists(captured_tmp_paths[0])
 
     @pytest.mark.asyncio
-    async def test_postroll_temp_file_not_in_preroll_ring_dir(self, tmp_path):
+    async def test_postroll_temp_file_not_in_preroll_ring_dir(self, tmp_path: Path):
         """Regression (bug-hunt finding, issue #43 follow-up): the postroll
         capture temp file must NOT be written into `_preroll_dir()` — that
         directory is scanned wholesale (no filename filter) by
@@ -6863,7 +6852,9 @@ class TestAssembleAndShipMotionClip:
         assert not captured_paths[0].startswith(preroll_ring_dir + os.sep)
 
     @pytest.mark.asyncio
-    async def test_failed_postroll_capture_partial_file_cleaned_up(self, tmp_path):
+    async def test_failed_postroll_capture_partial_file_cleaned_up(
+        self, tmp_path: Path
+    ):
         """Regression (bug-hunt finding, issue #43 follow-up): if
         `_capture_postroll` writes a partial file before returning False
         (e.g. ffmpeg exits non-zero after a truncated write), that partial
@@ -6902,7 +6893,9 @@ class TestAssembleAndShipMotionClip:
         assert not os.path.exists(captured_paths[0])
 
     @pytest.mark.asyncio
-    async def test_postroll_capture_fails_falls_back_to_preroll_only(self, tmp_path):
+    async def test_postroll_capture_fails_falls_back_to_preroll_only(
+        self, tmp_path: Path
+    ):
         """`_capture_postroll` returning False must not abort the clip —
         the assembly still ships with pre-roll segments alone."""
         coord = _make_assembly_coord(tmp_path, postroll_seconds=5)
@@ -6926,7 +6919,7 @@ class TestAssembleAndShipMotionClip:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_no_preroll_no_postroll_output_still_attempted(self, tmp_path):
+    async def test_no_preroll_no_postroll_output_still_attempted(self, tmp_path: Path):
         """Both empty (e.g. options changed mid-flight): create_motion_clip
         itself returns False (nothing to concat) and that propagates."""
         coord = _make_assembly_coord(tmp_path, postroll_seconds=0)
@@ -6937,7 +6930,7 @@ class TestAssembleAndShipMotionClip:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_event_clip_switch_off_skips_entirely(self, tmp_path):
+    async def test_event_clip_switch_off_skips_entirely(self, tmp_path: Path):
         """Feature request (realKim-dotcom, issue #43 follow-up): the
         per-camera nvr_event_clip switch OFF must skip native assembly
         entirely, without ever touching the assembly lock, pre-roll list,
@@ -6957,7 +6950,7 @@ class TestAssembleAndShipMotionClip:
         assert not coord._get_nvr_clip_assembly_lock(CAM_ID).locked()
 
     @pytest.mark.asyncio
-    async def test_event_clip_switch_on_by_default(self, tmp_path):
+    async def test_event_clip_switch_on_by_default(self, tmp_path: Path):
         """Backward compatibility: with no explicit switch state, native
         assembly proceeds exactly as before this feature existed."""
         coord = _make_assembly_coord(tmp_path)
@@ -6975,7 +6968,7 @@ class TestAssembleAndShipMotionClip:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_finalize_ring_on_event_disabled_by_default(self, tmp_path):
+    async def test_finalize_ring_on_event_disabled_by_default(self, tmp_path: Path):
         """nvr_finalize_ring_on_event defaults to off: the assembly must
         never call finalize_and_restart_preroll_recorder unless the option
         is explicitly turned on."""
@@ -7002,7 +6995,9 @@ class TestAssembleAndShipMotionClip:
         mock_finalize.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_finalize_ring_on_event_attaches_finalized_segment(self, tmp_path):
+    async def test_finalize_ring_on_event_attaches_finalized_segment(
+        self, tmp_path: Path
+    ):
         """nvr_finalize_ring_on_event=True: the finalized segment path is
         appended to the concat list, after the (drop-newest) pre-roll list
         and before any postroll capture — recovering the freshest footage
@@ -7060,7 +7055,9 @@ class TestAssembleAndShipMotionClip:
         assert len(seen_paths["paths"]) == 3
 
     @pytest.mark.asyncio
-    async def test_finalize_ring_on_event_none_falls_back_silently(self, tmp_path):
+    async def test_finalize_ring_on_event_none_falls_back_silently(
+        self, tmp_path: Path
+    ):
         """finalize_and_restart_preroll_recorder returning None (nothing to
         finalize, or had to hard-kill) must not break the assembly — it
         just ships without the extra segment, same as before this feature."""
@@ -7092,7 +7089,7 @@ class TestStopPrerollRecorderCachePrune:
     """issue #43 follow-up: leftover ring segments must not survive stop()."""
 
     @pytest.mark.asyncio
-    async def test_leftover_segments_removed_on_stop(self, tmp_path):
+    async def test_leftover_segments_removed_on_stop(self, tmp_path: Path):
         from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
 
         coord = _make_preroll_coord(tmp_path)
@@ -7109,7 +7106,7 @@ class TestStopPrerollRecorderCachePrune:
         assert not seg.exists()
 
     @pytest.mark.asyncio
-    async def test_no_process_still_prunes_cache(self, tmp_path):
+    async def test_no_process_still_prunes_cache(self, tmp_path: Path):
         """Even with no live process (e.g. crashed before this call), a
         stale ring file left from a prior run must still be cleaned up."""
         from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
@@ -7125,7 +7122,7 @@ class TestStopPrerollRecorderCachePrune:
         assert not seg.exists()
 
     @pytest.mark.asyncio
-    async def test_prune_error_swallowed(self, tmp_path):
+    async def test_prune_error_swallowed(self, tmp_path: Path):
         """A raising executor job (e.g. cache dir vanished mid-prune) must
         not propagate — best-effort cleanup, non-fatal."""
         coord = _make_preroll_coord(tmp_path)
@@ -7139,7 +7136,7 @@ class TestStopPrerollRecorderCachePrune:
         await recorder.stop_preroll_recorder(coord, CAM_ID)
 
     @pytest.mark.asyncio
-    async def test_prune_cache_false_keeps_leftover_segments(self, tmp_path):
+    async def test_prune_cache_false_keeps_leftover_segments(self, tmp_path: Path):
         """Regression (bug-hunt finding, issue #43 follow-up): a RESPAWN
         (`prune_cache=False`) must NOT wipe the ring — only a genuine stop
         (the default) does. Without this, every LOCAL-session/cred-rotation
@@ -7160,7 +7157,7 @@ class TestStopPrerollRecorderCachePrune:
         assert seg.exists()
 
     @pytest.mark.asyncio
-    async def test_start_preroll_recorder_respawn_preserves_ring(self, tmp_path):
+    async def test_start_preroll_recorder_respawn_preserves_ring(self, tmp_path: Path):
         """End-to-end: calling `start_preroll_recorder` again for a camera
         with an existing ring (its own leading stop_preroll_recorder call)
         must not wipe the pre-existing segments — only the periodic

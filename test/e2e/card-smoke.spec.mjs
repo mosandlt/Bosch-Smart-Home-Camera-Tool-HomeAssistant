@@ -1625,8 +1625,8 @@ test("_scheduleLiveRecovery is a no-op while the tab is hidden and not PiP-owned
 // ordinary tab switch (no visible reconnect) — bumped 8s→60s on 2026-06-24.
 test("background teardown grace keeps a quick tab switch static (source pin)", () => {
   expect(CARD_SRC).toMatch(/const BACKGROUND_TEARDOWN_GRACE_MS = 60000;/);
-  // _scheduleLiveRecovery runs only when visible AND not PiP-owned.
-  expect(CARD_SRC).toMatch(/if \(ownsPip\) return;\s*\n\s*if \(document\.visibilityState === "hidden"\) return;/);
+  // _scheduleLiveRecovery runs only when visible AND not PiP/native-fullscreen-owned.
+  expect(CARD_SRC).toMatch(/if \(this\._ownsNativePresentation\(v\)\) return;\s*\n\s*if \(document\.visibilityState === "hidden"\) return;/);
 });
 
 // Source pin: the REAL freeze fix — `pagehide` (Chrome freezes a tab hidden ~5 min and
@@ -1634,7 +1634,7 @@ test("background teardown grace keeps a quick tab switch static (source pin)", (
 // a live getStats trace: a healthy stream was killed by the pagehide handler at the
 // 5-min hidden mark. Real PiP can't be tested headless, so pin the guard. 2026-06-24.
 test("pagehide does not tear down a PiP-owned stream (source pin)", () => {
-  expect(CARD_SRC).toMatch(/_pagehideHandler = \(\) => \{[\s\S]*?const ownsPip = v && \(document\.pictureInPictureElement === v \|\| _boschPipActive === this\);[\s\S]*?if \(ownsPip\) return;[\s\S]*?this\._stopLiveVideo\(\);/);
+  expect(CARD_SRC).toMatch(/_pagehideHandler = \(\) => \{[\s\S]*?if \(this\._ownsNativePresentation\(v\)\) return;[\s\S]*?this\._stopLiveVideo\(\);/);
 });
 
 // Behavioral: the PRIMARY PiP fix — while PiP is open the card dispatches HA's
@@ -1764,6 +1764,128 @@ test("_scheduleLiveRecovery is suppressed while PiP-owned, runs once PiP is gone
   if (r.skipped) return; // cam-video not rendered in this harness build — source pins cover the wiring
   expect(r.stoppedWhilePip, "PiP-owned → no teardown (would freeze the floating window)").toBe(0);
   expect(r.stoppedAfterPip, "once PiP is gone, recovery runs normally").toBe(1);
+});
+
+// 2026-07-13 iOS PiP-after-fullscreen bug (Thomas, with screenshot): a native iOS
+// PiP window hangs forever in its loading spinner after the user had previously
+// been in iOS' own native <video> fullscreen presentation mode (webkitPresentationMode
+// === "fullscreen" — distinct from our own CSS-fullscreen button path, which never
+// touches this property). Root cause: `_scheduleLiveRecovery`'s ownsPip guard only
+// checked PiP, not native fullscreen, so a stall/blip during native fullscreen ran
+// srcObject=null + video.load() — the same teardown that corrupts PiP's compositor
+// link (crbug 894317) — silently corrupting the <video> element for a LATER PiP
+// request even after fullscreen was long since exited. `_ownsNativePresentation()`
+// now also suppresses recovery while `webkitPresentationMode === "fullscreen"`.
+test("_scheduleLiveRecovery is suppressed during iOS native <video> fullscreen, runs once it exits", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    let stopCount = 0;
+    card._stopLiveVideo = () => { stopCount++; card._liveVideoActive = false; };
+    card._startLiveVideo = () => {};
+    card._isStreaming = () => true;
+
+    const v = card.shadowRoot && card.shadowRoot.getElementById("cam-video");
+    if (!v) return { skipped: true };
+
+    // Simulate iOS native <video> fullscreen. On real WebKit (macOS/iOS),
+    // webkitPresentationMode is a native getter-only IDL attribute — plain
+    // assignment silently no-ops there (only Linux's WebKit build, which
+    // doesn't implement this Apple-only property, let a plain expando
+    // assignment "work" by accident). Object.defineProperty shadows the
+    // accessor with an own data property on every engine.
+    const definePresentationMode = (video, mode) =>
+      Object.defineProperty(video, "webkitPresentationMode", { configurable: true, value: mode });
+    definePresentationMode(v, "fullscreen");
+
+    // Native-fullscreen-owned → suppressed even though visible and not in PiP.
+    card._liveVideoActive = true; card._reconnectingLiveVideo = false; card._stoppingLiveVideo = false;
+    card._scheduleLiveRecovery("blip during native fullscreen");
+    const stoppedWhileFullscreen = stopCount; // expect 0
+
+    // Back to inline ("" on most engines when not in any special presentation mode)
+    // → recovery runs again, same as the PiP-gone case.
+    definePresentationMode(v, "inline");
+    card._liveVideoActive = true; card._reconnectingLiveVideo = false; card._stoppingLiveVideo = false;
+    card._scheduleLiveRecovery("blip after fullscreen exit");
+    const stoppedAfterFullscreen = stopCount; // expect 1
+
+    return { stoppedWhileFullscreen, stoppedAfterFullscreen };
+  });
+  if (r.skipped) return; // cam-video not rendered in this harness build — source pins cover the wiring
+  expect(r.stoppedWhileFullscreen, "native-fullscreen-owned → no teardown (would corrupt the compositor link, hanging a later PiP)").toBe(0);
+  expect(r.stoppedAfterFullscreen, "once native fullscreen is exited, recovery runs normally").toBe(1);
+});
+
+// Unit-level pin for the shared helper itself: exercises all three ownership
+// signals independently, plus the "none" case, plus the non-WebKit case where
+// webkitPresentationMode is undefined (Chrome/Firefox) — must not throw or
+// false-positive there. 2026-07-13.
+test("_ownsNativePresentation recognizes PiP (W3C + iOS-webkit mirror) and iOS native fullscreen, is false and crash-safe otherwise", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    const results = {};
+
+    // No video element at all → false, no throw.
+    results.nullVideo = card._ownsNativePresentation(null);
+
+    const v = document.createElement("video"); // detached fake element, not cam-video
+
+    // Nothing active → false.
+    results.plain = card._ownsNativePresentation(v);
+
+    // W3C PiP (document.pictureInPictureElement === this exact element).
+    const origDesc = Object.getOwnPropertyDescriptor(document, "pictureInPictureElement");
+    Object.defineProperty(document, "pictureInPictureElement", { configurable: true, get: () => v });
+    results.w3cPip = card._ownsNativePresentation(v);
+    Object.defineProperty(document, "pictureInPictureElement", { configurable: true, get: () => null });
+
+    // A DIFFERENT element in PiP must not falsely claim ownership for `v`.
+    const other = document.createElement("video");
+    Object.defineProperty(document, "pictureInPictureElement", { configurable: true, get: () => other });
+    results.otherElementPip = card._ownsNativePresentation(v);
+    Object.defineProperty(document, "pictureInPictureElement", { configurable: true, get: () => null });
+    if (origDesc) Object.defineProperty(document, "pictureInPictureElement", origDesc);
+
+    // Cross-browser safety: webkitPresentationMode undefined (Chrome/Firefox) must
+    // not throw and must not be mistaken for "fullscreen".
+    results.undefinedPresentationMode = card._ownsNativePresentation(v); // v.webkitPresentationMode is undefined here
+
+    // iOS native fullscreen. On real WebKit (macOS/iOS), webkitPresentationMode
+    // is a native getter-only IDL attribute — plain assignment silently no-ops
+    // there (only Linux's WebKit build, which doesn't implement this Apple-only
+    // property, let a plain expando assignment "work" by accident).
+    // Object.defineProperty shadows the accessor with an own data property on
+    // every engine.
+    const definePresentationMode = (video, mode) =>
+      Object.defineProperty(video, "webkitPresentationMode", { configurable: true, value: mode });
+    definePresentationMode(v, "fullscreen");
+    results.iosFullscreen = card._ownsNativePresentation(v);
+
+    // iOS inline (not fullscreen, not PiP) → false.
+    definePresentationMode(v, "inline");
+    results.iosInline = card._ownsNativePresentation(v);
+
+    return results;
+  });
+  expect(r.nullVideo, "no video element → false, no throw").toBe(false);
+  expect(r.plain, "nothing active → false").toBe(false);
+  expect(r.w3cPip, "this element in document.pictureInPictureElement → true").toBe(true);
+  expect(r.otherElementPip, "a DIFFERENT element in PiP must not claim ownership of this one").toBe(false);
+  expect(r.undefinedPresentationMode, "webkitPresentationMode undefined (non-WebKit) → false, no throw").toBe(false);
+  expect(r.iosFullscreen, "iOS native <video> fullscreen → true").toBe(true);
+  expect(r.iosInline, "iOS inline presentation mode → false").toBe(false);
 });
 
 // Source pins for the un-throttled freeze-detection wiring (these survive in src
@@ -1957,7 +2079,7 @@ test("background-tab freeze fix is wired: teardown-on-hidden, freeze-on-return, 
   expect(CARD_SRC).toMatch(/const\s+BACKGROUND_TEARDOWN_GRACE_MS\s*=\s*\d+/);
   // The teardown fires only while still hidden and exempts a watched PiP window.
   expect(CARD_SRC).toMatch(/if\s*\(document\.visibilityState\s*!==\s*"hidden"\)\s*return;\s*\/\/ came back during grace/);
-  expect(CARD_SRC).toMatch(/if\s*\(ownsPip\)\s*return;\s*\/\/ PiP IS being watched/);
+  expect(CARD_SRC).toMatch(/if\s*\(this\._ownsNativePresentation\(video\)\)\s*return;\s*\/\/ PiP\/native-fullscreen IS being watched/);
   // Freeze-on-return safety net: no fresh frame within 3s of return → reconnect.
   expect(CARD_SRC).toMatch(/_scheduleLiveRecovery\("no fresh frame within 3s of tab-return"\)/);
   expect(CARD_SRC).toMatch(/const\s+freshFrame\s*=/);

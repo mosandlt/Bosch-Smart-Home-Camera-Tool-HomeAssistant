@@ -124,9 +124,6 @@ def test_camera_summary_excludes_full_uuid(hass: HomeAssistant) -> None:
     assert async_get_config_entry_diagnostics is not None
 
 
-# ── Camera summary serialization ─────────────────────────────────────────
-
-
 async def test_camera_summary_includes_required_fields(hass: HomeAssistant) -> None:
     """Per-camera summary must surface model, firmware, status, etc."""
     cam_id = "11111111-1111-1111-1111-111111111111"

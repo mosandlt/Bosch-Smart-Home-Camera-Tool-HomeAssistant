@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -61,18 +62,13 @@ _AUDIO_CFG = {
 
 
 @pytest.fixture
-def stub_entry():
+def stub_entry() -> SimpleNamespace:
     """Shared minimal ConfigEntry stub used across most sections below."""
     return SimpleNamespace(entry_id="01ENTRY", data={}, options={})
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BoschPanNumber
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 @pytest.fixture
-def stub_coord():
+def stub_coord() -> SimpleNamespace:
     return SimpleNamespace(
         data={
             CAM_ID: {
@@ -105,7 +101,9 @@ def stub_coord():
 
 
 class TestPanNumber:
-    def test_construction(self, stub_coord, stub_entry):
+    def test_construction(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
@@ -113,33 +111,43 @@ class TestPanNumber:
         assert n._attr_native_min_value == -120
         assert n._attr_native_max_value == 120
 
-    def test_native_value_none_when_cache_empty(self, stub_coord, stub_entry):
+    def test_native_value_none_when_cache_empty(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.native_value is None
 
-    def test_native_value_reads_cache(self, stub_coord, stub_entry):
+    def test_native_value_reads_cache(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         stub_coord._pan_cache[CAM_ID] = 30
         from custom_components.bosch_shc_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.native_value == 30
 
-    def test_unavailable_when_cache_empty(self, stub_coord, stub_entry):
+    def test_unavailable_when_cache_empty(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.available is False
 
-    def test_available_when_cache_populated(self, stub_coord, stub_entry):
+    def test_available_when_cache_populated(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         stub_coord._pan_cache[CAM_ID] = 0
         from custom_components.bosch_shc_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.available is True
 
-    def test_rotation_180_inverts_sign_on_read(self, stub_coord, stub_entry):
+    def test_rotation_180_inverts_sign_on_read(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Ceiling-mounted: cam-physical +30° → user-visible -30°."""
         stub_coord._pan_cache[CAM_ID] = 30
         stub_coord._image_rotation_180[CAM_ID] = True
@@ -148,7 +156,9 @@ class TestPanNumber:
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.native_value == -30
 
-    def test_rotation_180_off_no_inversion(self, stub_coord, stub_entry):
+    def test_rotation_180_off_no_inversion(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         stub_coord._pan_cache[CAM_ID] = 30
         stub_coord._image_rotation_180[CAM_ID] = False
         from custom_components.bosch_shc_camera.number import BoschPanNumber
@@ -157,7 +167,9 @@ class TestPanNumber:
         assert n.native_value == 30
 
     @pytest.mark.asyncio
-    async def test_set_value_inverts_when_rotated(self, stub_coord, stub_entry):
+    async def test_set_value_inverts_when_rotated(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """User drags slider to +50 (right) on ceiling-mounted cam → send -50 to camera."""
         stub_coord._image_rotation_180[CAM_ID] = True
         from custom_components.bosch_shc_camera.number import BoschPanNumber
@@ -167,7 +179,9 @@ class TestPanNumber:
         stub_coord.async_cloud_set_pan.assert_called_once_with(CAM_ID, -50)
 
     @pytest.mark.asyncio
-    async def test_set_value_no_invert_when_not_rotated(self, stub_coord, stub_entry):
+    async def test_set_value_no_invert_when_not_rotated(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
@@ -185,7 +199,6 @@ class TestPanNumber:
         assert info["sw_version"] == "9.40.25"
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 # Doubled-"Bosch "-prefix entity_id regression
 #
 # Bug source: forum post 998974/15, Andrew75, 2026-05-15.
@@ -206,11 +219,10 @@ class TestPanNumber:
 #   BoschPowerLedBrightnessNumber, BoschAlarmDelayNumber,
 #   BoschAlarmActivationDelayNumber, BoschPreAlarmDelayNumber,
 #   BoschAudioAlarmSensitivityNumber.
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
-def coord():
+def coord() -> SimpleNamespace:
     return SimpleNamespace(
         data={
             CAM_ID: {
@@ -242,12 +254,12 @@ def coord():
 
 
 @pytest.fixture
-def entry():
+def entry() -> SimpleNamespace:
     return SimpleNamespace(entry_id="01ENTRY", data={}, options={})
 
 
 @pytest.fixture
-def coord_indoor(coord):
+def coord_indoor(coord: SimpleNamespace) -> SimpleNamespace:
     """Indoor II coord (for alarm-delay / power-LED classes)."""
     coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Indoor"
     return coord
@@ -362,7 +374,11 @@ def _make_pre_alarm_delay(coord_indoor, entry):
         _make_darkness_threshold,
     ],
 )
-def test_no_doubled_bosch_prefix_outdoor(factory, coord, entry):
+def test_no_doubled_bosch_prefix_outdoor(
+    factory: Callable[[SimpleNamespace, SimpleNamespace], object],
+    coord: SimpleNamespace,
+    entry: SimpleNamespace,
+):
     """_attr_name must not start with 'Bosch ' for outdoor-coord classes."""
     entity = factory(coord, entry)
     name = getattr(entity, "_attr_name", None)
@@ -386,7 +402,11 @@ def test_no_doubled_bosch_prefix_outdoor(factory, coord, entry):
         _make_darkness_threshold,
     ],
 )
-def test_has_entity_name_true_outdoor(factory, coord, entry):
+def test_has_entity_name_true_outdoor(
+    factory: Callable[[SimpleNamespace, SimpleNamespace], object],
+    coord: SimpleNamespace,
+    entry: SimpleNamespace,
+):
     """_attr_has_entity_name must be True (own or inherited) for all outdoor-coord classes."""
     entity = factory(coord, entry)
     # Use getattr so we resolve both plain attributes and properties correctly.
@@ -410,7 +430,11 @@ def test_has_entity_name_true_outdoor(factory, coord, entry):
         _make_pre_alarm_delay,
     ],
 )
-def test_no_doubled_bosch_prefix_indoor(factory, coord_indoor, entry):
+def test_no_doubled_bosch_prefix_indoor(
+    factory: Callable[[SimpleNamespace, SimpleNamespace], object],
+    coord_indoor: SimpleNamespace,
+    entry: SimpleNamespace,
+):
     """_attr_name must not start with 'Bosch ' for indoor-coord classes."""
     entity = factory(coord_indoor, entry)
     name = getattr(entity, "_attr_name", None)
@@ -428,7 +452,11 @@ def test_no_doubled_bosch_prefix_indoor(factory, coord_indoor, entry):
         _make_pre_alarm_delay,
     ],
 )
-def test_has_entity_name_true_indoor(factory, coord_indoor, entry):
+def test_has_entity_name_true_indoor(
+    factory: Callable[[SimpleNamespace, SimpleNamespace], object],
+    coord_indoor: SimpleNamespace,
+    entry: SimpleNamespace,
+):
     """_attr_has_entity_name must be True (own or inherited) for all indoor-coord classes."""
     entity = factory(coord_indoor, entry)
     has_entity_name = getattr(entity, "_attr_has_entity_name", False)
@@ -437,13 +465,9 @@ def test_has_entity_name_true_indoor(factory, coord_indoor, entry):
     )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 # Shared helpers for the SimpleNamespace + AsyncMock coordinator-bypass sections
 # below (speaker/mic/intrusion, lens elevation, white balance, LED brightness,
 # motion-light, darkness threshold, power LED, alarm delay, audio volume).
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 def _coord(
     cam_id: str = CAM_ID_GEN2_OUTDOOR,
     hw: str = "HOME_Eyes_Outdoor",
@@ -588,11 +612,6 @@ def _make_put_session_guards(
     else:
         session.put = MagicMock(side_effect=_resp_cm)
     return session, resp
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# BoschSpeakerLevelNumber
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class TestBoschSpeakerLevelNumber:
@@ -754,11 +773,6 @@ class TestBoschSpeakerLevelNumber:
         assert info["manufacturer"] == "Bosch"
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BoschMicrophoneLevelNumber
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 class TestBoschMicrophoneLevelNumber:
     """Smoke + regression tests for mic level — privacy guard and body shape."""
 
@@ -911,13 +925,9 @@ class TestBoschMicrophoneLevelNumber:
         assert ent._attr_translation_key == "microphone_level"
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 # Shared per-camera lock — BoschSpeakerLevelNumber / BoschMicrophoneLevelNumber /
 # BoschIntercomSwitch (switch.py) all read-modify-write the same /audio endpoint
 # and _audio_cache.
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 class TestAudioConfigLockConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_speaker_and_mic_writes_serialize(self):
@@ -969,11 +979,6 @@ class TestAudioConfigLockConcurrency:
 
         assert coord._audio_cache[cam_id]["speakerLevel"] == 90
         assert coord._audio_cache[cam_id]["microphoneLevel"] == 10
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# BoschIntrusionSensitivityNumber
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class TestBoschIntrusionSensitivityNumber:
@@ -1193,7 +1198,6 @@ class TestBoschIntrusionSensitivityNumber:
         assert ent.native_value == 3.0
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 # BoschIntrusionDistanceNumber
 #
 # Includes the distance-clamp regression: number.py used to clamp with
@@ -1201,7 +1205,6 @@ class TestBoschIntrusionSensitivityNumber:
 # ("must be less than or equal to 8") on FW 9.40.102 — setting 9 or 10
 # produced a doomed PUT and left the entity stuck. Fix: clamp to min(8, value)
 # and _attr_native_max_value = 8.
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class TestBoschIntrusionDistanceNumber:
@@ -1305,7 +1308,9 @@ class TestBoschIntrusionDistanceNumber:
             (5, 5),  # mid-range: must pass through unchanged
         ],
     )
-    async def test_set_native_value_clamp_regression(self, input_val, expected):
+    async def test_set_native_value_clamp_regression(
+        self, input_val: int, expected: int
+    ):
         """Explicit regression matrix for the min(10, value) → min(8, value)
         fix: values 9 and 10 (accepted by the old buggy clamp) must now be
         clamped to 8; values 1-8 must pass through unchanged."""
@@ -1460,11 +1465,6 @@ class TestBoschIntrusionDistanceNumber:
         ent = _make_entity_intrusion(BoschIntrusionDistanceNumber, coord, CAM_ID_GEN1)
         assert ent.available is False
         assert ent.native_value is None
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# async_setup_entry wiring — entity gating per camera generation/feature-support
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class TestAsyncSetupEntryWiring:
@@ -1681,11 +1681,6 @@ class TestAsyncSetupEntryWiring:
         )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BoschFrontLightIntensityNumber
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 def _make_hass():
     return SimpleNamespace(
         async_create_task=MagicMock(),
@@ -1771,11 +1766,11 @@ def _make_front_light_intensity_r2(shc_state_cache=None):
 
 
 @pytest.fixture
-def stub_coord_gen2():
+def stub_coord_gen2() -> SimpleNamespace:
     return _stub_coord_gen2_factory()
 
 
-def _stub_coord_gen2_factory(**overrides):
+def _stub_coord_gen2_factory(**overrides: object) -> SimpleNamespace:
     base = dict(
         data={
             CAM_ID: {
@@ -1810,7 +1805,9 @@ def _stub_coord_gen2_factory(**overrides):
 
 
 class TestFrontLightIntensityNumber:
-    def test_native_value_scaled_from_cache(self, stub_coord_gen2, stub_entry):
+    def test_native_value_scaled_from_cache(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import (
             BoschFrontLightIntensityNumber,
         )
@@ -1819,7 +1816,9 @@ class TestFrontLightIntensityNumber:
         entity = BoschFrontLightIntensityNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert entity.native_value == 75, "Must scale 0.75 API value to 75 percent"
 
-    def test_native_value_none_when_missing(self, stub_coord_gen2, stub_entry):
+    def test_native_value_none_when_missing(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import (
             BoschFrontLightIntensityNumber,
         )
@@ -1830,7 +1829,9 @@ class TestFrontLightIntensityNumber:
             "Must return None when intensity not in cache"
         )
 
-    def test_unavailable_without_cache(self, stub_coord_gen2, stub_entry):
+    def test_unavailable_without_cache(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Regression: with no front-light data cached the entity must report
         unavailable, not 'unknown' (available=True + native_value=None). Matches
         the cache-gating of the sibling number entities."""
@@ -1842,7 +1843,9 @@ class TestFrontLightIntensityNumber:
         entity = BoschFrontLightIntensityNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert entity.available is False
 
-    def test_available_with_cache(self, stub_coord_gen2, stub_entry):
+    def test_available_with_cache(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import (
             BoschFrontLightIntensityNumber,
         )
@@ -1871,11 +1874,6 @@ class TestFrontLightIntensityNumber:
         assert info["model"] == "Eyes Outdoor"
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BoschLensElevationNumber
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 def _make_lens_elevation_r2(elevation_cache=None):
     from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
 
@@ -1897,7 +1895,9 @@ class TestLensElevationNumber:
         sw = _make_lens_elevation_r2(elevation_cache={CAM_ID: 2.5})
         assert sw.native_value == 2.5
 
-    def test_native_value_none_when_missing(self, stub_coord_gen2, stub_entry):
+    def test_native_value_none_when_missing(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
 
         entity = BoschLensElevationNumber(stub_coord_gen2, CAM_ID, stub_entry)
@@ -1911,7 +1911,9 @@ class TestLensElevationNumber:
         sw = _make_lens_elevation_r2(elevation_cache={})
         assert sw.available is False
 
-    def test_range_constants(self, stub_coord_gen2, stub_entry):
+    def test_range_constants(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
 
         entity = BoschLensElevationNumber(stub_coord_gen2, CAM_ID, stub_entry)
@@ -1929,7 +1931,9 @@ class TestLensElevationNumber:
         assert sw.coordinator._lens_elevation_cache[CAM_ID] == 3.0
 
     @pytest.mark.asyncio
-    async def test_set_value_puts_rounded_value(self, stub_coord_gen2, stub_entry):
+    async def test_set_value_puts_rounded_value(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Pins float-rounding of the elevation value sent in the PUT body."""
         from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
 
@@ -1975,11 +1979,6 @@ class TestLensElevationNumber:
         assert info["manufacturer"] == "Bosch"
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BoschWhiteBalanceNumber
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 def _mock_aiohttp_session(status=200):
     @asynccontextmanager
     async def _put(*args, **kwargs):
@@ -2018,7 +2017,9 @@ class TestWhiteBalanceNumber:
         sw._wb_value = 0.3
         assert sw.native_value == 0.3
 
-    def test_native_value_none_when_cache_empty(self, stub_coord_gen2, stub_entry):
+    def test_native_value_none_when_cache_empty(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Via the real constructor: freshly built entity with no lighting
         cache and no remembered _wb_value must read as None."""
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
@@ -2026,7 +2027,9 @@ class TestWhiteBalanceNumber:
         entity = BoschWhiteBalanceNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert entity.native_value is None, "Must return None when lighting cache empty"
 
-    def test_caches_last_wb_value(self, stub_coord_gen2, stub_entry):
+    def test_caches_last_wb_value(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
 
         stub_coord_gen2._lighting_switch_cache[CAM_ID] = {
@@ -2040,7 +2043,9 @@ class TestWhiteBalanceNumber:
             "Must remember last read whiteBalance even after cache cleared"
         )
 
-    def test_range_minus_one_to_one(self, stub_coord_gen2, stub_entry):
+    def test_range_minus_one_to_one(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
 
         entity = BoschWhiteBalanceNumber(stub_coord_gen2, CAM_ID, stub_entry)
@@ -2160,11 +2165,6 @@ class TestWhiteBalanceNumber:
         cache = coord._lighting_switch_cache[CAM_ID]
         assert cache["frontLightSettings"]["whiteBalance"] == 0.5  # our write
         assert cache["topLedLightSettings"]["brightness"] == 77  # sibling kept
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# _BoschLedBrightnessBase (BoschTopLedBrightnessNumber / BoschBottomLedBrightnessNumber)
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 def _make_top_led_r2(lighting_switch_cache=None):
@@ -2303,11 +2303,6 @@ class TestBottomLedBrightnessNumber:
         assert e._brightness == 33.0
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BoschMotionLightSensitivityNumber
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 def _make_motion_light_sens_r2(motion_light_cache=None):
     from custom_components.bosch_shc_camera.number import (
         BoschMotionLightSensitivityNumber,
@@ -2350,11 +2345,6 @@ class TestMotionLightSensitivityNumber:
         sw.coordinator.async_put_camera.assert_awaited_once()
         body = sw.coordinator.async_put_camera.call_args[0][2]
         assert body["motionLightSensitivity"] == 4
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# BoschDarknessThresholdNumber
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 def _make_darkness_threshold_r2(global_lighting_cache=None):
@@ -2417,11 +2407,6 @@ class TestDarknessThresholdNumber:
         assert e.available is False
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BoschPowerLedBrightnessNumber
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 def _make_power_led_r2(icon_led_cache=None):
     from custom_components.bosch_shc_camera.number import BoschPowerLedBrightnessNumber
 
@@ -2472,11 +2457,6 @@ class TestPowerLedBrightnessNumber:
         await sw.async_set_native_value(-5.0)  # clamp to 0
         body = sw.coordinator.async_put_camera.call_args[0][2]
         assert body["value"] == 0
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# BoschAlarmDelayNumber (_BoschAlarmDelayBase)
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 def _make_alarm_delay_r2(alarm_settings=None):
@@ -2531,16 +2511,14 @@ class TestAlarmDelayNumber:
         sw.coordinator.async_put_camera.assert_not_awaited()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 # BoschAudioVolumeNumber — virtual card-playback-volume entity: seeds a
 # default, stores the set value in the coordinator, and never calls the
 # Bosch API (browser-side level). It is the automatable source of truth the
 # card reads + writes.
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 class TestAudioVolumeNumber:
-    def test_default_volume_when_unset(self, stub_coord_gen2, stub_entry):
+    def test_default_volume_when_unset(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
 
         stub_coord_gen2._audio_volume = {}
@@ -2548,7 +2526,9 @@ class TestAudioVolumeNumber:
         assert e.native_value == 50.0  # default returned without pre-seeding
 
     @pytest.mark.asyncio
-    async def test_set_value_stores_no_api_call(self, stub_coord_gen2, stub_entry):
+    async def test_set_value_stores_no_api_call(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
 
         stub_coord_gen2._audio_volume = {}
@@ -2560,7 +2540,9 @@ class TestAudioVolumeNumber:
         # Virtual preference — no Bosch write must happen.
         stub_coord_gen2.async_put_camera.assert_not_called()
 
-    def test_slider_metadata(self, stub_coord_gen2, stub_entry):
+    def test_slider_metadata(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from homeassistant.components.number import NumberMode
 
         from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
@@ -2570,7 +2552,9 @@ class TestAudioVolumeNumber:
         assert e._attr_native_max_value == 100
         assert e._attr_mode == NumberMode.SLIDER
 
-    def test_device_info_groups_under_camera_device(self, stub_coord_gen2, stub_entry):
+    def test_device_info_groups_under_camera_device(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.const import DOMAIN
         from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
 
@@ -2580,13 +2564,17 @@ class TestAudioVolumeNumber:
         assert di["manufacturer"] == "Bosch"
         assert di["name"].startswith("Bosch ")
 
-    def test_available_when_camera_online(self, stub_coord_gen2, stub_entry):
+    def test_available_when_camera_online(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
 
         e = BoschAudioVolumeNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert e.available is True
 
-    def test_unavailable_when_camera_offline(self, stub_coord_gen2, stub_entry):
+    def test_unavailable_when_camera_offline(
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Greys out together with the camera's other controls when offline."""
         from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
 
@@ -2595,7 +2583,7 @@ class TestAudioVolumeNumber:
         assert e.available is False
 
     def test_unavailable_when_coordinator_update_failed(
-        self, stub_coord_gen2, stub_entry
+        self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
 
@@ -2604,13 +2592,9 @@ class TestAudioVolumeNumber:
         assert e.available is False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: alarm-delay privacy guard (relocated from
-# tests/test_privacy_guard_branches.py — the light.py/switch.py siblings
-# live in tests/test_light.py and tests/test_switch.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
+# Alarm-delay privacy guard (relocated from tests/test_privacy_guard_branches.py
+# — the light.py/switch.py siblings live in tests/test_light.py and
+# tests/test_switch.py)
 def _stub_coord_with_privacy_number(
     privacy_on: bool = False, hw: str = "HOME_Eyes_Indoor"
 ):
@@ -2710,13 +2694,9 @@ class TestAlarmDelayPrivacyGuard:
         coord.async_put_camera.assert_called_once()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: front-light-intensity notify-on-total-failure coverage (relocated
-# from tests/test_switch_write_failure_warnings.py — the switch.py call
-# sites for the same 2026-07-07 fix live in tests/test_switch.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
+# Front-light-intensity notify-on-total-failure coverage (relocated from
+# tests/test_switch_write_failure_warnings.py — the switch.py call sites for
+# the same 2026-07-07 fix live in tests/test_switch.py)
 def _coord_light_write_failure(**overrides: object) -> SimpleNamespace:
     coord = SimpleNamespace(
         data={CAM_ID: {"info": {"title": "Terrasse"}}},
@@ -2731,7 +2711,7 @@ def _coord_light_write_failure(**overrides: object) -> SimpleNamespace:
 
 @pytest.mark.asyncio
 class TestFrontLightIntensityNumberWarnsOnFailure:
-    async def test_set_value_failure_warns(self, caplog):
+    async def test_set_value_failure_warns(self, caplog: pytest.LogCaptureFixture):
         from custom_components.bosch_shc_camera.number import (
             BoschFrontLightIntensityNumber,
         )
@@ -2744,7 +2724,7 @@ class TestFrontLightIntensityNumberWarnsOnFailure:
             await num.async_set_native_value(75.0)
         assert any("failed on all paths" in r.message for r in caplog.records)
 
-    async def test_set_value_success_is_silent(self, caplog):
+    async def test_set_value_success_is_silent(self, caplog: pytest.LogCaptureFixture):
         from custom_components.bosch_shc_camera.number import (
             BoschFrontLightIntensityNumber,
         )

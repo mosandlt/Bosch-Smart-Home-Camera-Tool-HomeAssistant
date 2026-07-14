@@ -28,8 +28,6 @@ from custom_components.bosch_shc_camera.system_health import (
     system_health_info,
 )
 
-# ── Helper: build a minimal coordinator stub ─────────────────────────────────
-
 
 def _make_coord(
     *,
@@ -47,9 +45,6 @@ def _make_coord(
             "data": cameras if cameras is not None else {},
         },
     )()
-
-
-# ── Unit tests for _format_ago ────────────────────────────────────────────────
 
 
 def test_format_ago_never() -> None:
@@ -82,9 +77,6 @@ def test_format_ago_positive_inf_returns_never_not_overflow() -> None:
     result = _format_ago(float("+inf"))
     # Both inf variants treated as "never" — no OverflowError
     assert result == "never"
-
-
-# ── _first_loaded_coordinator ─────────────────────────────────────────────────
 
 
 async def test_first_loaded_coordinator_no_entries(hass: HomeAssistant) -> None:
@@ -131,9 +123,6 @@ async def test_first_loaded_coordinator_missing_runtime_data(
     assert result is None
 
 
-# ── async_register ────────────────────────────────────────────────────────────
-
-
 def test_async_register_calls_register_info(hass: HomeAssistant) -> None:
     """async_register must call register.async_register_info with the right URL."""
     reg = MagicMock()
@@ -145,9 +134,6 @@ def test_async_register_calls_register_info(hass: HomeAssistant) -> None:
     manage_url = args[1] if len(args) > 1 else kwargs.get("manage_url")
     assert manage_url is not None
     assert "bosch_shc_camera" in manage_url
-
-
-# ── system_health_info — no integration loaded ────────────────────────────────
 
 
 async def test_system_health_no_integration(hass: HomeAssistant) -> None:
@@ -169,9 +155,6 @@ async def test_system_health_no_integration(hass: HomeAssistant) -> None:
     assert "platinum_quality" in info
     # last_fcm_push_ago must NOT be present when coord is None
     assert "last_fcm_push_ago" not in info
-
-
-# ── system_health_info — FCM healthy ─────────────────────────────────────────
 
 
 async def test_system_health_fcm_healthy(hass: HomeAssistant) -> None:
@@ -202,9 +185,6 @@ async def test_system_health_fcm_healthy(hass: HomeAssistant) -> None:
     assert info["platinum_quality"] == "v12.0.0+"
 
 
-# ── system_health_info — FCM degraded ────────────────────────────────────────
-
-
 async def test_system_health_fcm_degraded(hass: HomeAssistant) -> None:
     """FCM not running → fcm_push_active='degraded'."""
     coord = _make_coord(fcm_running=False, fcm_last_push=float("-inf"))
@@ -224,9 +204,6 @@ async def test_system_health_fcm_degraded(hass: HomeAssistant) -> None:
         info = await system_health_info(hass)
 
     assert info["fcm_push_active"] == "degraded"
-
-
-# ── system_health_info — last_fcm_push never ─────────────────────────────────
 
 
 async def test_system_health_fcm_last_push_never(hass: HomeAssistant) -> None:
@@ -252,9 +229,6 @@ async def test_system_health_fcm_last_push_never(hass: HomeAssistant) -> None:
     )
 
 
-# ── system_health_info — last_fcm_push recent ────────────────────────────────
-
-
 async def test_system_health_fcm_last_push_recent(hass: HomeAssistant) -> None:
     """_fcm_last_push ~5s ago → last_fcm_push_ago='5s ago' (±3s tolerance)."""
     coord = _make_coord(fcm_running=True, fcm_last_push=time.monotonic() - 5)
@@ -277,9 +251,6 @@ async def test_system_health_fcm_last_push_recent(hass: HomeAssistant) -> None:
     assert result.endswith("s ago"), f"Expected 'Xs ago', got {result!r}"
     seconds = int(result.split("s")[0])
     assert 2 <= seconds <= 8, f"Expected ~5s, got {seconds}s"
-
-
-# ── system_health_info — cloud URL check is passed through as coroutine ───────
 
 
 async def test_system_health_cloud_url_check_is_awaitable(
@@ -316,9 +287,6 @@ async def test_system_health_cloud_url_check_is_awaitable(
     )
 
 
-# ── system_health_info — coordinator with no _fcm_last_push attr ──────────────
-
-
 async def test_system_health_coord_missing_fcm_last_push(
     hass: HomeAssistant,
 ) -> None:
@@ -341,9 +309,6 @@ async def test_system_health_coord_missing_fcm_last_push(
         info = await system_health_info(hass)
 
     assert info["last_fcm_push_ago"] == "never"
-
-
-# ── system_health_info — coordinator with no data attr ───────────────────────
 
 
 async def test_system_health_coord_missing_data_attr(hass: HomeAssistant) -> None:
@@ -369,9 +334,6 @@ async def test_system_health_coord_missing_data_attr(hass: HomeAssistant) -> Non
         info = await system_health_info(hass)
 
     assert info["cameras_loaded"] == 0
-
-
-# ── CLOUD_HEALTH_URL sanity check ────────────────────────────────────────────
 
 
 def test_cloud_health_url_points_to_bosch() -> None:

@@ -48,6 +48,7 @@ import ssl
 import textwrap
 import threading
 import time
+from collections.abc import Generator
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -87,11 +88,8 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 # calls via pytest_socket by default; several sections below legitimately
 # need 127.0.0.1 loopback (fake RTSP servers, real proxy threads).
 @pytest.fixture(autouse=True)
-def _enable_loopback_sockets(socket_enabled):
+def _enable_loopback_sockets(socket_enabled: None) -> Generator[None, None, None]:
     yield
-
-
-# ── _digest_auth ─────────────────────────────────────────────────────────
 
 
 class TestDigestAuth:
@@ -150,9 +148,6 @@ class TestDigestAuth:
         """Bosch cameras use ASCII realms, but unicode must not crash."""
         result = _digest_auth("u", "p", "OPTIONS", "/x", "Ü-Realm", "nonce")
         assert 'realm="Ü-Realm"' in result
-
-
-# ── stop_tls_proxy / stop_all_proxies ────────────────────────────────────
 
 
 class TestStopTlsProxy:
@@ -288,9 +283,6 @@ class TestStopAllProxiesClearsGlobal:
             stop_tls_proxy(cam_id, cache)
 
 
-# ── Transport rewriting logic (structural) ───────────────────────────────
-
-
 class TestTransportRewriting:
     """Pin the RTSP SETUP Transport header rewriting logic.
 
@@ -359,9 +351,6 @@ class TestTransportRewriting:
         assert "interleaved=2-3" in results[1]
 
 
-# ── Circuit breaker constants ────────────────────────────────────────────
-
-
 class TestCircuitBreakerConstants:
     """Pin the burst-failure constants used in start_tls_proxy."""
 
@@ -383,9 +372,6 @@ class TestCircuitBreakerConstants:
         assert m
         val = float(m.group(1))
         assert 10.0 <= val <= 60.0, f"_BURST_WINDOW={val}s outside safe range"
-
-
-# ── start_tls_proxy contract (mock-socket, structural) ───────────────────
 
 
 def _mock_server_socket(port: int = 12345):
@@ -493,9 +479,6 @@ class TestStartTlsProxyContract:
             )
         finally:
             stop_tls_proxy(cam_id, cache)
-
-
-# ── on_proxy_died callback ────────────────────────────────────────────────
 
 
 def _ssl_ctx():
@@ -667,9 +650,6 @@ class TestOnProxyDiedCallback:
         )
 
 
-# ── no-blocking-primitive guard ───────────────────────────────────────────
-
-
 class TestStartTlsProxyNoBlocking:
     """Regression: `start_tls_proxy` was called from the async path without
     `executor_job`, and it contained a `threading.Event.wait(timeout=2)` — a
@@ -699,9 +679,6 @@ class TestStartTlsProxyNoBlocking:
             "start_tls_proxy must not wait on a thread-start signal — it runs "
             "on the asyncio event loop."
         )
-
-
-# ── EBADF suppression ─────────────────────────────────────────────────────
 
 
 class TestPipeErrnoEBADFSuppression:
@@ -744,9 +721,6 @@ class TestPipeErrnoEBADFSuppression:
             "not is_ebadf" in SRC
             or "not (isinstance(exc, OSError) and exc.errno == errno.EBADF)" in SRC
         ), "The EBADF guard must be a negative check so other OSErrors still get logged"
-
-
-# ── proxy thread lifecycle (real loopback sockets) ────────────────────────
 
 
 class _FakeTlsSocket:
@@ -976,9 +950,6 @@ class TestProxyThreadLifecycle:
         finally:
             stop_tls_proxy(cam_id, port_cache)
             _join_new_threads(threads_before)
-
-
-# ── circuit breaker behavior ───────────────────────────────────────────────
 
 
 class TestCircuitBreaker:
@@ -1264,9 +1235,6 @@ class TestCircuitBreakerSrvCloseRaises:
         _join_new_threads(threads_before)
 
 
-# ── TLS wrap failure cleanup ──────────────────────────────────────────────
-
-
 class TestTlsWrapFailure:
     """ssl_ctx.wrap_socket raising must close the raw TCP socket.
 
@@ -1349,9 +1317,6 @@ class TestTlsWrapFailure:
         assert "raise" in next_lines, (
             f"'raise' must follow raw.close() — found: {next_lines}"
         )
-
-
-# ── TCP keepalive structural pins ─────────────────────────────────────────
 
 
 class TestTcpKeepaliveStructural:
@@ -1710,9 +1675,6 @@ class TestClientKeepidleSetsockoptRaises:
         )
 
 
-# ── _pipe relay behavior (real echo servers) ──────────────────────────────
-
-
 class TestPipeRelay:
     """Bidirectional relay + Transport rewrite + debug logging.
 
@@ -1893,7 +1855,9 @@ class TestPipeRelay:
             _join_new_threads(threads_before)
 
     @pytest.mark.asyncio
-    async def test_debug_logging_on_first_exchanges(self, caplog):
+    async def test_debug_logging_on_first_exchanges(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """First exchanges are always logged at DEBUG level — no crash."""
         import logging
 
@@ -1935,9 +1899,6 @@ class TestPipeRelay:
             _join_new_threads(threads_before)
 
         # Just verify no exception was raised — debug path was hit
-
-
-# ── _pipe structural pins + close-once guard ──────────────────────────────
 
 
 class TestPipeStructural:
@@ -2066,9 +2027,6 @@ class TestPipeCloseOnce:
         )
 
 
-# ── _pipe select/debug/close-exception edge cases ─────────────────────────
-
-
 class TestPipeSelectEmptyBreak:
     """`_select.select(...)` returning ([], [], []) must break the pipe loop.
 
@@ -2122,7 +2080,9 @@ class TestPipeDebugLogAndCloseException:
     the exception is swallowed so the helper thread exits cleanly.
     """
 
-    def test_non_ebadf_exception_with_debug_logs_then_swallows_close(self, caplog):
+    def test_non_ebadf_exception_with_debug_logs_then_swallows_close(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         cam_id = "CAM-PIPE-DEBUG"
         threads_before = frozenset(threading.enumerate())
         port_cache: dict[str, int] = {}
@@ -2174,9 +2134,6 @@ class TestPipeDebugLogAndCloseException:
         assert pipe_errors, (
             "Non-EBADF exception in _pipe must emit a 'pipe error' DEBUG log"
         )
-
-
-# ── rtsp_keepalive ─────────────────────────────────────────────────────────
 
 
 class TestRtspKeepalive:
@@ -2488,9 +2445,6 @@ class TestRtspKeepalive:
         assert mock_writer.close.called, (
             "writer.close() must be called on no-nonce/no-200 path"
         )
-
-
-# ── pre_warm_rtsp ────────────────────────────────────────────────────────
 
 
 class TestPreWarmRtsp:
@@ -3222,9 +3176,6 @@ class TestPreWarmExceptionWaitClosedRaises:
         assert result is False
 
 
-# ── HLS access-token eviction (cf_unbuffer.py) ─────────────────────────────
-
-
 class TestHlsEvictionRaised:
     """`_HLS_ACCESS_MAX` raised to 256; active token skipped during eviction.
 
@@ -3325,11 +3276,9 @@ class TestHlsEvictionRaised:
         assert len(cf._HLS_ACCESS) <= cf._HLS_ACCESS_MAX
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: rtsp_keepalive writer-close/wait_closed exception swallowing
 # (relocated from tests/test_stream_modules_coverage.py — the camera.py
 # sibling coverage in that file lives in tests/test_camera.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestRtspKeepaliveWriterCloseOnException:

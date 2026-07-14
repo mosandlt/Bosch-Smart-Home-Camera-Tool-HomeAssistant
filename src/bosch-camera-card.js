@@ -149,7 +149,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.7";
+const CARD_VERSION = "14.1.8";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -460,6 +460,57 @@ const CARD_I18N = {
     pill_fullscreen_exit_title: "Exit fullscreen",
     pill_stream_title_start: "Start live stream",
     pill_stream_title_stop: "Stop live stream",
+    // ── issue #45 follow-up: more hardcoded German with no _t() key at all ──
+    schedules_none: "No schedules",
+    auth_expired_title: "Login expired",
+    auth_expired_sub: "Bosch cloud token invalid — sign in again to use the camera.",
+    auth_reauth_btn: "Sign in again",
+    maint_title_recent: "Bosch cloud maintenance announced",
+    outage_cam_singular: "camera",
+    outage_cam_plural: "cameras",
+    outage_auto_return_suffix: "will come back automatically once the cloud responds.",
+    outage_cloud_unreachable: "Bosch cloud unreachable",
+    outage_waiting_for_server: "waiting for the Bosch servers.",
+    no_bosch_cameras_found: "No Bosch cameras found.",
+    lan_reachable: "LAN reachable",
+    lan_not_reachable: "LAN not reachable",
+    lan_status_unknown: "LAN status unknown",
+    lan_cam_not_reachable: "Camera not reachable locally",
+    lan_status_unknown_cloud: "Status unknown — cloud data missing",
+    notif_maint_active_title: "Cloud maintenance in progress",
+    notif_maint_scheduled_title: "Cloud maintenance scheduled",
+    notif_maint_past_title: "Cloud maintenance ended",
+    notif_maint_limited_note: "Live view and snapshots may be limited.",
+    notif_maint_begin_label: "Start:",
+    notif_maint_end_label: "End:",
+    notif_maint_ended_prefix: "Ended",
+    notif_maint_resumed_note: "Cloud services should be back to normal.",
+    notif_details_link: "Details at Bosch →",
+    notif_cam_status_header: "Camera status",
+    notif_all_clear: "No Bosch cloud maintenance scheduled. All cameras reachable.",
+    badge_connecting: "Connecting",
+    tap_to_play_label: "Tap to play",
+    tap_to_play_hint: "Or enable \"Auto-play videos\" in the HA app settings",
+    lan_turn_on_title: "Turn {label} on",
+    lan_turn_off_title: "Turn {label} off",
+    state_on_short: "ON",
+    state_off_short: "OFF",
+    last_event_overlay_prefix: "Last:",
+    rule_default_name: "Rule {n}",
+    create_rule_title: "Create rule",
+    create_rule_name_label: "Rule name",
+    create_rule_name_default: "New rule",
+    create_rule_start_label: "Start time",
+    create_rule_end_label: "End time",
+    create_rule_cancel: "Cancel",
+    create_rule_submit: "Create",
+    weekday_sun: "Sun",
+    weekday_mon: "Mon",
+    weekday_tue: "Tue",
+    weekday_wed: "Wed",
+    weekday_thu: "Thu",
+    weekday_fri: "Fri",
+    weekday_sat: "Sat",
   },
   de: {
     // ── runtime chrome ──
@@ -675,6 +726,57 @@ const CARD_I18N = {
     pill_fullscreen_exit_title: "Vollbild verlassen",
     pill_stream_title_start: "Live-Stream starten",
     pill_stream_title_stop: "Live-Stream stoppen",
+    // ── issue #45 follow-up: more hardcoded German with no _t() key at all ──
+    schedules_none: "Keine Zeitpläne",
+    auth_expired_title: "Anmeldung abgelaufen",
+    auth_expired_sub: "Bosch Cloud Token ungültig — erneut anmelden um die Kamera wieder zu nutzen.",
+    auth_reauth_btn: "Erneut anmelden",
+    maint_title_recent: "Bosch-Cloud-Wartung angekündigt",
+    outage_cam_singular: "Kamera",
+    outage_cam_plural: "Kameras",
+    outage_auto_return_suffix: "kommen automatisch zurück, sobald die Cloud antwortet.",
+    outage_cloud_unreachable: "Bosch-Cloud nicht erreichbar",
+    outage_waiting_for_server: "warten auf die Bosch-Server.",
+    no_bosch_cameras_found: "Keine Bosch-Kameras gefunden.",
+    lan_reachable: "LAN erreichbar",
+    lan_not_reachable: "LAN nicht erreichbar",
+    lan_status_unknown: "LAN-Status unbekannt",
+    lan_cam_not_reachable: "Kamera lokal nicht erreichbar",
+    lan_status_unknown_cloud: "Status unbekannt — Cloud-Daten fehlen",
+    notif_maint_active_title: "Cloud-Wartung läuft",
+    notif_maint_scheduled_title: "Cloud-Wartung geplant",
+    notif_maint_past_title: "Cloud-Wartung beendet",
+    notif_maint_limited_note: "Live-Bild und Snapshots ggf. eingeschränkt.",
+    notif_maint_begin_label: "Beginn:",
+    notif_maint_end_label: "Ende:",
+    notif_maint_ended_prefix: "Beendet",
+    notif_maint_resumed_note: "Cloud-Dienste sollten wieder normal funktionieren.",
+    notif_details_link: "Details bei Bosch →",
+    notif_cam_status_header: "Kamera-Status",
+    notif_all_clear: "Keine Bosch-Cloud-Wartung geplant. Alle Kameras erreichbar.",
+    badge_connecting: "Verbinde",
+    tap_to_play_label: "Zum Abspielen tippen",
+    tap_to_play_hint: "Oder in den HA-App-Einstellungen „Videos automatisch abspielen“ aktivieren",
+    lan_turn_on_title: "{label} einschalten",
+    lan_turn_off_title: "{label} ausschalten",
+    state_on_short: "AN",
+    state_off_short: "AUS",
+    last_event_overlay_prefix: "Letztes:",
+    rule_default_name: "Regel {n}",
+    create_rule_title: "Regel erstellen",
+    create_rule_name_label: "Regel-Name",
+    create_rule_name_default: "Neue Regel",
+    create_rule_start_label: "Startzeit",
+    create_rule_end_label: "Endzeit",
+    create_rule_cancel: "Abbrechen",
+    create_rule_submit: "Erstellen",
+    weekday_sun: "So",
+    weekday_mon: "Mo",
+    weekday_tue: "Di",
+    weekday_wed: "Mi",
+    weekday_thu: "Do",
+    weekday_fri: "Fr",
+    weekday_sat: "Sa",
   },
 
   es: {
@@ -854,6 +956,57 @@ const CARD_I18N = {
     pill_fullscreen_exit_title: "Salir de pantalla completa",
     pill_stream_title_start: "Iniciar transmisión en vivo",
     pill_stream_title_stop: "Detener transmisión en vivo",
+    // ── issue #45 follow-up: more hardcoded German with no _t() key at all ──
+    schedules_none: "Sin horarios",
+    auth_expired_title: "Sesión caducada",
+    auth_expired_sub: "Token de Bosch Cloud no válido — inicia sesión de nuevo para usar la cámara.",
+    auth_reauth_btn: "Iniciar sesión de nuevo",
+    maint_title_recent: "Mantenimiento de Bosch Cloud anunciado",
+    outage_cam_singular: "cámara",
+    outage_cam_plural: "cámaras",
+    outage_auto_return_suffix: "volverán automáticamente en cuanto la nube responda.",
+    outage_cloud_unreachable: "Bosch Cloud inaccesible",
+    outage_waiting_for_server: "esperando a los servidores de Bosch.",
+    no_bosch_cameras_found: "No se encontraron cámaras Bosch.",
+    lan_reachable: "LAN accesible",
+    lan_not_reachable: "LAN no accesible",
+    lan_status_unknown: "Estado de LAN desconocido",
+    lan_cam_not_reachable: "Cámara no accesible localmente",
+    lan_status_unknown_cloud: "Estado desconocido — faltan datos de la nube",
+    notif_maint_active_title: "Mantenimiento de la nube en curso",
+    notif_maint_scheduled_title: "Mantenimiento de la nube programado",
+    notif_maint_past_title: "Mantenimiento de la nube finalizado",
+    notif_maint_limited_note: "La imagen en vivo y las instantáneas pueden estar limitadas.",
+    notif_maint_begin_label: "Inicio:",
+    notif_maint_end_label: "Fin:",
+    notif_maint_ended_prefix: "Finalizado",
+    notif_maint_resumed_note: "Los servicios en la nube deberían volver a la normalidad.",
+    notif_details_link: "Detalles en Bosch →",
+    notif_cam_status_header: "Estado de la cámara",
+    notif_all_clear: "No hay mantenimiento de Bosch Cloud programado. Todas las cámaras accesibles.",
+    badge_connecting: "Conectando",
+    tap_to_play_label: "Toca para reproducir",
+    tap_to_play_hint: "O activa «Reproducir vídeos automáticamente» en los ajustes de la app de HA",
+    lan_turn_on_title: "Encender {label}",
+    lan_turn_off_title: "Apagar {label}",
+    state_on_short: "ON",
+    state_off_short: "OFF",
+    last_event_overlay_prefix: "Último:",
+    rule_default_name: "Regla {n}",
+    create_rule_title: "Crear regla",
+    create_rule_name_label: "Nombre de la regla",
+    create_rule_name_default: "Nueva regla",
+    create_rule_start_label: "Hora de inicio",
+    create_rule_end_label: "Hora de fin",
+    create_rule_cancel: "Cancelar",
+    create_rule_submit: "Crear",
+    weekday_sun: "Dom",
+    weekday_mon: "Lun",
+    weekday_tue: "Mar",
+    weekday_wed: "Mié",
+    weekday_thu: "Jue",
+    weekday_fri: "Vie",
+    weekday_sat: "Sáb",
   },
   fr: {
     play_gate_label: "Démarrer le flux",
@@ -1032,6 +1185,57 @@ const CARD_I18N = {
     pill_fullscreen_exit_title: "Quitter le plein écran",
     pill_stream_title_start: "Démarrer le direct",
     pill_stream_title_stop: "Arrêter le direct",
+    // ── issue #45 follow-up: more hardcoded German with no _t() key at all ──
+    schedules_none: "Aucun horaire",
+    auth_expired_title: "Connexion expirée",
+    auth_expired_sub: "Jeton Bosch Cloud invalide — reconnectez-vous pour utiliser la caméra.",
+    auth_reauth_btn: "Se reconnecter",
+    maint_title_recent: "Maintenance Bosch Cloud annoncée",
+    outage_cam_singular: "caméra",
+    outage_cam_plural: "caméras",
+    outage_auto_return_suffix: "reviendront automatiquement dès que le cloud répondra.",
+    outage_cloud_unreachable: "Bosch Cloud inaccessible",
+    outage_waiting_for_server: "en attente des serveurs Bosch.",
+    no_bosch_cameras_found: "Aucune caméra Bosch trouvée.",
+    lan_reachable: "LAN accessible",
+    lan_not_reachable: "LAN inaccessible",
+    lan_status_unknown: "État LAN inconnu",
+    lan_cam_not_reachable: "Caméra inaccessible localement",
+    lan_status_unknown_cloud: "État inconnu — données cloud manquantes",
+    notif_maint_active_title: "Maintenance cloud en cours",
+    notif_maint_scheduled_title: "Maintenance cloud planifiée",
+    notif_maint_past_title: "Maintenance cloud terminée",
+    notif_maint_limited_note: "L'image en direct et les instantanés peuvent être limités.",
+    notif_maint_begin_label: "Début :",
+    notif_maint_end_label: "Fin :",
+    notif_maint_ended_prefix: "Terminée",
+    notif_maint_resumed_note: "Les services cloud devraient revenir à la normale.",
+    notif_details_link: "Détails chez Bosch →",
+    notif_cam_status_header: "État des caméras",
+    notif_all_clear: "Aucune maintenance Bosch Cloud prévue. Toutes les caméras accessibles.",
+    badge_connecting: "Connexion",
+    tap_to_play_label: "Appuyez pour lire",
+    tap_to_play_hint: "Ou activez « Lecture automatique des vidéos » dans les paramètres de l'app HA",
+    lan_turn_on_title: "Activer {label}",
+    lan_turn_off_title: "Désactiver {label}",
+    state_on_short: "ON",
+    state_off_short: "OFF",
+    last_event_overlay_prefix: "Dernier :",
+    rule_default_name: "Règle {n}",
+    create_rule_title: "Créer une règle",
+    create_rule_name_label: "Nom de la règle",
+    create_rule_name_default: "Nouvelle règle",
+    create_rule_start_label: "Heure de début",
+    create_rule_end_label: "Heure de fin",
+    create_rule_cancel: "Annuler",
+    create_rule_submit: "Créer",
+    weekday_sun: "Dim",
+    weekday_mon: "Lun",
+    weekday_tue: "Mar",
+    weekday_wed: "Mer",
+    weekday_thu: "Jeu",
+    weekday_fri: "Ven",
+    weekday_sat: "Sam",
   },
   it: {
     play_gate_label: "Avvia stream",
@@ -1210,6 +1414,57 @@ const CARD_I18N = {
     pill_fullscreen_exit_title: "Esci da schermo intero",
     pill_stream_title_start: "Avvia streaming live",
     pill_stream_title_stop: "Ferma streaming live",
+    // ── issue #45 follow-up: more hardcoded German with no _t() key at all ──
+    schedules_none: "Nessuna pianificazione",
+    auth_expired_title: "Accesso scaduto",
+    auth_expired_sub: "Token Bosch Cloud non valido — accedi di nuovo per usare la fotocamera.",
+    auth_reauth_btn: "Accedi di nuovo",
+    maint_title_recent: "Manutenzione Bosch Cloud annunciata",
+    outage_cam_singular: "fotocamera",
+    outage_cam_plural: "fotocamere",
+    outage_auto_return_suffix: "torneranno automaticamente non appena il cloud risponderà.",
+    outage_cloud_unreachable: "Bosch Cloud non raggiungibile",
+    outage_waiting_for_server: "in attesa dei server Bosch.",
+    no_bosch_cameras_found: "Nessuna fotocamera Bosch trovata.",
+    lan_reachable: "LAN raggiungibile",
+    lan_not_reachable: "LAN non raggiungibile",
+    lan_status_unknown: "Stato LAN sconosciuto",
+    lan_cam_not_reachable: "Fotocamera non raggiungibile localmente",
+    lan_status_unknown_cloud: "Stato sconosciuto — dati cloud mancanti",
+    notif_maint_active_title: "Manutenzione cloud in corso",
+    notif_maint_scheduled_title: "Manutenzione cloud pianificata",
+    notif_maint_past_title: "Manutenzione cloud terminata",
+    notif_maint_limited_note: "L'immagine live e gli snapshot potrebbero essere limitati.",
+    notif_maint_begin_label: "Inizio:",
+    notif_maint_end_label: "Fine:",
+    notif_maint_ended_prefix: "Terminata",
+    notif_maint_resumed_note: "I servizi cloud dovrebbero tornare alla normalità.",
+    notif_details_link: "Dettagli su Bosch →",
+    notif_cam_status_header: "Stato fotocamera",
+    notif_all_clear: "Nessuna manutenzione Bosch Cloud pianificata. Tutte le fotocamere raggiungibili.",
+    badge_connecting: "Connessione",
+    tap_to_play_label: "Tocca per avviare",
+    tap_to_play_hint: "Oppure attiva «Riproduzione automatica video» nelle impostazioni dell'app HA",
+    lan_turn_on_title: "Accendi {label}",
+    lan_turn_off_title: "Spegni {label}",
+    state_on_short: "ON",
+    state_off_short: "OFF",
+    last_event_overlay_prefix: "Ultimo:",
+    rule_default_name: "Regola {n}",
+    create_rule_title: "Crea regola",
+    create_rule_name_label: "Nome regola",
+    create_rule_name_default: "Nuova regola",
+    create_rule_start_label: "Ora di inizio",
+    create_rule_end_label: "Ora di fine",
+    create_rule_cancel: "Annulla",
+    create_rule_submit: "Crea",
+    weekday_sun: "Dom",
+    weekday_mon: "Lun",
+    weekday_tue: "Mar",
+    weekday_wed: "Mer",
+    weekday_thu: "Gio",
+    weekday_fri: "Ven",
+    weekday_sat: "Sab",
   },
   nl: {
     play_gate_label: "Stream starten",
@@ -1388,6 +1643,57 @@ const CARD_I18N = {
     pill_fullscreen_exit_title: "Volledig scherm verlaten",
     pill_stream_title_start: "Livestream starten",
     pill_stream_title_stop: "Livestream stoppen",
+    // ── issue #45 follow-up: more hardcoded German with no _t() key at all ──
+    schedules_none: "Geen schema's",
+    auth_expired_title: "Aanmelding verlopen",
+    auth_expired_sub: "Bosch Cloud-token ongeldig — meld je opnieuw aan om de camera te gebruiken.",
+    auth_reauth_btn: "Opnieuw aanmelden",
+    maint_title_recent: "Bosch Cloud-onderhoud aangekondigd",
+    outage_cam_singular: "camera",
+    outage_cam_plural: "camera's",
+    outage_auto_return_suffix: "komen automatisch terug zodra de cloud reageert.",
+    outage_cloud_unreachable: "Bosch Cloud niet bereikbaar",
+    outage_waiting_for_server: "wachten op de Bosch-servers.",
+    no_bosch_cameras_found: "Geen Bosch-camera's gevonden.",
+    lan_reachable: "LAN bereikbaar",
+    lan_not_reachable: "LAN niet bereikbaar",
+    lan_status_unknown: "LAN-status onbekend",
+    lan_cam_not_reachable: "Camera lokaal niet bereikbaar",
+    lan_status_unknown_cloud: "Status onbekend — cloudgegevens ontbreken",
+    notif_maint_active_title: "Cloud-onderhoud bezig",
+    notif_maint_scheduled_title: "Cloud-onderhoud gepland",
+    notif_maint_past_title: "Cloud-onderhoud beëindigd",
+    notif_maint_limited_note: "Live-beeld en snapshots kunnen beperkt zijn.",
+    notif_maint_begin_label: "Start:",
+    notif_maint_end_label: "Einde:",
+    notif_maint_ended_prefix: "Beëindigd",
+    notif_maint_resumed_note: "Cloudservices zouden weer normaal moeten werken.",
+    notif_details_link: "Details bij Bosch →",
+    notif_cam_status_header: "Camerastatus",
+    notif_all_clear: "Geen Bosch Cloud-onderhoud gepland. Alle camera's bereikbaar.",
+    badge_connecting: "Verbinden",
+    tap_to_play_label: "Tik om af te spelen",
+    tap_to_play_hint: "Of schakel “Video's automatisch afspelen” in bij de HA-app-instellingen",
+    lan_turn_on_title: "{label} inschakelen",
+    lan_turn_off_title: "{label} uitschakelen",
+    state_on_short: "AAN",
+    state_off_short: "UIT",
+    last_event_overlay_prefix: "Laatste:",
+    rule_default_name: "Regel {n}",
+    create_rule_title: "Regel aanmaken",
+    create_rule_name_label: "Regelnaam",
+    create_rule_name_default: "Nieuwe regel",
+    create_rule_start_label: "Starttijd",
+    create_rule_end_label: "Eindtijd",
+    create_rule_cancel: "Annuleren",
+    create_rule_submit: "Aanmaken",
+    weekday_sun: "Zo",
+    weekday_mon: "Ma",
+    weekday_tue: "Di",
+    weekday_wed: "Wo",
+    weekday_thu: "Do",
+    weekday_fri: "Vr",
+    weekday_sat: "Za",
   },
   pl: {
     play_gate_label: "Uruchom strumień",
@@ -1566,6 +1872,57 @@ const CARD_I18N = {
     pill_fullscreen_exit_title: "Zakończ pełny ekran",
     pill_stream_title_start: "Rozpocznij transmisję na żywo",
     pill_stream_title_stop: "Zatrzymaj transmisję na żywo",
+    // ── issue #45 follow-up: more hardcoded German with no _t() key at all ──
+    schedules_none: "Brak harmonogramów",
+    auth_expired_title: "Sesja wygasła",
+    auth_expired_sub: "Nieprawidłowy token Bosch Cloud — zaloguj się ponownie, aby korzystać z kamery.",
+    auth_reauth_btn: "Zaloguj się ponownie",
+    maint_title_recent: "Ogłoszono konserwację Bosch Cloud",
+    outage_cam_singular: "kamera",
+    outage_cam_plural: "kamery",
+    outage_auto_return_suffix: "wrócą automatycznie, gdy chmura odpowie.",
+    outage_cloud_unreachable: "Bosch Cloud niedostępny",
+    outage_waiting_for_server: "oczekiwanie na serwery Bosch.",
+    no_bosch_cameras_found: "Nie znaleziono kamer Bosch.",
+    lan_reachable: "LAN dostępny",
+    lan_not_reachable: "LAN niedostępny",
+    lan_status_unknown: "Nieznany status LAN",
+    lan_cam_not_reachable: "Kamera niedostępna lokalnie",
+    lan_status_unknown_cloud: "Status nieznany — brak danych z chmury",
+    notif_maint_active_title: "Trwa konserwacja chmury",
+    notif_maint_scheduled_title: "Zaplanowana konserwacja chmury",
+    notif_maint_past_title: "Konserwacja chmury zakończona",
+    notif_maint_limited_note: "Obraz na żywo i migawki mogą być ograniczone.",
+    notif_maint_begin_label: "Początek:",
+    notif_maint_end_label: "Koniec:",
+    notif_maint_ended_prefix: "Zakończono",
+    notif_maint_resumed_note: "Usługi chmurowe powinny wrócić do normy.",
+    notif_details_link: "Szczegóły u Bosch →",
+    notif_cam_status_header: "Status kamery",
+    notif_all_clear: "Brak zaplanowanej konserwacji Bosch Cloud. Wszystkie kamery dostępne.",
+    badge_connecting: "Łączenie",
+    tap_to_play_label: "Dotknij, aby odtworzyć",
+    tap_to_play_hint: "Lub włącz „Automatyczne odtwarzanie wideo” w ustawieniach aplikacji HA",
+    lan_turn_on_title: "Włącz {label}",
+    lan_turn_off_title: "Wyłącz {label}",
+    state_on_short: "WŁ",
+    state_off_short: "WYŁ",
+    last_event_overlay_prefix: "Ostatnie:",
+    rule_default_name: "Reguła {n}",
+    create_rule_title: "Utwórz regułę",
+    create_rule_name_label: "Nazwa reguły",
+    create_rule_name_default: "Nowa reguła",
+    create_rule_start_label: "Czas rozpoczęcia",
+    create_rule_end_label: "Czas zakończenia",
+    create_rule_cancel: "Anuluj",
+    create_rule_submit: "Utwórz",
+    weekday_sun: "Nd",
+    weekday_mon: "Pn",
+    weekday_tue: "Wt",
+    weekday_wed: "Śr",
+    weekday_thu: "Czw",
+    weekday_fri: "Pt",
+    weekday_sat: "Sb",
   },
   pt: {
     play_gate_label: "Iniciar stream",
@@ -1744,6 +2101,57 @@ const CARD_I18N = {
     pill_fullscreen_exit_title: "Sair do ecrã inteiro",
     pill_stream_title_start: "Iniciar transmissão ao vivo",
     pill_stream_title_stop: "Parar transmissão ao vivo",
+    // ── issue #45 follow-up: more hardcoded German with no _t() key at all ──
+    schedules_none: "Sem horários",
+    auth_expired_title: "Sessão expirada",
+    auth_expired_sub: "Token da Bosch Cloud inválido — inicie sessão novamente para usar a câmara.",
+    auth_reauth_btn: "Iniciar sessão novamente",
+    maint_title_recent: "Manutenção da Bosch Cloud anunciada",
+    outage_cam_singular: "câmara",
+    outage_cam_plural: "câmaras",
+    outage_auto_return_suffix: "voltarão automaticamente assim que a cloud responder.",
+    outage_cloud_unreachable: "Bosch Cloud inacessível",
+    outage_waiting_for_server: "a aguardar os servidores Bosch.",
+    no_bosch_cameras_found: "Nenhuma câmara Bosch encontrada.",
+    lan_reachable: "LAN acessível",
+    lan_not_reachable: "LAN inacessível",
+    lan_status_unknown: "Estado da LAN desconhecido",
+    lan_cam_not_reachable: "Câmara inacessível localmente",
+    lan_status_unknown_cloud: "Estado desconhecido — faltam dados da cloud",
+    notif_maint_active_title: "Manutenção da cloud em curso",
+    notif_maint_scheduled_title: "Manutenção da cloud agendada",
+    notif_maint_past_title: "Manutenção da cloud terminada",
+    notif_maint_limited_note: "A imagem em direto e as capturas podem estar limitadas.",
+    notif_maint_begin_label: "Início:",
+    notif_maint_end_label: "Fim:",
+    notif_maint_ended_prefix: "Terminada",
+    notif_maint_resumed_note: "Os serviços cloud devem voltar ao normal.",
+    notif_details_link: "Detalhes na Bosch →",
+    notif_cam_status_header: "Estado da câmara",
+    notif_all_clear: "Sem manutenção da Bosch Cloud agendada. Todas as câmaras acessíveis.",
+    badge_connecting: "Ligando",
+    tap_to_play_label: "Toque para reproduzir",
+    tap_to_play_hint: "Ou ative “Reprodução automática de vídeos” nas definições da app HA",
+    lan_turn_on_title: "Ligar {label}",
+    lan_turn_off_title: "Desligar {label}",
+    state_on_short: "ON",
+    state_off_short: "OFF",
+    last_event_overlay_prefix: "Último:",
+    rule_default_name: "Regra {n}",
+    create_rule_title: "Criar regra",
+    create_rule_name_label: "Nome da regra",
+    create_rule_name_default: "Nova regra",
+    create_rule_start_label: "Hora de início",
+    create_rule_end_label: "Hora de fim",
+    create_rule_cancel: "Cancelar",
+    create_rule_submit: "Criar",
+    weekday_sun: "Dom",
+    weekday_mon: "Seg",
+    weekday_tue: "Ter",
+    weekday_wed: "Qua",
+    weekday_thu: "Qui",
+    weekday_fri: "Sex",
+    weekday_sat: "Sáb",
   },
   ru: {
     play_gate_label: "Запустить трансляцию",
@@ -1922,6 +2330,57 @@ const CARD_I18N = {
     pill_fullscreen_exit_title: "Выйти из полноэкранного режима",
     pill_stream_title_start: "Начать прямую трансляцию",
     pill_stream_title_stop: "Остановить прямую трансляцию",
+    // ── issue #45 follow-up: more hardcoded German with no _t() key at all ──
+    schedules_none: "Нет расписаний",
+    auth_expired_title: "Сессия истекла",
+    auth_expired_sub: "Токен Bosch Cloud недействителен — войдите снова, чтобы использовать камеру.",
+    auth_reauth_btn: "Войти снова",
+    maint_title_recent: "Объявлено обслуживание Bosch Cloud",
+    outage_cam_singular: "камера",
+    outage_cam_plural: "камеры",
+    outage_auto_return_suffix: "вернутся автоматически, как только облако ответит.",
+    outage_cloud_unreachable: "Bosch Cloud недоступен",
+    outage_waiting_for_server: "ожидание серверов Bosch.",
+    no_bosch_cameras_found: "Камеры Bosch не найдены.",
+    lan_reachable: "LAN доступна",
+    lan_not_reachable: "LAN недоступна",
+    lan_status_unknown: "Статус LAN неизвестен",
+    lan_cam_not_reachable: "Камера недоступна локально",
+    lan_status_unknown_cloud: "Статус неизвестен — нет данных из облака",
+    notif_maint_active_title: "Обслуживание облака выполняется",
+    notif_maint_scheduled_title: "Запланировано обслуживание облака",
+    notif_maint_past_title: "Обслуживание облака завершено",
+    notif_maint_limited_note: "Прямая трансляция и снимки могут быть ограничены.",
+    notif_maint_begin_label: "Начало:",
+    notif_maint_end_label: "Конец:",
+    notif_maint_ended_prefix: "Завершено",
+    notif_maint_resumed_note: "Облачные сервисы должны вернуться в норму.",
+    notif_details_link: "Подробности на сайте Bosch →",
+    notif_cam_status_header: "Статус камеры",
+    notif_all_clear: "Обслуживание Bosch Cloud не запланировано. Все камеры доступны.",
+    badge_connecting: "Подключение",
+    tap_to_play_label: "Нажмите для воспроизведения",
+    tap_to_play_hint: "Или включите «Автовоспроизведение видео» в настройках приложения HA",
+    lan_turn_on_title: "Включить {label}",
+    lan_turn_off_title: "Выключить {label}",
+    state_on_short: "ВКЛ",
+    state_off_short: "ВЫКЛ",
+    last_event_overlay_prefix: "Последнее:",
+    rule_default_name: "Правило {n}",
+    create_rule_title: "Создать правило",
+    create_rule_name_label: "Название правила",
+    create_rule_name_default: "Новое правило",
+    create_rule_start_label: "Время начала",
+    create_rule_end_label: "Время окончания",
+    create_rule_cancel: "Отмена",
+    create_rule_submit: "Создать",
+    weekday_sun: "Вс",
+    weekday_mon: "Пн",
+    weekday_tue: "Вт",
+    weekday_wed: "Ср",
+    weekday_thu: "Чт",
+    weekday_fri: "Пт",
+    weekday_sat: "Сб",
   },
   uk: {
     play_gate_label: "Розпочати трансляцію",
@@ -2100,6 +2559,57 @@ const CARD_I18N = {
     pill_fullscreen_exit_title: "Вийти з повноекранного режиму",
     pill_stream_title_start: "Почати пряму трансляцію",
     pill_stream_title_stop: "Зупинити пряму трансляцію",
+    // ── issue #45 follow-up: more hardcoded German with no _t() key at all ──
+    schedules_none: "Немає розкладів",
+    auth_expired_title: "Сесію завершено",
+    auth_expired_sub: "Токен Bosch Cloud недійсний — увійдіть знову, щоб використовувати камеру.",
+    auth_reauth_btn: "Увійти знову",
+    maint_title_recent: "Оголошено обслуговування Bosch Cloud",
+    outage_cam_singular: "камера",
+    outage_cam_plural: "камери",
+    outage_auto_return_suffix: "повернуться автоматично, щойно хмара відповість.",
+    outage_cloud_unreachable: "Bosch Cloud недоступний",
+    outage_waiting_for_server: "очікування серверів Bosch.",
+    no_bosch_cameras_found: "Камери Bosch не знайдено.",
+    lan_reachable: "LAN доступна",
+    lan_not_reachable: "LAN недоступна",
+    lan_status_unknown: "Статус LAN невідомий",
+    lan_cam_not_reachable: "Камера недоступна локально",
+    lan_status_unknown_cloud: "Статус невідомий — немає даних із хмари",
+    notif_maint_active_title: "Обслуговування хмари триває",
+    notif_maint_scheduled_title: "Заплановано обслуговування хмари",
+    notif_maint_past_title: "Обслуговування хмари завершено",
+    notif_maint_limited_note: "Пряма трансляція та знімки можуть бути обмежені.",
+    notif_maint_begin_label: "Початок:",
+    notif_maint_end_label: "Кінець:",
+    notif_maint_ended_prefix: "Завершено",
+    notif_maint_resumed_note: "Хмарні служби мають повернутися до норми.",
+    notif_details_link: "Деталі на сайті Bosch →",
+    notif_cam_status_header: "Статус камери",
+    notif_all_clear: "Обслуговування Bosch Cloud не заплановано. Усі камери доступні.",
+    badge_connecting: "Підключення",
+    tap_to_play_label: "Торкніться, щоб відтворити",
+    tap_to_play_hint: "Або увімкніть «Автовідтворення відео» в налаштуваннях застосунку HA",
+    lan_turn_on_title: "Увімкнути {label}",
+    lan_turn_off_title: "Вимкнути {label}",
+    state_on_short: "УВІМК",
+    state_off_short: "ВИМК",
+    last_event_overlay_prefix: "Останнє:",
+    rule_default_name: "Правило {n}",
+    create_rule_title: "Створити правило",
+    create_rule_name_label: "Назва правила",
+    create_rule_name_default: "Нове правило",
+    create_rule_start_label: "Час початку",
+    create_rule_end_label: "Час завершення",
+    create_rule_cancel: "Скасувати",
+    create_rule_submit: "Створити",
+    weekday_sun: "Нд",
+    weekday_mon: "Пн",
+    weekday_tue: "Вт",
+    weekday_wed: "Ср",
+    weekday_thu: "Чт",
+    weekday_fri: "Пт",
+    weekday_sat: "Сб",
   },
   "zh-Hans": {
     play_gate_label: "启动直播",
@@ -2278,6 +2788,57 @@ const CARD_I18N = {
     pill_fullscreen_exit_title: "退出全屏",
     pill_stream_title_start: "开始直播",
     pill_stream_title_stop: "停止直播",
+    // ── issue #45 follow-up: more hardcoded German with no _t() key at all ──
+    schedules_none: "暂无计划",
+    auth_expired_title: "登录已过期",
+    auth_expired_sub: "Bosch Cloud 令牌无效 — 请重新登录以使用摄像头。",
+    auth_reauth_btn: "重新登录",
+    maint_title_recent: "已宣布 Bosch Cloud 维护",
+    outage_cam_singular: "台摄像头",
+    outage_cam_plural: "台摄像头",
+    outage_auto_return_suffix: "将在云端响应后自动恢复。",
+    outage_cloud_unreachable: "无法连接 Bosch Cloud",
+    outage_waiting_for_server: "正在等待 Bosch 服务器。",
+    no_bosch_cameras_found: "未找到 Bosch 摄像头。",
+    lan_reachable: "局域网可达",
+    lan_not_reachable: "局域网不可达",
+    lan_status_unknown: "局域网状态未知",
+    lan_cam_not_reachable: "摄像头本地不可达",
+    lan_status_unknown_cloud: "状态未知 — 缺少云端数据",
+    notif_maint_active_title: "云端维护进行中",
+    notif_maint_scheduled_title: "云端维护已计划",
+    notif_maint_past_title: "云端维护已结束",
+    notif_maint_limited_note: "实时画面和快照可能受限。",
+    notif_maint_begin_label: "开始：",
+    notif_maint_end_label: "结束：",
+    notif_maint_ended_prefix: "已结束",
+    notif_maint_resumed_note: "云服务应已恢复正常。",
+    notif_details_link: "在 Bosch 查看详情 →",
+    notif_cam_status_header: "摄像头状态",
+    notif_all_clear: "未计划 Bosch Cloud 维护。所有摄像头均可达。",
+    badge_connecting: "连接中",
+    tap_to_play_label: "点击播放",
+    tap_to_play_hint: "或在 HA 应用设置中启用“自动播放视频”",
+    lan_turn_on_title: "开启{label}",
+    lan_turn_off_title: "关闭{label}",
+    state_on_short: "开",
+    state_off_short: "关",
+    last_event_overlay_prefix: "最近：",
+    rule_default_name: "规则 {n}",
+    create_rule_title: "创建规则",
+    create_rule_name_label: "规则名称",
+    create_rule_name_default: "新规则",
+    create_rule_start_label: "开始时间",
+    create_rule_end_label: "结束时间",
+    create_rule_cancel: "取消",
+    create_rule_submit: "创建",
+    weekday_sun: "周日",
+    weekday_mon: "周一",
+    weekday_tue: "周二",
+    weekday_wed: "周三",
+    weekday_thu: "周四",
+    weekday_fri: "周五",
+    weekday_sat: "周六",
   },
 };
 
@@ -2503,8 +3064,7 @@ class BoschCameraCard extends HTMLElement {
       // down to free the go2rtc consumer immediately (the iOS/WKWebView
       // stale-consumer fix this handler was originally added for). 2026-06-24.
       const v = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
-      const ownsPip = v && (document.pictureInPictureElement === v || _boschPipActive === this);
-      if (ownsPip) return;
+      if (this._ownsNativePresentation(v)) return;
       this._stopLiveVideo();
     };
     window.addEventListener("pagehide", this._pagehideHandler);
@@ -3423,6 +3983,19 @@ class BoschCameraCard extends HTMLElement {
     this._showPlayGate();
   }
 
+  // Localize the tap-to-play overlay's static template text (issue #45
+  // follow-up scan, realKim-dotcom 2026-07-13): the label/hint were hardcoded
+  // German in the shell template and never routed through _t() at either of
+  // the two call sites that reveal this overlay (iOS bfcache-resume NotAllowedError,
+  // Android WebView autoplay-blocked NotAllowedError). Called right before each
+  // reveal so a language change is always reflected.
+  _localizeTapToPlayOverlay(overlay) {
+    const lbl = overlay.querySelector(".ttp-label");
+    if (lbl) lbl.textContent = this._t("tap_to_play_label");
+    const hint = overlay.querySelector(".ttp-hint");
+    if (hint) hint.textContent = this._t("tap_to_play_hint");
+  }
+
   // Show the tap-to-reveal gate. Keeps the snapshot visible underneath so
   // the user still sees which camera they're about to start. Also hides
   // the loading overlay so the spinner doesn't bleed through the gate.
@@ -3739,6 +4312,7 @@ class BoschCameraCard extends HTMLElement {
         if (err && err.name === "NotAllowedError" && this._isIOS()) {
           const overlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
           if (overlay && !overlay.classList.contains("visible")) {
+            this._localizeTapToPlayOverlay(overlay);
             overlay.classList.add("visible");
             if (this._tapToPlayResume) overlay.removeEventListener("pointerup", this._tapToPlayResume);
             const resume = () => {
@@ -3825,9 +4399,7 @@ class BoschCameraCard extends HTMLElement {
       if (!this.isConnected || !this._liveVideoActive) return;
       if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
       const video = this.shadowRoot?.getElementById("cam-video");
-      const ownsPip = video
-        && (document.pictureInPictureElement === video || _boschPipActive === this);
-      if (ownsPip) return;                        // PiP IS being watched — keep it
+      if (this._ownsNativePresentation(video)) return; // PiP/native-fullscreen IS being watched — keep it
       this._stopLiveVideo();
     }, BACKGROUND_TEARDOWN_GRACE_MS);
   }
@@ -7230,8 +7802,7 @@ class BoschCameraCard extends HTMLElement {
         // negotiation is not tab-throttled). The previous code took the early
         // return for PiP too, so a frozen-but-not-paused PiP stream stayed frozen
         // until the user switched back to the tab. 2026-06-18 (PiP freeze fix).
-        const ownsPip = document.pictureInPictureElement === video
-          || _boschPipActive === this;
+        const ownsPip = this._ownsNativePresentation(video);
         if (document.visibilityState === "hidden" && !ownsPip) {
           lastTime = video.currentTime;
           stallCount = 0;
@@ -7412,6 +7983,7 @@ class BoschCameraCard extends HTMLElement {
               // One tap satisfies the user-gesture requirement — show overlay.
               const overlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
               if (overlay) {
+                this._localizeTapToPlayOverlay(overlay);
                 overlay.classList.add("visible");
                 // Drop any resume listener left over from a previous start — else
                 // it stacks across reconnects and each copy fires play() against
@@ -8007,7 +8579,7 @@ class BoschCameraCard extends HTMLElement {
     // Only a PiP window the user is watching matters while hidden. A plain hidden
     // tab means nobody is looking — recovery there would only burn the scarce
     // Bosch session, so we defer it to the visibilitychange→visible path.
-    const ownsPip = document.pictureInPictureElement === video || _boschPipActive === this;
+    const ownsPip = this._ownsNativePresentation(video);
     if (!ownsPip) return;
     // rVFC presented-frame freeze: _boschLastFrameAt keeps updating for a PiP
     // surface compositing in the background and stops the instant frames freeze.
@@ -8257,22 +8829,28 @@ class BoschCameraCard extends HTMLElement {
     if (!this._liveVideoActive) return;
     if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
     // Auto-recovery runs ONLY when the tab is VISIBLE and this card does NOT own
-    // a PiP window:
-    //  (1) Hidden + non-PiP: nobody is watching the in-page tile. A background
-    //      track-mute / connectionState blip would otherwise thrash a stream that
-    //      survives the backgrounding and resumes fine on return (extended
-    //      teardown grace); the visibilitychange→visible path recovers it then.
-    //  (2) PiP-owned: our recovery does srcObject=null + video.load(), which tears
-    //      Chrome's PiP compositor link (crbug 894317) and freezes the floating
-    //      window. HA core ha-web-rtc-player does the same — it never recovers
-    //      while PiP is open. Recovery resumes on leavepictureinpicture / tab-return.
-    //  `ownsPip` is a live read (browser-authoritative pictureInPictureElement +
-    //  the iOS-webkit `_boschPipActive` mirror), so no extra state to manage.
-    //  2026-06-24.
+    // a native presentation surface (PiP window OR iOS native <video> fullscreen):
+    //  (1) Hidden + none of the above: nobody is watching the in-page tile. A
+    //      background track-mute / connectionState blip would otherwise thrash a
+    //      stream that survives the backgrounding and resumes fine on return
+    //      (extended teardown grace); the visibilitychange→visible path
+    //      recovers it then.
+    //  (2) PiP-owned OR iOS-native-fullscreen-owned: our recovery does
+    //      srcObject=null + video.load(), which tears the same WebKit/Chrome
+    //      compositor surface link PiP depends on (crbug 894317) and freezes the
+    //      floating window — or, for iOS native fullscreen, can leave a LATER PiP
+    //      request on the same <video> stuck spinning forever even after the user
+    //      already left fullscreen (2026-07-13 iOS PiP-after-fullscreen bug). HA
+    //      core ha-web-rtc-player does the same for PiP — it never recovers while
+    //      PiP is open. Recovery resumes on leavepictureinpicture / presentation-
+    //      mode-change-to-inline / tab-return.
+    //  `_ownsNativePresentation()` is a live read (browser-authoritative
+    //  pictureInPictureElement + the iOS-webkit `_boschPipActive` mirror + iOS
+    //  `webkitPresentationMode`), so no extra state to manage. 2026-06-24,
+    //  extended 2026-07-13.
     {
       const v = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
-      const ownsPip = v && (document.pictureInPictureElement === v || _boschPipActive === this);
-      if (ownsPip) return;
+      if (this._ownsNativePresentation(v)) return;
       if (document.visibilityState === "hidden") return;
     }
     // If WebRTC keeps needing recovery while NEVER rendering a frame, the transport
@@ -8771,11 +9349,6 @@ class BoschCameraCard extends HTMLElement {
     const _authTitle = this.shadowRoot.getElementById("auth-title");
     const _authSub   = this.shadowRoot.getElementById("auth-subtitle");
     const _authBtn   = this.shadowRoot.getElementById("auth-reauth-btn");
-    // Capture the template's default (integration-down) text once so we can
-    // restore it after a transient entity-missing render without duplicating it.
-    if (this._authDefaults === undefined && _authTitle && _authSub) {
-      this._authDefaults = { title: _authTitle.textContent, sub: _authSub.textContent };
-    }
     if (authOverlay) {
       authOverlay.classList.toggle("visible", isIntegrationDown || entityMissing);
       if (entityMissing) {
@@ -8783,8 +9356,12 @@ class BoschCameraCard extends HTMLElement {
         if (_authSub)   _authSub.textContent   = this._t("cam_missing_sub");
         if (_authBtn)   _authBtn.style.display  = "none";  // re-login can't fix a wrong entity id
       } else {
-        if (_authTitle && this._authDefaults) _authTitle.textContent = this._authDefaults.title;
-        if (_authSub && this._authDefaults)   _authSub.textContent   = this._authDefaults.sub;
+        // Real token-expiry case (the common one) — was left rendering the
+        // template's static hard-coded German text forever, since only the
+        // entityMissing branch above ever went through _t(). (issue #45 follow-up)
+        if (_authTitle) _authTitle.textContent = this._t("auth_expired_title");
+        if (_authSub)   _authSub.textContent   = this._t("auth_expired_sub");
+        if (_authBtn)   _authBtn.textContent   = this._t("auth_reauth_btn");
         if (_authBtn)   _authBtn.style.display  = "";
       }
     }
@@ -8940,7 +9517,11 @@ class BoschCameraCard extends HTMLElement {
       } else if (streamBadgeState === "streaming") {
         apBadge.className = "ap-badge live"; apBadge.textContent = "Live";
       } else if (streamBadgeState === "connecting") {
-        apBadge.className = "ap-badge connecting"; apBadge.textContent = "Verbinde";
+        // "Live"/"Offline" are kept as universal loanwords like the rest of this
+        // badge/pill chrome, but "Verbinde" was a bare German verb form with no
+        // _t() key — the one badge state that actually read as broken/foreign
+        // text to a non-German user. (issue #45 follow-up)
+        apBadge.className = "ap-badge connecting"; apBadge.textContent = this._t("badge_connecting");
       } else {
         apBadge.className = "ap-badge hidden"; apBadge.textContent = "";
       }
@@ -9144,7 +9725,11 @@ class BoschCameraCard extends HTMLElement {
       const a = hass.states[ents.camera]?.attributes?.last_event;
       if (a) lastEventStr = a.slice(0, 16).replace("T", " ");
     }
-    if (lastEventOverlay) lastEventOverlay.textContent = lastEventStr !== "—" ? `Letztes: ${lastEventStr}` : "";
+    // issue #45 follow-up scan (realKim-dotcom 2026-07-13): "Letztes: " prefix
+    // was hardcoded German regardless of hass.language. Only reachable in
+    // legacy (non-apple_style) layout — apple-style hides .img-overlay — but
+    // still a real gap for anyone with apple_style:false.
+    if (lastEventOverlay) lastEventOverlay.textContent = lastEventStr !== "—" ? `${this._t("last_event_overlay_prefix")} ${lastEventStr}` : "";
     // Apple-style "last event" glass pill (bottom-right of video). Show only
     // when we have a timestamp AND the stream isn't actively playing — the
     // LIVE badge already owns the user's attention while a stream is live,
@@ -9160,9 +9745,12 @@ class BoschCameraCard extends HTMLElement {
           const d = new Date(lastEventState.state);
           if (!isNaN(d)) {
             const sameDay = d.toDateString() === new Date().toDateString();
+            // issue #45 follow-up scan (realKim-dotcom 2026-07-13): was always
+            // de-DE regardless of hass.language.
+            const loc = cardLang(this._hass);
             pretty = sameDay
-              ? d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })
-              : d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
+              ? d.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" })
+              : d.toLocaleDateString(loc, { weekday: "short", day: "2-digit", month: "2-digit" });
           }
         } catch { /* fall back to lastEventStr */ }
       }
@@ -9837,7 +10425,13 @@ class BoschCameraCard extends HTMLElement {
 
   // ── Schedules & Zones ──────────────────────────────────────────────────────
   _updateSchedulesSection(hass, ents) {
-    const WEEKDAY_NAMES = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+    // issue #45 follow-up scan (realKim-dotcom 2026-07-13): was hardcoded
+    // German weekday abbreviations regardless of hass.language.
+    const WEEKDAY_NAMES = [
+      this._t("weekday_sun"), this._t("weekday_mon"), this._t("weekday_tue"),
+      this._t("weekday_wed"), this._t("weekday_thu"), this._t("weekday_fri"),
+      this._t("weekday_sat"),
+    ];
 
     // Rules count
     const rulesState = hass.states[ents.scheduleRules];
@@ -9852,7 +10446,7 @@ class BoschCameraCard extends HTMLElement {
       const rules = rulesState.attributes?.rules || [];
       const camId = hass.states[ents.status]?.attributes?.camera_id || "";
       if (rules.length === 0) {
-        rulesListEl.innerHTML = '<div style="font-size:11px;color:#666;padding:4px 0">Keine Zeitpläne</div>';
+        rulesListEl.innerHTML = `<div style="font-size:11px;color:#666;padding:4px 0">${this._t("schedules_none")}</div>`;
       } else {
         // Build rules HTML — only re-render when data changes (compare JSON)
         const rulesKey = JSON.stringify(rules);
@@ -9865,10 +10459,13 @@ class BoschCameraCard extends HTMLElement {
             const startT = r.start || r.startTime || "?";
             const endT = r.end || r.endTime || "?";
             const activeClass = isActive ? " active" : "";
-            const activeLabel = isActive ? "AN" : "AUS";
+            // issue #45 follow-up scan (realKim-dotcom 2026-07-13): was
+            // hardcoded German "AN"/"AUS" regardless of hass.language.
+            const activeLabel = isActive ? this._t("state_on_short") : this._t("state_off_short");
+            const defaultName = this._t("rule_default_name").replace("{n}", String(i + 1));
             return `<div class="rule-row" data-rule-idx="${i}">
               <div class="rule-info">
-                <div class="rule-name">${this._escHtml(r.name || "Regel " + (i+1))}</div>
+                <div class="rule-name">${this._escHtml(r.name || defaultName)}</div>
                 <div class="rule-time">${this._escHtml(startT)} – ${this._escHtml(endT)}</div>
                 <div class="rule-days">${this._escHtml(days)}</div>
               </div>
@@ -9887,9 +10484,10 @@ class BoschCameraCard extends HTMLElement {
               this._callService("bosch_shc_camera", "update_rule", {
                 camera_id: cId, rule_id: ruleId, is_active: newActive,
               });
-              // Optimistic UI
+              // Optimistic UI. issue #45 follow-up scan (realKim-dotcom
+              // 2026-07-13): was hardcoded German regardless of hass.language.
               btn.dataset.active = newActive ? "true" : "false";
-              btn.textContent = newActive ? "AN" : "AUS";
+              btn.textContent = newActive ? this._t("state_on_short") : this._t("state_off_short");
               btn.classList.toggle("active", newActive);
             });
           });
@@ -9972,18 +10570,20 @@ class BoschCameraCard extends HTMLElement {
     return new Promise((resolve) => {
       const overlay = document.createElement("div");
       overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;";
+      // issue #45 follow-up scan (realKim-dotcom 2026-07-13): entire dialog
+      // was hardcoded German regardless of hass.language.
       overlay.innerHTML = `
         <form style="background:var(--card-background-color,#fff);color:var(--primary-text-color,#000);border-radius:12px;padding:20px;min-width:260px;max-width:90vw;box-shadow:0 4px 24px rgba(0,0,0,.3);font-family:inherit;">
-          <div style="font-size:16px;font-weight:600;margin-bottom:12px;">Regel erstellen</div>
-          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">Regel-Name</label>
-          <input name="name" type="text" value="Neue Regel" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">
-          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">Startzeit</label>
+          <div style="font-size:16px;font-weight:600;margin-bottom:12px;">${this._t("create_rule_title")}</div>
+          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">${this._t("create_rule_name_label")}</label>
+          <input name="name" type="text" value="${this._escAttr(this._t("create_rule_name_default"))}" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">
+          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">${this._t("create_rule_start_label")}</label>
           <input name="start" type="time" value="08:00" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">
-          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">Endzeit</label>
+          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">${this._t("create_rule_end_label")}</label>
           <input name="end" type="time" value="20:00" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:14px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">
           <div style="display:flex;gap:8px;justify-content:flex-end;">
-            <button type="button" data-act="cancel" style="padding:8px 16px;border-radius:6px;border:none;background:var(--secondary-background-color,#eee);color:inherit;font-size:14px;">Abbrechen</button>
-            <button type="submit" data-act="ok" style="padding:8px 16px;border-radius:6px;border:none;background:var(--primary-color,#03a9f4);color:#fff;font-size:14px;">Erstellen</button>
+            <button type="button" data-act="cancel" style="padding:8px 16px;border-radius:6px;border:none;background:var(--secondary-background-color,#eee);color:inherit;font-size:14px;">${this._t("create_rule_cancel")}</button>
+            <button type="submit" data-act="ok" style="padding:8px 16px;border-radius:6px;border:none;background:var(--primary-color,#03a9f4);color:#fff;font-size:14px;">${this._t("create_rule_submit")}</button>
           </div>
         </form>`;
       const finish = (result) => {
@@ -10760,6 +11360,36 @@ class BoschCameraCard extends HTMLElement {
     } catch (_) {
       // gesture lost / NotAllowedError — silent, user can tap again
     }
+  }
+
+  // True when the given <video> is currently owned by a native OS presentation
+  // surface the user is actively watching RIGHT NOW: the W3C Picture-in-Picture
+  // floating window (`document.pictureInPictureElement`, Chrome/desktop Safari),
+  // the iOS-webkit PiP mirror (`_boschPipActive` — iOS uses
+  // webkitSetPresentationMode("picture-in-picture") instead of the W3C API, so
+  // `document.pictureInPictureElement` never reflects it there), OR Safari's
+  // native <video> fullscreen presentation mode
+  // (`video.webkitPresentationMode === "fullscreen"`). iOS Safari can drive a
+  // <video playsinline> into this mode on its own (e.g. on landscape rotation)
+  // WITHOUT us ever calling webkitEnterFullscreen() — our own fullscreen button
+  // uses `_enterCssFullscreen()` on iOS precisely to AVOID native fullscreen
+  // (see `_requestFullscreen()`), so that path never touches
+  // `webkitPresentationMode` and is NOT covered by this check; only iOS's own
+  // native gesture is. Tearing srcObject / video.load() (as `_stopLiveVideo()`
+  // does during recovery) while ANY of these own the element corrupts the same
+  // underlying WebKit/Chrome compositor surface link (crbug 894317) that PiP
+  // depends on — so a recovery cycle that runs during native fullscreen can
+  // leave a LATER PiP request stuck spinning forever, even after the user has
+  // already left fullscreen (HA-X? iOS PiP-after-fullscreen bug, 2026-07-13).
+  // `webkitPresentationMode` is undefined on non-WebKit browsers, so the
+  // comparison is always false there — no cross-browser crash risk. This is a
+  // live read (nothing cached), matching the existing `ownsPip` pattern.
+  _ownsNativePresentation(video) {
+    if (!video) return false;
+    if (document.pictureInPictureElement === video) return true;
+    if (_boschPipActive === this) return true;
+    if (video.webkitPresentationMode === "fullscreen") return true;
+    return false;
   }
 
   // Reflect the browser-wide single-PiP rule on this card's PiP button: lit when
@@ -11910,9 +12540,9 @@ class BoschCameraOverviewCard extends HTMLElement {
       tile.appendChild(header);
       const status = document.createElement("div");
       status.style.cssText = "font-size:11px;color:var(--secondary-text-color);";
-      status.textContent = lanState === "on" ? "LAN erreichbar"
-        : lanState === "off" ? "LAN nicht erreichbar"
-        : "LAN-Status unbekannt";
+      status.textContent = lanState === "on" ? this._t("lan_reachable")
+        : lanState === "off" ? this._t("lan_not_reachable")
+        : this._t("lan_status_unknown");
       tile.appendChild(status);
       const controls = document.createElement("div");
       controls.className = "bco-lan-controls";
@@ -11925,10 +12555,13 @@ class BoschCameraOverviewCard extends HTMLElement {
         const isOn = entity && entity.state === "on";
         if (isOn) btn.classList.add("bco-lan-btn-on");
         btn.disabled = !entOk || !reachable;
-        btn.title = !reachable ? "Kamera lokal nicht erreichbar"
-                  : !entOk ? "Status unbekannt — Cloud-Daten fehlen"
-                  : `${label} ${isOn ? "AUS" : "AN"} schalten`;
-        btn.textContent = `${label}${isOn ? " AN" : ""}`;
+        btn.title = !reachable ? this._t("lan_cam_not_reachable")
+                  : !entOk ? this._t("lan_status_unknown_cloud")
+                  // issue #45 follow-up scan (realKim-dotcom 2026-07-13): was
+                  // hardcoded German "{label} AN/AUS schalten" regardless of
+                  // hass.language.
+                  : this._t(isOn ? "lan_turn_off_title" : "lan_turn_on_title").replace("{label}", label);
+        btn.textContent = `${label}${isOn ? " " + this._t("state_on_short") : ""}`;
         if (entity) {
           btn.addEventListener("click", () => {
             this._hass.callService(domain, "toggle", { entity_id: entity.entity_id });
@@ -11936,8 +12569,8 @@ class BoschCameraOverviewCard extends HTMLElement {
         }
         controls.appendChild(btn);
       };
-      addBtn("Privacy", t.privacy, "switch");
-      if (t.light) addBtn("Licht", t.light, "light");
+      addBtn(this._t("privacy_short"), t.privacy, "switch");
+      if (t.light) addBtn(this._t("pill_light_title"), t.light, "light");
       tile.appendChild(controls);
       grid.appendChild(tile);
     }
@@ -12031,8 +12664,12 @@ class BoschCameraOverviewCard extends HTMLElement {
       const s = new Date(startIso);
       const e = new Date(endIso);
       if (isNaN(s) || isNaN(e)) return "";
-      const date = s.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
-      const fmt = (d) => d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+      // issue #45 follow-up scan (realKim-dotcom 2026-07-13): date/time was
+      // always formatted in de-DE regardless of hass.language — same class of
+      // bug already fixed for the offline overlay's "last seen" line.
+      const loc = cardLang(this._hass);
+      const date = s.toLocaleDateString(loc, { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+      const fmt = (d) => d.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit" });
       return `${date} ${fmt(s)}–${fmt(e)}`;
     } catch (_) {
       return "";
@@ -12184,33 +12821,36 @@ class BoschCameraOverviewCard extends HTMLElement {
           sub2.className = "bco-empty-sub";
 
           if ((mState === "active" || mState === "scheduled" || mState === "recent") && mAttr.camera_relevant) {
-            // Best case: Bosch announced exactly this window.
-            const verb = mState === "active" ? "läuft" : (mState === "scheduled" ? "geplant" : "angekündigt");
-            titleEl.textContent = `Bosch-Cloud-Wartung ${verb}`;
+            // Best case: Bosch announced exactly this window. (issue #45 follow-up:
+            // this empty-state path duplicated _renderMaintenanceBanner()'s copy as
+            // raw hard-coded German instead of routing through the same _t() keys.)
+            titleEl.textContent = mState === "active" ? this._t("maint_title")
+              : mState === "scheduled" ? this._t("maint_title_planned")
+              : this._t("maint_title_recent");
             const win = this._formatWindow(mAttr.scheduled_start, mAttr.scheduled_end);
             sub.textContent = win
-              ? `${mAttr.title || "Wartungsmeldung"} · ${win}`
-              : (mAttr.title || "Wartungsmeldung");
+              ? `${mAttr.title || this._t("maint_notice")} · ${win}`
+              : (mAttr.title || this._t("maint_notice"));
             // Only accept https:// — fall back to Bosch's service page if
             // the sensor's link attribute is missing or has a non-https scheme.
             link.href = (mAttr.link && /^https:\/\//i.test(mAttr.link))
               ? mAttr.link
               : "https://www.bosch-smarthome.com/service";
-            link.textContent = "Details in der Bosch Community";
+            link.textContent = this._t("maint_details");
             sub2.textContent =
-              `${unavailableBosch.length} ${unavailableBosch.length === 1 ? "Kamera" : "Kameras"} ` +
-              "kommen automatisch zurück, sobald die Cloud antwortet.";
+              `${unavailableBosch.length} ${unavailableBosch.length === 1 ? this._t("outage_cam_singular") : this._t("outage_cam_plural")} ` +
+              this._t("outage_auto_return_suffix");
           } else {
             // Fallback: cameras unavailable but no matching RSS announcement —
             // either Bosch hasn't posted yet, RSS is unreachable, or this is
             // an unannounced outage. Stay honest about the uncertainty.
-            titleEl.textContent = "Bosch-Cloud nicht erreichbar";
+            titleEl.textContent = this._t("outage_cloud_unreachable");
             sub.textContent =
-              `${unavailableBosch.length} ${unavailableBosch.length === 1 ? "Kamera" : "Kameras"} ` +
-              "warten auf die Bosch-Server.";
+              `${unavailableBosch.length} ${unavailableBosch.length === 1 ? this._t("outage_cam_singular") : this._t("outage_cam_plural")} ` +
+              this._t("outage_waiting_for_server");
             link.href = "https://community.bosch-smarthome.com/t5/wartungsarbeiten/bg-p/Wartungsarbeiten";
-            link.textContent = "Status prüfen: Bosch Community";
-            sub2.textContent = "Die Kameras kommen automatisch zurück, sobald die Cloud antwortet.";
+            link.textContent = this._t("maint_check_status");
+            sub2.textContent = this._t("maint_auto_return");
           }
           empty.appendChild(titleEl);
           empty.appendChild(sub);
@@ -12218,7 +12858,7 @@ class BoschCameraOverviewCard extends HTMLElement {
           empty.appendChild(sub2);
         } else {
           empty.className = "bco-empty";
-          empty.textContent = "Keine Bosch-Kameras gefunden.";
+          empty.textContent = this._t("no_bosch_cameras_found");
         }
         this._grid.appendChild(empty);
         this._emptyNode = empty;
@@ -12962,11 +13602,16 @@ class BoschNotificationsCard extends HTMLElement {
     return out;
   }
 
+  _t(key) { return cardT(this._hass, key); }
+
   _maintenanceBanner(maint) {
     if (!maint) return "";
     const state = maint.state;
     const a = maint.attributes || {};
-    const fmtTime = ts => ts ? new Date(ts).toLocaleString("de-DE", {
+    // issue #45 follow-up scan (realKim-dotcom 2026-07-13): was always de-DE
+    // regardless of hass.language.
+    const loc = cardLang(this._hass);
+    const fmtTime = ts => ts ? new Date(ts).toLocaleString(loc, {
       weekday: "short", day: "2-digit", month: "2-digit",
       hour: "2-digit", minute: "2-digit",
     }) : "?";
@@ -12974,17 +13619,17 @@ class BoschNotificationsCard extends HTMLElement {
     // a compromised RSS feed (or any sensor-state-write path) from injecting
     // `javascript:` / `data:` URIs that execute in the dashboard context.
     const safeLink = (a.link && /^https:\/\//i.test(a.link)) ? a.link : null;
-    const link = safeLink ? `<a href="${this._esc(safeLink)}" target="_blank" rel="noopener">Details bei Bosch →</a>` : "";
+    const link = safeLink ? `<a href="${this._esc(safeLink)}" target="_blank" rel="noopener">${this._t("notif_details_link")}</a>` : "";
 
     if (state === "active") {
       return `
         <div class="banner banner-active">
           <div class="banner-icon">⚠️</div>
           <div class="banner-body">
-            <div class="banner-title">Cloud-Wartung läuft</div>
-            <div class="banner-sub">${this._esc(a.title || "Wartungsmeldung")}</div>
+            <div class="banner-title">${this._t("notif_maint_active_title")}</div>
+            <div class="banner-sub">${this._esc(a.title || this._t("maint_notice"))}</div>
             <div class="banner-window">${fmtTime(a.scheduled_start)} – ${fmtTime(a.scheduled_end).split(", ").slice(-1)[0]}</div>
-            <div class="banner-note">Live-Bild und Snapshots ggf. eingeschränkt.</div>
+            <div class="banner-note">${this._t("notif_maint_limited_note")}</div>
             ${link ? `<div class="banner-link">${link}</div>` : ""}
           </div>
         </div>`;
@@ -12994,9 +13639,9 @@ class BoschNotificationsCard extends HTMLElement {
         <div class="banner banner-scheduled">
           <div class="banner-icon">📅</div>
           <div class="banner-body">
-            <div class="banner-title">Cloud-Wartung geplant</div>
-            <div class="banner-sub">${this._esc(a.title || "Wartungsmeldung")}</div>
-            <div class="banner-window">Beginn: ${fmtTime(a.scheduled_start)}<br>Ende: ${fmtTime(a.scheduled_end)}</div>
+            <div class="banner-title">${this._t("notif_maint_scheduled_title")}</div>
+            <div class="banner-sub">${this._esc(a.title || this._t("maint_notice"))}</div>
+            <div class="banner-window">${this._t("notif_maint_begin_label")} ${fmtTime(a.scheduled_start)}<br>${this._t("notif_maint_end_label")} ${fmtTime(a.scheduled_end)}</div>
             ${link ? `<div class="banner-link">${link}</div>` : ""}
           </div>
         </div>`;
@@ -13006,10 +13651,10 @@ class BoschNotificationsCard extends HTMLElement {
         <div class="banner banner-past">
           <div class="banner-icon">✅</div>
           <div class="banner-body">
-            <div class="banner-title">Cloud-Wartung beendet</div>
-            <div class="banner-sub">${this._esc(a.title || "Wartungsmeldung")}</div>
-            <div class="banner-window">Beendet ${fmtTime(a.scheduled_end)}</div>
-            <div class="banner-note">Cloud-Dienste sollten wieder normal funktionieren.</div>
+            <div class="banner-title">${this._t("notif_maint_past_title")}</div>
+            <div class="banner-sub">${this._esc(a.title || this._t("maint_notice"))}</div>
+            <div class="banner-window">${this._t("notif_maint_ended_prefix")} ${fmtTime(a.scheduled_end)}</div>
+            <div class="banner-note">${this._t("notif_maint_resumed_note")}</div>
           </div>
         </div>`;
     }
@@ -13032,7 +13677,7 @@ class BoschNotificationsCard extends HTMLElement {
           <span class="cam-state ${cls}">${this._esc(status)}</span>
         </div>`;
     }).join("");
-    return `<div class="cam-grid"><div class="cam-header">Kamera-Status</div>${rows}</div>`;
+    return `<div class="cam-grid"><div class="cam-header">${this._t("notif_cam_status_header")}</div>${rows}</div>`;
   }
 
   _clearMessage(maint, cams) {
@@ -13041,7 +13686,7 @@ class BoschNotificationsCard extends HTMLElement {
     if (hasMaint) return "";
     const anyOffline = cams.some(c => /OFFLINE|offline/i.test(c.state));
     if (anyOffline) return "";
-    return `<div class="clear">✓ Keine Bosch-Cloud-Wartung geplant. Alle Kameras erreichbar.</div>`;
+    return `<div class="clear">✓ ${this._t("notif_all_clear")}</div>`;
   }
 
   _esc(s) {

@@ -31,10 +31,13 @@ import asyncio
 import importlib
 import time
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+if TYPE_CHECKING:
+    from custom_components.bosch_shc_camera.camera import BoschCamera
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 CAM_ID_GAPS = "00000000-0000-0000-0000-000000000001"
@@ -49,7 +52,7 @@ FAKE_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 20 + b"\xff\xd9"
 
 
 @pytest.fixture
-def stub_coord():
+def stub_coord() -> SimpleNamespace:
     return SimpleNamespace(
         data={
             CAM_ID: {
@@ -74,7 +77,7 @@ def stub_coord():
 
 
 @pytest.fixture
-def stub_entry():
+def stub_entry() -> SimpleNamespace:
     return SimpleNamespace(
         entry_id="01ENTRY",
         data={"bearer_token": "fake-token"},
@@ -82,19 +85,18 @@ def stub_entry():
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Construction + synchronous properties
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestCameraConstruction:
-    def test_unique_id_lowercased(self, stub_coord, stub_entry):
+    def test_unique_id_lowercased(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam._attr_unique_id == f"bosch_shc_cam_{CAM_ID.lower()}"
 
-    def test_starts_with_placeholder_jpeg(self, stub_coord, stub_entry):
+    def test_starts_with_placeholder_jpeg(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Initial _cached_image is a 1×1 black JPEG to prevent HTTP 500
         when HA proxies the first image before any real snapshot has
         been fetched."""
@@ -105,7 +107,9 @@ class TestCameraConstruction:
         # JFIF marker = JPEG signature
         assert cam._cached_image.startswith(b"\xff\xd8\xff")
 
-    def test_resolves_display_name(self, stub_coord, stub_entry):
+    def test_resolves_display_name(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """`_model_name` resolves through models.get_display_name (Außenkamera II)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -113,17 +117,18 @@ class TestCameraConstruction:
         assert "Außenkamera" in cam._model_name
 
 
-# ── is_streaming ────────────────────────────────────────────────────────
-
-
 class TestIsStreaming:
-    def test_false_when_no_live_session(self, stub_coord, stub_entry):
+    def test_false_when_no_live_session(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.is_streaming is False
 
-    def test_true_when_live_session_present(self, stub_coord, stub_entry):
+    def test_true_when_live_session_present(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         stub_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -132,8 +137,8 @@ class TestIsStreaming:
 
     def test_supported_features_always_advertises_stream(
         self,
-        stub_coord,
-        stub_entry,
+        stub_coord: SimpleNamespace,
+        stub_entry: SimpleNamespace,
     ):
         """STREAM must always be advertised regardless of live-session state.
         Previously STREAM was hidden when the switch was OFF, causing HA-Core
@@ -154,11 +159,10 @@ class TestIsStreaming:
         assert cam.supported_features == CameraEntityFeature.STREAM
 
 
-# ── frame_interval ──────────────────────────────────────────────────────
-
-
 class TestFrameInterval:
-    def test_force_refresh_uses_short_interval(self, stub_coord, stub_entry):
+    def test_force_refresh_uses_short_interval(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """`_force_image_refresh = True` → 0.1s so HA's next proxy
         request fetches immediately."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
@@ -167,7 +171,9 @@ class TestFrameInterval:
         cam._force_image_refresh = True
         assert cam.frame_interval == 0.1
 
-    def test_streaming_uses_1_second(self, stub_coord, stub_entry):
+    def test_streaming_uses_1_second(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """While streaming → 1s (must be < card's 2s setInterval to dodge
         cache aliasing)."""
         stub_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
@@ -176,7 +182,9 @@ class TestFrameInterval:
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.frame_interval == 1.0
 
-    def test_idle_uses_long_interval(self, stub_coord, stub_entry):
+    def test_idle_uses_long_interval(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Idle (not streaming, no force-refresh) → IDLE_FRAME_INTERVAL (60s)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -184,18 +192,19 @@ class TestFrameInterval:
         assert cam.frame_interval == 60.0  # IDLE_FRAME_INTERVAL
 
 
-# ── motion_detection_enabled ────────────────────────────────────────────
-
-
 class TestMotionDetectionEnabled:
-    def test_false_when_no_motion_settings(self, stub_coord, stub_entry):
+    def test_false_when_no_motion_settings(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         # stub_coord.motion_settings returns {} → False
         assert cam.motion_detection_enabled is False
 
-    def test_true_when_enabled(self, stub_coord, stub_entry):
+    def test_true_when_enabled(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         stub_coord.motion_settings = lambda cam_id: {
             "enabled": True,
             "motionAlarmConfiguration": "MEDIUM",
@@ -205,7 +214,9 @@ class TestMotionDetectionEnabled:
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.motion_detection_enabled is True
 
-    def test_false_when_disabled(self, stub_coord, stub_entry):
+    def test_false_when_disabled(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         stub_coord.motion_settings = lambda cam_id: {
             "enabled": False,
             "motionAlarmConfiguration": "OFF",
@@ -216,23 +227,26 @@ class TestMotionDetectionEnabled:
         assert cam.motion_detection_enabled is False
 
 
-# ── HA metadata properties ──────────────────────────────────────────────
-
-
 class TestMetadata:
-    def test_brand_is_bosch(self, stub_coord, stub_entry):
+    def test_brand_is_bosch(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.brand == "Bosch"
 
-    def test_model_returns_hardware_version(self, stub_coord, stub_entry):
+    def test_model_returns_hardware_version(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.model == "HOME_Eyes_Outdoor"
 
-    def test_available_follows_coordinator(self, stub_coord, stub_entry):
+    def test_available_follows_coordinator(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
@@ -240,7 +254,9 @@ class TestMetadata:
         stub_coord.last_update_success = False
         assert cam.available is False
 
-    def test_device_info_has_mac_connection(self, stub_coord, stub_entry):
+    def test_device_info_has_mac_connection(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
@@ -249,16 +265,15 @@ class TestMetadata:
         assert info["sw_version"] == "9.40.25"
         assert ("mac", "aa:bb:cc:dd:ee:01") in info["connections"]
 
-    def test_device_info_no_mac_empty_connections(self, stub_coord, stub_entry):
+    def test_device_info_no_mac_empty_connections(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """No mac in info dict → connections is empty set, not None."""
         stub_coord.data[CAM_ID]["info"]["macAddress"] = ""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
         assert cam.device_info["connections"] == set()
-
-
-# ── _rotate_jpeg_180 (rotation helper) ──────────────────────────────────
 
 
 class TestRotateJpeg180:
@@ -291,11 +306,10 @@ class TestRotateJpeg180:
         # bytes can differ. We just assert it's a valid JPEG.
 
 
-# ── extra_state_attributes ──────────────────────────────────────────────
-
-
 class TestExtraStateAttributes:
-    def test_no_events_no_live(self, stub_coord, stub_entry):
+    def test_no_events_no_live(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
@@ -304,7 +318,9 @@ class TestExtraStateAttributes:
         assert attrs["camera_id"] == CAM_ID
         assert attrs["model_name"] != ""
 
-    def test_with_live_connection(self, stub_coord, stub_entry):
+    def test_with_live_connection(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         stub_coord.data[CAM_ID]["live"] = {
             "rtspsUrl": "rtsps://proxy/abc",
             "_connection_type": "LOCAL",
@@ -316,7 +332,9 @@ class TestExtraStateAttributes:
         # rtsps_url should populate (different name in attrs)
         assert "live_rtsps" in attrs or "rtsps_url" in attrs
 
-    def test_with_recent_event(self, stub_coord, stub_entry):
+    def test_with_recent_event(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         stub_coord.data[CAM_ID]["events"] = [
             {"id": "e1", "createdAt": "2026-05-05T10:00:00Z", "eventType": "MOVEMENT"},
         ]
@@ -327,9 +345,6 @@ class TestExtraStateAttributes:
         # last_event / event_type should reflect the latest
         assert "last_event" in attrs
         assert "event_type" in attrs
-
-
-# ── available during cloud-down maintenance window ──────────────────────
 
 
 def _make_maintenance(state: str = "active", *, camera_relevant: bool = True):
@@ -359,62 +374,82 @@ class TestAvailableDuringCloudOutage:
 
         return BoschCamera(stub_coord, CAM_ID, stub_entry)
 
-    def test_local_streaming_keeps_available(self, stub_coord, stub_entry):
+    def test_local_streaming_keeps_available(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         _set_cloud_outage(stub_coord)
         assert self._cam(stub_coord, stub_entry).available is True
 
-    def test_cloud_up_short_circuits(self, stub_coord, stub_entry):
+    def test_cloud_up_short_circuits(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         # last_update_success True → available True regardless of maintenance.
         stub_coord._maintenance_cache = _make_maintenance()
         assert self._cam(stub_coord, stub_entry).available is True
 
-    def test_no_maintenance_cache_stays_unavailable(self, stub_coord, stub_entry):
+    def test_no_maintenance_cache_stays_unavailable(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         _set_cloud_outage(stub_coord)
         stub_coord._maintenance_cache = None
         assert self._cam(stub_coord, stub_entry).available is False
 
-    def test_maintenance_not_active_stays_unavailable(self, stub_coord, stub_entry):
+    def test_maintenance_not_active_stays_unavailable(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         _set_cloud_outage(stub_coord)
         stub_coord._maintenance_cache = _make_maintenance("scheduled")
         assert self._cam(stub_coord, stub_entry).available is False
 
-    def test_not_camera_relevant_stays_unavailable(self, stub_coord, stub_entry):
+    def test_not_camera_relevant_stays_unavailable(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         _set_cloud_outage(stub_coord)
         stub_coord._maintenance_cache = _make_maintenance(camera_relevant=False)
         assert self._cam(stub_coord, stub_entry).available is False
 
-    def test_lan_unreachable_stays_unavailable(self, stub_coord, stub_entry):
+    def test_lan_unreachable_stays_unavailable(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         _set_cloud_outage(stub_coord)
         stub_coord.is_lan_reachable = lambda cam_id: False
         assert self._cam(stub_coord, stub_entry).available is False
 
-    def test_lan_reachability_unknown_stays_unavailable(self, stub_coord, stub_entry):
+    def test_lan_reachability_unknown_stays_unavailable(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         # None (unknown) must NOT be treated as reachable.
         _set_cloud_outage(stub_coord)
         stub_coord.is_lan_reachable = lambda cam_id: None
         assert self._cam(stub_coord, stub_entry).available is False
 
-    def test_no_live_session_stays_unavailable(self, stub_coord, stub_entry):
+    def test_no_live_session_stays_unavailable(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         # Maintenance + LAN ok but no streaming session → unavailable.
         _set_cloud_outage(stub_coord)
         stub_coord._live_connections = {}
         assert self._cam(stub_coord, stub_entry).available is False
 
     def test_live_connection_without_url_stays_unavailable(
-        self, stub_coord, stub_entry
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         # _live_connections entry exists but no rtsps/rtsp URL → not streaming.
         _set_cloud_outage(stub_coord)
         stub_coord._live_connections = {CAM_ID: {}}
         assert self._cam(stub_coord, stub_entry).available is False
 
-    def test_firmware_update_overrides_local_available(self, stub_coord, stub_entry):
+    def test_firmware_update_overrides_local_available(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         # Firmware install must win even inside a maintenance window.
         _set_cloud_outage(stub_coord)
         stub_coord.is_updating = lambda cam_id: True
         assert self._cam(stub_coord, stub_entry).available is False
 
-    def test_maintenance_state_raises_is_safe(self, stub_coord, stub_entry):
+    def test_maintenance_state_raises_is_safe(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         # A broken mw.state() (e.g. tz-naive compare) must not crash available.
         _set_cloud_outage(stub_coord)
 
@@ -425,13 +460,6 @@ class TestAvailableDuringCloudOutage:
             camera_relevant=True, state=_boom
         )
         assert self._cam(stub_coord, stub_entry).available is False
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# auto_play_default — camera-attribute exposure (options-flow round-trip
-# lives in tests/test_options_flow_settings.py; this pins only the camera
-# entity's read side)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _entry_with(mode_value):
@@ -448,7 +476,7 @@ def _entry_with(mode_value):
 
 class TestCameraAttributeAutoPlayDefault:
     @pytest.mark.parametrize("mode", ["lan", "always", "never"])
-    def test_each_mode_exposed(self, stub_coord, mode):
+    def test_each_mode_exposed(self, stub_coord: SimpleNamespace, mode: str):
         """PIN_EVERY_MODE: each canonical mode shows up verbatim on the
         camera entity attribute the card reads."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
@@ -457,7 +485,7 @@ class TestCameraAttributeAutoPlayDefault:
         attrs = cam.extra_state_attributes
         assert attrs["auto_play_default"] == mode
 
-    def test_legacy_confirm_collapses(self, stub_coord):
+    def test_legacy_confirm_collapses(self, stub_coord: SimpleNamespace):
         """v12.8.0 briefly exposed a "confirm" mode (popup dialog). v12.8.1
         dropped it in favour of an inline tap-to-reveal overlay. Any stale
         stored "confirm" value must collapse to "lan" so existing users
@@ -468,7 +496,7 @@ class TestCameraAttributeAutoPlayDefault:
         attrs = cam.extra_state_attributes
         assert attrs["auto_play_default"] == "lan"
 
-    def test_default_when_option_absent(self, stub_coord):
+    def test_default_when_option_absent(self, stub_coord: SimpleNamespace):
         """No option stored → attribute must still be "lan" so the card
         gets a usable signal without falling back to its own client-side
         default (which would drift from the integration default)."""
@@ -478,7 +506,7 @@ class TestCameraAttributeAutoPlayDefault:
         attrs = cam.extra_state_attributes
         assert attrs["auto_play_default"] == "lan"
 
-    def test_garbage_collapses_to_lan(self, stub_coord):
+    def test_garbage_collapses_to_lan(self, stub_coord: SimpleNamespace):
         """Garbage value (typo, stale value from a future renamed mode)
         collapses to "lan" at the read site. Never disables stream start
         silently — sane fallback ensures the card stays functional."""
@@ -488,7 +516,7 @@ class TestCameraAttributeAutoPlayDefault:
         attrs = cam.extra_state_attributes
         assert attrs["auto_play_default"] == "lan"
 
-    def test_empty_string_collapses_to_lan(self, stub_coord):
+    def test_empty_string_collapses_to_lan(self, stub_coord: SimpleNamespace):
         """Empty string is a sub-case of garbage. Pin it explicitly because
         select selectors can serialize a no-selection state as ``""`` in
         some HA versions."""
@@ -497,12 +525,6 @@ class TestCameraAttributeAutoPlayDefault:
         cam = BoschCamera(stub_coord, CAM_ID, _entry_with(""))
         attrs = cam.extra_state_attributes
         assert attrs["auto_play_default"] == "lan"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Async lifecycle: setup_entry, added/will_remove_from_hass, coordinator
-# updates, the image-refresh state machine, motion-detection toggling
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _make_coord(**overrides):
@@ -1256,7 +1278,6 @@ class TestPlaceholderJpeg:
         assert img.size == (1, 1)
 
 
-# ── async_create_stream (play_stream / Cast) ─────────────────────────────
 #
 # Regression test for 2026-05-09 19:02 CEST error:
 # "Error requesting stream: camera.bosch_terrasse does not support play stream service"
@@ -1319,9 +1340,6 @@ class TestAsyncCreateStream:
         coord.try_live_connection.assert_not_awaited()
         coord.async_update_listeners.assert_not_called()
         assert result is fake_stream
-
-
-# ── Regression: concurrent delayed refresh callers must not both fetch ───
 
 
 class TestRefreshInflightGuard:
@@ -1395,12 +1413,6 @@ class TestRefreshInflightGuard:
 
         await BoschCamera._async_trigger_image_refresh(cam, delay=0)
         assert cam._refresh_inflight is False
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# extra_state_attributes: camera_timestamp_overlay branch +
-# _async_camera_image_impl cached-image fallback
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _make_coord_gaps(**overrides):
@@ -1651,14 +1663,8 @@ class TestAsyncCameraImageImplCachedImageFallback:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# _yuv422_to_jpeg helper + stream_status attribute state machine + optional
-# attributes + stream_source LOCAL/REMOTE transport
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 @pytest.fixture
-def stub_coord_extra():
+def stub_coord_extra() -> SimpleNamespace:
     return SimpleNamespace(
         data={
             CAM_ID: {
@@ -1685,7 +1691,7 @@ def stub_coord_extra():
 
 
 @pytest.fixture
-def stub_entry_extra():
+def stub_entry_extra() -> SimpleNamespace:
     return SimpleNamespace(
         entry_id="01ENTRY",
         data={"bearer_token": "fake-token"},
@@ -1709,7 +1715,9 @@ class TestYuv422ToJpeg:
 
         return BoschCamera(stub_coord_extra, CAM_ID, stub_entry_extra)
 
-    def test_wrong_size_returns_none(self, stub_coord_extra, stub_entry_extra):
+    def test_wrong_size_returns_none(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         cam = self._make_cam(stub_coord_extra, stub_entry_extra)
         assert cam._yuv422_to_jpeg(b"x" * 100) is None, (
             "Non-115200-byte payload must reject (firmware contract: "
@@ -1717,17 +1725,23 @@ class TestYuv422ToJpeg:
             "PIL malformed shape and crash the snapshot path."
         )
 
-    def test_empty_bytes_returns_none(self, stub_coord_extra, stub_entry_extra):
+    def test_empty_bytes_returns_none(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         cam = self._make_cam(stub_coord_extra, stub_entry_extra)
         assert cam._yuv422_to_jpeg(b"") is None
 
-    def test_one_byte_off_returns_none(self, stub_coord_extra, stub_entry_extra):
+    def test_one_byte_off_returns_none(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """115199 bytes — off-by-one defends against truncated reads."""
         cam = self._make_cam(stub_coord_extra, stub_entry_extra)
         assert cam._yuv422_to_jpeg(b"\x00" * 115199) is None
         assert cam._yuv422_to_jpeg(b"\x00" * 115201) is None
 
-    def test_all_zero_yuv_produces_valid_jpeg(self, stub_coord_extra, stub_entry_extra):
+    def test_all_zero_yuv_produces_valid_jpeg(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """All-zero YUV422 = uniform dark green frame → must encode
         without error and produce JPEG bytes."""
         cam = self._make_cam(stub_coord_extra, stub_entry_extra)
@@ -1741,7 +1755,9 @@ class TestYuv422ToJpeg:
         # SOI + APP0/JFIF + ... + EOI
         assert out[-2:] == b"\xff\xd9", "JPEG must end with EOI marker"
 
-    def test_uniform_yuv_produces_valid_jpeg(self, stub_coord_extra, stub_entry_extra):
+    def test_uniform_yuv_produces_valid_jpeg(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """Y=128, U=128, V=128 → valid neutral grey frame."""
         cam = self._make_cam(stub_coord_extra, stub_entry_extra)
         # YUYV: Y0 U Y1 V repeats. Make it a flat grey field.
@@ -1752,7 +1768,9 @@ class TestYuv422ToJpeg:
         assert out is not None
         assert out[:3] == b"\xff\xd8\xff"
 
-    def test_high_contrast_yuv_produces_jpeg(self, stub_coord_extra, stub_entry_extra):
+    def test_high_contrast_yuv_produces_jpeg(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """Alternating Y=0 / Y=255 across the frame must still encode."""
         cam = self._make_cam(stub_coord_extra, stub_entry_extra)
         # Build a frame with Y bytes alternating, UV all 128
@@ -1774,7 +1792,9 @@ class TestStreamStatusAttribute:
     enum string immediately breaks badge rendering on every dashboard.
     """
 
-    def test_idle_when_no_session_no_warming(self, stub_coord_extra, stub_entry_extra):
+    def test_idle_when_no_session_no_warming(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -1783,7 +1803,7 @@ class TestStreamStatusAttribute:
         assert attrs["streaming_state"] == "idle"
 
     def test_streaming_when_live_session_active(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         stub_coord_extra._live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy/abc",
@@ -1796,7 +1816,9 @@ class TestStreamStatusAttribute:
         assert attrs["stream_status"] == "streaming"
         assert attrs["streaming_state"] == "active"
 
-    def test_streaming_remote_fallback(self, stub_coord_extra, stub_entry_extra):
+    def test_streaming_remote_fallback(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """When LOCAL was tried and lost → REMOTE, badge shows fallback."""
         stub_coord_extra._live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy/abc",
@@ -1809,7 +1831,9 @@ class TestStreamStatusAttribute:
         attrs = cam.extra_state_attributes
         assert attrs["stream_status"] == "streaming (REMOTE fallback)"
 
-    def test_warming_up_takes_priority(self, stub_coord_extra, stub_entry_extra):
+    def test_warming_up_takes_priority(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """While the encoder is pre-warming the badge must show
         `warming_up` even if a live_connection is in flight."""
         stub_coord_extra._live_connections[CAM_ID] = {
@@ -1832,7 +1856,9 @@ class TestOptionalAttributes:
     and never as `None` / empty-string. HA logbook + recorder include
     every attribute change, so empty noise pollutes history."""
 
-    def test_buffering_time_only_when_set(self, stub_coord_extra, stub_entry_extra):
+    def test_buffering_time_only_when_set(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -1841,7 +1867,7 @@ class TestOptionalAttributes:
         assert "connection_type" not in attrs
 
     def test_buffering_time_appears_with_live_session(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         stub_coord_extra._live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy/abc",
@@ -1855,7 +1881,9 @@ class TestOptionalAttributes:
         assert attrs["buffering_time_ms"] == 500
         assert attrs["connection_type"] == "LOCAL"
 
-    def test_bosch_priority_passes_through(self, stub_coord_extra, stub_entry_extra):
+    def test_bosch_priority_passes_through(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """`info.priority` (cloud float) appears as bosch_priority for
         the overview card's `use_bosch_sort` option."""
         stub_coord_extra.data[CAM_ID]["info"]["priority"] = 1.5
@@ -1864,7 +1892,9 @@ class TestOptionalAttributes:
         cam = BoschCamera(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert cam.extra_state_attributes["bosch_priority"] == 1.5
 
-    def test_bosch_priority_none_when_absent(self, stub_coord_extra, stub_entry_extra):
+    def test_bosch_priority_none_when_absent(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """Missing priority → None (not "" or 0). Card distinguishes
         these via `priority != null` check before sorting."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
@@ -1873,7 +1903,7 @@ class TestOptionalAttributes:
         assert cam.extra_state_attributes["bosch_priority"] is None
 
     def test_live_buffer_mode_propagates_from_options(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """Player-side buffer profile must reach the card via attribute."""
         stub_entry_extra.options["live_buffer_mode"] = "low_latency"
@@ -1883,7 +1913,7 @@ class TestOptionalAttributes:
         assert cam.extra_state_attributes["live_buffer_mode"] == "low_latency"
 
     def test_live_buffer_mode_defaults_to_balanced(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """Missing option → 'balanced'. This default is wired into the
         card's BOSCH_BUFFER_PROFILES table — both ends must agree."""
@@ -1904,7 +1934,9 @@ class TestStreamSourceTransport:
     """
 
     @pytest.mark.asyncio
-    async def test_local_sets_tcp_transport(self, stub_coord_extra, stub_entry_extra):
+    async def test_local_sets_tcp_transport(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         stub_coord_extra._live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://127.0.0.1:46597/rtsp_tunnel",
             "_connection_type": "LOCAL",
@@ -1918,7 +1950,7 @@ class TestStreamSourceTransport:
 
     @pytest.mark.asyncio
     async def test_remote_uses_default_transport(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         stub_coord_extra._live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy-12.live.cbs.boschsecurity.com:443/abc/rtsp_tunnel",
@@ -1936,7 +1968,7 @@ class TestStreamSourceTransport:
 
     @pytest.mark.asyncio
     async def test_audio_param_kept_even_when_switch_off(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """The audio track is ALWAYS kept in the stream now — switch.<cam>_audio
         is a card-side mute preference, not a track toggle. stream_source() must
@@ -1956,7 +1988,9 @@ class TestStreamSourceTransport:
         assert "inst=1" in url and "fmtp=1" in url
 
     @pytest.mark.asyncio
-    async def test_no_session_returns_none(self, stub_coord_extra, stub_entry_extra):
+    async def test_no_session_returns_none(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """No live_connections entry → None (HA sees stream_source==None
         and returns 503 to the WebSocket caller, which is the documented
         graceful behavior — see test_supported_features_always_advertises_stream)."""
@@ -1965,12 +1999,6 @@ class TestStreamSourceTransport:
         cam = BoschCamera(stub_coord_extra, CAM_ID, stub_entry_extra)
         url = await cam.stream_source()
         assert url is None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# async_camera_image public wrapper + _async_camera_image_impl LOCAL Digest
-# path + placeholder-vs-cache semantics + offline supported_features gate
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _make_coord_impl(**overrides):
@@ -2451,7 +2479,6 @@ class TestOutageFallbackStreamingGuard:
         assert out == b"\xff\xd8outage-snap"
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Regression: ValueError from auth_utils must not escape camera_proxy
 #
 # Source: forum 998974/15 (Andrew75, 2026-05-15). His HA log showed
@@ -2464,7 +2491,6 @@ class TestOutageFallbackStreamingGuard:
 # HA core, and produced HTTP 500.
 # (The coordinator-side counterpart, `async_fetch_live_snapshot_local` in
 # __init__.py, is covered in tests/test_init.py.)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _make_coord_valerr(**overrides):
@@ -2653,20 +2679,6 @@ class TestRemoteSnapshotRenewOutsideTimeout:
             out = await BoschCamera._async_camera_image_impl(cam)
         coord.try_live_connection.assert_awaited_once()
         assert out == b"\xff\xd8new"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# MJPEG inst=3 snapshot path
-#
-# BoschCamera._async_camera_image_impl:
-#   - Uses the MJPEG path when use_mjpeg_snapshot=True + Gen2 + LAN creds present
-#   - Skips MJPEG path and falls through when use_mjpeg_snapshot=False (default)
-#   - Skips MJPEG path when the camera is Gen1 (generation < 2)
-#   - Skips MJPEG path when LOCAL creds are missing from the cache
-#   - Falls back to existing paths when MJPEG returns None
-#   - Returns MJPEG result and caches it when MJPEG succeeds
-# Per PIN_EVERY_MODE: one test per discrete state.
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _make_coord_mjpeg(
@@ -3076,12 +3088,6 @@ class TestMjpegGen2Indoor:
         assert result == FAKE_JPEG
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Additional stream_source / _yuv422_to_jpeg / extra_state_attributes /
-# motion_detection_enabled / frame_interval coverage via a `.fget`-style stub
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 def _stub_entity_r5(**overrides):
     """Minimal BoschCamera-like stub for testing static methods and properties."""
     coord = SimpleNamespace(
@@ -3457,13 +3463,6 @@ class TestFrameIntervalR5:
         assert result == float(IDLE_FRAME_INTERVAL), (
             f"Idle mode must use IDLE_FRAME_INTERVAL ({IDLE_FRAME_INTERVAL}s) to avoid excessive polling"
         )
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# _async_camera_image_impl REMOTE proxy snapshot branches + idle cloud
-# snapshot: 200/404/401/403 responses, RCP-thumbnail fallback on timeout,
-# idle-camera cloud snapshot, event-snapshot last resort.
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _resp_cm(status: int, body: bytes = b"", content_type: str = "image/jpeg"):
@@ -4389,13 +4388,6 @@ class TestEventSnapshotLastResort:
         assert out == BC._PLACEHOLDER_JPEG, (
             "must return PLACEHOLDER_JPEG when all fetch methods fail and no cache"
         )
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Remaining _async_camera_image_impl / _async_rcp_thumbnail / _yuv422_to_jpeg
-# coverage: exception paths, LOCAL-via-proxy Digest, ClientError on 404/401
-# retries, LOCAL outage-snap fallback, event-snapshot 4xx/timeout handling.
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _make_coord_r7(**overrides):
@@ -5348,7 +5340,6 @@ class TestEventSnapshot4xx:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Regression: a transient live-snapshot failure on the proactive refresh tick
 # must NOT replace a good (live) cached frame with a stale event snapshot.
 #
@@ -5362,7 +5353,6 @@ class TestEventSnapshot4xx:
 # Fix: only seed from the event image on a genuine cold start (no real frame
 # yet — the 1×1 placeholder does not count); never replace a real live frame
 # with it, and back off a full interval on a transient failure.
-# ═══════════════════════════════════════════════════════════════════════════
 
 _LIVE_FRAME = b"\xff\xd8\xff\xe0LIVE-FRAME-CURRENT" + b"\x00" * 64
 _OLD_EVENT = b"\xff\xd8\xff\xe0ANCIENT-EVENT-IMAGE" + b"\x11" * 64
@@ -5442,7 +5432,6 @@ async def test_live_success_updates_frame() -> None:
     coord.async_fetch_fresh_event_snapshot.assert_not_awaited()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # WebRTC: close_webrtc_session idempotency + async_create_stream privacy gate
 #
 # Root cause (2026-05-16): HA go2rtc provider's async_close_session calls
@@ -5452,7 +5441,6 @@ async def test_live_success_updates_frame() -> None:
 # partial(camera.close_webrtc_session, session_id) as a subscription cleanup.
 # On client disconnect async_handle_close calls that partial → KeyError → HA
 # logs ERROR "Error unsubscribing from subscription" repeatedly.
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
@@ -5494,7 +5482,7 @@ def stub_entry_webrtc() -> SimpleNamespace:
 @pytest.fixture
 def camera_webrtc(
     stub_coord_webrtc: SimpleNamespace, stub_entry_webrtc: SimpleNamespace
-) -> Any:
+) -> BoschCamera:
     """Construct a bare BoschCamera without HA lifecycle (no hass, no add_to_hass)."""
     from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -5509,7 +5497,7 @@ class TestCloseWebrtcSession:
     must catch that KeyError so HA's async_handle_close does not log ERROR.
     """
 
-    def test_noop_when_no_provider(self, camera_webrtc: Any) -> None:
+    def test_noop_when_no_provider(self, camera_webrtc: BoschCamera) -> None:
         """No _webrtc_provider → close_webrtc_session must not raise."""
         # Base Camera sets _webrtc_provider via async_refresh_providers.
         # Without calling that, it is None.  Ensure no AttributeError.
@@ -5517,7 +5505,7 @@ class TestCloseWebrtcSession:
         # Must be a clean no-op — no exception of any kind.
         camera_webrtc.close_webrtc_session("non-existent-session-id")
 
-    def test_noop_on_keyerror_from_provider(self, camera_webrtc: Any) -> None:
+    def test_noop_on_keyerror_from_provider(self, camera_webrtc: BoschCamera) -> None:
         """Provider raises KeyError (session never inserted) → must not propagate.
 
         This is the exact failure path seen in HA logs 2026-05-16:
@@ -5533,7 +5521,9 @@ class TestCloseWebrtcSession:
 
         mock_provider.async_close_session.assert_called_once_with("unknown-session-id")
 
-    def test_known_session_delegates_to_provider(self, camera_webrtc: Any) -> None:
+    def test_known_session_delegates_to_provider(
+        self, camera_webrtc: BoschCamera
+    ) -> None:
         """When session IS known, provider.async_close_session must be called."""
         mock_provider = MagicMock()
         # No side_effect → returns None (happy path)
@@ -5544,7 +5534,7 @@ class TestCloseWebrtcSession:
         mock_provider.async_close_session.assert_called_once_with("known-session-abc")
 
     def test_other_exceptions_from_provider_still_propagate(
-        self, camera_webrtc: Any
+        self, camera_webrtc: BoschCamera
     ) -> None:
         """Non-KeyError exceptions from the provider must still surface.
 
@@ -5559,7 +5549,9 @@ class TestCloseWebrtcSession:
         with pytest.raises(RuntimeError, match="unexpected"):
             camera_webrtc.close_webrtc_session("some-session")
 
-    def test_multiple_close_calls_are_idempotent(self, camera_webrtc: Any) -> None:
+    def test_multiple_close_calls_are_idempotent(
+        self, camera_webrtc: BoschCamera
+    ) -> None:
         """Calling close_webrtc_session twice for the same ID must not raise.
 
         The second call will KeyError (session already popped on first call)
@@ -5598,7 +5590,7 @@ class TestAsyncCreateStreamPrivacy:
 
     @pytest.mark.asyncio
     async def test_raises_home_assistant_error_when_privacy_on(
-        self, camera_webrtc: Any, stub_coord_webrtc: SimpleNamespace
+        self, camera_webrtc: BoschCamera, stub_coord_webrtc: SimpleNamespace
     ) -> None:
         """Privacy ON → HomeAssistantError with 'privacy mode' in message."""
         from homeassistant.exceptions import HomeAssistantError
@@ -5611,7 +5603,7 @@ class TestAsyncCreateStreamPrivacy:
 
     @pytest.mark.asyncio
     async def test_no_error_when_privacy_off_and_connection_exists(
-        self, camera_webrtc: Any, stub_coord_webrtc: SimpleNamespace
+        self, camera_webrtc: BoschCamera, stub_coord_webrtc: SimpleNamespace
     ) -> None:
         """Privacy OFF + active live_connection → delegates to super() without error."""
         from homeassistant.exceptions import HomeAssistantError
@@ -5639,7 +5631,7 @@ class TestAsyncCreateStreamPrivacy:
 
     @pytest.mark.asyncio
     async def test_no_error_when_privacy_state_unknown(
-        self, camera_webrtc: Any, stub_coord_webrtc: SimpleNamespace
+        self, camera_webrtc: BoschCamera, stub_coord_webrtc: SimpleNamespace
     ) -> None:
         """Privacy state not in cache (None/missing) → must not raise HAError.
 
@@ -5668,7 +5660,6 @@ class TestAsyncCreateStreamPrivacy:
             pass  # other errors from missing hass are fine
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # WebRTC / HLS pre-warm waits: async_create_stream + the native
 # async_handle_async_webrtc_offer override, and the native-WebRTC-capability
 # flag regression (GitHub issue #40).
@@ -5693,7 +5684,6 @@ class TestAsyncCreateStreamPrivacy:
 # super().async_handle_async_webrtc_offer(), found _webrtc_provider is None,
 # and raised HomeAssistantError("Camera does not support WebRTC") for every
 # camera. Fix: force _supports_native_async_webrtc back to False in __init__.
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _make_coord_prewarm(**overrides):
@@ -5895,7 +5885,9 @@ async def test_webrtc_offer_privacy_mode_blocks_auto_open():
 
 
 @pytest.mark.asyncio
-async def test_webrtc_offer_auto_open_coalesces_on_skip(caplog: Any) -> None:
+async def test_webrtc_offer_auto_open_coalesces_on_skip(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """A concurrent start already in flight (STREAM_START_SKIPPED) must not
     be treated as a failure — just fall through to the pre-warm wait.
 
@@ -5937,7 +5929,7 @@ async def test_webrtc_offer_auto_open_coalesces_on_skip(caplog: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_webrtc_offer_auto_open_failure_logs_and_still_delegates(
-    caplog: Any,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """try_live_connection returning falsy (real failure, not a coalesced
     skip) must log a WARNING (not the coalescing debug line) but still fall
@@ -5996,7 +5988,9 @@ async def test_webrtc_offer_existing_connection_skips_auto_open():
 
 
 @pytest.mark.asyncio
-async def test_webrtc_offer_prewarm_timeout_still_delegates(caplog: Any) -> None:
+async def test_webrtc_offer_prewarm_timeout_still_delegates(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """If pre-warm never clears within the deadline, _wait_for_prewarm logs a
     warning and returns False — but the offer still delegates to super() so
     HA surfaces its own "no stream" handling rather than silently hanging.
@@ -6040,7 +6034,7 @@ async def test_webrtc_offer_prewarm_timeout_still_delegates(caplog: Any) -> None
     assert CAM_ID_PREWARM in coord._stream_warming
 
 
-def _make_real_camera_prewarm() -> Any:
+def _make_real_camera_prewarm() -> BoschCamera:
     """Construct BoschCamera via its real __init__ (not __new__ bypass) so the
     HA-core Camera.__init__ bookkeeping this bug lives in actually runs."""
     from custom_components.bosch_shc_camera.camera import BoschCamera
@@ -6104,12 +6098,6 @@ async def test_webrtc_offer_delegates_to_registered_provider_not_hard_error() ->
     provider.async_handle_async_webrtc_offer.assert_awaited_once_with(
         cam, "sdp-offer", "session-1", send_message
     )
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# LOCAL snap + outage snap: async_digest_request executor-bound closures
-# (camera.py's LOCAL-connection and cloud-outage snapshot branches).
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _make_camera_for_snap(**overrides):
@@ -6361,13 +6349,6 @@ class TestFetchOutageSnapClosure:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# SHC→Bosch class-rename contract: BoschCamera must exist, BoschSHCCamera
-# (the legacy pre-rename name) must not. Entity IDs and unique IDs stayed
-# unchanged across the rename.
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 def test_bosch_camera_importable():
     """BoschCamera is the current class name in camera.py."""
     mod = importlib.import_module("custom_components.bosch_shc_camera.camera")
@@ -6395,11 +6376,9 @@ def test_bosch_camera_unique_id_unchanged():
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: privacy TOCTOU guard + async_create_stream STREAM_START_SKIPPED
 # handling (relocated from tests/test_stream_modules_coverage.py — the
 # tls_proxy.py sibling lives in tests/test_tls_proxy.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _stub_coord_camera_toctou(
@@ -6600,12 +6579,10 @@ class TestAsyncCreateStreamSkipped:
         assert result is None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: firmware-install unavailability (relocated from
 # tests/test_updating_unavailable.py — the switch.py/init.py/light.py
 # siblings live in tests/test_switch.py, tests/test_init.py, and
 # tests/test_light.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _coord_camera_updating(
@@ -6672,10 +6649,8 @@ class TestCameraUpdatingUnavailable:
         assert cam.available is False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: GH#6 — streaming broken since 10.x, resolved in v10.5.3 (relocated
 # from tests/test_github_issues.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestGH6StreamPipelineSupportedFeatures:

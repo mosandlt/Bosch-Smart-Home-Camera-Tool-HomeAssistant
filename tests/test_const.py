@@ -41,12 +41,10 @@ class TestDefaultOptions:
         assert DEFAULT_OPTIONS.get("alert_notify_service") == ""
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: GH#4 — CARD_VERSION constant (relocated from
 # tests/test_github_issues.py — the bundled card JS file-existence check
 # for the same issue is a non-single-module meta check and stays in
 # tests/test_github_issues.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestCardVersionConstant:
@@ -60,10 +58,8 @@ class TestCardVersionConstant:
         assert len(CARD_VERSION) > 0
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: forum issue #7 (xDraGGi) — mark_events_read opt-out default
 # (relocated from tests/test_forum_issues.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestMarkEventsReadOptOutDefault:
@@ -100,11 +96,9 @@ class TestMarkEventsReadOptOutDefault:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: STREAM_START_SKIPPED sentinel (relocated from
 # tests/test_stream_start_in_progress.py — the coordinator/switch-side
 # consumers of the sentinel stayed in tests/test_init.py / tests/test_switch.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestStreamStartSkippedSentinel:

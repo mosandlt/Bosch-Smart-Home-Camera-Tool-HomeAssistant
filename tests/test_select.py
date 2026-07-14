@@ -31,12 +31,11 @@ PAN_CAM_ID = "22222222-AAAA-BBBB-CCCC-000000000001"
 
 
 @pytest.fixture
-def stub_entry():
+def stub_entry() -> SimpleNamespace:
     """Minimal config-entry stub shared by the naming/basic/pan-preset sections."""
     return SimpleNamespace(entry_id="01ENTRY", data={}, options={})
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Doubled-prefix entity naming regression
 #
 # Source: Andrew75 forum post 998974/15 reported entity IDs like
@@ -51,11 +50,10 @@ def stub_entry():
 # Fix (v14.2.2): remove all `_attr_name` assignments; use `_attr_translation_key`
 # instead so HA resolves the entity name from translations/en.json at runtime.
 # `_attr_name` must be None (unset) for translation_key-based naming to work.
-# ═════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
-def stub_coord_naming():
+def stub_coord_naming() -> SimpleNamespace:
     return SimpleNamespace(
         data={
             CAM_ID: {
@@ -84,7 +82,9 @@ def stub_coord_naming():
 
 
 class TestVideoQualitySelectNaming:
-    def test_attr_name_is_none(self, stub_coord_naming, stub_entry):
+    def test_attr_name_is_none(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_naming, CAM_ID, stub_entry)
@@ -93,13 +93,17 @@ class TestVideoQualitySelectNaming:
             f"_attr_name={name!r} still contains the 'Bosch' prefix"
         )
 
-    def test_translation_key_is_video_quality(self, stub_coord_naming, stub_entry):
+    def test_translation_key_is_video_quality(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "video_quality"
 
-    def test_has_entity_name_is_true(self, stub_coord_naming, stub_entry):
+    def test_has_entity_name_is_true(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_naming, CAM_ID, stub_entry)
@@ -107,7 +111,9 @@ class TestVideoQualitySelectNaming:
 
 
 class TestMotionSensitivitySelectNaming:
-    def test_attr_name_is_none(self, stub_coord_naming, stub_entry):
+    def test_attr_name_is_none(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import (
             BoschMotionSensitivitySelect,
         )
@@ -118,7 +124,9 @@ class TestMotionSensitivitySelectNaming:
             f"_attr_name={name!r} still contains the 'Bosch' prefix"
         )
 
-    def test_translation_key_is_motion_sensitivity(self, stub_coord_naming, stub_entry):
+    def test_translation_key_is_motion_sensitivity(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import (
             BoschMotionSensitivitySelect,
         )
@@ -126,7 +134,9 @@ class TestMotionSensitivitySelectNaming:
         sel = BoschMotionSensitivitySelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "motion_sensitivity"
 
-    def test_has_entity_name_is_true(self, stub_coord_naming, stub_entry):
+    def test_has_entity_name_is_true(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import (
             BoschMotionSensitivitySelect,
         )
@@ -136,7 +146,9 @@ class TestMotionSensitivitySelectNaming:
 
 
 class TestFcmPushModeSelectNaming:
-    def test_attr_name_is_none(self, stub_coord_naming, stub_entry):
+    def test_attr_name_is_none(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
 
         sel = BoschFcmPushModeSelect(stub_coord_naming, CAM_ID, stub_entry)
@@ -145,13 +157,17 @@ class TestFcmPushModeSelectNaming:
             f"_attr_name={name!r} still contains the 'Bosch' prefix"
         )
 
-    def test_translation_key_is_fcm_push_mode(self, stub_coord_naming, stub_entry):
+    def test_translation_key_is_fcm_push_mode(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
 
         sel = BoschFcmPushModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "fcm_push_mode"
 
-    def test_has_entity_name_is_true(self, stub_coord_naming, stub_entry):
+    def test_has_entity_name_is_true(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
 
         sel = BoschFcmPushModeSelect(stub_coord_naming, CAM_ID, stub_entry)
@@ -159,7 +175,9 @@ class TestFcmPushModeSelectNaming:
 
 
 class TestStreamModeSelectNaming:
-    def test_attr_name_is_none(self, stub_coord_naming, stub_entry):
+    def test_attr_name_is_none(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
 
         sel = BoschStreamModeSelect(stub_coord_naming, CAM_ID, stub_entry)
@@ -168,13 +186,17 @@ class TestStreamModeSelectNaming:
             f"_attr_name={name!r} still contains the 'Bosch' prefix"
         )
 
-    def test_translation_key_is_stream_mode(self, stub_coord_naming, stub_entry):
+    def test_translation_key_is_stream_mode(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
 
         sel = BoschStreamModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "stream_mode"
 
-    def test_has_entity_name_is_true(self, stub_coord_naming, stub_entry):
+    def test_has_entity_name_is_true(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
 
         sel = BoschStreamModeSelect(stub_coord_naming, CAM_ID, stub_entry)
@@ -182,7 +204,9 @@ class TestStreamModeSelectNaming:
 
 
 class TestDetectionModeSelectNaming:
-    def test_attr_name_is_none(self, stub_coord_naming, stub_entry):
+    def test_attr_name_is_none(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
 
         sel = BoschDetectionModeSelect(stub_coord_naming, CAM_ID, stub_entry)
@@ -191,26 +215,25 @@ class TestDetectionModeSelectNaming:
             f"_attr_name={name!r} still contains the 'Bosch' prefix"
         )
 
-    def test_translation_key_is_detection_mode(self, stub_coord_naming, stub_entry):
+    def test_translation_key_is_detection_mode(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
 
         sel = BoschDetectionModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "detection_mode"
 
-    def test_has_entity_name_is_true(self, stub_coord_naming, stub_entry):
+    def test_has_entity_name_is_true(
+        self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
 
         sel = BoschDetectionModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_has_entity_name is True
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# Basic construction / current_option behavior
-# ═════════════════════════════════════════════════════════════════════════
-
-
 @pytest.fixture
-def stub_coord_basic():
+def stub_coord_basic() -> SimpleNamespace:
     return SimpleNamespace(
         data={
             CAM_ID: {
@@ -232,21 +255,25 @@ def stub_coord_basic():
 
 
 class TestVideoQualitySelectBasic:
-    def test_construction(self, stub_coord_basic, stub_entry):
+    def test_construction(
+        self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_basic, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "video_quality"
         assert sel._attr_unique_id.endswith("_video_quality")
 
-    def test_current_option_reads_coordinator(self, stub_coord_basic, stub_entry):
+    def test_current_option_reads_coordinator(
+        self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_basic, CAM_ID, stub_entry)
         assert sel.current_option == "auto"
 
     def test_current_option_falls_back_to_auto_for_unknown(
-        self, stub_coord_basic, stub_entry
+        self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
 
@@ -254,7 +281,9 @@ class TestVideoQualitySelectBasic:
         sel = BoschVideoQualitySelect(stub_coord_basic, CAM_ID, stub_entry)
         assert sel.current_option == "auto"
 
-    def test_options_list_present(self, stub_coord_basic, stub_entry):
+    def test_options_list_present(
+        self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """A select entity must have a non-empty _attr_options."""
         from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
 
@@ -263,13 +292,8 @@ class TestVideoQualitySelectBasic:
         assert "auto" in sel._attr_options
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# BoschNvrModeSelect — per-camera Mini-NVR mode override (GitHub #43)
-# ═════════════════════════════════════════════════════════════════════════
-
-
 @pytest.fixture
-def stub_coord_nvr_mode():
+def stub_coord_nvr_mode() -> SimpleNamespace:
     calls = {}
 
     def _get_nvr_mode(cid):
@@ -295,14 +319,18 @@ def stub_coord_nvr_mode():
 
 
 class TestNvrModeSelectBasic:
-    def test_construction(self, stub_coord_nvr_mode, stub_entry):
+    def test_construction(
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "nvr_mode"
         assert sel._attr_unique_id.endswith("_nvr_mode")
 
-    def test_device_info(self, stub_coord_nvr_mode, stub_entry):
+    def test_device_info(
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera import DOMAIN
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
 
@@ -313,7 +341,7 @@ class TestNvrModeSelectBasic:
         assert info["model"] == "HOME_Eyes_Outdoor"
 
     def test_options_are_continuous_and_event_buffered_only(
-        self, stub_coord_nvr_mode, stub_entry
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """No 'off' option — that's the existing BoschNvrRecordingSwitch's job."""
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
@@ -322,14 +350,16 @@ class TestNvrModeSelectBasic:
         assert sel._attr_options == ["continuous", "event_buffered"]
 
     def test_current_option_reads_coordinator_default(
-        self, stub_coord_nvr_mode, stub_entry
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         assert sel.current_option == "continuous"
 
-    def test_current_option_reflects_override(self, stub_coord_nvr_mode, stub_entry):
+    def test_current_option_reflects_override(
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
 
         stub_coord_nvr_mode.get_nvr_mode = lambda cid: "event_buffered"
@@ -337,7 +367,7 @@ class TestNvrModeSelectBasic:
         assert sel.current_option == "event_buffered"
 
     def test_current_option_falls_back_for_unknown_value(
-        self, stub_coord_nvr_mode, stub_entry
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
 
@@ -347,7 +377,7 @@ class TestNvrModeSelectBasic:
 
     @pytest.mark.asyncio
     async def test_async_select_option_calls_coordinator_setter(
-        self, stub_coord_nvr_mode, stub_entry
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
 
@@ -359,7 +389,7 @@ class TestNvrModeSelectBasic:
 
     @pytest.mark.asyncio
     async def test_async_select_option_restarts_active_continuous_recorder(
-        self, stub_coord_nvr_mode, stub_entry
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Bug-hunt finding (2026-07-11): a mode change must apply immediately
         if a recorder is already running for this camera — otherwise a
@@ -376,7 +406,7 @@ class TestNvrModeSelectBasic:
 
     @pytest.mark.asyncio
     async def test_async_select_option_restarts_active_preroll_recorder(
-        self, stub_coord_nvr_mode, stub_entry
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Same as above, but the camera was running event-buffered mode
         (tracked in _nvr_preroll_processes, not _nvr_processes)."""
@@ -390,7 +420,7 @@ class TestNvrModeSelectBasic:
 
     @pytest.mark.asyncio
     async def test_async_select_option_no_restart_when_recorder_inactive(
-        self, stub_coord_nvr_mode, stub_entry
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """No recorder running for this camera (e.g. the NVR switch is off) →
         must NOT call start_recorder, which would incorrectly turn NVR on."""
@@ -403,7 +433,7 @@ class TestNvrModeSelectBasic:
 
     @pytest.mark.asyncio
     async def test_restore_state_applies_valid_saved_option(
-        self, stub_coord_nvr_mode, stub_entry
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
 
@@ -422,7 +452,7 @@ class TestNvrModeSelectBasic:
 
     @pytest.mark.asyncio
     async def test_restore_state_ignores_invalid_saved_option(
-        self, stub_coord_nvr_mode, stub_entry
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """A stale/invalid restored state must not be applied as an override."""
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
@@ -442,7 +472,7 @@ class TestNvrModeSelectBasic:
 
     @pytest.mark.asyncio
     async def test_restore_no_last_state_leaves_default(
-        self, stub_coord_nvr_mode, stub_entry
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
 
@@ -459,7 +489,9 @@ class TestNvrModeSelectBasic:
 
 
 class TestFcmPushModeSelectBasic:
-    def test_construction(self, stub_coord_basic, stub_entry):
+    def test_construction(
+        self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
 
         sel = BoschFcmPushModeSelect(stub_coord_basic, CAM_ID, stub_entry)
@@ -468,7 +500,9 @@ class TestFcmPushModeSelectBasic:
 
 
 class TestStreamModeSelectBasic:
-    def test_construction(self, stub_coord_basic, stub_entry):
+    def test_construction(
+        self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
 
         sel = BoschStreamModeSelect(stub_coord_basic, CAM_ID, stub_entry)
@@ -476,7 +510,9 @@ class TestStreamModeSelectBasic:
 
 
 class TestMotionSensitivitySelectBasic:
-    def test_disabled_by_default(self, stub_coord_basic, stub_entry):
+    def test_disabled_by_default(
+        self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Motion-sensitivity select is hidden by default — disabled_by_default."""
         from custom_components.bosch_shc_camera.select import (
             BoschMotionSensitivitySelect,
@@ -486,7 +522,6 @@ class TestMotionSensitivitySelectBasic:
         assert sel._attr_entity_registry_enabled_default is False
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Fallback-chain and option-key contract pins
 #
 # Most select entities use a tiered fallback chain to derive the
@@ -500,11 +535,10 @@ class TestMotionSensitivitySelectBasic:
 # position — users notice only after their settings appear to "reset"
 # themselves on integration reload. These tests pin the fallback order
 # plus the option-key constants the JSON translations + APIs depend on.
-# ═════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
-def stub_coord_extra():
+def stub_coord_extra() -> SimpleNamespace:
     return SimpleNamespace(
         data={
             CAM_ID: {
@@ -539,7 +573,7 @@ def stub_coord_extra():
 
 
 @pytest.fixture
-def stub_entry_extra():
+def stub_entry_extra() -> SimpleNamespace:
     return SimpleNamespace(
         entry_id="01ENTRY",
         data={},
@@ -600,7 +634,7 @@ class TestOptionConstants:
 
 class TestStreamModeSelectFallbackChain:
     def test_override_takes_precedence_over_options(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """When the user changes the dropdown live, `_stream_type_override`
         wins over the persisted option until the integration reloads.
@@ -612,7 +646,9 @@ class TestStreamModeSelectFallbackChain:
         sel = BoschStreamModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.current_option == "local"
 
-    def test_falls_back_to_persisted_option(self, stub_coord_extra, stub_entry_extra):
+    def test_falls_back_to_persisted_option(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """Without an in-memory override, persisted option wins."""
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
 
@@ -621,7 +657,9 @@ class TestStreamModeSelectFallbackChain:
         sel = BoschStreamModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.current_option == "remote"
 
-    def test_unknown_value_collapses_to_local(self, stub_coord_extra, stub_entry_extra):
+    def test_unknown_value_collapses_to_local(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """Garbage in the entry options must not poison the dropdown —
         the select entity would refuse to render an out-of-list value.
         Default collapse target is 'local' since v12.4.2 (LOCAL-first)."""
@@ -631,7 +669,9 @@ class TestStreamModeSelectFallbackChain:
         sel = BoschStreamModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.current_option == "local"
 
-    def test_auto_mode_explicit_pin(self, stub_coord_extra, stub_entry_extra):
+    def test_auto_mode_explicit_pin(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """Pin: override=None + persisted='auto' → current_option == 'auto'.
 
         The 'auto' key must survive a round-trip through the fallback chain:
@@ -653,7 +693,7 @@ class TestStreamModeSelectFallbackChain:
 
     @pytest.mark.asyncio
     async def test_select_option_writes_override(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """User picks 'remote' in the dropdown → `_stream_type_override`
         flips immediately. Takes effect on the next stream activation,
@@ -668,7 +708,9 @@ class TestStreamModeSelectFallbackChain:
 
 
 class TestFcmPushModeSelectAvailability:
-    def test_unavailable_when_fcm_disabled(self, stub_coord_extra, stub_entry_extra):
+    def test_unavailable_when_fcm_disabled(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """If the integration option `enable_fcm_push` is False, the
         dropdown must show 'unavailable' so the user knows toggling here
         does nothing — the master switch lives in integration options."""
@@ -681,7 +723,9 @@ class TestFcmPushModeSelectAvailability:
             "'Unavailable' so the user explicitly sees the master toggle."
         )
 
-    def test_available_when_fcm_enabled(self, stub_coord_extra, stub_entry_extra):
+    def test_available_when_fcm_enabled(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
 
         stub_coord_extra.options["enable_fcm_push"] = True
@@ -689,7 +733,7 @@ class TestFcmPushModeSelectAvailability:
         assert sel.available is True
 
     def test_current_option_reads_entry_options(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         # v12.4.5: valid options are now "auto" and "polling" only.
         # Pin "polling" — the non-default valid option — to verify persisted
@@ -700,7 +744,9 @@ class TestFcmPushModeSelectAvailability:
         sel = BoschFcmPushModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.current_option == "polling"
 
-    def test_current_option_default_auto(self, stub_coord_extra, stub_entry_extra):
+    def test_current_option_default_auto(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """Missing option key → 'auto'. Stable default ensures fresh
         installs land on the cross-platform-safe mode."""
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
@@ -709,14 +755,18 @@ class TestFcmPushModeSelectAvailability:
         sel = BoschFcmPushModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.current_option == "auto"
 
-    def test_current_option_unknown_collapses(self, stub_coord_extra, stub_entry_extra):
+    def test_current_option_unknown_collapses(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
 
         stub_entry_extra.options["fcm_push_mode"] = "junk"
         sel = BoschFcmPushModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.current_option == "auto"
 
-    def test_polling_mode_pinned(self, stub_coord_extra, stub_entry_extra):
+    def test_polling_mode_pinned(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """Pin: persisted 'polling' → current_option == 'polling'.
 
         FCM push mode 'polling' is the fallback for environments where
@@ -736,7 +786,7 @@ class TestFcmPushModeSelectAvailability:
 
 class TestMotionSensitivitySelectApiMapping:
     def test_current_option_lowercases_api_value(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """Bosch API returns UPPER-snake (HIGH); the select entity's option
         key list is lower-snake (high). Without lower-casing, the UI shows
@@ -752,7 +802,7 @@ class TestMotionSensitivitySelectApiMapping:
         assert sel.current_option == "high"
 
     def test_current_option_none_when_motion_unfetched(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """Slow-tier data not yet pulled → None (HA renders 'unknown')
         instead of an arbitrary default that might mismatch the camera."""
@@ -765,7 +815,7 @@ class TestMotionSensitivitySelectApiMapping:
         assert sel.current_option is None
 
     def test_current_option_default_for_unknown_api_value(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """If Bosch ever returns a level we don't list (e.g. the rumored
         EXTREME mode on Gen3), return the first valid option (with a warning)
@@ -786,7 +836,7 @@ class TestMotionSensitivitySelectApiMapping:
         )
 
     def test_unavailable_when_motion_settings_empty(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """Slow tier hasn't run yet → entity unavailable. Avoids the
         select rendering with a stale 'auto' that the user might click,
@@ -799,7 +849,9 @@ class TestMotionSensitivitySelectApiMapping:
         sel = BoschMotionSensitivitySelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.available is False
 
-    def test_disabled_by_default_in_registry(self, stub_coord_extra, stub_entry_extra):
+    def test_disabled_by_default_in_registry(
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
+    ):
         """Hidden by default — too granular for most users; expose only
         when explicitly enabled via Settings → Entities."""
         from custom_components.bosch_shc_camera.select import (
@@ -811,7 +863,7 @@ class TestMotionSensitivitySelectApiMapping:
 
     @pytest.mark.asyncio
     async def test_select_option_uppercases_for_api(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """The entity stores keys lowercased ('high'); Bosch API needs
         'HIGH'. The mapping happens in async_select_option — verify it."""
@@ -844,7 +896,7 @@ class TestMotionSensitivitySelectApiMapping:
 
     @pytest.mark.asyncio
     async def test_invalid_option_silently_no_op(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """An option outside the list must not call the API. Defends
         against typos in dashboard service calls (`select.select_option`
@@ -861,7 +913,7 @@ class TestMotionSensitivitySelectApiMapping:
 
 class TestVideoQualitySelectExtra:
     def test_current_option_passes_through_known_value(
-        self, stub_coord_extra, stub_entry_extra
+        self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """get_quality returns the active level — must round-trip if
         in the option list."""
@@ -902,7 +954,11 @@ class TestMotionSensitivitySelectAllLevels:
         ],
     )
     def test_api_value_maps_to_option_key(
-        self, stub_coord_extra, stub_entry_extra, api_value: str, expected_key: str
+        self,
+        stub_coord_extra: SimpleNamespace,
+        stub_entry_extra: SimpleNamespace,
+        api_value: str,
+        expected_key: str,
     ) -> None:
         """Pin: Bosch API value '{api_value}' → current_option == '{expected_key}'.
 
@@ -943,7 +999,11 @@ class TestDetectionModeSelectPins:
         ],
     )
     def test_detection_mode_api_to_key(
-        self, stub_coord_extra, stub_entry_extra, api_value: str, expected_key: str
+        self,
+        stub_coord_extra: SimpleNamespace,
+        stub_entry_extra: SimpleNamespace,
+        api_value: str,
+        expected_key: str,
     ) -> None:
         """Pin: coordinator cache value '{api_value}' → current_option == '{expected_key}'.
 
@@ -966,9 +1026,7 @@ class TestDetectionModeSelectPins:
         )
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # async_setup_entry, restore-on-restart, and write-path coverage
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _stub_coord_platform(gen2: bool = True):
@@ -1500,26 +1558,15 @@ class TestDetectionModeSelect:
         sel.coordinator.async_put_camera.assert_not_called()
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# PTZ named-preset select (Gen1 360°)
-#
-# Covers:
-#   - Construction and metadata
-#   - current_option: each of the 5 preset angles → matching name
-#   - current_option: non-preset position → None
-#   - current_option: cache empty → None
-#   - current_option: ceiling-mount (image_rotation_180) sign inversion
-#   - available: True / False conditions
-#   - async_select_option: each preset → async_cloud_set_pan called with correct angle
-#   - async_select_option: unknown option → no call
-#   - async_select_option: pan failure → cache NOT updated
-#   - async_select_option: ceiling-mount → angle inverted before PUT
-#   - PIN_EVERY_MODE: one test per preset value (home / left / right / back_left / back_right)
-# ═════════════════════════════════════════════════════════════════════════
-
-
+# PTZ named-preset select (Gen1 360°). Covers: construction/metadata; each of
+# the 5 preset angles mapping to its name; non-preset position -> None; empty
+# cache -> None; ceiling-mount (image_rotation_180) sign inversion; available
+# True/False; async_select_option per preset calling async_cloud_set_pan with
+# the correct angle (inverted on ceiling mount); unknown option -> no call;
+# failed pan -> cache not updated. PIN_EVERY_MODE: one test per preset value
+# (home / left / right / back_left / back_right).
 @pytest.fixture
-def stub_coord_pan():
+def stub_coord_pan() -> SimpleNamespace:
     """Minimal coordinator stub for PTZ preset tests."""
     coord = SimpleNamespace(
         data={
@@ -1826,19 +1873,14 @@ class TestPanPresetSetupEntry:
             )
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# `enable_ptz_controls` opt-in toggle gating
+# `enable_ptz_controls` opt-in toggle gating. Covers: DEFAULT_OPTIONS contains
+# `enable_ptz_controls: False`; select platform panLimit>0 + toggle OFF -> no
+# BoschPanPresetSelect; panLimit>0 + toggle ON -> BoschPanPresetSelect created;
+# panLimit=0 + toggle ON -> still no entity.
 #
 # PIN_EVERY_MODE: explicit tests for default, disabled, enabled, and the
 # panLimit gate (so enabling the toggle on a non-pan camera still creates
 # no entity).
-#
-# Covers:
-#   - DEFAULT_OPTIONS contains `enable_ptz_controls: False`
-#   - select platform: panLimit > 0 + toggle OFF → no BoschPanPresetSelect
-#   - select platform: panLimit > 0 + toggle ON  → BoschPanPresetSelect created
-#   - select platform: panLimit = 0 + toggle ON  → still no entity
-# ═════════════════════════════════════════════════════════════════════════
 
 CAM_PAN = "22222222-AAAA-BBBB-CCCC-000000000001"  # CAMERA_360, has pan
 CAM_NOPAN = "11111111-AAAA-BBBB-CCCC-000000000001"  # Gen2 outdoor, no pan
@@ -1970,10 +2012,7 @@ async def test_pan_select_options_value_garbage_collapses_to_disabled() -> None:
     assert pan_selects == []
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: BoschFcmPushModeSelect.available (relocated from
-# tests/test_shc_select_remaining_lines.py)
-# ─────────────────────────────────────────────────────────────────────────────
+# BoschFcmPushModeSelect.available (relocated from tests/test_shc_select_remaining_lines.py)
 
 
 class TestFcmPushModeSelectAvailableSuperFalse:
@@ -2033,7 +2072,6 @@ class TestFcmPushModeSelectAvailableSuperFalse:
             assert sel.available is True
 
 
-# ── BoschFcmPushModeSelect: restart-task lifecycle tracking ──────────────────
 @pytest.mark.asyncio
 async def test_fcm_mode_select_tracks_restart_task() -> None:
     """Selecting a new FCM push mode must register the async_start_fcm_push()

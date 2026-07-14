@@ -24,6 +24,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from enum import Enum
+from pathlib import Path
 from threading import Lock, RLock
 from types import ModuleType, SimpleNamespace
 from typing import Any, ClassVar
@@ -49,9 +50,7 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x42" * 400  # 404 B -- real-looking snapshot
 JPEG_BYTES_ALT = b"\xff\xd8\xff\xe0" + b"\x99" * 400  # different content, same length
 
-# ============================================================================
 # Supervisor lifecycle (ensure/stop), hard-heal reasons, poll-loop branches, path-a/b step1 failure + clip-guard tests, patched-client/listen-body creation branches, drift-heal registration markers (from: bug-hunt grab-bag, coverage-gate grab-bag, clip coverage, coverage gaps, drift/heal registration)
-# ============================================================================
 
 
 class TestSafePathSegment:
@@ -882,7 +881,9 @@ class TestStep1Failure:
     """
 
     @pytest.mark.asyncio
-    async def test_step1_exception_logs_and_returns(self, caplog):
+    async def test_step1_exception_logs_and_returns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Step 1 raises → warning logged + early return; no step 2/3 work."""
         coord = _make_alert_coord()
 
@@ -951,7 +952,9 @@ class TestStep1FailureNonCancelled:
     """
 
     @pytest.mark.asyncio
-    async def test_get_alert_services_raises_step1_caught(self, caplog):
+    async def test_get_alert_services_raises_step1_caught(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         coord = _make_alert_coord()
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
@@ -2107,9 +2110,7 @@ async def test_drift_heal_f_server_401_returns_false_no_marker_written() -> None
     )
 
 
-# ============================================================================
 # Noise filter, safe-URL validation, notify-data building, alert-service slot resolution, path A/B event handling + snapshot/dedup/ordering, creds-staleness helpers, listen() branches, mode/pin migration (from: event-snapshot, extra coverage, filter helpers, general helpers, listen branches, mode/pin)
-# ============================================================================
 
 
 def _isolate_shared_state():
@@ -3022,7 +3023,7 @@ class TestFcmSafeBoschUrl:
             ("not-a-url", False),
         ],
     )
-    def test_url_validation(self, url, expected):
+    def test_url_validation(self, url: str, expected: bool) -> None:
         from custom_components.bosch_shc_camera.fcm import _is_safe_bosch_url
 
         assert _is_safe_bosch_url(url) is expected
@@ -3147,7 +3148,9 @@ class TestFcmNoiseFilterAdditional:
         r2 = _make_record_ext("Unexpected exception during read")
         assert f.filter(r2) is False
 
-    def test_dedup_window_lets_through_after_elapsed(self, monkeypatch):
+    def test_dedup_window_lets_through_after_elapsed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """After the dedup window elapses, the next matching record passes
         again — keeps a heartbeat so users still see the WAN-down state in
         the log."""
@@ -4325,9 +4328,7 @@ async def test_migration_v1_to_v3_ios_clears_fcm_creds() -> None:
     assert captured["data"]["bearer_token"] == _FCM_DATA_WITH_CREDS["bearer_token"]
 
 
-# ============================================================================
 # No-library import-error fallback, exception paths in path A/B and mark-events-read/local-save, push-data-none guard, stop/cancellation, creds persistence, Bosch registration, remaining-lines coverage (from: no-library fallback, path A/B exceptions, push-data-none guard, remaining-lines coverage, round 5)
-# ============================================================================
 
 
 def _coord(data: Any) -> Any:
@@ -5328,7 +5329,7 @@ class TestPathAExceptionSwallow:
 
 
 class TestPathBExceptionSwallow:
-    async def test_save_snapshot_raise_is_swallowed(self, tmp_path):
+    async def test_save_snapshot_raise_is_swallowed(self, tmp_path: Path) -> None:
         """If `save_snapshot` raises mid-flight while persisting the
         event-image bytes from the cloud, the alert-image step logs a
         warning and continues — no propagation, no FCM listener crash."""
@@ -5629,7 +5630,9 @@ class TestLocalSaveExceptionBranches:
         )
 
     @pytest.mark.asyncio
-    async def test_local_save_timeout_logged_as_warning(self, caplog):
+    async def test_local_save_timeout_logged_as_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """TimeoutError path logs a warning with the camera name."""
         import logging
 
@@ -5680,7 +5683,9 @@ class TestLocalSaveExceptionBranches:
         assert "Terrasse" in timeout_msgs[0].message
 
     @pytest.mark.asyncio
-    async def test_local_save_exception_logged_as_warning(self, caplog):
+    async def test_local_save_exception_logged_as_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Generic Exception path logs a warning with the camera name and error."""
         import logging
 
@@ -5977,7 +5982,9 @@ class TestRegisterFcmWithBosch:
         assert ok is False
 
     @pytest.mark.asyncio
-    async def test_500_logs_response_body(self, caplog):
+    async def test_500_logs_response_body(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """HTTP 500 with unknown error must include the body in the WARNING log."""
         import logging
 
@@ -6347,14 +6354,14 @@ class TestBuildNotifyData2:
 
 
 class TestWriteFile:
-    def test_writes_bytes_to_file(self, tmp_path):
+    def test_writes_bytes_to_file(self, tmp_path: Path) -> None:
         from custom_components.bosch_shc_camera.fcm import _write_file
 
         target = tmp_path / "snap.jpg"
         _write_file(str(target), b"\xff\xd8DATA\xff\xd9")
         assert target.read_bytes() == b"\xff\xd8DATA\xff\xd9"
 
-    def test_overwrites_existing(self, tmp_path):
+    def test_overwrites_existing(self, tmp_path: Path) -> None:
         from custom_components.bosch_shc_camera.fcm import _write_file
 
         target = tmp_path / "snap.jpg"
@@ -6363,9 +6370,7 @@ class TestWriteFile:
         assert target.read_bytes() == b"NEW"
 
 
-# ============================================================================
 # Noise-filter idempotency, handle_fcm_push early exits/http branches/dedup/new-event/mark-events-read/person-upgrade/notification-switch, mark_events_read, send_alert early exit + step 1/2/3 + SMB/local-save gates + file cleanup (from: round 6, round 7)
-# ============================================================================
 
 
 def _resp_cm_push(status: int, json_data=None, text: str = ""):
@@ -8650,9 +8655,7 @@ class TestFileCleanup:
         )
 
 
-# ============================================================================
 # start_fcm_push mode branches + early exits, fetch_firebase_config, push snapshot task + exception handling, on_fcm_push drop-when-not-running, send_alert notify-type/trouble-event/step2/step3 branches, SMB/local-save timeouts + toggles, cleanup OSError, event-id concurrency, stale-client creds race, periodic re-registration, force-hard-heal (from: round 8, stale-client-creds race, issue-36 delivery, sprint grab-bag)
-# ============================================================================
 
 
 def _resp_cm_text(status: int, body: str = "") -> MagicMock:
@@ -10741,10 +10744,8 @@ def test_fast_poll_is_inside_default_motion_window() -> None:
     assert init_mod.FCM_DOWN_EVENT_POLL_SEC < DEFAULT_MOTION_ACTIVE_WINDOW
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: _alert_sent_ids eviction + FCM watchdog tempo (relocated from
 # tests/test_theoretical_bugs.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestAlertSentIdsEviction:
@@ -10892,12 +10893,10 @@ class TestFCMWatchdogTempo:
             )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: motion-event / live-stream TLS-channel contention fix (relocated
 # from tests/test_stream_motion_contention.py). Path A live-snap refresh must
 # be skipped while a camera is actively streaming; the smb.py side (prefetch
 # bypassing a second cloud pull) lives in tests/test_smb.py.
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _resp_cm_motion(
@@ -11185,12 +11184,10 @@ class TestAlertPipelinePrefetch:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: misc gap-fill coverage (relocated from
 # tests/test_misc_modules_coverage.py) — Path A exception swallowing,
 # mark-read background-task exception swallowing, AI-description-in-caption
 # block, clip-poll id/timestamp mismatch guards.
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _resp_cm_misc14(
@@ -11294,7 +11291,9 @@ class TestFcmPathAExceptionWarning:
     WARNING and does NOT propagate."""
 
     @pytest.mark.asyncio
-    async def test_path_a_exception_logs_warning(self, caplog):
+    async def test_path_a_exception_logs_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Path A try raises RuntimeError → WARNING logged, no propagation."""
         cam_entity = MagicMock()
         cam_entity.is_streaming = False
@@ -11473,7 +11472,9 @@ class TestSendAlertAiDescription:
         assert len(notify_calls) >= 1
 
     @pytest.mark.asyncio
-    async def test_ai_description_exception_swallowed(self, caplog):
+    async def test_ai_description_exception_swallowed(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """When the AI call raises, the exception is caught and logged at
         DEBUG; the caption stays unchanged."""
         coord = _make_alert_coord_misc14(
@@ -11689,10 +11690,8 @@ class TestClipPollMatchGuards:
         assert wrong_clip_calls == [], "Timestamp-mismatched clip must not be sent"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: _build_fcm_cfg / _try_fcm_with_mode / dispatch-mode coverage
 # (relocated from tests/test_coverage_round_n.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _mock_fcm_module(
@@ -11958,13 +11957,11 @@ class TestDispatchModes:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: fresh-install async_send_alert defaults (relocated from
 # tests/test_fresh_install.py — the get_options()-merging tests from that
 # file duplicated tests/test_init.py::TestGetOptions and were dropped rather
 # than duplicated; the _FILE_RE / sync_local_save filenaming tests moved to
 # tests/test_media_source.py and tests/test_smb.py respectively).
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _resp_cm_freshinstall(status, body=b"", content_type="image/jpeg"):
@@ -12104,11 +12101,9 @@ class TestFreshInstallAlertSave:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: fcm.py _alert_sent_ids SENTINEL_RULE default (relocated from
 # tests/test_bug_regression_v11.py — the __init__.py sibling of this same
 # bug pattern lives in tests/test_init.py::TestAlertSentIdsSentinel)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestFcmAlertSentIdsSentinel:

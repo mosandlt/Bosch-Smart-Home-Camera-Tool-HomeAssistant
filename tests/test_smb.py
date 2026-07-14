@@ -254,7 +254,7 @@ class TestSmbSafeBoschUrl:
             "https://api.bosch.com/x",
         ],
     )
-    def test_legit_urls_allowed(self, url):
+    def test_legit_urls_allowed(self, url: str) -> None:
         from custom_components.bosch_shc_camera.smb import _is_safe_bosch_url
 
         assert _is_safe_bosch_url(url) is True
@@ -268,7 +268,7 @@ class TestSmbSafeBoschUrl:
             "",
         ],
     )
-    def test_unsafe_urls_rejected(self, url):
+    def test_unsafe_urls_rejected(self, url: str) -> None:
         from custom_components.bosch_shc_camera.smb import _is_safe_bosch_url
 
         assert _is_safe_bosch_url(url) is False
@@ -327,7 +327,7 @@ class TestSyncLocalSaveBasics:
         resp.__exit__ = MagicMock(return_value=False)
         return resp
 
-    def test_filename_matches_file_re(self, tmp_path):
+    def test_filename_matches_file_re(self, tmp_path: Path) -> None:
         """Saved filename must match _FILE_RE so media_source can list it.
 
         The old _download_one saved {date}_{time}_{type}_{id}.ext — missing the
@@ -348,7 +348,7 @@ class TestSyncLocalSaveBasics:
                 f"filename {f.name!r} does not match _FILE_RE"
             )
 
-    def test_camera_subdir_created(self, tmp_path):
+    def test_camera_subdir_created(self, tmp_path: Path) -> None:
         """Camera name subdirectory is created inside download_path."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -358,7 +358,7 @@ class TestSyncLocalSaveBasics:
             sync_local_save(coord, _make_ev(), "tok", "Terrasse")
         assert (tmp_path / "Terrasse").is_dir()
 
-    def test_clip_skipped_when_status_not_done(self, tmp_path):
+    def test_clip_skipped_when_status_not_done(self, tmp_path: Path) -> None:
         """MP4 not saved when videoClipUploadStatus != Done."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -370,7 +370,7 @@ class TestSyncLocalSaveBasics:
         saved = list((tmp_path / "Terrasse").rglob("*.mp4"))
         assert saved == [], "MP4 must not be saved when clip status is not Done"
 
-    def test_unsafe_url_not_fetched(self, tmp_path):
+    def test_unsafe_url_not_fetched(self, tmp_path: Path) -> None:
         """SSRF guard: URLs not on bosch domains must be skipped."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -380,7 +380,7 @@ class TestSyncLocalSaveBasics:
             sync_local_save(coord, ev, "tok", "Terrasse")
             mock_get.assert_not_called()
 
-    def test_empty_download_path_is_noop(self, tmp_path):
+    def test_empty_download_path_is_noop(self, tmp_path: Path) -> None:
         """Empty download_path → function returns immediately, no files saved."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -389,7 +389,7 @@ class TestSyncLocalSaveBasics:
             sync_local_save(coord, _make_ev(), "tok", "Terrasse")
             mock_get.assert_not_called()
 
-    def test_existing_file_not_redownloaded(self, tmp_path):
+    def test_existing_file_not_redownloaded(self, tmp_path: Path) -> None:
         """Files that already exist are skipped (idempotent on FCM duplicates)."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -432,7 +432,7 @@ class TestSyncLocalSaveEmptyDownloadPath:
 class TestSyncLocalSaveTimestampGuards:
     """A short/empty/malformed timestamp must never crash the FCM save path."""
 
-    def test_short_timestamp_returns_early(self, tmp_path):
+    def test_short_timestamp_returns_early(self, tmp_path: Path) -> None:
         """Timestamp shorter than 19 chars → return without writing any file."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -447,7 +447,7 @@ class TestSyncLocalSaveTimestampGuards:
             "Short timestamp must cause early return — no folder or file created"
         )
 
-    def test_empty_timestamp_returns_early(self, tmp_path):
+    def test_empty_timestamp_returns_early(self, tmp_path: Path) -> None:
         """Empty timestamp → return without writing."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -456,7 +456,9 @@ class TestSyncLocalSaveTimestampGuards:
         sync_local_save(coord, ev, "tok", "Terrasse")
         assert list(tmp_path.iterdir()) == [], "Empty timestamp must cause early return"
 
-    def test_malformed_but_long_timestamp_falls_through_to_download(self, tmp_path):
+    def test_malformed_but_long_timestamp_falls_through_to_download(
+        self, tmp_path: Path
+    ) -> None:
         """Timestamp with month=0 causes ValueError in strptime → the except
         swallows it, and the download proceeds normally anyway.
         """
@@ -482,7 +484,9 @@ class TestSyncLocalSaveTimestampGuards:
         # The download was attempted (exception swallowed, execution continues)
         resp.__enter__.assert_called()
 
-    def test_valid_old_timestamp_skipped_when_started_at_set(self, tmp_path):
+    def test_valid_old_timestamp_skipped_when_started_at_set(
+        self, tmp_path: Path
+    ) -> None:
         """Timestamp predating session start → skipped (ev_epoch < started_at - 60).
         This is the normal gate that the malformed-timestamp test bypasses via except.
         """
@@ -510,7 +514,7 @@ class TestSyncLocalSavePatternFormatErrors:
     """Bad user-supplied folder_pattern / file_pattern keys must not crash;
     a sensible fallback path is used instead."""
 
-    def test_folder_pattern_unknown_key_falls_back_to_cam(self, tmp_path):
+    def test_folder_pattern_unknown_key_falls_back_to_cam(self, tmp_path: Path) -> None:
         """`{nonexistent}` in folder_pattern → KeyError caught → sub = cam_safe."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -530,7 +534,7 @@ class TestSyncLocalSavePatternFormatErrors:
         found = list(tmp_path.rglob("Terrasse*"))
         assert found, "Fallback path missing — KeyError not handled cleanly"
 
-    def test_file_pattern_unknown_key_falls_back(self, tmp_path):
+    def test_file_pattern_unknown_key_falls_back(self, tmp_path: Path) -> None:
         """`{nonexistent}` in file_pattern → KeyError caught → default stem."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -556,7 +560,7 @@ class TestSyncLocalSaveMp4Gate:
     """Additional branch coverage around the mp4-status gate and swallowed
     download exceptions."""
 
-    def test_mp4_skipped_when_status_not_done(self, tmp_path):
+    def test_mp4_skipped_when_status_not_done(self, tmp_path: Path) -> None:
         """MP4 url present but videoClipUploadStatus != 'Done' → MP4 not downloaded."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -575,7 +579,7 @@ class TestSyncLocalSaveMp4Gate:
 
         mock_urlopen.assert_not_called()
 
-    def test_download_exception_logged_not_raised(self, tmp_path):
+    def test_download_exception_logged_not_raised(self, tmp_path: Path) -> None:
         """urlopen raising an exception must be swallowed — no crash."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -590,7 +594,7 @@ class TestSyncLocalSaveMp4Gate:
         with patch(URLOPEN, side_effect=OSError("disk full")):
             sync_local_save(coord, ev, "tok", "Terrasse")  # must not raise
 
-    def test_image_downloaded_and_written(self, tmp_path):
+    def test_image_downloaded_and_written(self, tmp_path: Path) -> None:
         """HTTP 200 image response → file written to download_path/camera/stem.jpg."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -1748,7 +1752,7 @@ class TestFtpMakedirs:
 
 
 class TestFtpConnect:
-    def test_connect_passive_mode(self, monkeypatch):
+    def test_connect_passive_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """FRITZ!Box FTP requires passive mode — connection must call
         `set_pasv(True)` after login. Active mode silently fails on
         NAT'd connections (the default user setup)."""
@@ -2340,7 +2344,7 @@ class TestFtpFinallyQuitClose:
         fake_ftp.quit.assert_called_once()
         fake_ftp.close.assert_called_once()
 
-    def test_quit_and_close_both_fail(self, tmp_path):
+    def test_quit_and_close_both_fail(self, tmp_path: Path) -> None:
         """quit() + close() both raise → outer caller sees no exception."""
         from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
 
@@ -2996,12 +3000,7 @@ class TestRetentionMath:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: _http_get_chunked Bearer-auth Request building (relocated from
-# tests/test_remaining_cheap_gaps.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
+# _http_get_chunked Bearer-auth Request building (relocated from tests/test_remaining_cheap_gaps.py)
 class TestHttpGetChunked:
     def test_builds_bearer_request_and_urlopens(self):
         """`_http_get_chunked` must build a Request with `Authorization:
@@ -3031,19 +3030,15 @@ class TestHttpGetChunked:
         assert captured_req["timeout"] == 30
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: sync_local_save filenaming with a camera-name prefix (relocated
-# from tests/test_fresh_install.py — the _FILE_RE regex tests it complements
+# sync_local_save filenaming with a camera-name prefix (relocated from
+# tests/test_fresh_install.py — the _FILE_RE regex tests it complements
 # live in tests/test_media_source.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 class TestLocalSaveFilenaming:
     """Files saved by sync_local_save must include the camera prefix in the
     filename so media_source.py's `_FILE_RE` can attribute them back to the
     right camera in the Media Browser."""
 
-    def test_saved_filename_includes_camera_prefix(self, tmp_path):
+    def test_saved_filename_includes_camera_prefix(self, tmp_path: Path) -> None:
         from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
         from custom_components.bosch_shc_camera.smb import _safe_name, sync_local_save
 
@@ -3101,13 +3096,10 @@ class TestLocalSaveFilenaming:
             )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: motion-event / live-stream TLS-channel contention — SMB/FTP
-# prefetched-image bypass (relocated from
-# tests/test_stream_motion_contention.py — the fcm.py Path A guard + the
-# async_send_alert prefetch-propagation sibling live in tests/test_fcm.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Motion-event / live-stream TLS-channel contention — SMB/FTP prefetched-image
+# bypass (relocated from tests/test_stream_motion_contention.py — the fcm.py
+# Path A guard + the async_send_alert prefetch-propagation sibling live in
+# tests/test_fcm.py)
 _JPEG_BYTES_MOTION = b"\xff\xd8\xff\xe0" + b"\x42" * 400  # 404 B
 
 

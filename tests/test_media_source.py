@@ -57,9 +57,7 @@ _SAFE_VIDEO_URL = "https://media.boschsecurity.com/clip.mp4"
 _URLOPEN = "custom_components.bosch_shc_camera.smb.urllib.request.urlopen"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Shared helpers (deduped from the original 10 files)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _iso_ts(offset_s: float) -> str:
@@ -231,36 +229,33 @@ def _make_nvr_tree(
     return _NvrBackend(str(tmp_path))
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# PURE HELPERS: _safe_join, _is_macos_junk, _parse_filename,
-# _format_event_title, _FILE_RE
-# ═════════════════════════════════════════════════════════════════════════
+# Pure helpers: _safe_join, _is_macos_junk, _parse_filename, _format_event_title, _FILE_RE
 
 
 class TestSafeJoin:
-    def test_normal_relative_path(self, tmp_path):
+    def test_normal_relative_path(self, tmp_path: Path):
         result = _safe_join(tmp_path, "Terrasse/2026-05-05/snap.jpg")
         assert result is not None
         assert result.is_relative_to(tmp_path.resolve())
 
-    def test_traversal_attempt_rejected(self, tmp_path):
+    def test_traversal_attempt_rejected(self, tmp_path: Path):
         """`../etc/passwd` must NOT escape the base directory."""
         # raise_if_invalid_path catches `..` directly
         result = _safe_join(tmp_path, "../etc/passwd")
         assert result is None
 
-    def test_absolute_path_rejected(self, tmp_path):
+    def test_absolute_path_rejected(self, tmp_path: Path):
         """Absolute path -> traversal attempt -> reject."""
         result = _safe_join(tmp_path, "/etc/passwd")
         assert result is None
 
-    def test_double_traversal_rejected(self, tmp_path):
+    def test_double_traversal_rejected(self, tmp_path: Path):
         result = _safe_join(tmp_path, "../../etc/passwd")
         assert result is None
 
 
 class TestSafeJoinTraversal:
-    def test_symlink_escaping_base_returns_none(self, tmp_path):
+    def test_symlink_escaping_base_returns_none(self, tmp_path: Path):
         """Symlink that points outside base passes raise_if_invalid_path
         but resolve() shows it's outside the base -> returns None."""
         base = tmp_path / "base"
@@ -275,7 +270,7 @@ class TestSafeJoinTraversal:
         result = _safe_join(base, "escape")
         assert result is None
 
-    def test_valid_path_returns_target(self, tmp_path):
+    def test_valid_path_returns_target(self, tmp_path: Path):
         """Normal relative path stays inside base -> returns Path."""
         (tmp_path / "cam").mkdir()
         result = _safe_join(tmp_path, "cam")
@@ -296,7 +291,7 @@ class TestIsMacosJunk:
             ("", False),
         ],
     )
-    def test_classification(self, name, expected):
+    def test_classification(self, name: str, expected: bool):
         from custom_components.bosch_shc_camera.media_source import _is_macos_junk
 
         assert _is_macos_junk(name) is expected
@@ -422,7 +417,7 @@ class TestFileRegexEdgeCases:
     """_FILE_RE must match (or correctly reject) filenames from various camera names."""
 
     @pytest.fixture(autouse=True)
-    def _import(self):
+    def _import(self) -> None:
         from custom_components.bosch_shc_camera.media_source import _FILE_RE
 
         self.re = _FILE_RE
@@ -485,11 +480,6 @@ class TestFileRegexEdgeCases:
         assert r is not None, "Lowercase hex IDs must be accepted (re.IGNORECASE)"
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# _enabled_sources (Media Browser source decision tree)
-# ═════════════════════════════════════════════════════════════════════════
-
-
 class TestEnabledSources:
     """Reproduces the user-reported issue 'Media Browser bleibt leer nach v11.0.0'.
 
@@ -539,7 +529,7 @@ class TestEnabledSources:
         hass = self._build_hass([])
         assert _enabled_sources(hass) == []
 
-    def test_download_path_set_adds_local_backend(self, tmp_path):
+    def test_download_path_set_adds_local_backend(self, tmp_path: Path):
         """download_path set -> Local backend always appears."""
         hass = self._build_hass(
             [
@@ -556,7 +546,7 @@ class TestEnabledSources:
         assert src.kind == "L"
         assert src.label == "Lokal"
 
-    def test_empty_download_path_hides_local_backend(self, tmp_path):
+    def test_empty_download_path_hides_local_backend(self, tmp_path: Path):
         """Empty download_path -> no local backend."""
         hass = self._build_hass(
             [
@@ -569,7 +559,7 @@ class TestEnabledSources:
         )
         assert _enabled_sources(hass) == []
 
-    def test_download_path_creates_missing_directory(self, tmp_path):
+    def test_download_path_creates_missing_directory(self, tmp_path: Path):
         """download_path pointing to non-existent dir -> dir is created on first browse.
 
         Regression: before v11.0.1 the Media Browser stayed empty until the
@@ -606,7 +596,7 @@ class TestEnabledSources:
         result = _enabled_sources(hass)
         assert result == []
 
-    def test_smb_shown_regardless_of_upload_protocol(self, tmp_path):
+    def test_smb_shown_regardless_of_upload_protocol(self, tmp_path: Path):
         """SMB backend appears even when upload_protocol=ftp (FTP files land on
         the same NAS share and are readable via SMB -- v11.0.12 fix)."""
         hass = self._build_hass(
@@ -629,7 +619,7 @@ class TestEnabledSources:
         assert "S" in kinds, "SMB backend must appear even when upload_protocol=ftp"
         assert "L" in kinds, "Local backend must also appear"
 
-    def test_both_local_and_smb_shown_when_configured(self, tmp_path):
+    def test_both_local_and_smb_shown_when_configured(self, tmp_path: Path):
         """Local + SMB both shown simultaneously -- no filter."""
         hass = self._build_hass(
             [
@@ -649,7 +639,7 @@ class TestEnabledSources:
         kinds = {s.kind for s, _ in sources}
         assert kinds == {"L", "S"}
 
-    def test_only_configured_sources_shown(self, tmp_path):
+    def test_only_configured_sources_shown(self, tmp_path: Path):
         """When only download_path is set (no SMB), only local appears."""
         hass = self._build_hass(
             [
@@ -690,7 +680,7 @@ class TestEnabledSourcesNoRuntimeData:
 
 
 class TestFindSourceNone:
-    def test_find_source_unknown_kind_returns_none(self, tmp_path):
+    def test_find_source_unknown_kind_returns_none(self, tmp_path: Path):
         hass = _hass_stub("entry1", tmp_path=tmp_path)
         result = _find_source(hass, "entry1", "X")  # X is not a valid kind
         assert result is None
@@ -719,7 +709,7 @@ class TestEnabledSourcesOSError:
         kinds = [s.kind for s, _ in sources]
         assert "L" not in kinds
 
-    def test_nvr_oserror_skipped(self, tmp_path):
+    def test_nvr_oserror_skipped(self, tmp_path: Path):
         """OSError when accessing NVR path -> source is silently skipped."""
         entry = MagicMock()
         entry.entry_id = "e1"
@@ -764,14 +754,14 @@ class TestEnabledSourcesFilters:
         hass.data = {}
         return ms._enabled_sources(hass)
 
-    def test_local_shown_when_download_path_set(self, tmp_path):
+    def test_local_shown_when_download_path_set(self, tmp_path: Path):
         """Local backend always appears when download_path is configured."""
         entry = self._entry({"download_path": str(tmp_path)})
         sources = self._call(entry)
         kinds = [src.kind for src, _ in sources]
         assert "L" in kinds
 
-    def test_smb_shown_when_upload_enabled(self, tmp_path):
+    def test_smb_shown_when_upload_enabled(self, tmp_path: Path):
         """SMB backend always appears when enable_smb_upload=True + credentials."""
         entry = self._entry(
             {
@@ -788,7 +778,7 @@ class TestEnabledSourcesFilters:
         kinds = [src.kind for src, _ in sources]
         assert "S" in kinds
 
-    def test_smb_shown_when_ftp_protocol(self, tmp_path):
+    def test_smb_shown_when_ftp_protocol(self, tmp_path: Path):
         """SMB browser backend shown even when upload_protocol=ftp (v11.0.12 fix)."""
         entry = self._entry(
             {
@@ -805,7 +795,7 @@ class TestEnabledSourcesFilters:
         kinds = [src.kind for src, _ in sources]
         assert "S" in kinds
 
-    def test_nvr_backend_added_when_enabled(self, tmp_path):
+    def test_nvr_backend_added_when_enabled(self, tmp_path: Path):
         """enable_nvr=True with an existing dir must produce an NVR source."""
         nvr_base = tmp_path / "nvr"
         nvr_base.mkdir()
@@ -820,7 +810,7 @@ class TestEnabledSourcesFilters:
         kinds = [src.kind for src, _ in sources]
         assert "N" in kinds
 
-    def test_nvr_skipped_when_dir_missing(self, tmp_path):
+    def test_nvr_skipped_when_dir_missing(self, tmp_path: Path):
         entry = self._entry(
             {
                 "enable_nvr": True,
@@ -832,7 +822,7 @@ class TestEnabledSourcesFilters:
         kinds = [src.kind for src, _ in sources]
         assert "N" not in kinds
 
-    def test_download_path_dir_created_if_missing(self, tmp_path):
+    def test_download_path_dir_created_if_missing(self, tmp_path: Path):
         """Missing download_path directory must be created by _enabled_sources."""
         new_dir = tmp_path / "auto_created"
         assert not new_dir.exists()
@@ -841,24 +831,22 @@ class TestEnabledSourcesFilters:
         assert new_dir.is_dir()
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _LocalBackend: list_cameras / list_dates / list_events / resolve
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestLocalBackendListCameras:
-    def test_empty_dir_returns_empty(self, tmp_path):
+    def test_empty_dir_returns_empty(self, tmp_path: Path):
         b = _LocalBackend(str(tmp_path))
         assert b.list_cameras() == []
 
-    def test_missing_dir_returns_empty(self, tmp_path):
+    def test_missing_dir_returns_empty(self, tmp_path: Path):
         """Backend constructed with a path that doesn't exist must
         return [], not crash. Defensive against user typos in
         download_path."""
         b = _LocalBackend(str(tmp_path / "does-not-exist"))
         assert b.list_cameras() == []
 
-    def test_lists_cameras_alphabetically_case_insensitive(self, tmp_path):
+    def test_lists_cameras_alphabetically_case_insensitive(self, tmp_path: Path):
         (tmp_path / "Zebra").mkdir()
         (tmp_path / "alpha").mkdir()
         (tmp_path / "Beta").mkdir()
@@ -866,7 +854,7 @@ class TestLocalBackendListCameras:
         # Case-insensitive sort
         assert b.list_cameras() == ["alpha", "Beta", "Zebra"]
 
-    def test_skips_macos_junk(self, tmp_path):
+    def test_skips_macos_junk(self, tmp_path: Path):
         """`._.DS_Store` and similar macOS metadata dirs must not
         appear as fake camera entries."""
         (tmp_path / "Real-Cam").mkdir()
@@ -875,7 +863,7 @@ class TestLocalBackendListCameras:
         b = _LocalBackend(str(tmp_path))
         assert b.list_cameras() == ["Real-Cam"]
 
-    def test_skips_underscore_dirs(self, tmp_path):
+    def test_skips_underscore_dirs(self, tmp_path: Path):
         """B13-5 regression: _staging / _failed NVR scratch dirs must not appear
         as camera tiles in the Media Browser for _LocalBackend."""
         (tmp_path / "Terrasse").mkdir()
@@ -888,12 +876,12 @@ class TestLocalBackendListCameras:
         assert "_failed" not in result, "_failed must be filtered from camera list"
         assert result == ["Innenbereich", "Terrasse"]
 
-    def test_skips_files_only_dirs(self, tmp_path):
+    def test_skips_files_only_dirs(self, tmp_path: Path):
         (tmp_path / "loose-file.txt").write_text("x")
         b = _LocalBackend(str(tmp_path))
         assert b.list_cameras() == []
 
-    def test_year_first_folders_appear_in_camera_list(self, tmp_path):
+    def test_year_first_folders_appear_in_camera_list(self, tmp_path: Path):
         """Year-first folders (e.g. "2026/") must appear in list_cameras() alongside
         real camera folders so users can browse legacy recordings without restructuring.
 
@@ -914,7 +902,7 @@ class TestLocalBackendListCameras:
         )
         assert "2025" in cameras, "year-first folder must appear"
 
-    def test_list_year_first_months(self, tmp_path):
+    def test_list_year_first_months(self, tmp_path: Path):
         """list_year_first_months returns 2-digit month dirs under base/YYYY/."""
         year_dir = tmp_path / "2026"
         (year_dir / "03").mkdir(parents=True)
@@ -925,7 +913,7 @@ class TestLocalBackendListCameras:
         months = b.list_year_first_months("2026")
         assert months == ["04", "03"], f"expected newest-first months, got {months}"
 
-    def test_list_year_first_days(self, tmp_path):
+    def test_list_year_first_days(self, tmp_path: Path):
         """list_year_first_days returns 2-digit day dirs under base/YYYY/MM/."""
         day_dir = tmp_path / "2026" / "03"
         (day_dir / "25").mkdir(parents=True)
@@ -935,7 +923,7 @@ class TestLocalBackendListCameras:
         days = b.list_year_first_days("2026", "03")
         assert days == ["26", "25"], f"expected newest-first days, got {days}"
 
-    def test_list_year_first_events(self, tmp_path):
+    def test_list_year_first_events(self, tmp_path: Path):
         """list_year_first_events returns (filename, image, parsed) tuples from base/YYYY/MM/DD/."""
         day = tmp_path / "2026" / "03" / "25"
         day.mkdir(parents=True)
@@ -952,7 +940,7 @@ class TestLocalBackendListCameras:
 
 
 class TestLocalBackendListDates:
-    def test_groups_files_by_date(self, tmp_path):
+    def test_groups_files_by_date(self, tmp_path: Path):
         cam = tmp_path / "Terrasse"
         cam.mkdir()
         # Filename pattern: <Camera>_<YYYY-MM-DD>_<HH-MM-SS>_<EventType>.<ext>
@@ -963,11 +951,11 @@ class TestLocalBackendListDates:
         # Reverse-sorted by date (newest first)
         assert b.list_dates("Terrasse") == ["2026-05-04", "2026-05-03"]
 
-    def test_unknown_camera_returns_empty(self, tmp_path):
+    def test_unknown_camera_returns_empty(self, tmp_path: Path):
         b = _LocalBackend(str(tmp_path))
         assert b.list_dates("NonExistent") == []
 
-    def test_skips_unparseable_filenames(self, tmp_path):
+    def test_skips_unparseable_filenames(self, tmp_path: Path):
         """Loose / hand-named files in the camera dir don't break the
         date listing -- they're silently skipped."""
         cam = tmp_path / "Cam"
@@ -977,7 +965,7 @@ class TestLocalBackendListDates:
         b = _LocalBackend(str(tmp_path))
         assert b.list_dates("Cam") == ["2026-05-04"]
 
-    def test_traversal_camera_name_returns_empty(self, tmp_path):
+    def test_traversal_camera_name_returns_empty(self, tmp_path: Path):
         """`../etc` style camera name must not escape the base dir
         -- `_safe_join` gates this."""
         b = _LocalBackend(str(tmp_path))
@@ -987,7 +975,7 @@ class TestLocalBackendListDates:
 class TestLocalBackendListDatesEdgeCases:
     """Line 126: directories inside a camera folder are skipped (only files count)."""
 
-    def test_subdir_in_cam_folder_skipped(self, tmp_path):
+    def test_subdir_in_cam_folder_skipped(self, tmp_path: Path):
         cam_dir = tmp_path / "Terrasse"
         cam_dir.mkdir()
         # A sub-directory -- must NOT contribute a date
@@ -998,7 +986,7 @@ class TestLocalBackendListDatesEdgeCases:
         dates = backend.list_dates("Terrasse")
         assert dates == ["2026-05-07"]
 
-    def test_no_valid_files_returns_empty(self, tmp_path):
+    def test_no_valid_files_returns_empty(self, tmp_path: Path):
         cam_dir = tmp_path / "Terrasse"
         cam_dir.mkdir()
         (cam_dir / "readme.txt").write_bytes(b"x")  # unrecognised extension
@@ -1007,7 +995,7 @@ class TestLocalBackendListDatesEdgeCases:
 
 
 class TestLocalBackendListEvents:
-    def test_groups_jpg_and_mp4_into_one_event(self, tmp_path):
+    def test_groups_jpg_and_mp4_into_one_event(self, tmp_path: Path):
         cam = tmp_path / "Cam"
         cam.mkdir()
         (cam / "Cam_2026-05-04_10-00-00_MOVEMENT_B1.jpg").write_text("x")
@@ -1021,7 +1009,7 @@ class TestLocalBackendListEvents:
         assert image.endswith(".jpg")
         assert parsed["date"] == "2026-05-04"
 
-    def test_image_only_event(self, tmp_path):
+    def test_image_only_event(self, tmp_path: Path):
         cam = tmp_path / "Cam"
         cam.mkdir()
         (cam / "Cam_2026-05-04_10-00-00_AUDIO_C1.jpg").write_text("x")
@@ -1031,7 +1019,7 @@ class TestLocalBackendListEvents:
         assert preferred.endswith(".jpg")
         assert image == preferred
 
-    def test_video_only_event_image_none(self, tmp_path):
+    def test_video_only_event_image_none(self, tmp_path: Path):
         cam = tmp_path / "Cam"
         cam.mkdir()
         (cam / "Cam_2026-05-04_10-00-00_AUDIO_C2.mp4").write_text("x")
@@ -1041,7 +1029,7 @@ class TestLocalBackendListEvents:
         assert preferred.endswith(".mp4")
         assert image is None
 
-    def test_filters_other_dates(self, tmp_path):
+    def test_filters_other_dates(self, tmp_path: Path):
         cam = tmp_path / "Cam"
         cam.mkdir()
         (cam / "Cam_2026-05-04_10-00-00_MOVEMENT_B1.jpg").write_text("x")
@@ -1052,7 +1040,7 @@ class TestLocalBackendListEvents:
         # Only the date=2026-05-04 entry came through
         assert events[0][2]["date"] == "2026-05-04"
 
-    def test_sorted_newest_first(self, tmp_path):
+    def test_sorted_newest_first(self, tmp_path: Path):
         """Within a date, events appear newest-first (reverse stem sort
         works because the timestamp is in the stem)."""
         cam = tmp_path / "Cam"
@@ -1071,14 +1059,14 @@ class TestLocalBackendListEvents:
 class TestLocalBackendListEventsEdgeCases:
     """Lines 135-140: cam_dir=None (path traversal blocked) + junk file skip."""
 
-    def test_cam_dir_none_path_traversal(self, tmp_path):
+    def test_cam_dir_none_path_traversal(self, tmp_path: Path):
         """_safe_join blocks '../..'; list_events returns []."""
         backend = _LocalBackend(str(tmp_path))
         # "../../etc" -> _safe_join returns None -> early return
         result = backend.list_events("../../etc", "2026-05-07")
         assert result == []
 
-    def test_dated_path_traversal_rejected(self, tmp_path):
+    def test_dated_path_traversal_rejected(self, tmp_path: Path):
         """Regression: list_events_dated must validate year/month/day before
         joining -- a '..' component (from a crafted media identifier) must NOT
         escape the camera directory. 2026-06-01 security fix."""
@@ -1100,7 +1088,7 @@ class TestLocalBackendListEventsEdgeCases:
         )
         assert len(backend.list_events_dated("Terrasse", "2026", "05", "07")) == 1
 
-    def test_macos_junk_file_skipped(self, tmp_path):
+    def test_macos_junk_file_skipped(self, tmp_path: Path):
         cam_dir = tmp_path / "Terrasse"
         cam_dir.mkdir()
         (cam_dir / "._Terrasse_2026-05-07_10-00-00_MOVEMENT_11111111.mp4").write_bytes(
@@ -1116,7 +1104,7 @@ class TestLocalBackendListEventsEdgeCases:
 
 
 class TestLocalBackendResolve:
-    def test_resolve_existing_file(self, tmp_path):
+    def test_resolve_existing_file(self, tmp_path: Path):
         (tmp_path / "Cam").mkdir()
         target = tmp_path / "Cam" / "Cam_2026-05-04_10-00-00_MOVEMENT_B1.jpg"
         target.write_text("x")
@@ -1124,7 +1112,7 @@ class TestLocalBackendResolve:
         out = b.resolve("Cam", "Cam_2026-05-04_10-00-00_MOVEMENT_B1.jpg")
         assert out == target
 
-    def test_resolve_traversal_blocked(self, tmp_path):
+    def test_resolve_traversal_blocked(self, tmp_path: Path):
         """Path traversal via `..` must be blocked even when the target
         file exists outside the base."""
         b = _LocalBackend(str(tmp_path / "base"))
@@ -1133,12 +1121,12 @@ class TestLocalBackendResolve:
         out = b.resolve("..", "etc", "passwd")
         assert out is None
 
-    def test_resolve_nonexistent_file_returns_none(self, tmp_path):
+    def test_resolve_nonexistent_file_returns_none(self, tmp_path: Path):
         b = _LocalBackend(str(tmp_path))
         out = b.resolve("Cam", "missing.jpg")
         assert out is None
 
-    def test_resolve_directory_returns_none(self, tmp_path):
+    def test_resolve_directory_returns_none(self, tmp_path: Path):
         """Resolve must only return file paths -- directory targets
         return None (caller wants to play a media file)."""
         (tmp_path / "Cam").mkdir()
@@ -1147,7 +1135,7 @@ class TestLocalBackendResolve:
         out = b.resolve("Cam")
         assert out is None
 
-    def test_resolve_year_first_4_part_path(self, tmp_path):
+    def test_resolve_year_first_4_part_path(self, tmp_path: Path):
         """resolve(year, month, day, filename) must return the file for year-first layout.
 
         _serve_local accepts len(tail)==4, which maps to (year, month, day, filename) --
@@ -1177,7 +1165,7 @@ class TestLocalBackendCameraFirst:
     every playback attempt. Fix: prefer Local when no SMB source is configured.
     """
 
-    def test_list_years_returns_four_digit_dirs(self, tmp_path):
+    def test_list_years_returns_four_digit_dirs(self, tmp_path: Path):
         """list_years must return only dirs matching ^\\d{4}$ (not full YYYY-MM-DD names)."""
         cam = tmp_path / "Terrasse"
         (cam / "2026").mkdir(parents=True)
@@ -1189,7 +1177,7 @@ class TestLocalBackendCameraFirst:
             f"Expected only 4-digit year dirs, got {years}"
         )
 
-    def test_list_months_returns_two_digit_dirs(self, tmp_path):
+    def test_list_months_returns_two_digit_dirs(self, tmp_path: Path):
         cam = tmp_path / "Terrasse"
         year_dir = cam / "2026"
         (year_dir / "05").mkdir(parents=True)
@@ -1199,7 +1187,7 @@ class TestLocalBackendCameraFirst:
         months = b.list_months("Terrasse", "2026")
         assert months == ["05", "04"], f"Expected two-digit month dirs, got {months}"
 
-    def test_list_days_returns_two_digit_dirs(self, tmp_path):
+    def test_list_days_returns_two_digit_dirs(self, tmp_path: Path):
         cam = tmp_path / "Terrasse"
         month_dir = cam / "2026" / "05"
         (month_dir / "08").mkdir(parents=True)
@@ -1208,7 +1196,7 @@ class TestLocalBackendCameraFirst:
         days = b.list_days("Terrasse", "2026", "05")
         assert days == ["08", "07"], f"Expected two-digit day dirs, got {days}"
 
-    def test_list_events_dated_reads_files_from_day_dir(self, tmp_path):
+    def test_list_events_dated_reads_files_from_day_dir(self, tmp_path: Path):
         cam = tmp_path / "Terrasse"
         day_dir = cam / "2026" / "05" / "08"
         day_dir.mkdir(parents=True)
@@ -1224,7 +1212,7 @@ class TestLocalBackendCameraFirst:
         )
         assert parsed["date"] == "2026-05-08", f"Parsed date wrong: {parsed['date']}"
 
-    def test_resolve_camera_first_path(self, tmp_path):
+    def test_resolve_camera_first_path(self, tmp_path: Path):
         """resolve(camera, year, month, day, filename) must return the correct file path."""
         cam = tmp_path / "Terrasse"
         day_dir = cam / "2026" / "05" / "08"
@@ -1247,38 +1235,36 @@ class TestLocalBackendCameraFirst:
         )
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _LocalBackend: flat-coverage gaps (None-branches / traversal / junk skips)
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestLocalListYears:
-    def test_cam_path_is_file_not_dir_returns_empty(self, tmp_path):
+    def test_cam_path_is_file_not_dir_returns_empty(self, tmp_path: Path):
         # Create "Terrasse" as a file, not a dir
         (tmp_path / "Terrasse").write_bytes(b"x")
         backend = _LocalBackend(str(tmp_path))
         assert backend.list_years("Terrasse") == []
 
-    def test_path_traversal_returns_empty(self, tmp_path):
+    def test_path_traversal_returns_empty(self, tmp_path: Path):
         backend = _LocalBackend(str(tmp_path / "sub"))
         assert backend.list_years("../../etc") == []
 
 
 class TestLocalListMonths:
-    def test_cam_dir_none_path_traversal_returns_empty(self, tmp_path):
+    def test_cam_dir_none_path_traversal_returns_empty(self, tmp_path: Path):
         nested = tmp_path / "base"
         nested.mkdir()
         backend = _LocalBackend(str(nested))
         assert backend.list_months("../../etc", "2026") == []
 
-    def test_year_dir_none_path_traversal_returns_empty(self, tmp_path):
+    def test_year_dir_none_path_traversal_returns_empty(self, tmp_path: Path):
         cam_dir = tmp_path / "Cam"
         cam_dir.mkdir()
         backend = _LocalBackend(str(tmp_path))
         # year is path traversal inside cam_dir
         assert backend.list_months("Cam", "../../etc") == []
 
-    def test_year_dir_not_dir_returns_empty(self, tmp_path):
+    def test_year_dir_not_dir_returns_empty(self, tmp_path: Path):
         cam_dir = tmp_path / "Cam"
         cam_dir.mkdir()
         # Create "2026" as a file inside cam
@@ -1286,13 +1272,13 @@ class TestLocalListMonths:
         backend = _LocalBackend(str(tmp_path))
         assert backend.list_months("Cam", "2026") == []
 
-    def test_year_dir_missing_returns_empty(self, tmp_path):
+    def test_year_dir_missing_returns_empty(self, tmp_path: Path):
         cam_dir = tmp_path / "Cam"
         cam_dir.mkdir()
         backend = _LocalBackend(str(tmp_path))
         assert backend.list_months("Cam", "2026") == []
 
-    def test_year_dir_exists_returns_sorted_months(self, tmp_path):
+    def test_year_dir_exists_returns_sorted_months(self, tmp_path: Path):
         """Year dir exists and has valid month dirs -> returns them."""
         (tmp_path / "Cam" / "2026" / "05").mkdir(parents=True)
         (tmp_path / "Cam" / "2026" / "04").mkdir(parents=True)
@@ -1302,26 +1288,26 @@ class TestLocalListMonths:
 
 
 class TestLocalListDays:
-    def test_cam_dir_none_returns_empty(self, tmp_path):
+    def test_cam_dir_none_returns_empty(self, tmp_path: Path):
         nested = tmp_path / "base"
         nested.mkdir()
         backend = _LocalBackend(str(nested))
         assert backend.list_days("../../etc", "2026", "05") == []
 
-    def test_year_traversal_returns_empty(self, tmp_path):
+    def test_year_traversal_returns_empty(self, tmp_path: Path):
         cam_dir = tmp_path / "Cam"
         cam_dir.mkdir()
         backend = _LocalBackend(str(tmp_path))
         assert backend.list_days("Cam", "../../etc", "05") == []
 
-    def test_month_traversal_inside_year_returns_empty(self, tmp_path):
+    def test_month_traversal_inside_year_returns_empty(self, tmp_path: Path):
         cam_dir = tmp_path / "Cam"
         year_dir = cam_dir / "2026"
         year_dir.mkdir(parents=True)
         backend = _LocalBackend(str(tmp_path))
         assert backend.list_days("Cam", "2026", "../../etc") == []
 
-    def test_month_dir_not_dir_returns_empty(self, tmp_path):
+    def test_month_dir_not_dir_returns_empty(self, tmp_path: Path):
         cam_dir = tmp_path / "Cam"
         year_dir = cam_dir / "2026"
         year_dir.mkdir(parents=True)
@@ -1329,7 +1315,7 @@ class TestLocalListDays:
         backend = _LocalBackend(str(tmp_path))
         assert backend.list_days("Cam", "2026", "05") == []
 
-    def test_month_dir_missing_returns_empty(self, tmp_path):
+    def test_month_dir_missing_returns_empty(self, tmp_path: Path):
         cam_dir = tmp_path / "Cam"
         (cam_dir / "2026").mkdir(parents=True)
         backend = _LocalBackend(str(tmp_path))
@@ -1337,13 +1323,13 @@ class TestLocalListDays:
 
 
 class TestLocalListEventsDated:
-    def test_cam_dir_none_returns_empty(self, tmp_path):
+    def test_cam_dir_none_returns_empty(self, tmp_path: Path):
         nested = tmp_path / "base"
         nested.mkdir()
         backend = _LocalBackend(str(nested))
         assert backend.list_events_dated("../../etc", "2026", "05", "07") == []
 
-    def test_day_dir_not_dir_returns_empty(self, tmp_path):
+    def test_day_dir_not_dir_returns_empty(self, tmp_path: Path):
         # Create cam/year/month/day as a file
         day_path = tmp_path / "Cam" / "2026" / "05" / "07"
         day_path.parent.mkdir(parents=True)
@@ -1351,14 +1337,14 @@ class TestLocalListEventsDated:
         backend = _LocalBackend(str(tmp_path))
         assert backend.list_events_dated("Cam", "2026", "05", "07") == []
 
-    def test_day_dir_missing_returns_empty(self, tmp_path):
+    def test_day_dir_missing_returns_empty(self, tmp_path: Path):
         (tmp_path / "Cam" / "2026" / "05").mkdir(parents=True)
         backend = _LocalBackend(str(tmp_path))
         assert backend.list_events_dated("Cam", "2026", "05", "07") == []
 
 
 class TestLocalCollectEvents:
-    def test_macos_junk_skipped_in_collect(self, tmp_path):
+    def test_macos_junk_skipped_in_collect(self, tmp_path: Path):
         day_dir = tmp_path / "Cam" / "2026" / "05" / "07"
         day_dir.mkdir(parents=True)
         stem = "Cam_2026-05-07_10-00-00_MOVEMENT_AB12CD34"
@@ -1369,7 +1355,7 @@ class TestLocalCollectEvents:
         assert len(events) == 1
         assert "._" not in events[0][0]
 
-    def test_unparseable_filename_skipped_in_collect(self, tmp_path):
+    def test_unparseable_filename_skipped_in_collect(self, tmp_path: Path):
         day_dir = tmp_path / "Cam" / "2026" / "05" / "07"
         day_dir.mkdir(parents=True)
         (day_dir / "not_a_valid_event.txt").write_bytes(b"x")
@@ -1377,20 +1363,18 @@ class TestLocalCollectEvents:
         assert backend.list_events_dated("Cam", "2026", "05", "07") == []
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _LocalBackend: year-first tree (base/YYYY/MM/DD/) None-branches
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestLocalListYearFirstMonthsNoneBranches:
     """`_safe_join(base, year) is None` -> return []."""
 
-    def test_path_traversal_year_returns_empty(self, tmp_path):
+    def test_path_traversal_year_returns_empty(self, tmp_path: Path):
         """Year arg with `..` -> _safe_join returns None -> caller returns []."""
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_months("../../etc") == []
 
-    def test_year_dir_not_a_dir_returns_empty(self, tmp_path):
+    def test_year_dir_not_a_dir_returns_empty(self, tmp_path: Path):
         """Year is a file, not a directory -> second arm of `not d.is_dir()` -> []."""
         (tmp_path / "2026").write_bytes(b"x")
         b = _LocalBackend(str(tmp_path))
@@ -1400,18 +1384,18 @@ class TestLocalListYearFirstMonthsNoneBranches:
 class TestLocalListYearFirstDaysNoneBranches:
     """Year-traversal None -> []; month-traversal None -> []."""
 
-    def test_year_traversal_returns_empty(self, tmp_path):
+    def test_year_traversal_returns_empty(self, tmp_path: Path):
         """Year is `../../etc` -> _safe_join returns None -> []."""
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_days("../../etc", "05") == []
 
-    def test_month_traversal_inside_year_returns_empty(self, tmp_path):
+    def test_month_traversal_inside_year_returns_empty(self, tmp_path: Path):
         """Year ok but month is traversal -> second _safe_join None -> []."""
         (tmp_path / "2026").mkdir()
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_days("2026", "../../etc") == []
 
-    def test_month_dir_missing_returns_empty(self, tmp_path):
+    def test_month_dir_missing_returns_empty(self, tmp_path: Path):
         """`not d.is_dir()`: month name valid but dir doesn't exist."""
         (tmp_path / "2026").mkdir()
         b = _LocalBackend(str(tmp_path))
@@ -1421,33 +1405,31 @@ class TestLocalListYearFirstDaysNoneBranches:
 class TestLocalListYearFirstEventsNoneBranches:
     """3 traversal-None branches for the year-first events helper."""
 
-    def test_year_traversal_returns_empty(self, tmp_path):
+    def test_year_traversal_returns_empty(self, tmp_path: Path):
         """Year is `..` -> first _safe_join None -> []."""
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_events("../../etc", "05", "07") == []
 
-    def test_month_traversal_returns_empty(self, tmp_path):
+    def test_month_traversal_returns_empty(self, tmp_path: Path):
         """Year ok, month traversal -> second _safe_join None -> []."""
         (tmp_path / "2026").mkdir()
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_events("2026", "../../etc", "07") == []
 
-    def test_day_traversal_returns_empty(self, tmp_path):
+    def test_day_traversal_returns_empty(self, tmp_path: Path):
         """Year+month ok, day traversal -> third _safe_join None -> []."""
         (tmp_path / "2026" / "05").mkdir(parents=True)
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_events("2026", "05", "../../etc") == []
 
-    def test_day_dir_missing_returns_empty(self, tmp_path):
+    def test_day_dir_missing_returns_empty(self, tmp_path: Path):
         """`not d.is_dir()`: day name valid but day dir absent."""
         (tmp_path / "2026" / "05").mkdir(parents=True)
         b = _LocalBackend(str(tmp_path))
         assert b.list_year_first_events("2026", "05", "07") == []
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _LocalBackend: camera names with spaces / umlauts
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _make_event_file(
@@ -1475,14 +1457,14 @@ class TestLocalBackendCameraNameWithSpace:
     spaces so list_cameras / list_dates / list_events all work end-to-end.
     """
 
-    def test_list_cameras_returns_name_with_space(self, tmp_path):
+    def test_list_cameras_returns_name_with_space(self, tmp_path: Path):
         """Directories whose name contains a space are returned correctly."""
         cam = "Meine Kamera"
         (tmp_path / cam).mkdir()
         b = _LocalBackend(str(tmp_path))
         assert cam in b.list_cameras()
 
-    def test_list_dates_with_space_in_name(self, tmp_path):
+    def test_list_dates_with_space_in_name(self, tmp_path: Path):
         """list_dates must find dates when camera name has a space."""
         cam = "Bosch Terrasse"
         cam_dir = tmp_path / cam
@@ -1491,7 +1473,7 @@ class TestLocalBackendCameraNameWithSpace:
         b = _LocalBackend(str(tmp_path))
         assert b.list_dates(cam) == ["2026-05-07"]
 
-    def test_list_dates_multiple_days(self, tmp_path):
+    def test_list_dates_multiple_days(self, tmp_path: Path):
         """Multiple dates returned sorted newest-first, spaces handled."""
         cam = "Kamera 01"
         cam_dir = tmp_path / cam
@@ -1501,7 +1483,7 @@ class TestLocalBackendCameraNameWithSpace:
         b = _LocalBackend(str(tmp_path))
         assert b.list_dates(cam) == ["2026-05-07", "2026-05-06"]
 
-    def test_list_events_returns_files_with_space_in_name(self, tmp_path):
+    def test_list_events_returns_files_with_space_in_name(self, tmp_path: Path):
         """list_events must yield events when camera name has a space."""
         cam = "Garten Kamera"
         cam_dir = tmp_path / cam
@@ -1511,7 +1493,7 @@ class TestLocalBackendCameraNameWithSpace:
         events = b.list_events(cam, "2026-05-07")
         assert len(events) == 1, "One event expected"
 
-    def test_list_events_multiple_spaces(self, tmp_path):
+    def test_list_events_multiple_spaces(self, tmp_path: Path):
         """Camera name with multiple spaces must work end-to-end."""
         cam = "Vorne Rechts Aussen"
         cam_dir = tmp_path / cam
@@ -1522,7 +1504,7 @@ class TestLocalBackendCameraNameWithSpace:
         events = b.list_events(cam, "2026-05-07")
         assert len(events) == 1
 
-    def test_resolve_file_with_space_in_name(self, tmp_path):
+    def test_resolve_file_with_space_in_name(self, tmp_path: Path):
         """resolve() must return the Path for a file under a camera with a space."""
         cam = "Test Kamera"
         cam_dir = tmp_path / cam
@@ -1536,7 +1518,7 @@ class TestLocalBackendCameraNameWithSpace:
 class TestLocalBackendUmlautNames:
     """Camera names with German umlauts (ä, ö, ü) must be handled correctly."""
 
-    def test_list_dates_umlaut_name(self, tmp_path):
+    def test_list_dates_umlaut_name(self, tmp_path: Path):
         cam = "Küche"
         cam_dir = tmp_path / cam
         cam_dir.mkdir()
@@ -1544,7 +1526,7 @@ class TestLocalBackendUmlautNames:
         b = _LocalBackend(str(tmp_path))
         assert b.list_dates(cam) == ["2026-05-07"]
 
-    def test_list_dates_umlaut_with_space(self, tmp_path):
+    def test_list_dates_umlaut_with_space(self, tmp_path: Path):
         cam = "Haustür Eingang"
         cam_dir = tmp_path / cam
         cam_dir.mkdir()
@@ -1553,11 +1535,9 @@ class TestLocalBackendUmlautNames:
         assert b.list_dates(cam) == ["2026-05-07"]
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# smb.sync_local_save: auto-download HTTP flow + old-event guard
-# (backs the _LocalBackend on-disk tree; exercised here alongside its
-# consumer rather than in tests/test_smb.py)
-# ═════════════════════════════════════════════════════════════════════════
+# smb.sync_local_save: auto-download HTTP flow + old-event guard (backs the
+# _LocalBackend on-disk tree; exercised here alongside its consumer rather
+# than in tests/test_smb.py)
 
 
 class TestSyncLocalSaveDownload:
@@ -1575,7 +1555,7 @@ class TestSyncLocalSaveDownload:
             with patch(_URLOPEN, return_value=mock_urlopen_resp):
                 sync_local_save(coord, ev, "TOKEN", cam_name)
 
-    def test_jpg_downloaded_on_200(self, tmp_path):
+    def test_jpg_downloaded_on_200(self, tmp_path: Path):
         coord = _coord(tmp_path)
         resp = _urlopen_resp(200, b"JPEG")
         self._call(coord, _ev(videoClipUrl=None), resp)
@@ -1583,7 +1563,7 @@ class TestSyncLocalSaveDownload:
         assert len(files) == 1
         assert files[0].read_bytes() == b"JPEG"
 
-    def test_mp4_and_jpg_both_downloaded(self, tmp_path):
+    def test_mp4_and_jpg_both_downloaded(self, tmp_path: Path):
         coord = _coord(tmp_path)
         resp = _urlopen_resp(200, b"DATA")
         # Two files -> read() called multiple times; reset side_effect for each call
@@ -1594,7 +1574,7 @@ class TestSyncLocalSaveDownload:
         assert ".jpg" in exts
         assert ".mp4" in exts
 
-    def test_mp4_skipped_when_status_not_done(self, tmp_path):
+    def test_mp4_skipped_when_status_not_done(self, tmp_path: Path):
         coord = _coord(tmp_path)
         resp = _urlopen_resp(200, b"DATA")
         self._call(coord, _ev(videoClipUploadStatus="Pending"), resp)
@@ -1603,7 +1583,7 @@ class TestSyncLocalSaveDownload:
         assert ".jpg" in exts
         assert ".mp4" not in exts
 
-    def test_mp4_skipped_when_status_missing(self, tmp_path):
+    def test_mp4_skipped_when_status_missing(self, tmp_path: Path):
         coord = _coord(tmp_path)
         resp = _urlopen_resp(200, b"DATA")
         ev = _ev()
@@ -1612,7 +1592,7 @@ class TestSyncLocalSaveDownload:
         exts = {f.suffix for f in (tmp_path / "Terrasse").rglob("*.*")}
         assert ".mp4" not in exts
 
-    def test_unsafe_url_skipped(self, tmp_path):
+    def test_unsafe_url_skipped(self, tmp_path: Path):
         coord = _coord(tmp_path)
         with patch(_URLOPEN) as mock_urlopen:
             from custom_components.bosch_shc_camera.smb import sync_local_save
@@ -1626,25 +1606,25 @@ class TestSyncLocalSaveDownload:
             mock_urlopen.assert_not_called()
         assert list((tmp_path / "Terrasse").rglob("*.*")) == []
 
-    def test_missing_image_url_no_jpg(self, tmp_path):
+    def test_missing_image_url_no_jpg(self, tmp_path: Path):
         coord = _coord(tmp_path)
         resp = _urlopen_resp(200, b"DATA")
         self._call(coord, _ev(imageUrl=None), resp)
         exts = {f.suffix for f in (tmp_path / "Terrasse").rglob("*.*")}
         assert ".jpg" not in exts
 
-    def test_http_non_200_no_file_written(self, tmp_path):
+    def test_http_non_200_no_file_written(self, tmp_path: Path):
         coord = _coord(tmp_path)
         resp = _urlopen_resp(403, b"")
         self._call(coord, _ev(videoClipUrl=None), resp)
         assert list((tmp_path / "Terrasse").rglob("*.*")) == []
 
-    def test_http_exception_does_not_crash(self, tmp_path):
+    def test_http_exception_does_not_crash(self, tmp_path: Path):
         coord = _coord(tmp_path)
         self._call(coord, _ev(videoClipUrl=None), OSError("network gone"))
         assert list((tmp_path / "Terrasse").rglob("*.*")) == []
 
-    def test_file_already_exists_skips_http(self, tmp_path):
+    def test_file_already_exists_skips_http(self, tmp_path: Path):
         """If the file is already on disk, no HTTP request must be made."""
         coord = _coord(tmp_path)
         ev = _ev(videoClipUrl=None)
@@ -1662,7 +1642,7 @@ class TestSyncLocalSaveDownload:
             sync_local_save(coord, ev, "TOKEN", "Terrasse")
             mock_urlopen.assert_not_called()
 
-    def test_stem_uses_empty_id_when_none(self, tmp_path):
+    def test_stem_uses_empty_id_when_none(self, tmp_path: Path):
         """id=None must not crash; stem ends with empty id suffix."""
         coord = _coord(tmp_path)
         resp = _urlopen_resp(200, b"X")
@@ -1671,7 +1651,7 @@ class TestSyncLocalSaveDownload:
         assert len(files) == 1
         assert files[0].stem.endswith("_MOVEMENT_")
 
-    def test_short_timestamp_returns_early(self, tmp_path):
+    def test_short_timestamp_returns_early(self, tmp_path: Path):
         """Events with timestamp shorter than 19 chars must be ignored."""
         coord = _coord(tmp_path)
         with patch(_URLOPEN) as mock_urlopen:
@@ -1680,7 +1660,7 @@ class TestSyncLocalSaveDownload:
             sync_local_save(coord, _ev(timestamp="2026-05"), "TOKEN", "Cam")
             mock_urlopen.assert_not_called()
 
-    def test_no_download_path_returns_early(self, tmp_path):
+    def test_no_download_path_returns_early(self, tmp_path: Path):
         """Empty download_path must be a no-op."""
         coord = SimpleNamespace(
             options={"download_path": ""}, _download_started_at=time.time() - 3600
@@ -1691,7 +1671,7 @@ class TestSyncLocalSaveDownload:
             sync_local_save(coord, _ev(), "TOKEN", "Cam")
             mock_urlopen.assert_not_called()
 
-    def test_camera_name_with_space_creates_dir(self, tmp_path):
+    def test_camera_name_with_space_creates_dir(self, tmp_path: Path):
         """Camera name containing a space must produce the right directory."""
         coord = _coord(tmp_path)
         resp = _urlopen_resp(200, b"X")
@@ -1711,7 +1691,7 @@ class TestSyncLocalSaveOldEventGuard:
     Events older than (started_at - 60 s) are skipped.
     """
 
-    def test_old_event_is_skipped(self, tmp_path):
+    def test_old_event_is_skipped(self, tmp_path: Path):
         """Event timestamp 2 hours before coordinator start -> no file written."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -1732,7 +1712,7 @@ class TestSyncLocalSaveOldEventGuard:
             "Old event (2 h before session start) must not create any file"
         )
 
-    def test_event_just_before_cutoff_is_skipped(self, tmp_path):
+    def test_event_just_before_cutoff_is_skipped(self, tmp_path: Path):
         """Event 90 s before start is within the guard window -> skipped."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -1750,7 +1730,7 @@ class TestSyncLocalSaveOldEventGuard:
             "Event 90 s before session start must be skipped"
         )
 
-    def test_recent_event_is_not_skipped(self, tmp_path):
+    def test_recent_event_is_not_skipped(self, tmp_path: Path):
         """Event after coordinator start (within 60 s slack) -> proceeds to download."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -1779,7 +1759,7 @@ class TestSyncLocalSaveOldEventGuard:
             "Recent event (5 min after session start) must trigger download"
         )
 
-    def test_event_within_60s_slack_is_not_skipped(self, tmp_path):
+    def test_event_within_60s_slack_is_not_skipped(self, tmp_path: Path):
         """Event 30 s before coordinator start is within the 60 s tolerance -> allowed."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -1804,7 +1784,7 @@ class TestSyncLocalSaveOldEventGuard:
         written = list(tmp_path.rglob("*.jpg"))
         assert len(written) == 1, "Event within 60 s slack window must not be blocked"
 
-    def test_no_started_at_attribute_falls_through(self, tmp_path):
+    def test_no_started_at_attribute_falls_through(self, tmp_path: Path):
         """Coordinator without _download_started_at (e.g. old pickled state) must not crash."""
         from custom_components.bosch_shc_camera.smb import sync_local_save
 
@@ -1834,7 +1814,7 @@ class TestSafeNameSanitization:
     """
 
     @pytest.fixture(autouse=True)
-    def _import(self):
+    def _import(self) -> None:
         from custom_components.bosch_shc_camera.smb import _safe_name
 
         self.fn = _safe_name
@@ -1892,20 +1872,18 @@ class TestSafeNameSanitization:
             assert m.group("camera") == safe
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _NvrBackend: continuous-recording segment listing/resolve
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestNvrBackend:
-    def test_list_cameras_sorted(self, tmp_path):
+    def test_list_cameras_sorted(self, tmp_path: Path):
         (tmp_path / "Garten").mkdir()
         (tmp_path / "Terrasse").mkdir()
         (tmp_path / ".DS_Store").mkdir()
         b = _NvrBackend(str(tmp_path))
         assert b.list_cameras() == ["Garten", "Terrasse"]
 
-    def test_list_cameras_skips_underscore_dirs(self, tmp_path):
+    def test_list_cameras_skips_underscore_dirs(self, tmp_path: Path):
         """B13-5 regression: _staging / _failed NVR internal dirs must not
         appear as camera tiles in the Media Browser for _NvrBackend."""
         (tmp_path / "Garten").mkdir()
@@ -1918,7 +1896,7 @@ class TestNvrBackend:
         assert "_failed" not in result, "_failed must be filtered"
         assert result == ["Garten", "Terrasse"]
 
-    def test_list_dates_only_yyyy_mm_dd_dirs(self, tmp_path):
+    def test_list_dates_only_yyyy_mm_dd_dirs(self, tmp_path: Path):
         """Only `YYYY-MM-DD` named dirs are date entries -- random
         sub-dirs (e.g. `_staging`, `_failed`) must be excluded."""
         cam = tmp_path / "Cam"
@@ -1931,11 +1909,11 @@ class TestNvrBackend:
         # Reverse-sorted, junk excluded
         assert b.list_dates("Cam") == ["2026-05-04", "2026-05-03"]
 
-    def test_list_dates_unknown_camera_returns_empty(self, tmp_path):
+    def test_list_dates_unknown_camera_returns_empty(self, tmp_path: Path):
         b = _NvrBackend(str(tmp_path))
         assert b.list_dates("NoCam") == []
 
-    def test_list_segments_returns_filename_and_human_label(self, tmp_path):
+    def test_list_segments_returns_filename_and_human_label(self, tmp_path: Path):
         cam = tmp_path / "Cam"
         date = cam / "2026-05-04"
         date.mkdir(parents=True)
@@ -1950,7 +1928,7 @@ class TestNvrBackend:
             ("10-30.mp4", "10:30"),
         ]
 
-    def test_list_segments_skips_non_matching_files(self, tmp_path):
+    def test_list_segments_skips_non_matching_files(self, tmp_path: Path):
         cam = tmp_path / "Cam"
         date = cam / "2026-05-04"
         date.mkdir(parents=True)
@@ -1961,7 +1939,7 @@ class TestNvrBackend:
         out = b.list_segments("Cam", "2026-05-04")
         assert out == [("10-30.mp4", "10:30")]
 
-    def test_resolve_validates_date_and_filename(self, tmp_path):
+    def test_resolve_validates_date_and_filename(self, tmp_path: Path):
         cam = tmp_path / "Cam"
         date = cam / "2026-05-04"
         date.mkdir(parents=True)
@@ -1976,7 +1954,7 @@ class TestNvrBackend:
         # Traversal rejected
         assert b.resolve("..", "2026-05-04", "10-30.mp4") is None
 
-    def test_resolve_missing_file_returns_none(self, tmp_path):
+    def test_resolve_missing_file_returns_none(self, tmp_path: Path):
         cam = tmp_path / "Cam"
         date = cam / "2026-05-04"
         date.mkdir(parents=True)
@@ -1986,7 +1964,7 @@ class TestNvrBackend:
 
 
 class TestNvrListSegmentsCamDirNone:
-    def test_path_traversal_cam_returns_empty(self, tmp_path):
+    def test_path_traversal_cam_returns_empty(self, tmp_path: Path):
         nested = tmp_path / "base"
         nested.mkdir()
         backend = _NvrBackend(str(nested))
@@ -1996,7 +1974,7 @@ class TestNvrListSegmentsCamDirNone:
 class TestNvrBackendListCameras:
     """Base dir doesn't exist -> list_cameras returns []."""
 
-    def test_missing_base_returns_empty(self, tmp_path):
+    def test_missing_base_returns_empty(self, tmp_path: Path):
         backend = _NvrBackend(str(tmp_path / "nonexistent"))
         assert backend.list_cameras() == []
 
@@ -2004,11 +1982,11 @@ class TestNvrBackendListCameras:
 class TestNvrBackendListDates:
     """cam_dir None or not a directory -> list_dates returns []."""
 
-    def test_path_traversal_cam_returns_empty(self, tmp_path):
+    def test_path_traversal_cam_returns_empty(self, tmp_path: Path):
         backend = _NvrBackend(str(tmp_path))
         assert backend.list_dates("../../etc") == []
 
-    def test_missing_cam_dir_returns_empty(self, tmp_path):
+    def test_missing_cam_dir_returns_empty(self, tmp_path: Path):
         backend = _NvrBackend(str(tmp_path))
         assert backend.list_dates("MissingCam") == []
 
@@ -2016,7 +1994,7 @@ class TestNvrBackendListDates:
 class TestNvrBackendListSegments:
     """Junk files skipped; date_dir None or not-dir."""
 
-    def test_junk_file_skipped_in_segments(self, tmp_path):
+    def test_junk_file_skipped_in_segments(self, tmp_path: Path):
         seg_dir = tmp_path / "Terrasse" / "2026-05-07"
         seg_dir.mkdir(parents=True)
         (seg_dir / "._10-00.mp4").write_bytes(b"x")  # macOS junk
@@ -2026,12 +2004,12 @@ class TestNvrBackendListSegments:
         assert len(segs) == 1
         assert segs[0][0] == "10-00.mp4"
 
-    def test_date_dir_none_path_traversal(self, tmp_path):
+    def test_date_dir_none_path_traversal(self, tmp_path: Path):
         (tmp_path / "Terrasse").mkdir()
         backend = _NvrBackend(str(tmp_path))
         assert backend.list_segments("Terrasse", "../../etc") == []
 
-    def test_date_dir_not_dir_returns_empty(self, tmp_path):
+    def test_date_dir_not_dir_returns_empty(self, tmp_path: Path):
         cam_dir = tmp_path / "Terrasse"
         cam_dir.mkdir()
         # "2026-05-07" is a file, not a directory
@@ -2039,7 +2017,7 @@ class TestNvrBackendListSegments:
         backend = _NvrBackend(str(tmp_path))
         assert backend.list_segments("Terrasse", "2026-05-07") == []
 
-    def test_non_matching_file_skipped(self, tmp_path):
+    def test_non_matching_file_skipped(self, tmp_path: Path):
         seg_dir = tmp_path / "Terrasse" / "2026-05-07"
         seg_dir.mkdir(parents=True)
         (seg_dir / "README.txt").write_bytes(b"x")
@@ -2050,33 +2028,31 @@ class TestNvrBackendListSegments:
 class TestNvrBackendResolve:
     """date_dir None (path traversal) and invalid date/filename."""
 
-    def test_date_traversal_returns_none(self, tmp_path):
+    def test_date_traversal_returns_none(self, tmp_path: Path):
         (tmp_path / "Terrasse").mkdir()
         backend = _NvrBackend(str(tmp_path))
         assert backend.resolve("Terrasse", "../../etc", "10-00.mp4") is None
 
-    def test_invalid_date_format_returns_none(self, tmp_path):
+    def test_invalid_date_format_returns_none(self, tmp_path: Path):
         backend = _make_nvr_tree(tmp_path)
         assert backend.resolve("Terrasse", "20260507", "10-00.mp4") is None
 
-    def test_invalid_segment_format_returns_none(self, tmp_path):
+    def test_invalid_segment_format_returns_none(self, tmp_path: Path):
         backend = _make_nvr_tree(tmp_path)
         assert backend.resolve("Terrasse", "2026-05-07", "bad.avi") is None
 
-    def test_missing_file_returns_none(self, tmp_path):
+    def test_missing_file_returns_none(self, tmp_path: Path):
         backend = _make_nvr_tree(tmp_path)
         assert backend.resolve("Terrasse", "2026-05-07", "23-59.mp4") is None
 
-    def test_valid_resolve_returns_path(self, tmp_path):
+    def test_valid_resolve_returns_path(self, tmp_path: Path):
         backend = _make_nvr_tree(tmp_path)
         result = backend.resolve("Terrasse", "2026-05-07", "10-00.mp4")
         assert result is not None
         assert result.name == "10-00.mp4"
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _SmbBackend: properties, scandir-backed listing, open_file
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestSmbBackendProperties:
@@ -2274,10 +2250,8 @@ class TestSmbBackendOpenFile:
         assert fobj is fake_fobj
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _SmbBackend: legacy flat-file variant (list_flat_dates/list_flat_events/
 # open_flat_file -- camera/file.ext with no date subtree)
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestSmbListFlatDates:
@@ -2423,9 +2397,7 @@ class TestSmbOpenFlatFile:
         assert size == 4096
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _SmbBackend: year-first browse methods (mocked at _scandir_filtered boundary)
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestSmbBackendYearFirst:
@@ -2564,7 +2536,7 @@ class TestBrowseSmbYearFirstMonths:
     Reached by `_browse_smb` with rest=['2026'] and a year-named root folder.
     """
 
-    def test_year_at_camera_level_lists_months(self, tmp_path):
+    def test_year_at_camera_level_lists_months(self, tmp_path: Path):
         media, src, backend = _make_smb_media_source(tmp_path)
         with patch.object(backend, "list_year_first_months", return_value=["04", "03"]):
             node = media._browse_smb(src, backend, ["2026"], single_source=True)
@@ -2585,7 +2557,7 @@ class TestBrowseSmbYearFirstDays:
     Reached with rest=['2026','05'] where the first segment is the year.
     """
 
-    def test_year_month_lists_days(self, tmp_path):
+    def test_year_month_lists_days(self, tmp_path: Path):
         media, src, backend = _make_smb_media_source(tmp_path)
         with patch.object(backend, "list_year_first_days", return_value=["08", "07"]):
             node = media._browse_smb(src, backend, ["2026", "05"], single_source=True)
@@ -2604,7 +2576,7 @@ class TestBrowseSmbYearFirstEvents:
     `year/month/day/file` in identifiers + thumbnails.
     """
 
-    def test_year_month_day_lists_events_with_thumbnail(self, tmp_path):
+    def test_year_month_day_lists_events_with_thumbnail(self, tmp_path: Path):
         from homeassistant.components.media_player import MediaClass
 
         media, src, backend = _make_smb_media_source(tmp_path)
@@ -2644,7 +2616,7 @@ class TestBrowseSmbYearFirstEvents:
             f"thumbnail must point at the jpg sibling, got {child.thumbnail}"
         )
 
-    def test_year_month_day_image_only_event(self, tmp_path):
+    def test_year_month_day_image_only_event(self, tmp_path: Path):
         """Image-only event (no mp4 sibling) -> IMAGE class + content-type image/jpeg."""
         from homeassistant.components.media_player import MediaClass
 
@@ -2674,11 +2646,9 @@ class TestBrowseSmbYearFirstEvents:
         assert child.thumbnail is None
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _SmbBackend: connection-cache isolation under concurrency (SMB2
 # credit-starvation regression, production trace 2026-05-14) + session
 # cleanup on error + path-traversal guards
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _backend_credit_starvation(hass_data: dict | None = None):
@@ -3192,9 +3162,7 @@ class TestSmbPathTraversal:
         mod.open_file.assert_not_called()
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Small pure helpers, second batch: _format_event_title / _entry_title / _node
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestEntryTitle:
@@ -3261,11 +3229,6 @@ class TestNode:
         assert out.thumbnail == "https://example/thumb.jpg"
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# BoschCameraMediaSource.async_resolve_media
-# ═════════════════════════════════════════════════════════════════════════
-
-
 class TestAsyncResolveMedia:
     @pytest.mark.asyncio
     async def test_root_unresolvable(self):
@@ -3291,11 +3254,6 @@ class TestAsyncResolveMedia:
         assert out.mime_type == "application/octet-stream"
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# async_get_media_source: HTTP view registered exactly once
-# ═════════════════════════════════════════════════════════════════════════
-
-
 class TestAsyncGetMediaSource:
     @pytest.mark.asyncio
     async def test_first_call_registers_view(self):
@@ -3316,9 +3274,7 @@ class TestAsyncGetMediaSource:
         assert hass.http.register_view.call_count == 1
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # BoschCameraMediaSource._browse dispatch tree
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestBrowseEmpty:
@@ -3337,7 +3293,7 @@ class TestBrowseEmpty:
 
 
 class TestBrowseSingleEntrySingleBackend:
-    def test_root_lists_cameras_directly(self, tmp_path):
+    def test_root_lists_cameras_directly(self, tmp_path: Path):
         _seed_local_event(tmp_path, "Terrasse", "2026-05-04")
         _seed_local_event(tmp_path, "Garten", "2026-05-04")
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -3348,7 +3304,7 @@ class TestBrowseSingleEntrySingleBackend:
         assert "Terrasse" in titles
         assert "Garten" in titles
 
-    def test_camera_level_lists_years(self, tmp_path):
+    def test_camera_level_lists_years(self, tmp_path: Path):
         """Camera-first tree (default): browsing a camera shows years, not flat dates."""
         _seed_local_event(tmp_path, "Terrasse", "2026-05-04")
         _seed_local_event(tmp_path, "Terrasse", "2026-05-03")
@@ -3358,7 +3314,7 @@ class TestBrowseSingleEntrySingleBackend:
         titles = [c.title for c in out.children]
         assert "2026" in titles
 
-    def test_day_level_lists_events(self, tmp_path):
+    def test_day_level_lists_events(self, tmp_path: Path):
         """Camera-first tree: browsing camera/year/month/day shows events."""
         mp4, jpg = _seed_local_event(tmp_path, "Terrasse", "2026-05-04", "10-30-00")
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -3374,7 +3330,7 @@ class TestBrowseSingleEntrySingleBackend:
         # Thumbnail URL points to the jpg
         assert ev.thumbnail and jpg in ev.thumbnail
 
-    def test_too_deep_path_raises_unresolvable(self, tmp_path):
+    def test_too_deep_path_raises_unresolvable(self, tmp_path: Path):
         """Camera-first tree: 6 rest segments (beyond year/month/day/events) -> Unresolvable."""
         _seed_local_event(tmp_path, "Cam", "2026-05-04")
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -3384,7 +3340,7 @@ class TestBrowseSingleEntrySingleBackend:
 
 
 class TestBrowseMultipleEntries:
-    def test_root_lists_entries(self, tmp_path):
+    def test_root_lists_entries(self, tmp_path: Path):
         """Two loaded config entries -> root level shows them as
         chooser nodes (one per entry)."""
         # Set up two entries each with their own download dir
@@ -3438,7 +3394,7 @@ class TestBrowseMultipleEntries:
         assert "Account A" in titles
         assert "Account B" in titles
 
-    def test_unknown_entry_raises_unresolvable(self, tmp_path):
+    def test_unknown_entry_raises_unresolvable(self, tmp_path: Path):
         _seed_local_event(tmp_path, "Cam", "2026-05-04")
         hass, _ = _hass_with_local_dir(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -3478,21 +3434,21 @@ class TestBrowseNvrBackend:
         )
         return hass
 
-    def test_nvr_root_lists_cameras(self, tmp_path):
+    def test_nvr_root_lists_cameras(self, tmp_path: Path):
         hass = self._setup_nvr_only(tmp_path)
         src = BoschCameraMediaSource(hass)
         root = src._browse("")
         titles = [c.title for c in root.children]
         assert "Cam" in titles
 
-    def test_nvr_camera_lists_dates(self, tmp_path):
+    def test_nvr_camera_lists_dates(self, tmp_path: Path):
         hass = self._setup_nvr_only(tmp_path)
         src = BoschCameraMediaSource(hass)
         out = src._browse("01NVRONLY/Cam")
         titles = [c.title for c in out.children]
         assert "2026-05-04" in titles
 
-    def test_nvr_date_lists_segments_with_time_label(self, tmp_path):
+    def test_nvr_date_lists_segments_with_time_label(self, tmp_path: Path):
         hass = self._setup_nvr_only(tmp_path)
         src = BoschCameraMediaSource(hass)
         out = src._browse("01NVRONLY/Cam/2026-05-04")
@@ -3504,7 +3460,7 @@ class TestBrowseNvrBackend:
         assert all(c.can_play for c in out.children)
         assert all(not c.can_expand for c in out.children)
 
-    def test_nvr_too_deep_raises_unresolvable(self, tmp_path):
+    def test_nvr_too_deep_raises_unresolvable(self, tmp_path: Path):
         hass = self._setup_nvr_only(tmp_path)
         src = BoschCameraMediaSource(hass)
         with pytest.raises(Unresolvable):
@@ -3546,7 +3502,7 @@ class TestMultiSourceSingleEntry:
         )
         return hass
 
-    def test_root_with_two_sources_shows_chooser(self, tmp_path):
+    def test_root_with_two_sources_shows_chooser(self, tmp_path: Path):
         hass = self._setup_local_plus_nvr(tmp_path)
         src = BoschCameraMediaSource(hass)
         root = src._browse("")
@@ -3555,7 +3511,7 @@ class TestMultiSourceSingleEntry:
         assert "Lokal" in labels
         assert "Aufnahmen" in labels
 
-    def test_local_source_explicit_kind(self, tmp_path):
+    def test_local_source_explicit_kind(self, tmp_path: Path):
         """Identifier `01MULTI/L` selects the local backend even though
         the entry has multiple sources."""
         hass = self._setup_local_plus_nvr(tmp_path)
@@ -3564,14 +3520,14 @@ class TestMultiSourceSingleEntry:
         titles = [c.title for c in out.children]
         assert "Cam" in titles
 
-    def test_nvr_source_explicit_kind(self, tmp_path):
+    def test_nvr_source_explicit_kind(self, tmp_path: Path):
         hass = self._setup_local_plus_nvr(tmp_path)
         src = BoschCameraMediaSource(hass)
         out = src._browse("01MULTI/N")
         titles = [c.title for c in out.children]
         assert "Cam" in titles
 
-    def test_unknown_kind_raises(self, tmp_path):
+    def test_unknown_kind_raises(self, tmp_path: Path):
         hass = self._setup_local_plus_nvr(tmp_path)
         src = BoschCameraMediaSource(hass)
         with pytest.raises(Unresolvable):
@@ -3580,7 +3536,7 @@ class TestMultiSourceSingleEntry:
 
 class TestAsyncBrowseMedia:
     @pytest.mark.asyncio
-    async def test_unresolvable_becomes_browse_error(self, tmp_path):
+    async def test_unresolvable_becomes_browse_error(self, tmp_path: Path):
         from homeassistant.components.media_player.errors import BrowseError
 
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -3596,7 +3552,7 @@ class TestAsyncBrowseMedia:
             await src.async_browse_media(item)
 
     @pytest.mark.asyncio
-    async def test_browse_media_runs_through_executor(self, tmp_path):
+    async def test_browse_media_runs_through_executor(self, tmp_path: Path):
         _seed_local_event(tmp_path, "Cam", "2026-05-04")
         hass, _ = _hass_with_local_dir(tmp_path)
 
@@ -3648,7 +3604,7 @@ class TestBrowsePathAutoDetection:
     single_source mode.  Fixed by comparing against the actual backend kind.
     """
 
-    def test_camera_with_space_navigates_to_years(self, tmp_path):
+    def test_camera_with_space_navigates_to_years(self, tmp_path: Path):
         """Single source, camera name 'Meine Kamera' (with space) -> years listed.
 
         Root context: Andreas74 (simon42 2026-05-07) reported empty subfolder.
@@ -3661,7 +3617,7 @@ class TestBrowsePathAutoDetection:
         assert len(out.children) == 1
         assert out.children[0].title == "2026"
 
-    def test_camera_named_L_known_ambiguity(self, tmp_path):
+    def test_camera_named_L_known_ambiguity(self, tmp_path: Path):
         """KNOWN LIMITATION: camera named 'L' with local backend is ambiguous.
 
         The identifier '{entry_id}/L' cannot be distinguished between:
@@ -3691,7 +3647,7 @@ class TestBrowsePathAutoDetection:
             "and returns the camera list; 'L' is the camera name shown as a child."
         )
 
-    def test_camera_named_S_navigates_to_years(self, tmp_path):
+    def test_camera_named_S_navigates_to_years(self, tmp_path: Path):
         """Camera named 'S' must not be treated as SMB-source token."""
         _seed_event(tmp_path, "S", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
@@ -3700,7 +3656,7 @@ class TestBrowsePathAutoDetection:
         assert len(out.children) == 1
         assert out.children[0].title == "2026"
 
-    def test_camera_named_N_navigates_to_years(self, tmp_path):
+    def test_camera_named_N_navigates_to_years(self, tmp_path: Path):
         """Camera named 'N' must not be treated as NVR-source token."""
         _seed_event(tmp_path, "N", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
@@ -3709,7 +3665,7 @@ class TestBrowsePathAutoDetection:
         assert len(out.children) == 1
         assert out.children[0].title == "2026"
 
-    def test_old_style_L_prefix_compatibility(self, tmp_path):
+    def test_old_style_L_prefix_compatibility(self, tmp_path: Path):
         """Old bookmark with 'L' prefix on single-source entry must still navigate.
 
         When a user had multi-source and bookmarked '{entry_id}/L/Cam',
@@ -3725,14 +3681,14 @@ class TestBrowsePathAutoDetection:
         assert len(out.children) == 1
         assert out.children[0].title == "2026"
 
-    def test_camera_with_umlaut_navigates_to_years(self, tmp_path):
+    def test_camera_with_umlaut_navigates_to_years(self, tmp_path: Path):
         _seed_event(tmp_path, "Küche", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
         src = BoschCameraMediaSource(hass)
         out = src._browse("01ENT/Küche")
         assert len(out.children) == 1
 
-    def test_camera_with_space_day_lists_events(self, tmp_path):
+    def test_camera_with_space_day_lists_events(self, tmp_path: Path):
         """Full path to day level with space in camera name returns events."""
         _seed_event(tmp_path, "Bosch Terrasse", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
@@ -3741,7 +3697,7 @@ class TestBrowsePathAutoDetection:
         assert len(out.children) == 1
         assert out.children[0].can_play is True
 
-    def test_root_with_space_camera_lists_camera_as_child(self, tmp_path):
+    def test_root_with_space_camera_lists_camera_as_child(self, tmp_path: Path):
         """Root browse returns camera names (with spaces) as children."""
         _seed_event(tmp_path, "Vorne Rechts", "2026-05-07")
         _seed_event(tmp_path, "Hinten Links", "2026-05-07")
@@ -3752,7 +3708,7 @@ class TestBrowsePathAutoDetection:
         assert "Vorne Rechts" in titles
         assert "Hinten Links" in titles
 
-    def test_camera_name_longer_than_one_char_starting_with_L(self, tmp_path):
+    def test_camera_name_longer_than_one_char_starting_with_L(self, tmp_path: Path):
         """Camera named 'Lounge' (starts with L) is NOT treated as source token."""
         _seed_event(tmp_path, "Lounge", "2026-05-07")
         hass = _hass_for_browse(tmp_path)
@@ -3761,7 +3717,7 @@ class TestBrowsePathAutoDetection:
         assert len(out.children) == 1
         assert out.children[0].title == "2026"  # camera-first: year level
 
-    def test_multiple_cameras_with_spaces_sorted(self, tmp_path):
+    def test_multiple_cameras_with_spaces_sorted(self, tmp_path: Path):
         """Multiple cameras with spaces are sorted case-insensitively."""
         _seed_event(tmp_path, "Zweite Kamera", "2026-05-07")
         _seed_event(tmp_path, "erste Kamera", "2026-05-07")
@@ -3772,7 +3728,7 @@ class TestBrowsePathAutoDetection:
         titles = [c.title for c in out.children]
         assert titles == sorted(titles, key=str.casefold)
 
-    def test_unknown_entry_raises_unresolvable(self, tmp_path):
+    def test_unknown_entry_raises_unresolvable(self, tmp_path: Path):
         from custom_components.bosch_shc_camera.media_source import (
             BoschCameraMediaSource,
             Unresolvable,
@@ -3783,7 +3739,7 @@ class TestBrowsePathAutoDetection:
         with pytest.raises((Exception,)):
             src._browse("UNKNOWN_ENTRY/Cam")
 
-    def test_camera_day_events_thumbnail_uses_space_in_url(self, tmp_path):
+    def test_camera_day_events_thumbnail_uses_space_in_url(self, tmp_path: Path):
         """Thumbnail URL for events under a camera with a space must be set."""
         cam = "My Cam"
         cam_dir = tmp_path / cam / "2026" / "05" / "07"
@@ -3805,14 +3761,14 @@ class TestBrowsePathAutoDetection:
 class TestBrowseDispatchSingleSource:
     """Single-source entry implicit kind detection and unknown-source error."""
 
-    def test_unknown_entry_raises_unresolvable(self, tmp_path):
+    def test_unknown_entry_raises_unresolvable(self, tmp_path: Path):
         hass = _hass_stub("entry1", tmp_path=tmp_path)
         (tmp_path).mkdir(exist_ok=True)
         ms = BoschCameraMediaSource(hass)
         with pytest.raises(Unresolvable):
             ms._browse("unknown-entry/L/Terrasse")
 
-    def test_too_deep_local_path_raises_unresolvable(self, tmp_path):
+    def test_too_deep_local_path_raises_unresolvable(self, tmp_path: Path):
         """Camera-first tree: 6 rest segments (past camera/year/month/day/events) -> Unresolvable."""
         (tmp_path / "Terrasse").mkdir(parents=True, exist_ok=True)
         hass = _hass_stub("entry1", tmp_path=tmp_path)
@@ -3834,7 +3790,7 @@ class TestBrowseLocalCameraFirstFlat:
         (cam_dir / f"{stem}.jpg").write_bytes(b"img")
         return tmp_path
 
-    def test_camera_level_shows_flat_dates_alongside_years(self, tmp_path):
+    def test_camera_level_shows_flat_dates_alongside_years(self, tmp_path: Path):
         """camera_first=True, len(rest)==1: flat dates (from files in cam/) appended."""
         self._setup(tmp_path)
         # Also create a year subfolder so we have both year nodes and flat dates
@@ -3849,7 +3805,7 @@ class TestBrowseLocalCameraFirstFlat:
         # Flat date node from file
         assert "2026-05-07" in titles
 
-    def test_camera_level_flat_dates_only(self, tmp_path):
+    def test_camera_level_flat_dates_only(self, tmp_path: Path):
         """camera_first=True, no year subdirs -- only flat dates shown."""
         self._setup(tmp_path)
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -3858,7 +3814,7 @@ class TestBrowseLocalCameraFirstFlat:
         titles = [c.title for c in out.children]
         assert "2026-05-07" in titles
 
-    def test_flat_date_routing_returns_events(self, tmp_path):
+    def test_flat_date_routing_returns_events(self, tmp_path: Path):
         """camera_first=True, rest[1] is YYYY-MM-DD (not a 4-digit year) -> flat events."""
         self._setup(tmp_path)
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -3870,7 +3826,7 @@ class TestBrowseLocalCameraFirstFlat:
         assert ev.can_play is True
         assert ev.can_expand is False
 
-    def test_flat_date_event_has_thumbnail(self, tmp_path):
+    def test_flat_date_event_has_thumbnail(self, tmp_path: Path):
         """Flat event nodes include a thumbnail URL when image is present."""
         self._setup(tmp_path)
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -3880,7 +3836,7 @@ class TestBrowseLocalCameraFirstFlat:
         assert ev.thumbnail is not None
         assert ".jpg" in ev.thumbnail
 
-    def test_flat_date_event_identifier_is_2_segment(self, tmp_path):
+    def test_flat_date_event_identifier_is_2_segment(self, tmp_path: Path):
         """Flat event identifier is camera/filename (2 segments, not 5)."""
         self._setup(tmp_path)
         hass, _ = _hass_with_local_dir(tmp_path)
@@ -3893,7 +3849,7 @@ class TestBrowseLocalCameraFirstFlat:
 
 
 class TestBrowseLocalMonthsLevel:
-    def test_year_level_lists_months(self, tmp_path):
+    def test_year_level_lists_months(self, tmp_path: Path):
         """camera_first, len(rest)==2 with 4-digit year -> lists months."""
         _seed_local_event(tmp_path, "Terrasse", "2026-05-07")
         _seed_local_event(tmp_path, "Terrasse", "2026-04-15")
@@ -3905,7 +3861,7 @@ class TestBrowseLocalMonthsLevel:
         assert "05" in titles
         assert "04" in titles
 
-    def test_year_level_empty_months(self, tmp_path):
+    def test_year_level_empty_months(self, tmp_path: Path):
         """camera_first, len(rest)==2 with 4-digit year but empty year dir."""
         year_dir = tmp_path / "Terrasse" / "2026"
         year_dir.mkdir(parents=True)
@@ -3916,7 +3872,7 @@ class TestBrowseLocalMonthsLevel:
 
 
 class TestBrowseLocalDaysLevel:
-    def test_year_month_level_lists_days(self, tmp_path):
+    def test_year_month_level_lists_days(self, tmp_path: Path):
         """camera_first, len(rest)==3 -> lists days."""
         _seed_local_event(tmp_path, "Terrasse", "2026-05-07")
         _seed_local_event(tmp_path, "Terrasse", "2026-05-04")
@@ -3961,7 +3917,7 @@ class TestBrowseLocalLegacyFlat:
         )
         return hass
 
-    def test_legacy_camera_lists_dates(self, tmp_path):
+    def test_legacy_camera_lists_dates(self, tmp_path: Path):
         """camera_first=False, len(rest)==1 -> list dates from filenames."""
         hass = self._hass_with_legacy_backend(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -3969,7 +3925,7 @@ class TestBrowseLocalLegacyFlat:
         titles = [c.title for c in out.children]
         assert "2026-05-07" in titles
 
-    def test_legacy_date_lists_events(self, tmp_path):
+    def test_legacy_date_lists_events(self, tmp_path: Path):
         """camera_first=False, len(rest)==2 -> list events for that date."""
         hass = self._hass_with_legacy_backend(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -3978,7 +3934,7 @@ class TestBrowseLocalLegacyFlat:
         ev = out.children[0]
         assert ev.can_play is True
 
-    def test_legacy_date_event_no_thumbnail_when_image_missing(self, tmp_path):
+    def test_legacy_date_event_no_thumbnail_when_image_missing(self, tmp_path: Path):
         """Legacy flat: no thumbnail when image is None."""
         # mp4 only, no jpg
         cam_dir = tmp_path / "Cam"
@@ -4008,7 +3964,7 @@ class TestBrowseLocalLegacyFlat:
         assert len(out.children) == 1
         assert out.children[0].thumbnail is None
 
-    def test_legacy_too_deep_raises_unresolvable(self, tmp_path):
+    def test_legacy_too_deep_raises_unresolvable(self, tmp_path: Path):
         """camera_first=False: 4+ segments -> Unresolvable."""
         hass = self._hass_with_legacy_backend(tmp_path)
         src = BoschCameraMediaSource(hass)
@@ -4355,7 +4311,7 @@ class TestBrowseSmb:
 
 
 class TestBrowseEntryRootDispatch:
-    def test_nvr_single_source_lists_cameras(self, tmp_path):
+    def test_nvr_single_source_lists_cameras(self, tmp_path: Path):
         """Single NVR source: root browse goes straight to camera list."""
         from custom_components.bosch_shc_camera import media_source as ms
         from custom_components.bosch_shc_camera.media_source import _Source
@@ -4389,7 +4345,7 @@ class TestBrowseEntryRootDispatch:
             out = obj._browse("")
         assert out.children[0].title == "Terrasse"
 
-    def test_multi_source_entry_root_shows_chooser(self, tmp_path):
+    def test_multi_source_entry_root_shows_chooser(self, tmp_path: Path):
         """Two backends on same entry: root shows source chooser."""
         from custom_components.bosch_shc_camera import media_source as ms
         from custom_components.bosch_shc_camera.media_source import _Source
@@ -4414,11 +4370,9 @@ class TestBrowseEntryRootDispatch:
         assert "N" in kinds
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # BoschCameraMediaView routing: structural source-pins (camera-first vs
 # date-first vs NVR disambiguation, verified by reading the view's own
 # source via inspect.getsource + assert_in_source)
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestViewRoutingCameraFirstLocal:
@@ -4481,7 +4435,7 @@ class TestViewRoutingCameraFirstLocal:
                     "else-branch must not unconditionally set kind='S' -- that would break Local users"
                 )
 
-    def test_camera_first_and_legacy_flat_coexist(self, tmp_path):
+    def test_camera_first_and_legacy_flat_coexist(self, tmp_path: Path):
         """_LocalBackend must serve BOTH old flat files AND new year/month/day files
         from the same base directory (Georg's mixed-layout scenario).
 
@@ -4671,10 +4625,8 @@ class TestBrowseYearFirstRouting:
         )
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # BoschCameraMediaView.get(): HTTP serving -- Local/NVR/SMB dispatch,
 # Range requests, error paths
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _smb_hass_for_view(entry_id="entry1"):
@@ -4757,7 +4709,7 @@ class TestMediaViewDispatch:
     """get() dispatches by head token to correct backend."""
 
     @pytest.mark.asyncio
-    async def test_empty_parts_raises_404(self, tmp_path):
+    async def test_empty_parts_raises_404(self, tmp_path: Path):
         hass = _make_view_hass("entry1", tmp_path)
         view = BoschCameraMediaView(hass)
         request = MagicMock()
@@ -4766,7 +4718,7 @@ class TestMediaViewDispatch:
             await view.get(request, "entry1", "")
 
     @pytest.mark.asyncio
-    async def test_local_wrong_tail_length_raises_404(self, tmp_path):
+    async def test_local_wrong_tail_length_raises_404(self, tmp_path: Path):
         hass = _make_view_hass("entry1", tmp_path, kind="L")
         view = BoschCameraMediaView(hass)
         request = MagicMock()
@@ -4776,7 +4728,7 @@ class TestMediaViewDispatch:
             await view.get(request, "entry1", "L/Terrasse")
 
     @pytest.mark.asyncio
-    async def test_nvr_wrong_tail_length_raises_404(self, tmp_path):
+    async def test_nvr_wrong_tail_length_raises_404(self, tmp_path: Path):
         hass = _make_view_hass("entry1", tmp_path, kind="N")
         view = BoschCameraMediaView(hass)
         request = MagicMock()
@@ -4786,7 +4738,7 @@ class TestMediaViewDispatch:
             await view.get(request, "entry1", "N/Terrasse/2026-05-07")
 
     @pytest.mark.asyncio
-    async def test_source_not_found_raises_404(self, tmp_path):
+    async def test_source_not_found_raises_404(self, tmp_path: Path):
         hass = _make_view_hass("entry1", tmp_path, kind="L")
         view = BoschCameraMediaView(hass)
         request = MagicMock()
@@ -4796,7 +4748,9 @@ class TestMediaViewDispatch:
             await view.get(request, "entry1", "S/Cam/2026/05/07/file.mp4")
 
     @pytest.mark.asyncio
-    async def test_find_source_dispatched_via_executor_not_event_loop(self, tmp_path):
+    async def test_find_source_dispatched_via_executor_not_event_loop(
+        self, tmp_path: Path
+    ):
         """Regression (bug-hunt 2026-07-03): _find_source -> _enabled_sources
         does blocking Path.exists()/mkdir()/is_dir() per configured entry.
         get() used to call it directly on the event loop (unlike _browse(),
@@ -4887,7 +4841,7 @@ class TestMediaViewDispatch:
         assert resp is real_response
 
     @pytest.mark.asyncio
-    async def test_else_branch_routes_to_local(self, tmp_path):
+    async def test_else_branch_routes_to_local(self, tmp_path: Path):
         """head is not a kind/year/camera+year/camera+date -> else branch -> kind=L."""
         # Use a local backend
         cam_dir = tmp_path / "Cam"
@@ -4925,7 +4879,7 @@ class TestMediaViewDispatch:
         assert isinstance(resp, FileResponse)
 
     @pytest.mark.asyncio
-    async def test_nvr_date_head_routes_to_nvr(self, tmp_path):
+    async def test_nvr_date_head_routes_to_nvr(self, tmp_path: Path):
         """parts[1] matches NVR_DATE_DIR_RE -> kind=N (NVR single-source)."""
         seg_dir = tmp_path / "Terrasse" / "2026-05-07"
         seg_dir.mkdir(parents=True)
@@ -4959,7 +4913,7 @@ class TestMediaViewDispatch:
         assert isinstance(resp, type(resp))  # web.FileResponse
 
     @pytest.mark.asyncio
-    async def test_bad_date_format_raises_404(self, tmp_path):
+    async def test_bad_date_format_raises_404(self, tmp_path: Path):
         hass = _make_view_hass("entry1", tmp_path, kind="N")
         view = BoschCameraMediaView(hass)
         request = MagicMock()
@@ -4968,7 +4922,7 @@ class TestMediaViewDispatch:
             await view.get(request, "entry1", "N/Terrasse/20260507/10-00.mp4")
 
     @pytest.mark.asyncio
-    async def test_bad_segment_name_raises_404(self, tmp_path):
+    async def test_bad_segment_name_raises_404(self, tmp_path: Path):
         hass = _make_view_hass("entry1", tmp_path, kind="N")
         view = BoschCameraMediaView(hass)
         request = MagicMock()
@@ -4977,7 +4931,7 @@ class TestMediaViewDispatch:
             await view.get(request, "entry1", "N/Terrasse/2026-05-07/bad.avi")
 
     @pytest.mark.asyncio
-    async def test_missing_nvr_file_raises_404(self, tmp_path):
+    async def test_missing_nvr_file_raises_404(self, tmp_path: Path):
         hass = _make_view_hass("entry1", tmp_path, kind="N")
         view = BoschCameraMediaView(hass)
         request = MagicMock()
@@ -5209,7 +5163,7 @@ class TestMediaViewSmbFlatPath:
 
 class TestServeLocalBadMime:
     @pytest.mark.asyncio
-    async def test_bad_mime_raises_404(self, tmp_path):
+    async def test_bad_mime_raises_404(self, tmp_path: Path):
         """File exists and filename parses, but mime is not image/jpeg or video/mp4."""
         # Create a file with extension that parses but gives bad mime
         # We can't easily create a file with a parseable name but bad mime
@@ -5249,7 +5203,7 @@ class TestServeLocalBadMime:
                 await view.get(request, "entry1", f"L/Cam/{stem}.jpg")
 
     @pytest.mark.asyncio
-    async def test_bad_filename_raises_404(self, tmp_path):
+    async def test_bad_filename_raises_404(self, tmp_path: Path):
         hass = _make_view_hass("entry1", tmp_path, kind="L")
         view = BoschCameraMediaView(hass)
         request = MagicMock()
@@ -5259,7 +5213,7 @@ class TestServeLocalBadMime:
             await view.get(request, "entry1", "L/Terrasse/notvalid.txt")
 
     @pytest.mark.asyncio
-    async def test_missing_file_raises_404(self, tmp_path):
+    async def test_missing_file_raises_404(self, tmp_path: Path):
         hass = _make_view_hass("entry1", tmp_path, kind="L")
         view = BoschCameraMediaView(hass)
         request = MagicMock()
@@ -5271,7 +5225,7 @@ class TestServeLocalBadMime:
 
 class TestServeLocalHappyPath:
     @pytest.mark.asyncio
-    async def test_serve_local_returns_file_response(self, tmp_path):
+    async def test_serve_local_returns_file_response(self, tmp_path: Path):
         """_serve_local with valid file + correct mime -> web.FileResponse."""
         cam_dir = tmp_path / "Cam"
         cam_dir.mkdir()
@@ -5305,7 +5259,7 @@ class TestServeLocalHappyPath:
         assert isinstance(resp, FileResponse)
 
     @pytest.mark.asyncio
-    async def test_serve_local_jpg_returns_file_response(self, tmp_path):
+    async def test_serve_local_jpg_returns_file_response(self, tmp_path: Path):
         """_serve_local with .jpg -> web.FileResponse (via jpg mime)."""
         cam_dir = tmp_path / "Cam"
         cam_dir.mkdir()
@@ -5341,7 +5295,7 @@ class TestServeLocalHappyPath:
 
 class TestServeNvrHappyPath:
     @pytest.mark.asyncio
-    async def test_nvr_serve_valid_file_returns_file_response(self, tmp_path):
+    async def test_nvr_serve_valid_file_returns_file_response(self, tmp_path: Path):
         """_serve_nvr with valid date + segment -> returns web.FileResponse."""
         seg_dir = tmp_path / "Terrasse" / "2026-05-07"
         seg_dir.mkdir(parents=True)
@@ -5684,10 +5638,8 @@ class TestStreamSmbFobjFinally:
         assert resp is real_response
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: `_SmbBackend._scandir_filtered` skips NVR-internal `_`-prefixed
-# directories (relocated from tests/test_misc_modules_coverage.py)
-# ─────────────────────────────────────────────────────────────────────────────
+# `_SmbBackend._scandir_filtered` skips NVR-internal `_`-prefixed directories
+# (relocated from tests/test_misc_modules_coverage.py)
 
 
 class TestSmbBackendScandirFilteredNvrInternalDirs:
@@ -5762,11 +5714,9 @@ class TestSmbBackendScandirFilteredNvrInternalDirs:
         assert "event.mp4" in result
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: `_FILE_RE` legacy no-prefix + camera-prefixed filename matching
-# (relocated from tests/test_fresh_install.py — the sync_local_save
-# filenaming test it complements lives in tests/test_smb.py)
-# ─────────────────────────────────────────────────────────────────────────────
+# `_FILE_RE` legacy no-prefix + camera-prefixed filename matching (relocated
+# from tests/test_fresh_install.py -- the sync_local_save filenaming test it
+# complements lives in tests/test_smb.py)
 
 
 class TestFilenameRegexCameraPrefix:
@@ -5816,9 +5766,6 @@ class TestFilenameRegexCameraPrefix:
             assert self._regex().match(name) is None, (
                 f"{name!r} must not match _FILE_RE"
             )
-
-
-# ── README documents the local-save / Media Browser enablement path ─────────
 
 
 class TestReadmeDocumentsLocalSavePath:

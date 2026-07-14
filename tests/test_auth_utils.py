@@ -28,11 +28,9 @@ from unittest.mock import AsyncMock, MagicMock
 import aiohttp
 import pytest
 
-# ---------------------------------------------------------------------------
 # Direct module import — avoids pulling in the full HA package __init__.py
-# which requires homeassistant to be installed.
-# Registered under the real dotted name so pytest-cov / coverage.py can trace it.
-# ---------------------------------------------------------------------------
+# which requires homeassistant to be installed. Registered under the real
+# dotted name so pytest-cov / coverage.py can trace it.
 _AUTH_UTILS_PATH = (
     Path(__file__).parent.parent
     / "custom_components"
@@ -65,11 +63,6 @@ _md5 = _auth_utils._md5  # type: ignore[attr-defined]
 _parse_digest_challenge = _auth_utils._parse_digest_challenge  # type: ignore[attr-defined]
 _sha256 = _auth_utils._sha256  # type: ignore[attr-defined]
 async_digest_request = _auth_utils.async_digest_request  # type: ignore[attr-defined]
-
-
-# ---------------------------------------------------------------------------
-# Helpers for building fake server responses
-# ---------------------------------------------------------------------------
 
 
 def _make_response(
@@ -105,11 +98,6 @@ def _digest_challenge(
     if qop:
         parts.append(f'qop="{qop}"')
     return "Digest " + ", ".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# Unit tests — internal helpers
-# ---------------------------------------------------------------------------
 
 
 class TestMd5:
@@ -248,11 +236,6 @@ class TestBuildDigestHeader:
         )
         # URI in header must include query string
         assert 'uri="/snap.jpg?JpegSize=1206"' in hdr
-
-
-# ---------------------------------------------------------------------------
-# Integration tests — async_digest_request using mocked ClientSession
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -558,13 +541,9 @@ class TestAsyncDigestRequest:
         assert f'response="{expected_response}"' in auth_hdr
 
 
-# ---------------------------------------------------------------------------
 # Stale-nonce retry: a second 401 carrying stale=true means the server
 # accepted the credentials but wants a fresh nonce — retry once more instead
 # of giving up.
-# ---------------------------------------------------------------------------
-
-
 def _make_resp(
     status: int,
     headers: dict[str, str] | None = None,

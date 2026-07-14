@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
@@ -54,24 +55,14 @@ CAM_ID_INTERCOM = "DEAD-BEEF-INTERCOM"
 MODULE = "custom_components.bosch_shc_camera.switch"
 
 
-# ============================================================
-# --- state/availability/attribute + turn_on/turn_off + mode-pin coverage ---
-# ============================================================
-
-
 async def _noop_async(self) -> None:
     """Stand-in for super().async_added_to_hass() (skips the live-hass restore
     registration) so RestoreEntity restore logic can be tested in isolation."""
     return None
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Fixtures
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 @pytest.fixture
-def stub_coord():
+def stub_coord() -> SimpleNamespace:
     """Coordinator stub good enough for switch entity properties."""
     coord = SimpleNamespace(
         data={
@@ -121,7 +112,7 @@ def stub_coord():
 
 
 @pytest.fixture
-def stub_entry():
+def stub_entry() -> SimpleNamespace:
     """A minimal ConfigEntry-like object — switches only read .options for some checks."""
     return SimpleNamespace(
         entry_id="01ENTRY",
@@ -131,7 +122,7 @@ def stub_entry():
 
 
 @pytest.fixture
-def stub_coord_turnonoff():
+def stub_coord_turnonoff() -> SimpleNamespace:
     """Coordinator stub for the turn_on/turn_off action coverage — adds the
     cloud-setter / async_put_camera AsyncMocks and a few extra data fields
     (autofollow, recordingOptions) that the base `stub_coord` above doesn't
@@ -306,12 +297,12 @@ def _stub_coord(**overrides):
 
 
 @pytest.fixture
-def coord():
+def coord() -> SimpleNamespace:
     return _stub_coord()
 
 
 @pytest.fixture
-def entry():
+def entry() -> SimpleNamespace:
     return SimpleNamespace(
         entry_id="01ENTRY",
         data={"bearer_token": "x"},
@@ -327,19 +318,18 @@ def _bind_hass_modepins(sw):
     sw.async_write_ha_state = MagicMock()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschLiveStreamSwitch
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestLiveStreamSwitch:
-    def test_is_on_false_when_no_active_session(self, stub_coord, stub_entry):
+    def test_is_on_false_when_no_active_session(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
 
         sw = BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is False
 
-    def test_is_on_true_when_user_intent_set(self, stub_coord, stub_entry):
+    def test_is_on_true_when_user_intent_set(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Switch reads user intent (`_user_intent_streams`), not raw `_live_connections`."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
 
@@ -348,7 +338,7 @@ class TestLiveStreamSwitch:
         assert sw.is_on is True
 
     def test_is_on_false_when_only_live_connections_populated(
-        self, stub_coord, stub_entry
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Auto-opened sessions (Cast / dashboard) populate `_live_connections`
         but do not flip the switch."""
@@ -358,7 +348,9 @@ class TestLiveStreamSwitch:
         sw = BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is False
 
-    def test_unavailable_during_privacy(self, stub_coord, stub_entry):
+    def test_unavailable_during_privacy(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Privacy ON → live_stream must be unavailable."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
 
@@ -366,7 +358,9 @@ class TestLiveStreamSwitch:
         sw = BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.available is False
 
-    def test_unavailable_when_session_stale(self, stub_coord, stub_entry):
+    def test_unavailable_when_session_stale(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """LOCAL keepalive given up → live_stream unavailable to prevent
         showing a frozen stream as healthy."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
@@ -375,7 +369,9 @@ class TestLiveStreamSwitch:
         sw = BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.available is False
 
-    def test_unavailable_when_camera_offline(self, stub_coord, stub_entry):
+    def test_unavailable_when_camera_offline(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Camera OFFLINE → live_stream unavailable (super().available checks)."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
 
@@ -383,13 +379,17 @@ class TestLiveStreamSwitch:
         sw = BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.available is False
 
-    def test_available_in_normal_state(self, stub_coord, stub_entry):
+    def test_available_in_normal_state(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
 
         sw = BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.available is True
 
-    def test_extra_attrs_exposes_connection_metadata(self, stub_coord, stub_entry):
+    def test_extra_attrs_exposes_connection_metadata(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
 
         stub_coord._live_connections[CAM_ID] = {
@@ -403,7 +403,9 @@ class TestLiveStreamSwitch:
         assert attrs["rtsps_url"].startswith("rtsps://")
         assert attrs["proxy_snap_url"].startswith("https://")
 
-    def test_extra_attrs_empty_when_no_session(self, stub_coord, stub_entry):
+    def test_extra_attrs_empty_when_no_session(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
 
         sw = BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
@@ -412,27 +414,26 @@ class TestLiveStreamSwitch:
         assert attrs["rtsps_url"] == ""
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschPrivacyModeSwitch — state / availability / attrs / cooldown
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestPrivacyModeSwitch:
-    def test_is_on_reads_cache(self, stub_coord, stub_entry):
+    def test_is_on_reads_cache(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
         stub_coord._shc_state_cache[CAM_ID]["privacy_mode"] = True
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is True
 
-    def test_is_on_off(self, stub_coord, stub_entry):
+    def test_is_on_off(self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace):
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
         stub_coord._shc_state_cache[CAM_ID]["privacy_mode"] = False
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is False
 
-    def test_available_even_when_camera_offline(self, stub_coord, stub_entry):
+    def test_available_even_when_camera_offline(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Privacy switch is cloud-only — must stay available even with offline camera.
 
         Contract: privacy state lives in the cloud API response, not on the
@@ -446,7 +447,9 @@ class TestPrivacyModeSwitch:
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.available is True
 
-    def test_unavailable_when_cache_empty(self, stub_coord, stub_entry):
+    def test_unavailable_when_cache_empty(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """If we've never seen a privacy_mode value (None), switch is unavailable."""
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
@@ -454,7 +457,9 @@ class TestPrivacyModeSwitch:
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.available is False
 
-    def test_extra_attrs_exposes_rcp_state(self, stub_coord, stub_entry):
+    def test_extra_attrs_exposes_rcp_state(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """The RCP privacy reading is exposed for cross-validation."""
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
@@ -462,7 +467,9 @@ class TestPrivacyModeSwitch:
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.extra_state_attributes["rcp_state"] == 1
 
-    def test_check_cooldown_blocks_during_warmup(self, stub_coord, stub_entry):
+    def test_check_cooldown_blocks_during_warmup(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Privacy toggle during stream warm-up must be blocked."""
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
@@ -470,7 +477,9 @@ class TestPrivacyModeSwitch:
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw._check_cooldown() is False
 
-    def test_check_cooldown_blocks_rapid_toggle(self, stub_coord, stub_entry):
+    def test_check_cooldown_blocks_rapid_toggle(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """A toggle within _PRIVACY_COOLDOWN seconds must be blocked."""
         import time as _time
 
@@ -480,7 +489,9 @@ class TestPrivacyModeSwitch:
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw._check_cooldown() is False
 
-    def test_check_cooldown_allows_after_window(self, stub_coord, stub_entry):
+    def test_check_cooldown_allows_after_window(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         import time as _time
 
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
@@ -490,7 +501,7 @@ class TestPrivacyModeSwitch:
         assert sw._check_cooldown() is True
 
     def test_check_cooldown_first_toggle_not_blocked_low_monotonic(
-        self, stub_coord, stub_entry
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Regression (SENTINEL_RULE): on a freshly booted host time.monotonic()
         can be < _PRIVACY_COOLDOWN. With no _privacy_set_at entry yet (first
@@ -513,7 +524,7 @@ class TestPrivacyModeSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_off_during_cooldown_defers_not_raises(
-        self, stub_coord, stub_entry
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """A privacy toggle inside the cooldown window must be DEFERRED +
         coalesced, never raised — a raised ServiceValidationError aborted an
@@ -544,7 +555,9 @@ class TestPrivacyModeSwitch:
         sw.hass.async_create_task.call_args.args[0].close()
 
     @pytest.mark.asyncio
-    async def test_deferred_privacy_coalesces_to_latest(self, stub_coord, stub_entry):
+    async def test_deferred_privacy_coalesces_to_latest(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Toggle ON then OFF within the cooldown → coalesced to the LATEST
         intent (OFF), one deferred task armed, and the flush applies only OFF."""
         import time as _time
@@ -580,7 +593,7 @@ class TestPrivacyModeSwitch:
 
     @pytest.mark.asyncio
     async def test_cooldown_message_reports_remaining_seconds(
-        self, stub_coord, stub_entry
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         import time as _time
 
@@ -592,27 +605,28 @@ class TestPrivacyModeSwitch:
         assert "wait" in msg.lower() and "s before" in msg.lower(), msg
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschAudioSwitch — state / availability / RestoreEntity
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestAudioSwitch:
-    def test_is_on_reads_enabled_state(self, stub_coord, stub_entry):
+    def test_is_on_reads_enabled_state(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """is_on reflects the _audio_enabled cache (fixture seeds CAM_ID=True)."""
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
 
         sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is True
 
-    def test_is_on_false_when_disabled(self, stub_coord, stub_entry):
+    def test_is_on_false_when_disabled(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
 
         stub_coord._audio_enabled[CAM_ID] = False
         sw = BoschAudioSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is False
 
-    def test_default_when_camera_unknown(self, stub_coord, stub_entry):
+    def test_default_when_camera_unknown(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """A brand-new camera defaults to OFF (muted) — no forced default-on.
 
         The switch is the single source of truth (persisted via
@@ -627,7 +641,9 @@ class TestAudioSwitch:
         # __init__ seeds the default into the cache.
         assert stub_coord._audio_enabled[CAM_ID] is False
 
-    async def test_restore_persists_off_across_restart(self, stub_coord, stub_entry):
+    async def test_restore_persists_off_across_restart(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Switch OFF survives a restart: RestoreEntity replays the last state.
 
         Regression: streams always started with sound because the old
@@ -655,7 +671,9 @@ class TestAudioSwitch:
         assert stub_coord._audio_enabled[CAM_ID] is False
         assert sw.is_on is False
 
-    async def test_restore_persists_on_across_restart(self, stub_coord, stub_entry):
+    async def test_restore_persists_on_across_restart(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Switch ON is likewise restored — existing users keep their sound on."""
         from types import SimpleNamespace
         from unittest.mock import AsyncMock
@@ -673,7 +691,7 @@ class TestAudioSwitch:
         assert sw.is_on is True
 
     async def test_restore_no_previous_state_keeps_default_off(
-        self, stub_coord, stub_entry
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """No restorable state (first ever boot) → stays at the OFF default."""
         from unittest.mock import AsyncMock
@@ -688,20 +706,19 @@ class TestAudioSwitch:
         assert sw.is_on is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschPrivacySoundSwitch
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestPrivacySoundSwitch:
-    def test_is_on_reads_cache(self, stub_coord, stub_entry):
+    def test_is_on_reads_cache(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschPrivacySoundSwitch
 
         stub_coord._privacy_sound_cache[CAM_ID] = True
         sw = BoschPrivacySoundSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is True
 
-    def test_unavailable_when_value_unknown(self, stub_coord, stub_entry):
+    def test_unavailable_when_value_unknown(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """None in cache → unavailable."""
         from custom_components.bosch_shc_camera.switch import BoschPrivacySoundSwitch
 
@@ -710,21 +727,19 @@ class TestPrivacySoundSwitch:
         assert sw.available is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschTimestampSwitch — state/availability (stub_coord fixture) merged with
-# unique_id + ON/OFF value pins (coord/entry fixture)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestTimestampSwitch:
-    def test_is_on_reads_cache(self, stub_coord, stub_entry):
+    def test_is_on_reads_cache(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschTimestampSwitch
 
         stub_coord._timestamp_cache[CAM_ID] = True
         sw = BoschTimestampSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is True
 
-    def test_unavailable_when_unknown(self, stub_coord, stub_entry):
+    def test_unavailable_when_unknown(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschTimestampSwitch
 
         stub_coord._timestamp_cache[CAM_ID] = None
@@ -736,27 +751,31 @@ class TestTimestampSwitch:
 
         return BoschTimestampSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_timestamp"
 
-    def test_is_on_true(self, coord, entry):
+    def test_is_on_true(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._timestamp_cache[CAM_ID] = True
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false(self, coord, entry):
+    def test_is_on_false(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._timestamp_cache[CAM_ID] = False
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
-    def test_is_on_none_when_missing(self, coord, entry):
+    def test_is_on_none_when_missing(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._timestamp_cache = {}
         sw = self._make(coord, entry)
         assert sw.is_on is None
 
     @pytest.mark.asyncio
-    async def test_turn_on_puts_result_true_and_caches(self, coord, entry):
+    async def test_turn_on_puts_result_true_and_caches(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._timestamp_cache[CAM_ID] = False
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -767,7 +786,9 @@ class TestTimestampSwitch:
         assert coord._timestamp_cache[CAM_ID] is True
 
     @pytest.mark.asyncio
-    async def test_turn_off_puts_result_false_and_caches(self, coord, entry):
+    async def test_turn_off_puts_result_false_and_caches(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._timestamp_cache[CAM_ID] = True
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -778,13 +799,10 @@ class TestTimestampSwitch:
         assert coord._timestamp_cache[CAM_ID] is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschStatusLedSwitch — state (stub_coord) + unique_id/ON/OFF pins (coord/entry)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestStatusLedSwitch:
-    def test_is_on_reads_cache(self, stub_coord, stub_entry):
+    def test_is_on_reads_cache(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
 
         stub_coord._ledlights_cache[CAM_ID] = True
@@ -798,22 +816,24 @@ class TestStatusLedSwitchModePins:
 
         return BoschStatusLedSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_ledlights"
 
-    def test_is_on_true(self, coord, entry):
+    def test_is_on_true(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._ledlights_cache[CAM_ID] = True
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false(self, coord, entry):
+    def test_is_on_false(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._ledlights_cache[CAM_ID] = False
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
     @pytest.mark.asyncio
-    async def test_turn_on_puts_state_ON_and_caches_true(self, coord, entry):
+    async def test_turn_on_puts_state_ON_and_caches_true(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._ledlights_cache[CAM_ID] = False
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -824,7 +844,9 @@ class TestStatusLedSwitchModePins:
         assert coord._ledlights_cache[CAM_ID] is True
 
     @pytest.mark.asyncio
-    async def test_turn_off_puts_state_OFF_and_caches_false(self, coord, entry):
+    async def test_turn_off_puts_state_OFF_and_caches_false(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._ledlights_cache[CAM_ID] = True
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -835,13 +857,10 @@ class TestStatusLedSwitchModePins:
         assert coord._ledlights_cache[CAM_ID] is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschNotificationsSwitch — state/availability
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestNotificationsSwitch:
-    def test_is_on_for_follow_camera_schedule(self, stub_coord, stub_entry):
+    def test_is_on_for_follow_camera_schedule(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """FOLLOW_CAMERA_SCHEDULE → switch is ON."""
         from custom_components.bosch_shc_camera.switch import BoschNotificationsSwitch
 
@@ -851,7 +870,9 @@ class TestNotificationsSwitch:
         sw = BoschNotificationsSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is True
 
-    def test_is_on_for_on_camera_schedule(self, stub_coord, stub_entry):
+    def test_is_on_for_on_camera_schedule(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """ON_CAMERA_SCHEDULE → switch is ON."""
         from custom_components.bosch_shc_camera.switch import BoschNotificationsSwitch
 
@@ -861,14 +882,18 @@ class TestNotificationsSwitch:
         sw = BoschNotificationsSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is True
 
-    def test_is_off_for_always_off(self, stub_coord, stub_entry):
+    def test_is_off_for_always_off(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschNotificationsSwitch
 
         stub_coord._shc_state_cache[CAM_ID]["notifications_status"] = "ALWAYS_OFF"
         sw = BoschNotificationsSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is False
 
-    def test_available_even_when_camera_offline(self, stub_coord, stub_entry):
+    def test_available_even_when_camera_offline(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Notifications switch is cloud-only — like privacy."""
         from custom_components.bosch_shc_camera.switch import BoschNotificationsSwitch
 
@@ -877,15 +902,10 @@ class TestNotificationsSwitch:
         assert sw.available is True
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschCameraLightSwitch — actions
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestCameraLightSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_on_calls_cloud_setter_with_true(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschCameraLightSwitch
 
@@ -898,7 +918,7 @@ class TestCameraLightSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_off_calls_cloud_setter_with_false(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschCameraLightSwitch
 
@@ -910,15 +930,10 @@ class TestCameraLightSwitchActions:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschFrontLightSwitch / BoschWallwasherSwitch — component-specific cloud setter
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestLightComponentSwitches:
     @pytest.mark.asyncio
     async def test_front_light_on_uses_front_component(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
 
@@ -932,7 +947,9 @@ class TestLightComponentSwitches:
         )
 
     @pytest.mark.asyncio
-    async def test_front_light_off(self, stub_coord_turnonoff, stub_entry):
+    async def test_front_light_off(
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
 
         sw = BoschFrontLightSwitch(stub_coord_turnonoff, CAM_ID, stub_entry)
@@ -946,7 +963,7 @@ class TestLightComponentSwitches:
 
     @pytest.mark.asyncio
     async def test_wallwasher_uses_wallwasher_component(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Pin the literal 'wallwasher' string — the cloud handler
         switches on this exact key."""
@@ -962,14 +979,11 @@ class TestLightComponentSwitches:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschPrivacyModeSwitch — actions (cooldown gate + stream teardown)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestPrivacyModeSwitchActions:
     @pytest.mark.asyncio
-    async def test_turn_on_during_warmup_defers(self, stub_coord_turnonoff, stub_entry):
+    async def test_turn_on_during_warmup_defers(
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """During stream warm-up a privacy toggle is DEFERRED (not applied,
         not raised) — the TLS proxy + encoder init isn't a moment to flip the
         shutter, but the intent is queued and applied once warm-up clears."""
@@ -988,7 +1002,7 @@ class TestPrivacyModeSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_on_within_cooldown_defers(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """A second flip within the cooldown window is DEFERRED (not applied
         immediately, not raised) — protects the camera firmware from rapid
@@ -1008,7 +1022,7 @@ class TestPrivacyModeSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_on_tears_down_active_stream(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """If a live stream is active when privacy turns on, must
         teardown — otherwise stream_worker auto-restart loops against
@@ -1026,7 +1040,7 @@ class TestPrivacyModeSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_on_no_active_stream_skips_teardown(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
@@ -1040,7 +1054,7 @@ class TestPrivacyModeSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_off_calls_cloud_setter_false(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschPrivacyModeSwitch
 
@@ -1052,14 +1066,11 @@ class TestPrivacyModeSwitchActions:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschNotificationsSwitch — actions
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestNotificationsSwitchActions:
     @pytest.mark.asyncio
-    async def test_turn_on(self, stub_coord_turnonoff, stub_entry):
+    async def test_turn_on(
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschNotificationsSwitch
 
         sw = BoschNotificationsSwitch(stub_coord_turnonoff, CAM_ID, stub_entry)
@@ -1070,7 +1081,9 @@ class TestNotificationsSwitchActions:
         )
 
     @pytest.mark.asyncio
-    async def test_turn_off(self, stub_coord_turnonoff, stub_entry):
+    async def test_turn_off(
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschNotificationsSwitch
 
         sw = BoschNotificationsSwitch(stub_coord_turnonoff, CAM_ID, stub_entry)
@@ -1081,15 +1094,10 @@ class TestNotificationsSwitchActions:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschMotionEnabledSwitch — actions
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestMotionEnabledSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_on_preserves_sensitivity(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Motion ON via PUT /motion must preserve the existing sensitivity
         — sending only `enabled` resets the level to API default."""
@@ -1110,7 +1118,7 @@ class TestMotionEnabledSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_off_preserves_sensitivity(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         stub_coord_turnonoff.motion_settings = lambda cid: {
             "enabled": True,
@@ -1126,7 +1134,7 @@ class TestMotionEnabledSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_on_default_sensitivity_when_unset(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """If no settings exist yet (first boot), default sensitivity is HIGH."""
         stub_coord_turnonoff.motion_settings = lambda cid: {}
@@ -1139,15 +1147,10 @@ class TestMotionEnabledSwitchActions:
         assert args[2] == {"enabled": True, "motionAlarmConfiguration": "HIGH"}
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschRecordSoundSwitch — actions
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestRecordSoundSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_on_sends_record_sound_true(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschRecordSoundSwitch
 
@@ -1160,7 +1163,9 @@ class TestRecordSoundSwitchActions:
         assert args[2] == {"recordSound": True}
 
     @pytest.mark.asyncio
-    async def test_turn_off(self, stub_coord_turnonoff, stub_entry):
+    async def test_turn_off(
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschRecordSoundSwitch
 
         sw = BoschRecordSoundSwitch(stub_coord_turnonoff, CAM_ID, stub_entry)
@@ -1170,14 +1175,11 @@ class TestRecordSoundSwitchActions:
         assert args[2] == {"recordSound": False}
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschAutoFollowSwitch — actions
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestAutoFollowSwitchActions:
     @pytest.mark.asyncio
-    async def test_turn_on_sends_result_true(self, stub_coord_turnonoff, stub_entry):
+    async def test_turn_on_sends_result_true(
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Auto-follow API uses the unusual {"result": bool} payload —
         not {"enabled": bool}. Pin so the body schema doesn't drift."""
         from custom_components.bosch_shc_camera.switch import BoschAutoFollowSwitch
@@ -1193,7 +1195,9 @@ class TestAutoFollowSwitchActions:
         )
 
     @pytest.mark.asyncio
-    async def test_turn_off(self, stub_coord_turnonoff, stub_entry):
+    async def test_turn_off(
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschAutoFollowSwitch
 
         sw = BoschAutoFollowSwitch(stub_coord_turnonoff, CAM_ID, stub_entry)
@@ -1203,14 +1207,11 @@ class TestAutoFollowSwitchActions:
         assert args[2] == {"result": False}
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschAudioSwitch — actions (in-memory only, no API)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestAudioSwitchActions:
     @pytest.mark.asyncio
-    async def test_turn_on_sets_in_memory_flag(self, stub_coord_turnonoff, stub_entry):
+    async def test_turn_on_sets_in_memory_flag(
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Audio switch is purely client-side — toggles `_audio_enabled[cam_id]`.
         Stream-side audio is controlled via the URL `enableaudio=` param at
         the next stream_source() call."""
@@ -1223,7 +1224,9 @@ class TestAudioSwitchActions:
         assert stub_coord_turnonoff._audio_enabled[CAM_ID] is True
 
     @pytest.mark.asyncio
-    async def test_turn_off_sets_in_memory_flag(self, stub_coord_turnonoff, stub_entry):
+    async def test_turn_off_sets_in_memory_flag(
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
 
         stub_coord_turnonoff._audio_enabled[CAM_ID] = True
@@ -1234,7 +1237,7 @@ class TestAudioSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_on_writes_ha_state_immediately(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Regression #22: async_turn_on MUST push the new state to HA right
         away. is_on reads the _audio_enabled dict (not coordinator data), so
@@ -1251,7 +1254,7 @@ class TestAudioSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_off_writes_ha_state_immediately(
-        self, stub_coord_turnonoff, stub_entry
+        self, stub_coord_turnonoff: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Regression #22 — see test_turn_on_writes_ha_state_immediately."""
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
@@ -1261,11 +1264,6 @@ class TestAudioSwitchActions:
         _bind_hass_turnonoff(sw)
         await sw.async_turn_off()
         sw.async_write_ha_state.assert_called()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschNotificationTypeSwitch — per ntype (unique_id, is_on, turn_on/off pins)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestNotificationTypeSwitchAudio:
@@ -1278,26 +1276,34 @@ class TestNotificationTypeSwitchAudio:
 
         return BoschNotificationTypeSwitch(coord, CAM_ID, entry, "audio")
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_notif_audio"
 
-    def test_is_on_true_when_cache_true(self, coord, entry):
+    def test_is_on_true_when_cache_true(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._notifications_cache[CAM_ID] = {"audio": True, "movement": False}
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false_when_cache_false(self, coord, entry):
+    def test_is_on_false_when_cache_false(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._notifications_cache[CAM_ID] = {"audio": False, "movement": True}
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
-    def test_is_on_none_when_no_cache(self, coord, entry):
+    def test_is_on_none_when_no_cache(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         assert sw.is_on is None
 
     @pytest.mark.asyncio
-    async def test_turn_on_puts_true_and_caches(self, coord, entry):
+    async def test_turn_on_puts_true_and_caches(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._notifications_cache[CAM_ID] = {"audio": False, "movement": True}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1308,7 +1314,9 @@ class TestNotificationTypeSwitchAudio:
         assert coord._notifications_cache[CAM_ID]["audio"] is True
 
     @pytest.mark.asyncio
-    async def test_turn_off_puts_false_and_caches(self, coord, entry):
+    async def test_turn_off_puts_false_and_caches(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._notifications_cache[CAM_ID] = {"audio": True, "movement": True}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1329,22 +1337,24 @@ class TestNotificationTypeSwitchTrouble:
 
         return BoschNotificationTypeSwitch(coord, CAM_ID, entry, "trouble")
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_notif_trouble"
 
-    def test_is_on_true(self, coord, entry):
+    def test_is_on_true(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._notifications_cache[CAM_ID] = {"trouble": True}
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false(self, coord, entry):
+    def test_is_on_false(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._notifications_cache[CAM_ID] = {"trouble": False}
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
     @pytest.mark.asyncio
-    async def test_turn_on_puts_correct_payload(self, coord, entry):
+    async def test_turn_on_puts_correct_payload(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._notifications_cache[CAM_ID] = {"trouble": False, "person": True}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1355,7 +1365,9 @@ class TestNotificationTypeSwitchTrouble:
         assert coord._notifications_cache[CAM_ID]["trouble"] is True
 
     @pytest.mark.asyncio
-    async def test_turn_off_puts_correct_payload(self, coord, entry):
+    async def test_turn_off_puts_correct_payload(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._notifications_cache[CAM_ID] = {"trouble": True, "person": True}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1376,22 +1388,24 @@ class TestNotificationTypeSwitchCameraAlarm:
 
         return BoschNotificationTypeSwitch(coord, CAM_ID, entry, "cameraAlarm")
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_notif_cameraAlarm"
 
-    def test_is_on_true(self, coord, entry):
+    def test_is_on_true(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._notifications_cache[CAM_ID] = {"cameraAlarm": True}
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false(self, coord, entry):
+    def test_is_on_false(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._notifications_cache[CAM_ID] = {"cameraAlarm": False}
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
     @pytest.mark.asyncio
-    async def test_turn_on_puts_true(self, coord, entry):
+    async def test_turn_on_puts_true(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._notifications_cache[CAM_ID] = {"cameraAlarm": False}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1402,7 +1416,9 @@ class TestNotificationTypeSwitchCameraAlarm:
         assert coord._notifications_cache[CAM_ID]["cameraAlarm"] is True
 
     @pytest.mark.asyncio
-    async def test_turn_off_puts_false(self, coord, entry):
+    async def test_turn_off_puts_false(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._notifications_cache[CAM_ID] = {"cameraAlarm": True}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1423,22 +1439,24 @@ class TestNotificationTypeSwitchTroubleEmail:
 
         return BoschNotificationTypeSwitch(coord, CAM_ID, entry, "troubleEmail")
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_notif_troubleEmail"
 
-    def test_is_on_true(self, coord, entry):
+    def test_is_on_true(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._notifications_cache[CAM_ID] = {"troubleEmail": True}
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false(self, coord, entry):
+    def test_is_on_false(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._notifications_cache[CAM_ID] = {"troubleEmail": False}
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
     @pytest.mark.asyncio
-    async def test_turn_on_puts_true(self, coord, entry):
+    async def test_turn_on_puts_true(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._notifications_cache[CAM_ID] = {"troubleEmail": False}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1449,7 +1467,9 @@ class TestNotificationTypeSwitchTroubleEmail:
         assert coord._notifications_cache[CAM_ID]["troubleEmail"] is True
 
     @pytest.mark.asyncio
-    async def test_turn_off_puts_false(self, coord, entry):
+    async def test_turn_off_puts_false(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._notifications_cache[CAM_ID] = {"troubleEmail": True}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1460,27 +1480,24 @@ class TestNotificationTypeSwitchTroubleEmail:
         assert coord._notifications_cache[CAM_ID]["troubleEmail"] is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschIntercomSwitch — unique_id + is_on default + ON/OFF value pins
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestIntercomSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
 
         return BoschIntercomSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_intercom"
 
-    def test_is_on_defaults_false(self, coord, entry):
+    def test_is_on_defaults_false(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
     @pytest.mark.asyncio
-    async def test_turn_on_sends_audioEnabled_true_speakerlevel(self, coord, entry):
+    async def test_turn_on_sends_audioEnabled_true_speakerlevel(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         """Regression: the body key is the API's "speakerLevel" (lowercase s)
         — confirmed via a real capture
         {"audioEnabled":true,"microphoneLevel":60,"speakerLevel":80}. A
@@ -1495,7 +1512,9 @@ class TestIntercomSwitchModePins:
         assert sw.is_on is True
 
     @pytest.mark.asyncio
-    async def test_turn_off_sends_audioEnabled_false(self, coord, entry):
+    async def test_turn_off_sends_audioEnabled_false(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         sw._is_on = True
         _bind_hass_modepins(sw)
@@ -1506,38 +1525,37 @@ class TestIntercomSwitchModePins:
         assert sw.is_on is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschAutoFollowSwitch — unique_id + ON/OFF value pins
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestAutoFollowSwitch:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschAutoFollowSwitch
 
         return BoschAutoFollowSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_autofollow"
 
-    def test_is_on_true(self, coord, entry):
+    def test_is_on_true(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord.data[CAM_ID]["autofollow"] = {"result": True}
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false(self, coord, entry):
+    def test_is_on_false(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord.data[CAM_ID]["autofollow"] = {"result": False}
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
-    def test_is_on_none_when_no_data(self, coord, entry):
+    def test_is_on_none_when_no_data(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord.data[CAM_ID]["autofollow"] = None
         sw = self._make(coord, entry)
         assert sw.is_on is None
 
     @pytest.mark.asyncio
-    async def test_turn_on_puts_result_true(self, coord, entry):
+    async def test_turn_on_puts_result_true(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         _bind_hass_modepins(sw)
         await sw.async_turn_on()
@@ -1546,7 +1564,9 @@ class TestAutoFollowSwitch:
         )
 
     @pytest.mark.asyncio
-    async def test_turn_off_puts_result_false(self, coord, entry):
+    async def test_turn_off_puts_result_false(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         _bind_hass_modepins(sw)
         await sw.async_turn_off()
@@ -1555,38 +1575,37 @@ class TestAutoFollowSwitch:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschRecordSoundSwitch — unique_id + ON/OFF value pins
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestRecordSoundSwitch:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschRecordSoundSwitch
 
         return BoschRecordSoundSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_record_sound"
 
-    def test_is_on_true(self, coord, entry):
+    def test_is_on_true(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord.recording_options = lambda cid: {"recordSound": True}
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false(self, coord, entry):
+    def test_is_on_false(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord.recording_options = lambda cid: {"recordSound": False}
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
-    def test_is_on_none_when_no_opts(self, coord, entry):
+    def test_is_on_none_when_no_opts(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord.recording_options = lambda cid: None
         sw = self._make(coord, entry)
         assert sw.is_on is None
 
     @pytest.mark.asyncio
-    async def test_turn_on_puts_recordSound_true(self, coord, entry):
+    async def test_turn_on_puts_recordSound_true(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         _bind_hass_modepins(sw)
         await sw.async_turn_on()
@@ -1595,7 +1614,9 @@ class TestRecordSoundSwitch:
         )
 
     @pytest.mark.asyncio
-    async def test_turn_off_puts_recordSound_false(self, coord, entry):
+    async def test_turn_off_puts_recordSound_false(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         _bind_hass_modepins(sw)
         await sw.async_turn_off()
@@ -1604,22 +1625,19 @@ class TestRecordSoundSwitch:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschMotionLightSwitch — ON/OFF value pins
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestMotionLightSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
 
         return BoschMotionLightSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_motion_light"
 
-    def test_is_on_true_from_cache(self, coord, entry):
+    def test_is_on_true_from_cache(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._motion_light_cache[CAM_ID] = {
             "lightOnMotionEnabled": True,
             "sensitivity": "HIGH",
@@ -1627,17 +1645,23 @@ class TestMotionLightSwitchModePins:
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false_from_cache(self, coord, entry):
+    def test_is_on_false_from_cache(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._motion_light_cache[CAM_ID] = {"lightOnMotionEnabled": False}
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
-    def test_is_on_none_when_no_cache(self, coord, entry):
+    def test_is_on_none_when_no_cache(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         assert sw.is_on is None
 
     @pytest.mark.asyncio
-    async def test_turn_on_sets_lightOnMotionEnabled_true_in_put(self, coord, entry):
+    async def test_turn_on_sets_lightOnMotionEnabled_true_in_put(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._motion_light_cache[CAM_ID] = {"lightOnMotionEnabled": False, "delay": 30}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1650,7 +1674,9 @@ class TestMotionLightSwitchModePins:
         assert sw._is_on is True
 
     @pytest.mark.asyncio
-    async def test_turn_off_sets_lightOnMotionEnabled_false_in_put(self, coord, entry):
+    async def test_turn_off_sets_lightOnMotionEnabled_false_in_put(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._motion_light_cache[CAM_ID] = {"lightOnMotionEnabled": True, "delay": 30}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1662,37 +1688,40 @@ class TestMotionLightSwitchModePins:
         assert sw._is_on is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschAmbientLightSwitch — ON/OFF value pins
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestAmbientLightSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschAmbientLightSwitch
 
         return BoschAmbientLightSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_ambient_light"
 
-    def test_is_on_true_from_cache(self, coord, entry):
+    def test_is_on_true_from_cache(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._ambient_lighting_cache[CAM_ID] = {"ambientLightEnabled": True}
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false_from_cache(self, coord, entry):
+    def test_is_on_false_from_cache(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._ambient_lighting_cache[CAM_ID] = {"ambientLightEnabled": False}
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
-    def test_is_on_none_when_no_cache(self, coord, entry):
+    def test_is_on_none_when_no_cache(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         assert sw.is_on is None
 
     @pytest.mark.asyncio
-    async def test_turn_on_calls_set_ambient_with_true(self, coord, entry):
+    async def test_turn_on_calls_set_ambient_with_true(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         _bind_hass_modepins(sw)
         sw._set_ambient_light = AsyncMock()
@@ -1700,7 +1729,9 @@ class TestAmbientLightSwitchModePins:
         sw._set_ambient_light.assert_awaited_once_with(True)
 
     @pytest.mark.asyncio
-    async def test_turn_off_calls_set_ambient_with_false(self, coord, entry):
+    async def test_turn_off_calls_set_ambient_with_false(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         _bind_hass_modepins(sw)
         sw._set_ambient_light = AsyncMock()
@@ -1709,7 +1740,7 @@ class TestAmbientLightSwitchModePins:
 
     @pytest.mark.asyncio
     async def test_set_ambient_light_on_sends_ambientLightEnabled_true(
-        self, coord, entry
+        self, coord: SimpleNamespace, entry: SimpleNamespace
     ):
         """Full HTTP path: PUT body must include ambientLightEnabled=True."""
         sw = self._make(coord, entry)
@@ -1741,7 +1772,7 @@ class TestAmbientLightSwitchModePins:
 
     @pytest.mark.asyncio
     async def test_set_ambient_light_off_sends_ambientLightEnabled_false(
-        self, coord, entry
+        self, coord: SimpleNamespace, entry: SimpleNamespace
     ):
         """Full HTTP path: PUT body must include ambientLightEnabled=False."""
         sw = self._make(coord, entry)
@@ -1772,22 +1803,17 @@ class TestAmbientLightSwitchModePins:
         assert sw._is_on is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschSoftLightFadingSwitch — ON/OFF value pins
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestSoftLightFadingSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
 
         return BoschSoftLightFadingSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_soft_light_fading"
 
-    def test_is_on_true(self, coord, entry):
+    def test_is_on_true(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._global_lighting_cache[CAM_ID] = {
             "softLightFading": True,
             "darknessThreshold": 0.5,
@@ -1795,7 +1821,7 @@ class TestSoftLightFadingSwitchModePins:
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false(self, coord, entry):
+    def test_is_on_false(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._global_lighting_cache[CAM_ID] = {
             "softLightFading": False,
             "darknessThreshold": 0.5,
@@ -1803,12 +1829,16 @@ class TestSoftLightFadingSwitchModePins:
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
-    def test_is_on_none_when_no_cache(self, coord, entry):
+    def test_is_on_none_when_no_cache(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         assert sw.is_on is None
 
     @pytest.mark.asyncio
-    async def test_turn_on_delegates_put_global_true(self, coord, entry):
+    async def test_turn_on_delegates_put_global_true(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         _bind_hass_modepins(sw)
         sw._put_global_lighting = AsyncMock()
@@ -1816,7 +1846,9 @@ class TestSoftLightFadingSwitchModePins:
         sw._put_global_lighting.assert_awaited_once_with(True)
 
     @pytest.mark.asyncio
-    async def test_turn_off_delegates_put_global_false(self, coord, entry):
+    async def test_turn_off_delegates_put_global_false(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         _bind_hass_modepins(sw)
         sw._put_global_lighting = AsyncMock()
@@ -1824,7 +1856,9 @@ class TestSoftLightFadingSwitchModePins:
         sw._put_global_lighting.assert_awaited_once_with(False)
 
     @pytest.mark.asyncio
-    async def test_put_global_on_sends_softLightFading_true(self, coord, entry):
+    async def test_put_global_on_sends_softLightFading_true(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._global_lighting_cache[CAM_ID] = {
             "softLightFading": False,
             "darknessThreshold": 0.4,
@@ -1851,7 +1885,9 @@ class TestSoftLightFadingSwitchModePins:
         assert coord._global_lighting_cache[CAM_ID]["softLightFading"] is True
 
     @pytest.mark.asyncio
-    async def test_put_global_off_sends_softLightFading_false(self, coord, entry):
+    async def test_put_global_off_sends_softLightFading_false(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._global_lighting_cache[CAM_ID] = {
             "softLightFading": True,
             "darknessThreshold": 0.6,
@@ -1878,37 +1914,40 @@ class TestSoftLightFadingSwitchModePins:
         assert coord._global_lighting_cache[CAM_ID]["softLightFading"] is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschPreAlarmSwitch — ON/OFF value pins
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestPreAlarmSwitch:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschPreAlarmSwitch
 
         return BoschPreAlarmSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_prealarm"
 
-    def test_is_on_true_when_setting_ON(self, coord, entry):
+    def test_is_on_true_when_setting_ON(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._alarm_settings_cache[CAM_ID] = {"preAlarmMode": "ON", "alarmMode": "OFF"}
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false_when_setting_OFF(self, coord, entry):
+    def test_is_on_false_when_setting_OFF(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._alarm_settings_cache[CAM_ID] = {"preAlarmMode": "OFF", "alarmMode": "ON"}
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
-    def test_is_on_none_when_no_cache(self, coord, entry):
+    def test_is_on_none_when_no_cache(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         assert sw.is_on is None
 
     @pytest.mark.asyncio
-    async def test_turn_on_puts_preAlarmMode_ON(self, coord, entry):
+    async def test_turn_on_puts_preAlarmMode_ON(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._alarm_settings_cache[CAM_ID] = {"preAlarmMode": "OFF", "alarmMode": "ON"}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1919,7 +1958,9 @@ class TestPreAlarmSwitch:
         assert coord._alarm_settings_cache[CAM_ID]["preAlarmMode"] == "ON"
 
     @pytest.mark.asyncio
-    async def test_turn_off_puts_preAlarmMode_OFF(self, coord, entry):
+    async def test_turn_off_puts_preAlarmMode_OFF(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._alarm_settings_cache[CAM_ID] = {"preAlarmMode": "ON", "alarmMode": "ON"}
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1930,11 +1971,9 @@ class TestPreAlarmSwitch:
         assert coord._alarm_settings_cache[CAM_ID]["preAlarmMode"] == "OFF"
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # BoschPanicAlarmSwitch — ON/OFF value pins
 # NOTE: panic_alarm is a momentary/stateful siren — there is no cloud GET
 #       endpoint, so state is purely local. Both ON and OFF send PUT.
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestPanicAlarmSwitch:
@@ -1943,21 +1982,27 @@ class TestPanicAlarmSwitch:
 
         return BoschPanicAlarmSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_camera_{CAM_ID}_panic_alarm"
 
-    def test_is_on_false_by_default(self, coord, entry):
+    def test_is_on_false_by_default(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
-    def test_is_on_true_when_cache_true(self, coord, entry):
+    def test_is_on_true_when_cache_true(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         coord._panic_alarm_cache = {CAM_ID: True}
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
     @pytest.mark.asyncio
-    async def test_turn_on_sends_status_ON(self, coord, entry):
+    async def test_turn_on_sends_status_ON(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         """PUT body must carry {"status": "ON"}."""
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
@@ -1970,7 +2015,9 @@ class TestPanicAlarmSwitch:
         assert sw.is_on is True
 
     @pytest.mark.asyncio
-    async def test_turn_off_sends_status_OFF(self, coord, entry):
+    async def test_turn_off_sends_status_OFF(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         """PUT body must carry {"status": "OFF"}."""
         coord._panic_alarm_cache = {CAM_ID: True}
         sw = self._make(coord, entry)
@@ -1984,7 +2031,9 @@ class TestPanicAlarmSwitch:
         assert sw.is_on is False
 
     @pytest.mark.asyncio
-    async def test_turn_on_blocked_by_privacy(self, coord, entry):
+    async def test_turn_on_blocked_by_privacy(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
         """Privacy-ON blocks turn_on — PUT must not be called."""
         coord._shc_state_cache[CAM_ID]["privacy_mode"] = True
         sw = self._make(coord, entry)
@@ -1994,34 +2043,29 @@ class TestPanicAlarmSwitch:
         coord.async_put_camera.assert_not_called()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschFrontLightSwitch — unique_id + ON/OFF value pins
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestFrontLightSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
 
         return BoschFrontLightSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_front_light_{CAM_ID.lower()}"
 
-    def test_is_on_true(self, coord, entry):
+    def test_is_on_true(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._shc_state_cache[CAM_ID]["front_light"] = True
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false(self, coord, entry):
+    def test_is_on_false(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._shc_state_cache[CAM_ID]["front_light"] = False
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
     @pytest.mark.asyncio
     async def test_turn_on_calls_cloud_set_light_component_front_true(
-        self, coord, entry
+        self, coord: SimpleNamespace, entry: SimpleNamespace
     ):
         sw = self._make(coord, entry)
         await sw.async_turn_on()
@@ -2031,7 +2075,7 @@ class TestFrontLightSwitchModePins:
 
     @pytest.mark.asyncio
     async def test_turn_off_calls_cloud_set_light_component_front_false(
-        self, coord, entry
+        self, coord: SimpleNamespace, entry: SimpleNamespace
     ):
         sw = self._make(coord, entry)
         await sw.async_turn_off()
@@ -2040,34 +2084,29 @@ class TestFrontLightSwitchModePins:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BoschWallwasherSwitch — unique_id + ON/OFF value pins
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestWallwasherSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschWallwasherSwitch
 
         return BoschWallwasherSwitch(coord, CAM_ID, entry)
 
-    def test_unique_id(self, coord, entry):
+    def test_unique_id(self, coord: SimpleNamespace, entry: SimpleNamespace):
         sw = self._make(coord, entry)
         assert sw.unique_id == f"bosch_shc_wallwasher_{CAM_ID.lower()}"
 
-    def test_is_on_true(self, coord, entry):
+    def test_is_on_true(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._shc_state_cache[CAM_ID]["wallwasher"] = True
         sw = self._make(coord, entry)
         assert sw.is_on is True
 
-    def test_is_on_false(self, coord, entry):
+    def test_is_on_false(self, coord: SimpleNamespace, entry: SimpleNamespace):
         coord._shc_state_cache[CAM_ID]["wallwasher"] = False
         sw = self._make(coord, entry)
         assert sw.is_on is False
 
     @pytest.mark.asyncio
     async def test_turn_on_calls_cloud_set_light_component_wallwasher_true(
-        self, coord, entry
+        self, coord: SimpleNamespace, entry: SimpleNamespace
     ):
         sw = self._make(coord, entry)
         await sw.async_turn_on()
@@ -2077,23 +2116,13 @@ class TestWallwasherSwitchModePins:
 
     @pytest.mark.asyncio
     async def test_turn_off_calls_cloud_set_light_component_wallwasher_false(
-        self, coord, entry
+        self, coord: SimpleNamespace, entry: SimpleNamespace
     ):
         sw = self._make(coord, entry)
         await sw.async_turn_off()
         coord.async_cloud_set_light_component.assert_awaited_once_with(
             CAM_ID, "wallwasher", False
         )
-
-
-# ============================================================
-# --- NVR intent, ambient light, intercom restore, motion-light fallback,
-#     live-stream health watchdog, RTSP credential redaction, write-failure warnings ---
-# ============================================================
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Shared helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _base_info():
@@ -2131,11 +2160,6 @@ def _resp_cm(status: int, json_data=None, raise_exc=None):
         cm.__aenter__ = AsyncMock(return_value=resp)
     cm.__aexit__ = AsyncMock(return_value=None)
     return cm
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# NVR recording switch — user intent tracked immediately (before coord refresh)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _nvr_coord(**overrides):
@@ -2224,11 +2248,9 @@ class TestNvrSwitchIntent:
         assert sw.is_on is False
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # NVR event-clip opt-out switch (issue #43 follow-up feature request,
 # realKim-dotcom) — default ON, per-camera opt-out of the native
 # FCM-triggered event→clip assembly.
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _nvr_event_clip_coord(**overrides):
@@ -2342,11 +2364,6 @@ class TestNvrEventClipSwitch:
         assert CAM_ID not in coord._nvr_event_clip_enabled
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# async_setup_entry — enable_snapshot_button option must not gate switches
-# ──────────────────────────────────────────────────────────────────────────────
-
-
 def _setup_coord():
     """Minimal coordinator for async_setup_entry tests.
 
@@ -2442,11 +2459,6 @@ class TestSetupEntryGuard:
                 await async_setup_entry(hass, entry, _add)
 
         assert len(added) > 0
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# BoschAmbientLightSwitch — cache updates on successful cloud write
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _ambient_coord(**overrides):
@@ -2591,11 +2603,6 @@ class TestAmbientLightCacheUpdate:
         sw.async_write_ha_state.assert_called_once()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# BoschIntercomSwitch — RestoreEntity state persistence across HA restarts
-# ──────────────────────────────────────────────────────────────────────────────
-
-
 class TestIntercomRestoreEntity:
     """IntercomSwitch restores ON/OFF state across HA restarts."""
 
@@ -2687,13 +2694,6 @@ class TestIntercomRestoreEntity:
             await sw.async_added_to_hass()
 
         assert sw.is_on is False  # unchanged default
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Misc switch coverage: device_info, is_on caches, turn_off, cooldowns,
-# notifications, softlight-fading fallback, intrusion-detection guard,
-# and async_setup_entry entity-creation gates
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _make_coord(**overrides):
@@ -2967,11 +2967,9 @@ async def test_setup_entry_gen2_indoor_alarm_switches():
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # BoschMotionLightSwitch — network-fetch fallback paths (empty cache forces
 # a GET before the PUT; token-missing/HTTP-error/exception all short-circuit
 # before any write, leaving local state untouched)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _stub_coord_motionlight(token: str | None = "tok-A", **overrides):
@@ -2997,7 +2995,7 @@ def _stub_coord_motionlight(token: str | None = "tok-A", **overrides):
 
 
 @pytest.fixture
-def stub_entry_c():
+def stub_entry_c() -> SimpleNamespace:
     return SimpleNamespace(entry_id="01ENTRY", data={}, options={})
 
 
@@ -3026,7 +3024,9 @@ class TestMotionLightNoTokenEarlyReturn:
     """
 
     @pytest.mark.asyncio
-    async def test_no_token_short_circuits_before_get(self, stub_entry_c):
+    async def test_no_token_short_circuits_before_get(
+        self, stub_entry_c: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
 
         coord = _stub_coord_motionlight(token=None)
@@ -3055,7 +3055,7 @@ class TestMotionLightGetHttpError:
     """GET returns non-200 → warn + return; no PUT."""
 
     @pytest.mark.asyncio
-    async def test_http_500_returns_without_put(self, stub_entry_c):
+    async def test_http_500_returns_without_put(self, stub_entry_c: SimpleNamespace):
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
 
         coord = _stub_coord_motionlight()
@@ -3078,7 +3078,7 @@ class TestMotionLightGetHttpError:
         assert sw._is_on is None, "failed GET must leave local state untouched"
 
     @pytest.mark.asyncio
-    async def test_http_401_returns_without_put(self, stub_entry_c):
+    async def test_http_401_returns_without_put(self, stub_entry_c: SimpleNamespace):
         """401 (auth expired) is just another non-200 status — same early return."""
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
 
@@ -3105,7 +3105,9 @@ class TestMotionLightGetRaises:
     """
 
     @pytest.mark.asyncio
-    async def test_get_raises_timeout_returns_without_put(self, stub_entry_c):
+    async def test_get_raises_timeout_returns_without_put(
+        self, stub_entry_c: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
 
         coord = _stub_coord_motionlight()
@@ -3131,7 +3133,9 @@ class TestMotionLightGetRaises:
         assert sw._is_on is None
 
     @pytest.mark.asyncio
-    async def test_get_raises_generic_returns_without_put(self, stub_entry_c):
+    async def test_get_raises_generic_returns_without_put(
+        self, stub_entry_c: SimpleNamespace
+    ):
         """Any unexpected error from session.get is caught and the call no-ops."""
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
 
@@ -3154,7 +3158,6 @@ class TestMotionLightGetRaises:
         assert sw._is_on is None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # BoschLiveStreamSwitch._stream_health_watchdog — LOCAL stream health polling
 #
 # The watchdog runs after a LOCAL stream-on. It probes HA's `Stream` object
@@ -3166,7 +3169,6 @@ class TestMotionLightGetRaises:
 #   - "unhealthy" (Stream object but available=False) → at first tick
 #     record_stream_error + restart; at second tick saturate the error
 #     counter to force REMOTE on next try_live_connection.
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _make_coord_streamhealth(**overrides):
@@ -3341,11 +3343,9 @@ class TestUnhealthyRestart:
         sw.async_write_ha_state.assert_called()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # RTSP credential redaction — `_redact_rtsp_creds` and
 # BoschLiveStreamSwitch.extra_state_attributes must never leak Digest/proxy
 # userinfo (user:password@host) into logs or entity attributes
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -3454,11 +3454,9 @@ class TestExtraStateAttributesRedaction:
         assert attrs["rtsps_url"] == no_cred_url
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Write-failure warnings — camera-light/front-light/wallwasher/notifications
 # switches must log a WARNING when the cloud write fails on every fallback
 # path, and stay silent on success
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _coord_writefail(**overrides: object) -> SimpleNamespace:
@@ -3479,7 +3477,7 @@ def _entry_writefail() -> SimpleNamespace:
 
 @pytest.mark.asyncio
 class TestCameraLightSwitchWarnsOnFailure:
-    async def test_turn_on_failure_warns(self, caplog):
+    async def test_turn_on_failure_warns(self, caplog: pytest.LogCaptureFixture):
         sw = BoschCameraLightSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_on()
@@ -3488,7 +3486,7 @@ class TestCameraLightSwitchWarnsOnFailure:
             for r in caplog.records
         )
 
-    async def test_turn_off_failure_warns(self, caplog):
+    async def test_turn_off_failure_warns(self, caplog: pytest.LogCaptureFixture):
         sw = BoschCameraLightSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_off()
@@ -3497,7 +3495,7 @@ class TestCameraLightSwitchWarnsOnFailure:
             for r in caplog.records
         )
 
-    async def test_turn_on_success_is_silent(self, caplog):
+    async def test_turn_on_success_is_silent(self, caplog: pytest.LogCaptureFixture):
         sw = BoschCameraLightSwitch(
             _coord_writefail(async_cloud_set_camera_light=AsyncMock(return_value=True)),
             CAM_ID,
@@ -3510,7 +3508,7 @@ class TestCameraLightSwitchWarnsOnFailure:
 
 @pytest.mark.asyncio
 class TestFrontLightSwitchWarnsOnFailure:
-    async def test_turn_on_failure_warns(self, caplog):
+    async def test_turn_on_failure_warns(self, caplog: pytest.LogCaptureFixture):
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
 
         sw = BoschFrontLightSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
@@ -3521,7 +3519,7 @@ class TestFrontLightSwitchWarnsOnFailure:
             for r in caplog.records
         )
 
-    async def test_turn_off_failure_warns(self, caplog):
+    async def test_turn_off_failure_warns(self, caplog: pytest.LogCaptureFixture):
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
 
         sw = BoschFrontLightSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
@@ -3535,7 +3533,7 @@ class TestFrontLightSwitchWarnsOnFailure:
 
 @pytest.mark.asyncio
 class TestWallwasherSwitchWarnsOnFailure:
-    async def test_turn_on_failure_warns(self, caplog):
+    async def test_turn_on_failure_warns(self, caplog: pytest.LogCaptureFixture):
         sw = BoschWallwasherSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_on()
@@ -3544,7 +3542,7 @@ class TestWallwasherSwitchWarnsOnFailure:
             for r in caplog.records
         )
 
-    async def test_turn_off_failure_warns(self, caplog):
+    async def test_turn_off_failure_warns(self, caplog: pytest.LogCaptureFixture):
         sw = BoschWallwasherSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_off()
@@ -3556,7 +3554,7 @@ class TestWallwasherSwitchWarnsOnFailure:
 
 @pytest.mark.asyncio
 class TestNotificationsSwitchWarnsOnFailure:
-    async def test_turn_on_failure_warns(self, caplog):
+    async def test_turn_on_failure_warns(self, caplog: pytest.LogCaptureFixture):
         sw = BoschNotificationsSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_on()
@@ -3565,7 +3563,7 @@ class TestNotificationsSwitchWarnsOnFailure:
             for r in caplog.records
         )
 
-    async def test_turn_off_failure_warns(self, caplog):
+    async def test_turn_off_failure_warns(self, caplog: pytest.LogCaptureFixture):
         sw = BoschNotificationsSwitch(_coord_writefail(), CAM_ID, _entry_writefail())
         with caplog.at_level(logging.WARNING):
             await sw.async_turn_off()
@@ -3573,18 +3571,6 @@ class TestNotificationsSwitchWarnsOnFailure:
             "Notifications toggle for Terrasse (OFF) failed on all paths" in r.message
             for r in caplog.records
         )
-
-
-# ============================================================
-# --- audio/intrusion detection (glass-break/fire-alarm), cache races,
-#     intercom option gate, intrusion write-lock, live-stream user intent,
-#     panic alarm, privacy<->livestream interaction, privacy offline mode,
-#     privacy/camera-light write-failure notification ---
-# ============================================================
-
-# =====================================================================
-# --- audio/intrusion detection switches (glass-break / fire-alarm) ---
-# =====================================================================
 
 
 def _coord_audio(cfg: dict | None, privacy_on: bool = False) -> SimpleNamespace:
@@ -3628,7 +3614,9 @@ FIRE = "BoschFireAlarmDetectionSwitch"
         (FIRE, {"detectGlassBreak": True}, None),
     ],
 )
-def test_is_on_maps_its_own_field(cls, cfg, expected):
+def test_is_on_maps_its_own_field(
+    cls: str, cfg: dict[str, bool] | None, expected: bool | None
+):
     sw = _make(cls, _coord_audio(cfg))
     assert sw.is_on is expected
 
@@ -3729,7 +3717,9 @@ async def test_concurrent_glass_and_fire_no_clobber():
 
 
 @pytest.mark.asyncio
-async def test_turn_on_sets_intrusion_write_lock(stub_entry_gen2) -> None:
+async def test_turn_on_sets_intrusion_write_lock(
+    stub_entry_gen2: SimpleNamespace,
+) -> None:
     """After turn_on, _intrusion_config_set_at[cam_id] must be set — otherwise
     the next slow-tier poll (300s) overwrites the cache with the stale cloud
     value."""
@@ -3752,7 +3742,9 @@ async def test_turn_on_sets_intrusion_write_lock(stub_entry_gen2) -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_put_does_not_set_write_lock(stub_entry_gen2) -> None:
+async def test_failed_put_does_not_set_write_lock(
+    stub_entry_gen2: SimpleNamespace,
+) -> None:
     """If the PUT fails: neither cache nor write-lock may be touched."""
     from custom_components.bosch_shc_camera.switch import BoschIntrusionDetectionSwitch
 
@@ -3818,13 +3810,8 @@ def _make_coord_intrusion() -> SimpleNamespace:
     return coord
 
 
-# =====================================================================
-# --- cache-race / write-lock protection (multiple switches) ---
-# =====================================================================
-
-
 @pytest.fixture
-def coord_with_helpers():
+def coord_with_helpers() -> tuple[SimpleNamespace, Callable[..., bool]]:
     """Build a coordinator-shaped stub with the real `_is_write_locked` method bound."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -3845,27 +3832,37 @@ def coord_with_helpers():
 
 
 class TestIsWriteLocked:
-    def test_no_entry_returns_false(self, coord_with_helpers):
+    def test_no_entry_returns_false(
+        self, coord_with_helpers: tuple[SimpleNamespace, Callable[..., bool]]
+    ):
         coord, helper = coord_with_helpers
         assert helper(coord, CAM_ID, coord._privacy_sound_set_at) is False
 
-    def test_fresh_write_returns_true(self, coord_with_helpers):
+    def test_fresh_write_returns_true(
+        self, coord_with_helpers: tuple[SimpleNamespace, Callable[..., bool]]
+    ):
         coord, helper = coord_with_helpers
         coord._privacy_sound_set_at[CAM_ID] = time.monotonic()
         assert helper(coord, CAM_ID, coord._privacy_sound_set_at) is True
 
-    def test_old_write_returns_false(self, coord_with_helpers):
+    def test_old_write_returns_false(
+        self, coord_with_helpers: tuple[SimpleNamespace, Callable[..., bool]]
+    ):
         coord, helper = coord_with_helpers
         coord._privacy_sound_set_at[CAM_ID] = time.monotonic() - 60.0
         assert helper(coord, CAM_ID, coord._privacy_sound_set_at) is False
 
-    def test_lock_window_boundary(self, coord_with_helpers):
+    def test_lock_window_boundary(
+        self, coord_with_helpers: tuple[SimpleNamespace, Callable[..., bool]]
+    ):
         """At exactly TTL seconds, lock has expired."""
         coord, helper = coord_with_helpers
         coord._privacy_sound_set_at[CAM_ID] = time.monotonic() - 30.0
         assert helper(coord, CAM_ID, coord._privacy_sound_set_at) is False
 
-    def test_lock_works_on_other_field_dicts(self, coord_with_helpers):
+    def test_lock_works_on_other_field_dicts(
+        self, coord_with_helpers: tuple[SimpleNamespace, Callable[..., bool]]
+    ):
         """Helper is generic — works for every set_at dict."""
         coord, helper = coord_with_helpers
         coord._arming_set_at[CAM_ID] = time.monotonic()
@@ -3972,11 +3969,6 @@ class TestArmingSwitchRecordsTimestamp:
         await sw.async_turn_on()
         assert CAM_ID not in coord._arming_cache
         assert CAM_ID not in coord._arming_set_at
-
-
-# =====================================================================
-# --- intercom option gate ---
-# =====================================================================
 
 
 def _make_setup_inputs(*, enable_intercom: bool, registry_has_intercom: bool):
@@ -4110,11 +4102,6 @@ class TestIntercomOptionGate:
         )
 
 
-# =====================================================================
-# --- panic alarm switch (Gen2 siren) ---
-# =====================================================================
-
-
 @pytest.fixture
 def stub_entry_gen2() -> SimpleNamespace:
     return SimpleNamespace(entry_id="01ENTRY", data={}, options={})
@@ -4141,7 +4128,7 @@ def _make_coord_panic() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_turn_on_sends_status_on(stub_entry_gen2) -> None:
+async def test_turn_on_sends_status_on(stub_entry_gen2: SimpleNamespace) -> None:
     """PUT /v11/video_inputs/{id}/panic_alarm {"status":"ON"} — pins the exact
     body Bosch expects (Gen2 siren trigger; the earlier /acoustic_alarm
     endpoint only exists on CAMERA_360 Gen1, which has no integrated siren)."""
@@ -4163,7 +4150,7 @@ async def test_turn_on_sends_status_on(stub_entry_gen2) -> None:
 
 
 @pytest.mark.asyncio
-async def test_turn_off_sends_status_off(stub_entry_gen2) -> None:
+async def test_turn_off_sends_status_off(stub_entry_gen2: SimpleNamespace) -> None:
     from custom_components.bosch_shc_camera.switch import BoschPanicAlarmSwitch
 
     coord = _make_coord_panic()
@@ -4180,7 +4167,7 @@ async def test_turn_off_sends_status_off(stub_entry_gen2) -> None:
 
 
 @pytest.mark.asyncio
-async def test_is_on_tracks_local_cache(stub_entry_gen2) -> None:
+async def test_is_on_tracks_local_cache(stub_entry_gen2: SimpleNamespace) -> None:
     """No GET endpoint exists — track last-sent state locally."""
     from custom_components.bosch_shc_camera.switch import BoschPanicAlarmSwitch
 
@@ -4193,7 +4180,9 @@ async def test_is_on_tracks_local_cache(stub_entry_gen2) -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_put_does_not_set_cache_panic(stub_entry_gen2) -> None:
+async def test_failed_put_does_not_set_cache_panic(
+    stub_entry_gen2: SimpleNamespace,
+) -> None:
     from custom_components.bosch_shc_camera.switch import BoschPanicAlarmSwitch
 
     coord = _make_coord_panic()
@@ -4211,7 +4200,7 @@ async def test_failed_put_does_not_set_cache_panic(stub_entry_gen2) -> None:
     )
 
 
-def test_disabled_by_default(stub_entry_gen2) -> None:
+def test_disabled_by_default(stub_entry_gen2: SimpleNamespace) -> None:
     """Panic-alarm switch defaults to disabled (75dB is loud, not something
     for the default dashboard). User must explicitly enable it."""
     from custom_components.bosch_shc_camera.switch import BoschPanicAlarmSwitch
@@ -4222,7 +4211,9 @@ def test_disabled_by_default(stub_entry_gen2) -> None:
 
 
 @pytest.mark.asyncio
-async def test_lazy_init_creates_cache_on_legacy_coordinator(stub_entry_gen2) -> None:
+async def test_lazy_init_creates_cache_on_legacy_coordinator(
+    stub_entry_gen2: SimpleNamespace,
+) -> None:
     """When a coordinator from an older build doesn't carry
     `_panic_alarm_cache`, `_set()` lazy-inits it so the very first toggle
     works. Pins switch.py's lazy-init guard."""
@@ -4242,9 +4233,7 @@ async def test_lazy_init_creates_cache_on_legacy_coordinator(stub_entry_gen2) ->
     assert coord._panic_alarm_cache[CAM_ID_GEN2] is True
 
 
-# =====================================================================
-# --- live-stream user-intent switch ---
-# =====================================================================
+# Live-stream user-intent switch.
 #
 # The coordinator tracks user intent in `_user_intent_streams: set[str]`,
 # decoupled from `_live_connections` (which Cast/dashboard/`camera.play_stream`
@@ -4296,7 +4285,9 @@ class TestHealthWatchdogIntentCheck:
     tear-down before calling `try_live_connection`."""
 
     @pytest.mark.asyncio
-    async def test_watchdog_skips_reconnect_when_intent_gone(self, monkeypatch):
+    async def test_watchdog_skips_reconnect_when_intent_gone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         """Pin: if user toggled OFF during sleep, watchdog bails without re-opening."""
         # Mock sleep so the test runs instantly
         import asyncio as _asyncio
@@ -4357,7 +4348,9 @@ class TestHealthWatchdogIntentCheck:
         )
 
     @pytest.mark.asyncio
-    async def test_watchdog_reconnects_when_intent_still_present(self, monkeypatch):
+    async def test_watchdog_reconnects_when_intent_still_present(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         """Sanity: if intent is still True, watchdog DOES reconnect."""
         import asyncio as _asyncio
 
@@ -4478,9 +4471,7 @@ class TestTurnOnFailureRevertsIntent:
         )
 
 
-# =====================================================================
-# --- privacy switch: live-stream teardown interaction ---
-# =====================================================================
+# Privacy switch: live-stream teardown interaction.
 #
 # When privacy is turned off, the live-stream switch must not stay stuck on
 # "on" even though the underlying RTSP session is dead. Two contracts are
@@ -4666,9 +4657,7 @@ class TestSwitchIsOnContract:
         )
 
 
-# =====================================================================
-# --- privacy switch: offline-mode availability contract ---
-# =====================================================================
+# Privacy switch: offline-mode availability contract.
 #
 # Availability semantics for the privacy switch, including a cold-start
 # fallback: cloud healthy + cached state → available (primary). Cloud down +
@@ -4805,9 +4794,7 @@ class TestPrivacySwitchOfflineMode:
         assert s.available is False
 
 
-# =====================================================================
-# --- privacy / camera-light write-failure notification ---
-# =====================================================================
+# Privacy / camera-light write-failure notification.
 #
 # When every write path (cloud, Gen2 LOCAL RCP, SHC) is exhausted, the user
 # must always get a persistent_notification, and the switch must log a
@@ -4988,7 +4975,9 @@ class TestCameraLightSameShcFallbackBug:
 
 class TestSwitchLogsOnTotalFailure:
     @pytest.mark.asyncio
-    async def test_apply_privacy_logs_warning_when_write_fails(self, caplog):
+    async def test_apply_privacy_logs_warning_when_write_fails(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """`_apply_privacy` must not silently discard a False result — pins a
         visible WARNING so the failure isn't only buried in a notification.
         """
@@ -5011,7 +5000,9 @@ class TestSwitchLogsOnTotalFailure:
         assert any("failed on all paths" in record.message for record in caplog.records)
 
     @pytest.mark.asyncio
-    async def test_apply_privacy_silent_when_write_succeeds(self, caplog):
+    async def test_apply_privacy_silent_when_write_succeeds(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         """No warning noise on the (normal) success path."""
         from custom_components.bosch_shc_camera.switch import (
             BoschPrivacyModeSwitch,
@@ -5031,13 +5022,6 @@ class TestSwitchLogsOnTotalFailure:
         assert not any(
             "failed on all paths" in record.message for record in caplog.records
         )
-
-
-# ============================================================
-# --- round8/round9/sprint coverage: motion/recording/autofollow/intercom,
-#     privacy-sound, LED, motion/ambient light, soft-fade, intrusion,
-#     notification-type, alarm arm/mode/pre-alarm, image rotation, NVR ---
-# ============================================================
 
 
 # ── minimal coordinator stub ─────────────────────────────────────────────────
@@ -6040,12 +6024,12 @@ def _stub_coord_round9(**overrides):
 
 
 @pytest.fixture
-def stub_coord_round9():
+def stub_coord_round9() -> SimpleNamespace:
     return _stub_coord_round9()
 
 
 @pytest.fixture
-def stub_entry_round9():
+def stub_entry_round9() -> SimpleNamespace:
     return SimpleNamespace(entry_id="01ENTRY", data={}, options={})
 
 
@@ -6054,7 +6038,7 @@ def stub_entry_round9():
 
 class TestIsGen2Indoor:
     def test_returns_true_for_home_eyes_indoor(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschTimestampSwitch,
@@ -6067,7 +6051,9 @@ class TestIsGen2Indoor:
             "HOME_Eyes_Indoor must be identified as Gen2 Indoor"
         )
 
-    def test_returns_false_for_outdoor(self, stub_coord_round9, stub_entry_round9):
+    def test_returns_false_for_outdoor(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import (
             BoschTimestampSwitch,
             _is_gen2_indoor,
@@ -6080,7 +6066,7 @@ class TestIsGen2Indoor:
         )
 
     def test_returns_true_for_camera_indoor_gen2(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschTimestampSwitch,
@@ -6100,7 +6086,7 @@ class TestIsGen2Indoor:
 class TestWarnIfPrivacyOn:
     @pytest.mark.asyncio
     async def test_returns_false_when_privacy_off(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschTimestampSwitch,
@@ -6114,7 +6100,7 @@ class TestWarnIfPrivacyOn:
 
     @pytest.mark.asyncio
     async def test_returns_true_when_privacy_on_and_sends_notification(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschTimestampSwitch,
@@ -6134,7 +6120,7 @@ class TestWarnIfPrivacyOn:
 
     @pytest.mark.asyncio
     async def test_swallows_notification_error(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschTimestampSwitch,
@@ -6159,7 +6145,7 @@ class TestWarnIfPrivacyOn:
 class TestPrivacySoundSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_on_updates_cache_on_success(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschPrivacySoundSwitch
 
@@ -6173,7 +6159,7 @@ class TestPrivacySoundSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_off_updates_cache_on_success(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschPrivacySoundSwitch
 
@@ -6187,7 +6173,7 @@ class TestPrivacySoundSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_on_no_cache_update_on_failure(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschPrivacySoundSwitch
 
@@ -6206,7 +6192,9 @@ class TestPrivacySoundSwitchActions:
 
 class TestTimestampSwitchActions:
     @pytest.mark.asyncio
-    async def test_turn_on_sets_cache_true(self, stub_coord_round9, stub_entry_round9):
+    async def test_turn_on_sets_cache_true(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschTimestampSwitch
 
         stub_coord_round9.async_put_camera = AsyncMock()
@@ -6219,7 +6207,7 @@ class TestTimestampSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_off_sets_cache_false(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschTimestampSwitch
 
@@ -6233,7 +6221,7 @@ class TestTimestampSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_off_keeps_cache_on_put_failure(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         """Regression: a failed PUT must NOT flip the cache or stamp the write-lock.
 
@@ -6259,7 +6247,7 @@ class TestTimestampSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_on_keeps_cache_on_put_failure(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschTimestampSwitch
 
@@ -6283,7 +6271,7 @@ class TestTimestampSwitchActions:
 class TestStatusLedSwitchActionsRound9:
     @pytest.mark.asyncio
     async def test_turn_on_sets_cache_true_on_success(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
 
@@ -6298,7 +6286,7 @@ class TestStatusLedSwitchActionsRound9:
 
     @pytest.mark.asyncio
     async def test_turn_off_keeps_cache_on_put_failure(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         """Regression: failed PUT must not flip the cache nor stamp the write-lock."""
         from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
@@ -6318,7 +6306,7 @@ class TestStatusLedSwitchActionsRound9:
 
     @pytest.mark.asyncio
     async def test_turn_on_keeps_cache_on_put_failure(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
 
@@ -6340,7 +6328,9 @@ class TestStatusLedSwitchActionsRound9:
 
 
 class TestNotificationTypeSwitch:
-    def test_is_on_reads_from_cache(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_reads_from_cache(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import (
             BoschNotificationTypeSwitch,
         )
@@ -6354,7 +6344,9 @@ class TestNotificationTypeSwitch:
         )
         assert entity.is_on is True, "Must read movement flag from notifications cache"
 
-    def test_is_on_false_for_disabled_type(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_false_for_disabled_type(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import (
             BoschNotificationTypeSwitch,
         )
@@ -6368,7 +6360,9 @@ class TestNotificationTypeSwitch:
         )
         assert entity.is_on is False, "Must return False when type is False in cache"
 
-    def test_is_on_none_when_cache_empty(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_none_when_cache_empty(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import (
             BoschNotificationTypeSwitch,
         )
@@ -6380,7 +6374,7 @@ class TestNotificationTypeSwitch:
         assert entity.is_on is None, "Must return None when no cache exists"
 
     def test_available_false_when_cache_empty(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschNotificationTypeSwitch,
@@ -6395,7 +6389,7 @@ class TestNotificationTypeSwitch:
         )
 
     def test_available_true_when_cache_populated(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschNotificationTypeSwitch,
@@ -6410,7 +6404,7 @@ class TestNotificationTypeSwitch:
         )
 
     def test_translation_key_normalises_camelcase(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschNotificationTypeSwitch,
@@ -6423,7 +6417,9 @@ class TestNotificationTypeSwitch:
             "cameraAlarm must map to notification_type_camera_alarm (snake_case)"
         )
 
-    def test_trouble_email_normalised(self, stub_coord_round9, stub_entry_round9):
+    def test_trouble_email_normalised(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import (
             BoschNotificationTypeSwitch,
         )
@@ -6437,7 +6433,7 @@ class TestNotificationTypeSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_on_merges_with_existing_flags(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschNotificationTypeSwitch,
@@ -6460,7 +6456,7 @@ class TestNotificationTypeSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_off_updates_single_flag(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschNotificationTypeSwitch,
@@ -6482,14 +6478,18 @@ class TestNotificationTypeSwitch:
 
 
 class TestAlarmSystemArmSwitch:
-    def test_is_on_reads_arming_cache(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_reads_arming_cache(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmSystemArmSwitch
 
         stub_coord_round9._arming_cache[CAM_ID] = True
         entity = BoschAlarmSystemArmSwitch(stub_coord_round9, CAM_ID, stub_entry_round9)
         assert entity.is_on is True, "Must read arming state from _arming_cache"
 
-    def test_is_on_none_when_no_cache(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_none_when_no_cache(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmSystemArmSwitch
 
         stub_coord_round9._arming_cache = {}
@@ -6497,7 +6497,7 @@ class TestAlarmSystemArmSwitch:
         assert entity.is_on is None, "Must return None when not yet known"
 
     def test_available_requires_camera_online(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmSystemArmSwitch
 
@@ -6506,7 +6506,7 @@ class TestAlarmSystemArmSwitch:
         assert entity.available is False, "Must be unavailable when camera is offline"
 
     def test_extra_attrs_include_alarm_status(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmSystemArmSwitch
 
@@ -6523,7 +6523,7 @@ class TestAlarmSystemArmSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_on_updates_arming_cache(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmSystemArmSwitch
 
@@ -6537,7 +6537,7 @@ class TestAlarmSystemArmSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_off_updates_arming_cache(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmSystemArmSwitch
 
@@ -6555,7 +6555,9 @@ class TestAlarmSystemArmSwitch:
 
 
 class TestAlarmSettingsSwitchBase:
-    def test_is_on_true_when_field_is_ON(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_true_when_field_is_ON(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmModeSwitch
 
         stub_coord_round9._alarm_settings_cache[CAM_ID] = {
@@ -6565,14 +6567,18 @@ class TestAlarmSettingsSwitchBase:
         entity = BoschAlarmModeSwitch(stub_coord_round9, CAM_ID, stub_entry_round9)
         assert entity.is_on is True, "alarmMode=ON must yield is_on=True"
 
-    def test_is_on_false_when_field_is_OFF(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_false_when_field_is_OFF(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmModeSwitch
 
         stub_coord_round9._alarm_settings_cache[CAM_ID] = {"alarmMode": "OFF"}
         entity = BoschAlarmModeSwitch(stub_coord_round9, CAM_ID, stub_entry_round9)
         assert entity.is_on is False, "alarmMode=OFF must yield is_on=False"
 
-    def test_is_on_none_when_field_missing(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_none_when_field_missing(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmModeSwitch
 
         stub_coord_round9._alarm_settings_cache = {}
@@ -6580,7 +6586,7 @@ class TestAlarmSettingsSwitchBase:
         assert entity.is_on is None, "Must return None when no alarm settings cached"
 
     def test_available_false_when_cache_empty(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmModeSwitch
 
@@ -6591,7 +6597,7 @@ class TestAlarmSettingsSwitchBase:
         )
 
     def test_available_true_when_cache_and_online(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmModeSwitch
 
@@ -6602,7 +6608,9 @@ class TestAlarmSettingsSwitchBase:
         )
 
     @pytest.mark.asyncio
-    async def test_set_updates_field_to_ON(self, stub_coord_round9, stub_entry_round9):
+    async def test_set_updates_field_to_ON(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmModeSwitch
 
         stub_coord_round9._alarm_settings_cache[CAM_ID] = {
@@ -6618,7 +6626,9 @@ class TestAlarmSettingsSwitchBase:
         )
 
     @pytest.mark.asyncio
-    async def test_set_updates_field_to_OFF(self, stub_coord_round9, stub_entry_round9):
+    async def test_set_updates_field_to_OFF(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschAlarmModeSwitch
 
         stub_coord_round9._alarm_settings_cache[CAM_ID] = {
@@ -6635,7 +6645,7 @@ class TestAlarmSettingsSwitchBase:
 
     @pytest.mark.asyncio
     async def test_set_no_op_when_cache_empty(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         """No crash or API call when alarm_settings cache is empty (camera not yet polled)."""
         from custom_components.bosch_shc_camera.switch import BoschAlarmModeSwitch
@@ -6648,7 +6658,7 @@ class TestAlarmSettingsSwitchBase:
         stub_coord_round9.async_put_camera.assert_not_called()
 
     def test_prealarm_reads_prealarmmode_field(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschPreAlarmSwitch
 
@@ -6666,7 +6676,9 @@ class TestAlarmSettingsSwitchBase:
 
 
 class TestImageRotation180Switch:
-    def test_is_on_reads_rotation_dict(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_reads_rotation_dict(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import (
             BoschImageRotation180Switch,
         )
@@ -6677,7 +6689,9 @@ class TestImageRotation180Switch:
         )
         assert entity.is_on is True, "is_on must read from _image_rotation_180"
 
-    def test_is_on_false_when_not_set(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_false_when_not_set(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import (
             BoschImageRotation180Switch,
         )
@@ -6689,7 +6703,7 @@ class TestImageRotation180Switch:
         assert entity.is_on is False, "is_on must default to False when not in dict"
 
     def test_available_requires_only_coordinator_success(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschImageRotation180Switch,
@@ -6706,7 +6720,9 @@ class TestImageRotation180Switch:
         )
 
     @pytest.mark.asyncio
-    async def test_turn_on_sets_dict_true(self, stub_coord_round9, stub_entry_round9):
+    async def test_turn_on_sets_dict_true(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import (
             BoschImageRotation180Switch,
         )
@@ -6722,7 +6738,9 @@ class TestImageRotation180Switch:
         stub_coord_round9.async_update_listeners.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_turn_off_sets_dict_false(self, stub_coord_round9, stub_entry_round9):
+    async def test_turn_off_sets_dict_false(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import (
             BoschImageRotation180Switch,
         )
@@ -6739,7 +6757,7 @@ class TestImageRotation180Switch:
 
     @pytest.mark.asyncio
     async def test_async_added_to_hass_restores_on_state(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschImageRotation180Switch,
@@ -6768,7 +6786,7 @@ class TestImageRotation180Switch:
 
     @pytest.mark.asyncio
     async def test_async_added_to_hass_no_op_for_off_state(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschImageRotation180Switch,
@@ -6799,21 +6817,25 @@ class TestImageRotation180Switch:
 
 
 class TestNvrRecordingSwitch:
-    def test_is_on_reads_nvr_user_intent(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_reads_nvr_user_intent(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
 
         stub_coord_round9._nvr_user_intent[CAM_ID] = True
         entity = BoschNvrRecordingSwitch(stub_coord_round9, CAM_ID, stub_entry_round9)
         assert entity.is_on is True, "is_on must read from _nvr_user_intent"
 
-    def test_is_on_false_when_not_set(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_false_when_not_set(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
 
         entity = BoschNvrRecordingSwitch(stub_coord_round9, CAM_ID, stub_entry_round9)
         assert entity.is_on is False, "is_on must default to False"
 
     def test_available_false_when_coordinator_failed(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
 
@@ -6822,7 +6844,7 @@ class TestNvrRecordingSwitch:
         assert entity.available is False, "Must be unavailable when coordinator failed"
 
     def test_available_false_when_camera_offline(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
 
@@ -6831,7 +6853,7 @@ class TestNvrRecordingSwitch:
         assert entity.available is False, "Must be unavailable when camera is offline"
 
     def test_available_false_when_no_live_connection(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
 
@@ -6842,7 +6864,7 @@ class TestNvrRecordingSwitch:
         )
 
     def test_available_false_when_live_is_remote(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
 
@@ -6853,7 +6875,7 @@ class TestNvrRecordingSwitch:
         )
 
     def test_available_true_when_local_stream_active(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
 
@@ -6862,7 +6884,7 @@ class TestNvrRecordingSwitch:
         assert entity.available is True, "Must be available when LOCAL stream is active"
 
     def test_extra_attrs_exposes_ffmpeg_state(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
 
@@ -6877,7 +6899,9 @@ class TestNvrRecordingSwitch:
             "extra_attrs must include connection_type"
         )
 
-    def test_entity_disabled_by_default(self, stub_coord_round9, stub_entry_round9):
+    def test_entity_disabled_by_default(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
 
         entity = BoschNvrRecordingSwitch(stub_coord_round9, CAM_ID, stub_entry_round9)
@@ -6890,7 +6914,9 @@ class TestNvrRecordingSwitch:
 
 
 class TestMotionLightSwitchIsOn:
-    def test_is_on_reads_from_cache(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_reads_from_cache(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
 
         stub_coord_round9._motion_light_cache[CAM_ID] = {"lightOnMotionEnabled": True}
@@ -6899,7 +6925,9 @@ class TestMotionLightSwitchIsOn:
             "is_on must read lightOnMotionEnabled from motion_light_cache"
         )
 
-    def test_is_on_none_when_cache_empty(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_none_when_cache_empty(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
 
         stub_coord_round9._motion_light_cache = {}
@@ -6910,7 +6938,7 @@ class TestMotionLightSwitchIsOn:
 
     @pytest.mark.asyncio
     async def test_set_motion_light_updates_cache_on_success(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
 
@@ -6932,7 +6960,9 @@ class TestMotionLightSwitchIsOn:
 
 
 class TestSoftLightFadingSwitchRound9:
-    def test_is_on_reads_softlightfading(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_reads_softlightfading(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
 
         stub_coord_round9._global_lighting_cache[CAM_ID] = {
@@ -6946,7 +6976,9 @@ class TestSoftLightFadingSwitchRound9:
             "is_on must read softLightFading from global lighting cache"
         )
 
-    def test_is_on_none_when_cache_empty(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_none_when_cache_empty(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
 
         entity = BoschSoftLightFadingSwitch(
@@ -6954,7 +6986,9 @@ class TestSoftLightFadingSwitchRound9:
         )
         assert entity.is_on is None, "is_on must be None when cache empty"
 
-    def test_available_false_when_no_cache(self, stub_coord_round9, stub_entry_round9):
+    def test_available_false_when_no_cache(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
 
         entity = BoschSoftLightFadingSwitch(
@@ -6965,7 +6999,7 @@ class TestSoftLightFadingSwitchRound9:
         )
 
     def test_available_true_when_cache_present(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
 
@@ -6981,7 +7015,7 @@ class TestSoftLightFadingSwitchRound9:
 
 class TestIntrusionDetectionSwitch:
     def test_is_on_reads_enabled_from_intrusion_cache(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschIntrusionDetectionSwitch,
@@ -7000,7 +7034,9 @@ class TestIntrusionDetectionSwitch:
             "is_on must read 'enabled' from _intrusion_config_cache"
         )
 
-    def test_is_on_none_when_cache_empty(self, stub_coord_round9, stub_entry_round9):
+    def test_is_on_none_when_cache_empty(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import (
             BoschIntrusionDetectionSwitch,
         )
@@ -7011,7 +7047,7 @@ class TestIntrusionDetectionSwitch:
         assert entity.is_on is None, "is_on must be None when cache is empty"
 
     def test_available_false_when_intrusion_cache_empty(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschIntrusionDetectionSwitch,
@@ -7025,7 +7061,7 @@ class TestIntrusionDetectionSwitch:
         )
 
     def test_extra_attrs_expose_sensitivity_and_mode(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschIntrusionDetectionSwitch,
@@ -7049,7 +7085,7 @@ class TestIntrusionDetectionSwitch:
 
     @pytest.mark.asyncio
     async def test_privacy_blocks_set_intrusion(
-        self, stub_coord_round9, stub_entry_round9
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import (
             BoschIntrusionDetectionSwitch,
@@ -7170,12 +7206,12 @@ def _stub_coord_sprintma(**overrides):
 
 
 @pytest.fixture
-def stub_coord_sprintma():
+def stub_coord_sprintma() -> SimpleNamespace:
     return _stub_coord()
 
 
 @pytest.fixture
-def stub_entry_sprintma():
+def stub_entry_sprintma() -> SimpleNamespace:
     return SimpleNamespace(
         entry_id="01ENTRY",
         data={"bearer_token": "x"},
@@ -7193,7 +7229,7 @@ def stub_entry_sprintma():
 class TestAsyncSetupEntry:
     @pytest.mark.asyncio
     async def test_early_return_when_snapshot_disabled(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 150: return early when enable_snapshot_button=False."""
         from custom_components.bosch_shc_camera.switch import async_setup_entry
@@ -7217,7 +7253,7 @@ class TestAsyncSetupEntry:
 
     @pytest.mark.asyncio
     async def test_creates_base_entities_for_cam(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 166-237: at least LiveStream + Audio + Privacy entities created."""
         from custom_components.bosch_shc_camera.switch import (
@@ -7246,7 +7282,7 @@ class TestAsyncSetupEntry:
 
     @pytest.mark.asyncio
     async def test_creates_light_entities_when_feature_present(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 181-185: CameraLight, FrontLight, Wallwasher only when has_light=True."""
         from custom_components.bosch_shc_camera.switch import (
@@ -7275,7 +7311,7 @@ class TestAsyncSetupEntry:
 
     @pytest.mark.asyncio
     async def test_skips_light_entities_when_no_light_feature(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 181-185: No light entities when featureSupport.light=False."""
         from custom_components.bosch_shc_camera.switch import (
@@ -7300,7 +7336,7 @@ class TestAsyncSetupEntry:
 
     @pytest.mark.asyncio
     async def test_creates_nvr_switch_when_enabled(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 235: NvrRecordingSwitch added only if enable_nvr=True."""
         from custom_components.bosch_shc_camera.switch import (
@@ -7328,7 +7364,7 @@ class TestAsyncSetupEntry:
 
     @pytest.mark.asyncio
     async def test_skips_nvr_switch_when_disabled(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 235: NvrRecordingSwitch NOT added when enable_nvr=False."""
         from custom_components.bosch_shc_camera.switch import (
@@ -7352,7 +7388,7 @@ class TestAsyncSetupEntry:
 
     @pytest.mark.asyncio
     async def test_creates_nvr_event_clip_switch_when_enabled(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """BoschNvrEventClipSwitch added alongside BoschNvrRecordingSwitch
         whenever enable_nvr=True (issue #43 follow-up feature request)."""
@@ -7381,7 +7417,7 @@ class TestAsyncSetupEntry:
 
     @pytest.mark.asyncio
     async def test_skips_nvr_event_clip_switch_when_disabled(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """NvrEventClipSwitch NOT added when enable_nvr=False, mirroring
         BoschNvrRecordingSwitch's own gating."""
@@ -7406,7 +7442,7 @@ class TestAsyncSetupEntry:
 
     @pytest.mark.asyncio
     async def test_creates_indoor_privacy_sound_switch(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 201-202: PrivacySoundSwitch for indoor cameras."""
         from custom_components.bosch_shc_camera.switch import (
@@ -7431,7 +7467,7 @@ class TestAsyncSetupEntry:
 
     @pytest.mark.asyncio
     async def test_creates_gen2_entities_for_gen2_camera(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 207-212: StatusLed, MotionLight, AmbientLight, SoftLightFading, IntrusionDetection for Gen2."""
         from custom_components.bosch_shc_camera.switch import (
@@ -7467,7 +7503,7 @@ class TestAsyncSetupEntry:
 
     @pytest.mark.asyncio
     async def test_creates_image_rotation_for_indoor(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 231-232: ImageRotation180Switch for INDOOR cameras."""
         from custom_components.bosch_shc_camera.switch import (
@@ -7497,7 +7533,7 @@ class TestAsyncSetupEntry:
 class TestLiveStreamSwitchTurnOn:
     @pytest.mark.asyncio
     async def test_blocked_by_privacy_raises(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 285-289: ServiceValidationError when privacy mode is ON."""
         from homeassistant.exceptions import ServiceValidationError
@@ -7513,7 +7549,7 @@ class TestLiveStreamSwitchTurnOn:
 
     @pytest.mark.asyncio
     async def test_cooldown_blocks_when_stream_just_stopped(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 291-297: cooldown guard — no connection attempt within STREAM_COOLDOWN."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
@@ -7526,7 +7562,7 @@ class TestLiveStreamSwitchTurnOn:
 
     @pytest.mark.asyncio
     async def test_cooldown_allows_after_enough_time(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Cooldown should NOT block when _last_stream_off is old enough."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
@@ -7539,7 +7575,7 @@ class TestLiveStreamSwitchTurnOn:
 
     @pytest.mark.asyncio
     async def test_turn_on_success_local_schedules_watchdog(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 302-322: LOCAL result schedules _stream_health_watchdog task."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
@@ -7555,7 +7591,7 @@ class TestLiveStreamSwitchTurnOn:
 
     @pytest.mark.asyncio
     async def test_turn_on_success_remote_no_watchdog(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 302-322: REMOTE result does NOT schedule a watchdog."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
@@ -7571,7 +7607,7 @@ class TestLiveStreamSwitchTurnOn:
 
     @pytest.mark.asyncio
     async def test_turn_on_failure_records_stream_error(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 323-325: None result → record_stream_error called."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
@@ -7585,7 +7621,7 @@ class TestLiveStreamSwitchTurnOn:
 
     @pytest.mark.asyncio
     async def test_turn_off_calls_teardown_and_refresh(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 428-437: turn_off tears down stream, writes state, requests refresh."""
         from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
@@ -7604,7 +7640,7 @@ class TestLiveStreamSwitchTurnOn:
 class TestAudioSwitchActionsSprintma:
     @pytest.mark.asyncio
     async def test_turn_on_sets_flag_and_applies(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 464-468: turn_on sets _audio_enabled True and calls _apply_audio_change."""
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
@@ -7617,7 +7653,7 @@ class TestAudioSwitchActionsSprintma:
 
     @pytest.mark.asyncio
     async def test_turn_off_sets_flag_and_applies(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 470-474: turn_off sets _audio_enabled False and calls _apply_audio_change."""
         from custom_components.bosch_shc_camera.switch import BoschAudioSwitch
@@ -7630,7 +7666,7 @@ class TestAudioSwitchActionsSprintma:
 
     @pytest.mark.asyncio
     async def test_turn_on_never_reconnects_even_during_privacy(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """The audio switch is a card-side mute now — turning it on must never
         re-open the live connection, including while privacy is active (the old
@@ -7650,7 +7686,7 @@ class TestAudioSwitchActionsSprintma:
 
     @pytest.mark.asyncio
     async def test_turn_on_does_not_reopen_stream_when_live(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Audio is now a synced card-side MUTE — the AAC track is always in the
         stream, so toggling the switch must NOT re-open the live connection
@@ -7669,7 +7705,7 @@ class TestAudioSwitchActionsSprintma:
 
     @pytest.mark.asyncio
     async def test_toggle_no_reconnect_no_refresh_when_not_live(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Off-stream toggle just stores the preference + writes state — no
         stream re-open and no coordinator refresh."""
@@ -7687,7 +7723,9 @@ class TestAudioSwitchActionsSprintma:
 
 
 class TestCameraLightSwitchAvailable:
-    def test_available_when_online(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_available_when_online(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         """Lines 514-523: available=True when coordinator ok + camera online."""
         from custom_components.bosch_shc_camera.switch import BoschCameraLightSwitch
 
@@ -7695,7 +7733,7 @@ class TestCameraLightSwitchAvailable:
         assert sw.available is True
 
     def test_unavailable_when_coordinator_fails(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """available=False when last_update_success=False."""
         from custom_components.bosch_shc_camera.switch import BoschCameraLightSwitch
@@ -7705,7 +7743,7 @@ class TestCameraLightSwitchAvailable:
         assert sw.available is False
 
     def test_unavailable_when_camera_offline(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """available=False when camera offline."""
         from custom_components.bosch_shc_camera.switch import BoschCameraLightSwitch
@@ -7719,7 +7757,9 @@ class TestCameraLightSwitchAvailable:
 
 
 class TestFrontLightIsOn:
-    def test_is_on_reads_from_cache(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_is_on_reads_from_cache(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         """Line 550: reads front_light from _shc_state_cache."""
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
 
@@ -7727,7 +7767,9 @@ class TestFrontLightIsOn:
         sw = BoschFrontLightSwitch(stub_coord_sprintma, CAM_ID, stub_entry_sprintma)
         assert sw.is_on is True
 
-    def test_is_on_false(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_is_on_false(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
 
         stub_coord_sprintma._shc_state_cache[CAM_ID]["front_light"] = False
@@ -7736,7 +7778,9 @@ class TestFrontLightIsOn:
 
 
 class TestWallwasherIsOn:
-    def test_is_on_true(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_is_on_true(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         """Lines 582, 588: reads wallwasher state from cache."""
         from custom_components.bosch_shc_camera.switch import BoschWallwasherSwitch
 
@@ -7744,7 +7788,9 @@ class TestWallwasherIsOn:
         sw = BoschWallwasherSwitch(stub_coord_sprintma, CAM_ID, stub_entry_sprintma)
         assert sw.is_on is True
 
-    def test_is_on_false(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_is_on_false(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschWallwasherSwitch
 
         stub_coord_sprintma._shc_state_cache[CAM_ID]["wallwasher"] = False
@@ -7758,7 +7804,7 @@ class TestWallwasherIsOn:
 class TestMotionEnabledSwitchGen2Privacy:
     @pytest.mark.asyncio
     async def test_turn_on_blocked_by_privacy_for_gen2_indoor(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 690: gen2 indoor camera blocked when privacy ON."""
         from custom_components.bosch_shc_camera.switch import BoschMotionEnabledSwitch
@@ -7773,7 +7819,7 @@ class TestMotionEnabledSwitchGen2Privacy:
 
     @pytest.mark.asyncio
     async def test_turn_on_not_blocked_for_outdoor(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Outdoor cameras not blocked by privacy guard."""
         from custom_components.bosch_shc_camera.switch import BoschMotionEnabledSwitch
@@ -7789,7 +7835,7 @@ class TestMotionEnabledSwitchGen2Privacy:
 
     @pytest.mark.asyncio
     async def test_turn_off_blocked_by_privacy_for_gen2_indoor(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 721: gen2 indoor camera turn_off also blocked by privacy."""
         from custom_components.bosch_shc_camera.switch import BoschMotionEnabledSwitch
@@ -7806,7 +7852,9 @@ class TestMotionEnabledSwitchGen2Privacy:
 
 
 class TestIntercomSwitch:
-    def test_is_on_defaults_false(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_is_on_defaults_false(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         """Lines 889-896: _is_on defaults to False."""
         from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
 
@@ -7815,7 +7863,7 @@ class TestIntercomSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_on_success_sets_is_on(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Successful async_put_camera sets _is_on=True."""
         from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
@@ -7828,7 +7876,7 @@ class TestIntercomSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_off_success_sets_is_on_false(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Successful async_put_camera sets _is_on=False."""
         from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
@@ -7841,7 +7889,7 @@ class TestIntercomSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_on_failure_does_not_raise(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """async_put_camera returning False must not raise, and must still
         call async_write_ha_state."""
@@ -7856,7 +7904,7 @@ class TestIntercomSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_off_failure_does_not_raise(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """async_put_camera returning False must not raise on turn_off."""
         from custom_components.bosch_shc_camera.switch import BoschIntercomSwitch
@@ -7871,7 +7919,7 @@ class TestIntercomSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_on_uses_correct_field_casing_and_preserves_mic_level(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Regression: a prior version sent the wrong JSON key casing
         ("SpeakerLevel" instead of the API's "speakerLevel") — silently
@@ -7896,7 +7944,7 @@ class TestIntercomSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_on_updates_shared_audio_cache(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Regression: the prior implementation never wrote back to
         _audio_cache, leaving BoschSpeakerLevelNumber/BoschMicrophoneLevelNumber's
@@ -7919,7 +7967,7 @@ class TestIntercomSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_off_does_not_touch_speaker_level(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """turn_off only sets audioEnabled=False; speakerLevel/microphoneLevel
         stay whatever they were, matching the ON-only "speakerLevel=50" body
@@ -7950,7 +7998,7 @@ class TestIntercomSwitch:
 class TestStatusLedSwitchActions:
     @pytest.mark.asyncio
     async def test_turn_on_updates_cache(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1076-1082: turn_on PUTs {"state":"ON"} and updates cache."""
         from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
@@ -7966,7 +8014,7 @@ class TestStatusLedSwitchActions:
 
     @pytest.mark.asyncio
     async def test_turn_off_updates_cache(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1084-1090: turn_off PUTs {"state":"OFF"} and updates cache."""
         from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
@@ -7980,7 +8028,9 @@ class TestStatusLedSwitchActions:
         )
         assert stub_coord_sprintma._ledlights_cache[CAM_ID] is False
 
-    def test_available_with_cache(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_available_with_cache(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         """Lines 1069-1074: available=True only when cache has value."""
         from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
 
@@ -7989,7 +8039,7 @@ class TestStatusLedSwitchActions:
         assert sw.available is True
 
     def test_available_false_when_cache_none(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 1073: available=False when ledlights cache is None."""
         from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
@@ -8005,7 +8055,7 @@ class TestStatusLedSwitchActions:
 class TestMotionLightSwitch:
     @pytest.mark.asyncio
     async def test_turn_on_with_cached_config(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1146-1163: cache hit path — no HTTP GET, PUT directly with toggled flag."""
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
@@ -8029,7 +8079,7 @@ class TestMotionLightSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_off_with_cached_config(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1168-1169: turn_off delegates to _set_motion_light(False)."""
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
@@ -8051,7 +8101,7 @@ class TestMotionLightSwitch:
 
     @pytest.mark.asyncio
     async def test_set_motion_light_no_op_on_put_fail(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 1162: PUT failure — cache and _is_on not updated."""
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
@@ -8067,7 +8117,9 @@ class TestMotionLightSwitch:
         # _is_on must remain None (not updated on failure)
         assert sw._is_on is None
 
-    def test_available_true(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_available_true(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         """Lines 1121-1125: available when coordinator ok + online."""
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
 
@@ -8075,7 +8127,7 @@ class TestMotionLightSwitch:
         assert sw.available is True
 
     def test_available_false_coordinator_fail(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 1122: available=False when coordinator fails."""
         from custom_components.bosch_shc_camera.switch import BoschMotionLightSwitch
@@ -8089,7 +8141,9 @@ class TestMotionLightSwitch:
 
 
 class TestAmbientLightSwitch:
-    def test_is_on_reads_cache(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_is_on_reads_cache(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         """Lines 1192-1196: is_on reads from _ambient_lighting_cache."""
         from custom_components.bosch_shc_camera.switch import BoschAmbientLightSwitch
 
@@ -8100,7 +8154,7 @@ class TestAmbientLightSwitch:
         assert sw.is_on is True
 
     def test_is_on_none_when_cache_empty(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """is_on returns None when no cache data."""
         from custom_components.bosch_shc_camera.switch import BoschAmbientLightSwitch
@@ -8108,7 +8162,9 @@ class TestAmbientLightSwitch:
         sw = BoschAmbientLightSwitch(stub_coord_sprintma, CAM_ID, stub_entry_sprintma)
         assert sw.is_on is None
 
-    def test_available_true(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_available_true(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         """Lines 1199-1203: available when coordinator ok + online."""
         from custom_components.bosch_shc_camera.switch import BoschAmbientLightSwitch
 
@@ -8116,7 +8172,7 @@ class TestAmbientLightSwitch:
         assert sw.available is True
 
     def test_available_false_when_offline(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 1200: available=False when camera offline."""
         from custom_components.bosch_shc_camera.switch import BoschAmbientLightSwitch
@@ -8127,7 +8183,7 @@ class TestAmbientLightSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_on_calls_set_ambient(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1227-1228: turn_on calls _set_ambient_light(True)."""
         from custom_components.bosch_shc_camera.switch import BoschAmbientLightSwitch
@@ -8141,7 +8197,7 @@ class TestAmbientLightSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_off_calls_set_ambient(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1230-1231: turn_off calls _set_ambient_light(False)."""
         from custom_components.bosch_shc_camera.switch import BoschAmbientLightSwitch
@@ -8154,7 +8210,7 @@ class TestAmbientLightSwitch:
 
     @pytest.mark.asyncio
     async def test_set_ambient_light_http_success(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1206-1225: full GET+PUT path updates _is_on on 200."""
         from custom_components.bosch_shc_camera.switch import BoschAmbientLightSwitch
@@ -8187,7 +8243,7 @@ class TestAmbientLightSwitch:
 
     @pytest.mark.asyncio
     async def test_set_ambient_light_no_token_returns_early(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 1207: return early when no token."""
         from custom_components.bosch_shc_camera.switch import BoschAmbientLightSwitch
@@ -8203,7 +8259,9 @@ class TestAmbientLightSwitch:
 
 
 class TestSoftLightFadingSwitch:
-    def test_is_on_reads_global_cache(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_is_on_reads_global_cache(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         """Lines 1253-1255: reads softLightFading from _global_lighting_cache."""
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
 
@@ -8216,7 +8274,9 @@ class TestSoftLightFadingSwitch:
         )
         assert sw.is_on is True
 
-    def test_is_on_none_when_no_cache(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_is_on_none_when_no_cache(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
 
         sw = BoschSoftLightFadingSwitch(
@@ -8224,7 +8284,9 @@ class TestSoftLightFadingSwitch:
         )
         assert sw.is_on is None
 
-    def test_available_requires_cache(self, stub_coord_sprintma, stub_entry_sprintma):
+    def test_available_requires_cache(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
         """Lines 1258-1263: available only when _global_lighting_cache populated."""
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
 
@@ -8235,7 +8297,7 @@ class TestSoftLightFadingSwitch:
         assert sw.available is True
 
     def test_available_false_without_cache(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
 
@@ -8246,7 +8308,7 @@ class TestSoftLightFadingSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_on_calls_put_global(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1293-1294: turn_on delegates to _put_global_lighting(True)."""
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
@@ -8261,7 +8323,7 @@ class TestSoftLightFadingSwitch:
 
     @pytest.mark.asyncio
     async def test_turn_off_calls_put_global(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1296-1297: turn_off delegates to _put_global_lighting(False)."""
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
@@ -8276,7 +8338,7 @@ class TestSoftLightFadingSwitch:
 
     @pytest.mark.asyncio
     async def test_put_global_lighting_success_updates_cache(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1266-1291: PUT success updates _global_lighting_cache."""
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
@@ -8312,7 +8374,7 @@ class TestSoftLightFadingSwitch:
 
     @pytest.mark.asyncio
     async def test_put_global_lighting_no_token_returns_early(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Line 1267: return early when no token."""
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
@@ -8326,7 +8388,7 @@ class TestSoftLightFadingSwitch:
 
     @pytest.mark.asyncio
     async def test_put_global_lighting_non_dict_response_uses_body(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1285-1288: non-dict JSON response falls back to body dict."""
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
@@ -8360,7 +8422,7 @@ class TestSoftLightFadingSwitch:
 
     @pytest.mark.asyncio
     async def test_put_global_lighting_exception_swallowed(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1289-1290: network exception inside try block is swallowed, async_write_ha_state still called."""
         from custom_components.bosch_shc_camera.switch import BoschSoftLightFadingSwitch
@@ -8393,7 +8455,7 @@ class TestSoftLightFadingSwitch:
 class TestIntrusionDetectionPrivacyGuard:
     @pytest.mark.asyncio
     async def test_set_intrusion_blocked_by_privacy(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1346-1350: _warn_if_privacy_on returns True → PUT not called."""
         from custom_components.bosch_shc_camera.switch import (
@@ -8414,7 +8476,7 @@ class TestIntrusionDetectionPrivacyGuard:
 
     @pytest.mark.asyncio
     async def test_set_intrusion_allowed_when_privacy_off(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1351-1357: PUT called when privacy is OFF."""
         from custom_components.bosch_shc_camera.switch import (
@@ -8443,7 +8505,7 @@ class TestIntrusionDetectionPrivacyGuard:
 class TestNvrRecordingSwitchRestoreState:
     @pytest.mark.asyncio
     async def test_restores_on_state_and_sets_intent(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1777-1784: restore ON state sets _nvr_user_intent."""
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
@@ -8464,7 +8526,7 @@ class TestNvrRecordingSwitchRestoreState:
 
     @pytest.mark.asyncio
     async def test_restores_off_state_no_intent(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1777-1784: restore OFF state leaves _nvr_user_intent unchanged."""
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
@@ -8484,7 +8546,7 @@ class TestNvrRecordingSwitchRestoreState:
 
     @pytest.mark.asyncio
     async def test_no_previous_state_no_intent(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """None from async_get_last_state → no intent set."""
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
@@ -8502,7 +8564,7 @@ class TestNvrRecordingSwitchRestoreState:
 
     @pytest.mark.asyncio
     async def test_restores_on_and_kicks_recorder_when_live(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1788-1797: when LOCAL stream is already active, kicks off recorder task."""
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
@@ -8524,7 +8586,7 @@ class TestNvrRecordingSwitchRestoreState:
 
     @pytest.mark.asyncio
     async def test_restores_on_no_kick_when_remote(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1788-1797: REMOTE stream → recorder NOT kicked off."""
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
@@ -8546,7 +8608,7 @@ class TestNvrRecordingSwitchRestoreState:
 
     @pytest.mark.asyncio
     async def test_turn_on_starts_recorder(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1799-1802: turn_on calls start_recorder."""
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
@@ -8562,7 +8624,7 @@ class TestNvrRecordingSwitchRestoreState:
 
     @pytest.mark.asyncio
     async def test_turn_off_stops_recorder(
-        self, stub_coord_sprintma, stub_entry_sprintma
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
         """Lines 1804-1807: turn_off calls stop_recorder."""
         from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
@@ -8575,17 +8637,6 @@ class TestNvrRecordingSwitchRestoreState:
         sw.async_write_ha_state = MagicMock()
         await sw.async_turn_off()
         stub_coord_sprintma.stop_recorder.assert_awaited_once_with(CAM_ID)
-
-
-# ============================================================
-# --- extracted from test_github_issues.py / test_stream_modules_coverage.py:
-#     Gen2 outdoor light switches, live-stream switch, privacy cooldown
-#     message + pending-privacy apply loop + async_will_remove_from_hass ---
-# ============================================================
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Shared fixtures
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _stub_coord_e(
@@ -8663,11 +8714,6 @@ def _make_privacy_switch(coord: SimpleNamespace, entry: SimpleNamespace | None =
     return sw
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Gen2 Outdoor: front-light + wallwasher switch classes exist
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 class TestGen2OutdoorLightSwitches:
     """Gen2 Outdoor (HOME_Eyes_Outdoor) exposes separate front-light and
     wallwasher switch entities (distinct from the combined RGB lights)."""
@@ -8687,11 +8733,6 @@ class TestGen2OutdoorLightSwitches:
             "Wallwasher (top + bottom LEDs combined) must have its own "
             "switch entity for Gen2 Outdoor"
         )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Live-stream switch: existence + availability tied to session staleness
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestLiveStreamSwitchIntent:
@@ -8737,11 +8778,6 @@ class TestLiveStreamSwitchIntent:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Privacy-mode switch: _cooldown_message stream-warming vs cooldown branch
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 class TestCooldownMessageStreamWarming:
     """_cooldown_message returns the stream-warming message when the stream
     is warming up, and the cooldown message when a recent privacy write is
@@ -8771,11 +8807,6 @@ class TestCooldownMessageStreamWarming:
 
         assert "stream is still starting" not in msg
         assert "wait" in msg.lower() or "just changed" in msg.lower()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Privacy-mode switch: _pending_privacy_loop paths
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestPendingPrivacyLoop:
@@ -8898,11 +8929,6 @@ class TestPendingPrivacyLoop:
         sw.async_write_ha_state.assert_called()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Privacy-mode switch: async_will_remove_from_hass task cancellation
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 class TestAsyncWillRemoveFromHass:
     """async_will_remove_from_hass cancels a pending apply task on entity
     removal, but only if it isn't already done."""
@@ -8972,12 +8998,10 @@ class TestAsyncWillRemoveFromHass:
         # must not raise
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: v12.4.13 LAN-fallback hardening — privacy availability during a
 # cloud outage (relocated from tests/test_lan_fallback_during_outage.py; the
 # rcp.py transport half lives in tests/test_rcp.py, the shc.py half in
 # tests/test_shc.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestPrivacyAvailableWhenHwUnknown:
@@ -9029,10 +9053,8 @@ class TestPrivacyAvailableWhenHwUnknown:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: cheap availability-property pins (relocated from
 # tests/test_misc_small_gaps.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestSwitchAvailabilityGaps:
@@ -9072,11 +9094,9 @@ class TestSwitchAvailabilityGaps:
         assert sw.available is False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: panic-alarm privacy guard + failed-PUT warning (relocated from
 # tests/test_privacy_guard_branches.py — the light.py/number.py siblings
 # live in tests/test_light.py and tests/test_number.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _stub_coord_with_privacy_panic(
@@ -9169,12 +9189,10 @@ class TestPanicAlarmPrivacyGuardAndFailedPut:
         assert coord._panic_alarm_cache[CAM_ID] is True
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: firmware-install unavailability (relocated from
 # tests/test_updating_unavailable.py — the camera.py/init.py/light.py
 # siblings live in tests/test_camera.py, tests/test_init.py, and
 # tests/test_light.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _coord_updating(
@@ -9253,13 +9271,11 @@ class TestPrivacySwitchUpdatingUnavailable:
         assert sw.available is False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: concurrent-start false "Live stream failed" alarm (relocated from
 # tests/test_stream_start_in_progress.py — the STREAM_START_SKIPPED
 # coordinator-side contract lives in tests/test_init.py, the sentinel
 # falsy/singleton contract and the const.py definition are exercised
 # inline here since STREAM_START_SKIPPED is a shared symbol)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _make_switch_stub_skip(coord):

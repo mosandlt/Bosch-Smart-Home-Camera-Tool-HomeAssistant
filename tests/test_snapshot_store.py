@@ -17,10 +17,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# --------------------------------------------------------------------------- #
-# Helpers
-# --------------------------------------------------------------------------- #
-
 VALID_CAM_ID = "AABBCCDD-EEFF-1122-3344-556677889900"
 VALID_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 200  # 204 B — passes min-size guard
 
@@ -38,11 +34,6 @@ def _make_hass(tmp_path: Path) -> Any:
 
     hass.async_add_executor_job = _executor
     return hass
-
-
-# --------------------------------------------------------------------------- #
-# Round-trip
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
@@ -218,11 +209,6 @@ async def test_original_replace_error_propagates_when_cleanup_also_fails(
         await snapshot_store.save_snapshot(hass, VALID_CAM_ID, VALID_JPEG)
 
 
-# --------------------------------------------------------------------------- #
-# cam_id validation (path traversal prevention)
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.asyncio
 async def test_invalid_cam_id_raises_value_error_save(tmp_path: Path) -> None:
     """save_snapshot raises ValueError for non-UUID cam_id."""
@@ -298,11 +284,6 @@ async def test_mixed_case_uuid_accepted(tmp_path: Path) -> None:
     assert result == VALID_JPEG
 
 
-# --------------------------------------------------------------------------- #
-# Missing file
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.asyncio
 async def test_load_missing_returns_none(tmp_path: Path) -> None:
     """load_snapshot returns None when no file exists for that cam_id."""
@@ -327,11 +308,6 @@ async def test_load_oserror_returns_none_and_warns(
 
     assert result is None
     assert any("failed to read snapshot" in r.message for r in caplog.records)
-
-
-# --------------------------------------------------------------------------- #
-# Size guards
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
@@ -385,11 +361,6 @@ async def test_exact_min_size_accepted(tmp_path: Path) -> None:
     await save_snapshot(hass, VALID_CAM_ID, exactly_100)
     result = await load_snapshot(hass, VALID_CAM_ID)
     assert result == exactly_100
-
-
-# --------------------------------------------------------------------------- #
-# Privacy mode gate in camera entity
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio

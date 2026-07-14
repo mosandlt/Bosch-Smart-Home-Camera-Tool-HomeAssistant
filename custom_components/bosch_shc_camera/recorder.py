@@ -409,6 +409,15 @@ async def _spawn_preroll_recorder_locked(
     releasing the lock between its own stop and this spawn (would reopen
     the exact race issue #44 fixed).
     """
+    if getattr(coordinator, "_nvr_shutting_down", False):
+        # Config-entry unload/HA-stop is tearing this coordinator down
+        # (issue #47) — refuse to spawn a new ring writer that
+        # stop_all_preroll()'s sweep, running concurrently, might not see.
+        _LOGGER.debug(
+            "NVR pre-roll spawn skipped for %s — coordinator shutting down",
+            cam_id[:8],
+        )
+        return
     live = coordinator._live_connections.get(cam_id, {})
     if live.get("_connection_type") != "LOCAL":
         return
@@ -569,10 +578,39 @@ async def stop_preroll_recorder(
     return clean_exit
 
 
+def _known_cam_ids_for_shutdown(coordinator: BoschCameraCoordinator) -> set[str]:
+    """All camera IDs that could plausibly have (or soon get) an NVR/ring
+    ffmpeg process — used by the unload-time sweeps below.
+
+    A plain ``list(coordinator._nvr_processes.keys())`` snapshot (the
+    previous implementation) misses a camera whose ``start_recorder``/
+    ``_spawn_preroll_recorder_locked`` call is still in flight and hasn't
+    registered its process yet at snapshot time — issue #47's orphaned-
+    ffmpeg finding. Including every currently-configured camera (not just
+    ones with an already-tracked process) means the per-cam
+    ``_get_nvr_recorder_lock`` acquire in ``stop_all``/``stop_all_preroll``
+    below will still serialize against — and thus catch — that in-flight
+    spawn once it finishes registering.
+    """
+    cam_ids = set(coordinator._nvr_processes) | set(coordinator._nvr_preroll_processes)
+    cam_ids |= set(getattr(coordinator, "_camera_entities", {}) or {})
+    return cam_ids
+
+
 async def stop_all_preroll(coordinator: BoschCameraCoordinator) -> None:
-    """Stop all pre-roll recorders — called on integration unload."""
-    for cam_id in list(coordinator._nvr_preroll_processes.keys()):
-        await stop_preroll_recorder(coordinator, cam_id)
+    """Stop all pre-roll recorders — called on integration unload.
+
+    Serializes each camera on `_get_nvr_recorder_lock` (issue #47) so a
+    `start_preroll_recorder`/`_spawn_preroll_recorder_locked` call that is
+    still in flight when unload begins cannot race this sweep: it either
+    hasn't acquired the lock yet (and will observe `_nvr_shutting_down` and
+    bail once it does), or already holds the lock and finishes registering
+    into `_nvr_preroll_processes` before this loop's own acquire for that
+    camera unblocks and sees the freshly-spawned process.
+    """
+    for cam_id in _known_cam_ids_for_shutdown(coordinator):
+        async with coordinator._get_nvr_recorder_lock(cam_id):
+            await stop_preroll_recorder(coordinator, cam_id)
 
 
 async def finalize_and_restart_preroll_recorder(
@@ -1188,6 +1226,16 @@ async def start_recorder(
     # microseconds) and hold the same lock `_refresh_local_creds_from_heartbeat`
     # uses while mutating `_live_connections`, so the two can't interleave.
     async with coordinator._get_nvr_recorder_lock(cam_id):
+        if getattr(coordinator, "_nvr_shutting_down", False):
+            # Config-entry unload/HA-stop started while we were creating
+            # staging dirs (issue #47) — refuse to spawn a process that
+            # stop_all()'s concurrent sweep, serialized on this same lock,
+            # might already have passed for this camera.
+            _LOGGER.debug(
+                "NVR start skipped for %s — coordinator shutting down",
+                cam_id[:8],
+            )
+            return
         live = coordinator._live_connections.get(cam_id, {})
         if live.get("_connection_type") != "LOCAL":
             return  # stream torn down while we were creating staging dirs
@@ -1308,10 +1356,17 @@ async def stop_recorder(
 
 
 async def stop_all(coordinator: BoschCameraCoordinator) -> None:
-    """Stop every recorder — called on integration unload / HA stop."""
+    """Stop every recorder — called on integration unload / HA stop.
+
+    See `stop_all_preroll`'s docstring (issue #47): sweeps every known
+    camera (not just ones with an already-tracked process) under
+    `_get_nvr_recorder_lock`, so an in-flight `start_recorder` call cannot
+    leave an untracked, never-killed ffmpeg process behind.
+    """
     await stop_all_preroll(coordinator)
-    for cam_id in list(coordinator._nvr_processes.keys()):
-        await stop_recorder(coordinator, cam_id)
+    for cam_id in _known_cam_ids_for_shutdown(coordinator):
+        async with coordinator._get_nvr_recorder_lock(cam_id):
+            await stop_recorder(coordinator, cam_id)
 
 
 async def _watch_recorder(

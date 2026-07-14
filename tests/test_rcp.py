@@ -111,11 +111,6 @@ def _mock_ha_session(status: int = 200, body: bytes = b"") -> MagicMock:
     return session
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: get_cached_rcp_session — 5-minute TTL cache
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestGetCachedRcpSession:
     """Pin the 5-minute TTL cache contract for get_cached_rcp_session."""
 
@@ -381,11 +376,6 @@ class TestGetCachedRcpSessionConcurrency:
         assert cache["hash123"][0] == "session-X"
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: rcp_local_read_privacy / rcp_local_write_privacy
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestRcpLocalPrivacy:
     """Pin the 4-byte payload contract for 0x0d00 privacy read/write."""
 
@@ -505,11 +495,6 @@ class TestRcpLocalPrivacy:
         assert captured["payload"] == "00000000", (
             "Privacy OFF must send all-zero payload"
         )
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: rcp_read — HTTP status handling + session-cache invalidation
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestRcpReadSessionInvalidation:
@@ -1036,11 +1021,6 @@ class TestRcpReadDropSessionNone:
         assert result is None
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: rcp_session — cloud-proxy RCP handshake
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestRcpSession:
     """All branches of rcp_session (2-step cloud proxy session open)."""
 
@@ -1198,11 +1178,6 @@ class TestRcpSession:
             result = await rcp_session(MagicMock(), {}, PROXY_HOST, PROXY_HASH)
         # step2 timeout is caught — should still return the session_id
         assert result == "0xABCDEF01"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: rcp_local_read / rcp_local_write — direct LAN RCP (Gen2 fallback)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestRcpLocalRead:
@@ -1527,11 +1502,6 @@ class TestRcpLocalWriteFrontLight:
         assert ok is False
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: _is_xml_envelope — shared cloud-proxy XML-leak detection
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestIsXmlEnvelopeHelper:
     """_is_xml_envelope: shared detection of cloud-proxy XML-leak responses.
 
@@ -1588,11 +1558,6 @@ class TestIsXmlEnvelopeHelper:
 
         # Product name (legitimate ASCII), not XML
         assert _is_xml_envelope(b"Bosch Smart Camera\x00") is False
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — LED dimmer (0x0c22)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestAsyncUpdateRcpDataDimmer:
@@ -1780,11 +1745,6 @@ class TestAsyncUpdateRcpDataDimmerXmlGuard:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — privacy mask (0x0d00)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestAsyncUpdateRcpDataPrivacy:
     """async_update_rcp_data: privacy mask (0x0d00) parsing."""
 
@@ -1874,11 +1834,6 @@ class TestPrivacyExceptionPath:
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_privacy_cache
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — clock offset (0x0a0f)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestClockInvalidDateComponents:
@@ -2120,11 +2075,6 @@ class TestAsyncUpdateRcpDataClockXmlGuard:
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — LAN IP (0x0a36)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestAsyncUpdateRcpDataLanIp:
     """async_update_rcp_data: LAN IP (0x0a36) — 4-byte binary and ASCII formats."""
 
@@ -2243,11 +2193,6 @@ class TestLanIpRawNone:
         assert coord._rcp_cmd_failures[CAM_ID].get("0x0a36", 0) >= 1
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — product name (0x0aea)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestProductNameCacheWrite:
     """Pin the success branch of the 0x0aea product-name read.
 
@@ -2350,11 +2295,6 @@ class TestProductNameRawNone:
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert coord._rcp_cmd_failures[CAM_ID].get("0x0aea", 0) >= 1
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — bitrate ladder (0x0c81)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestAsyncUpdateRcpDataBitrate:
@@ -2577,11 +2517,6 @@ class TestBitrateOutOfRange:
         assert CAM_ID not in coord._rcp_bitrate_cache
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — alarm catalog (0x0c38)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestAlarmCatalogCacheWrite:
     """Pin the success branch of the 0x0c38 alarm-catalog read.
 
@@ -2712,11 +2647,6 @@ class TestAlarmCatalogException:
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert CAM_ID not in coord._rcp_alarm_catalog_cache
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — motion zones (0x0c00)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestMotionZonesEdgeCases:
@@ -2861,11 +2791,6 @@ class TestMotionZonesException:
         assert CAM_ID not in coord._rcp_motion_zones_cache
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — motion coords (0x0c0a)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestMotionCoordsCacheWrite:
     """End-to-end pin of the 0x0c0a read → parse → cache-write path."""
 
@@ -2936,11 +2861,6 @@ class TestMotionCoordsRead:
         assert zones[0]["x2"] == 100.0
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — TLS certificate (0x0b91)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestTlsCertPaths:
     """async_update_rcp_data: TLS cert cached on data, _mark_fail on None."""
 
@@ -2985,11 +2905,6 @@ class TestTlsCertPaths:
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
         assert coord._rcp_cmd_failures[CAM_ID].get("0x0b91", 0) >= 1
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — network services (0x0c62)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestNetworkServicesCached:
@@ -3100,11 +3015,6 @@ class TestNetworkServicesXmlWrapped:
         assert coord._rcp_cmd_failures[CAM_ID].get("0x0c62", 0) >= 1
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — IVA catalog (0x0b60)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestIvaCatalogCached:
     """async_update_rcp_data: IVA catalog raw → parsed and cached."""
 
@@ -3136,9 +3046,7 @@ class TestIvaCatalogCached:
         assert any(m["module_id"] == 2 and not m["active"] for m in catalog)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Section: async_update_rcp_data — Phase-2 command skip-guard regression
-# ═══════════════════════════════════════════════════════════════════════════
 # Regression (bug-hunt): 0x0c38/0x0c0a/0x0c62/0x0b60 had no
 # _skip()/_mark_fail()/_mark_ok() at all, unlike every earlier-added command
 # and 0x0c00/0x0b91 — on a camera that doesn't support one of these, it
@@ -3310,11 +3218,6 @@ class TestPhase2CommandsNowSkipGuarded:
         assert CAM_ID not in coord._rcp_iva_catalog_cache
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: async_update_rcp_data — 3-strike skip/mark_fail threshold
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestSkipFailMarkLogic:
     """Pin the 3-failure threshold that suppresses persistently-unsupported commands."""
 
@@ -3373,11 +3276,6 @@ class TestSkipFailMarkLogic:
         assert "0x0c22" in called_cmds, (
             "Command must still be attempted at 2 failures — threshold is 3"
         )
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: _parse_alarm_catalog — pure parser (UTF-16-BE alarm names)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestParseAlarmCatalog:
@@ -3568,11 +3466,6 @@ class TestParseAlarmCatalogExcept:
         assert result == []
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: _parse_motion_zones — pure parser (5 × 28B struct)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestParseMotionZones:
     """Pin _parse_motion_zones' 28-byte chunk layout."""
 
@@ -3634,11 +3527,6 @@ class TestParseMotionZones:
         from custom_components.bosch_shc_camera.rcp import _parse_motion_zones
 
         assert _parse_motion_zones(b"\x00" * 10) == []
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: _parse_motion_coords — pure parser (0-10000 → 0-100% coords)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestParseMotionCoords:
@@ -3783,11 +3671,6 @@ class TestParseMotionCoordsHappyPath:
         assert zones == [{"x1": 0.0, "y1": 0.0, "x2": 50.0, "y2": 50.0}]
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: _parse_network_services — pure parser (null-separated ASCII)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestParseNetworkServices:
     """Pin _parse_network_services' null-separated ASCII decoder."""
 
@@ -3888,11 +3771,6 @@ class TestParseNetworkServicesExcept:
         result = _parse_network_services(raw)
         assert "A" not in result
         assert "BB" in result
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: _parse_iva_catalog — pure parser (65 × 6B TLV)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestParseIvaCatalog:
@@ -4038,11 +3916,6 @@ class TestParseIvaCatalogShortChunk:
         assert result[0]["module_id"] == 5
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: _parse_tls_cert — pure parser (DER cert bytes → info dict)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestParseTlsCert:
     """ImportError on cryptography → raw_hex fallback."""
 
@@ -4169,11 +4042,6 @@ class TestParseTlsCertHappyPath:
         assert "raw_hex" not in info  # happy path: no fallback
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Section: defensive `break` branches in the pure zone/coord parsers
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class TestDefensiveBreakBranches:
     """Pin the defensive `break` statements in _parse_motion_zones and
     _parse_motion_coords.
@@ -4249,11 +4117,9 @@ class TestDefensiveBreakBranches:
         assert zones[0] == {"x1": 0.0, "y1": 0.0, "x2": 50.0, "y2": 50.0}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: rcp_local_write HTTPS transport (relocated from
 # tests/test_lan_fallback_during_outage.py — the switch.py/shc.py siblings
 # live in tests/test_switch.py and tests/test_shc.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestRcpLocalWriteTransport:
@@ -4352,10 +4218,8 @@ class TestRcpLocalWriteTransport:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: 0x0d00 privacy-mask XML-envelope handling (relocated from
 # tests/test_misc_modules_coverage.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestRcpPrivacyXmlEnvelope:
@@ -4449,11 +4313,9 @@ class TestRcpPrivacyXmlEnvelope:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: LED-dimmer out-of-range failure (relocated from
 # tests/test_remaining_cheap_gaps.py — the local_rcp.py/smb.py siblings live
 # in tests/test_local_rcp.py and tests/test_smb.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestRcpUpdateDimmerOutOfRange:

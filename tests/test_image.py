@@ -18,10 +18,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# --------------------------------------------------------------------------- #
-# Shared test IDs / fixtures
-# --------------------------------------------------------------------------- #
-
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 DISK_JPEG = b"\xff\xd8\xff\xe0" + b"\x01" * 300  # 304 B — looks like a real snapshot
 RAM_JPEG = b"\xff\xd8\xff\xe0" + b"\x02" * 300  # different bytes for RAM path
@@ -96,11 +92,6 @@ def _build_image_entity(
     return entity
 
 
-# --------------------------------------------------------------------------- #
-# Entity creation gate
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.asyncio
 async def test_image_entity_not_created_when_snapshots_disabled(
     tmp_path: Path,
@@ -167,11 +158,6 @@ async def test_image_entity_created_when_snapshots_enabled(
     assert isinstance(added[0], BoschCameraLastSnapshotImage)
 
 
-# --------------------------------------------------------------------------- #
-# async_image — disk path
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.asyncio
 async def test_async_image_returns_disk_bytes(tmp_path: Path) -> None:
     """async_image returns disk-persisted bytes when the file exists."""
@@ -203,11 +189,6 @@ async def test_async_image_disk_takes_priority_over_ram(tmp_path: Path) -> None:
     result = await entity.async_image()
     # Disk takes priority
     assert result == DISK_JPEG
-
-
-# --------------------------------------------------------------------------- #
-# async_image — fallback to camera RAM cache
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
@@ -274,11 +255,6 @@ async def test_async_image_no_camera_entity_registered(tmp_path: Path) -> None:
     assert result is None
 
 
-# --------------------------------------------------------------------------- #
-# async_notify_refreshed
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.asyncio
 async def test_notify_refreshed_bumps_last_updated(tmp_path: Path) -> None:
     """async_notify_refreshed must set _attr_image_last_updated to a non-None datetime."""
@@ -336,11 +312,6 @@ async def test_notify_refreshed_called_twice_advances_timestamp(
     assert second_ts >= first_ts
 
 
-# --------------------------------------------------------------------------- #
-# Unique-ID stability
-# --------------------------------------------------------------------------- #
-
-
 def test_unique_id_stable(tmp_path: Path) -> None:
     """Unique ID must be deterministic: {cam_id}_last_snapshot."""
     hass = _make_hass(tmp_path)
@@ -356,11 +327,6 @@ def test_unique_id_stable_across_rebuilds(tmp_path: Path) -> None:
     assert e1._attr_unique_id == e2._attr_unique_id
 
 
-# --------------------------------------------------------------------------- #
-# Coordinator registration
-# --------------------------------------------------------------------------- #
-
-
 def test_entity_registers_with_coordinator(tmp_path: Path) -> None:
     """The image entity must register itself in coordinator._image_entities."""
     hass = _make_hass(tmp_path)
@@ -371,11 +337,7 @@ def test_entity_registers_with_coordinator(tmp_path: Path) -> None:
     assert coordinator._image_entities.get(CAM_ID) is entity
 
 
-# --------------------------------------------------------------------------- #
 # In-RAM cache (perf 2026-06-18) — disk read only once per refresh
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.asyncio
 async def test_async_image_caches_bytes_no_second_disk_read(tmp_path: Path) -> None:
     """Perf pin: repeated async_image() calls between refreshes must hit disk
@@ -454,12 +416,7 @@ async def test_ram_fallback_not_cached(tmp_path: Path) -> None:
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: entity lifecycle hooks (relocated from
-# tests/test_misc_small_gaps.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
+# Entity lifecycle hooks (relocated from tests/test_misc_small_gaps.py)
 class TestImageEntityHooks:
     @pytest.mark.asyncio
     async def test_will_remove_pops_from_coordinator(self):

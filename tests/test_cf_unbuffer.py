@@ -20,8 +20,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# ── _wrap_playlist_response ───────────────────────────────────────────────────
-
 
 class TestWrapPlaylistResponse:
     """Pin the Content-Type rewrite behaviour for HLS manifest responses."""
@@ -78,9 +76,6 @@ class TestWrapPlaylistResponse:
 
         bare = object()
         assert _wrap_playlist_response(bare) is bare
-
-
-# ── _emit_segment_chunked ─────────────────────────────────────────────────────
 
 
 class TestEmitSegmentChunked:
@@ -147,9 +142,6 @@ class TestEmitSegmentChunked:
         assert result is resp, "None-body response must be passed through unchanged"
 
 
-# ── _make_playlist_wrapper / _make_segment_wrapper idempotency ────────────────
-
-
 class TestWrapperIdempotency:
     """Wrapped views must carry _cf_wrapped=True so re-registration is a no-op."""
 
@@ -178,9 +170,6 @@ class TestWrapperIdempotency:
         assert getattr(wrapped, "_cf_wrapped", False) is True, (
             "_cf_wrapped=True prevents double-patching on HA restart"
         )
-
-
-# ── register() idempotency ────────────────────────────────────────────────────
 
 
 class TestRegisterIdempotency:
@@ -268,9 +257,6 @@ class TestRegisterIdempotency:
                 pytest.fail(f"register() must not raise when hls is unavailable: {exc}")
 
         mod._PATCHED = original_patched
-
-
-# ── Structural contract ───────────────────────────────────────────────────────
 
 
 class TestStructuralContract:
@@ -554,9 +540,6 @@ class TestRegisterEdgeBranches:
         mod._PATCHED = original_patched
 
 
-# ── Log-level regression ──────────────────────────────────────────────────────
-
-
 class TestRegisterLogLevel:
     """Regression: 'patch applied' must log at INFO, not WARNING.
 
@@ -618,9 +601,6 @@ class TestRegisterLogLevel:
         assert level == "warning", (
             f"CF-unbuffer outer exception handler must log at WARNING (not {level!r})"
         )
-
-
-# ── HLS-access tracking (idle-reaper consumer signal) ─────────────────────────
 
 
 class TestHlsAccessTracking:

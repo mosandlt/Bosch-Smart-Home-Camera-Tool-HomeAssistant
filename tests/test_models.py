@@ -240,12 +240,7 @@ def test_no_gen2_360_in_registry() -> None:
             )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: GH#3 — Gen2 Outdoor model config (relocated from
-# tests/test_github_issues.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
+# GH#3 — Gen2 Outdoor model config (relocated from tests/test_github_issues.py)
 def test_gh3_gen2_outdoor_model_config_exists():
     """Gen2 Outdoor hardware version must resolve to a generation-2 config."""
     from custom_components.bosch_shc_camera.models import get_model_config

@@ -29,7 +29,7 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
 @pytest.fixture
-def stub_coord():
+def stub_coord() -> SimpleNamespace:
     return SimpleNamespace(
         data={
             CAM_ID: {
@@ -49,14 +49,16 @@ def stub_coord():
 
 
 @pytest.fixture
-def stub_entry():
+def stub_entry() -> SimpleNamespace:
     return SimpleNamespace(entry_id="01ENTRY", data={}, options={})
 
 
 # ── BoschRefreshSnapshotButton ──────────────────────────────────────────
 
 
-def test_refresh_button_construction(stub_coord, stub_entry):
+def test_refresh_button_construction(
+    stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+):
     """Refresh button instantiates with the expected unique_id + translation_key."""
     from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
@@ -68,7 +70,9 @@ def test_refresh_button_construction(stub_coord, stub_entry):
     assert getattr(btn, "_attr_name", None) is None
 
 
-def test_refresh_button_device_info(stub_coord, stub_entry):
+def test_refresh_button_device_info(
+    stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+):
     """device_info propagates model name + firmware + mac."""
     from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
@@ -83,7 +87,9 @@ def test_refresh_button_device_info(stub_coord, stub_entry):
 # ── No mac → no connection entry ────────────────────────────────────────
 
 
-def test_device_info_no_mac_skipped(stub_coord, stub_entry):
+def test_device_info_no_mac_skipped(
+    stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+):
     """Empty mac → device_info connections is an empty set."""
     from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
@@ -100,7 +106,9 @@ def test_device_info_no_mac_skipped(stub_coord, stub_entry):
 
 class TestRefreshSnapshotPress:
     @pytest.mark.asyncio
-    async def test_press_schedules_coordinator_refresh(self, stub_coord, stub_entry):
+    async def test_press_schedules_coordinator_refresh(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """async_press must schedule coordinator.async_request_refresh via hass.async_create_task."""
         from unittest.mock import MagicMock
 
@@ -115,7 +123,7 @@ class TestRefreshSnapshotPress:
 
     @pytest.mark.asyncio
     async def test_press_also_triggers_image_refresh_when_cam_entity_present(
-        self, stub_coord, stub_entry
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """When a camera entity is registered, async_press also schedules its image refresh."""
         from unittest.mock import AsyncMock, MagicMock
@@ -137,7 +145,9 @@ class TestRefreshSnapshotErrorHandling:
     """async_press attaches error-logging callbacks to the created tasks."""
 
     @pytest.mark.asyncio
-    async def test_done_callback_attached_to_refresh_task(self, stub_coord, stub_entry):
+    async def test_done_callback_attached_to_refresh_task(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """A done callback must be registered on the coordinator refresh task."""
         from unittest.mock import MagicMock
 
@@ -152,7 +162,7 @@ class TestRefreshSnapshotErrorHandling:
 
     @pytest.mark.asyncio
     async def test_done_callback_attached_to_image_refresh_task(
-        self, stub_coord, stub_entry
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """A done callback must be registered on the image refresh task too."""
         from unittest.mock import AsyncMock, MagicMock
@@ -180,7 +190,9 @@ class TestRefreshSnapshotErrorHandling:
 
 class TestSetupEntry:
     @pytest.mark.asyncio
-    async def test_creates_one_button_per_camera(self, stub_coord, stub_entry):
+    async def test_creates_one_button_per_camera(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Default options → 3 button entities per camera: Refresh Snapshot,
         Restart (soft reset), Factory Reset (hard reset).
 
@@ -210,7 +222,7 @@ class TestSetupEntry:
 
     @pytest.mark.asyncio
     async def test_snapshot_button_disabled_but_reset_buttons_remain(
-        self, stub_coord, stub_entry
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """enable_snapshot_button=False only skips the snapshot-refresh button —
         the reset buttons aren't gated by that option and must still appear."""
@@ -355,7 +367,7 @@ class TestResetButtonEntities:
 
 
 @pytest.fixture
-def _naming_stub_coord():
+def _naming_stub_coord() -> SimpleNamespace:
     return SimpleNamespace(
         data={
             CAM_ID: {
@@ -384,7 +396,9 @@ def _naming_stub_coord():
 
 
 class TestRefreshSnapshotButtonNaming:
-    def test_attr_name_is_none(self, _naming_stub_coord, stub_entry):
+    def test_attr_name_is_none(
+        self, _naming_stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """_attr_name must be None — translation_key provides the entity name."""
         from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
@@ -394,13 +408,17 @@ class TestRefreshSnapshotButtonNaming:
             f"_attr_name={name!r} still contains the 'Bosch' prefix — entity_id would be doubled"
         )
 
-    def test_translation_key_is_refresh_snapshot(self, _naming_stub_coord, stub_entry):
+    def test_translation_key_is_refresh_snapshot(
+        self, _naming_stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
         btn = BoschRefreshSnapshotButton(_naming_stub_coord, CAM_ID, stub_entry)
         assert btn._attr_translation_key == "refresh_snapshot"
 
-    def test_has_entity_name_is_true(self, _naming_stub_coord, stub_entry):
+    def test_has_entity_name_is_true(
+        self, _naming_stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
         btn = BoschRefreshSnapshotButton(_naming_stub_coord, CAM_ID, stub_entry)

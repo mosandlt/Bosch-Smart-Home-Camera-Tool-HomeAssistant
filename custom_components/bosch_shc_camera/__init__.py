@@ -1168,6 +1168,11 @@ class BoschCameraCoordinator(
         # TCP reachability cache — (reachable, monotonic_ts). TTL 60s.
         # Populated by _async_local_tcp_ping (status loop) and stream pre-check.
         self._lan_tcp_reachable: dict[str, tuple[bool, float]] = {}
+        # issue #47: monotonic ts of the last time the AUTO-mode TCP
+        # pre-check's "unreachable" verdict was deliberately overridden to
+        # force a real LOCAL attempt anyway (chicken-and-egg breaker — see
+        # LAN_RECHECK_FORCE_INTERVAL_SEC in const.py / live_connection.py).
+        self._lan_recheck_forced_at: dict[str, float] = {}
         # Monotonic timestamp of the last successful local-RCP write per cam.
         # The camera briefly tears down its cloud session when Digest creds
         # rotate after an RCP write; we use this to suppress LAN-offline
@@ -1278,6 +1283,19 @@ class BoschCameraCoordinator(
         # sessions at 2-3). LAN-only: only runs when _connection_type=LOCAL +
         # camera ONLINE. See `docs/mini-nvr-concept.md` §2.
         self._nvr_processes: dict[str, asyncio.subprocess.Process] = {}
+        # Set True as the very first step of config-entry unload/HA-stop
+        # teardown (_async_cancel_coordinator_tasks), BEFORE stop_all()/
+        # stop_all_preroll() run. Checked by start_recorder/
+        # _spawn_preroll_recorder_locked (under the same per-cam
+        # `_get_nvr_recorder_lock`) so a spawn that is still in flight when
+        # unload begins either (a) hasn't acquired the lock yet and bails
+        # out without spawning, or (b) already holds the lock and finishes
+        # registering into _nvr_processes/_nvr_preroll_processes before
+        # unload's stop_all — which now takes the SAME per-cam lock — can
+        # observe and kill it. Closes the orphaned-ffmpeg race from issue
+        # #47 (up to 5 stray recorder/ring processes surviving a reload,
+        # including concurrent writers to the same output file).
+        self._nvr_shutting_down: bool = False
         # Session-State-Facade Slice 2: CacheFieldView over self._sessions
         # (see session_state.py) for the plain per-cam Mini-NVR status
         # dicts below — _nvr_processes above stays a plain dict (live
@@ -2849,6 +2867,7 @@ class BoschCameraCoordinator(
         "_local_rescue_attempts",
         "_local_rescue_at",
         "_lan_tcp_reachable",
+        "_lan_recheck_forced_at",
         "_local_write_at",
         "_local_promote_at",
         "_offline_since",
@@ -3149,12 +3168,28 @@ class BoschCameraCoordinator(
         # User-intent flag (consulted by the watcher's respawn check).
         self._nvr_user_intent[cam_id] = True
         if not nvr_recorder.should_record(self, cam_id, switch_on=True):
-            _LOGGER.debug(
-                "NVR start_recorder skipped for %s — gate closed (LOCAL=%s online=%s)",
-                cam_id[:8],
-                self._live_connections.get(cam_id, {}).get("_connection_type"),
-                self.is_camera_online(cam_id),
-            )
+            conn_type = self._live_connections.get(cam_id, {}).get("_connection_type")
+            if conn_type == "REMOTE":
+                # issue #47: recording wants LOCAL, but the live session is
+                # currently REMOTE (e.g. AUTO mode fell back because of a
+                # stale LAN IP / weak WiFi / consecutive stream errors) —
+                # this is the single most likely reason a user sees the
+                # Mini-NVR switch/sensor go silently "unavailable" with no
+                # explanation. Previously only a DEBUG log, easy to miss
+                # entirely; make it discoverable.
+                _LOGGER.warning(
+                    "NVR start_recorder skipped for %s — live session is "
+                    "REMOTE, not LOCAL (LAN-only by design). Recording will "
+                    "resume automatically once the session is LOCAL again",
+                    cam_id[:8],
+                )
+            else:
+                _LOGGER.debug(
+                    "NVR start_recorder skipped for %s — gate closed (LOCAL=%s online=%s)",
+                    cam_id[:8],
+                    conn_type,
+                    self.is_camera_online(cam_id),
+                )
             return
         await nvr_recorder.start_recorder(self, cam_id)
 
@@ -5883,6 +5918,13 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     # teardown, Frigate endpoints, and stop_all_proxies. Catch it, finish the
     # rest of the cleanup, then re-raise at the end so the cancellation still
     # ultimately surfaces to the caller (bug-hunt 2026-07-03).
+    # Set FIRST, before anything else (issue #47): once this is True,
+    # start_recorder/_spawn_preroll_recorder_locked refuse to spawn a new
+    # ffmpeg child (checked under the same per-cam _get_nvr_recorder_lock
+    # that stop_all()/stop_all_preroll() below now also acquire), closing
+    # the window where an in-flight recorder start could race a reload and
+    # leave an untracked, never-killed process behind.
+    coord._nvr_shutting_down = True
     _cancelled_during_cleanup: asyncio.CancelledError | None = None
     try:
         await coord.async_stop_fcm_push()

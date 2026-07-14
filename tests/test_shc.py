@@ -40,18 +40,16 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
 
+from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
 SRC = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
 CAM_ID = "11111111-1111-1111-1111-111111111111"
-
-
-# ═════════════════════════════════════════════════════════════════════════
-# Shared response/session mock helpers
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _mock_response(status: int, json_data=None, text: str = ""):
@@ -80,7 +78,6 @@ def _put_200_json_session(json_data: dict) -> MagicMock:
     return session
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # No-forced-refresh regression: privacy/light/notifications/pan setters must
 # NOT trigger a full coordinator refresh after a successful write.
 #
@@ -103,7 +100,6 @@ def _put_200_json_session(json_data: dict) -> MagicMock:
 # and destructive for the others. Decoupled (option A): drop the forced
 # refresh; the regular 60 s coordinator tick confirms the state, and the
 # privacy-OFF snapshot trigger still refreshes the image.
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _stub_coord_privacy_no_refresh():
@@ -448,7 +444,6 @@ class TestCloudSetPanNoRefresh:
         coord.hass.async_create_task.assert_not_called()
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Privacy-mode / camera-light cache write-lock race (PRIVACY_REVERT bug)
 #
 # Bug discovered 2026-04-27: first OFF-toggle of the privacy switch visibly
@@ -463,7 +458,6 @@ class TestCloudSetPanNoRefresh:
 # These tests pin the contract: when a user write happened within
 # `_WRITE_LOCK_SECS`, a stale SHC poll response must NOT overwrite the
 # freshly-set cache value.
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _make_stub_coordinator(write_lock_secs: float = 30.0):
@@ -625,10 +619,8 @@ async def test_light_shc_poll_when_no_recent_user_write() -> None:
     assert coord._shc_state_cache[cam_id]["camera_light"] is True
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Structural: every public function must exist (guards against accidental
 # renames the coordinator/entity modules call directly)
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestShcFunctionContracts:
@@ -651,11 +643,6 @@ class TestShcFunctionContracts:
             assert f"def {fn}" in src or f"async def {fn}" in src, (
                 f"shc.py is missing function '{fn}' — coordinator or entity calls it directly"
             )
-
-
-# ═════════════════════════════════════════════════════════════════════════
-# async_shc_request — the raw SHC HTTPS client
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _mock_resp(status: int, json_data=None, text: str = ""):
@@ -877,11 +864,6 @@ class TestAsyncShcRequest:
         assert result is None
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# async_update_shc_states — per-camera SHC device-state fetcher
-# ═════════════════════════════════════════════════════════════════════════
-
-
 class TestAsyncUpdateShcStates:
     @pytest.mark.asyncio
     async def test_not_configured_returns_early(self):
@@ -1012,11 +994,6 @@ class TestAsyncUpdateShcStatesNoDeviceMatch:
         # CAM_ID was matched → cache entry created; CAM2_ID was not matched → absent
         assert CAM_ID in coord._shc_state_cache
         assert cam2_id not in coord._shc_state_cache
-
-
-# ═════════════════════════════════════════════════════════════════════════
-# async_shc_set_camera_light / async_shc_set_privacy_mode — SHC-local setters
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _coord_with_shc(
@@ -1169,11 +1146,6 @@ class TestAsyncShcSetPrivacyMode:
         ):
             result = await async_shc_set_privacy_mode(coord, CAM_ID, False)
         assert result is False
-
-
-# ═════════════════════════════════════════════════════════════════════════
-# async_cloud_set_privacy_mode
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _stub_coord_setters(*, gen2: bool = True, with_token: bool = True):
@@ -1740,11 +1712,6 @@ class TestCloudSetPrivacyMode401TokenRefreshFails:
         assert result is False
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# async_cloud_set_camera_light
-# ═════════════════════════════════════════════════════════════════════════
-
-
 class TestCloudSetCameraLight:
     @pytest.mark.asyncio
     async def test_gen1_success(self):
@@ -1933,11 +1900,6 @@ class TestCloudSetCameraLightBranches:
         ):
             await async_cloud_set_camera_light(coord, CAM_ID, True)
         mock_shc.assert_called_once()
-
-
-# ═════════════════════════════════════════════════════════════════════════
-# async_cloud_set_notifications
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _notif_coord(cam_id: str = CAM_ID) -> SimpleNamespace:
@@ -2131,11 +2093,6 @@ class TestCloudSetNotifications:
         assert ok is False
         # Cache must NOT have been updated
         assert "notifications_status" not in coord._shc_state_cache.get(CAM_ID, {})
-
-
-# ═════════════════════════════════════════════════════════════════════════
-# async_cloud_set_light_component — Gen1 + Gen2 cloud paths
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _stub_coord_light(*, gen2: bool = True, with_token: bool = True):
@@ -2790,7 +2747,6 @@ class TestCloudSetLightComponentGen2WallwasherNetworkError:
         assert result is True
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # async_cloud_set_light_component — Gen2 LOCAL RCP front-light fallback
 #
 # When the Bosch cloud fails to set a front-light component, the integration
@@ -2802,11 +2758,10 @@ class TestCloudSetLightComponentGen2WallwasherNetworkError:
 #   - `coordinator.async_update_listeners` fired so the UI re-reads
 #   - RCP-write failure returns False without touching the cache
 #   - Gen1 cams skip the fallback entirely
-# ═════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
-def light_fallback_stub_coord():
+def light_fallback_stub_coord() -> BoschCameraCoordinator:
     coord = SimpleNamespace()
     # hass.data needed for async_get_clientsession (the light fallback
     # pre-allocates the session before checking token, so the test must
@@ -2822,18 +2777,22 @@ def light_fallback_stub_coord():
     coord._hw_version = {CAM_ID: "HOME_Eyes_Outdoor"}  # Gen2
     coord.async_update_listeners = lambda: None
     coord.options = {}
-    return coord
+    return cast(BoschCameraCoordinator, coord)
 
 
 @pytest.fixture
-def light_fallback_gen1_coord(light_fallback_stub_coord):
+def light_fallback_gen1_coord(
+    light_fallback_stub_coord: BoschCameraCoordinator,
+) -> BoschCameraCoordinator:
     light_fallback_stub_coord._hw_version = {CAM_ID: "OUTDOOR"}  # Gen1
     return light_fallback_stub_coord
 
 
 @pytest.mark.asyncio
 class TestGen2LocalRcpLightFallback:
-    async def test_front_true_writes_brightness_100(self, light_fallback_stub_coord):
+    async def test_front_true_writes_brightness_100(
+        self, light_fallback_stub_coord: BoschCameraCoordinator
+    ):
         from custom_components.bosch_shc_camera import shc
 
         mock_write = AsyncMock(return_value=True)
@@ -2863,7 +2822,9 @@ class TestGen2LocalRcpLightFallback:
         # _local_write_at stamped for grace-period helper
         assert CAM_ID in light_fallback_stub_coord._local_write_at
 
-    async def test_front_false_writes_brightness_0(self, light_fallback_stub_coord):
+    async def test_front_false_writes_brightness_0(
+        self, light_fallback_stub_coord: BoschCameraCoordinator
+    ):
         from custom_components.bosch_shc_camera import shc
 
         mock_write = AsyncMock(return_value=True)
@@ -2889,7 +2850,9 @@ class TestGen2LocalRcpLightFallback:
             light_fallback_stub_coord._shc_state_cache[CAM_ID]["front_light"] is False
         )
 
-    async def test_intensity_float_maps_to_percent(self, light_fallback_stub_coord):
+    async def test_intensity_float_maps_to_percent(
+        self, light_fallback_stub_coord: BoschCameraCoordinator
+    ):
         from custom_components.bosch_shc_camera import shc
 
         mock_write = AsyncMock(return_value=True)
@@ -2916,7 +2879,9 @@ class TestGen2LocalRcpLightFallback:
             == 0.5
         )
 
-    async def test_intensity_int_passes_through(self, light_fallback_stub_coord):
+    async def test_intensity_int_passes_through(
+        self, light_fallback_stub_coord: BoschCameraCoordinator
+    ):
         from custom_components.bosch_shc_camera import shc
 
         mock_write = AsyncMock(return_value=True)
@@ -2944,7 +2909,7 @@ class TestGen2LocalRcpLightFallback:
         )
 
     async def test_camera_light_flag_recomputed_after_local_write(
-        self, light_fallback_stub_coord
+        self, light_fallback_stub_coord: BoschCameraCoordinator
     ):
         from custom_components.bosch_shc_camera import shc
 
@@ -2967,7 +2932,9 @@ class TestGen2LocalRcpLightFallback:
             light_fallback_stub_coord._shc_state_cache[CAM_ID]["camera_light"] is True
         )
 
-    async def test_rcp_failure_returns_false(self, light_fallback_stub_coord):
+    async def test_rcp_failure_returns_false(
+        self, light_fallback_stub_coord: BoschCameraCoordinator
+    ):
         from custom_components.bosch_shc_camera import shc
 
         mock_write = AsyncMock(return_value=False)
@@ -2993,7 +2960,9 @@ class TestGen2LocalRcpLightFallback:
             CAM_ID, {}
         )
 
-    async def test_wallwasher_skips_local_fallback(self, light_fallback_stub_coord):
+    async def test_wallwasher_skips_local_fallback(
+        self, light_fallback_stub_coord: BoschCameraCoordinator
+    ):
         """Wallwasher write payload is too complex for the unauthenticated
         RCP path — must fall through without touching the camera."""
         from custom_components.bosch_shc_camera import shc
@@ -3018,7 +2987,9 @@ class TestGen2LocalRcpLightFallback:
         assert ok is False
         mock_write.assert_not_awaited()
 
-    async def test_gen1_skips_local_fallback(self, light_fallback_gen1_coord):
+    async def test_gen1_skips_local_fallback(
+        self, light_fallback_gen1_coord: BoschCameraCoordinator
+    ):
         """Gen1 cams never enter the LOCAL RCP fallback — auth model is
         different and the writes have not been verified there."""
         from custom_components.bosch_shc_camera import shc
@@ -3043,7 +3014,9 @@ class TestGen2LocalRcpLightFallback:
         assert ok is False
         mock_write.assert_not_awaited()
 
-    async def test_no_lan_ip_skips_fallback(self, light_fallback_stub_coord):
+    async def test_no_lan_ip_skips_fallback(
+        self, light_fallback_stub_coord: BoschCameraCoordinator
+    ):
         from custom_components.bosch_shc_camera import shc
 
         light_fallback_stub_coord._rcp_lan_ip_cache = {}
@@ -3069,7 +3042,7 @@ class TestGen2LocalRcpLightFallback:
         mock_write.assert_not_awaited()
 
     async def test_prefers_local_creds_host_over_rcp_cache(
-        self, light_fallback_stub_coord
+        self, light_fallback_stub_coord: BoschCameraCoordinator
     ):
         from custom_components.bosch_shc_camera import shc
 
@@ -3090,11 +3063,6 @@ class TestGen2LocalRcpLightFallback:
             )
         # local_creds.host wins over _rcp_lan_ip_cache
         assert mock_write.await_args.args[1] == "10.0.0.5"
-
-
-# ═════════════════════════════════════════════════════════════════════════
-# async_cloud_set_pan
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestCloudSetPan:
@@ -3240,12 +3208,6 @@ class TestCloudSetPanBodyException:
         # Should still return True (200 is success) and cache the requested position
         assert result is True
         assert coord._pan_cache[CAM_ID] == 45
-
-
-# ═════════════════════════════════════════════════════════════════════════
-# shc_configured / shc_ready / _shc_mark_success / _shc_mark_failure —
-# SHC availability + backoff bookkeeping
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _stub_coord_for_availability(
@@ -3396,7 +3358,6 @@ class TestShcMarkSuccessFailure:
         assert coord._shc_fail_count == 6
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _schedule_privacy_off_snapshot — indoor (shutter) vs outdoor delay
 #
 # Indoor cameras have a mechanical shutter that takes ~5 s to open. Outdoor
@@ -3408,7 +3369,6 @@ class TestShcMarkSuccessFailure:
 # returned a privacy-placeholder frame. 5s covers the slowest observed
 # shutter-open + encoder-ready cycle. Outdoor cameras have no physical
 # shutter — 0.5s is enough for cloud propagation.
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestSchedulePrivacyOffSnapshot:
@@ -3556,10 +3516,8 @@ class TestSchedulePrivacyOffSnapshotSmoke:
             pass
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Structural pins: write-lock timestamps must exist in the right functions
 # so the BUG-4/PRIVACY_REVERT bug shape cannot silently regress.
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestWriteLockOrdering:
@@ -3636,12 +3594,10 @@ class TestShcFetcherWriteLockCheck:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: v12.4.13 LAN-fallback hardening — hw-unknown gate relaxation +
 # cloud-444 skip-cooldown (relocated from
 # tests/test_lan_fallback_during_outage.py — the rcp.py transport half lives
 # in tests/test_rcp.py, the switch.py availability half in tests/test_switch.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestShcLanFallbackFiresForUnknownHw:
@@ -3786,10 +3742,8 @@ class TestCloud444Cooldown:
         assert ok is True
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: _local_write_at timestamp on Gen2 LAN-RCP privacy success
 # (relocated from tests/test_misc_small_gaps.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestLocalWriteTimestamp:

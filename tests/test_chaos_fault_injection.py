@@ -42,6 +42,7 @@ import struct
 import sys
 import threading
 import time
+from collections.abc import Generator
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -68,9 +69,7 @@ CAM_B = "22222222-2222-2222-2222-222222222222"
 _PATCH_SESSION = "custom_components.bosch_shc_camera.async_get_bosch_cloud_session"
 
 
-# ============================================================================
-# --- Shared coordinator-stub / fake-response helpers ---
-# ============================================================================
+# Shared coordinator-stub / fake-response helpers.
 # Mirrors tests/test_init.py's `_make_resp_sprint_kb` / `_url_session` /
 # `_make_coord_sprint_kb` verbatim in shape (kept self-contained in this
 # file rather than cross-imported, so this chaos suite has no dependency on
@@ -319,11 +318,6 @@ def _make_coord(**overrides):
     return ns
 
 
-# ============================================================================
-# --- Focus area 1: Cloud-API faults ---
-# ============================================================================
-
-
 class TestCloudApiFaultInjectionCameraList:
     """Top-level `GET /v11/video_inputs` (fetch_camera_list, camera_list.py)
     is NOT swallowed by design — it propagates as `UpdateFailed` so HA's
@@ -475,11 +469,6 @@ class TestCloudApiFaultInjectionPerCameraChaos:
         )
 
 
-# ============================================================================
-# --- Focus area 2: TLS-proxy / RTSP hard connection resets ---
-# ============================================================================
-
-
 class _FakeTlsSocket:
     """Minimal SSL-wrap stand-in: satisfies `.version()`/`.cipher()` (used
     for a debug log line) and delegates all real I/O to the raw socket."""
@@ -504,7 +493,9 @@ def _fake_tls_ctx():
 
 
 @pytest.fixture(autouse=True)
-def _enable_loopback_sockets_for_chaos(socket_enabled):
+def _enable_loopback_sockets_for_chaos(
+    socket_enabled: None,
+) -> Generator[None, None, None]:
     """pytest-homeassistant-custom-component blocks real `socket.socket()`
     calls by default; the TLS-proxy tests below legitimately need real
     127.0.0.1 loopback sockets (real accept-loop thread + real client
@@ -690,11 +681,6 @@ class TestTlsProxyHardResetRecovery:
                     t.join(timeout=0.2)
 
 
-# ============================================================================
-# --- Focus area 3: go2rtc unreachable while actively streaming ---
-# ============================================================================
-
-
 class TestGo2rtcUnreachableWhileStreaming:
     """`register_go2rtc_stream`/`unregister_go2rtc_stream` (go2rtc_client.py)
     must swallow every realistic fault (timeout, connection error, generic
@@ -774,11 +760,6 @@ class TestGo2rtcUnreachableWhileStreaming:
         # raise — the go2rtc entry is either already gone or about to be,
         # either way this is a no-op, not a crash.
         await asyncio.wait_for(unregister_go2rtc_stream(coord, CAM_A), timeout=5.0)
-
-
-# ============================================================================
-# --- Focus area 4: Token-refresh cascade failures ---
-# ============================================================================
 
 
 def _make_coord_token_chaos(**overrides):
@@ -949,11 +930,6 @@ class TestTokenRefreshCascadeChaos:
                 assert isinstance(res, str) and res
 
 
-# ============================================================================
-# --- Focus area 5: Camera-removal race (`_purge_cam_id`) ---
-# ============================================================================
-
-
 def _make_purge_stub() -> BoschCameraCoordinator:
     coord = BoschCameraCoordinator.__new__(BoschCameraCoordinator)
     for attr in BoschCameraCoordinator._PURGE_CAM_DICT_ATTRS:
@@ -1055,11 +1031,6 @@ class TestCameraRemovalRace:
         # Double-purge (simulating the camera also vanishing next tick)
         # must not raise even though nothing is left to remove.
         BoschCameraCoordinator._purge_cam_id(coord, CAM_A)
-
-
-# ============================================================================
-# --- Focus area 6: SMB/FTP NVR-upload unreachable ---
-# ============================================================================
 
 
 def _smb_coord(options: dict | None = None) -> SimpleNamespace:
@@ -1181,11 +1152,6 @@ class TestSmbFtpUnreachableChaos:
                 ),
                 timeout=2.0,
             )
-
-
-# ============================================================================
-# --- Focus area 7: Concurrent-heartbeat chaos ---
-# ============================================================================
 
 
 class TestConcurrentHeartbeatChaos:

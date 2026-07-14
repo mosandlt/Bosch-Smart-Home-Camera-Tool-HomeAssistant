@@ -28,9 +28,6 @@ import pytest
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
-# ── GH#1: Motion Sensitivity not permanent (DrNiKa) ────────────────────
-
-
 class TestGH1_MotionRevert:
     """Same root cause as forum issue #1 (Poldi41) — see test_forum_issues.py.
 
@@ -56,16 +53,13 @@ class TestGH1_MotionRevert:
             )
 
 
-# ── GH#2, GH#3, GH#5, GH#6: routed to per-module test files during the
+# GH#2, GH#3, GH#5, GH#6: routed to per-module test files during the
 # tests/ reorg — see tests/test_init.py (token-refresh methods + repair
 # issue string), tests/test_switch.py + tests/test_light.py + tests/
 # test_models.py (Gen2 outdoor light/switch/model-config), tests/
 # test_config_flow.py (reauth/reconfigure), tests/test_camera.py
 # (supported_features / live_connections). Only the doc/file-existence
 # checks below don't fit a single custom_components module and stay here.
-
-
-# ── GH#4: bosch-camera-card is not working (Michael8885443) ────────────
 
 
 class TestGH4_CardFrontend:
@@ -91,9 +85,6 @@ class TestGH4_CardFrontend:
 # The live_stream-switch-specific regression tests that used to live here
 # (class existence + unavailable-on-stale-session) also moved, to
 # tests/test_switch.py.
-
-
-# ── Meta enforcer ─────────────────────────────────────────────────────
 
 
 class TestMeta:

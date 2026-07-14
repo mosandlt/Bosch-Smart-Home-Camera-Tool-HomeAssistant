@@ -48,13 +48,8 @@ import pytest
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# Basic property reads — BoschTopLedLight / BoschBottomLedLight / BoschFrontLight
-# ═══════════════════════════════════════════════════════════════════════
-
-
 @pytest.fixture
-def stub_coord():
+def stub_coord() -> SimpleNamespace:
     return SimpleNamespace(
         data={
             CAM_ID: {
@@ -91,25 +86,31 @@ def stub_coord():
 
 
 @pytest.fixture
-def stub_entry():
+def stub_entry() -> SimpleNamespace:
     return SimpleNamespace(entry_id="01ENTRY", data={}, options={})
 
 
 class TestTopLedLight:
-    def test_construction(self, stub_coord, stub_entry):
+    def test_construction(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
         assert light._led_key == "topLedLightSettings"
 
-    def test_off_when_brightness_zero(self, stub_coord, stub_entry):
+    def test_off_when_brightness_zero(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
         # Cache has brightness=0 → is_on=False
         assert light.is_on is False
 
-    def test_on_when_brightness_positive(self, stub_coord, stub_entry):
+    def test_on_when_brightness_positive(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         stub_coord._lighting_switch_cache[CAM_ID]["topLedLightSettings"][
             "brightness"
         ] = 75
@@ -118,7 +119,9 @@ class TestTopLedLight:
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
         assert light.is_on is True
 
-    def test_brightness_scales_to_255(self, stub_coord, stub_entry):
+    def test_brightness_scales_to_255(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """API uses 0-100, HA uses 0-255 — values must be scaled."""
         stub_coord._lighting_switch_cache[CAM_ID]["topLedLightSettings"][
             "brightness"
@@ -131,7 +134,9 @@ class TestTopLedLight:
         assert bri is not None
         assert 100 <= bri <= 150  # ~127
 
-    def test_extra_attrs_warm_white_default_when_no_color(self, stub_coord, stub_entry):
+    def test_extra_attrs_warm_white_default_when_no_color(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """When user never picked a color, card sees a warm-white default
         so the color dot isn't grey on first load."""
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
@@ -143,7 +148,9 @@ class TestTopLedLight:
         r, g, b = attrs["last_rgb_color"]
         assert r > g > b
 
-    def test_extra_attrs_preserves_user_color(self, stub_coord, stub_entry):
+    def test_extra_attrs_preserves_user_color(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """If the user picked a color, that's what appears in last_rgb_color."""
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
@@ -152,7 +159,9 @@ class TestTopLedLight:
         attrs = light.extra_state_attributes
         assert attrs["last_rgb_color"] == [255, 0, 128]
 
-    def test_extra_attrs_invalid_hex_does_not_raise(self, stub_coord, stub_entry):
+    def test_extra_attrs_invalid_hex_does_not_raise(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Garbled cached color must not crash extra_state_attributes.
 
         Implementation choice: invalid hex falls through silently (no
@@ -167,7 +176,9 @@ class TestTopLedLight:
         attrs = light.extra_state_attributes
         assert isinstance(attrs, dict)
 
-    def test_available_follows_coordinator(self, stub_coord, stub_entry):
+    def test_available_follows_coordinator(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
@@ -177,7 +188,9 @@ class TestTopLedLight:
 
 
 class TestBottomLedLight:
-    def test_uses_bottom_led_key(self, stub_coord, stub_entry):
+    def test_uses_bottom_led_key(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.light import BoschBottomLedLight
 
         light = BoschBottomLedLight(stub_coord, CAM_ID, stub_entry)
@@ -185,17 +198,13 @@ class TestBottomLedLight:
 
 
 class TestFrontLight:
-    def test_uses_front_led_key(self, stub_coord, stub_entry):
+    def test_uses_front_led_key(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.light import BoschFrontLight
 
         light = BoschFrontLight(stub_coord, CAM_ID, stub_entry)
         assert light._led_key == "frontLightSettings"
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Shared helpers for the __new__-bypass unit tests below (device_info,
-# put_lighting_switch internals, restore-state, cache sync, rgb_color, ...)
-# ═══════════════════════════════════════════════════════════════════════
 
 
 def _stub_coord_edge(**overrides):
@@ -274,9 +283,6 @@ def _make_put_session(
     return session, resp
 
 
-# ── device_info ─────────────────────────────────────────────────────────
-
-
 class TestDeviceInfoReturn:
     """`device_info` must return a dict containing identifiers + connections
     derived from cam_id + mac. Cheap smoke to pin the contract."""
@@ -300,9 +306,6 @@ class TestDeviceInfoReturn:
         light._mac = ""
         info = light.device_info
         assert info["connections"] == set()
-
-
-# ── _put_lighting_switch — defensive merge branch for unknown keys ─────
 
 
 class TestPutLightingSwitchDefensiveMerge:
@@ -345,9 +348,6 @@ class TestPutLightingSwitchDefensiveMerge:
         assert captured_body["someFutureGroup"] == {"brightness": 50, "color": None}
 
 
-# ── _put_lighting_switch — resp.json() raises on a 200 response ────────
-
-
 class TestPutLightingSwitchJsonParseError:
     """If the Bosch cloud returns 200 but with a malformed body (HTML error
     page, gzip-stripped, etc.), `resp.json()` raises. The except branch now
@@ -383,9 +383,6 @@ class TestPutLightingSwitchJsonParseError:
         assert cache["topLedLightSettings"]["brightness"] == 50, (
             "Optimistic update must apply the written brightness value"
         )
-
-
-# ── async_turn_on — remembers brightness ────────────────────────────────
 
 
 class TestAsyncTurnOnRemembersBrightness:
@@ -435,9 +432,6 @@ class TestAsyncTurnOnRemembersBrightness:
         assert light._last_brightness == 1
 
 
-# ── async_turn_off — remembers color_hex ────────────────────────────────
-
-
 class TestAsyncTurnOffRemembersColor:
     """Before zeroing brightness, the off-handler must persist the current
     `_color_hex` into `_last_color_hex` so the next turn_on restores the
@@ -463,9 +457,6 @@ class TestAsyncTurnOffRemembersColor:
         assert light._last_color_hex == "#FF8000"
         assert light._is_on is False
         assert light._brightness == 0
-
-
-# ── extra_state_attributes ───────────────────────────────────────────────
 
 
 class TestExtraStateAttributes:
@@ -521,9 +512,6 @@ class TestExtraStateAttributes:
         light = _make_light()
         light._last_white_balance = 0.42
         assert light.extra_state_attributes["last_white_balance"] == 0.42
-
-
-# ── async_added_to_hass — RestoreState round-trip ───────────────────────
 
 
 class TestAsyncAddedToHassRestore:
@@ -648,9 +636,6 @@ class TestAsyncAddedToHassRestore:
         assert light._last_brightness == 100
 
 
-# ── _load_state_from_cache ──────────────────────────────────────────────
-
-
 class TestLoadStateFromCache:
     def test_off_when_brightness_zero(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
@@ -725,9 +710,6 @@ class TestLoadStateFromCache:
         assert light._is_on is False
 
 
-# ── _get_current_state ──────────────────────────────────────────────────
-
-
 class TestGetCurrentState:
     def test_returns_defaults_when_cache_empty(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
@@ -763,9 +745,6 @@ class TestGetCurrentState:
         assert state["frontLightSettings"]["whiteBalance"] == 0.5
         # Bottom not in cache → default
         assert state["bottomLedLightSettings"]["brightness"] == 0
-
-
-# ── _put_lighting_switch — happy path / HTTP-error / exception handling ─
 
 
 class TestPutLightingSwitch:
@@ -934,9 +913,6 @@ class TestPutLightingSwitch:
         assert body["topLedLightSettings"]["brightness"] == 80
 
 
-# ── _put_switch_endpoint ─────────────────────────────────────────────────
-
-
 class TestPutSwitchEndpoint:
     @pytest.mark.asyncio
     async def test_success_returns_true(self):
@@ -982,9 +958,6 @@ class TestPutSwitchEndpoint:
         ):
             ok = await BoschTopLedLight._put_switch_endpoint(light, "front", True)
         assert ok is False
-
-
-# ── _BoschRgbLedLight._sync_wallwasher_cache ────────────────────────────
 
 
 class TestSyncWallwasherCache:
@@ -1051,9 +1024,6 @@ class TestSyncWallwasherCache:
         assert coord._light_set_at[CAM_ID] > 0
 
 
-# ── _BoschRgbLedLight.rgb_color ──────────────────────────────────────────
-
-
 class TestRgbColor:
     def test_returns_tuple_when_color_set(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
@@ -1081,7 +1051,7 @@ class TestRgbColor:
         assert light.rgb_color == (0x22, 0xDD, 0x44)
 
 
-# ── 204 No Content: optimistic cache update regression ──────────────────
+# 204 No Content: optimistic cache update regression
 #
 # Root cause: /lighting/switch returns 204 No Content (empty body).
 # Old code: resp.json() raised (no JSON body) → except swallowed silently
@@ -1368,11 +1338,6 @@ class TestPutLightingSwitchConcurrentNoClobber:
         assert put_bodies[-1]["bottomLedLightSettings"]["brightness"] == 70
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# async_setup_entry gating, color-temp Kelvin, turn_on/off write paths
-# ═══════════════════════════════════════════════════════════════════════
-
-
 def _stub_coord_setup(**overrides):
     base = dict(
         data={
@@ -1400,7 +1365,7 @@ def _stub_coord_setup(**overrides):
 
 
 @pytest.fixture
-def stub_coord_setup():
+def stub_coord_setup() -> SimpleNamespace:
     return _stub_coord_setup()
 
 
@@ -1557,9 +1522,11 @@ class TestFrontLightColorTempKelvin:
         entity = BoschFrontLight(coord, CAM_ID, entry)
         return entity
 
-    def test_cool_white_balance_gives_high_kelvin(self, stub_coord_setup, stub_entry):
+    def test_cool_white_balance_gives_high_kelvin(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """whiteBalance=-1.0 (coolest) must map to 6500K."""
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._white_balance = -1.0
         entity._is_on = True
         entity._brightness = 80
@@ -1568,9 +1535,11 @@ class TestFrontLightColorTempKelvin:
         k = entity.color_temp_kelvin
         assert k == 6500, "whiteBalance=-1.0 must map to 6500K (cool)"
 
-    def test_warm_white_balance_gives_low_kelvin(self, stub_coord_setup, stub_entry):
+    def test_warm_white_balance_gives_low_kelvin(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """whiteBalance=1.0 (warmest) must map to 2000K."""
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._white_balance = 1.0
         entity._is_on = True
         entity._brightness = 80
@@ -1578,9 +1547,11 @@ class TestFrontLightColorTempKelvin:
         k = entity.color_temp_kelvin
         assert k == 2000, "whiteBalance=1.0 must map to 2000K (warm)"
 
-    def test_neutral_white_balance_gives_mid_kelvin(self, stub_coord_setup, stub_entry):
+    def test_neutral_white_balance_gives_mid_kelvin(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """whiteBalance=0.0 must map to 4250K (midpoint)."""
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._white_balance = 0.0
         entity._is_on = True
         entity._brightness = 80
@@ -1588,9 +1559,11 @@ class TestFrontLightColorTempKelvin:
         k = entity.color_temp_kelvin
         assert k == 4250, "whiteBalance=0.0 must map to 4250K (neutral)"
 
-    def test_returns_value_when_off_for_ui_slider(self, stub_coord_setup, stub_entry):
+    def test_returns_value_when_off_for_ui_slider(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Must return a non-None Kelvin value even when light is off (UI slider position)."""
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = False
         entity._white_balance = None
         entity._last_white_balance = -1.0
@@ -1611,10 +1584,10 @@ class TestFrontLightTurnOn:
 
     @pytest.mark.asyncio
     async def test_turn_on_without_kwargs_uses_last_brightness(
-        self, stub_coord_setup, stub_entry
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Turn ON with no kwargs must use remembered brightness (not 0)."""
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = False
         entity._last_brightness = 75
         entity._white_balance = -0.5
@@ -1626,12 +1599,12 @@ class TestFrontLightTurnOn:
 
     @pytest.mark.asyncio
     async def test_turn_on_with_color_temp_stores_wb(
-        self, stub_coord_setup, stub_entry
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Turn ON with ATTR_COLOR_TEMP_KELVIN must convert to whiteBalance and store it."""
         from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
 
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._last_brightness = 80
         await entity.async_turn_on(**{ATTR_COLOR_TEMP_KELVIN: 6500})
@@ -1643,12 +1616,12 @@ class TestFrontLightTurnOn:
 
     @pytest.mark.asyncio
     async def test_turn_on_while_off_with_brightness_only_preconfigures(
-        self, stub_coord_setup, stub_entry
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """When light is off and only brightness is given: store locally, don't PUT API."""
         from homeassistant.components.light import ATTR_BRIGHTNESS
 
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = False
         await entity.async_turn_on(**{ATTR_BRIGHTNESS: 128})
         entity._put_lighting_switch.assert_not_called()
@@ -1658,10 +1631,10 @@ class TestFrontLightTurnOn:
 
     @pytest.mark.asyncio
     async def test_turn_on_sends_put_and_enables_front_switch(
-        self, stub_coord_setup, stub_entry
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Turn ON from on-state must PUT lighting/switch and enable front switch endpoint."""
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._last_brightness = 60
         await entity.async_turn_on()
@@ -1669,9 +1642,11 @@ class TestFrontLightTurnOn:
         entity._put_switch_endpoint.assert_called_once_with("front", True)
 
     @pytest.mark.asyncio
-    async def test_turn_on_sets_is_on_true(self, stub_coord_setup, stub_entry):
+    async def test_turn_on_sets_is_on_true(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Entity must be is_on=True after turn_on."""
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._last_brightness = 80
         await entity.async_turn_on()
@@ -1689,8 +1664,10 @@ class TestFrontLightTurnOff:
         return entity
 
     @pytest.mark.asyncio
-    async def test_turn_off_sets_is_on_false(self, stub_coord_setup, stub_entry):
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+    async def test_turn_off_sets_is_on_false(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._brightness = 80
         await entity.async_turn_off()
@@ -1699,10 +1676,10 @@ class TestFrontLightTurnOff:
 
     @pytest.mark.asyncio
     async def test_turn_off_sends_brightness_zero_and_disables_endpoint(
-        self, stub_coord_setup, stub_entry
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Turn OFF must PUT brightness=0 AND disable the front switch endpoint."""
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._brightness = 80
         entity._white_balance = -0.5
@@ -1715,10 +1692,10 @@ class TestFrontLightTurnOff:
 
     @pytest.mark.asyncio
     async def test_turn_off_preserves_white_balance_in_put(
-        self, stub_coord_setup, stub_entry
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Turn OFF must preserve whiteBalance in PUT body so subsequent top/bottom PUTs don't accidentally re-enable front."""
-        entity = self._make_front_light(stub_coord_setup, stub_entry)
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._brightness = 80
         entity._white_balance = 0.5
@@ -1741,11 +1718,13 @@ class TestTopLedLightTurnOn:
         return entity
 
     @pytest.mark.asyncio
-    async def test_turn_on_with_rgb_sends_color_hex(self, stub_coord_setup, stub_entry):
+    async def test_turn_on_with_rgb_sends_color_hex(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Turn ON with ATTR_RGB_COLOR must convert to #RRGGBB and include in PUT body."""
         from homeassistant.components.light import ATTR_RGB_COLOR
 
-        entity = self._make_top_led(stub_coord_setup, stub_entry)
+        entity = self._make_top_led(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._last_brightness = 80
         await entity.async_turn_on(**{ATTR_RGB_COLOR: (255, 0, 128)})
@@ -1758,20 +1737,24 @@ class TestTopLedLightTurnOn:
         )
 
     @pytest.mark.asyncio
-    async def test_turn_on_enables_topdown_endpoint(self, stub_coord_setup, stub_entry):
+    async def test_turn_on_enables_topdown_endpoint(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Turn ON must also enable the topdown lighting endpoint (ambient mode)."""
-        entity = self._make_top_led(stub_coord_setup, stub_entry)
+        entity = self._make_top_led(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._last_brightness = 80
         await entity.async_turn_on()
         entity._put_switch_endpoint.assert_called_with("topdown", True)
 
     @pytest.mark.asyncio
-    async def test_preconfigure_while_off_with_rgb(self, stub_coord_setup, stub_entry):
+    async def test_preconfigure_while_off_with_rgb(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Color change while off must store color locally without calling API."""
         from homeassistant.components.light import ATTR_RGB_COLOR
 
-        entity = self._make_top_led(stub_coord_setup, stub_entry)
+        entity = self._make_top_led(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = False
         await entity.async_turn_on(**{ATTR_RGB_COLOR: (0, 255, 0)})
         entity._put_lighting_switch.assert_not_called()
@@ -1780,8 +1763,10 @@ class TestTopLedLightTurnOn:
         )
 
     @pytest.mark.asyncio
-    async def test_turn_off_sends_brightness_zero(self, stub_coord_setup, stub_entry):
-        entity = self._make_top_led(stub_coord_setup, stub_entry)
+    async def test_turn_off_sends_brightness_zero(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        entity = self._make_top_led(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._brightness = 70
         stub_coord_setup._lighting_switch_cache[CAM_ID] = {
@@ -1797,10 +1782,10 @@ class TestTopLedLightTurnOn:
 
     @pytest.mark.asyncio
     async def test_turn_off_disables_topdown_when_both_leds_off(
-        self, stub_coord_setup, stub_entry
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Topdown endpoint must be disabled when both Top and Bottom brightness reach 0."""
-        entity = self._make_top_led(stub_coord_setup, stub_entry)
+        entity = self._make_top_led(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._brightness = 70
         # Both LEDs at 0 after PUT
@@ -1814,7 +1799,7 @@ class TestTopLedLightTurnOn:
 
 class TestLightBaseAvailableAndBrightness:
     def test_available_requires_only_coordinator_success(
-        self, stub_coord_setup, stub_entry
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Light entities must be available when coordinator succeeded (no camera-online gate)."""
         from custom_components.bosch_shc_camera.light import BoschFrontLight
@@ -1826,7 +1811,7 @@ class TestLightBaseAvailableAndBrightness:
         )
 
     def test_brightness_returns_last_brightness_when_off(
-        self, stub_coord_setup, stub_entry
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """brightness property must return last_brightness (scaled to 0-255) when light is off."""
         from custom_components.bosch_shc_camera.light import BoschFrontLight
@@ -1869,9 +1854,9 @@ class TestLightWriteFailureGating:
 
     @pytest.mark.asyncio
     async def test_front_turn_off_keeps_on_when_put_fails(
-        self, stub_coord_setup, stub_entry
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        entity = self._front(stub_coord_setup, stub_entry)
+        entity = self._front(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._brightness = 60
         await entity.async_turn_off()
@@ -1883,9 +1868,9 @@ class TestLightWriteFailureGating:
 
     @pytest.mark.asyncio
     async def test_top_led_turn_off_keeps_on_when_put_fails(
-        self, stub_coord_setup, stub_entry
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        entity = self._top(stub_coord_setup, stub_entry)
+        entity = self._top(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._brightness = 70
         await entity.async_turn_off()
@@ -1896,9 +1881,11 @@ class TestLightWriteFailureGating:
         entity._put_switch_endpoint.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_front_turn_off_clears_on_success(self, stub_coord_setup, stub_entry):
+    async def test_front_turn_off_clears_on_success(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         """Control: a successful off-PUT does flip is_on to False."""
-        entity = self._front(stub_coord_setup, stub_entry)
+        entity = self._front(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._put_lighting_switch = AsyncMock(return_value=True)
         entity._put_switch_endpoint = AsyncMock(return_value=True)
         entity._is_on = True
@@ -1907,18 +1894,16 @@ class TestLightWriteFailureGating:
         assert entity._is_on is False, "is_on must be False after a successful off-PUT"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: doubled entity-name-prefix regression (relocated from
 # tests/test_doubled_prefix_light_binary_sensor.py — the binary_sensor.py
 # half lives in tests/test_binary_sensor.py). Classes with
 # `_attr_has_entity_name=True` AND `_attr_name=f"Bosch {cam_title} <Suffix>"`
 # produced entity_ids like `light.bosch_est_bosch_est_oberes_licht` because
 # HA already prepends the device name when has_entity_name=True.
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
-def stub_coord_light_prefix():
+def stub_coord_light_prefix() -> SimpleNamespace:
     """Minimal coordinator for the doubled-prefix light tests."""
     return SimpleNamespace(
         data={
@@ -1972,7 +1957,9 @@ def _has_entity_name_light(entity) -> bool:
 class TestTopLedLightPrefix:
     """light.py BoschTopLedLight (Oberes Licht)"""
 
-    def test_name_no_doubled_prefix(self, stub_coord_light_prefix, stub_entry):
+    def test_name_no_doubled_prefix(
+        self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         entity = BoschTopLedLight(stub_coord_light_prefix, CAM_ID, stub_entry)
@@ -1980,7 +1967,9 @@ class TestTopLedLightPrefix:
             f"_attr_name={entity._attr_name!r} still contains 'Bosch '"
         )
 
-    def test_has_entity_name(self, stub_coord_light_prefix, stub_entry):
+    def test_has_entity_name(
+        self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         entity = BoschTopLedLight(stub_coord_light_prefix, CAM_ID, stub_entry)
@@ -1990,7 +1979,9 @@ class TestTopLedLightPrefix:
 class TestBottomLedLightPrefix:
     """light.py BoschBottomLedLight (Unteres Licht)"""
 
-    def test_name_no_doubled_prefix(self, stub_coord_light_prefix, stub_entry):
+    def test_name_no_doubled_prefix(
+        self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.light import BoschBottomLedLight
 
         entity = BoschBottomLedLight(stub_coord_light_prefix, CAM_ID, stub_entry)
@@ -1998,7 +1989,9 @@ class TestBottomLedLightPrefix:
             f"_attr_name={entity._attr_name!r} still contains 'Bosch '"
         )
 
-    def test_has_entity_name(self, stub_coord_light_prefix, stub_entry):
+    def test_has_entity_name(
+        self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.light import BoschBottomLedLight
 
         entity = BoschBottomLedLight(stub_coord_light_prefix, CAM_ID, stub_entry)
@@ -2008,7 +2001,9 @@ class TestBottomLedLightPrefix:
 class TestFrontLightPrefixDoubling:
     """light.py BoschFrontLight (Frontlicht)"""
 
-    def test_name_no_doubled_prefix(self, stub_coord_light_prefix, stub_entry):
+    def test_name_no_doubled_prefix(
+        self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.light import BoschFrontLight
 
         entity = BoschFrontLight(stub_coord_light_prefix, CAM_ID, stub_entry)
@@ -2016,17 +2011,17 @@ class TestFrontLightPrefixDoubling:
             f"_attr_name={entity._attr_name!r} still contains 'Bosch '"
         )
 
-    def test_has_entity_name(self, stub_coord_light_prefix, stub_entry):
+    def test_has_entity_name(
+        self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
         from custom_components.bosch_shc_camera.light import BoschFrontLight
 
         entity = BoschFrontLight(stub_coord_light_prefix, CAM_ID, stub_entry)
         assert _has_entity_name_light(entity)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: Gen2 LAN-reachable fallback availability (relocated from
 # tests/test_misc_small_gaps.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestLightLanFallbackAvailability:
@@ -2093,11 +2088,9 @@ class TestLightLanFallbackAvailability:
             assert _BoschLightBase.available.fget(light) is False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: privacy-mode guard on light turn_on (relocated from
 # tests/test_privacy_guard_branches.py — the switch.py/number.py siblings
 # live in tests/test_switch.py and tests/test_number.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _stub_coord_with_privacy_light(
@@ -2249,12 +2242,10 @@ class TestFrontLightPrivacyGuard:
         entity._put_lighting_switch.assert_called_once()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: GH#3 — Gen2 Outdoor RGB light classes (relocated from
 # tests/test_github_issues.py — the switch.py wallwasher/front-light switch
 # classes for the same issue are already covered in tests/test_switch.py;
 # the models.py Gen2 config check lives in tests/test_models.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestGH3Gen2RgbLightClasses:
@@ -2267,12 +2258,10 @@ class TestGH3Gen2RgbLightClasses:
         assert hasattr(light_mod, "BoschFrontLight")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: firmware-install unavailability — light.py side (relocated from
 # tests/test_updating_unavailable.py — the camera.py/switch.py/init.py
 # siblings live in tests/test_camera.py, tests/test_switch.py, and
 # tests/test_init.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _coord_light_updating(*, is_updating_value: bool) -> SimpleNamespace:

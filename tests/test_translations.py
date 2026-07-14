@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -48,29 +50,31 @@ ICONS_PATH = COMPONENT_DIR / "icons.json"
 
 
 @pytest.fixture(scope="module")
-def strings() -> dict:
-    return json.loads(STRINGS_PATH.read_text())
+def strings() -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads(STRINGS_PATH.read_text()))
 
 
 @pytest.fixture(scope="module")
-def de() -> dict:
-    return json.loads(DE_PATH.read_text())
+def de() -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads(DE_PATH.read_text()))
 
 
 @pytest.fixture(scope="module")
-def en() -> dict:
-    return json.loads(EN_PATH.read_text())
+def en() -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads(EN_PATH.read_text()))
 
 
 @pytest.fixture(scope="module")
-def icons() -> dict:
-    return json.loads(ICONS_PATH.read_text())
+def icons() -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads(ICONS_PATH.read_text()))
 
 
-# ── General structure / cross-file consistency checks ───────────────────────
-
-
-def test_all_translation_files_parse(strings, de, en, icons) -> None:
+def test_all_translation_files_parse(
+    strings: dict[str, Any],
+    de: dict[str, Any],
+    en: dict[str, Any],
+    icons: dict[str, Any],
+) -> None:
     """All translation + icon JSON files must be valid JSON."""
     assert "exceptions" in strings, "strings.json missing top-level 'exceptions' key"
     assert "exceptions" in de, "de.json missing top-level 'exceptions' key"
@@ -78,7 +82,9 @@ def test_all_translation_files_parse(strings, de, en, icons) -> None:
     assert "entity" in icons, "icons.json missing top-level 'entity' key"
 
 
-def test_exceptions_keys_match_across_files(strings, de, en) -> None:
+def test_exceptions_keys_match_across_files(
+    strings: dict[str, Any], de: dict[str, Any], en: dict[str, Any]
+) -> None:
     """Every key in strings.json/exceptions must exist in de.json + en.json."""
     canonical = set(strings["exceptions"].keys())
     de_keys = set(de.get("exceptions", {}).keys())
@@ -91,7 +97,12 @@ def test_exceptions_keys_match_across_files(strings, de, en) -> None:
     )
 
 
-def test_translation_keys_match_hassfest_rule(strings, en, de, icons) -> None:
+def test_translation_keys_match_hassfest_rule(
+    strings: dict[str, Any],
+    en: dict[str, Any],
+    de: dict[str, Any],
+    icons: dict[str, Any],
+) -> None:
     """Every key must match [a-z0-9_-]+ — Hassfest enforces this."""
     pattern = re.compile(r"^[a-z0-9_-]+$")
     samples: list[tuple[str, str]] = []
@@ -108,7 +119,7 @@ def test_translation_keys_match_hassfest_rule(strings, en, de, icons) -> None:
         )
 
 
-def test_known_translation_keys_used_by_handlers(strings) -> None:
+def test_known_translation_keys_used_by_handlers(strings: dict[str, Any]) -> None:
     """The translation keys raised in __init__.py must all be defined.
 
     This is an explicit allowlist — if a new HomeAssistantError /
@@ -136,7 +147,9 @@ def test_known_translation_keys_used_by_handlers(strings) -> None:
     )
 
 
-def test_issue_translation_keys_present(strings, de, en) -> None:
+def test_issue_translation_keys_present(
+    strings: dict[str, Any], de: dict[str, Any], en: dict[str, Any]
+) -> None:
     """ir.async_create_issue calls must have translation_key entries."""
     must_exist = {"token_expired", "auth_server_outage"}
     for label, blob in [("strings", strings), ("de", de), ("en", en)]:
@@ -147,7 +160,7 @@ def test_issue_translation_keys_present(strings, de, en) -> None:
         )
 
 
-def test_icon_translation_keys_present(icons) -> None:
+def test_icon_translation_keys_present(icons: dict[str, Any]) -> None:
     """icons.json must define icons for every entity that uses translation_key.
 
     Spot-check the most prominent state-based switches and sensors that
@@ -176,7 +189,7 @@ def test_icon_translation_keys_present(icons) -> None:
     assert not missing_se, f"icons.json sensor missing: {missing_se}"
 
 
-def test_state_based_icons_have_default(icons) -> None:
+def test_state_based_icons_have_default(icons: dict[str, Any]) -> None:
     """Every icon entry with a `state` block must also define `default`."""
     for platform, entries in icons["entity"].items():
         for key, body in entries.items():
@@ -186,9 +199,6 @@ def test_state_based_icons_have_default(icons) -> None:
                     f"without 'default' — entities will render with no "
                     f"icon when their state isn't in the state map"
                 )
-
-
-# ── Placeholder validation (Hassfest + formatjs rules) ───────────────────────
 
 
 def _placeholders(text: str) -> set[str]:
@@ -262,7 +272,9 @@ def test_all_translation_files_placeholder_consistency():
     assert not errors, "Placeholder mismatches found:\n" + "\n".join(errors)
 
 
-def test_placeholders_not_in_single_quotes(strings, de, en) -> None:
+def test_placeholders_not_in_single_quotes(
+    strings: dict[str, Any], de: dict[str, Any], en: dict[str, Any]
+) -> None:
     """Hassfest rejects messages where a {placeholder} sits inside single quotes.
 
     Pattern: '{anything}' — the single quotes around braces are forbidden.
@@ -285,7 +297,7 @@ _VALID_PLACEHOLDER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 _HTML_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*\s*/?>")
 
 
-def _walk_string_values(node, path):
+def _walk_string_values(node: Any, path: list[str]) -> Iterator[tuple[str, str]]:
     """Yield (path, string_value) for every JSON string leaf, list-based path."""
     if isinstance(node, dict):
         for k, v in node.items():
@@ -298,7 +310,9 @@ def _walk_string_values(node, path):
 
 
 @pytest.mark.parametrize("fixture_name", ["strings", "de", "en"])
-def test_no_invalid_placeholders_in_translations(fixture_name, request):
+def test_no_invalid_placeholders_in_translations(
+    fixture_name: str, request: pytest.FixtureRequest
+):
     """Every `{...}` placeholder in translation strings must be a valid
     Python identifier (`[a-zA-Z_][a-zA-Z0-9_]*`). Hassfest enforces
     this and fails the GitHub-Action `Validate` workflow if violated.
@@ -338,7 +352,6 @@ def test_no_invalid_placeholders_in_translations(fixture_name, request):
     )
 
 
-# ── ICU MessageFormat escaping (pattern-description helper text) ────────────
 #
 # Two validators squeeze pattern-description helper text from opposite
 # directions:
@@ -385,11 +398,11 @@ _PATTERN_DESC_KEYS = ("folder_pattern", "file_pattern")
 _ANY_CURLY_TOKEN_RE = re.compile(r"\{[a-z_]+\}")
 
 
-def _all_pattern_description_strings():
+def _all_pattern_description_strings() -> Iterator[tuple[str, str, str]]:
     """Yield (file, key, value) for each pattern-desc string in each file."""
     for path in _ICU_FILES:
         data = json.loads(path.read_text(encoding="utf-8"))
-        stack: list[dict] = [data]
+        stack: list[dict[str, Any]] = [data]
         while stack:
             node = stack.pop()
             if not isinstance(node, dict):
@@ -482,9 +495,6 @@ def test_pattern_descriptions_still_mention_each_variable_name_in_prose() -> Non
 
         assert found_folder, f"{path.name} no longer has folder_pattern description"
         assert found_file, f"{path.name} no longer has file_pattern description"
-
-
-# ── use_mjpeg_snapshot doc-vs-default consistency ────────────────────────────
 
 
 class TestUseMjpegSnapshotDoc:

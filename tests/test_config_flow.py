@@ -56,9 +56,7 @@ from tests.source_match import assert_in_source
 MODULE = "custom_components.bosch_shc_camera.config_flow"
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Constants pinned
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestConfigFlowConstants:
@@ -99,9 +97,7 @@ class TestConfigFlowConstants:
         assert len(CLIENT_SECRET) > 0
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Pure helper functions — PKCE, auth-URL, redirect-code parsing, JWT azp claim
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestPkcePair:
@@ -267,9 +263,7 @@ class TestDetectTokenClientId:
         assert _detect_token_client_id(garbled) is None
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # RefreshTokenInvalidError / AuthServerOutageError + _do_refresh
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestRefreshErrors:
@@ -427,10 +421,8 @@ class TestDoRefresh:
         assert result is None
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # BoschOAuth2Implementation — property contracts, authorize URL, external
 # data resolve, refresh
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestBoschOAuth2Implementation:
@@ -626,9 +618,7 @@ class TestAsyncRefreshToken:
                 await impl._async_refresh_token({"refresh_token": "rt"})
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _exchange_code — initial code→token exchange (manual login + relogin paste)
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestExchangeCode:
@@ -677,9 +667,7 @@ class TestExchangeCode:
         assert result is None
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # async_oauth_create_entry — structural source-routing pins
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestAsyncOauthCreateEntryStructure:
@@ -808,10 +796,8 @@ class TestOptionsFlowStructure:
         )
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Single-instance guard / OAuth create-entry / reauth+reconfigure — via the
 # real HA flow-manager harness
-# ═════════════════════════════════════════════════════════════════════════
 
 
 async def test_user_flow_aborts_when_already_configured(
@@ -941,11 +927,9 @@ async def test_oauth_create_entry_redacts_in_diagnostics(
     assert "api_key" in TO_REDACT  # Firebase API key must be in redact list
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Reauth / reconfigure entry points — lightweight stub bypassing the HA
 # flow framework (covers branches unreachable via the full harness because
 # it requires `hass_frontend`, not installed in every dev venv)
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _make_bare_flow():
@@ -1168,7 +1152,6 @@ class TestConfigFlowSteps:
         assert isinstance(result, BoschCameraOptionsFlow)
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Manual copy/paste login fallback on the initial config flow
 #
 # Bug source: Bosch Smart Home Community private message from SebastianHarder
@@ -1187,7 +1170,6 @@ class TestConfigFlowSteps:
 # instead of unconditionally delegating to the automatic OAuth2 flow, via
 # the new `async_step_auto_login`, `async_step_manual_login`, and
 # `async_step_manual_paste` steps on `BoschCameraConfigFlow`.
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _make_flow(source: str = "user"):
@@ -1520,9 +1502,7 @@ class TestAsyncStepManualPaste:
         flow.async_create_entry.assert_not_called()
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # BoschCameraOptionsFlow — relogin steps (force-relogin from the options menu)
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestOptionsFlowReloginSteps:
@@ -1674,7 +1654,6 @@ class TestOptionsFlowReloginSteps:
         assert kwargs["data"]["cloud_api_override"] == "https://example-test.invalid"
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # _flatten_sections + OPTIONS_SECTIONS layout
 #
 # ``_flatten_sections`` is the contract surface between HA's
@@ -1687,7 +1666,6 @@ class TestOptionsFlowReloginSteps:
 # fields grouped into collapsible blocks. The flatten helper is the only
 # surface where the section grouping leaks into runtime behaviour; the
 # rest of the integration sees the legacy flat dict shape.
-# ═════════════════════════════════════════════════════════════════════════
 
 
 class TestFlattenSectionsBasic:
@@ -1743,7 +1721,9 @@ class TestFlattenSectionsCollisions:
     """Defensive guards — duplicate keys must explode loudly so a future
     OPTIONS_SECTIONS edit cannot silently overwrite an existing field."""
 
-    def test_duplicate_across_two_sections_raises(self, monkeypatch):
+    def test_duplicate_across_two_sections_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Two sections claim the same field → ValueError."""
         # Patch OPTIONS_SECTIONS in place so the helper sees the conflict.
         monkeypatch.setitem(OPTIONS_SECTIONS, "_test_a", ["dupe_field"])
@@ -1808,9 +1788,7 @@ class TestOptionsSectionsLayout:
         assert "nvr_smb_subpath" in OPTIONS_SECTIONS["nvr"]
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Options-flow schema rendering / submit + per-section round-trips
-# ═════════════════════════════════════════════════════════════════════════
 
 
 def _make_entry(
@@ -2003,7 +1981,7 @@ class TestOptionsStepInitSubmit:
         assert captured["data"]["enable_nvr"] is True
 
 
-# ── Per-section scenario tests ──────────────────────────────────────────────
+# Per-section scenario tests
 #
 # Coverage goals:
 # * Every section submits correctly → keys land in the saved entry.
@@ -2362,7 +2340,7 @@ class TestNvrSection:
 class TestAiSection:
     """Tests for AI options schema validation (E-P1 / E-P2 / E-P3)."""
 
-    # ── E-P1: entity fields are nullable selectors (gate-disable via clear) ─────
+    # E-P1: entity fields are nullable selectors (gate-disable via clear)
     # The fields use the serializer-supported nullable shape
     # ``vol.Any(None, EntitySelector(...))`` (issue #35). The frontend submits
     # ``None`` (allow_none) — NOT ""  — when an entity picker is cleared, so the
@@ -2390,7 +2368,7 @@ class TestAiSection:
         result = schema({CONF_AI_ACTIVE_CONDITION_ENTITY: "input_boolean.away"})
         assert result[CONF_AI_ACTIVE_CONDITION_ENTITY] == "input_boolean.away"
 
-    # ── E-P2: ai_max_per_day has no upper cap (0 = unlimited is honoured) ───────
+    # E-P2: ai_max_per_day has no upper cap (0 = unlimited is honoured)
 
     def test_ai_max_per_day_zero_allowed(self) -> None:
         """0 = unlimited must pass (E-P2)."""
@@ -2412,7 +2390,7 @@ class TestAiSection:
         with pytest.raises((vol.Invalid, vol.MultipleInvalid)):
             schema({CONF_AI_MAX_PER_DAY: -1})
 
-    # ── E-P3: time fields accept HH:MM / HH:MM:SS or empty (gate-disable) ───────
+    # E-P3: time fields accept HH:MM / HH:MM:SS or empty (gate-disable)
 
     def test_ai_active_time_start_empty_allowed(self) -> None:
         """Empty string must be allowed to disable the time gate (E-P3)."""
@@ -2455,7 +2433,7 @@ class TestAiSection:
         result = schema({CONF_AI_ACTIVE_TIME_END: "25:00"})
         assert result[CONF_AI_ACTIVE_TIME_END] == "25:00"
 
-    # ── E-P1 + round-trip: submit AI section with entity cleared ────────────────
+    # E-P1 + round-trip: submit AI section with entity cleared
 
     @pytest.mark.asyncio
     async def test_ai_entity_fields_cleared_saves_none(self) -> None:
@@ -2807,7 +2785,6 @@ class TestDefaultOptionsCompleteness:
         )
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # OptionsFlow schema must be frontend-serializable (issue #35)
 #
 # Bug source: GitHub issue #35 (GhostRider2809, v13.7.2) — opening
@@ -2830,7 +2807,6 @@ class TestDefaultOptionsCompleteness:
 # This test pins the schema against the *exact* serialisation HA performs,
 # so any future unserialisable node (``vol.Any``, a raw lambda, …) fails
 # here instead of in a user's browser.
-# ═════════════════════════════════════════════════════════════════════════
 
 
 async def _capture_init_schema(flow: BoschCameraOptionsFlow):
@@ -2909,7 +2885,6 @@ class TestOptionsSchemaSerializable:
             assert field in keys, f"{field} missing from AI section after fix"
 
 
-# ═════════════════════════════════════════════════════════════════════════
 # Translation-file structure backing the options-flow sections
 #
 # HA frontend resolves options-flow field labels at:
@@ -2923,7 +2898,6 @@ class TestOptionsSchemaSerializable:
 # Reported by Thomas (session 2026-05-07): ALL toggle labels displayed as raw
 # Python keys (e.g. enable_snapshots instead of "Camera snapshots") because
 # the flat data dict was used instead of section-nested data.
-# ═════════════════════════════════════════════════════════════════════════
 
 COMP = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
 
@@ -2952,7 +2926,7 @@ class TestTranslationStructure:
     """Verify labels live inside sections, not flat at the step level."""
 
     @pytest.mark.parametrize("filename", list(TRANSLATION_FILES))
-    def test_no_flat_data_at_step_level(self, filename):
+    def test_no_flat_data_at_step_level(self, filename: str) -> None:
         """options.step.init must NOT have a top-level 'data' key.
 
         If labels exist at the flat level HA frontend ignores them and shows
@@ -2966,7 +2940,7 @@ class TestTranslationStructure:
         )
 
     @pytest.mark.parametrize("filename", list(TRANSLATION_FILES))
-    def test_no_flat_data_description_at_step_level(self, filename):
+    def test_no_flat_data_description_at_step_level(self, filename: str) -> None:
         """options.step.init must NOT have a top-level 'data_description' key."""
         d = _load_translation(filename)
         init = d.get("options", {}).get("step", {}).get("init", {})
@@ -2975,7 +2949,7 @@ class TestTranslationStructure:
         )
 
     @pytest.mark.parametrize("filename", list(TRANSLATION_FILES))
-    def test_all_option_fields_have_label_in_sections(self, filename):
+    def test_all_option_fields_have_label_in_sections(self, filename: str) -> None:
         """Every field in OPTIONS_SECTIONS must have a label in the correct section."""
         d = _load_translation(filename)
         sections = _init_sections(d)
@@ -2988,7 +2962,7 @@ class TestTranslationStructure:
         assert not missing, f"{filename}: missing labels in sections.data: {missing}"
 
     @pytest.mark.parametrize("filename", list(TRANSLATION_FILES))
-    def test_all_sections_have_name(self, filename):
+    def test_all_sections_have_name(self, filename: str) -> None:
         """Every section in OPTIONS_SECTIONS must have a translated name."""
         d = _load_translation(filename)
         sections = _init_sections(d)
@@ -3001,7 +2975,7 @@ class TestTranslationStructure:
             )
 
     @pytest.mark.parametrize("filename", list(TRANSLATION_FILES))
-    def test_no_extra_fields_in_sections(self, filename):
+    def test_no_extra_fields_in_sections(self, filename: str) -> None:
         """No field in any section.data should be absent from OPTIONS_SECTIONS."""
         d = _load_translation(filename)
         sections = _init_sections(d)
@@ -3014,7 +2988,7 @@ class TestTranslationStructure:
                 )
 
     @pytest.mark.parametrize("filename", list(TRANSLATION_FILES))
-    def test_each_field_in_correct_section(self, filename):
+    def test_each_field_in_correct_section(self, filename: str) -> None:
         """A field must be in exactly the section OPTIONS_SECTIONS assigns it to."""
         d = _load_translation(filename)
         sections = _init_sections(d)
@@ -3044,12 +3018,6 @@ class TestTranslationStructure:
         assert polling.get("scan_interval") != "Polling interval (seconds)", (
             "de.json polling.data.scan_interval still has English label"
         )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: options-flow Frigate validation errors (relocated from
-# tests/test_coverage_gates_v14.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -3176,12 +3144,6 @@ async def test_options_flow_empty_ip_allowlist_no_error() -> None:
 
     flow.async_show_form.assert_not_called()
     flow.async_create_entry.assert_called_once()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: options-flow webhook URL validation (Runde2 P1 #2 —
-# CONF_WEBHOOK_URL had no format check, unlike diagnostic_cloud_api_override)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -3312,12 +3274,6 @@ async def test_options_flow_webhook_url_whitespace_only_no_error() -> None:
     flow.async_create_entry.assert_called_once()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: GH#5 — Reauth/Reconfigure flow (relocated from
-# tests/test_github_issues.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 class TestGH5ReauthReconfigureFlow:
     """dziko83 (closed GH issue) hit a 404 on the legacy re-auth link. The
     fix was an in-HA Reconfigure flow that never leaves the app; these tests
@@ -3352,13 +3308,6 @@ class TestGH5ReauthReconfigureFlow:
             ).read_text()
         )
         assert "reauth_confirm" in strings.get("config", {}).get("step", {})
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Section: SHC class-rename regression guard (relocated from
-# tests/test_class_renames.py — the camera.py side of this rename
-# (BoschCamera / BoschSHCCamera) is pinned in tests/test_camera.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestClassRenamesConfigFlow:

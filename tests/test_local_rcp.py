@@ -24,8 +24,6 @@ from __future__ import annotations
 import urllib.error
 from unittest.mock import MagicMock, patch
 
-# ── _parse_rcp_xml ────────────────────────────────────────────────────────────
-
 
 class TestParseRcpXml:
     """Pin every branch of _parse_rcp_xml."""
@@ -173,9 +171,6 @@ class TestParseRcpXml:
         assert self._parse(xml, "P_STRING") == "HOME_Eyes_Outdoor_II"
 
 
-# ── rcp_read_local_sync error-path ────────────────────────────────────────────
-
-
 def _make_opener_mock(status: int = 200, body: bytes = b"") -> MagicMock:
     """Build a mock urllib opener whose open() returns a response-like context manager."""
     resp = MagicMock()
@@ -237,9 +232,6 @@ class TestRcpReadLocalSyncErrors:
         assert result == 77, "200 response body must be parsed via _parse_rcp_xml"
 
 
-# ── rcp_read_remote_sync error-path ──────────────────────────────────────────
-
-
 class TestRcpReadRemoteSyncErrors:
     """Pin the error/fallback paths of rcp_read_remote_sync without network."""
 
@@ -290,10 +282,8 @@ class TestRcpReadRemoteSyncErrors:
         assert result == b"\x48\x65\x6c\x6c\x6f"  # "Hello"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: rcp_read_remote_sync non-200 branch (relocated from
 # tests/test_remaining_cheap_gaps.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestRcpReadRemoteSyncNon200:

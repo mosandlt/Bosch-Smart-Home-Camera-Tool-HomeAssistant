@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "14.1.7"
+CARD_VERSION = "14.1.8"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 # Delivery-death detection (issue #36). When the periodic /v11/events poll finds
@@ -86,6 +86,16 @@ STREAM_START_SKIPPED = _StreamStartSkipped()
 # inconsistent (CLI 5/15s vs. integration 10s).
 TIMEOUT_SNAP = 10  # GET on signed image / imageUrl
 TIMEOUT_PUT_CONNECTION = 10  # PUT /v11/video_inputs/{id}/connection
+
+# issue #47: AUTO-mode TCP pre-check chicken-and-egg breaker. When the
+# camera's cached LAN IP is stale (DHCP re-lease after a mesh flap/reboot),
+# every pre-check ping against it fails forever, which would otherwise skip
+# LOCAL — and only the LOCAL PUT itself can teach us the camera's *current*
+# IP. At most once per this interval, ignore a failing pre-check and let
+# LOCAL be attempted for real so a fresh IP has a chance to be learned; the
+# existing pre-warm-failure fallback still demotes to REMOTE gracefully if
+# the camera really is unreachable.
+LAN_RECHECK_FORCE_INTERVAL_SEC = 600.0
 
 # Subprocess-lifecycle timeouts (recorder.py). Grace = SIGTERM→SIGKILL window;
 # kill_wait = post-SIGKILL wait_for; stderr_drain = drain pipe before close;

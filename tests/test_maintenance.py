@@ -23,10 +23,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from freezegun.api import FrozenDateTimeFactory
 
 from custom_components.bosch_shc_camera import BoschCameraCoordinator
 from custom_components.bosch_shc_camera.maintenance import (
@@ -55,9 +57,6 @@ REAL_RSS = """<?xml version="1.0" encoding="UTF-8"?>
     </item>
   </channel>
 </rss>""".encode()
-
-
-# ── _parse_window ────────────────────────────────────────────────────────
 
 
 class TestParseWindow:
@@ -100,9 +99,6 @@ class TestParseWindow:
         assert start is not None and end is not None
         assert end > start
         assert (end - start) == timedelta(hours=3)
-
-
-# ── MaintenanceWindow.state() ────────────────────────────────────────────
 
 
 class TestState:
@@ -155,9 +151,6 @@ class TestState:
         assert mw.state(now) == "unknown"
 
 
-# ── _is_camera_relevant ─────────────────────────────────────────────────
-
-
 class TestCameraRelevance:
     @pytest.mark.parametrize(
         "text",
@@ -168,7 +161,7 @@ class TestCameraRelevance:
             "CBS service maintenance",
         ],
     )
-    def test_relevant_keywords_hit(self, text):
+    def test_relevant_keywords_hit(self, text: str):
         assert _is_camera_relevant(text, "")
 
     @pytest.mark.parametrize(
@@ -179,11 +172,8 @@ class TestCameraRelevance:
             "Tür-/Fenster-Kontakt rollout",
         ],
     )
-    def test_unrelated_keywords_miss(self, text):
+    def test_unrelated_keywords_miss(self, text: str):
         assert not _is_camera_relevant(text, "")
-
-
-# ── _parse_feed_body ────────────────────────────────────────────────────
 
 
 class TestParseFeedBody:
@@ -218,9 +208,6 @@ class TestParseFeedBody:
         assert mw.scheduled_start == datetime(2026, 5, 20, 7, 0, tzinfo=UTC)
 
 
-# ── _prefers ────────────────────────────────────────────────────────────
-
-
 class TestPrefers:
     def _mw(self, **kw):
         defaults = {
@@ -236,16 +223,16 @@ class TestPrefers:
         defaults.update(kw)
         return MaintenanceWindow(**defaults)
 
-    def test_active_beats_scheduled(self, freezer):
+    def test_active_beats_scheduled(self, freezer: FrozenDateTimeFactory):
         # Freeze wall clock so _prefers's internal state() call (which uses
         # utcnow as default) lands inside the active window. Without freezing,
         # the test only passes between 05:00 and 09:00 UTC.
         freezer.move_to("2026-05-19T07:00:00+00:00")
-        active = self._mw(
+        active = self._mw(  # type: ignore[no-untyped-call]
             scheduled_start=datetime(2026, 5, 19, 5, 0, tzinfo=UTC),
             scheduled_end=datetime(2026, 5, 19, 9, 0, tzinfo=UTC),
         )
-        scheduled = self._mw(
+        scheduled = self._mw(  # type: ignore[no-untyped-call]
             scheduled_start=datetime(2026, 5, 20, 5, 0, tzinfo=UTC),
             scheduled_end=datetime(2026, 5, 20, 9, 0, tzinfo=UTC),
         )
@@ -264,9 +251,6 @@ class TestPrefers:
         assert _prefers(a, b)
 
 
-# ── _parse_html_fallback ────────────────────────────────────────────────
-
-
 class TestHtmlFallback:
     def test_extracts_first_item(self):
         html = b"""<html>
@@ -282,9 +266,6 @@ class TestHtmlFallback:
 
     def test_returns_none_without_item_anchor(self):
         assert _parse_html_fallback(b"<html><body>nope</body></html>", "x") is None
-
-
-# ── async_fetch_maintenance (with mocked aiohttp) ───────────────────────
 
 
 class _MockResp:
@@ -370,9 +351,6 @@ class TestFetchEndToEnd:
         assert mw is None
 
 
-# ── _parse_pub_date ──────────────────────────────────────────────────────
-
-
 class TestParsePubDate:
     def test_rss_format(self):
         d = _parse_pub_date("Mon, 18 May 2026 10:06:13 GMT")
@@ -389,7 +367,7 @@ class TestParsePubDate:
         assert before <= d <= after
 
 
-# ── BoschCameraCoordinator._async_maybe_announce_cloud_state ────────────
+# BoschCameraCoordinator._async_maybe_announce_cloud_state
 #
 # Pins:
 # - First observation (healthy or failed) is silent — baseline only.
@@ -620,7 +598,7 @@ class TestCloudStateAnnounce:
         assert args[1] == "thomas"  # NOT "notify.thomas"
 
 
-# ── BoschCameraCoordinator._async_maybe_announce_maintenance ────────────
+# BoschCameraCoordinator._async_maybe_announce_maintenance
 #
 # Pin every transition path so the same window can never spam the user, but a
 # genuine state change (scheduled -> active) gets one fresh announcement.
@@ -661,13 +639,13 @@ def _mw_for_announce(
     )
 
 
-def _make_announce_coord(notify_service: str = "thomas") -> SimpleNamespace:
+def _make_announce_coord(notify_service: str = "thomas") -> BoschCameraCoordinator:
     """Stub coordinator carrying only what `_async_maybe_announce_maintenance` reads."""
     coord = SimpleNamespace()
     coord.options = {"alert_notify_service": notify_service}
     coord._maintenance_notified_key = None
     coord.hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
-    return coord
+    return cast(BoschCameraCoordinator, coord)
 
 
 @pytest.mark.asyncio
@@ -682,7 +660,7 @@ class TestMaintenanceAnnounce:
         # (already in deps).
         pass
 
-    async def test_announces_on_scheduled(self, freezer):
+    async def test_announces_on_scheduled(self, freezer: FrozenDateTimeFactory):
         freezer.move_to("2026-05-19T07:30:00+00:00")
         coord = _make_announce_coord()
         mw = _mw_for_announce("scheduled")
@@ -695,7 +673,9 @@ class TestMaintenanceAnnounce:
         assert "Wartung" in args.args[2]["message"]
         assert coord._maintenance_notified_key == (mw.link, "scheduled")
 
-    async def test_announces_again_on_scheduled_to_active(self, freezer):
+    async def test_announces_again_on_scheduled_to_active(
+        self, freezer: FrozenDateTimeFactory
+    ):
         freezer.move_to("2026-05-19T07:30:00+00:00")
         coord = _make_announce_coord()
         sched = _mw_for_announce("scheduled")
@@ -708,7 +688,7 @@ class TestMaintenanceAnnounce:
         assert "läuft" in second.args[2]["title"].lower()
         assert coord._maintenance_notified_key == (active.link, "active")
 
-    async def test_dedupes_duplicate_calls(self, freezer):
+    async def test_dedupes_duplicate_calls(self, freezer: FrozenDateTimeFactory):
         freezer.move_to("2026-05-19T07:30:00+00:00")
         coord = _make_announce_coord()
         mw = _mw_for_announce("scheduled")
@@ -717,21 +697,27 @@ class TestMaintenanceAnnounce:
         coord.hass.services.async_call.assert_called_once()
 
     @pytest.mark.parametrize("silent_state", ["past", "recent", "unknown"])
-    async def test_silent_for_non_actionable_states(self, freezer, silent_state):
+    async def test_silent_for_non_actionable_states(
+        self, freezer: FrozenDateTimeFactory, silent_state: str
+    ):
         freezer.move_to("2026-05-19T07:30:00+00:00")
         coord = _make_announce_coord()
         mw = _mw_for_announce(silent_state)
         await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, mw)
         coord.hass.services.async_call.assert_not_called()
 
-    async def test_silent_when_not_camera_relevant(self, freezer):
+    async def test_silent_when_not_camera_relevant(
+        self, freezer: FrozenDateTimeFactory
+    ):
         freezer.move_to("2026-05-19T07:30:00+00:00")
         coord = _make_announce_coord()
         mw = _mw_for_announce("active", camera_relevant=False)
         await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, mw)
         coord.hass.services.async_call.assert_not_called()
 
-    async def test_no_service_configured_still_dedupes(self, freezer):
+    async def test_no_service_configured_still_dedupes(
+        self, freezer: FrozenDateTimeFactory
+    ):
         """Without a notify service we record the key anyway so the user is
         not pestered the moment they later configure a service mid-window."""
         freezer.move_to("2026-05-19T07:30:00+00:00")
@@ -741,7 +727,7 @@ class TestMaintenanceAnnounce:
         coord.hass.services.async_call.assert_not_called()
         assert coord._maintenance_notified_key == (mw.link, "scheduled")
 
-    async def test_notify_failure_is_swallowed(self, freezer):
+    async def test_notify_failure_is_swallowed(self, freezer: FrozenDateTimeFactory):
         freezer.move_to("2026-05-19T07:30:00+00:00")
         coord = _make_announce_coord()
         coord.hass.services.async_call = AsyncMock(
@@ -754,7 +740,7 @@ class TestMaintenanceAnnounce:
         # Key still gets recorded so we don't retry-storm on every coordinator tick.
         assert coord._maintenance_notified_key == (mw.link, "active")
 
-    async def test_multiple_services_all_called(self, freezer):
+    async def test_multiple_services_all_called(self, freezer: FrozenDateTimeFactory):
         """alert_notify_service can be a comma-separated list — every entry is called."""
         freezer.move_to("2026-05-19T07:30:00+00:00")
         coord = _make_announce_coord(notify_service="thomas, signalhome")
@@ -764,7 +750,7 @@ class TestMaintenanceAnnounce:
         called = {c.args[1] for c in coord.hass.services.async_call.await_args_list}
         assert called == {"thomas", "signalhome"}
 
-    async def test_new_window_link_re_announces(self, freezer):
+    async def test_new_window_link_re_announces(self, freezer: FrozenDateTimeFactory):
         """A different announcement (new Bosch RSS item, different link)
         should re-announce even if the previous one was already 'scheduled'."""
         freezer.move_to("2026-05-19T07:30:00+00:00")
@@ -775,7 +761,7 @@ class TestMaintenanceAnnounce:
         await BoschCameraCoordinator._async_maybe_announce_maintenance(coord, second)
         assert coord.hass.services.async_call.await_count == 2
 
-    async def test_active_to_past_announces_ended(self, freezer):
+    async def test_active_to_past_announces_ended(self, freezer: FrozenDateTimeFactory):
         """active → past transition for the same window fires one final
         'beendet' notification so users know the cloud should be back."""
         freezer.move_to("2026-05-19T07:30:00+00:00")
@@ -791,7 +777,9 @@ class TestMaintenanceAnnounce:
         assert "beendet" in second.args[2]["title"].lower()
         assert coord._maintenance_notified_key == (past.link, "past")
 
-    async def test_stale_past_window_does_not_announce(self, freezer):
+    async def test_stale_past_window_does_not_announce(
+        self, freezer: FrozenDateTimeFactory
+    ):
         """A 'past' announcement discovered without a prior 'active' phase
         (e.g. integration restart after the window already closed) must
         stay silent — otherwise users get spammed about historical
@@ -804,7 +792,9 @@ class TestMaintenanceAnnounce:
         # Dedupe key is still set so a follow-up tick stays silent too.
         assert coord._maintenance_notified_key == (past.link, "past")
 
-    async def test_full_scheduled_active_past_lifecycle(self, freezer):
+    async def test_full_scheduled_active_past_lifecycle(
+        self, freezer: FrozenDateTimeFactory
+    ):
         """End-to-end: scheduled → active → past for the same window
         triggers exactly three notifications in the right order."""
         freezer.move_to("2026-05-19T03:00:00+00:00")
@@ -831,7 +821,7 @@ class TestMaintenanceAnnounce:
         assert "beendet" in titles[2]
 
 
-# ── BoschCameraCoordinator._async_refresh_maintenance ────────────────────
+# BoschCameraCoordinator._async_refresh_maintenance
 #
 # Periodic + reactive refresh helper that hits the Bosch community RSS feed
 # in the background. The cooldown logic and the exception-swallow path are
@@ -1005,10 +995,8 @@ class TestAsyncRefreshMaintenance:
         coord._async_maybe_announce_maintenance.assert_not_awaited()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Section: RSS parser edge cases (relocated from
 # tests/test_misc_small_gaps.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestMaintenanceParserEdges:

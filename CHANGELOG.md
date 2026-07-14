@@ -5,6 +5,19 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v15.0.2] - 2026-07-14
+
+Patch — iOS PiP-after-native-fullscreen fix, LAN-IP staleness recovery (#47), i18n completion (#45)
+
+### Fixed
+
+- **iOS Picture-in-Picture hangs permanently after native fullscreen.** The `ownsPip` guard that protects live-recovery teardown from tearing PiP's compositor link never checked `video.webkitPresentationMode === "fullscreen"` — a third, separate WebKit presentation state iOS can enter on its own. Factored into a shared `_ownsNativePresentation()` helper covering both cases, applied at all 5 call sites.
+- **AUTO-mode LOCAL stream never recovers after a camera's LAN IP changes** (#47, realKim-dotcom). Once a camera's cached LAN IP goes stale (DHCP re-lease after a mesh flap/reboot), the TCP pre-check failed against the dead address forever. Now, at most once every 10 minutes per camera, a failing pre-check is ignored and LOCAL is attempted for real — the existing pre-warm fallback still demotes to REMOTE gracefully if the camera really is unreachable.
+- **Orphaned Mini-NVR ffmpeg processes on integration unload** (same #47 report). A recorder spawn still in flight when HA stops/reloads could leak an untracked ffmpeg process. Fixed by sweeping every configured camera under the existing per-camera lock, plus a shutdown flag both spawn paths check.
+- **Completed the card i18n pass from #45.** A follow-up scan found more hardcoded German: the tap-to-play overlay, LAN-fallback tile buttons, three date/time formatters hardcoded to `de-DE` regardless of the configured language, the rules list, and the entire "Create rule" dialog. All now respect `hass.language` across all 11 supported locales.
+
+CARD_VERSION 14.1.7 → 14.1.8. 6136 pytest, 261 e2e (chromium/firefox/webkit), mypy --strict / ruff / codespell clean.
+
 ## [v15.0.1] - 2026-07-13
 
 Patch — internal cleanup: Session-State-Facade migration complete (Slice 3 + Slice 4), no user-facing change

@@ -18,9 +18,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# ---------------------------------------------------------------------------
 # Helpers to build fake media_source / history responses
-# ---------------------------------------------------------------------------
 
 
 def _make_browse_result(cam="Terrasse", date="2026-05-08", n_segments=4):
@@ -68,11 +66,6 @@ def _make_resolve_result(url="https://192.0.2.4:8123/api/media_source/..."):
     return {"url": url, "mime_type": "video/mp4"}
 
 
-# ===========================================================================
-# Tests: media_source/browse_media data contract
-# ===========================================================================
-
-
 class TestMediaSourceBrowseContract(unittest.TestCase):
     def test_browse_result_has_children(self):
         result = _make_browse_result()
@@ -113,11 +106,6 @@ class TestMediaSourceBrowseContract(unittest.TestCase):
     def test_browse_media_content_id_contains_cam(self):
         result = _make_browse_result(cam="Terrasse")
         assert "Terrasse" in result["media_content_id"]
-
-
-# ===========================================================================
-# Tests: motion history query data contract
-# ===========================================================================
 
 
 class TestMotionHistoryContract(unittest.TestCase):
@@ -173,11 +161,6 @@ class TestMotionHistoryContract(unittest.TestCase):
         assert len(result[0]) == 3
 
 
-# ===========================================================================
-# Tests: media_source/resolve_media data contract
-# ===========================================================================
-
-
 class TestResolveMediaContract(unittest.TestCase):
     def test_resolve_result_has_url(self):
         result = _make_resolve_result()
@@ -190,11 +173,6 @@ class TestResolveMediaContract(unittest.TestCase):
     def test_resolve_url_is_http(self):
         result = _make_resolve_result("http://192.0.2.4:8123/api/media_source/test.mp4")
         assert result["url"].startswith("http")
-
-
-# ===========================================================================
-# Tests: NVR media source identifier format
-# ===========================================================================
 
 
 class TestNvrSourceIdFormat(unittest.TestCase):
