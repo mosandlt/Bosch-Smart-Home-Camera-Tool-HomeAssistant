@@ -1,9 +1,9 @@
 """Session-State-Facade Slice 3 (docs/stream-perf-stability-refactor-plan.md)
-— dedicated regression tests for the `_live_connections`/`_user_intent_streams`
+— dedicated regression tests for the `live_connections`/`user_intent_streams`
 migration onto `CameraSessionState.live_connection`/`.user_intent_stream`.
 
 Slice 3 was flagged in the plan as higher-risk than Slice 1/2 because
-`_live_connections` is actively read AND mutated (multiple `.pop()` call
+`live_connections` is actively read AND mutated (multiple `.pop()` call
 sites) by today's Phase 1/2/3 code. Before relying on the existing Slice 2
 `CacheFieldView` for it, its `.pop()` behavior (inherited from
 `collections.abc.MutableMapping`, never previously exercised by any Slice 2
@@ -99,7 +99,7 @@ class TestCacheFieldViewPopSemanticsForLiveConnections:
 
 class TestCacheFieldViewNestedMutationForLiveConnections:
     """`session_renewal.py`'s credential-rotation path does
-    `live = coordinator._live_connections.get(cam_id); live["rtspsUrl"] = ...`
+    `live = coordinator.live_connections.get(cam_id); live["rtspsUrl"] = ...`
     — the returned dict must be the SAME object stored on the session, not a
     copy, or the mutation would silently vanish."""
 
@@ -128,7 +128,7 @@ class TestCacheFieldViewNestedMutationForLiveConnections:
 
 
 class TestBoolFieldViewForUserIntentStream:
-    """`_user_intent_streams` migrated onto `CameraSessionState.
+    """`user_intent_streams` migrated onto `CameraSessionState.
     user_intent_stream` via the existing `BoolFieldView` — same contract as
     the Slice 1 boolean flags, verified here with the actual field name
     used in production (`session_state.py`'s generic tests already cover

@@ -66,10 +66,10 @@ def stub_coord() -> SimpleNamespace:
                 "live": {},
             }
         },
-        _live_connections={},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
+        live_connections={},
+        camera_entities={},
+        stream_fell_back={},
+        stream_error_count={},
         last_update_success=True,
         motion_settings=lambda cam_id: {},
         is_stream_warming=lambda cam_id: False,
@@ -97,15 +97,15 @@ class TestCameraConstruction:
     def test_starts_with_placeholder_jpeg(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        """Initial _cached_image is a 1×1 black JPEG to prevent HTTP 500
+        """Initial cached_image is a 1×1 black JPEG to prevent HTTP 500
         when HA proxies the first image before any real snapshot has
         been fetched."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
-        assert cam._cached_image is not None
+        assert cam.cached_image is not None
         # JFIF marker = JPEG signature
-        assert cam._cached_image.startswith(b"\xff\xd8\xff")
+        assert cam.cached_image.startswith(b"\xff\xd8\xff")
 
     def test_resolves_display_name(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
@@ -129,7 +129,7 @@ class TestIsStreaming:
     def test_true_when_live_session_present(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        stub_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
+        stub_coord.live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
@@ -155,7 +155,7 @@ class TestIsStreaming:
         # No live session → STREAM still advertised (stream_source returns None)
         assert cam.supported_features == CameraEntityFeature.STREAM
         # With live session → still STREAM
-        stub_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
+        stub_coord.live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
         assert cam.supported_features == CameraEntityFeature.STREAM
 
 
@@ -176,7 +176,7 @@ class TestFrameInterval:
     ):
         """While streaming → 1s (must be < card's 2s setInterval to dodge
         cache aliasing)."""
-        stub_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
+        stub_coord.live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
@@ -358,9 +358,9 @@ def _set_cloud_outage(coord):
     state: cloud poll failed, known active maintenance window, LAN reachable,
     live session established (rtspsUrl present)."""
     coord.last_update_success = False
-    coord._maintenance_cache = _make_maintenance()
+    coord.maintenance_cache = _make_maintenance()
     coord.is_lan_reachable = lambda cam_id: True
-    coord._live_connections = {CAM_ID: {"rtspsUrl": "rtsps://127.0.0.1:36167/x"}}
+    coord.live_connections = {CAM_ID: {"rtspsUrl": "rtsps://127.0.0.1:36167/x"}}
 
 
 class TestAvailableDuringCloudOutage:
@@ -384,28 +384,28 @@ class TestAvailableDuringCloudOutage:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         # last_update_success True → available True regardless of maintenance.
-        stub_coord._maintenance_cache = _make_maintenance()
+        stub_coord.maintenance_cache = _make_maintenance()
         assert self._cam(stub_coord, stub_entry).available is True
 
     def test_no_maintenance_cache_stays_unavailable(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         _set_cloud_outage(stub_coord)
-        stub_coord._maintenance_cache = None
+        stub_coord.maintenance_cache = None
         assert self._cam(stub_coord, stub_entry).available is False
 
     def test_maintenance_not_active_stays_unavailable(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         _set_cloud_outage(stub_coord)
-        stub_coord._maintenance_cache = _make_maintenance("scheduled")
+        stub_coord.maintenance_cache = _make_maintenance("scheduled")
         assert self._cam(stub_coord, stub_entry).available is False
 
     def test_not_camera_relevant_stays_unavailable(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         _set_cloud_outage(stub_coord)
-        stub_coord._maintenance_cache = _make_maintenance(camera_relevant=False)
+        stub_coord.maintenance_cache = _make_maintenance(camera_relevant=False)
         assert self._cam(stub_coord, stub_entry).available is False
 
     def test_lan_unreachable_stays_unavailable(
@@ -428,15 +428,15 @@ class TestAvailableDuringCloudOutage:
     ):
         # Maintenance + LAN ok but no streaming session → unavailable.
         _set_cloud_outage(stub_coord)
-        stub_coord._live_connections = {}
+        stub_coord.live_connections = {}
         assert self._cam(stub_coord, stub_entry).available is False
 
     def test_live_connection_without_url_stays_unavailable(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        # _live_connections entry exists but no rtsps/rtsp URL → not streaming.
+        # live_connections entry exists but no rtsps/rtsp URL → not streaming.
         _set_cloud_outage(stub_coord)
-        stub_coord._live_connections = {CAM_ID: {}}
+        stub_coord.live_connections = {CAM_ID: {}}
         assert self._cam(stub_coord, stub_entry).available is False
 
     def test_firmware_update_overrides_local_available(
@@ -456,7 +456,7 @@ class TestAvailableDuringCloudOutage:
         def _boom():
             raise TypeError("naive vs aware")
 
-        stub_coord._maintenance_cache = SimpleNamespace(
+        stub_coord.maintenance_cache = SimpleNamespace(
             camera_relevant=True, state=_boom
         )
         assert self._cam(stub_coord, stub_entry).available is False
@@ -542,12 +542,12 @@ def _make_coord(**overrides):
                 "live": {},
             }
         },
-        _live_connections={},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _shc_state_cache={},
-        _stream_warming=set(),
+        live_connections={},
+        camera_entities={},
+        stream_fell_back={},
+        stream_error_count={},
+        shc_state_cache={},
+        stream_warming=set(),
         last_update_success=True,
         motion_settings=lambda cid: {},
         is_stream_warming=lambda cid: False,
@@ -588,16 +588,16 @@ def _make_camera(coord=None, entry=None, **camera_overrides):
     cam._entry = entry
     cam._attr_name = "Bosch Terrasse"
     cam._display_name = "Bosch Terrasse"
-    cam._cached_image = None
+    cam.cached_image = None
     cam._force_image_refresh = False
-    cam._last_image_fetch = 0.0
+    cam.last_image_fetch = 0.0
     cam._was_streaming = False
     cam._refresh_inflight = (
         False  # synchronous in-flight guard (replaces _refresh_lock)
     )
     cam._model = "HOME_Eyes_Outdoor"
     cam._model_name = "Eyes Outdoor"
-    cam._hw_version = "HOME_Eyes_Outdoor"
+    cam.hw_version = "HOME_Eyes_Outdoor"
     cam._fw = "9.40.25"
     cam._mac = "64:00:00:00:00:01"
     # HA framework calls camera.py uses
@@ -677,7 +677,7 @@ class TestAsyncSetupEntry:
 class TestLifecycleHooks:
     """Pin the entity registration contract.
 
-    `async_added_to_hass` must register self in `coordinator._camera_entities`
+    `async_added_to_hass` must register self in `coordinator.camera_entities`
     so the heartbeat NVR-restart hook + service handlers can find this
     instance. `async_will_remove_from_hass` must unregister so the dict
     doesn't accumulate dead refs across reloads."""
@@ -695,7 +695,7 @@ class TestLifecycleHooks:
             new=AsyncMock(),
         ):
             await BoschCamera.async_added_to_hass(cam)
-        assert coord._camera_entities[CAM_ID] is cam
+        assert coord.camera_entities[CAM_ID] is cam
 
     @pytest.mark.asyncio
     async def test_added_to_hass_schedules_image_refresh(self):
@@ -726,13 +726,13 @@ class TestLifecycleHooks:
 
         coord = _make_coord()
         cam = _make_camera(coord=coord)
-        coord._camera_entities[CAM_ID] = cam
+        coord.camera_entities[CAM_ID] = cam
         with patch(
             "custom_components.bosch_shc_camera.camera.CoordinatorEntity.async_will_remove_from_hass",
             new=AsyncMock(),
         ):
             await BoschCamera.async_will_remove_from_hass(cam)
-        assert CAM_ID not in coord._camera_entities
+        assert CAM_ID not in coord.camera_entities
 
     @pytest.mark.asyncio
     async def test_will_remove_when_not_registered_no_crash(self):
@@ -743,7 +743,7 @@ class TestLifecycleHooks:
         coord = _make_coord()
         cam = _make_camera(coord=coord)
         # Ensure dict is empty
-        coord._camera_entities.clear()
+        coord.camera_entities.clear()
         with patch(
             "custom_components.bosch_shc_camera.camera.CoordinatorEntity.async_will_remove_from_hass",
             new=AsyncMock(),
@@ -753,8 +753,8 @@ class TestLifecycleHooks:
 
     @pytest.mark.asyncio
     async def test_added_to_hass_restores_persisted_snapshot(self):
-        """Cold-start: `load_snapshot` returns bytes → `_cached_image` is
-        seeded with the persisted JPEG and `_last_image_fetch` is back-dated
+        """Cold-start: `load_snapshot` returns bytes → `cached_image` is
+        seeded with the persisted JPEG and `last_image_fetch` is back-dated
         by one snapshot_interval so the next live refresh fires on schedule
         (instead of immediately, which would race the coordinator's first
         tick). Pins camera.py's async_added_to_hass restore path."""
@@ -779,14 +779,14 @@ class TestLifecycleHooks:
             ),
         ):
             await BoschCamera.async_added_to_hass(cam)
-        # _cached_image holds the persisted bytes.
-        assert cam._cached_image is persisted_jpeg
-        # _last_image_fetch is back-dated by one snapshot_interval.
+        # cached_image holds the persisted bytes.
+        assert cam.cached_image is persisted_jpeg
+        # last_image_fetch is back-dated by one snapshot_interval.
         # Default snapshot_interval = 90 s in DEFAULT_OPTIONS.
         from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
 
         expected = 10_000.0 - float(DEFAULT_OPTIONS["snapshot_interval"])
-        assert cam._last_image_fetch == expected
+        assert cam.last_image_fetch == expected
 
 
 class TestHandleCoordinatorUpdate:
@@ -822,7 +822,7 @@ class TestHandleCoordinatorUpdate:
     def test_streaming_to_idle_triggers_refresh(self):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        coord = _make_coord()  # _live_connections empty → not streaming
+        coord = _make_coord()  # live_connections empty → not streaming
         cam = _make_camera(coord=coord, _was_streaming=True)
         tasks = self._create_task_collector(cam)
         with patch(
@@ -840,7 +840,7 @@ class TestHandleCoordinatorUpdate:
         cam = _make_camera(
             coord=coord,
             _was_streaming=False,
-            _last_image_fetch=time.monotonic() - 100,  # 100s ago, < 1800s default
+            last_image_fetch=time.monotonic() - 100,  # 100s ago, < 1800s default
         )
         tasks = self._create_task_collector(cam)
         with patch(
@@ -856,7 +856,7 @@ class TestHandleCoordinatorUpdate:
         cam = _make_camera(
             coord=coord,
             _was_streaming=False,
-            _last_image_fetch=time.monotonic() - 2000,  # > 1800s
+            last_image_fetch=time.monotonic() - 2000,  # > 1800s
         )
         tasks = self._create_task_collector(cam)
         with patch(
@@ -874,7 +874,7 @@ class TestHandleCoordinatorUpdate:
         """
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        coord = _make_coord(_live_connections={CAM_ID: {"rtspsUrl": "rtsp://test/x"}})
+        coord = _make_coord(live_connections={CAM_ID: {"rtspsUrl": "rtsp://test/x"}})
         cam = _make_camera(coord=coord, _was_streaming=True)
         tasks = self._create_task_collector(cam)
         with patch(
@@ -894,7 +894,7 @@ class TestHandleCoordinatorUpdate:
             coord=coord,
             entry=entry,
             _was_streaming=False,
-            _last_image_fetch=time.monotonic() - 90,  # 90s ago > 60s
+            last_image_fetch=time.monotonic() - 90,  # 90s ago > 60s
         )
         tasks = self._create_task_collector(cam)
         with patch(
@@ -917,9 +917,9 @@ class TestAsyncTriggerImageRefresh:
         round-trips per minute (2026-04-23 forum thread)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        coord = _make_coord(_shc_state_cache={CAM_ID: {"privacy_mode": True}})
+        coord = _make_coord(shc_state_cache={CAM_ID: {"privacy_mode": True}})
         cam = _make_camera(coord=coord)
-        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
         coord.async_fetch_live_snapshot.assert_not_awaited()
         coord.async_fetch_fresh_event_snapshot.assert_not_awaited()
 
@@ -929,7 +929,7 @@ class TestAsyncTriggerImageRefresh:
 
         coord = _make_coord()
         cam = _make_camera(coord=coord)
-        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
         # finally clause clears the flag
         assert cam._force_image_refresh is False
 
@@ -940,10 +940,10 @@ class TestAsyncTriggerImageRefresh:
         coord = _make_coord()
         coord.async_fetch_live_snapshot = AsyncMock(return_value=b"\xff\xd8live")
         cam = _make_camera(coord=coord)
-        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
         coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
-        assert cam._cached_image == b"\xff\xd8live"
-        assert cam._last_image_fetch > 0
+        assert cam.cached_image == b"\xff\xd8live"
+        assert cam.last_image_fetch > 0
         cam.async_write_ha_state.assert_called()
 
     @pytest.mark.asyncio
@@ -955,10 +955,10 @@ class TestAsyncTriggerImageRefresh:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
         coord.async_fetch_live_snapshot_local = AsyncMock(return_value=b"\xff\xd8local")
         cam = _make_camera(coord=coord)
-        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
         coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
         coord.async_fetch_live_snapshot_local.assert_awaited_once_with(CAM_ID)
-        assert cam._cached_image == b"\xff\xd8local"
+        assert cam.cached_image == b"\xff\xd8local"
 
     @pytest.mark.asyncio
     async def test_falls_back_to_fresh_event_when_live_paths_fail(self):
@@ -975,9 +975,9 @@ class TestAsyncTriggerImageRefresh:
             return_value=b"\xff\xd8event"
         )
         cam = _make_camera(coord=coord)
-        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
         coord.async_fetch_fresh_event_snapshot.assert_awaited_once_with(CAM_ID)
-        assert cam._cached_image == b"\xff\xd8event"
+        assert cam.cached_image == b"\xff\xd8event"
 
     @pytest.mark.asyncio
     async def test_skips_live_snapshot_when_streaming(self):
@@ -991,10 +991,10 @@ class TestAsyncTriggerImageRefresh:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         coord = _make_coord(
-            _live_connections={CAM_ID: {"rtspsUrl": "rtsp://test/x"}}
+            live_connections={CAM_ID: {"rtspsUrl": "rtsp://test/x"}}
         )  # → is_streaming True
         cam = _make_camera(coord=coord)
-        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
         coord.async_fetch_live_snapshot.assert_not_awaited()
         coord.async_fetch_live_snapshot_local.assert_not_awaited()
         # And NOT the fresh-event fallback either
@@ -1002,7 +1002,7 @@ class TestAsyncTriggerImageRefresh:
 
     @pytest.mark.asyncio
     async def test_quick_event_seed_when_only_placeholder(self):
-        """First-mount path: _cached_image is the 1×1 placeholder (the state
+        """First-mount path: cached_image is the 1×1 placeholder (the state
         set by __init__ before any real frame has arrived). Use async_camera_image
         to grab a quick event snapshot so the card has something within 1 s.
 
@@ -1015,12 +1015,12 @@ class TestAsyncTriggerImageRefresh:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
         coord.async_fetch_live_snapshot_local = AsyncMock(return_value=None)
         coord.async_fetch_fresh_event_snapshot = AsyncMock(return_value=None)
-        # Set _cached_image to the real placeholder so the identity check triggers
-        cam = _make_camera(coord=coord, _cached_image=BoschCamera._PLACEHOLDER_JPEG)
+        # Set cached_image to the real placeholder so the identity check triggers
+        cam = _make_camera(coord=coord, cached_image=BoschCamera._PLACEHOLDER_JPEG)
         cam.async_camera_image = AsyncMock(return_value=b"\xff\xd8seed")
-        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
         cam.async_camera_image.assert_awaited_once()
-        assert cam._cached_image == b"\xff\xd8seed"
+        assert cam.cached_image == b"\xff\xd8seed"
 
     @pytest.mark.asyncio
     async def test_persists_to_disk_and_notifies_image_entity(self):
@@ -1030,18 +1030,18 @@ class TestAsyncTriggerImageRefresh:
         gets the new signed-URL token."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        coord = _make_coord(_shc_state_cache={CAM_ID: {"privacy_mode": False}})
+        coord = _make_coord(shc_state_cache={CAM_ID: {"privacy_mode": False}})
         coord.async_fetch_live_snapshot = AsyncMock(return_value=b"\xff\xd8new")
         image_entity = SimpleNamespace(
             async_notify_refreshed=AsyncMock(return_value=None),
         )
-        coord._image_entities = {CAM_ID: image_entity}
+        coord.image_entities = {CAM_ID: image_entity}
         cam = _make_camera(coord=coord)
         with patch(
             "custom_components.bosch_shc_camera.camera.save_snapshot",
             new=AsyncMock(return_value=None),
         ) as save_mock:
-            await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+            await BoschCamera.async_trigger_image_refresh(cam, delay=0)
         save_mock.assert_awaited_once()
         image_entity.async_notify_refreshed.assert_awaited_once()
 
@@ -1057,7 +1057,7 @@ class TestAsyncTriggerImageRefresh:
         coord.async_fetch_live_snapshot = AsyncMock(side_effect=RuntimeError("oops"))
         cam = _make_camera(coord=coord)
         # Must NOT raise
-        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
         # And the flag was still cleared (finally)
         assert cam._force_image_refresh is False
 
@@ -1070,7 +1070,7 @@ class TestAsyncTriggerImageRefresh:
         coord = _make_coord()
         cam = _make_camera(coord=coord)
         with patch("asyncio.sleep", new=AsyncMock()) as sleep:
-            await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+            await BoschCamera.async_trigger_image_refresh(cam, delay=0)
             sleep.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -1080,7 +1080,7 @@ class TestAsyncTriggerImageRefresh:
         coord = _make_coord()
         cam = _make_camera(coord=coord)
         with patch("asyncio.sleep", new=AsyncMock()) as sleep:
-            await BoschCamera._async_trigger_image_refresh(cam, delay=2)
+            await BoschCamera.async_trigger_image_refresh(cam, delay=2)
             sleep.assert_awaited_once_with(2)
 
 
@@ -1173,8 +1173,8 @@ class TestStreamSourceEdgeCasesAsync:
         Edge case during the connect-handshake window."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        coord = _make_coord(_live_connections={CAM_ID: {"_connection_type": "LOCAL"}})
-        coord._audio_enabled = {}
+        coord = _make_coord(live_connections={CAM_ID: {"_connection_type": "LOCAL"}})
+        coord.audio_enabled = {}
         cam = _make_camera(coord=coord)
         url = await BoschCamera.stream_source(cam)
         assert url is None
@@ -1186,14 +1186,14 @@ class TestStreamSourceEdgeCasesAsync:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         coord = _make_coord(
-            _live_connections={
+            live_connections={
                 CAM_ID: {
                     "_connection_type": "LOCAL",
                     "rtspUrl": "rtsp://x:y@127.0.0.1:5000/rtsp_tunnel",
                 },
             }
         )
-        coord._audio_enabled = {CAM_ID: True}
+        coord.audio_enabled = {CAM_ID: True}
         cam = _make_camera(coord=coord)
         url = await BoschCamera.stream_source(cam)
         assert url and "127.0.0.1:5000" in url
@@ -1326,7 +1326,7 @@ class TestAsyncCreateStream:
     async def test_existing_connection_skips_open(self):
         """When a live session is already active, skips try_live_connection."""
         coord = _make_coord(
-            _live_connections={CAM_ID: {"rtspsUrl": "rtsps://proxy-12/xyz"}},
+            live_connections={CAM_ID: {"rtspsUrl": "rtsps://proxy-12/xyz"}},
             try_live_connection=AsyncMock(),
             async_update_listeners=MagicMock(),
         )
@@ -1359,7 +1359,7 @@ class TestRefreshInflightGuard:
     @pytest.mark.asyncio
     async def test_second_caller_skips_when_inflight_true(self) -> None:
         """When _refresh_inflight is already True (set by a first in-flight caller),
-        a second call to _async_trigger_image_refresh must return immediately
+        a second call to async_trigger_image_refresh must return immediately
         without calling async_fetch_live_snapshot.
 
         This pins the synchronous-flag guard that replaces the old two-step
@@ -1383,7 +1383,7 @@ class TestRefreshInflightGuard:
         # Simulate first caller holding the inflight flag
         cam._refresh_inflight = True
 
-        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
 
         # Second caller must have returned without fetching
         coord.async_fetch_live_snapshot.assert_not_awaited()
@@ -1398,7 +1398,7 @@ class TestRefreshInflightGuard:
         coord = _make_coord()
         cam = _make_camera(coord=coord)
 
-        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
         assert cam._refresh_inflight is False
 
     @pytest.mark.asyncio
@@ -1411,7 +1411,7 @@ class TestRefreshInflightGuard:
         coord.async_fetch_live_snapshot = AsyncMock(side_effect=RuntimeError("boom"))
         cam = _make_camera(coord=coord)
 
-        await BoschCamera._async_trigger_image_refresh(cam, delay=0)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
         assert cam._refresh_inflight is False
 
 
@@ -1431,17 +1431,17 @@ def _make_coord_gaps(**overrides):
                 "live": {"rtspsUrl": "rtsps://cam/stream"},
             }
         },
-        _live_connections={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _stream_warming=set(),
-        _audio_enabled={CAM_ID_GAPS: True},
-        _local_creds_cache={},
-        _live_opened_at={},
-        _image_rotation_180={},
-        _shc_state_cache={},
-        _timestamp_cache={},
-        _auth_outage_count=0,
+        live_connections={},
+        stream_fell_back={},
+        stream_error_count={},
+        stream_warming=set(),
+        audio_enabled={CAM_ID_GAPS: True},
+        local_creds_cache={},
+        live_opened_at={},
+        image_rotation_180={},
+        shc_state_cache={},
+        timestamp_cache={},
+        auth_outage_count=0,
         last_update_success=True,
         token="tok-A",
         options={},
@@ -1472,9 +1472,9 @@ def _stub_entity_gaps(coord=None, **overrides):
         _model_name="Eyes Outdoor II",
         _fw="9.40.25",
         _mac="aa:bb:cc:dd:ee:01",
-        _hw_version="HOME_Eyes_Outdoor",
-        _cached_image=None,
-        _last_image_fetch=0.0,
+        hw_version="HOME_Eyes_Outdoor",
+        cached_image=None,
+        last_image_fetch=0.0,
         _force_image_refresh=False,
         is_streaming=False,
         stream_options={},
@@ -1495,13 +1495,13 @@ def _make_camera_gaps(coord=None, **overrides):
     cam._entry = SimpleNamespace(data={"bearer_token": "tok"}, options={})
     cam._attr_name = "Bosch Terrasse"
     cam._display_name = "Bosch Terrasse"
-    cam._cached_image = None
+    cam.cached_image = None
     cam._force_image_refresh = False
-    cam._last_image_fetch = 0.0
+    cam.last_image_fetch = 0.0
     cam._was_streaming = False
     cam._model = "HOME_Eyes_Outdoor"
     cam._model_name = "Eyes Outdoor II"
-    cam._hw_version = "HOME_Eyes_Outdoor"
+    cam.hw_version = "HOME_Eyes_Outdoor"
     cam._fw = "9.40.25"
     cam._mac = "aa:bb:cc:dd:ee:01"
     cam.async_write_ha_state = MagicMock()
@@ -1530,8 +1530,8 @@ class TestCameraTimestampOverlayAttr:
             return BoschCamera.extra_state_attributes.fget(entity)
 
     def test_timestamp_overlay_true_when_cache_value_is_true(self):
-        """When _timestamp_cache[cam_id]=True the attribute must be True."""
-        coord = _make_coord_gaps(_timestamp_cache={CAM_ID_GAPS: True})
+        """When timestamp_cache[cam_id]=True the attribute must be True."""
+        coord = _make_coord_gaps(timestamp_cache={CAM_ID_GAPS: True})
         entity = _stub_entity_gaps(coord=coord)
         entity._cam_data = {
             "events": [],
@@ -1546,8 +1546,8 @@ class TestCameraTimestampOverlayAttr:
         assert attrs["camera_timestamp_overlay"] is True
 
     def test_timestamp_overlay_false_when_cache_value_is_false(self):
-        """When _timestamp_cache[cam_id]=False the attribute must be False."""
-        coord = _make_coord_gaps(_timestamp_cache={CAM_ID_GAPS: False})
+        """When timestamp_cache[cam_id]=False the attribute must be False."""
+        coord = _make_coord_gaps(timestamp_cache={CAM_ID_GAPS: False})
         entity = _stub_entity_gaps(coord=coord)
         entity._cam_data = {
             "events": [],
@@ -1560,9 +1560,9 @@ class TestCameraTimestampOverlayAttr:
         assert attrs["camera_timestamp_overlay"] is False
 
     def test_timestamp_overlay_absent_when_cache_has_no_entry(self):
-        """When _timestamp_cache has no entry for this cam_id the attribute
+        """When timestamp_cache has no entry for this cam_id the attribute
         must be omitted entirely (not False/None)."""
-        coord = _make_coord_gaps(_timestamp_cache={})
+        coord = _make_coord_gaps(timestamp_cache={})
         entity = _stub_entity_gaps(coord=coord)
         entity._cam_data = {
             "events": [],
@@ -1576,8 +1576,8 @@ class TestCameraTimestampOverlayAttr:
         )
 
     def test_timestamp_overlay_absent_when_cache_value_is_none(self):
-        """When _timestamp_cache[cam_id]=None the attribute must also be omitted."""
-        coord = _make_coord_gaps(_timestamp_cache={CAM_ID_GAPS: None})
+        """When timestamp_cache[cam_id]=None the attribute must also be omitted."""
+        coord = _make_coord_gaps(timestamp_cache={CAM_ID_GAPS: None})
         entity = _stub_entity_gaps(coord=coord)
         entity._cam_data = {
             "events": [],
@@ -1591,10 +1591,10 @@ class TestCameraTimestampOverlayAttr:
         )
 
     def test_timestamp_overlay_absent_when_no_timestamp_cache_attr(self):
-        """Defensive: if coordinator lacks _timestamp_cache entirely (legacy
+        """Defensive: if coordinator lacks timestamp_cache entirely (legacy
         coordinator loaded from old snapshot), the attribute must be absent."""
         coord = _make_coord_gaps()
-        del coord._timestamp_cache  # simulate missing attribute
+        del coord.timestamp_cache  # simulate missing attribute
         entity = _stub_entity_gaps(coord=coord)
         entity._cam_data = {
             "events": [],
@@ -1608,10 +1608,10 @@ class TestCameraTimestampOverlayAttr:
 
 class TestAsyncCameraImageImplCachedImageFallback:
     """When cloud+LAN snapshots both return None (e.g. CAMERA_360 with an
-    auth-required snap.jpg endpoint), _cached_image must be returned as
+    auth-required snap.jpg endpoint), cached_image must be returned as
     the fallback so the Lovelace card still shows the last-known frame.
 
-    This covers the `if self._cached_image: return self._cached_image` branch.
+    This covers the `if self.cached_image: return self.cached_image` branch.
     """
 
     @pytest.mark.asyncio
@@ -1627,18 +1627,18 @@ class TestAsyncCameraImageImplCachedImageFallback:
 
         coord = _make_coord_gaps()
         # Live connection with rtspsUrl → is_streaming=True, but NO proxyUrl → section 1 skipped
-        coord._live_connections = {
+        coord.live_connections = {
             CAM_ID_GAPS: {
                 "rtspsUrl": "rtsps://192.168.1.1/stream",
                 # No proxyUrl → proxy_url = "" → section 1 not entered
             }
         }
-        coord._local_creds_cache = {}  # no outage creds → 2b skipped
-        coord._auth_outage_count = 0
+        coord.local_creds_cache = {}  # no outage creds → 2b skipped
+        coord.auth_outage_count = 0
         coord.data[CAM_ID_GAPS]["events"] = []
 
         cam = _make_camera_gaps(coord=coord)
-        cam._cached_image = b"\xff\xd8\xff\xe0cached_frame"
+        cam.cached_image = b"\xff\xd8\xff\xe0cached_frame"
         cam._was_streaming = False
         cam.hass = SimpleNamespace(
             async_create_task=MagicMock(
@@ -1659,7 +1659,7 @@ class TestAsyncCameraImageImplCachedImageFallback:
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result == b"\xff\xd8\xff\xe0cached_frame", (
-            "Must return _cached_image when streaming but no proxyUrl (section 3)"
+            "Must return cached_image when streaming but no proxyUrl (section 3)"
         )
 
 
@@ -1679,11 +1679,11 @@ def stub_coord_extra() -> SimpleNamespace:
                 "status": "ONLINE",
             }
         },
-        _live_connections={},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _audio_enabled={},
+        live_connections={},
+        camera_entities={},
+        stream_fell_back={},
+        stream_error_count={},
+        audio_enabled={},
         last_update_success=True,
         motion_settings=lambda cam_id: {},
         is_stream_warming=lambda cam_id: False,
@@ -1805,7 +1805,7 @@ class TestStreamStatusAttribute:
     def test_streaming_when_live_session_active(
         self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
-        stub_coord_extra._live_connections[CAM_ID] = {
+        stub_coord_extra.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy/abc",
             "_connection_type": "REMOTE",
         }
@@ -1820,11 +1820,11 @@ class TestStreamStatusAttribute:
         self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """When LOCAL was tried and lost → REMOTE, badge shows fallback."""
-        stub_coord_extra._live_connections[CAM_ID] = {
+        stub_coord_extra.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy/abc",
             "_connection_type": "REMOTE",
         }
-        stub_coord_extra._stream_fell_back[CAM_ID] = True
+        stub_coord_extra.stream_fell_back[CAM_ID] = True
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -1836,7 +1836,7 @@ class TestStreamStatusAttribute:
     ):
         """While the encoder is pre-warming the badge must show
         `warming_up` even if a live_connection is in flight."""
-        stub_coord_extra._live_connections[CAM_ID] = {
+        stub_coord_extra.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy/abc",
             "_connection_type": "LOCAL",
         }
@@ -1869,7 +1869,7 @@ class TestOptionalAttributes:
     def test_buffering_time_appears_with_live_session(
         self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
-        stub_coord_extra._live_connections[CAM_ID] = {
+        stub_coord_extra.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy/abc",
             "_connection_type": "LOCAL",
             "_bufferingTime": 500,
@@ -1937,7 +1937,7 @@ class TestStreamSourceTransport:
     async def test_local_sets_tcp_transport(
         self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
-        stub_coord_extra._live_connections[CAM_ID] = {
+        stub_coord_extra.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://127.0.0.1:46597/rtsp_tunnel",
             "_connection_type": "LOCAL",
         }
@@ -1952,7 +1952,7 @@ class TestStreamSourceTransport:
     async def test_remote_uses_default_transport(
         self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
-        stub_coord_extra._live_connections[CAM_ID] = {
+        stub_coord_extra.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy-12.live.cbs.boschsecurity.com:443/abc/rtsp_tunnel",
             "_connection_type": "REMOTE",
         }
@@ -1972,14 +1972,14 @@ class TestStreamSourceTransport:
     ):
         """The audio track is ALWAYS kept in the stream now — switch.<cam>_audio
         is a card-side mute preference, not a track toggle. stream_source() must
-        NOT strip enableaudio=1 even when _audio_enabled is False, else a session
+        NOT strip enableaudio=1 even when audio_enabled is False, else a session
         started while muted would have no track to unmute. Regression for the
         always-on-audio design (2026-06-01)."""
-        stub_coord_extra._live_connections[CAM_ID] = {
+        stub_coord_extra.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy/abc/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1",
             "_connection_type": "REMOTE",
         }
-        stub_coord_extra._audio_enabled[CAM_ID] = False
+        stub_coord_extra.audio_enabled[CAM_ID] = False
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = BoschCamera(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -2009,15 +2009,15 @@ def _make_coord_impl(**overrides):
                 "events": [],
             },
         },
-        _live_connections={},
-        _live_opened_at={},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _shc_state_cache={},
-        _stream_warming=set(),
-        _image_rotation_180={},
-        _local_creds_cache={},
+        live_connections={},
+        live_opened_at={},
+        camera_entities={},
+        stream_fell_back={},
+        stream_error_count={},
+        shc_state_cache={},
+        stream_warming=set(),
+        image_rotation_180={},
+        local_creds_cache={},
         last_update_success=True,
         is_stream_warming=lambda cid: False,
         try_live_connection=AsyncMock(return_value=None),
@@ -2036,13 +2036,13 @@ def _make_camera_impl(coord=None, **camera_overrides):
     cam._entry = SimpleNamespace(data={"bearer_token": "tok"}, options={})
     cam._attr_name = "Bosch Terrasse"
     cam._display_name = "Bosch Terrasse"
-    cam._cached_image = None
+    cam.cached_image = None
     cam._force_image_refresh = False
-    cam._last_image_fetch = 0.0
+    cam.last_image_fetch = 0.0
     cam._was_streaming = False
     cam._model = "X"
     cam._model_name = "X"
-    cam._hw_version = "X"
+    cam.hw_version = "X"
     cam._fw = ""
     cam._mac = ""
     cam.async_write_ha_state = MagicMock()
@@ -2088,7 +2088,7 @@ class TestAsyncCameraImageWrapper:
         the cached JPEG instead."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        cam = _make_camera_impl(_cached_image=b"\xff\xd8cached")
+        cam = _make_camera_impl(cached_image=b"\xff\xd8cached")
         cam._async_camera_image_impl = AsyncMock(side_effect=RuntimeError("oops"))
         out = await BoschCamera.async_camera_image(cam)
         assert out == b"\xff\xd8cached"
@@ -2097,7 +2097,7 @@ class TestAsyncCameraImageWrapper:
     async def test_returns_placeholder_when_impl_raises_and_no_cache(self):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        cam = _make_camera_impl()  # _cached_image=None
+        cam = _make_camera_impl()  # cached_image=None
         cam._async_camera_image_impl = AsyncMock(side_effect=RuntimeError("oops"))
         out = await BoschCamera.async_camera_image(cam)
         assert out == BoschCamera._PLACEHOLDER_JPEG
@@ -2122,7 +2122,7 @@ class TestAsyncCameraImageWrapper:
         (the indoor cams Thomas has on the ceiling rely on this)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        coord = _make_coord_impl(_image_rotation_180={CAM_ID: True})
+        coord = _make_coord_impl(image_rotation_180={CAM_ID: True})
         cam = _make_camera_impl(coord=coord)
         cam._async_camera_image_impl = AsyncMock(return_value=b"\xff\xd8orig")
         cam.hass.async_add_executor_job = AsyncMock(return_value=b"\xff\xd8rotated")
@@ -2136,7 +2136,7 @@ class TestAsyncCameraImageWrapper:
         placeholder — there's nothing meaningful to rotate."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        coord = _make_coord_impl(_image_rotation_180={CAM_ID: True})
+        coord = _make_coord_impl(image_rotation_180={CAM_ID: True})
         cam = _make_camera_impl(coord=coord)
         cam._async_camera_image_impl = AsyncMock(return_value=None)
         out = await BoschCamera.async_camera_image(cam)
@@ -2147,7 +2147,7 @@ class TestAsyncCameraImageWrapper:
     async def test_rotation_disabled_no_executor_call(self):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        coord = _make_coord_impl(_image_rotation_180={CAM_ID: False})
+        coord = _make_coord_impl(image_rotation_180={CAM_ID: False})
         cam = _make_camera_impl(coord=coord)
         cam._async_camera_image_impl = AsyncMock(return_value=b"\xff\xd8orig")
         out = await BoschCamera.async_camera_image(cam)
@@ -2156,14 +2156,14 @@ class TestAsyncCameraImageWrapper:
 
     @pytest.mark.asyncio
     async def test_rotation_when_attribute_missing(self):
-        """`_image_rotation_180` may not exist on older coordinator
+        """`image_rotation_180` may not exist on older coordinator
         snapshots — getattr default {} keeps the rotation off."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         coord = _make_coord_impl()
         # Remove the attribute entirely
-        if hasattr(coord, "_image_rotation_180"):
-            delattr(coord, "_image_rotation_180")
+        if hasattr(coord, "image_rotation_180"):
+            delattr(coord, "image_rotation_180")
         cam = _make_camera_impl(coord=coord)
         cam._async_camera_image_impl = AsyncMock(return_value=b"\xff\xd8orig")
         out = await BoschCamera.async_camera_image(cam)
@@ -2178,7 +2178,7 @@ class TestAsyncCameraImageImplLocalDigest:
 
     def _local_coord(self):
         return _make_coord_impl(
-            _live_connections={
+            live_connections={
                 CAM_ID: {
                     "_connection_type": "LOCAL",
                     "proxyUrl": "https://192.0.2.1/snap.jpg",
@@ -2222,8 +2222,8 @@ class TestAsyncCameraImageImplLocalDigest:
         ):
             out = await BoschCamera._async_camera_image_impl(cam)
         assert out == img
-        assert cam._cached_image == img
-        assert cam._last_image_fetch > 0
+        assert cam.cached_image == img
+        assert cam.last_image_fetch > 0
 
     @pytest.mark.asyncio
     async def test_local_digest_timeout_returns_placeholder(self):
@@ -2236,7 +2236,7 @@ class TestAsyncCameraImageImplLocalDigest:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = _make_camera_impl(
-            coord=self._local_coord(), _cached_image=b"\xff\xd8cached"
+            coord=self._local_coord(), cached_image=b"\xff\xd8cached"
         )
         with (
             patch(
@@ -2261,7 +2261,7 @@ class TestAsyncCameraImageImplLocalDigest:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = _make_camera_impl(
-            coord=self._local_coord(), _cached_image=b"\xff\xd8cached"
+            coord=self._local_coord(), cached_image=b"\xff\xd8cached"
         )
         with (
             patch(
@@ -2280,15 +2280,15 @@ class TestAsyncCameraImageImplLocalDigest:
 class TestPlaceholderTreatedAsNoCache:
     """2026-06-17: HA Companion app showed a BLACK image on cold start.
 
-    `_cached_image` is initialised to the truthy 1×1 black `_PLACEHOLDER_JPEG`,
-    so the first-load fetch branch `if not self._cached_image:` never fired
+    `cached_image` is initialised to the truthy 1×1 black `_PLACEHOLDER_JPEG`,
+    so the first-load fetch branch `if not self.cached_image:` never fired
     while we still held only the placeholder. With a fresh (non-stale)
-    `_last_image_fetch`, the impl skipped both the first-load AND the
+    `last_image_fetch`, the impl skipped both the first-load AND the
     cache-stale branches and returned the black placeholder. The desktop card
     hid this via its localStorage cache; the mobile app (no such cache, hits
     /api/camera_proxy directly) got the black frame. Fix: the first-load branch
     also fires when we hold only the placeholder (identity check, mirrors
-    _async_trigger_image_refresh).
+    async_trigger_image_refresh).
     """
 
     @pytest.mark.asyncio
@@ -2299,14 +2299,14 @@ class TestPlaceholderTreatedAsNoCache:
 
         real = b"\xff\xd8\xff\xe0real-snapshot-bytes"
         coord = _make_coord_impl(
-            _live_connections={},  # not streaming → reaches section 2
+            live_connections={},  # not streaming → reaches section 2
             async_fetch_live_snapshot=AsyncMock(return_value=real),
             async_fetch_live_snapshot_local=AsyncMock(return_value=None),
         )
         cam = _make_camera_impl(
             coord=coord,
-            _cached_image=BoschCamera._PLACEHOLDER_JPEG,
-            _last_image_fetch=time.monotonic() - 100,  # stale (TTL is 30s)
+            cached_image=BoschCamera._PLACEHOLDER_JPEG,
+            last_image_fetch=time.monotonic() - 100,  # stale (TTL is 30s)
         )
         with patch(
             "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
@@ -2314,7 +2314,7 @@ class TestPlaceholderTreatedAsNoCache:
         ):
             out = await BoschCamera._async_camera_image_impl(cam)
         assert out == real, "must fetch a real frame, not serve the black placeholder"
-        assert cam._cached_image == real
+        assert cam.cached_image == real
 
     @pytest.mark.asyncio
     async def test_placeholder_offline_backs_off_no_hammer(self):
@@ -2326,21 +2326,21 @@ class TestPlaceholderTreatedAsNoCache:
         remote = AsyncMock(return_value=None)  # offline → fails
         local = AsyncMock(return_value=None)
         coord = _make_coord_impl(
-            _live_connections={},
+            live_connections={},
             async_fetch_live_snapshot=remote,
             async_fetch_live_snapshot_local=local,
         )
         cam = _make_camera_impl(
             coord=coord,
-            _cached_image=BoschCamera._PLACEHOLDER_JPEG,
-            _last_image_fetch=time.monotonic() - 100,  # stale → first call fetches
+            cached_image=BoschCamera._PLACEHOLDER_JPEG,
+            last_image_fetch=time.monotonic() - 100,  # stale → first call fetches
         )
         with patch(
             "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=MagicMock()),
         ):
             out1 = await BoschCamera._async_camera_image_impl(cam)
-            # Second call immediately after: failure stamped _last_image_fetch=now,
+            # Second call immediately after: failure stamped last_image_fetch=now,
             # so cache_stale is now False → must NOT fetch again (backoff).
             out2 = await BoschCamera._async_camera_image_impl(cam)
         assert out1 == BoschCamera._PLACEHOLDER_JPEG  # nothing better available
@@ -2403,8 +2403,8 @@ class TestOutageFallbackStreamingGuard:
 
     def _outage_coord(self, **overrides):
         base = dict(
-            _auth_outage_count=1,
-            _local_creds_cache={
+            auth_outage_count=1,
+            local_creds_cache={
                 CAM_ID: {
                     "user": "cbs-1",
                     "password": "p",
@@ -2426,9 +2426,9 @@ class TestOutageFallbackStreamingGuard:
 
         coord = self._outage_coord(
             # rtspsUrl present → is_streaming True; no proxyUrl → section 1 skipped
-            _live_connections={CAM_ID: {"rtspsUrl": "rtsps://192.0.2.9/s"}},
+            live_connections={CAM_ID: {"rtspsUrl": "rtsps://192.0.2.9/s"}},
         )
-        cam = _make_camera_impl(coord=coord, _cached_image=b"\xff\xd8cached")
+        cam = _make_camera_impl(coord=coord, cached_image=b"\xff\xd8cached")
         digest = AsyncMock()
         with (
             patch(
@@ -2451,10 +2451,10 @@ class TestOutageFallbackStreamingGuard:
         → section 2b DOES attempt the LOCAL Digest snap.jpg fallback."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        coord = self._outage_coord(_live_connections={})  # is_streaming False
+        coord = self._outage_coord(live_connections={})  # is_streaming False
         # No cached image → section 2 first-load branch falls through to 2b
         # when the cloud fetch fails (instead of returning a stale cache).
-        cam = _make_camera_impl(coord=coord, _cached_image=None)
+        cam = _make_camera_impl(coord=coord, cached_image=None)
 
         resp = MagicMock()
         resp.status = 200
@@ -2496,7 +2496,7 @@ class TestOutageFallbackStreamingGuard:
 def _make_coord_valerr(**overrides):
     base = dict(
         data={CAM_ID: {"info": {"title": "Est", "hardwareVersion": "X"}, "events": []}},
-        _live_connections={
+        live_connections={
             CAM_ID: {
                 "_connection_type": "LOCAL",
                 "proxyUrl": "https://192.0.2.1/snap.jpg",
@@ -2504,14 +2504,14 @@ def _make_coord_valerr(**overrides):
                 "_local_password": "p",
             },
         },
-        _live_opened_at={},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _shc_state_cache={},
-        _stream_warming=set(),
-        _image_rotation_180={},
-        _local_creds_cache={},
+        live_opened_at={},
+        camera_entities={},
+        stream_fell_back={},
+        stream_error_count={},
+        shc_state_cache={},
+        stream_warming=set(),
+        image_rotation_180={},
+        local_creds_cache={},
         last_update_success=True,
         is_stream_warming=lambda cid: False,
         try_live_connection=AsyncMock(return_value=None),
@@ -2530,13 +2530,13 @@ def _make_camera_valerr(coord=None, **camera_overrides):
     cam._entry = SimpleNamespace(data={"bearer_token": "tok"}, options={})
     cam._attr_name = None
     cam._display_name = "Bosch Est"
-    cam._cached_image = None
+    cam.cached_image = None
     cam._force_image_refresh = False
-    cam._last_image_fetch = 0.0
+    cam.last_image_fetch = 0.0
     cam._was_streaming = False
     cam._model = "X"
     cam._model_name = "X"
-    cam._hw_version = "X"
+    cam.hw_version = "X"
     cam._fw = ""
     cam._mac = ""
     cam.async_write_ha_state = MagicMock()
@@ -2568,7 +2568,7 @@ class TestCameraImageImplValueError:
     async def test_local_digest_value_error_returns_cached(self, err_msg: str):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        cam = _make_camera_valerr(_cached_image=b"\xff\xd8cached")
+        cam = _make_camera_valerr(cached_image=b"\xff\xd8cached")
         with (
             patch(
                 "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
@@ -2588,7 +2588,7 @@ class TestCameraImageImplValueError:
     async def test_local_digest_value_error_no_cache_returns_placeholder(self):
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        cam = _make_camera_valerr()  # _cached_image=None
+        cam = _make_camera_valerr()  # cached_image=None
         with (
             patch(
                 "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
@@ -2663,10 +2663,10 @@ class TestRemoteSnapshotRenewOutsideTimeout:
         session = MagicMock()
         session.get = _get
         coord = _make_coord_valerr(
-            _live_connections={
+            live_connections={
                 CAM_ID: {"_connection_type": "REMOTE", "proxyUrl": old_url}
             },
-            _live_opened_at={CAM_ID: 0.0},
+            live_opened_at={CAM_ID: 0.0},
             try_live_connection=AsyncMock(
                 return_value={"_connection_type": "REMOTE", "proxyUrl": new_url}
             ),
@@ -2696,28 +2696,28 @@ def _make_coord_mjpeg(
                 "live": {},
             },
         },
-        _live_connections=live_connections if live_connections is not None else {},
-        _live_opened_at={},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _shc_state_cache={},
-        _stream_warming=set(),
-        _image_rotation_180={},
-        _local_creds_cache=(
+        live_connections=live_connections if live_connections is not None else {},
+        live_opened_at={},
+        camera_entities={},
+        stream_fell_back={},
+        stream_error_count={},
+        shc_state_cache={},
+        stream_warming=set(),
+        image_rotation_180={},
+        local_creds_cache=(
             {CAM_ID: {**local_creds, "ts": local_creds.get("ts", time.monotonic())}}
             if local_creds
             else {}
         ),
-        _timestamp_cache={},
-        _audio_enabled={},
+        timestamp_cache={},
+        audio_enabled={},
         last_update_success=True,
         is_stream_warming=lambda cid: False,
         try_live_connection=AsyncMock(return_value=None),
         async_fetch_live_snapshot=AsyncMock(return_value=None),
         async_fetch_live_snapshot_local=AsyncMock(return_value=None),
         async_fetch_fresh_event_snapshot=AsyncMock(return_value=None),
-        _auth_outage_count=auth_outage_count,
+        auth_outage_count=auth_outage_count,
     )
     base.update(extra)
     return SimpleNamespace(**base)
@@ -2741,13 +2741,13 @@ def _make_camera_mjpeg(
     )
     cam._attr_name = "Bosch Terrasse"
     cam._display_name = "Bosch Terrasse"
-    cam._cached_image = None
+    cam.cached_image = None
     cam._force_image_refresh = False
-    cam._last_image_fetch = 0.0
+    cam.last_image_fetch = 0.0
     cam._was_streaming = False
     cam._model = hw_version
     cam._model_name = "Eyes Außenkamera II"
-    cam._hw_version = hw_version
+    cam.hw_version = hw_version
     cam._fw = "9.40.102"
     cam._mac = ""
     cam.async_write_ha_state = MagicMock()
@@ -2798,7 +2798,7 @@ class TestMjpegPathEnabled:
             result = await cam._async_camera_image_impl()
 
         assert result == FAKE_JPEG
-        assert cam._cached_image == FAKE_JPEG
+        assert cam.cached_image == FAKE_JPEG
 
     @pytest.mark.asyncio
     async def test_mjpeg_failure_falls_through_to_existing_paths(self):
@@ -2812,8 +2812,8 @@ class TestMjpegPathEnabled:
         coord = _make_coord_mjpeg(local_creds=local_creds)
         cam = _make_camera_mjpeg(coord=coord, opts={"use_mjpeg_snapshot": True})
         # Seed a cached image so there is something to fall back to
-        cam._cached_image = b"\xff\xd8fallback"
-        cam._last_image_fetch = time.monotonic()  # not stale
+        cam.cached_image = b"\xff\xd8fallback"
+        cam.last_image_fetch = time.monotonic()  # not stale
 
         with (
             _patch_session_mjpeg(),
@@ -2873,8 +2873,8 @@ class TestMjpegPathDisabled:
         }
         coord = _make_coord_mjpeg(local_creds=local_creds)
         cam = _make_camera_mjpeg(coord=coord, opts={"use_mjpeg_snapshot": False})
-        cam._cached_image = b"\xff\xd8old"
-        cam._last_image_fetch = time.monotonic()
+        cam.cached_image = b"\xff\xd8old"
+        cam.last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
         with (
@@ -2894,8 +2894,8 @@ class TestMjpegPathDisabled:
         still gates the MJPEG path — fetch never called when creds cache empty."""
         coord = _make_coord_mjpeg()  # no creds populated
         cam = _make_camera_mjpeg(coord=coord, opts={})
-        cam._cached_image = b"\xff\xd8old"
-        cam._last_image_fetch = time.monotonic()
+        cam.cached_image = b"\xff\xd8old"
+        cam.last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
         with (
@@ -2929,8 +2929,8 @@ class TestMjpegPathGen1:
             hw_version="INDOOR",
             opts={"use_mjpeg_snapshot": True},
         )
-        cam._cached_image = b"\xff\xd8old"
-        cam._last_image_fetch = time.monotonic()
+        cam.cached_image = b"\xff\xd8old"
+        cam.last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
         with (
@@ -2960,8 +2960,8 @@ class TestMjpegPathGen1:
             hw_version="OUTDOOR",
             opts={"use_mjpeg_snapshot": True},
         )
-        cam._cached_image = b"\xff\xd8old"
-        cam._last_image_fetch = time.monotonic()
+        cam.cached_image = b"\xff\xd8old"
+        cam.last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
         with (
@@ -2981,15 +2981,15 @@ class TestMjpegPathMissingCreds:
 
     @pytest.mark.asyncio
     async def test_no_creds_skips_mjpeg(self):
-        """Empty _local_creds_cache → fetch_mjpeg_snapshot not called."""
+        """Empty local_creds_cache → fetch_mjpeg_snapshot not called."""
         coord = _make_coord_mjpeg(local_creds=None)
         cam = _make_camera_mjpeg(
             coord=coord,
             hw_version="HOME_Eyes_Outdoor",
             opts={"use_mjpeg_snapshot": True},
         )
-        cam._cached_image = b"\xff\xd8old"
-        cam._last_image_fetch = time.monotonic()
+        cam.cached_image = b"\xff\xd8old"
+        cam.last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
         with (
@@ -3013,8 +3013,8 @@ class TestMjpegPathMissingCreds:
             hw_version="HOME_Eyes_Outdoor",
             opts={"use_mjpeg_snapshot": True},
         )
-        cam._cached_image = b"\xff\xd8old"
-        cam._last_image_fetch = time.monotonic()
+        cam.cached_image = b"\xff\xd8old"
+        cam.last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
         with (
@@ -3038,8 +3038,8 @@ class TestMjpegPathMissingCreds:
             hw_version="HOME_Eyes_Outdoor",
             opts={"use_mjpeg_snapshot": True},
         )
-        cam._cached_image = b"\xff\xd8old"
-        cam._last_image_fetch = time.monotonic()
+        cam.cached_image = b"\xff\xd8old"
+        cam.last_image_fetch = time.monotonic()
 
         mock_fetch = AsyncMock(return_value=FAKE_JPEG)
         with (
@@ -3105,14 +3105,14 @@ def _stub_entity_r5(**overrides):
                 "live": {"rtspsUrl": "rtsps://cam/stream"},
             }
         },
-        _live_connections={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _stream_warming=set(),
-        _audio_enabled={CAM_ID: True},
-        _local_creds_cache={},
-        _live_opened_at={},
-        _auth_outage_count=0,
+        live_connections={},
+        stream_fell_back={},
+        stream_error_count={},
+        stream_warming=set(),
+        audio_enabled={CAM_ID: True},
+        local_creds_cache={},
+        live_opened_at={},
+        auth_outage_count=0,
         last_update_success=True,
         token="tok-A",
         options={},
@@ -3136,9 +3136,9 @@ def _stub_entity_r5(**overrides):
         _model_name="Eyes Outdoor II",
         _fw="9.40.25",
         _mac="aa:bb:cc:dd:ee:01",
-        _hw_version="HOME_Eyes_Outdoor",
-        _cached_image=None,
-        _last_image_fetch=0.0,
+        hw_version="HOME_Eyes_Outdoor",
+        cached_image=None,
+        last_image_fetch=0.0,
         _force_image_refresh=False,
         is_streaming=False,
         stream_options={},
@@ -3159,7 +3159,7 @@ class TestStreamSourceR5:
         entity = _stub_entity_r5()
         result = await BoschCamera.stream_source(entity)
         assert result is None, (
-            "stream_source must return None when _live_connections is empty"
+            "stream_source must return None when live_connections is empty"
         )
 
     @pytest.mark.asyncio
@@ -3168,7 +3168,7 @@ class TestStreamSourceR5:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         entity = _stub_entity_r5()
-        entity.coordinator._live_connections[CAM_ID] = {
+        entity.coordinator.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy.bosch.com:443/stream",
             "_connection_type": "REMOTE",
         }
@@ -3183,7 +3183,7 @@ class TestStreamSourceR5:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         entity = _stub_entity_r5()
-        entity.coordinator._live_connections[CAM_ID] = {
+        entity.coordinator.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsp://127.0.0.1:8765/stream",
             "_connection_type": "LOCAL",
         }
@@ -3198,7 +3198,7 @@ class TestStreamSourceR5:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         entity = _stub_entity_r5()
-        entity.coordinator._live_connections[CAM_ID] = {
+        entity.coordinator.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy.bosch.com:443/stream",
             "_connection_type": "REMOTE",
         }
@@ -3211,12 +3211,12 @@ class TestStreamSourceR5:
     async def test_keeps_audio_param_when_switch_off(self):
         """The AAC track is always kept now — switch.<cam>_audio is a card-side
         mute, not a track toggle — so stream_source must NOT strip enableaudio=1
-        even when _audio_enabled is False (2026-06-01 always-on-audio design)."""
+        even when audio_enabled is False (2026-06-01 always-on-audio design)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         entity = _stub_entity_r5()
-        entity.coordinator._audio_enabled[CAM_ID] = False
-        entity.coordinator._live_connections[CAM_ID] = {
+        entity.coordinator.audio_enabled[CAM_ID] = False
+        entity.coordinator.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://proxy.bosch.com:443/stream&enableaudio=1",
             "_connection_type": "REMOTE",
         }
@@ -3229,7 +3229,7 @@ class TestStreamSourceR5:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         entity = _stub_entity_r5()
-        entity.coordinator._live_connections[CAM_ID] = {"_connection_type": "LOCAL"}
+        entity.coordinator.live_connections[CAM_ID] = {"_connection_type": "LOCAL"}
         result = await BoschCamera.stream_source(entity)
         assert result is None, "Must return None when live connection has no URL field"
 
@@ -3321,7 +3321,7 @@ class TestExtraStateAttributesR5:
 
         entity = _stub_entity_r5()
         entity.is_streaming = True
-        entity.coordinator._stream_fell_back[CAM_ID] = True
+        entity.coordinator.stream_fell_back[CAM_ID] = True
         entity._cam_data = {
             "events": [],
             "live": {"rtspsUrl": "rtsps://x"},
@@ -3358,12 +3358,12 @@ class TestExtraStateAttributesR5:
         )
 
     def test_connecting_status_when_session_exists_but_no_stream(self):
-        """stream_status='connecting' when session is in _live_connections but not yet streaming."""
+        """stream_status='connecting' when session is in live_connections but not yet streaming."""
         from custom_components.bosch_shc_camera.camera import BoschCamera as BoschCamera
 
         entity = _stub_entity_r5()
         entity.is_streaming = False
-        entity.coordinator._live_connections[CAM_ID] = {}  # session open, no URL
+        entity.coordinator.live_connections[CAM_ID] = {}  # session open, no URL
         entity._cam_data = {
             "events": [],
             "live": {},
@@ -3485,16 +3485,16 @@ def _make_coord_r6(**overrides):
                 "events": [],
             },
         },
-        _live_connections={},
-        _live_opened_at={},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _shc_state_cache={},
-        _stream_warming=set(),
-        _image_rotation_180={},
-        _local_creds_cache={},
-        _auth_outage_count=0,
+        live_connections={},
+        live_opened_at={},
+        camera_entities={},
+        stream_fell_back={},
+        stream_error_count={},
+        shc_state_cache={},
+        stream_warming=set(),
+        image_rotation_180={},
+        local_creds_cache={},
+        auth_outage_count=0,
         last_update_success=True,
         is_stream_warming=lambda cid: False,
         try_live_connection=AsyncMock(return_value=None),
@@ -3516,13 +3516,13 @@ def _make_camera_r6(coord=None, **camera_overrides):
     cam._entry = SimpleNamespace(data={"bearer_token": "tok"}, options={})
     cam._attr_name = "Bosch Terrasse"
     cam._display_name = "Bosch Terrasse"
-    cam._cached_image = None
+    cam.cached_image = None
     cam._force_image_refresh = False
-    cam._last_image_fetch = -86400.0
+    cam.last_image_fetch = -86400.0
     cam._was_streaming = False
     cam._model = "HOME_Eyes_Outdoor"
     cam._model_name = "Eyes Outdoor II"
-    cam._hw_version = "HOME_Eyes_Outdoor"
+    cam.hw_version = "HOME_Eyes_Outdoor"
     cam._fw = "9.40.25"
     cam._mac = "aa:bb:cc:dd:ee:01"
     cam.async_write_ha_state = MagicMock()
@@ -3538,10 +3538,10 @@ def _make_camera_r6(coord=None, **camera_overrides):
 def _live_conn(proxy_url: str = PROXY_URL, opened_before: float = 1.0):
     """Return a coordinator with an active REMOTE live connection."""
     coord = _make_coord_r6(
-        _live_connections={
+        live_connections={
             CAM_ID: {"proxyUrl": proxy_url, "_connection_type": "REMOTE"}
         },
-        _live_opened_at={CAM_ID: time.monotonic() - opened_before},
+        live_opened_at={CAM_ID: time.monotonic() - opened_before},
     )
     return coord
 
@@ -3549,12 +3549,12 @@ def _live_conn(proxy_url: str = PROXY_URL, opened_before: float = 1.0):
 class TestRemoteProxy200:
     """Successful snap.jpg fetch from REMOTE proxy — the happy path that
     should run on every streaming camera tick. Pin: cached_image +
-    _last_image_fetch must be updated and the bytes returned.
+    last_image_fetch must be updated and the bytes returned.
     """
 
     @pytest.mark.asyncio
     async def test_200_image_jpeg_caches_and_returns(self):
-        """HTTP 200 + image/jpeg → store in _cached_image, update timestamp, return bytes."""
+        """HTTP 200 + image/jpeg → store in cached_image, update timestamp, return bytes."""
         coord = _live_conn()
         cam = _make_camera_r6(coord=coord)
         session = MagicMock()
@@ -3571,16 +3571,14 @@ class TestRemoteProxy200:
             out = await BoschCamera._async_camera_image_impl(cam)
 
         assert out == b"\xff\xd8img", "must return the fetched bytes on 200"
-        assert cam._cached_image == b"\xff\xd8img", (
-            "_cached_image must be updated on 200"
-        )
-        assert cam._last_image_fetch > 0, "_last_image_fetch must be set on 200"
+        assert cam.cached_image == b"\xff\xd8img", "cached_image must be updated on 200"
+        assert cam.last_image_fetch > 0, "last_image_fetch must be set on 200"
 
     @pytest.mark.asyncio
     async def test_200_wrong_content_type_falls_through(self):
         """HTTP 200 + text/html (expired proxy page) → do not cache, fall through."""
         coord = _live_conn()
-        cam = _make_camera_r6(coord=coord, _cached_image=b"\xff\xd8old")
+        cam = _make_camera_r6(coord=coord, cached_image=b"\xff\xd8old")
         session = MagicMock()
         session.get.return_value = _resp_cm(
             200, body=b"<html>", content_type="text/html"
@@ -3596,7 +3594,7 @@ class TestRemoteProxy200:
             out = await BoschCamera._async_camera_image_impl(cam)
 
         # Falls through; final return is cached image
-        assert cam._cached_image == b"\xff\xd8old", (
+        assert cam.cached_image == b"\xff\xd8old", (
             "must NOT overwrite cached on text/html 200"
         )
 
@@ -3604,7 +3602,7 @@ class TestRemoteProxy200:
     async def test_200_empty_body_falls_through(self):
         """HTTP 200 + image/jpeg but empty body → guard `if data:` must skip cache update."""
         coord = _live_conn()
-        cam = _make_camera_r6(coord=coord, _cached_image=b"\xff\xd8old")
+        cam = _make_camera_r6(coord=coord, cached_image=b"\xff\xd8old")
         session = MagicMock()
         session.get.return_value = _resp_cm(200, body=b"", content_type="image/jpeg")
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
@@ -3617,7 +3615,7 @@ class TestRemoteProxy200:
 
             out = await BoschCamera._async_camera_image_impl(cam)
 
-        assert cam._cached_image == b"\xff\xd8old", (
+        assert cam.cached_image == b"\xff\xd8old", (
             "empty body must not overwrite cached image"
         )
 
@@ -3657,7 +3655,7 @@ class TestRemoteProxy404:
         assert out == b"\xff\xd8fresh", (
             "must return fresh bytes after 404 → renew → 200"
         )
-        assert cam._cached_image == b"\xff\xd8fresh", "must cache the fresh bytes"
+        assert cam.cached_image == b"\xff\xd8fresh", "must cache the fresh bytes"
         coord.try_live_connection.assert_awaited_once_with(CAM_ID)
 
     @pytest.mark.asyncio
@@ -3665,7 +3663,7 @@ class TestRemoteProxy404:
         """404 → try_live_connection returns None → no retry, fall through to cached."""
         coord = _live_conn()
         coord.try_live_connection = AsyncMock(return_value=None)
-        cam = _make_camera_r6(coord=coord, _cached_image=b"\xff\xd8cached")
+        cam = _make_camera_r6(coord=coord, cached_image=b"\xff\xd8cached")
 
         session = MagicMock()
         session.get.return_value = _resp_cm(404, body=b"", content_type="text/html")
@@ -3695,7 +3693,7 @@ class TestRemoteProxy404:
         coord.try_live_connection = AsyncMock(
             return_value={"_connection_type": "REMOTE"}
         )
-        cam = _make_camera_r6(coord=coord, _cached_image=b"\xff\xd8cached")
+        cam = _make_camera_r6(coord=coord, cached_image=b"\xff\xd8cached")
 
         session = MagicMock()
         session.get.return_value = _resp_cm(404, body=b"", content_type="text/html")
@@ -3729,7 +3727,7 @@ class TestRemoteProxy401:
         This is the CAMERA_360 steady-state: snap.jpg always 401 but stream is alive.
         """
         coord = _live_conn(opened_before=5.0)  # only 5s old — well below TTL
-        cam = _make_camera_r6(coord=coord, _cached_image=b"\xff\xd8cached")
+        cam = _make_camera_r6(coord=coord, cached_image=b"\xff\xd8cached")
 
         session = MagicMock()
         session.get.return_value = _resp_cm(
@@ -3749,15 +3747,15 @@ class TestRemoteProxy401:
             coord.try_live_connection.assert_not_awaited(),
             "must NOT renew when age < LIVE_SESSION_TTL",
         )
-        assert CAM_ID in coord._live_connections, (
-            "must NOT clear _live_connections on young 401"
+        assert CAM_ID in coord.live_connections, (
+            "must NOT clear live_connections on young 401"
         )
 
     @pytest.mark.asyncio
     async def test_403_age_below_ttl_keeps_session(self):
         """403 with young session → same keep-alive logic as 401."""
         coord = _live_conn(opened_before=5.0)
-        cam = _make_camera_r6(coord=coord, _cached_image=b"\xff\xd8cached")
+        cam = _make_camera_r6(coord=coord, cached_image=b"\xff\xd8cached")
 
         session = MagicMock()
         session.get.return_value = _resp_cm(
@@ -3774,8 +3772,8 @@ class TestRemoteProxy401:
             out = await BoschCamera._async_camera_image_impl(cam)
 
         coord.try_live_connection.assert_not_awaited(), "must NOT renew on young 403"
-        assert CAM_ID in coord._live_connections, (
-            "_live_connections must survive young 403"
+        assert CAM_ID in coord.live_connections, (
+            "live_connections must survive young 403"
         )
 
     @pytest.mark.asyncio
@@ -3809,12 +3807,12 @@ class TestRemoteProxy401:
 
     @pytest.mark.asyncio
     async def test_401_age_above_ttl_renewal_fails_clears_connection(self):
-        """401 + expired + try_live_connection returns None → clear _live_connections.
+        """401 + expired + try_live_connection returns None → clear live_connections.
         Pin: is_streaming must become False after clearing so the card shows correct state.
         """
         coord = _live_conn(opened_before=70.0)
         coord.try_live_connection = AsyncMock(return_value=None)
-        cam = _make_camera_r6(coord=coord, _cached_image=b"\xff\xd8old")
+        cam = _make_camera_r6(coord=coord, cached_image=b"\xff\xd8old")
 
         session = MagicMock()
         session.get.return_value = _resp_cm(
@@ -3830,18 +3828,18 @@ class TestRemoteProxy401:
 
             out = await BoschCamera._async_camera_image_impl(cam)
 
-        assert CAM_ID not in coord._live_connections, (
-            "must clear _live_connections when renewal fails (so is_streaming → False)"
+        assert CAM_ID not in coord.live_connections, (
+            "must clear live_connections when renewal fails (so is_streaming → False)"
         )
-        assert CAM_ID not in coord._live_opened_at, (
-            "must also clear _live_opened_at when renewal fails"
+        assert CAM_ID not in coord.live_opened_at, (
+            "must also clear live_opened_at when renewal fails"
         )
 
     @pytest.mark.asyncio
     async def test_401_above_ttl_renewal_coalesced_keeps_connection(self):
         """Regression: 401 + expired + try_live_connection returns
         STREAM_START_SKIPPED (another start is already in flight) must NOT
-        clear _live_connections/_live_opened_at — that would delete the concurrent
+        clear live_connections/live_opened_at — that would delete the concurrent
         renewal's fresh session and kill the stream plus any Frigate front-door
         reading its creds. Only a genuine renewal FAILURE (falsy non-sentinel)
         clears. STREAM_START_SKIPPED is falsy, so before the fix it fell into the
@@ -3851,7 +3849,7 @@ class TestRemoteProxy401:
 
         coord = _live_conn(opened_before=70.0)
         coord.try_live_connection = AsyncMock(return_value=STREAM_START_SKIPPED)
-        cam = _make_camera_r6(coord=coord, _cached_image=b"\xff\xd8old")
+        cam = _make_camera_r6(coord=coord, cached_image=b"\xff\xd8old")
 
         session = MagicMock()
         session.get.return_value = _resp_cm(
@@ -3866,11 +3864,11 @@ class TestRemoteProxy401:
             await BoschCamera._async_camera_image_impl(cam)
 
         coord.try_live_connection.assert_awaited_once_with(CAM_ID)
-        assert CAM_ID in coord._live_connections, (
-            "coalesced start (STREAM_START_SKIPPED) must NOT clear _live_connections"
+        assert CAM_ID in coord.live_connections, (
+            "coalesced start (STREAM_START_SKIPPED) must NOT clear live_connections"
         )
-        assert CAM_ID in coord._live_opened_at, (
-            "coalesced start must NOT clear _live_opened_at"
+        assert CAM_ID in coord.live_opened_at, (
+            "coalesced start must NOT clear live_opened_at"
         )
 
 
@@ -3906,13 +3904,13 @@ class TestRemoteProxyTimeout:
         assert out == b"\xff\xd8rcp", (
             "must return RCP thumbnail bytes on snap.jpg timeout"
         )
-        assert cam._cached_image == b"\xff\xd8rcp", "must cache RCP thumbnail bytes"
+        assert cam.cached_image == b"\xff\xd8rcp", "must cache RCP thumbnail bytes"
 
     @pytest.mark.asyncio
     async def test_timeout_rcp_thumbnail_none_falls_through(self):
         """TimeoutError → _async_rcp_thumbnail returns None → fall through to idle path."""
         coord = _live_conn()
-        cam = _make_camera_r6(coord=coord, _cached_image=b"\xff\xd8old")
+        cam = _make_camera_r6(coord=coord, cached_image=b"\xff\xd8old")
         cam._async_rcp_thumbnail = AsyncMock(return_value=None)
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
 
@@ -3963,7 +3961,7 @@ class TestAsyncRcpThumbnail:
     async def test_no_urls_in_live_returns_none(self):
         """No 'urls' key in live connection → return None immediately."""
         coord = _make_coord_r6(
-            _live_connections={
+            live_connections={
                 CAM_ID: {"proxyUrl": PROXY_URL, "_connection_type": "REMOTE"}
             },
         )
@@ -3981,13 +3979,13 @@ class TestAsyncRcpThumbnail:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         out = await BoschCamera._async_rcp_thumbnail(cam)
-        assert out is None, "must return None when _live_connections is empty"
+        assert out is None, "must return None when live_connections is empty"
 
     @pytest.mark.asyncio
     async def test_bad_url_format_no_slash_returns_none(self):
         """urls[0] without '/' → len(parts) != 2 → return None."""
         coord = _make_coord_r6(
-            _live_connections={
+            live_connections={
                 CAM_ID: {"urls": ["noslash"], "_connection_type": "REMOTE"}
             },
         )
@@ -3999,11 +3997,11 @@ class TestAsyncRcpThumbnail:
 
     @pytest.mark.asyncio
     async def test_no_rcp_session_returns_none(self):
-        """_get_cached_rcp_session returns None → return None (no session)."""
+        """get_cached_rcp_session returns None → return None (no session)."""
         coord = _make_coord_r6(
-            _live_connections={CAM_ID: {"urls": ["proxy-01.bosch.com/abc123"]}},
+            live_connections={CAM_ID: {"urls": ["proxy-01.bosch.com/abc123"]}},
         )
-        coord._get_cached_rcp_session = AsyncMock(return_value=None)
+        coord.get_cached_rcp_session = AsyncMock(return_value=None)
         cam = _make_camera_r6(coord=coord)
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -4012,12 +4010,12 @@ class TestAsyncRcpThumbnail:
 
     @pytest.mark.asyncio
     async def test_rcp_0x099e_jpeg_returned_directly(self):
-        """_rcp_read returns JPEG bytes (starts with 0xFFD8) → return them directly."""
+        """rcp_read returns JPEG bytes (starts with 0xFFD8) → return them directly."""
         coord = _make_coord_r6(
-            _live_connections={CAM_ID: {"urls": ["proxy-01.bosch.com/abc123"]}},
+            live_connections={CAM_ID: {"urls": ["proxy-01.bosch.com/abc123"]}},
         )
-        coord._get_cached_rcp_session = AsyncMock(return_value="sess-id-1")
-        coord._rcp_read = AsyncMock(return_value=b"\xff\xd8jpeg-data")
+        coord.get_cached_rcp_session = AsyncMock(return_value="sess-id-1")
+        coord.rcp_read = AsyncMock(return_value=b"\xff\xd8jpeg-data")
         cam = _make_camera_r6(coord=coord)
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -4028,11 +4026,11 @@ class TestAsyncRcpThumbnail:
     async def test_rcp_0x099e_not_jpeg_falls_to_yuv422(self):
         """0x099e not JPEG → fall through to 0x0c98 YUV422 path."""
         coord = _make_coord_r6(
-            _live_connections={CAM_ID: {"urls": ["proxy-01.bosch.com/abc123"]}},
+            live_connections={CAM_ID: {"urls": ["proxy-01.bosch.com/abc123"]}},
         )
-        coord._get_cached_rcp_session = AsyncMock(return_value="sess-id-1")
+        coord.get_cached_rcp_session = AsyncMock(return_value="sess-id-1")
         # First call (0x099e) returns non-JPEG; second (0x0c98) returns None
-        coord._rcp_read = AsyncMock(side_effect=[b"\x00\x00not-jpeg", None])
+        coord.rcp_read = AsyncMock(side_effect=[b"\x00\x00not-jpeg", None])
         cam = _make_camera_r6(coord=coord)
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -4040,17 +4038,17 @@ class TestAsyncRcpThumbnail:
         assert out is None, (
             "must return None when neither 0x099e nor 0x0c98 yields usable data"
         )
-        assert coord._rcp_read.await_count == 2, "must attempt both RCP registers"
+        assert coord.rcp_read.await_count == 2, "must attempt both RCP registers"
 
     @pytest.mark.asyncio
     async def test_rcp_0x0c98_wrong_size_returns_none(self):
         """0x0c98 returns data but not 115200 bytes → return None."""
         coord = _make_coord_r6(
-            _live_connections={CAM_ID: {"urls": ["proxy-01.bosch.com/abc123"]}},
+            live_connections={CAM_ID: {"urls": ["proxy-01.bosch.com/abc123"]}},
         )
-        coord._get_cached_rcp_session = AsyncMock(return_value="sess-id-1")
+        coord.get_cached_rcp_session = AsyncMock(return_value="sess-id-1")
         # First call not-JPEG; second wrong size
-        coord._rcp_read = AsyncMock(side_effect=[b"\x00\x00", b"\xab" * 1000])
+        coord.rcp_read = AsyncMock(side_effect=[b"\x00\x00", b"\xab" * 1000])
         cam = _make_camera_r6(coord=coord)
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -4071,10 +4069,10 @@ class TestIdleCameraCloudSnapshot:
     @pytest.mark.asyncio
     async def test_no_cache_fetches_via_async_fetch_live_snapshot(self):
         """No cached image → call async_fetch_live_snapshot → cache and return."""
-        coord = _make_coord_r6()  # no _live_connections → not streaming
+        coord = _make_coord_r6()  # no live_connections → not streaming
         coord.async_fetch_live_snapshot = AsyncMock(return_value=b"\xff\xd8snap")
         cam = _make_camera_r6(coord=coord)
-        # _cached_image=None (default)
+        # cached_image=None (default)
 
         with patch(
             "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
@@ -4088,7 +4086,7 @@ class TestIdleCameraCloudSnapshot:
         assert out == b"\xff\xd8snap", (
             "must return snapshot from async_fetch_live_snapshot"
         )
-        assert cam._cached_image == b"\xff\xd8snap", "must cache the snapshot"
+        assert cam.cached_image == b"\xff\xd8snap", "must cache the snapshot"
 
     @pytest.mark.asyncio
     async def test_no_cache_prefer_small_tries_rcp_first(self):
@@ -4160,8 +4158,8 @@ class TestIdleCameraCloudSnapshot:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=b"\xff\xd8fresh")
         cam = _make_camera_r6(
             coord=coord,
-            _cached_image=b"\xff\xd8stale",
-            _last_image_fetch=time.monotonic() - 60,  # 60s ago — past the 30s TTL
+            cached_image=b"\xff\xd8stale",
+            last_image_fetch=time.monotonic() - 60,  # 60s ago — past the 30s TTL
         )
 
         with patch(
@@ -4174,7 +4172,7 @@ class TestIdleCameraCloudSnapshot:
 
         coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
         assert out == b"\xff\xd8fresh", "must return fresh bytes when cache is stale"
-        assert cam._cached_image == b"\xff\xd8fresh", (
+        assert cam.cached_image == b"\xff\xd8fresh", (
             "must update cache with fresh bytes"
         )
 
@@ -4184,8 +4182,8 @@ class TestIdleCameraCloudSnapshot:
         coord = _make_coord_r6()
         cam = _make_camera_r6(
             coord=coord,
-            _cached_image=b"\xff\xd8stale",
-            _last_image_fetch=time.monotonic() - 60,
+            cached_image=b"\xff\xd8stale",
+            last_image_fetch=time.monotonic() - 60,
         )
         cam._async_rcp_thumbnail = AsyncMock(return_value=b"\xff\xd8rcp-fresh")
 
@@ -4209,8 +4207,8 @@ class TestIdleCameraCloudSnapshot:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=b"\xff\xd8should-not")
         cam = _make_camera_r6(
             coord=coord,
-            _cached_image=b"\xff\xd8cached",
-            _last_image_fetch=time.monotonic() - 5,  # only 5s old
+            cached_image=b"\xff\xd8cached",
+            last_image_fetch=time.monotonic() - 5,  # only 5s old
         )
 
         with patch(
@@ -4229,15 +4227,15 @@ class TestIdleCameraCloudSnapshot:
 
     @pytest.mark.asyncio
     async def test_stale_both_fail_advances_timestamp_returns_cached(self):
-        """Stale cache + both REMOTE and LOCAL return None → advance _last_image_fetch, return cached."""
+        """Stale cache + both REMOTE and LOCAL return None → advance last_image_fetch, return cached."""
         coord = _make_coord_r6()
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
         coord.async_fetch_live_snapshot_local = AsyncMock(return_value=None)
         before = time.monotonic() - 60
         cam = _make_camera_r6(
             coord=coord,
-            _cached_image=b"\xff\xd8old",
-            _last_image_fetch=before,
+            cached_image=b"\xff\xd8old",
+            last_image_fetch=before,
         )
 
         with patch(
@@ -4248,8 +4246,8 @@ class TestIdleCameraCloudSnapshot:
 
             out = await BoschCamera._async_camera_image_impl(cam)
 
-        assert cam._last_image_fetch > before, (
-            "must advance _last_image_fetch so next tick retries instead of looping"
+        assert cam.last_image_fetch > before, (
+            "must advance last_image_fetch so next tick retries instead of looping"
         )
         assert out == b"\xff\xd8old", (
             "must return stale cached image when both fetches fail"
@@ -4280,7 +4278,7 @@ class TestEventSnapshotLastResort:
             }
         )
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
-        cam = _make_camera_r6(coord=coord)  # _cached_image=None
+        cam = _make_camera_r6(coord=coord)  # cached_image=None
 
         img_resp = _resp_cm(200, body=b"\xff\xd8event-img", content_type="image/jpeg")
         snap_resp = _resp_cm(404, body=b"", content_type="text/html")
@@ -4301,7 +4299,55 @@ class TestEventSnapshotLastResort:
         assert out == b"\xff\xd8event-img", (
             "must return event imageUrl bytes as last resort"
         )
-        assert cam._cached_image == b"\xff\xd8event-img", "must cache event image"
+        assert cam.cached_image == b"\xff\xd8event-img", "must cache event image"
+
+    @pytest.mark.asyncio
+    async def test_placeholder_cached_image_does_not_block_last_resort(self):
+        """Regression: section 3's `if self.cached_image:` must exclude the
+        placeholder sentinel (identity check, mirroring section 2's guard a
+        few lines above) — otherwise a genuine cold start (cached_image still
+        the placeholder set in __init__, every live/cloud tier failed) always
+        returns the placeholder here instead of reaching this section (the
+        real last-resort event snapshot), contradicting this section's own
+        "last resort on very first startup" docstring. Bug found 2026-07-15
+        while building the HA-Core-submission-prep test suite; confirmed by
+        temporarily reverting the `is not self._PLACEHOLDER_JPEG` guard on
+        section 3 — this test then failed with the placeholder bytes instead
+        of the event snapshot.
+        """
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        img_url = "https://residential.cbs.boschsecurity.com/v11/events/abc/image.jpg"
+        coord = _make_coord_r6(
+            data={
+                CAM_ID: {
+                    "info": {"title": "Terrasse", "hardwareVersion": "X"},
+                    "events": [
+                        {
+                            "imageUrl": img_url,
+                            "timestamp": "2026-05-07T10:00:00.000Z",
+                        }
+                    ],
+                }
+            }
+        )
+        coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
+        cam = _make_camera_r6(coord=coord, cached_image=BoschCamera._PLACEHOLDER_JPEG)
+
+        img_resp = _resp_cm(200, body=b"\xff\xd8event-img", content_type="image/jpeg")
+        session = MagicMock()
+        session.get.return_value = img_resp
+
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            out = await BoschCamera._async_camera_image_impl(cam)
+
+        assert out == b"\xff\xd8event-img", (
+            "placeholder cached_image must not intercept section 3 — the real "
+            "event snapshot is the correct fallback on a genuine cold start"
+        )
 
     @pytest.mark.asyncio
     async def test_unsafe_image_url_rejected(self):
@@ -4318,7 +4364,7 @@ class TestEventSnapshotLastResort:
             }
         )
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
-        cam = _make_camera_r6(coord=coord, _cached_image=b"\xff\xd8cached")
+        cam = _make_camera_r6(coord=coord, cached_image=b"\xff\xd8cached")
 
         session = MagicMock()
         session.get.return_value = _resp_cm(
@@ -4350,7 +4396,7 @@ class TestEventSnapshotLastResort:
             }
         )
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
-        cam = _make_camera_r6(coord=coord, _cached_image=b"\xff\xd8cached")
+        cam = _make_camera_r6(coord=coord, cached_image=b"\xff\xd8cached")
 
         session = MagicMock()
         session.get.return_value = _resp_cm(
@@ -4373,7 +4419,7 @@ class TestEventSnapshotLastResort:
         coord = _make_coord_r6()
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
         coord.async_fetch_live_snapshot_local = AsyncMock(return_value=None)
-        cam = _make_camera_r6(coord=coord)  # _cached_image=None
+        cam = _make_camera_r6(coord=coord)  # cached_image=None
 
         with patch(
             "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
@@ -4398,24 +4444,24 @@ def _make_coord_r7(**overrides):
                 "events": [],
             },
         },
-        _live_connections={},
-        _live_opened_at={},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _shc_state_cache={},
-        _stream_warming=set(),
-        _image_rotation_180={},
-        _local_creds_cache={},
-        _auth_outage_count=0,
+        live_connections={},
+        live_opened_at={},
+        camera_entities={},
+        stream_fell_back={},
+        stream_error_count={},
+        shc_state_cache={},
+        stream_warming=set(),
+        image_rotation_180={},
+        local_creds_cache={},
+        auth_outage_count=0,
         last_update_success=True,
         is_stream_warming=lambda cid: False,
         try_live_connection=AsyncMock(return_value=None),
         async_fetch_live_snapshot=AsyncMock(return_value=None),
         async_fetch_live_snapshot_local=AsyncMock(return_value=None),
-        _get_cached_rcp_session=AsyncMock(return_value=None),
-        _rcp_read=AsyncMock(return_value=None),
-        _audio_enabled={},
+        get_cached_rcp_session=AsyncMock(return_value=None),
+        rcp_read=AsyncMock(return_value=None),
+        audio_enabled={},
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -4431,13 +4477,13 @@ def _make_camera_r7(coord=None, **overrides):
     cam._entry = SimpleNamespace(data={"bearer_token": "tok"}, options={})
     cam._attr_name = "Bosch Terrasse"
     cam._display_name = "Bosch Terrasse"
-    cam._cached_image = None
+    cam.cached_image = None
     cam._force_image_refresh = False
-    cam._last_image_fetch = 0.0
+    cam.last_image_fetch = 0.0
     cam._was_streaming = False
     cam._model = "HOME_Eyes_Outdoor"
     cam._model_name = "Eyes Outdoor II"
-    cam._hw_version = "HOME_Eyes_Outdoor"
+    cam.hw_version = "HOME_Eyes_Outdoor"
     cam._fw = "9.40.25"
     cam._mac = "aa:bb:cc:dd:ee:01"
     cam.async_write_ha_state = MagicMock()
@@ -4457,7 +4503,7 @@ def _local_live_conn(
 ):
     """Coordinator with an active LOCAL live connection."""
     coord = _make_coord_r7(
-        _live_connections={
+        live_connections={
             CAM_ID: {
                 "proxyUrl": proxy_url,
                 "_connection_type": "LOCAL",
@@ -4465,7 +4511,7 @@ def _local_live_conn(
                 "_local_password": local_pass,
             }
         },
-        _live_opened_at={CAM_ID: time.monotonic() - 1.0},
+        live_opened_at={CAM_ID: time.monotonic() - 1.0},
     )
     return coord
 
@@ -4473,10 +4519,10 @@ def _local_live_conn(
 def _remote_live_conn(proxy_url: str = PROXY_URL, opened_before: float = 60.0):
     """Coordinator with an active REMOTE live connection (for 401 age check)."""
     coord = _make_coord_r7(
-        _live_connections={
+        live_connections={
             CAM_ID: {"proxyUrl": proxy_url, "_connection_type": "REMOTE"}
         },
-        _live_opened_at={CAM_ID: time.monotonic() - opened_before},
+        live_opened_at={CAM_ID: time.monotonic() - opened_before},
     )
     return coord
 
@@ -4532,11 +4578,11 @@ class TestAsyncRcpThumbnailYuv422:
     async def test_yuv422_conversion_fails_returns_none(self):
         """115200-byte raw, but _yuv422_to_jpeg returns None → log debug, return None."""
         coord = _make_coord_r7(
-            _live_connections={
+            live_connections={
                 CAM_ID: {"urls": ["proxy-01.live.cbs.boschsecurity.com:42090/abc123"]}
             },
-            _get_cached_rcp_session=AsyncMock(return_value="session-id-1"),
-            _rcp_read=AsyncMock(
+            get_cached_rcp_session=AsyncMock(return_value="session-id-1"),
+            rcp_read=AsyncMock(
                 side_effect=[
                     b"\x00\x00bad",  # 0x099e → not JPEG (no FF D8)
                     bytes(115200),  # 0x0c98 → correct size
@@ -4558,11 +4604,11 @@ class TestAsyncRcpThumbnailYuv422:
     async def test_yuv422_wrong_size_returns_none(self):
         """Raw 0x0c98 has unexpected size (not 115200) → log debug, return None."""
         coord = _make_coord_r7(
-            _live_connections={
+            live_connections={
                 CAM_ID: {"urls": ["proxy-01.live.cbs.boschsecurity.com:42090/abc123"]}
             },
-            _get_cached_rcp_session=AsyncMock(return_value="session-id-2"),
-            _rcp_read=AsyncMock(
+            get_cached_rcp_session=AsyncMock(return_value="session-id-2"),
+            rcp_read=AsyncMock(
                 side_effect=[
                     b"\x00\x00bad",  # 0x099e → not JPEG
                     bytes(1000),  # 0x0c98 → wrong size
@@ -4581,11 +4627,11 @@ class TestAsyncRcpThumbnailYuv422:
     async def test_yuv422_success_returns_jpeg(self):
         """115200-byte raw, _yuv422_to_jpeg succeeds → return JPEG bytes."""
         coord = _make_coord_r7(
-            _live_connections={
+            live_connections={
                 CAM_ID: {"urls": ["proxy-01.live.cbs.boschsecurity.com:42090/abc123"]}
             },
-            _get_cached_rcp_session=AsyncMock(return_value="session-id-3"),
-            _rcp_read=AsyncMock(
+            get_cached_rcp_session=AsyncMock(return_value="session-id-3"),
+            rcp_read=AsyncMock(
                 side_effect=[
                     b"\x00\x00bad",  # 0x099e → not JPEG
                     bytes(115200),  # 0x0c98 → correct size
@@ -4646,7 +4692,7 @@ class TestLocalSnapViaProxy:
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result == img_bytes, "LOCAL snap 200 must return image bytes"
-        assert cam._cached_image == img_bytes, "LOCAL snap 200 must cache image"
+        assert cam.cached_image == img_bytes, "LOCAL snap 200 must cache image"
 
     @pytest.mark.asyncio
     async def test_local_snap_non_200_falls_to_placeholder(self):
@@ -4708,7 +4754,7 @@ class TestLocalSnapViaProxy:
         We verify async_digest_request is never called.
         """
         coord = _make_coord_r7(
-            _live_connections={
+            live_connections={
                 CAM_ID: {
                     "proxyUrl": LOCAL_SNAP_URL,
                     "_connection_type": "LOCAL",
@@ -4716,7 +4762,7 @@ class TestLocalSnapViaProxy:
                     "_local_password": "",
                 }
             },
-            _live_opened_at={CAM_ID: time.monotonic() - 1.0},
+            live_opened_at={CAM_ID: time.monotonic() - 1.0},
         )
         cam = _make_camera_r7(coord=coord)
 
@@ -4756,15 +4802,15 @@ class TestProxy404RetryClientError:
 
         new_url = "https://proxy-02.live.cbs.boschsecurity.com/new/snap.jpg"
         coord = _make_coord_r7(
-            _live_connections={
+            live_connections={
                 CAM_ID: {"proxyUrl": PROXY_URL, "_connection_type": "REMOTE"}
             },
-            _live_opened_at={CAM_ID: time.monotonic() - 5.0},
+            live_opened_at={CAM_ID: time.monotonic() - 5.0},
         )
         coord.try_live_connection = AsyncMock(
             return_value={"proxyUrl": new_url, "_connection_type": "REMOTE"}
         )
-        cam = _make_camera_r7(coord=coord, _cached_image=b"\xff\xd8cached")
+        cam = _make_camera_r7(coord=coord, cached_image=b"\xff\xd8cached")
 
         first_cm = _resp_cm(404, body=b"not found", content_type="text/html")
         retry_cm = MagicMock()
@@ -4783,7 +4829,7 @@ class TestProxy404RetryClientError:
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result is not None, "ClientError on 404-retry must not raise"
-        assert cam._cached_image == b"\xff\xd8cached", (
+        assert cam.cached_image == b"\xff\xd8cached", (
             "cached image must survive 404+ClientError"
         )
 
@@ -4802,7 +4848,7 @@ class TestProxy401RetryClientError:
         coord.try_live_connection = AsyncMock(
             return_value={"proxyUrl": new_url, "_connection_type": "REMOTE"}
         )
-        cam = _make_camera_r7(coord=coord, _cached_image=b"\xff\xd8401cached")
+        cam = _make_camera_r7(coord=coord, cached_image=b"\xff\xd8401cached")
 
         first_cm = _resp_cm(401, body=b"Unauthorized", content_type="text/html")
         retry_cm = MagicMock()
@@ -4833,8 +4879,8 @@ class TestLocalOutageSnapFallback:
     def _outage_coord(self):
         """Coordinator that looks like an auth outage with cached LOCAL creds."""
         return _make_coord_r7(
-            _live_connections={},  # NOT streaming
-            _local_creds_cache={
+            live_connections={},  # NOT streaming
+            local_creds_cache={
                 CAM_ID: {
                     "user": "digestuser",
                     "password": "digestpass",
@@ -4842,7 +4888,7 @@ class TestLocalOutageSnapFallback:
                     "port": 443,
                 }
             },
-            _auth_outage_count=1,  # > 0 → outage path active
+            auth_outage_count=1,  # > 0 → outage path active
             # async_fetch_live_snapshot returns None so we reach outage path
             async_fetch_live_snapshot=AsyncMock(return_value=None),
             async_fetch_live_snapshot_local=AsyncMock(return_value=None),
@@ -4872,7 +4918,7 @@ class TestLocalOutageSnapFallback:
             result = await BoschCamera._async_camera_image_impl(cam)
 
         assert result == img_bytes, "outage snap success must return image bytes"
-        assert cam._cached_image == img_bytes, "outage snap must cache image"
+        assert cam.cached_image == img_bytes, "outage snap must cache image"
 
     @pytest.mark.asyncio
     async def test_outage_snap_timeout_falls_to_placeholder(self):
@@ -4901,10 +4947,10 @@ class TestLocalOutageSnapFallback:
 
     @pytest.mark.asyncio
     async def test_outage_snap_zero_outage_count_skips_path(self):
-        """_auth_outage_count == 0 → outage snap path must be skipped entirely."""
+        """auth_outage_count == 0 → outage snap path must be skipped entirely."""
         coord = _make_coord_r7(
-            _live_connections={},
-            _local_creds_cache={
+            live_connections={},
+            local_creds_cache={
                 CAM_ID: {
                     "user": "u",
                     "password": "p",
@@ -4912,7 +4958,7 @@ class TestLocalOutageSnapFallback:
                     "port": 443,
                 }
             },
-            _auth_outage_count=0,  # no outage — must skip
+            auth_outage_count=0,  # no outage — must skip
             async_fetch_live_snapshot=AsyncMock(return_value=None),
             async_fetch_live_snapshot_local=AsyncMock(return_value=None),
         )
@@ -4940,11 +4986,11 @@ class TestLocalOutageSnapFallback:
 
     @pytest.mark.asyncio
     async def test_outage_snap_no_creds_skips_path(self):
-        """Empty _local_creds_cache → outage snap path skipped."""
+        """Empty local_creds_cache → outage snap path skipped."""
         coord = _make_coord_r7(
-            _live_connections={},
-            _local_creds_cache={},  # no creds
-            _auth_outage_count=1,
+            live_connections={},
+            local_creds_cache={},  # no creds
+            auth_outage_count=1,
             async_fetch_live_snapshot=AsyncMock(return_value=None),
             async_fetch_live_snapshot_local=AsyncMock(return_value=None),
         )
@@ -4984,12 +5030,12 @@ class TestEventSnapshotUnsafeUrl:
         """Coordinator: is_streaming=True but no proxyUrl → falls to event snapshot path."""
         return _make_coord_r7(
             data={CAM_ID: {"info": {}, "events": events}},
-            # CAM_ID present in _live_connections → is_streaming=True
-            _live_connections={
+            # CAM_ID present in live_connections → is_streaming=True
+            live_connections={
                 CAM_ID: {"rtspsUrl": "rtsp://test/x"}
             },  # is_streaming=True (rtspsUrl gate); no proxyUrl → proxy_url = ""
-            _local_creds_cache={},  # no cached creds → outage path skipped
-            _auth_outage_count=0,
+            local_creds_cache={},  # no cached creds → outage path skipped
+            auth_outage_count=0,
             async_fetch_live_snapshot=AsyncMock(return_value=None),
             async_fetch_live_snapshot_local=AsyncMock(return_value=None),
         )
@@ -4998,7 +5044,7 @@ class TestEventSnapshotUnsafeUrl:
     async def test_unsafe_url_logged_and_skipped(self):
         """imageUrl on non-Bosch domain → warning logged, URL skipped.
 
-        _cached_image=None so the code doesn't short-circuit at 'if self._cached_image:'
+        cached_image=None so the code doesn't short-circuit at 'if self.cached_image:'
         and reaches the event snapshot section (path 4).
         """
         coord = self._streaming_no_proxy_coord(
@@ -5014,7 +5060,7 @@ class TestEventSnapshotUnsafeUrl:
             ]
         )
         cam = _make_camera_r7(
-            coord=coord, _cached_image=None
+            coord=coord, cached_image=None
         )  # no cache → reach section 4
 
         session = MagicMock()
@@ -5063,7 +5109,7 @@ class TestEventSnapshot4xx:
     """Various HTTP errors and network failures in the event snapshot loop.
 
     To reach this path, camera must be streaming (is_streaming=True, i.e.
-    CAM_ID in _live_connections) but have no proxyUrl. Then the outage path
+    CAM_ID in live_connections) but have no proxyUrl. Then the outage path
     is skipped (no local creds + outage_count=0) and we fall through here.
     """
 
@@ -5071,11 +5117,11 @@ class TestEventSnapshot4xx:
         """Coordinator: is_streaming=True, no proxyUrl, no outage → event snapshot path."""
         return _make_coord_r7(
             data={CAM_ID: {"info": {}, "events": events}},
-            _live_connections={
+            live_connections={
                 CAM_ID: {"rtspsUrl": "rtsp://test/x"}
             },  # is_streaming=True (rtspsUrl gate); no proxyUrl → proxy_url = ""
-            _local_creds_cache={},
-            _auth_outage_count=0,
+            local_creds_cache={},
+            auth_outage_count=0,
             async_fetch_live_snapshot=AsyncMock(return_value=None),
             async_fetch_live_snapshot_local=AsyncMock(return_value=None),
         )
@@ -5084,8 +5130,8 @@ class TestEventSnapshot4xx:
     async def test_401_returns_cached_immediately(self):
         """Event snapshot 401 → warning logged, cached image (None) → placeholder returned.
 
-        _cached_image must be None to reach this path past the earlier
-        short-circuit. After 401, 'return self._cached_image' returns None, so
+        cached_image must be None to reach this path past the earlier
+        short-circuit. After 401, 'return self.cached_image' returns None, so
         the public wrapper serves _PLACEHOLDER_JPEG. We verify that session.get
         is called exactly once (one URL fetched → 401 → immediate return
         without trying next event).
@@ -5101,7 +5147,7 @@ class TestEventSnapshot4xx:
             ]
         )
         cam = _make_camera_r7(
-            coord=coord, _cached_image=None
+            coord=coord, cached_image=None
         )  # no cache → reach section 4
 
         session = MagicMock()
@@ -5140,7 +5186,7 @@ class TestEventSnapshot4xx:
             [{"imageUrl": safe_url, "timestamp": "2026-01-01T00:00:00Z"}]
         )
         cam = _make_camera_r7(
-            coord=coord, _cached_image=None
+            coord=coord, cached_image=None
         )  # no cache → reach section 4
 
         session = MagicMock()
@@ -5171,7 +5217,7 @@ class TestEventSnapshot4xx:
     async def test_403_tries_next_event_then_returns_placeholder(self):
         """403 on first event → try next event; 403 again → all failed → placeholder.
 
-        _cached_image=None to bypass the earlier short-circuit and reach this path.
+        cached_image=None to bypass the earlier short-circuit and reach this path.
         """
         safe_url1 = "https://media.boschsecurity.com/ev1.jpg"
         safe_url2 = "https://media.boschsecurity.com/ev2.jpg"
@@ -5182,7 +5228,7 @@ class TestEventSnapshot4xx:
             ]
         )
         cam = _make_camera_r7(
-            coord=coord, _cached_image=None
+            coord=coord, cached_image=None
         )  # no cache → reach section 4
 
         session = MagicMock()
@@ -5249,7 +5295,7 @@ class TestEventSnapshot4xx:
             ]
         )
         cam = _make_camera_r7(
-            coord=coord, _cached_image=None
+            coord=coord, cached_image=None
         )  # no cache → reach section 4
 
         # First CM raises TimeoutError when __aenter__ is called
@@ -5289,7 +5335,7 @@ class TestEventSnapshot4xx:
             ]
         )
         cam = _make_camera_r7(
-            coord=coord, _cached_image=None
+            coord=coord, cached_image=None
         )  # no cache → reach section 4
 
         err_cm = MagicMock()
@@ -5321,7 +5367,7 @@ class TestEventSnapshot4xx:
         coord = self._event_coord(
             [{"imageUrl": safe_url, "timestamp": "2026-01-01T00:00:00Z"}]
         )
-        cam = _make_camera_r7(coord=coord, _cached_image=None)
+        cam = _make_camera_r7(coord=coord, cached_image=None)
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         placeholder = BoschCamera._PLACEHOLDER_JPEG
@@ -5345,9 +5391,9 @@ class TestEventSnapshot4xx:
 #
 # Bug (reported 2026-06-11, privacy OFF): the user saw the current live
 # snapshot, then "after some time" the card flipped to an ancient image from
-# an old motion event. Root cause: ``_async_trigger_image_refresh`` fell back
+# an old motion event. Root cause: ``async_trigger_image_refresh`` fell back
 # to ``async_fetch_fresh_event_snapshot`` whenever the live fetch failed and
-# overwrote ``_cached_image`` with the "latest event" image — which is days
+# overwrote ``cached_image`` with the "latest event" image — which is days
 # old when ``last_event`` is frozen (no new motion / FCM stale).
 #
 # Fix: only seed from the event image on a genuine cold start (no real frame
@@ -5363,9 +5409,9 @@ def _make_camera_stale(cached: bytes | None):
 
     coord = SimpleNamespace(
         data={CAM_ID_STALE: {"info": {"title": "Terrasse"}}},
-        _live_connections={},
-        _shc_state_cache={},  # privacy OFF
-        _image_entities={},
+        live_connections={},
+        shc_state_cache={},  # privacy OFF
+        image_entities={},
         async_fetch_live_snapshot=AsyncMock(return_value=None),  # live FAILS
         async_fetch_live_snapshot_local=AsyncMock(return_value=None),
         async_fetch_fresh_event_snapshot=AsyncMock(return_value=_OLD_EVENT),
@@ -5375,9 +5421,9 @@ def _make_camera_stale(cached: bytes | None):
     cam._cam_id = CAM_ID_STALE
     cam._entry = SimpleNamespace(data={"bearer_token": "tok"}, options={})
     cam._display_name = "Bosch Terrasse"
-    cam._cached_image = cached
+    cam.cached_image = cached
     cam._force_image_refresh = False
-    cam._last_image_fetch = 0.0
+    cam.last_image_fetch = 0.0
     cam._was_streaming = False
     cam._refresh_inflight = (
         False  # synchronous in-flight guard (replaces _refresh_lock)
@@ -5393,14 +5439,14 @@ async def test_live_failure_keeps_good_frame_not_stale_event() -> None:
     cam, coord = _make_camera_stale(cached=_LIVE_FRAME)
 
     with patch("custom_components.bosch_shc_camera.camera.save_snapshot", AsyncMock()):
-        await cam._async_trigger_image_refresh(delay=0)
+        await cam.async_trigger_image_refresh(delay=0)
 
     # The good live frame is preserved …
-    assert cam._cached_image == _LIVE_FRAME
+    assert cam.cached_image == _LIVE_FRAME
     # … and the stale event snapshot was never even fetched.
     coord.async_fetch_fresh_event_snapshot.assert_not_awaited()
-    # Backoff: _last_image_fetch bumped so it does not hammer every tick.
-    assert cam._last_image_fetch > 0.0
+    # Backoff: last_image_fetch bumped so it does not hammer every tick.
+    assert cam.last_image_fetch > 0.0
 
 
 @pytest.mark.asyncio
@@ -5411,11 +5457,11 @@ async def test_cold_start_still_seeds_from_event_snapshot() -> None:
     cam, coord = _make_camera_stale(cached=BoschCamera._PLACEHOLDER_JPEG)
 
     with patch("custom_components.bosch_shc_camera.camera.save_snapshot", AsyncMock()):
-        await cam._async_trigger_image_refresh(delay=0)
+        await cam.async_trigger_image_refresh(delay=0)
 
     # Cold start: the event image is used as a seed (better than a black tile).
     coord.async_fetch_fresh_event_snapshot.assert_awaited_once()
-    assert cam._cached_image == _OLD_EVENT
+    assert cam.cached_image == _OLD_EVENT
 
 
 @pytest.mark.asyncio
@@ -5426,9 +5472,9 @@ async def test_live_success_updates_frame() -> None:
     coord.async_fetch_live_snapshot = AsyncMock(return_value=new_live)
 
     with patch("custom_components.bosch_shc_camera.camera.save_snapshot", AsyncMock()):
-        await cam._async_trigger_image_refresh(delay=0)
+        await cam.async_trigger_image_refresh(delay=0)
 
-    assert cam._cached_image == new_live
+    assert cam.cached_image == new_live
     coord.async_fetch_fresh_event_snapshot.assert_not_awaited()
 
 
@@ -5459,11 +5505,11 @@ def stub_coord_webrtc() -> SimpleNamespace:
                 "live": {},
             }
         },
-        _live_connections={},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _shc_state_cache={},
+        live_connections={},
+        camera_entities={},
+        stream_fell_back={},
+        stream_error_count={},
+        shc_state_cache={},
         last_update_success=True,
         motion_settings=lambda cam_id: {},
         is_stream_warming=lambda cam_id: False,
@@ -5595,8 +5641,8 @@ class TestAsyncCreateStreamPrivacy:
         """Privacy ON → HomeAssistantError with 'privacy mode' in message."""
         from homeassistant.exceptions import HomeAssistantError
 
-        stub_coord_webrtc._shc_state_cache[CAM_ID_WEBRTC] = {"privacy_mode": True}
-        stub_coord_webrtc._live_connections = {}  # no active session
+        stub_coord_webrtc.shc_state_cache[CAM_ID_WEBRTC] = {"privacy_mode": True}
+        stub_coord_webrtc.live_connections = {}  # no active session
 
         with pytest.raises(HomeAssistantError, match="privacy mode"):
             await camera_webrtc.async_create_stream()
@@ -5608,9 +5654,9 @@ class TestAsyncCreateStreamPrivacy:
         """Privacy OFF + active live_connection → delegates to super() without error."""
         from homeassistant.exceptions import HomeAssistantError
 
-        stub_coord_webrtc._shc_state_cache[CAM_ID_WEBRTC] = {"privacy_mode": False}
+        stub_coord_webrtc.shc_state_cache[CAM_ID_WEBRTC] = {"privacy_mode": False}
         # Simulate an active live connection so the branch skips try_live_connection
-        stub_coord_webrtc._live_connections[CAM_ID_WEBRTC] = {
+        stub_coord_webrtc.live_connections[CAM_ID_WEBRTC] = {
             "rtspsUrl": "rtsps://proxy.example.com:443/hash/rtsp_tunnel",
             "_connection_type": "REMOTE",
         }
@@ -5640,8 +5686,8 @@ class TestAsyncCreateStreamPrivacy:
         """
         from homeassistant.exceptions import HomeAssistantError
 
-        stub_coord_webrtc._shc_state_cache = {}  # no entry for this cam
-        stub_coord_webrtc._live_connections = {}
+        stub_coord_webrtc.shc_state_cache = {}  # no entry for this cam
+        stub_coord_webrtc.live_connections = {}
 
         # try_live_connection will be called; mock it to return None (unavailable)
         async def fake_try_live_connection(cam_id: str) -> None:
@@ -5666,7 +5712,7 @@ class TestAsyncCreateStreamPrivacy:
 #
 # Symptom (async_create_stream): idle→ONLINE LOCAL stream in the native
 # more-info view showed "does not support play stream service" — the
-# coordinator sets `_live_connections[cam_id] = result` before LOCAL pre-warm
+# coordinator sets `live_connections[cam_id] = result` before LOCAL pre-warm
 # completes (no `rtspsUrl` key yet), so stream_source() returned None while
 # async_create_stream's gate check saw the dict already populated and skipped
 # the auto-open path.
@@ -5688,9 +5734,9 @@ class TestAsyncCreateStreamPrivacy:
 
 def _make_coord_prewarm(**overrides):
     base = dict(
-        _live_connections={},
-        _stream_warming=set(),
-        _shc_state_cache={},
+        live_connections={},
+        stream_warming=set(),
+        shc_state_cache={},
         try_live_connection=AsyncMock(return_value={"rtspsUrl": "rtsp://x"}),
         async_update_listeners=MagicMock(),
         get_model_config=lambda cid: SimpleNamespace(min_total_wait=2),
@@ -5711,12 +5757,12 @@ def _make_camera_prewarm(coord):
 
 @pytest.mark.asyncio
 async def test_prewarm_in_progress_waits_for_completion():
-    """While _stream_warming contains cam_id, async_create_stream must wait
+    """While stream_warming contains cam_id, async_create_stream must wait
     for warming to complete before delegating to super — otherwise stream_source
     returns None and HA logs 'does not support play stream service'."""
     coord = _make_coord_prewarm(
-        _live_connections={CAM_ID_PREWARM: {"proxyUrl": "https://x/snap.jpg"}},
-        _stream_warming={CAM_ID_PREWARM},
+        live_connections={CAM_ID_PREWARM: {"proxyUrl": "https://x/snap.jpg"}},
+        stream_warming={CAM_ID_PREWARM},
     )
     cam = _make_camera_prewarm(coord)
 
@@ -5725,8 +5771,8 @@ async def test_prewarm_in_progress_waits_for_completion():
     # Schedule background task to finish pre-warm after 0.3s
     async def _finish_prewarm():
         await asyncio.sleep(0.3)
-        coord._live_connections[CAM_ID_PREWARM]["rtspsUrl"] = "rtsp://127.0.0.1:36107/x"
-        coord._stream_warming.discard(CAM_ID_PREWARM)
+        coord.live_connections[CAM_ID_PREWARM]["rtspsUrl"] = "rtsp://127.0.0.1:36107/x"
+        coord.stream_warming.discard(CAM_ID_PREWARM)
 
     asyncio.create_task(_finish_prewarm())  # noqa: RUF006  # fire-and-forget in test
 
@@ -5738,7 +5784,7 @@ async def test_prewarm_in_progress_waits_for_completion():
 
     # super().async_create_stream must have been awaited AFTER warming cleared
     assert result is fake_stream
-    assert CAM_ID_PREWARM not in coord._stream_warming
+    assert CAM_ID_PREWARM not in coord.stream_warming
     # And try_live_connection must NOT have been called — connection already
     # existed, we just had to wait for the URL to be populated.
     coord.try_live_connection.assert_not_awaited()
@@ -5749,8 +5795,8 @@ async def test_prewarm_timeout_returns_none():
     """If pre-warm never completes within min_total_wait + grace, return None
     rather than blocking forever. Caller (HA) treats None as 'no stream'."""
     coord = _make_coord_prewarm(
-        _live_connections={CAM_ID_PREWARM: {"proxyUrl": "https://x/snap.jpg"}},
-        _stream_warming={CAM_ID_PREWARM},
+        live_connections={CAM_ID_PREWARM: {"proxyUrl": "https://x/snap.jpg"}},
+        stream_warming={CAM_ID_PREWARM},
         # Tight deadline so the test completes quickly: 0 + 5s grace = 5s.
         # We patch asyncio.sleep to short-circuit the wait.
         get_model_config=lambda cid: SimpleNamespace(min_total_wait=0),
@@ -5773,8 +5819,8 @@ async def test_no_warming_delegates_immediately():
     """If pre-warm is not in progress, no waiting — just delegate to super.
     Backwards-compatible with the existing happy path."""
     coord = _make_coord_prewarm(
-        _live_connections={CAM_ID_PREWARM: {"rtspsUrl": "rtsp://127.0.0.1:36107/x"}},
-        _stream_warming=set(),  # NOT warming
+        live_connections={CAM_ID_PREWARM: {"rtspsUrl": "rtsp://127.0.0.1:36107/x"}},
+        stream_warming=set(),  # NOT warming
     )
     cam = _make_camera_prewarm(coord)
 
@@ -5794,12 +5840,12 @@ async def test_webrtc_offer_waits_for_prewarm_before_delegating():
     """A WebRTC offer arriving mid-warm-up must wait for pre-warm to clear
     before super().async_handle_async_webrtc_offer() is awaited — otherwise
     go2rtc reads stream_source()==None and the native view stays black."""
-    coord = _make_coord_prewarm(_stream_warming={CAM_ID_PREWARM})
+    coord = _make_coord_prewarm(stream_warming={CAM_ID_PREWARM})
     cam = _make_camera_prewarm(coord)
 
     async def _finish_prewarm():
         await asyncio.sleep(0.3)
-        coord._stream_warming.discard(CAM_ID_PREWARM)
+        coord.stream_warming.discard(CAM_ID_PREWARM)
 
     asyncio.create_task(_finish_prewarm())  # noqa: RUF006  # fire-and-forget in test
 
@@ -5812,7 +5858,7 @@ async def test_webrtc_offer_waits_for_prewarm_before_delegating():
             "sdp-offer", "session-1", send_message
         )
 
-    assert CAM_ID_PREWARM not in coord._stream_warming
+    assert CAM_ID_PREWARM not in coord.stream_warming
     mock_super.assert_awaited_once_with("sdp-offer", "session-1", send_message)
 
 
@@ -5820,8 +5866,8 @@ async def test_webrtc_offer_waits_for_prewarm_before_delegating():
 async def test_webrtc_offer_no_warming_delegates_immediately():
     """No pre-warm in progress → no waiting, straight delegation (happy path)."""
     coord = _make_coord_prewarm(
-        _stream_warming=set(),
-        _live_connections={CAM_ID_PREWARM: {"rtspsUrl": "rtsp://x"}},
+        stream_warming=set(),
+        live_connections={CAM_ID_PREWARM: {"rtspsUrl": "rtsp://x"}},
     )
     cam = _make_camera_prewarm(coord)
 
@@ -5841,10 +5887,10 @@ async def test_webrtc_offer_no_warming_delegates_immediately():
 @pytest.mark.asyncio
 async def test_webrtc_offer_no_live_connection_auto_opens_one():
     """First-time-setup gap (community.simon42.com report): a camera whose
-    Live Stream switch was never turned on has no _live_connections entry.
+    Live Stream switch was never turned on has no live_connections entry.
     The native WebRTC offer must auto-open one — mirroring async_create_stream
     — instead of delegating straight to super() with stream_source()==None."""
-    coord = _make_coord_prewarm(_live_connections={}, _stream_warming=set())
+    coord = _make_coord_prewarm(live_connections={}, stream_warming=set())
     cam = _make_camera_prewarm(coord)
 
     send_message = MagicMock()
@@ -5868,9 +5914,9 @@ async def test_webrtc_offer_privacy_mode_blocks_auto_open():
     from homeassistant.exceptions import HomeAssistantError
 
     coord = _make_coord_prewarm(
-        _live_connections={},
-        _stream_warming=set(),
-        _shc_state_cache={CAM_ID_PREWARM: {"privacy_mode": True}},
+        live_connections={},
+        stream_warming=set(),
+        shc_state_cache={CAM_ID_PREWARM: {"privacy_mode": True}},
     )
     cam = _make_camera_prewarm(coord)
     cam._display_name = "Bosch Innenbereich"
@@ -5901,8 +5947,8 @@ async def test_webrtc_offer_auto_open_coalesces_on_skip(
     from custom_components.bosch_shc_camera.const import STREAM_START_SKIPPED
 
     coord = _make_coord_prewarm(
-        _live_connections={},
-        _stream_warming=set(),
+        live_connections={},
+        stream_warming=set(),
         try_live_connection=AsyncMock(return_value=STREAM_START_SKIPPED),
     )
     cam = _make_camera_prewarm(coord)
@@ -5938,8 +5984,8 @@ async def test_webrtc_offer_auto_open_failure_logs_and_still_delegates(
     import logging
 
     coord = _make_coord_prewarm(
-        _live_connections={},
-        _stream_warming=set(),
+        live_connections={},
+        stream_warming=set(),
         try_live_connection=AsyncMock(return_value=None),
     )
     cam = _make_camera_prewarm(coord)
@@ -5970,8 +6016,8 @@ async def test_webrtc_offer_existing_connection_skips_auto_open():
     """A camera whose stream is already active (switch ON / prior offer)
     must not re-trigger try_live_connection on every subsequent offer."""
     coord = _make_coord_prewarm(
-        _live_connections={CAM_ID_PREWARM: {"rtspsUrl": "rtsp://x"}},
-        _stream_warming=set(),
+        live_connections={CAM_ID_PREWARM: {"rtspsUrl": "rtsp://x"}},
+        stream_warming=set(),
     )
     cam = _make_camera_prewarm(coord)
 
@@ -6000,12 +6046,12 @@ async def test_webrtc_offer_prewarm_timeout_still_delegates(
     `mock_super.assert_awaited_once_with(...)` alone is identical whether
     pre-warm succeeded, timed out, or the wait was skipped entirely. Pin the
     timeout branch specifically: the deadline-exceeded WARNING fired and
-    `_stream_warming` was never cleared (a successful/skipped wait clears or
+    `stream_warming` was never cleared (a successful/skipped wait clears or
     never sets it)."""
     import logging
 
     coord = _make_coord_prewarm(
-        _stream_warming={CAM_ID_PREWARM},
+        stream_warming={CAM_ID_PREWARM},
         get_model_config=lambda cid: SimpleNamespace(min_total_wait=0),
     )
     cam = _make_camera_prewarm(coord)
@@ -6031,7 +6077,7 @@ async def test_webrtc_offer_prewarm_timeout_still_delegates(
     mock_super.assert_awaited_once_with("sdp-offer", "session-1", send_message)
     mock_sleep.assert_awaited()
     assert "did not complete within" in caplog.text
-    assert CAM_ID_PREWARM in coord._stream_warming
+    assert CAM_ID_PREWARM in coord.stream_warming
 
 
 def _make_real_camera_prewarm() -> BoschCamera:
@@ -6055,12 +6101,12 @@ def _make_real_camera_prewarm() -> BoschCamera:
         # Already-open session: this fixture targets the provider-delegation
         # and native-webrtc-flag regressions, not the auto-open path (covered
         # separately by the test_webrtc_offer_no_live_connection_* tests).
-        _live_connections={CAM_ID_PREWARM: {"rtspsUrl": "rtsp://127.0.0.1:1/x"}},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _stream_warming=set(),
-        _shc_state_cache={},
+        live_connections={CAM_ID_PREWARM: {"rtspsUrl": "rtsp://127.0.0.1:1/x"}},
+        camera_entities={},
+        stream_fell_back={},
+        stream_error_count={},
+        stream_warming=set(),
+        shc_state_cache={},
         last_update_success=True,
         motion_settings=lambda cam_id: {},
         is_stream_warming=lambda cam_id: False,
@@ -6106,16 +6152,16 @@ def _make_camera_for_snap(**overrides):
 
     coord = SimpleNamespace(
         data={CAM_ID: {"info": {"title": "Terrasse"}, "events": []}},
-        _live_connections={},
-        _live_opened_at={},
-        _camera_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _shc_state_cache={},
-        _stream_warming=set(),
-        _image_rotation_180={},
-        _local_creds_cache={},
-        _auth_outage_count=0,
+        live_connections={},
+        live_opened_at={},
+        camera_entities={},
+        stream_fell_back={},
+        stream_error_count={},
+        shc_state_cache={},
+        stream_warming=set(),
+        image_rotation_180={},
+        local_creds_cache={},
+        auth_outage_count=0,
         last_update_success=True,
         is_stream_warming=lambda cid: False,
         try_live_connection=AsyncMock(return_value=None),
@@ -6128,13 +6174,13 @@ def _make_camera_for_snap(**overrides):
     cam._entry = SimpleNamespace(data={"bearer_token": "tok"}, options={})
     cam._attr_name = "Terrasse"
     cam._display_name = "Terrasse"
-    cam._cached_image = None
+    cam.cached_image = None
     cam._force_image_refresh = False
-    cam._last_image_fetch = 0.0
+    cam.last_image_fetch = 0.0
     cam._was_streaming = False
     cam._model = "HOME_Eyes_Outdoor"
     cam._model_name = "Eyes Outdoor II"
-    cam._hw_version = "HOME_Eyes_Outdoor"
+    cam.hw_version = "HOME_Eyes_Outdoor"
     cam._fw = "9.40.25"
     cam._mac = "aa:bb:cc:dd:ee:01"
     # _token is a read-only property backed by _entry.data["bearer_token"]
@@ -6170,7 +6216,7 @@ class TestFetchLocalSnapClosure:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = _make_camera_for_snap()
-        cam.coordinator._live_connections = {
+        cam.coordinator.live_connections = {
             CAM_ID: {
                 "proxyUrl": "https://192.0.2.149:443/snap.jpg",
                 "_connection_type": "LOCAL",
@@ -6195,7 +6241,7 @@ class TestFetchLocalSnapClosure:
         assert result == b"\xff\xd8\xff", (
             "LOCAL snap 200 + image/jpeg must return the bytes"
         )
-        assert cam._cached_image == b"\xff\xd8\xff", "_cached_image must be updated"
+        assert cam.cached_image == b"\xff\xd8\xff", "cached_image must be updated"
 
     @pytest.mark.asyncio
     async def test_local_snap_request_exception_returns_none(self):
@@ -6205,7 +6251,7 @@ class TestFetchLocalSnapClosure:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = _make_camera_for_snap()
-        cam.coordinator._live_connections = {
+        cam.coordinator.live_connections = {
             CAM_ID: {
                 "proxyUrl": "https://192.0.2.149:443/snap.jpg",
                 "_connection_type": "LOCAL",
@@ -6230,7 +6276,7 @@ class TestFetchLocalSnapClosure:
 
         assert (
             result is None
-            or result is cam._cached_image
+            or result is cam.cached_image
             or result is _Cam._PLACEHOLDER_JPEG
         ), (
             "aiohttp.ClientError in LOCAL snap must not raise; returns cached/placeholder"
@@ -6242,7 +6288,7 @@ class TestFetchLocalSnapClosure:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         cam = _make_camera_for_snap()
-        cam.coordinator._live_connections = {
+        cam.coordinator.live_connections = {
             CAM_ID: {
                 "proxyUrl": "https://192.0.2.149/snap.jpg",
                 "_connection_type": "LOCAL",
@@ -6271,14 +6317,14 @@ class TestFetchLocalSnapClosure:
 class TestFetchOutageSnapClosure:
     """camera.py outage snap path: async_digest_request called directly.
 
-    Triggered when _auth_outage_count > 0 and _local_creds_cache has cached creds.
+    Triggered when auth_outage_count > 0 and local_creds_cache has cached creds.
     """
 
     def _make_outage_cam(self) -> MagicMock:
         """Camera with outage creds."""
         cam = _make_camera_for_snap()
-        cam.coordinator._auth_outage_count = 2  # triggers outage path
-        cam.coordinator._local_creds_cache = {
+        cam.coordinator.auth_outage_count = 2  # triggers outage path
+        cam.coordinator.local_creds_cache = {
             CAM_ID: {
                 "user": "digest_user",
                 "password": "digest_pass",
@@ -6287,7 +6333,7 @@ class TestFetchOutageSnapClosure:
                 "ts": time.monotonic(),
             }
         }
-        cam.coordinator._live_connections = {}  # no active stream → skip path 1
+        cam.coordinator.live_connections = {}  # no active stream → skip path 1
         return cam
 
     @pytest.mark.asyncio
@@ -6313,8 +6359,8 @@ class TestFetchOutageSnapClosure:
         assert result == b"\xff\xd8outage", (
             "outage snap 200 + image/jpeg must return the bytes"
         )
-        assert cam._cached_image == b"\xff\xd8outage", (
-            "_cached_image updated on outage snap"
+        assert cam.cached_image == b"\xff\xd8outage", (
+            "cached_image updated on outage snap"
         )
 
     @pytest.mark.asyncio
@@ -6342,7 +6388,7 @@ class TestFetchOutageSnapClosure:
 
         assert (
             result is None
-            or result is cam._cached_image
+            or result is cam.cached_image
             or result is _Cam._PLACEHOLDER_JPEG
         ), (
             "aiohttp.ClientError in outage snap must not raise; returns cached/placeholder"
@@ -6400,21 +6446,21 @@ def _stub_coord_camera_toctou(
                 "events": [],
             }
         },
-        _live_connections=live_connections if live_connections is not None else {},
-        _user_intent_streams=set(),
-        _shc_state_cache={
+        live_connections=live_connections if live_connections is not None else {},
+        user_intent_streams=set(),
+        shc_state_cache={
             CAM_ID: (shc_state if shc_state is not None else {"privacy_mode": False})
         },
-        _session_stale={},
-        _stream_warming={CAM_ID} if stream_warming else set(),
-        _privacy_set_at={},
-        _light_set_at={},
-        _audio_enabled={CAM_ID: True},
-        _privacy_sound_cache={CAM_ID: False},
-        _timestamp_cache={CAM_ID: True},
-        _ledlights_cache={CAM_ID: True},
-        _arming_cache={},
-        _rcp_privacy_cache={},
+        session_stale={},
+        stream_warming={CAM_ID} if stream_warming else set(),
+        privacy_set_at={},
+        light_set_at={},
+        audio_enabled={CAM_ID: True},
+        privacy_sound_cache={CAM_ID: False},
+        timestamp_cache={CAM_ID: True},
+        ledlights_cache={CAM_ID: True},
+        arming_cache={},
+        rcp_privacy_cache={},
         last_update_success=True,
         options={},
         is_camera_online=lambda cid: True,
@@ -6426,7 +6472,7 @@ def _stub_coord_camera_toctou(
 
 class TestCameraPrivacyToctouGuard:
     """When privacy flips ON during a live fetch, the fetched frame must be
-    discarded — `_cached_image` must not be updated."""
+    discarded — `cached_image` must not be updated."""
 
     def _make_camera(self, coord: SimpleNamespace) -> object:
         from custom_components.bosch_shc_camera.camera import BoschCamera
@@ -6436,9 +6482,9 @@ class TestCameraPrivacyToctouGuard:
         cam._cam_id = CAM_ID
         cam._display_name = "Bosch Terrasse"
         cam.hass = SimpleNamespace()
-        cam._cached_image = b""
+        cam.cached_image = b""
         cam._PLACEHOLDER_JPEG = b"\xff\xd8\xff\xe0placeholder"
-        cam._last_image_fetch = float("-inf")
+        cam.last_image_fetch = float("-inf")
         cam._refresh_inflight = False
         cam._force_image_refresh = False
         cam.async_write_ha_state = MagicMock()
@@ -6447,16 +6493,16 @@ class TestCameraPrivacyToctouGuard:
     @pytest.mark.asyncio
     async def test_frame_discarded_when_privacy_on_during_fetch(self) -> None:
         """If privacy_mode becomes True while a frame was being fetched,
-        `_cached_image` must NOT be updated — simulated via a side-effect on
+        `cached_image` must NOT be updated — simulated via a side-effect on
         `async_fetch_live_snapshot` that flips the privacy cache mid-fetch."""
         coord = _stub_coord_camera_toctou(shc_state={"privacy_mode": False})
         cam = self._make_camera(coord)
-        original_cache = cam._cached_image
+        original_cache = cam.cached_image
 
         fake_image = b"\xff\xd8\xff\xe0fakeframe"
 
         def _flip_privacy_and_return(*_args: object, **_kwargs: object) -> bytes:
-            coord._shc_state_cache[CAM_ID]["privacy_mode"] = True
+            coord.shc_state_cache[CAM_ID]["privacy_mode"] = True
             return fake_image
 
         coord.async_fetch_live_snapshot = AsyncMock(
@@ -6468,9 +6514,9 @@ class TestCameraPrivacyToctouGuard:
 
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
-        await BoschCamera._async_trigger_image_refresh(cam)
+        await BoschCamera.async_trigger_image_refresh(cam)
 
-        assert cam._cached_image == original_cache
+        assert cam.cached_image == original_cache
 
     @pytest.mark.asyncio
     async def test_frame_stored_when_privacy_off_during_fetch(self) -> None:
@@ -6482,7 +6528,7 @@ class TestCameraPrivacyToctouGuard:
         coord.async_fetch_live_snapshot = AsyncMock(return_value=fake_image)
         coord.async_fetch_live_snapshot_local = AsyncMock(return_value=None)
         coord.async_fetch_fresh_event_snapshot = AsyncMock(return_value=None)
-        coord._image_entities = {}
+        coord.image_entities = {}
         cam.async_camera_image = AsyncMock(return_value=None)
 
         with patch(
@@ -6491,9 +6537,9 @@ class TestCameraPrivacyToctouGuard:
         ):
             from custom_components.bosch_shc_camera.camera import BoschCamera
 
-            await BoschCamera._async_trigger_image_refresh(cam)
+            await BoschCamera.async_trigger_image_refresh(cam)
 
-        assert cam._cached_image == fake_image
+        assert cam.cached_image == fake_image
 
 
 class TestAsyncCreateStreamSkipped:
@@ -6515,9 +6561,9 @@ class TestAsyncCreateStreamSkipped:
         from custom_components.bosch_shc_camera.const import STREAM_START_SKIPPED
 
         coord = SimpleNamespace(
-            _live_connections={},  # no existing session → triggers auto-open path
-            _stream_warming=set(),  # not warming → no wait loop
-            _shc_state_cache={CAM_ID: {"privacy_mode": False}},
+            live_connections={},  # no existing session → triggers auto-open path
+            stream_warming=set(),  # not warming → no wait loop
+            shc_state_cache={CAM_ID: {"privacy_mode": False}},
             try_live_connection=AsyncMock(return_value=STREAM_START_SKIPPED),
             async_update_listeners=MagicMock(),
             get_model_config=lambda cid: SimpleNamespace(min_total_wait=0),
@@ -6547,9 +6593,9 @@ class TestAsyncCreateStreamSkipped:
         from homeassistant.exceptions import HomeAssistantError
 
         coord = SimpleNamespace(
-            _live_connections={},
-            _stream_warming=set(),
-            _shc_state_cache={CAM_ID: {"privacy_mode": True}},
+            live_connections={},
+            stream_warming=set(),
+            shc_state_cache={CAM_ID: {"privacy_mode": True}},
             try_live_connection=AsyncMock(),
             async_update_listeners=MagicMock(),
             get_model_config=lambda cid: SimpleNamespace(min_total_wait=0),
@@ -6565,9 +6611,9 @@ class TestAsyncCreateStreamSkipped:
     async def test_failed_connection_returns_none(self) -> None:
         """When try_live_connection returns a falsy non-skipped value, return None."""
         coord = SimpleNamespace(
-            _live_connections={},
-            _stream_warming=set(),
-            _shc_state_cache={CAM_ID: {"privacy_mode": False}},
+            live_connections={},
+            stream_warming=set(),
+            shc_state_cache={CAM_ID: {"privacy_mode": False}},
             try_live_connection=AsyncMock(return_value=None),
             async_update_listeners=MagicMock(),
             get_model_config=lambda cid: SimpleNamespace(min_total_wait=0),
@@ -6603,13 +6649,13 @@ def _coord_camera_updating(
         },
         last_update_success=last_update_success,
         is_updating=lambda cam_id: is_updating_value if cam_id == CAM_ID else False,
-        _firmware_cache={CAM_ID: {"updating": is_updating_value}},
-        _shc_state_cache={CAM_ID: {"privacy_mode": False}},
-        _hw_version={CAM_ID: "HOME_Eyes_Outdoor"},
-        _lan_tcp_reachable={CAM_ID: (True, 0.0)},
+        firmware_cache={CAM_ID: {"updating": is_updating_value}},
+        shc_state_cache={CAM_ID: {"privacy_mode": False}},
+        hw_version={CAM_ID: "HOME_Eyes_Outdoor"},
+        lan_tcp_reachable={CAM_ID: (True, 0.0)},
         is_lan_reachable=lambda cam_id: True,
         is_session_stale=lambda cam_id: False,
-        _user_intent_streams=set(),
+        user_intent_streams=set(),
     )
 
 
@@ -6675,8 +6721,8 @@ class TestGH6StreamPipelineSupportedFeatures:
                     }
                 }
             },
-            _live_connections={},
-            _camera_entities={},
+            live_connections={},
+            camera_entities={},
             last_update_success=True,
         )
         entry = SimpleNamespace(entry_id="01", data={"bearer_token": "x"}, options={})
@@ -6686,5 +6732,5 @@ class TestGH6StreamPipelineSupportedFeatures:
             "component at entity setup time based on this flag"
         )
         # The flag must not change when live_connections is populated
-        coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
+        coord.live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
         assert CameraEntityFeature.STREAM in cam.supported_features

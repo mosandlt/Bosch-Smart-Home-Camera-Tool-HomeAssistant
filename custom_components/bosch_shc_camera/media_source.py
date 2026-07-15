@@ -369,7 +369,7 @@ class _SmbBackend:
         path = f"\\{self.share}\\{base}" if base else f"\\{self.share}"
         return f"{self.protocol}:\\\\{self.server}{path}"
 
-    def _new_session_cache(self) -> dict[str, Any]:
+    def new_session_cache(self) -> dict[str, Any]:
         """Build a fresh connection_cache dict + register a session into it.
 
         Returning a new dict per call forces smbclient to instantiate a new
@@ -387,7 +387,7 @@ class _SmbBackend:
         )
         return cache
 
-    def _close_session_cache(self, cache: dict[str, Any]) -> None:
+    def close_session_cache(self, cache: dict[str, Any]) -> None:
         """Best-effort tear-down so the Connection's TCP socket can close.
 
         Without this, sessions linger in ``cache`` (held by the fobj's connection
@@ -451,7 +451,7 @@ class _SmbBackend:
         from smbclient import scandir
 
         owns_cache = session is None
-        cache = session if session is not None else self._new_session_cache()
+        cache = session if session is not None else self.new_session_cache()
         try:
             path = self._path(*segments)
             for e in scandir(path, connection_cache=cache):
@@ -466,7 +466,7 @@ class _SmbBackend:
                     yield e.name
         finally:
             if owns_cache:
-                self._close_session_cache(cache)
+                self.close_session_cache(cache)
 
     # tree (camera-first: camera/year/month/day)
     def list_cameras(self, session: dict[str, Any] | None = None) -> list[str]:
@@ -607,7 +607,7 @@ class _SmbBackend:
     ) -> tuple[Any, int]:
         """Return (file-like, size). Caller closes the file-like.
 
-        The returned fobj carries a ``_bosch_close_cache`` callable; the HTTP
+        The returned fobj carries a ``bosch_close_cache`` callable; the HTTP
         streamer invokes it after fobj.close() so the per-request SMB session
         is torn down.
         """
@@ -624,17 +624,17 @@ class _SmbBackend:
             raise FileNotFoundError(filename)
         if not _parse_filename(filename):
             raise FileNotFoundError(filename)
-        cache = self._new_session_cache()
+        cache = self.new_session_cache()
         try:
             path = self._path(camera, year, month, day, filename)
             st = smb_stat(path, connection_cache=cache)
             # share_access="r": allow other readers (FRITZ.NAS opens exclusive
             # by default → NtStatus 0xc0000043 on a 2nd parallel range-request).
             fobj = open_file(path, mode="rb", share_access="r", connection_cache=cache)
-            fobj._bosch_close_cache = lambda: self._close_session_cache(cache)
+            fobj.bosch_close_cache = lambda: self.close_session_cache(cache)
             return fobj, st.st_size
         except Exception:
-            self._close_session_cache(cache)
+            self.close_session_cache(cache)
             raise
 
     # ── flat-file methods (files directly in camera/ folder on NAS) ──────────
@@ -695,16 +695,16 @@ class _SmbBackend:
             raise FileNotFoundError(filename)
         if not _parse_filename(filename):
             raise FileNotFoundError(filename)
-        cache = self._new_session_cache()
+        cache = self.new_session_cache()
         try:
             path = self._path(camera, filename)
             st = smb_stat(path, connection_cache=cache)
             # share_access="r": allow other readers (see open_file for context).
             fobj = open_file(path, mode="rb", share_access="r", connection_cache=cache)
-            fobj._bosch_close_cache = lambda: self._close_session_cache(cache)
+            fobj.bosch_close_cache = lambda: self.close_session_cache(cache)
             return fobj, st.st_size
         except Exception:
-            self._close_session_cache(cache)
+            self.close_session_cache(cache)
             raise
 
 
@@ -1249,13 +1249,13 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
         the cache is still closed at the end of this method — it never
         outlives a single browse step.
         """
-        session = backend._new_session_cache()
+        session = backend.new_session_cache()
         try:
             return self._browse_smb_inner(
                 src, backend, rest, session, single_source=single_source, root=root
             )
         finally:
-            backend._close_session_cache(session)
+            backend.close_session_cache(session)
 
     def _browse_smb_inner(
         self,
@@ -1749,7 +1749,7 @@ class BoschCameraMediaView(HomeAssistantView):  # type: ignore[misc]
             await response.write_eof()
             return response
         finally:
-            close_cache = getattr(fobj, "_bosch_close_cache", None)
+            close_cache = getattr(fobj, "bosch_close_cache", None)
             try:
                 await self.hass.async_add_executor_job(fobj.close)
             finally:

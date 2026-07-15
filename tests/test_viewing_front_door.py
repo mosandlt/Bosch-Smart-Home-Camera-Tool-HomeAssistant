@@ -6,8 +6,8 @@ OSError fallback + URL shape), and `stop_viewing_front_door`.
 
 Reuses the same lightweight `SimpleNamespace` coordinator-stub pattern as
 `test_init.py`'s `try_live_connection_inner` tests, since this module reads
-the exact same coordinator attributes (`_live_connections`,
-`_tls_proxy_ports`) that those fixtures already populate.
+the exact same coordinator attributes (`live_connections`,
+`tls_proxy_ports`) that those fixtures already populate.
 """
 
 from __future__ import annotations
@@ -40,10 +40,10 @@ def _enable_loopback_sockets(socket_enabled: None) -> Generator[None, None, None
 
 def _coord(**overrides: object) -> SimpleNamespace:
     base: dict[str, object] = dict(
-        _live_connections={},
-        _tls_proxy_ports={},
-        _viewing_front_door_runner=None,
-        _viewing_sticky_port={},
+        live_connections={},
+        tls_proxy_ports={},
+        viewing_front_door_runner=None,
+        viewing_sticky_port={},
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -63,46 +63,44 @@ class TestViewingResolveInner:
     @pytest.mark.asyncio
     async def test_non_local_connection_type_returns_none(self):
         coord = _coord(
-            _live_connections={CAM_A: {"_connection_type": "REMOTE"}},
-            _tls_proxy_ports={CAM_A: 12345},
+            live_connections={CAM_A: {"_connection_type": "REMOTE"}},
+            tls_proxy_ports={CAM_A: 12345},
         )
         assert await viewing_resolve_inner(coord, CAM_A) is None
 
     @pytest.mark.asyncio
     async def test_missing_port_returns_none(self):
         coord = _coord(
-            _live_connections={
+            live_connections={
                 CAM_A: {
                     "_connection_type": "LOCAL",
                     "_local_user": "u",
                     "_local_password": "p",
                 }
             },
-            _tls_proxy_ports={},  # no port cached yet
+            tls_proxy_ports={},  # no port cached yet
         )
         assert await viewing_resolve_inner(coord, CAM_A) is None
 
     @pytest.mark.asyncio
     async def test_missing_user_or_password_returns_none(self):
         coord = _coord(
-            _live_connections={
-                CAM_A: {"_connection_type": "LOCAL", "_local_user": "u"}
-            },
-            _tls_proxy_ports={CAM_A: 12345},
+            live_connections={CAM_A: {"_connection_type": "LOCAL", "_local_user": "u"}},
+            tls_proxy_ports={CAM_A: 12345},
         )
         assert await viewing_resolve_inner(coord, CAM_A) is None
 
     @pytest.mark.asyncio
     async def test_all_present_returns_inner_target(self):
         coord = _coord(
-            _live_connections={
+            live_connections={
                 CAM_A: {
                     "_connection_type": "LOCAL",
                     "_local_user": "u-fresh",
                     "_local_password": "p-fresh",
                 }
             },
-            _tls_proxy_ports={CAM_A: 55123},
+            tls_proxy_ports={CAM_A: 55123},
         )
         target = await viewing_resolve_inner(coord, CAM_A)
         assert target is not None
@@ -130,7 +128,7 @@ class TestViewingResolveInner:
 def runner_coord():
     coord = _coord()
     yield coord
-    runner = coord._viewing_front_door_runner
+    runner = coord.viewing_front_door_runner
     if runner is not None:
         runner.stop_all()
 
@@ -171,18 +169,18 @@ class TestStartViewingFrontDoor:
 
     @pytest.mark.asyncio
     async def test_lazily_creates_runner(self, runner_coord):
-        assert runner_coord._viewing_front_door_runner is None
+        assert runner_coord.viewing_front_door_runner is None
         await start_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=60
         )
-        assert isinstance(runner_coord._viewing_front_door_runner, FrontDoorRunner)
+        assert isinstance(runner_coord.viewing_front_door_runner, FrontDoorRunner)
 
     @pytest.mark.asyncio
     async def test_binds_auth_none_localhost_only(self, runner_coord):
         await start_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=60
         )
-        server = runner_coord._viewing_front_door_runner._servers[CAM_A]
+        server = runner_coord.viewing_front_door_runner._servers[CAM_A]
         assert server.config.bind_host == "127.0.0.1"
         assert server.config.auth_mode == AUTH_NONE
         assert server.config.ip_allowlist == frozenset()
@@ -192,14 +190,14 @@ class TestStartViewingFrontDoor:
         url1 = await start_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=60
         )
-        port1 = runner_coord._viewing_sticky_port[CAM_A]
+        port1 = runner_coord.viewing_sticky_port[CAM_A]
         # Second call reuses the already-bound listener (see
         # test_second_call_reuses_listener_does_not_rebind below) and must
         # keep publishing the SAME port either way.
         url2 = await start_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=60
         )
-        port2 = runner_coord._viewing_sticky_port[CAM_A]
+        port2 = runner_coord.viewing_sticky_port[CAM_A]
         assert port1 == port2
         assert url1 == url2
 
@@ -216,7 +214,7 @@ class TestStartViewingFrontDoor:
         await start_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=60
         )
-        server_before = runner_coord._viewing_front_door_runner._servers[CAM_A]
+        server_before = runner_coord.viewing_front_door_runner._servers[CAM_A]
         with patch.object(
             FrontDoorRunner, "start_server", AsyncMock()
         ) as start_server_spy:
@@ -224,7 +222,7 @@ class TestStartViewingFrontDoor:
                 runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=60
             )
         start_server_spy.assert_not_called()
-        server_after = runner_coord._viewing_front_door_runner._servers[CAM_A]
+        server_after = runner_coord.viewing_front_door_runner._servers[CAM_A]
         assert server_before is server_after
 
     @pytest.mark.asyncio
@@ -239,7 +237,7 @@ class TestStartViewingFrontDoor:
         url1 = await start_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=60
         )
-        port1 = runner_coord._viewing_sticky_port[CAM_A]
+        port1 = runner_coord.viewing_sticky_port[CAM_A]
         url2 = await start_viewing_front_door(
             runner_coord,
             CAM_A,
@@ -247,7 +245,7 @@ class TestStartViewingFrontDoor:
             audio_param="&enableaudio=1",
             max_session_duration=3600,
         )
-        port2 = runner_coord._viewing_sticky_port[CAM_A]
+        port2 = runner_coord.viewing_sticky_port[CAM_A]
         assert port1 == port2  # same listener, same port
         assert "inst=1" in url1
         assert "inst=2" in url2
@@ -264,12 +262,12 @@ class TestStartViewingFrontDoor:
         blocker = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
         blocked_port = blocker.sockets[0].getsockname()[1]
         try:
-            runner_coord._viewing_sticky_port[CAM_A] = blocked_port
+            runner_coord.viewing_sticky_port[CAM_A] = blocked_port
             url = await start_viewing_front_door(
                 runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=60
             )
             assert url is not None
-            new_port = runner_coord._viewing_sticky_port[CAM_A]
+            new_port = runner_coord.viewing_sticky_port[CAM_A]
             assert new_port != blocked_port
         finally:
             blocker.close()
@@ -303,6 +301,6 @@ class TestStopViewingFrontDoor:
         await start_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=60
         )
-        assert runner_coord._viewing_front_door_runner.has_server(CAM_A)
+        assert runner_coord.viewing_front_door_runner.has_server(CAM_A)
         await stop_viewing_front_door(runner_coord, CAM_A)
-        assert not runner_coord._viewing_front_door_runner.has_server(CAM_A)
+        assert not runner_coord.viewing_front_door_runner.has_server(CAM_A)

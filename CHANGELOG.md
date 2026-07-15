@@ -5,6 +5,18 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v16.0.1] - 2026-07-15
+
+Patch — three real bug fixes reported by realKim-dotcom against v16.0.0, plus a small `cloud_ssl.py` session-lifecycle improvement found during HA-Core-submission-prep work. No breaking changes.
+
+### Fixed
+
+- **Mini-NVR never started on slower-encoder/weaker-WiFi cameras** ([#49](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/49)). The recorder's readiness wait for a fresh stream URL was a flat 12s window tuned only for Gen2 cameras, while Gen1 Outdoor's own documented pre-warm ceiling is 35s on a weak link — the recorder gave up on every coordinator tick. Redesigned as an event-driven wait (a per-camera signal set the instant the stream is genuinely ready) with the camera's own model-specific timing used only as a safety-net ceiling, not the primary mechanism — removes the underlying class of bug (two independently-drifting timing constants) rather than just widening the old one.
+- **Two concurrent recorder-start attempts for the same camera could both spawn ffmpeg**, leaving two processes writing the same segment file and mutually truncating it (same report, secondary finding — pre-existing on v15.0.2 too, not a v16 regression). The recorder's stop-then-spawn sequence is now fully serialized under one lock acquisition, the same pattern already used for the pre-roll ring buffer.
+- **`event_buffered` motion clips dropped 15-31 seconds of footage right over the motion event** when `nvr_finalize_ring_on_event` is enabled ([#50](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/50), verified against the camera's own on-screen clock). The pre-roll ring's "always drop the newest segment" safety rule was being applied even after the ring had already been stopped for finalization, discarding a real, complete segment for no reason — restructured the finalize step so the ring is confirmed stopped before the clip is assembled from a stable, already-correct segment list, with the ring restarted only afterward.
+- **Motion-clip filenames used UTC while continuous-mode segments use local time** (cosmetic, same report), sorting a single event's files hours apart in the same dated folder. Motion-clip naming now uses local time to match.
+- Shared Bosch cloud session now closes on `EVENT_HOMEASSISTANT_CLOSE` instead of the earlier `EVENT_HOMEASSISTANT_STOP`, matching Home Assistant's own `aiohttp_client` session-teardown timing — avoids tearing the session down while other integrations' stop-phase cleanup may still be running.
+
 ## [v16.0.0] - 2026-07-14
 
 Major — HA-Core-submission preparation: TLS-proxy rewritten to native asyncio, go2rtc streams register through Home Assistant's own mechanism instead of a manual API call, OAuth ported to Core's `application_credentials` platform, `smbprotocol` made an optional dependency, and a further round of protocol/session logic extracted into the standalone `bosch-shc-camera-client` PyPI library. No breaking changes to the config schema or public entities — existing installs upgrade with zero action needed. Bumped as a major version because of the scale of the internal architecture change, matching the v15.0.0 precedent.

@@ -38,9 +38,9 @@ def _make_session(resp):
 
 def _make_coord(**overrides):
     base = dict(
-        _feature_flags={},
-        _protocol_checked=False,
-        _integration_version="14.5.9",
+        feature_flags={},
+        protocol_checked=False,
+        integration_version="14.5.9",
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -49,13 +49,13 @@ def _make_coord(**overrides):
 class TestEnsureFeatureFlags:
     @pytest.mark.asyncio
     async def test_already_set_is_a_noop(self):
-        coord = _make_coord(_feature_flags={"already": "set"})
+        coord = _make_coord(feature_flags={"already": "set"})
         session = _make_session(_make_resp(200, {"new": "data"}))
 
         await ensure_feature_flags(coord, session, HEADERS)
 
         session.get.assert_not_called()
-        assert coord._feature_flags == {"already": "set"}
+        assert coord.feature_flags == {"already": "set"}
 
     @pytest.mark.asyncio
     async def test_200_caches_flags(self):
@@ -64,7 +64,7 @@ class TestEnsureFeatureFlags:
 
         await ensure_feature_flags(coord, session, HEADERS)
 
-        assert coord._feature_flags == {"flag_a": True}
+        assert coord.feature_flags == {"flag_a": True}
 
     @pytest.mark.asyncio
     async def test_non_200_leaves_flags_unset(self):
@@ -73,7 +73,7 @@ class TestEnsureFeatureFlags:
 
         await ensure_feature_flags(coord, session, HEADERS)
 
-        assert coord._feature_flags == {}
+        assert coord.feature_flags == {}
 
     @pytest.mark.asyncio
     async def test_client_error_is_swallowed(self):
@@ -85,7 +85,7 @@ class TestEnsureFeatureFlags:
 
         await ensure_feature_flags(coord, session, HEADERS)  # must not raise
 
-        assert coord._feature_flags == {}
+        assert coord.feature_flags == {}
 
     @pytest.mark.asyncio
     async def test_timeout_is_swallowed(self):
@@ -114,7 +114,7 @@ class TestEnsureFeatureFlags:
 class TestEnsureProtocolChecked:
     @pytest.mark.asyncio
     async def test_already_checked_is_a_noop(self):
-        coord = _make_coord(_protocol_checked=True)
+        coord = _make_coord(protocol_checked=True)
         session = _make_session(_make_resp(200, {"state": "SUPPORTED"}))
 
         await ensure_protocol_checked(coord, session, HEADERS)
@@ -140,7 +140,7 @@ class TestEnsureProtocolChecked:
 
         await ensure_protocol_checked(coord, session, HEADERS)
 
-        assert coord._protocol_checked is True
+        assert coord.protocol_checked is True
 
     @pytest.mark.asyncio
     async def test_malformed_json_body_is_swallowed(self):
@@ -154,7 +154,7 @@ class TestEnsureProtocolChecked:
 
         await ensure_protocol_checked(coord, session, HEADERS)  # must not raise
 
-        assert coord._protocol_checked is True
+        assert coord.protocol_checked is True
 
     @pytest.mark.asyncio
     async def test_supported_logs_no_warning(
@@ -207,4 +207,4 @@ class TestEnsureProtocolChecked:
 
         await ensure_protocol_checked(coord, session, HEADERS)  # must not raise
 
-        assert coord._protocol_checked is True
+        assert coord.protocol_checked is True

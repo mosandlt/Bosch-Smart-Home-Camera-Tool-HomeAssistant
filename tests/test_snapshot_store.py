@@ -367,7 +367,7 @@ async def test_exact_min_size_accepted(tmp_path: Path) -> None:
 async def test_privacy_mode_skips_save(tmp_path: Path) -> None:
     """When privacy_mode is ON the background refresh exits early — no save occurs.
 
-    The privacy gate at the top of _async_trigger_image_refresh returns before
+    The privacy gate at the top of async_trigger_image_refresh returns before
     any fetch/save logic runs. We verify no disk file is created.
 
     turbojpeg is mocked so the test runs without the libturbojpeg C extension.
@@ -404,16 +404,16 @@ async def test_privacy_mode_skips_save(tmp_path: Path) -> None:
                 "live": {},
             }
         },
-        _live_connections={},
-        _camera_entities={},
-        _image_entities={},
-        _stream_fell_back={},
-        _stream_error_count={},
+        live_connections={},
+        camera_entities={},
+        image_entities={},
+        stream_fell_back={},
+        stream_error_count={},
         last_update_success=True,
         motion_settings=lambda cid: {},
         is_stream_warming=lambda cid: False,
         # Privacy ON for this camera
-        _shc_state_cache={cam_id: {"privacy_mode": True}},
+        shc_state_cache={cam_id: {"privacy_mode": True}},
     )
 
     entry = SimpleNamespace(
@@ -436,7 +436,7 @@ async def test_privacy_mode_skips_save(tmp_path: Path) -> None:
         "custom_components.bosch_shc_camera.camera.save_snapshot",
         side_effect=_mock_save,
     ):
-        await cam._async_trigger_image_refresh(delay=0)
+        await cam.async_trigger_image_refresh(delay=0)
 
     # Privacy mode gate must prevent any save_snapshot call
     assert saved_calls == [], (

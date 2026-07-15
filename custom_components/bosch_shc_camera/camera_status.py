@@ -10,16 +10,16 @@ Gating semantics are DELIBERATELY different from `event_polling.py`'s
 `poll_events` (do not homogenize the two — a bug-hunt agent flagged this
 explicitly during review of the event-polling extraction): there is no
 single top-level "do_status" bool. Instead, each camera's own coroutine
-gates itself via `coordinator._should_check_status(cam_id, now,
+gates itself via `coordinator.should_check_status(cam_id, now,
 interval_status)` — cameras can be on different per-camera check
 intervals (e.g. extended intervals for persistently-offline cameras).
 Correspondingly, `poll_statuses`' returned `any_status_checked` is set
 True for EVERY camera whose gather result wasn't an exception — even if
 that camera's own gate skipped the actual check and returned a cached
 status — NOT only on a "definitive fetch" like `poll_events`'s return
-value. This is intentional: `_per_cam_status_at[cam_id]` was already
+value. This is intentional: `per_cam_status_at[cam_id]` was already
 updated inside a real check, so re-deriving "was anything checked" from
-`_should_check_status` again here would always read False for
+`should_check_status` again here would always read False for
 extended-offline cameras (their per-cam timestamp was just set to `now`),
 stalling `_last_status` forever when all cameras are persistently
 offline.
@@ -64,14 +64,14 @@ async def _check_one_camera_status(
     interval_status: int,
 ) -> tuple[str, str]:
     """Check a single camera's status. Returns ``(cam_id, status)``."""
-    if not coordinator._should_check_status(cam_id, now, interval_status):
-        return (cam_id, coordinator._cached_status.get(cam_id, "UNKNOWN"))
+    if not coordinator.should_check_status(cam_id, now, interval_status):
+        return (cam_id, coordinator.cached_status.get(cam_id, "UNKNOWN"))
 
     # Fast path: local TCP ping — if camera is reachable on LAN,
     # it's definitely ONLINE (skip cloud /commissioned call).
-    if await coordinator._async_local_tcp_ping(cam_id):
-        coordinator._per_cam_status_at[cam_id] = now
-        coordinator._offline_since.pop(cam_id, None)  # clear offline tracking
+    if await coordinator.async_local_tcp_ping(cam_id):
+        coordinator.per_cam_status_at[cam_id] = now
+        coordinator.offline_since.pop(cam_id, None)  # clear offline tracking
         _LOGGER.debug(
             "Local TCP ping OK for %s — ONLINE (cloud check skipped)",
             cam_id[:8],
@@ -88,7 +88,7 @@ async def _check_one_camera_status(
         # LAN with a brief (~2-3 s) re-buffer instead of
         # waiting for the user to re-toggle. Cooldown 5 min
         # prevents ping-pong if LAN flaps in/out.
-        if coordinator._stream_fell_back.get(cam_id):
+        if coordinator.stream_fell_back.get(cam_id):
             # Read options fresh here: this branch only runs for a
             # camera that has fallen back to REMOTE (rare), so the
             # cost is negligible, and reading the entry's options
@@ -96,35 +96,35 @@ async def _check_one_camera_status(
             # snapshot (which a caller/test may set independently of
             # the entry). Reverted a micro-opt that broke that
             # contract. 2026-06-18.
-            _check_opts = _get_options(coordinator._entry)
+            _check_opts = _get_options(coordinator.entry)
             if _check_opts.get("stream_connection_type", "local") == "auto":
-                err_count_was = coordinator._stream_error_count.get(cam_id, 0)
+                err_count_was = coordinator.stream_error_count.get(cam_id, 0)
                 _LOGGER.info(
                     "AUTO mode: %s LAN reachable again — clearing "
                     "REMOTE fallback flag (counter=%d)",
                     cam_id[:8],
                     err_count_was,
                 )
-                coordinator._stream_error_count.pop(cam_id, None)
-                coordinator._stream_error_at.pop(cam_id, None)
-                coordinator._stream_fell_back.pop(cam_id, None)
+                coordinator.stream_error_count.pop(cam_id, None)
+                coordinator.stream_error_at.pop(cam_id, None)
+                coordinator.stream_fell_back.pop(cam_id, None)
                 # Active promotion path: only when a stream is
                 # actively running on REMOTE-fallback.
-                live = coordinator._live_connections.get(cam_id, {})
+                live = coordinator.live_connections.get(cam_id, {})
                 if live.get("_connection_type") == "REMOTE":
-                    last_promote = coordinator._local_promote_at.get(
+                    last_promote = coordinator.local_promote_at.get(
                         cam_id, float("-inf")
                     )
                     _LOCAL_PROMOTE_COOLDOWN_S = 300
                     if (now - last_promote) > _LOCAL_PROMOTE_COOLDOWN_S:
-                        coordinator._local_promote_at[cam_id] = now
+                        coordinator.local_promote_at[cam_id] = now
                         _LOGGER.info(
                             "AUTO mode: %s active REMOTE stream — "
                             "attempting live LOCAL promotion via renewal",
                             cam_id[:8],
                         )
-                        coordinator._spawn_tracked(
-                            coordinator._promote_to_local(cam_id),
+                        coordinator.spawn_tracked(
+                            coordinator.promote_to_local(cam_id),
                             name=f"bosch_shc_camera_promote_local_{cam_id[:8]}",
                         )
         return (cam_id, "ONLINE")
@@ -166,7 +166,7 @@ async def _check_one_camera_status(
                 ) as r:
                     if r.status == 200:
                         comm = await r.json()
-                        coordinator._commissioned_cache[cam_id] = comm
+                        coordinator.commissioned_cache[cam_id] = comm
                         if comm.get("connected") and comm.get("commissioned"):
                             status = "ONLINE"
                         elif comm.get("configured"):
@@ -181,20 +181,20 @@ async def _check_one_camera_status(
         except Exception as err:
             _LOGGER.debug("Commissioned fallback error for %s: %s", cam_id, err)
 
-    coordinator._per_cam_status_at[cam_id] = now
+    coordinator.per_cam_status_at[cam_id] = now
     # Track offline duration for extended interval.
-    # SESSION_LIMIT is NOT a connectivity failure — do not add to _offline_since
+    # SESSION_LIMIT is NOT a connectivity failure — do not add to offline_since
     # so the camera does not get penalised with extended check intervals.
     if status in ("OFFLINE", "UPDATING"):
-        if cam_id not in coordinator._offline_since:
-            coordinator._offline_since[cam_id] = now
+        if cam_id not in coordinator.offline_since:
+            coordinator.offline_since[cam_id] = now
     else:
-        coordinator._offline_since.pop(cam_id, None)
+        coordinator.offline_since.pop(cam_id, None)
     # Fire persistent notification if 444 hits accumulate
     if status == "SESSION_LIMIT":
         _handle_quota = getattr(coordinator, "_async_handle_session_quota_hit", None)
         if _handle_quota is not None:
-            coordinator._spawn_tracked(
+            coordinator.spawn_tracked(
                 _handle_quota(cam_id),
                 name=f"bosch_shc_camera_session_quota_{cam_id[:8]}",
             )
@@ -230,10 +230,10 @@ async def poll_statuses(
         if isinstance(result, BaseException):
             continue
         cid, status = result
-        coordinator._cached_status[cid] = status
-        # Mark as checked unconditionally — _per_cam_status_at[cid] was
+        coordinator.cached_status[cid] = status
+        # Mark as checked unconditionally — per_cam_status_at[cid] was
         # just updated inside _check_one_camera_status, so re-calling
-        # _should_check_status would always return False for
+        # should_check_status would always return False for
         # extended-offline cams (their per-cam timestamp was just set to
         # `now`). That caused _last_status to stall forever when all
         # cameras were persistently offline, making do_status=True on

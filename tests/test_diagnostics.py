@@ -85,9 +85,9 @@ async def test_diagnostics_redacts_nested_fcm_credentials(
         {
             "data": {},
             "last_update_success": True,
-            "_fcm_running": False,
-            "_fcm_healthy": True,
-            "_auth_outage_count": 0,
+            "fcm_running": False,
+            "fcm_healthy": True,
+            "auth_outage_count": 0,
             "update_interval": None,
         },
     )()
@@ -150,9 +150,9 @@ async def test_camera_summary_includes_required_fields(hass: HomeAssistant) -> N
                 }
             },
             "last_update_success": True,
-            "_fcm_running": True,
-            "_fcm_healthy": True,
-            "_auth_outage_count": 0,
+            "fcm_running": True,
+            "fcm_healthy": True,
+            "auth_outage_count": 0,
             "update_interval": None,
         },
     )()
@@ -181,9 +181,9 @@ async def test_camera_summary_handles_empty_coordinator(hass: HomeAssistant) -> 
         {
             "data": {},
             "last_update_success": True,
-            "_fcm_running": False,
-            "_fcm_healthy": True,
-            "_auth_outage_count": 0,
+            "fcm_running": False,
+            "fcm_healthy": True,
+            "auth_outage_count": 0,
             "update_interval": None,
         },
     )()
@@ -210,7 +210,7 @@ async def test_coordinator_section_exposes_health_signals(
     """coordinator.running, fcm_running, fcm_healthy, auth_outage_count,
     and stream_warming_count are essential bug-report context.
 
-    Regression: `_stream_warming` is a `StreamWarmingView` facade (Phase 1
+    Regression: `stream_warming` is a `StreamWarmingView` facade (Phase 1
     coordinator rewrite), not a plain `set[str]` — a stub using a real
     `set()` here would NOT have caught `len()` breaking against the real
     facade (found live by a THREE_PER_ISSUE_PER_CHANGE bug-hunt agent), so
@@ -234,10 +234,10 @@ async def test_coordinator_section_exposes_health_signals(
         {
             "data": {},
             "last_update_success": False,  # mid-incident
-            "_fcm_running": True,
-            "_fcm_healthy": False,
-            "_auth_outage_count": 4,
-            "_stream_warming": StreamWarmingView(sessions),
+            "fcm_running": True,
+            "fcm_healthy": False,
+            "auth_outage_count": 4,
+            "stream_warming": StreamWarmingView(sessions),
             "update_interval": type("Td", (), {"total_seconds": lambda self: 60.0})(),
         },
     )()
@@ -273,9 +273,9 @@ async def test_integration_version_exposed(hass: HomeAssistant) -> None:
         {
             "data": {},
             "last_update_success": True,
-            "_fcm_running": False,
-            "_fcm_healthy": True,
-            "_auth_outage_count": 0,
+            "fcm_running": False,
+            "fcm_healthy": True,
+            "auth_outage_count": 0,
             "update_interval": None,
         },
     )()
@@ -324,14 +324,14 @@ async def test_camera_stream_health_fields(hass: HomeAssistant) -> None:
                 }
             },
             "last_update_success": True,
-            "_fcm_running": False,
-            "_fcm_healthy": True,
-            "_auth_outage_count": 0,
-            "_offline_since": {cam_id: offline_ts},
-            "_stream_error_count": {cam_id: 3},
-            "_stream_fell_back": {cam_id: True},
-            "_session_stale": {cam_id: False},
-            "_stream_warming": set(),
+            "fcm_running": False,
+            "fcm_healthy": True,
+            "auth_outage_count": 0,
+            "offline_since": {cam_id: offline_ts},
+            "stream_error_count": {cam_id: 3},
+            "stream_fell_back": {cam_id: True},
+            "session_stale": {cam_id: False},
+            "stream_warming": set(),
             "update_interval": None,
         },
     )()
@@ -379,14 +379,14 @@ async def test_camera_stream_health_defaults_for_healthy_camera(
                 }
             },
             "last_update_success": True,
-            "_fcm_running": True,
-            "_fcm_healthy": True,
-            "_auth_outage_count": 0,
-            "_offline_since": {},
-            "_stream_error_count": {},
-            "_stream_fell_back": {},
-            "_session_stale": {},
-            "_stream_warming": set(),
+            "fcm_running": True,
+            "fcm_healthy": True,
+            "auth_outage_count": 0,
+            "offline_since": {},
+            "stream_error_count": {},
+            "stream_fell_back": {},
+            "session_stale": {},
+            "stream_warming": set(),
             "update_interval": None,
         },
     )()
@@ -424,9 +424,9 @@ async def test_options_redaction_strips_smb_credentials(hass: HomeAssistant) -> 
         {
             "data": {},
             "last_update_success": True,
-            "_fcm_running": False,
-            "_fcm_healthy": True,
-            "_auth_outage_count": 0,
+            "fcm_running": False,
+            "fcm_healthy": True,
+            "auth_outage_count": 0,
             "update_interval": None,
         },
     )()
@@ -464,9 +464,9 @@ async def test_options_redaction_strips_frigate_credentials(
         {
             "data": {},
             "last_update_success": True,
-            "_fcm_running": False,
-            "_fcm_healthy": True,
-            "_auth_outage_count": 0,
+            "fcm_running": False,
+            "fcm_healthy": True,
+            "auth_outage_count": 0,
             "update_interval": None,
         },
     )()

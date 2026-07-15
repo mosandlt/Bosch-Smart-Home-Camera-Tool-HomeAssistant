@@ -81,7 +81,7 @@ def _make_gate_coord(
 ) -> SimpleNamespace:
     """Minimal coordinator stub with the three fields ``should_record`` reads."""
     return SimpleNamespace(
-        _live_connections={CAM_ID: {"_connection_type": conn_type}},
+        live_connections={CAM_ID: {"_connection_type": conn_type}},
         is_camera_online=lambda cid: online,
     )
 
@@ -115,11 +115,11 @@ class TestShouldRecord:
         assert should_record(coord, CAM_ID, switch_on=True) is False
 
     def test_no_live_connection_returns_false(self):
-        """Unknown cam_id (not in `_live_connections`) → not LOCAL → False."""
+        """Unknown cam_id (not in `live_connections`) → not LOCAL → False."""
         from custom_components.bosch_shc_camera.recorder import should_record
 
         coord = SimpleNamespace(
-            _live_connections={},
+            live_connections={},
             is_camera_online=lambda cid: True,
         )
         assert should_record(coord, CAM_ID, switch_on=True) is False
@@ -837,10 +837,10 @@ def _make_preroll_coord(tmp_path, *, cam_title: str = CAM_TITLE) -> SimpleNamesp
             "nvr_preroll_cache_dir": str(tmp_path),
             "nvr_preroll_seconds": 30,
         },
-        _nvr_preroll_processes={},
-        _nvr_preroll_segment_counts={},
-        _nvr_preroll_tasks={},
-        _bg_tasks=set(),
+        nvr_preroll_processes={},
+        nvr_preroll_segment_counts={},
+        nvr_preroll_tasks={},
+        bg_tasks=set(),
         # SENTINEL_RULE: monotonic-based "last X" maps default to float('-inf')
         # so any (now - last) >= interval check is True on fresh CI VMs.
         _nvr_last_preroll_prune={CAM_ID: float("-inf")},
@@ -864,19 +864,19 @@ def _make_phase_coord(opts=None, cam_title="Terrasse", cam_id=CAM_ID_SHORT):
             "nvr_quality": "auto",
         },
         data={cam_id: {"info": {"title": cam_title}}},
-        _live_connections={
+        live_connections={
             cam_id: {
                 "_connection_type": "LOCAL",
                 "rtspsUrl": "rtsp://user:pass@127.0.0.1:9000/rtsp_tunnel?inst=1&enableaudio=1",
             }
         },
-        _nvr_processes={},
-        _nvr_preroll_processes={},
-        _nvr_preroll_segment_counts={},
+        nvr_processes={},
+        nvr_preroll_processes={},
+        nvr_preroll_segment_counts={},
         _nvr_preroll_last_crash={},
-        _nvr_preroll_tasks={},
-        _nvr_error_state={},
-        _nvr_auth_retry_count={},
+        nvr_preroll_tasks={},
+        nvr_error_state={},
+        nvr_auth_retry_count={},
         _nvr_recorder_locks={},
         hass=MagicMock(),
         async_update_listeners=MagicMock(),
@@ -884,16 +884,16 @@ def _make_phase_coord(opts=None, cam_title="Terrasse", cam_id=CAM_ID_SHORT):
     coord.hass.async_add_executor_job = AsyncMock(return_value=None)
     coord.hass.async_create_background_task = MagicMock(return_value=MagicMock())
     coord.hass.loop = MagicMock()
-    coord._bg_tasks = set()
+    coord.bg_tasks = set()
 
-    def _get_nvr_recorder_lock(cid: str) -> asyncio.Lock:
+    def get_nvr_recorder_lock(cid: str) -> asyncio.Lock:
         lock = coord._nvr_recorder_locks.get(cid)
         if lock is None:
             lock = asyncio.Lock()
             coord._nvr_recorder_locks[cid] = lock
         return lock
 
-    coord._get_nvr_recorder_lock = _get_nvr_recorder_lock
+    coord.get_nvr_recorder_lock = get_nvr_recorder_lock
 
     # get_nvr_mode: mirrors the REAL coordinator method exactly — per-camera
     # override first (GitHub #43), else fall back to the global nvr_event_only
@@ -1637,22 +1637,22 @@ def _make_lifecycle_coord(
     (start/stop_recorder, _watch_recorder, sync_nvr_cleanup) touch."""
     proxy_url = "rtsp://user:pass@127.0.0.1:46597/rtsp_tunnel?inst=1"
     coord = SimpleNamespace(
-        _live_connections={
+        live_connections={
             CAM_ID: {
                 "_connection_type": conn_type,
                 "rtspsUrl": proxy_url,
             }
         },
-        _nvr_processes={},
-        _nvr_preroll_processes={},
-        _nvr_preroll_segment_counts={},
-        _nvr_preroll_tasks={},
-        _nvr_user_intent={CAM_ID: True},
-        _nvr_recent_crash={},
-        _nvr_error_state={},
-        _nvr_auth_retry_count={},
+        nvr_processes={},
+        nvr_preroll_processes={},
+        nvr_preroll_segment_counts={},
+        nvr_preroll_tasks={},
+        nvr_user_intent={CAM_ID: True},
+        nvr_recent_crash={},
+        nvr_error_state={},
+        nvr_auth_retry_count={},
         _nvr_recorder_locks={},
-        _bg_tasks=set(),
+        bg_tasks=set(),
         data={CAM_ID: {"info": {"title": "Terrasse"}, "status": "ONLINE"}},
         options={
             "nvr_base_path": base_path,
@@ -1663,15 +1663,28 @@ def _make_lifecycle_coord(
         async_update_listeners=MagicMock(),
     )
 
-    def _get_nvr_recorder_lock(cam_id: str) -> asyncio.Lock:
+    def get_nvr_recorder_lock(cam_id: str) -> asyncio.Lock:
         lock = coord._nvr_recorder_locks.get(cam_id)
         if lock is None:
             lock = asyncio.Lock()
             coord._nvr_recorder_locks[cam_id] = lock
         return lock
 
-    coord._get_nvr_recorder_lock = _get_nvr_recorder_lock
+    coord.get_nvr_recorder_lock = get_nvr_recorder_lock
 
+    # get_session: real CameraSessionState instances (lazily created, one per
+    # cam_id) so stream_ready_event is a real, independent asyncio.Event per
+    # camera — matches the production get_or_create_session backing store.
+    # A camera that already has a usable rtspsUrl (the common case for this
+    # fixture's default) never touches this — start_recorder's fast path
+    # checks the URL first and only reads get_session().stream_ready_event
+    # when it needs to wait.
+    from custom_components.bosch_shc_camera.session_state import (
+        get_or_create_session as _get_or_create_session,
+    )
+
+    coord._sessions = {}
+    coord.get_session = lambda cid: _get_or_create_session(coord._sessions, cid)
     # get_nvr_mode: mirrors the REAL coordinator method exactly — per-camera
     # override first (GitHub #43), else fall back to the global nvr_event_only
     # option. Bug-hunt finding (2026-07-11): an earlier version of this stub
@@ -1863,16 +1876,30 @@ class TestStartRecorder:
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
             await recorder.start_recorder(coord, CAM_ID)
         spawn.assert_not_called()
-        assert CAM_ID not in coord._nvr_processes
+        assert CAM_ID not in coord.nvr_processes
 
     @pytest.mark.asyncio
     async def test_skipped_when_no_proxy_url(self, tmp_path: Path):
-        """rtspsUrl missing or not rtsp:// → skip with warning, no spawn."""
+        """rtspsUrl missing or not rtsp:// → skip with warning, no spawn.
+
+        The readiness-wait is now event-based (GitHub #49 redesign): it
+        awaits stream_ready_event with a model-derived timeout instead of
+        polling. Patch asyncio.wait_for to raise TimeoutError immediately so
+        this test still exercises the full "never becomes ready" exhaustion
+        path without any real wall-clock delay.
+        """
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
-        coord._live_connections[CAM_ID]["rtspsUrl"] = ""
-        with patch.object(asyncio, "create_subprocess_exec") as spawn:
+        coord.live_connections[CAM_ID]["rtspsUrl"] = ""
+
+        async def _timeout_immediately(*_a, **_kw):
+            raise TimeoutError
+
+        with (
+            patch.object(asyncio, "create_subprocess_exec") as spawn,
+            patch.object(asyncio, "wait_for", new=_timeout_immediately),
+        ):
             await recorder.start_recorder(coord, CAM_ID)
         spawn.assert_not_called()
 
@@ -1883,8 +1910,15 @@ class TestStartRecorder:
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
-        coord._live_connections[CAM_ID]["rtspsUrl"] = "rtsps://camera.lan/x"
-        with patch.object(asyncio, "create_subprocess_exec") as spawn:
+        coord.live_connections[CAM_ID]["rtspsUrl"] = "rtsps://camera.lan/x"
+
+        async def _timeout_immediately(*_a, **_kw):
+            raise TimeoutError
+
+        with (
+            patch.object(asyncio, "create_subprocess_exec") as spawn,
+            patch.object(asyncio, "wait_for", new=_timeout_immediately),
+        ):
             await recorder.start_recorder(coord, CAM_ID)
         spawn.assert_not_called()
 
@@ -1901,21 +1935,21 @@ class TestStartRecorder:
 
         with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
             await recorder.start_recorder(coord, CAM_ID)
-        assert coord._nvr_processes[CAM_ID] is proc
+        assert coord.nvr_processes[CAM_ID] is proc
         # Segment dir was created — under the staging tree as of v11.0.4
         # NVR-storage-target refactor (ffmpeg always writes to _staging first).
         assert (tmp_path / "_staging" / "Terrasse").exists()
 
     @pytest.mark.asyncio
     async def test_successful_spawn_clears_stale_error_state(self, tmp_path: Path):
-        """Issue #42: _nvr_error_state must not stay stuck showing "error"
+        """Issue #42: nvr_error_state must not stay stuck showing "error"
         forever after a give-up — a fresh successful spawn (manual toggle,
         or the stream-up hook reviving the recorder on the next LOCAL
         session) must clear it."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
-        coord._nvr_error_state[CAM_ID] = "ffmpeg crashed twice"
+        coord.nvr_error_state[CAM_ID] = "ffmpeg crashed twice"
         proc = _mock_proc(returncode=None)
 
         async def _spawn(*args, **kwargs):
@@ -1923,7 +1957,7 @@ class TestStartRecorder:
 
         with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
             await recorder.start_recorder(coord, CAM_ID)
-        assert CAM_ID not in coord._nvr_error_state
+        assert CAM_ID not in coord.nvr_error_state
 
     @pytest.mark.asyncio
     async def test_replaces_existing_process(self, tmp_path: Path):
@@ -1933,7 +1967,7 @@ class TestStartRecorder:
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         old_proc = _mock_proc(returncode=None)
-        coord._nvr_processes[CAM_ID] = old_proc
+        coord.nvr_processes[CAM_ID] = old_proc
         new_proc = _mock_proc(returncode=None)
 
         async def _spawn(*args, **kwargs):
@@ -1944,7 +1978,7 @@ class TestStartRecorder:
         # Old got SIGTERM
         old_proc.send_signal.assert_called_once_with(signal.SIGTERM)
         # New is now registered
-        assert coord._nvr_processes[CAM_ID] is new_proc
+        assert coord.nvr_processes[CAM_ID] is new_proc
 
     @pytest.mark.asyncio
     async def test_ffmpeg_not_found_fails_silently(self, tmp_path: Path):
@@ -1958,7 +1992,7 @@ class TestStartRecorder:
             side_effect=FileNotFoundError("ffmpeg not on PATH"),
         ):
             await recorder.start_recorder(coord, CAM_ID)
-        assert CAM_ID not in coord._nvr_processes
+        assert CAM_ID not in coord.nvr_processes
 
     @pytest.mark.asyncio
     async def test_oserror_on_spawn_returns(self, tmp_path: Path):
@@ -1972,7 +2006,7 @@ class TestStartRecorder:
             side_effect=OSError("EAGAIN"),
         ):
             await recorder.start_recorder(coord, CAM_ID)
-        assert CAM_ID not in coord._nvr_processes
+        assert CAM_ID not in coord.nvr_processes
 
     @pytest.mark.asyncio
     async def test_makedirs_failure_aborts_spawn(self, tmp_path: Path):
@@ -1995,30 +2029,40 @@ class TestStartRecorder:
 
     @pytest.mark.asyncio
     async def test_torn_down_during_proxy_url_wait_returns_early(self):
-        """During the proxy-URL polling loop, if the connection type
-        flips to non-LOCAL (user toggled stream off), `start_recorder`
-        must return silently without starting ffmpeg."""
+        """During the event-based readiness wait, if the connection type
+        flips to non-LOCAL (user toggled stream off, or teardown fired —
+        which also clears stream_ready_event, see stream_lifecycle.py),
+        `start_recorder` must return silently without starting ffmpeg."""
         from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_shc_camera.session_state import (
+            get_or_create_session,
+        )
 
         coord = SimpleNamespace(
-            _live_connections={
+            live_connections={
                 CAM_ID_SHORT: {"_connection_type": "LOCAL", "rtspsUrl": ""}
             },
             options={},
             data={CAM_ID_SHORT: {"info": {"title": "Terrasse"}}},
             hass=SimpleNamespace(async_add_executor_job=AsyncMock()),
             async_update_listeners=MagicMock(),
+            _sessions={},
+        )
+        coord.get_session = lambda cid: get_or_create_session(coord._sessions, cid)
+        coord._nvr_recorder_locks = {}
+        coord.get_nvr_recorder_lock = lambda cid: coord._nvr_recorder_locks.setdefault(
+            cid, asyncio.Lock()
         )
 
-        async def _fake_sleep(_sec):
-            # Flip the connection type after the first sleep so the loop
-            # body sees it on the next iteration and returns.
-            coord._live_connections[CAM_ID_SHORT]["_connection_type"] = "REMOTE"
+        async def _wait_for_then_teardown(*_a, **_kw):
+            # Simulate: by the time the wait resolves (event set or timeout,
+            # doesn't matter which), the stream has already been torn down —
+            # matches the real teardown path clearing _connection_type.
+            coord.live_connections[CAM_ID_SHORT]["_connection_type"] = "REMOTE"
 
         with (
             patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)),
-            patch("asyncio.sleep", new=_fake_sleep),
-            patch.object(recorder, "_PROXY_URL_WAIT_STEPS", 5),
+            patch.object(asyncio, "wait_for", new=_wait_for_then_teardown),
         ):
             await recorder.start_recorder(coord, CAM_ID_SHORT)
         # Must have exited via the early `return` — coord.options unmodified
@@ -2026,35 +2070,98 @@ class TestStartRecorder:
 
     @pytest.mark.asyncio
     async def test_rtsp_url_appears_during_wait_continues(self):
-        """If the URL lands during polling, the loop breaks and the
-        function continues past the wait block."""
+        """If the URL lands (stream_ready_event fires) before the wait
+        times out, start_recorder continues past the wait block."""
         from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_shc_camera.session_state import (
+            get_or_create_session,
+        )
 
         coord = SimpleNamespace(
-            _live_connections={
+            live_connections={
                 CAM_ID_SHORT: {"_connection_type": "LOCAL", "rtspsUrl": ""}
             },
             options={"nvr_event_only": True, "nvr_preroll_seconds": 0},
             data={CAM_ID_SHORT: {"info": {"title": "Terrasse"}}},
             hass=SimpleNamespace(async_add_executor_job=AsyncMock()),
             async_update_listeners=MagicMock(),
+            _sessions={},
+        )
+        coord.get_session = lambda cid: get_or_create_session(coord._sessions, cid)
+        coord._nvr_recorder_locks = {}
+        coord.get_nvr_recorder_lock = lambda cid: coord._nvr_recorder_locks.setdefault(
+            cid, asyncio.Lock()
         )
         coord.get_nvr_mode = lambda cid: "event_buffered"
 
-        async def _fake_sleep(_sec):
-            coord._live_connections[CAM_ID_SHORT]["rtspsUrl"] = (
+        async def _wait_for_then_url_lands(*_a, **_kw):
+            # Simulate the event firing: rtspsUrl lands, as
+            # live_connection.py would have set it right before .set().
+            coord.live_connections[CAM_ID_SHORT]["rtspsUrl"] = (
                 "rtsp://127.0.0.1:5000/cam"
             )
 
         with (
             patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)),
-            patch("asyncio.sleep", new=_fake_sleep),
-            patch.object(recorder, "_PROXY_URL_WAIT_STEPS", 5),
+            patch.object(asyncio, "wait_for", new=_wait_for_then_url_lands),
         ):
             await recorder.start_recorder(coord, CAM_ID_SHORT)
         # nvr_event_only + preroll_seconds=0 returns immediately past the
         # poll loop without invoking ffmpeg — the test merely verifies the
         # function reached past the URL-landed branch without crashing.
+
+    @pytest.mark.asyncio
+    async def test_wait_timeout_matches_slow_model_min_total_wait(self):
+        """GitHub #49 regression (realKim-dotcom, 2026-07-15): Gen1 Outdoor
+        (OUTDOOR/CAMERA_EYES, min_total_wait=35s) never got its NVR recorder
+        started because the readiness wait used a flat 12s window tuned only
+        for Gen2 ("~3-10s"). Pin that the computed wait_for timeout is now
+        derived from the camera's own model config, not the old flat
+        constant — this is the actual root cause, independent of whether
+        the event happens to fire in time in any single test run.
+        """
+        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_shc_camera.models import MODELS
+        from custom_components.bosch_shc_camera.session_state import (
+            get_or_create_session,
+        )
+
+        coord = SimpleNamespace(
+            live_connections={
+                CAM_ID_SHORT: {"_connection_type": "LOCAL", "rtspsUrl": ""}
+            },
+            options={},
+            data={CAM_ID_SHORT: {"info": {"title": "Terrasse"}}},
+            hass=SimpleNamespace(async_add_executor_job=AsyncMock()),
+            async_update_listeners=MagicMock(),
+            _sessions={},
+            hw_version={CAM_ID_SHORT: "OUTDOOR"},
+        )
+        coord.get_session = lambda cid: get_or_create_session(coord._sessions, cid)
+        coord._nvr_recorder_locks = {}
+        coord.get_nvr_recorder_lock = lambda cid: coord._nvr_recorder_locks.setdefault(
+            cid, asyncio.Lock()
+        )
+
+        captured_timeout = None
+
+        async def _capture_timeout(_coro, *, timeout=None):
+            nonlocal captured_timeout
+            captured_timeout = timeout
+            raise TimeoutError
+
+        with (
+            patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)),
+            patch.object(asyncio, "wait_for", new=_capture_timeout),
+        ):
+            await recorder.start_recorder(coord, CAM_ID_SHORT)
+
+        assert captured_timeout is not None
+        assert captured_timeout >= MODELS["OUTDOOR"].min_total_wait
+        # The old flat constant was 12s (24 steps x 500ms) — this model's
+        # min_total_wait (35s) must dominate, proving the fix actually
+        # changed behavior for exactly the affected model.
+        assert captured_timeout >= 35
 
 
 class TestStartRecorderDateDirPreCreation(unittest.TestCase):
@@ -2178,12 +2285,14 @@ class TestEventOnlyMode(unittest.TestCase):
                 "asyncio.create_subprocess_exec",
                 side_effect=lambda *a, **k: spawned.append(a) or MagicMock(),
             ):
-                with patch.object(recorder, "start_preroll_recorder", new=AsyncMock()):
+                with patch.object(
+                    recorder, "_spawn_preroll_recorder_locked", new=AsyncMock()
+                ):
                     await recorder.start_recorder(coord, cam_id)
 
         asyncio.get_event_loop().run_until_complete(_run())
         assert len(spawned) == 0, "main ffmpeg spawned despite nvr_event_only=True"
-        assert cam_id not in coord._nvr_processes
+        assert cam_id not in coord.nvr_processes
 
     def test_event_only_starts_preroll(self):
         """nvr_event_only=True must start the pre-roll recorder when preroll_seconds > 0."""
@@ -2208,13 +2317,15 @@ class TestEventOnlyMode(unittest.TestCase):
 
         async def _run():
             with patch.object(
-                recorder, "start_preroll_recorder", side_effect=fake_start_preroll
+                recorder,
+                "_spawn_preroll_recorder_locked",
+                side_effect=fake_start_preroll,
             ):
                 await recorder.start_recorder(coord, cam_id)
 
         asyncio.get_event_loop().run_until_complete(_run())
         assert cam_id in started_preroll, (
-            "start_preroll_recorder not called in event_only mode"
+            "_spawn_preroll_recorder_locked not called in event_only mode"
         )
 
     def test_event_only_skips_preroll_when_seconds_zero(self):
@@ -2240,7 +2351,9 @@ class TestEventOnlyMode(unittest.TestCase):
 
         async def _run():
             with patch.object(
-                recorder, "start_preroll_recorder", side_effect=fake_start_preroll
+                recorder,
+                "_spawn_preroll_recorder_locked",
+                side_effect=fake_start_preroll,
             ):
                 await recorder.start_recorder(coord, cam_id)
 
@@ -2273,7 +2386,7 @@ class TestEventOnlyMode(unittest.TestCase):
                 await recorder.start_recorder(coord, cam_id)
 
         asyncio.get_event_loop().run_until_complete(_run())
-        assert cam_id in coord._nvr_processes, "main ffmpeg not spawned in normal mode"
+        assert cam_id in coord.nvr_processes, "main ffmpeg not spawned in normal mode"
 
 
 class TestPerCameraNvrModeOverrideMixedFleet:
@@ -2320,7 +2433,7 @@ class TestPerCameraNvrModeOverrideMixedFleet:
                 await recorder.start_recorder(coord, cam_a)
 
         asyncio.get_event_loop().run_until_complete(_run())
-        assert cam_a in coord._nvr_processes, (
+        assert cam_a in coord.nvr_processes, (
             "override='continuous' must spawn the main ffmpeg recorder even "
             "though the global option says event-only"
         )
@@ -2351,12 +2464,14 @@ class TestPerCameraNvrModeOverrideMixedFleet:
 
         async def _run():
             with patch.object(
-                recorder, "start_preroll_recorder", side_effect=fake_start_preroll
+                recorder,
+                "_spawn_preroll_recorder_locked",
+                side_effect=fake_start_preroll,
             ):
                 await recorder.start_recorder(coord, cam_b)
 
         asyncio.get_event_loop().run_until_complete(_run())
-        assert cam_b not in coord._nvr_processes, (
+        assert cam_b not in coord.nvr_processes, (
             "override='event_buffered' must NOT spawn the main ffmpeg "
             "recorder even though the global option says continuous"
         )
@@ -2383,7 +2498,7 @@ class TestPerCameraNvrModeOverrideMixedFleet:
         )
         # Add the second camera to the same coordinator instance.
         coord.data[cam_premises] = {"info": {"title": "Grundstueck"}}
-        coord._live_connections[cam_premises] = {
+        coord.live_connections[cam_premises] = {
             "_connection_type": "LOCAL",
             "rtspsUrl": "rtsp://user:pass@127.0.0.1:9001/rtsp_tunnel?inst=1",
         }
@@ -2405,15 +2520,17 @@ class TestPerCameraNvrModeOverrideMixedFleet:
             with (
                 patch("asyncio.create_subprocess_exec", return_value=mock_proc),
                 patch.object(
-                    recorder, "start_preroll_recorder", side_effect=fake_start_preroll
+                    recorder,
+                    "_spawn_preroll_recorder_locked",
+                    side_effect=fake_start_preroll,
                 ),
             ):
                 await recorder.start_recorder(coord, cam_glass)
                 await recorder.start_recorder(coord, cam_premises)
 
         asyncio.get_event_loop().run_until_complete(_run())
-        assert cam_glass in coord._nvr_processes, "glass cam must run continuous"
-        assert cam_premises not in coord._nvr_processes, (
+        assert cam_glass in coord.nvr_processes, "glass cam must run continuous"
+        assert cam_premises not in coord.nvr_processes, (
             "premises cam must NOT run continuous"
         )
         assert cam_premises in started_preroll, "premises cam must run pre-roll"
@@ -2428,7 +2545,7 @@ class TestStopRecorder:
         # No process registered
         await recorder.stop_recorder(coord, CAM_ID)
         # No exception, no state change
-        assert CAM_ID not in coord._nvr_processes
+        assert CAM_ID not in coord.nvr_processes
 
     @pytest.mark.asyncio
     async def test_already_exited_quick_return(self):
@@ -2436,10 +2553,10 @@ class TestStopRecorder:
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=0)  # already exited
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
         await recorder.stop_recorder(coord, CAM_ID)
         proc.send_signal.assert_not_called()
-        assert CAM_ID not in coord._nvr_processes
+        assert CAM_ID not in coord.nvr_processes
 
     @pytest.mark.asyncio
     async def test_clean_sigterm_exit(self):
@@ -2448,11 +2565,11 @@ class TestStopRecorder:
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=None)
         proc.wait = AsyncMock(return_value=0)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
         await recorder.stop_recorder(coord, CAM_ID)
         proc.send_signal.assert_called_once_with(signal.SIGTERM)
         proc.kill.assert_not_called()  # didn't escalate
-        assert CAM_ID not in coord._nvr_processes
+        assert CAM_ID not in coord.nvr_processes
 
     @pytest.mark.asyncio
     async def test_sigkill_escalation_on_timeout(self):
@@ -2472,7 +2589,7 @@ class TestStopRecorder:
             return r
 
         proc.wait = _wait
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         with patch.object(
             asyncio,
@@ -2495,7 +2612,7 @@ class TestStopRecorder:
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=None)
         proc.send_signal = MagicMock(side_effect=ProcessLookupError())
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
         # Must not raise
         await recorder.stop_recorder(coord, CAM_ID)
 
@@ -2508,7 +2625,7 @@ class TestStopRecorder:
         proc = _mock_proc(returncode=None)
         proc.send_signal = MagicMock()
         proc.kill = MagicMock(side_effect=ProcessLookupError)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         call_count_ref = [0]
 
@@ -2537,7 +2654,7 @@ class TestStopRecorder:
         proc = _mock_proc(returncode=None)
         proc.send_signal = MagicMock()
         proc.kill = MagicMock()  # succeeds
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         calls = []
 
@@ -2587,18 +2704,18 @@ class TestStopAll:
         coord = _make_lifecycle_coord()
         proc_a = _mock_proc(returncode=0)
         proc_b = _mock_proc(returncode=0)
-        coord._nvr_processes["cam-A"] = proc_a
-        coord._nvr_processes["cam-B"] = proc_b
+        coord.nvr_processes["cam-A"] = proc_a
+        coord.nvr_processes["cam-B"] = proc_b
         await recorder.stop_all(coord)
         # Both must be drained
-        assert coord._nvr_processes == {}
+        assert coord.nvr_processes == {}
 
     @pytest.mark.asyncio
     async def test_empty_dict_is_safe(self):
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord()
-        coord._nvr_processes.clear()
+        coord.nvr_processes.clear()
         await recorder.stop_all(coord)
 
     @pytest.mark.asyncio
@@ -2607,7 +2724,7 @@ class TestStopAll:
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_phase_coord()
-        coord._nvr_processes = {"cam1": MagicMock()}
+        coord.nvr_processes = {"cam1": MagicMock()}
 
         stop_all_preroll_called = []
 
@@ -2634,13 +2751,13 @@ class TestNvrShutdownRace:
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
-        coord._nvr_shutting_down = True
+        coord.nvr_shutting_down = True
 
         with patch("asyncio.create_subprocess_exec") as spawn_mock:
             await recorder.start_recorder(coord, cam_id)
 
         spawn_mock.assert_not_called()
-        assert cam_id not in coord._nvr_processes
+        assert cam_id not in coord.nvr_processes
 
     @pytest.mark.asyncio
     async def test_spawn_preroll_refuses_when_shutting_down(self):
@@ -2648,23 +2765,23 @@ class TestNvrShutdownRace:
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
-        coord._nvr_shutting_down = True
+        coord.nvr_shutting_down = True
 
         with patch("asyncio.create_subprocess_exec") as spawn_mock:
             await recorder.start_preroll_recorder(coord, cam_id)
 
         spawn_mock.assert_not_called()
-        assert cam_id not in coord._nvr_preroll_processes
+        assert cam_id not in coord.nvr_preroll_processes
 
     @pytest.mark.asyncio
     async def test_shutting_down_defaults_false_on_bare_stub(self):
-        """A coordinator stub predating this fix (no `_nvr_shutting_down`
+        """A coordinator stub predating this fix (no `nvr_shutting_down`
         attribute at all) must behave exactly as before — spawn allowed."""
         from custom_components.bosch_shc_camera import recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
-        assert not hasattr(coord, "_nvr_shutting_down")
+        assert not hasattr(coord, "nvr_shutting_down")
 
         mock_proc = MagicMock()
         mock_proc.returncode = None
@@ -2672,52 +2789,52 @@ class TestNvrShutdownRace:
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             await recorder.start_recorder(coord, cam_id)
 
-        assert coord._nvr_processes.get(cam_id) is mock_proc
+        assert coord.nvr_processes.get(cam_id) is mock_proc
 
     @pytest.mark.asyncio
     async def test_stop_all_sweeps_cameras_known_only_via_camera_entities(self):
         """A camera with no tracked process yet (e.g. its start_recorder
-        call is still in flight) but present in `_camera_entities` must
+        call is still in flight) but present in `camera_entities` must
         still have its per-cam lock acquired by the unload sweep — closes
-        the exact gap a stale `list(_nvr_processes.keys())` snapshot had."""
+        the exact gap a stale `list(nvr_processes.keys())` snapshot had."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord()
-        coord._camera_entities = {"cam-new": MagicMock()}
+        coord.camera_entities = {"cam-new": MagicMock()}
         locked_cams = []
-        real_get_lock = coord._get_nvr_recorder_lock
+        real_get_lock = coord.get_nvr_recorder_lock
 
         def _tracking_get_lock(cam_id):
             locked_cams.append(cam_id)
             return real_get_lock(cam_id)
 
-        coord._get_nvr_recorder_lock = _tracking_get_lock
+        coord.get_nvr_recorder_lock = _tracking_get_lock
         await recorder.stop_all(coord)
         assert "cam-new" in locked_cams
 
     @pytest.mark.asyncio
     async def test_stop_all_serializes_on_per_cam_lock(self):
         """stop_all must not touch a camera's process until it can acquire
-        that camera's `_get_nvr_recorder_lock` — proves it cannot race a
+        that camera's `get_nvr_recorder_lock` — proves it cannot race a
         concurrent in-flight start_recorder holding the same lock."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=None)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
-        lock = coord._get_nvr_recorder_lock(CAM_ID)
+        lock = coord.get_nvr_recorder_lock(CAM_ID)
         await lock.acquire()
         try:
             task = asyncio.ensure_future(recorder.stop_all(coord))
             await asyncio.sleep(0)
             # stop_all is blocked waiting for the lock we hold — the
             # process must be untouched while blocked.
-            assert CAM_ID in coord._nvr_processes
+            assert CAM_ID in coord.nvr_processes
         finally:
             lock.release()
         await task
-        assert CAM_ID not in coord._nvr_processes
+        assert CAM_ID not in coord.nvr_processes
 
 
 class TestPrerollRecorderLifecycle(unittest.TestCase):
@@ -2727,17 +2844,17 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
-        coord._live_connections[cam_id]["_connection_type"] = "REMOTE"
+        coord.live_connections[cam_id]["_connection_type"] = "REMOTE"
 
         async def _run():
             await recorder.start_preroll_recorder(coord, cam_id)
-            return cam_id in coord._nvr_preroll_processes
+            return cam_id in coord.nvr_preroll_processes
 
         result = asyncio.get_event_loop().run_until_complete(_run())
         assert result is False
 
     def test_start_preroll_stores_process(self):
-        """Valid LOCAL session → process stored in _nvr_preroll_processes."""
+        """Valid LOCAL session → process stored in nvr_preroll_processes."""
         import custom_components.bosch_shc_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
@@ -2750,7 +2867,7 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
         async def _run():
             with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
                 await recorder.start_preroll_recorder(coord, cam_id)
-            return coord._nvr_preroll_processes.get(cam_id)
+            return coord.nvr_preroll_processes.get(cam_id)
 
         result = asyncio.get_event_loop().run_until_complete(_run())
         assert result is mock_proc
@@ -2768,11 +2885,11 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
         mock_proc.returncode = None
         mock_proc.send_signal = MagicMock()
         mock_proc.wait = AsyncMock(return_value=0)
-        coord._nvr_preroll_processes[cam_id] = mock_proc
+        coord.nvr_preroll_processes[cam_id] = mock_proc
 
         async def _run():
             await recorder.stop_preroll_recorder(coord, cam_id)
-            return cam_id in coord._nvr_preroll_processes
+            return cam_id in coord.nvr_preroll_processes
 
         still_present = asyncio.get_event_loop().run_until_complete(_run())
         assert still_present is False
@@ -2792,7 +2909,7 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
         asyncio.get_event_loop().run_until_complete(_run())
 
     def test_stop_all_preroll_stops_all(self):
-        """stop_all_preroll calls stop for every cam in _nvr_preroll_processes."""
+        """stop_all_preroll calls stop for every cam in nvr_preroll_processes."""
         import custom_components.bosch_shc_camera.recorder as recorder
 
         coord = _make_phase_coord()
@@ -2802,7 +2919,7 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
         async def mock_stop(c, cid):
             stopped.append(cid)
 
-        coord._nvr_preroll_processes = {"cam1": MagicMock(), "cam2": MagicMock()}
+        coord.nvr_preroll_processes = {"cam1": MagicMock(), "cam2": MagicMock()}
 
         async def _run():
             with patch.object(recorder, "stop_preroll_recorder", side_effect=mock_stop):
@@ -2877,7 +2994,7 @@ class TestStartPrerollRecorderSerialization:
             )
 
         assert len(procs) == 2
-        assert coord._nvr_preroll_processes[CAM_ID] is procs[-1]
+        assert coord.nvr_preroll_processes[CAM_ID] is procs[-1]
         # The first caller's process must have been asked to stop (not
         # leaked as an untracked orphan) — the second call's leading
         # stop_preroll_recorder() SIGTERMs whatever is currently tracked.
@@ -2900,7 +3017,7 @@ class TestStartPrerollRecorder:
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
             await recorder.start_preroll_recorder(coord, CAM_ID)
         spawn.assert_not_called()
-        assert CAM_ID not in coord._nvr_preroll_processes
+        assert CAM_ID not in coord.nvr_preroll_processes
 
     @pytest.mark.asyncio
     async def test_skipped_when_rtsp_url_missing(self, tmp_path: Path):
@@ -2910,11 +3027,11 @@ class TestStartPrerollRecorder:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
-        coord._live_connections[CAM_ID]["rtspsUrl"] = ""
+        coord.live_connections[CAM_ID]["rtspsUrl"] = ""
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
             await recorder.start_preroll_recorder(coord, CAM_ID)
         spawn.assert_not_called()
-        assert CAM_ID not in coord._nvr_preroll_processes
+        assert CAM_ID not in coord.nvr_preroll_processes
 
     @pytest.mark.asyncio
     async def test_happy_path_full_local(self, tmp_path: Path):
@@ -2943,7 +3060,7 @@ class TestStartPrerollRecorder:
             await recorder.start_preroll_recorder(coord, CAM_ID)
 
         # Process registered
-        assert coord._nvr_preroll_processes[CAM_ID] is proc
+        assert coord.nvr_preroll_processes[CAM_ID] is proc
         # Cache dir created under tmp_path / Terrasse
         assert (tmp_path / "Terrasse").exists()
         # start_preroll_recorder's own leading stop_preroll_recorder() call
@@ -2955,8 +3072,8 @@ class TestStartPrerollRecorder:
         assert len(prune_calls) == 1
         assert prune_calls[0][1] == 4
         # Watcher task registered
-        assert CAM_ID in coord._nvr_preroll_tasks
-        assert coord._nvr_preroll_tasks[CAM_ID] is not None
+        assert CAM_ID in coord.nvr_preroll_tasks
+        assert coord.nvr_preroll_tasks[CAM_ID] is not None
 
     @pytest.mark.asyncio
     async def test_ffmpeg_not_found_cleanup(self, tmp_path: Path):
@@ -2976,9 +3093,9 @@ class TestStartPrerollRecorder:
             # Must not raise.
             await recorder.start_preroll_recorder(coord, CAM_ID)
 
-        assert CAM_ID not in coord._nvr_preroll_processes
+        assert CAM_ID not in coord.nvr_preroll_processes
         # Pre-roll watcher task also not registered.
-        assert CAM_ID not in coord._nvr_preroll_tasks
+        assert CAM_ID not in coord.nvr_preroll_tasks
 
     @pytest.mark.asyncio
     async def test_spawn_oserror_cleanup(self, tmp_path: Path):
@@ -2996,8 +3113,8 @@ class TestStartPrerollRecorder:
         ):
             await recorder.start_preroll_recorder(coord, CAM_ID)
 
-        assert CAM_ID not in coord._nvr_preroll_processes
-        assert CAM_ID not in coord._nvr_preroll_tasks
+        assert CAM_ID not in coord.nvr_preroll_processes
+        assert CAM_ID not in coord.nvr_preroll_tasks
 
     @pytest.mark.asyncio
     async def test_makedirs_failure_aborts(self, tmp_path: Path):
@@ -3019,7 +3136,7 @@ class TestStartPrerollRecorder:
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
             await recorder.start_preroll_recorder(coord, CAM_ID)
         spawn.assert_not_called()
-        assert CAM_ID not in coord._nvr_preroll_processes
+        assert CAM_ID not in coord.nvr_preroll_processes
 
     @pytest.mark.asyncio
     async def test_prune_exception_swallowed(self, tmp_path: Path):
@@ -3043,18 +3160,18 @@ class TestStartPrerollRecorder:
             await recorder.start_preroll_recorder(coord, CAM_ID)
 
         # Process must still be registered despite the prune failure
-        assert coord._nvr_preroll_processes.get(CAM_ID) is proc
+        assert coord.nvr_preroll_processes.get(CAM_ID) is proc
 
     @pytest.mark.asyncio
     async def test_preroll_tasks_auto_created_when_absent(self, tmp_path: Path):
-        """If coordinator has no _nvr_preroll_tasks attr, it is created."""
+        """If coordinator has no nvr_preroll_tasks attr, it is created."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
         # Remove the attribute to trigger the hasattr branch
-        del coord._nvr_preroll_tasks
+        del coord.nvr_preroll_tasks
 
         proc = _mock_proc(returncode=None)
 
@@ -3065,8 +3182,8 @@ class TestStartPrerollRecorder:
             await recorder.start_preroll_recorder(coord, CAM_ID)
 
         # The attribute must now exist and contain the registered task
-        assert hasattr(coord, "_nvr_preroll_tasks")
-        assert CAM_ID in coord._nvr_preroll_tasks
+        assert hasattr(coord, "nvr_preroll_tasks")
+        assert CAM_ID in coord.nvr_preroll_tasks
 
 
 class TestStopPrerollRecorder:
@@ -3084,7 +3201,7 @@ class TestStopPrerollRecorder:
         coord = _make_preroll_coord(tmp_path)
         proc = _mock_proc(returncode=None)
         proc.kill = MagicMock(side_effect=ProcessLookupError("no such process"))
-        coord._nvr_preroll_processes[CAM_ID] = proc
+        coord.nvr_preroll_processes[CAM_ID] = proc
 
         # First wait_for (SIGTERM grace) → TimeoutError; second (post-SIGKILL) → resolves.
         with patch.object(
@@ -3099,7 +3216,7 @@ class TestStopPrerollRecorder:
             await recorder.stop_preroll_recorder(coord, CAM_ID)
         proc.send_signal.assert_called_once_with(signal.SIGTERM)
         proc.kill.assert_called_once()
-        assert CAM_ID not in coord._nvr_preroll_processes
+        assert CAM_ID not in coord.nvr_preroll_processes
 
     @pytest.mark.asyncio
     async def test_final_timeout_after_sigkill_swallowed(self, tmp_path: Path):
@@ -3113,7 +3230,7 @@ class TestStopPrerollRecorder:
 
         coord = _make_preroll_coord(tmp_path)
         proc = _mock_proc(returncode=None)
-        coord._nvr_preroll_processes[CAM_ID] = proc
+        coord.nvr_preroll_processes[CAM_ID] = proc
 
         # Both wait_for calls time out — SIGKILL didn't take either.
         with patch.object(
@@ -3137,7 +3254,7 @@ class TestStopPrerollRecorder:
         # No process registered
         await recorder.stop_preroll_recorder(coord, CAM_ID)
         # No state change, no exception
-        assert CAM_ID not in coord._nvr_preroll_processes
+        assert CAM_ID not in coord.nvr_preroll_processes
 
     @pytest.mark.asyncio
     async def test_already_exited_returns_quickly(self, tmp_path: Path):
@@ -3146,7 +3263,7 @@ class TestStopPrerollRecorder:
 
         coord = _make_preroll_coord(tmp_path)
         proc = _mock_proc(returncode=0)
-        coord._nvr_preroll_processes[CAM_ID] = proc
+        coord.nvr_preroll_processes[CAM_ID] = proc
 
         await recorder.stop_preroll_recorder(coord, CAM_ID)
         proc.send_signal.assert_not_called()
@@ -3160,13 +3277,13 @@ class TestStopPrerollRecorder:
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=None)
         proc.send_signal = MagicMock(side_effect=ProcessLookupError)
-        coord._nvr_preroll_processes[CAM_ID] = proc
+        coord.nvr_preroll_processes[CAM_ID] = proc
 
         # Must not raise
         await recorder.stop_preroll_recorder(coord, CAM_ID)
 
         # Process must have been popped
-        assert CAM_ID not in coord._nvr_preroll_processes
+        assert CAM_ID not in coord.nvr_preroll_processes
 
     def test_cancels_watcher_task(self):
         """stop_preroll_recorder must cancel the periodic prune-watcher task."""
@@ -3177,29 +3294,29 @@ class TestStopPrerollRecorder:
 
         mock_task = MagicMock()
         mock_task.done.return_value = False
-        coord._nvr_preroll_tasks = {cam_id: mock_task}
+        coord.nvr_preroll_tasks = {cam_id: mock_task}
 
         # No process — but task should still be cancelled
-        coord._nvr_preroll_processes = {}
+        coord.nvr_preroll_processes = {}
 
         async def _run():
             await recorder.stop_preroll_recorder(coord, cam_id)
 
         asyncio.get_event_loop().run_until_complete(_run())
         mock_task.cancel.assert_called_once()
-        assert cam_id not in coord._nvr_preroll_tasks
+        assert cam_id not in coord.nvr_preroll_tasks
 
     @pytest.mark.asyncio
     async def test_returns_true_on_clean_sigterm_exit(self, tmp_path: Path):
         """stop_preroll_recorder now returns True iff SIGTERM exit was
-        clean within the grace window — finalize_and_restart_preroll_recorder
+        clean within the grace window — stop_and_finalize_preroll_recorder
         depends on this to know whether the newest segment's moov atom can
         be trusted (issue #43 follow-up feature)."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_preroll_coord(tmp_path)
         proc = _mock_proc(returncode=None)
-        coord._nvr_preroll_processes[CAM_ID] = proc
+        coord.nvr_preroll_processes[CAM_ID] = proc
 
         with patch.object(asyncio, "wait_for", return_value=None):
             result = await recorder.stop_preroll_recorder(coord, CAM_ID)
@@ -3213,7 +3330,7 @@ class TestStopPrerollRecorder:
 
         coord = _make_preroll_coord(tmp_path)
         proc = _mock_proc(returncode=None)
-        coord._nvr_preroll_processes[CAM_ID] = proc
+        coord.nvr_preroll_processes[CAM_ID] = proc
 
         with patch.object(asyncio, "wait_for", side_effect=[TimeoutError(), None]):
             result = await recorder.stop_preroll_recorder(coord, CAM_ID)
@@ -3229,43 +3346,48 @@ class TestStopPrerollRecorder:
         assert result is False
 
 
-class TestFinalizeAndRestartPrerollRecorder:
-    """Opt-in stop-finalize-then-restart assembly mode (issue #43 follow-up
-    feature request, realKim-dotcom's fork): recovers the freshest ring
-    segment for FCM-triggered clips instead of always dropping it.
+class TestStopAndFinalizePrerollRecorder:
+    """Opt-in stop-then-finalize assembly mode (issue #43 follow-up feature
+    request, realKim-dotcom's fork): recovers the freshest ring segment for
+    FCM-triggered clips instead of always dropping it.
+
+    GitHub #50 (realKim-dotcom, 2026-07-15) redesign: this function now
+    only stops the ring and returns a stable, ring-genuinely-stopped
+    segment list — it no longer restarts the ring itself (see
+    `restart_preroll_recorder_after_finalize`, tested separately below) nor
+    relocates the finalized file to a sibling directory (no longer needed:
+    the caller uses the returned list directly instead of re-scanning via
+    `list_preroll_files()`, so there's no risk of the restarted ring's own
+    scan picking the same file back up).
     """
 
     @pytest.mark.asyncio
-    async def test_no_active_process_returns_none(self):
+    async def test_no_active_process_returns_false_empty(self):
         """Ring not running for this camera yet — nothing to finalize."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_phase_coord()
-        # _nvr_preroll_processes has no entry for CAM_ID_SHORT.
-        result = await recorder.finalize_and_restart_preroll_recorder(
-            coord, CAM_ID_SHORT
-        )
-        assert result is None
+        # nvr_preroll_processes has no entry for CAM_ID_SHORT.
+        result = await recorder.stop_and_finalize_preroll_recorder(coord, CAM_ID_SHORT)
+        assert result == (False, [])
 
     @pytest.mark.asyncio
-    async def test_dead_process_returns_none(self):
+    async def test_dead_process_returns_false_empty(self):
         """A process handle that already exited must be treated as
         nothing-to-finalize, same as no handle at all."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_phase_coord()
         proc = _mock_proc(returncode=0)
-        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
-        result = await recorder.finalize_and_restart_preroll_recorder(
-            coord, CAM_ID_SHORT
-        )
-        assert result is None
+        coord.nvr_preroll_processes[CAM_ID_SHORT] = proc
+        result = await recorder.stop_and_finalize_preroll_recorder(coord, CAM_ID_SHORT)
+        assert result == (False, [])
 
     @pytest.mark.asyncio
-    async def test_empty_ring_returns_none_without_stopping(self):
+    async def test_empty_ring_returns_false_without_stopping(self):
         """The ring writer is alive but has produced no segments yet
-        (`_newest_preroll_path` returns None) — must not stop/respawn a
-        perfectly healthy ring writer for no benefit."""
+        (`_newest_preroll_path` returns None) — must not stop a perfectly
+        healthy ring writer for no benefit."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_phase_coord()
@@ -3273,29 +3395,28 @@ class TestFinalizeAndRestartPrerollRecorder:
             side_effect=lambda fn, *a, **kw: fn(*a, **kw)
         )
         proc = _mock_proc(returncode=None)
-        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
+        coord.nvr_preroll_processes[CAM_ID_SHORT] = proc
 
         with (
             patch.object(recorder, "_newest_preroll_path", return_value=None),
             patch.object(recorder, "stop_preroll_recorder") as mock_stop,
-            patch.object(recorder, "_spawn_preroll_recorder_locked") as mock_spawn,
         ):
-            result = await recorder.finalize_and_restart_preroll_recorder(
+            result = await recorder.stop_and_finalize_preroll_recorder(
                 coord, CAM_ID_SHORT
             )
 
-        assert result is None
+        assert result == (False, [])
         mock_stop.assert_not_called()
-        mock_spawn.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_clean_exit_returns_finalized_path_and_restarts(self, tmp_path: Path):
+    async def test_clean_exit_returns_all_segments_including_newest(
+        self, tmp_path: Path
+    ):
         """The common path: an active ring with a newest segment, clean
-        SIGTERM exit → returns the RELOCATED segment's path (moved out of
-        the ring's own cache dir — regression coverage for the bug-hunt
-        finding that returning the in-place path let `list_preroll_files()`
-        pick it back up and concatenate it a second time) AND restarts the
-        ring."""
+        SIGTERM exit → returns True plus EVERY segment still on disk
+        (including the newest, since a clean exit guarantees its moov atom)
+        — does NOT restart the ring (that's the caller's job, after it has
+        built the clip from this list)."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_phase_coord(
@@ -3310,40 +3431,45 @@ class TestFinalizeAndRestartPrerollRecorder:
             side_effect=lambda fn, *a, **kw: fn(*a, **kw)
         )
         proc = _mock_proc(returncode=None)
-        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
+        coord.nvr_preroll_processes[CAM_ID_SHORT] = proc
         cam_dir = recorder._preroll_dir(str(tmp_path), "Terrasse")
         os.makedirs(cam_dir)
+        older = os.path.join(cam_dir, "115950.mp4")
         newest = os.path.join(cam_dir, "120000.mp4")
-        with open(newest, "wb") as f:
-            f.write(b"x" * 2048)
+        for p in (older, newest):
+            with open(p, "wb") as f:
+                f.write(b"x" * 2048)
+        # Distinct mtimes so _list_preroll_segments' oldest-first sort is
+        # deterministic regardless of filesystem timestamp resolution.
+        os.utime(older, (1000, 1000))
+        os.utime(newest, (2000, 2000))
 
         with (
             patch.object(recorder, "_newest_preroll_path", return_value=newest),
             patch.object(
                 recorder, "stop_preroll_recorder", new=AsyncMock(return_value=True)
             ) as mock_stop,
-            patch.object(
-                recorder, "_spawn_preroll_recorder_locked", new=AsyncMock()
-            ) as mock_spawn,
         ):
-            result = await recorder.finalize_and_restart_preroll_recorder(
+            ring_was_running, paths = await recorder.stop_and_finalize_preroll_recorder(
                 coord, CAM_ID_SHORT
             )
 
-        assert result is not None
-        assert result != newest
-        assert os.path.isfile(result)
-        assert not os.path.exists(newest)  # moved, not copied
-        finalized_root = os.path.join(str(tmp_path), "_finalized_tmp")
-        assert result.startswith(finalized_root + os.sep)
+        assert ring_was_running is True
+        assert paths == [older, newest]
+        # Clean exit — nothing discarded, both files still on disk.
+        assert os.path.isfile(older)
+        assert os.path.isfile(newest)
         mock_stop.assert_awaited_once_with(coord, CAM_ID_SHORT, prune_cache=False)
-        mock_spawn.assert_awaited_once_with(coord, CAM_ID_SHORT)
 
     @pytest.mark.asyncio
-    async def test_hard_kill_returns_none_but_still_restarts(self, tmp_path: Path):
-        """A forced kill (no moov-atom guarantee) must return None — but
-        the ring is still restarted regardless, so recording resumes even
-        when the freshest segment can't be trusted."""
+    async def test_hard_kill_excludes_and_deletes_newest_only(self, tmp_path: Path):
+        """A forced kill (no moov-atom guarantee) must exclude JUST the
+        untrustworthy newest segment from the returned list (and delete it)
+        — every OTHER already-complete segment is still returned, since the
+        ring itself is genuinely stopped either way. This is the actual
+        GitHub #50 fix: the old implementation fell back to a second
+        drop-newest scan here, losing a SECOND segment on top of the
+        untrustworthy one."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_phase_coord(
@@ -3358,38 +3484,35 @@ class TestFinalizeAndRestartPrerollRecorder:
             side_effect=lambda fn, *a, **kw: fn(*a, **kw)
         )
         proc = _mock_proc(returncode=None)
-        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
+        coord.nvr_preroll_processes[CAM_ID_SHORT] = proc
         cam_dir = recorder._preroll_dir(str(tmp_path), "Terrasse")
         os.makedirs(cam_dir)
+        older = os.path.join(cam_dir, "115950.mp4")
         newest = os.path.join(cam_dir, "120000.mp4")
-        with open(newest, "wb") as f:
-            f.write(b"x" * 2048)
+        for p in (older, newest):
+            with open(p, "wb") as f:
+                f.write(b"x" * 2048)
+        os.utime(older, (1000, 1000))
+        os.utime(newest, (2000, 2000))
 
         with (
             patch.object(recorder, "_newest_preroll_path", return_value=newest),
             patch.object(
                 recorder, "stop_preroll_recorder", new=AsyncMock(return_value=False)
             ),
-            patch.object(
-                recorder, "_spawn_preroll_recorder_locked", new=AsyncMock()
-            ) as mock_spawn,
         ):
-            result = await recorder.finalize_and_restart_preroll_recorder(
+            ring_was_running, paths = await recorder.stop_and_finalize_preroll_recorder(
                 coord, CAM_ID_SHORT
             )
 
-        assert result is None
-        # Relocated-but-untrustworthy file must be cleaned up, not leaked.
-        assert not os.path.exists(newest)
-        finalized_root = os.path.join(str(tmp_path), "_finalized_tmp")
-        if os.path.isdir(finalized_root):
-            for _root, _dirs, files in os.walk(finalized_root):
-                assert files == []
-        mock_spawn.assert_awaited_once_with(coord, CAM_ID_SHORT)
+        assert ring_was_running is True
+        assert paths == [older]
+        assert os.path.isfile(older)  # the real, complete segment survives
+        assert not os.path.exists(newest)  # untrustworthy segment deleted
 
     @pytest.mark.asyncio
     async def test_hard_kill_cleanup_unlink_failure_swallowed(self, tmp_path: Path):
-        """If the untrustworthy relocated file can't even be unlinked (e.g.
+        """If the untrustworthy newest file can't even be unlinked (e.g.
         it's already gone, or a permissions race), that must not raise into
         the caller — best-effort cleanup only, same discipline as every
         other cache-prune path in this module."""
@@ -3407,7 +3530,7 @@ class TestFinalizeAndRestartPrerollRecorder:
             side_effect=lambda fn, *a, **kw: fn(*a, **kw)
         )
         proc = _mock_proc(returncode=None)
-        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
+        coord.nvr_preroll_processes[CAM_ID_SHORT] = proc
         cam_dir = recorder._preroll_dir(str(tmp_path), "Terrasse")
         os.makedirs(cam_dir)
         newest = os.path.join(cam_dir, "120000.mp4")
@@ -3419,23 +3542,20 @@ class TestFinalizeAndRestartPrerollRecorder:
             patch.object(
                 recorder, "stop_preroll_recorder", new=AsyncMock(return_value=False)
             ),
-            patch.object(
-                recorder, "_spawn_preroll_recorder_locked", new=AsyncMock()
-            ) as mock_spawn,
             patch("os.unlink", side_effect=OSError("already gone")),
         ):
-            result = await recorder.finalize_and_restart_preroll_recorder(
+            ring_was_running, paths = await recorder.stop_and_finalize_preroll_recorder(
                 coord, CAM_ID_SHORT
             )
 
-        assert result is None
-        mock_spawn.assert_awaited_once_with(coord, CAM_ID_SHORT)
+        assert ring_was_running is True
+        assert paths == []  # newest still excluded even though unlink failed
 
     @pytest.mark.asyncio
-    async def test_holds_recorder_lock_across_stop_and_restart(self):
+    async def test_holds_recorder_lock_across_stop(self):
         """Same serialization discipline as issue #44's fix: the per-camera
-        recorder lock must stay held for the whole stop+respawn sequence so
-        a concurrent start_preroll_recorder/switch-toggle can't race in
+        recorder lock must stay held for the whole stop sequence so a
+        concurrent start_preroll_recorder/switch-toggle can't race in
         between and leak a second untracked ring writer."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -3444,8 +3564,8 @@ class TestFinalizeAndRestartPrerollRecorder:
             side_effect=lambda fn, *a, **kw: fn(*a, **kw)
         )
         proc = _mock_proc(returncode=None)
-        coord._nvr_preroll_processes[CAM_ID_SHORT] = proc
-        lock = coord._get_nvr_recorder_lock(CAM_ID_SHORT)
+        coord.nvr_preroll_processes[CAM_ID_SHORT] = proc
+        lock = coord.get_nvr_recorder_lock(CAM_ID_SHORT)
         observed_locked_during_stop = False
 
         async def _fake_stop(_coord, _cam_id, *, prune_cache):
@@ -3456,11 +3576,38 @@ class TestFinalizeAndRestartPrerollRecorder:
         with (
             patch.object(recorder, "_newest_preroll_path", return_value="/x/y.mp4"),
             patch.object(recorder, "stop_preroll_recorder", side_effect=_fake_stop),
-            patch.object(recorder, "_spawn_preroll_recorder_locked", new=AsyncMock()),
+            patch.object(recorder, "_list_preroll_segments", return_value=[]),
         ):
-            await recorder.finalize_and_restart_preroll_recorder(coord, CAM_ID_SHORT)
+            await recorder.stop_and_finalize_preroll_recorder(coord, CAM_ID_SHORT)
 
         assert observed_locked_during_stop is True
+        assert not lock.locked()
+
+
+class TestRestartPrerollRecorderAfterFinalize:
+    """GitHub #50: the restart step is now its own function, deliberately
+    called only after the caller has built the motion clip — see
+    `TestStopAndFinalizePrerollRecorder`'s class docstring."""
+
+    @pytest.mark.asyncio
+    async def test_spawns_under_lock(self):
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_phase_coord()
+        lock = coord.get_nvr_recorder_lock(CAM_ID_SHORT)
+        observed_locked = False
+
+        async def _fake_spawn(_coord, _cam_id):
+            nonlocal observed_locked
+            observed_locked = lock.locked()
+
+        with patch.object(
+            recorder, "_spawn_preroll_recorder_locked", side_effect=_fake_spawn
+        ) as mock_spawn:
+            await recorder.restart_preroll_recorder_after_finalize(coord, CAM_ID_SHORT)
+
+        mock_spawn.assert_awaited_once_with(coord, CAM_ID_SHORT)
+        assert observed_locked is True
         assert not lock.locked()
 
 
@@ -3468,7 +3615,7 @@ class TestWatchRecorder:
     @pytest.mark.asyncio
     async def test_clean_exit_no_respawn(self):
         """Process exited cleanly AND was already removed from
-        _nvr_processes → no respawn (replacement / clean stop scenario)."""
+        nvr_processes → no respawn (replacement / clean stop scenario)."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord()
@@ -3488,7 +3635,7 @@ class TestWatchRecorder:
         coord = _make_lifecycle_coord(conn_type="REMOTE")  # gate now closed
         proc = _mock_proc(returncode=1, stderr_data=b"connection refused")
         proc.wait = AsyncMock(return_value=1)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         with (
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
@@ -3506,7 +3653,7 @@ class TestWatchRecorder:
         coord = _make_lifecycle_coord()  # LOCAL, online
         proc = _mock_proc(returncode=1, stderr_data=b"transient")
         proc.wait = AsyncMock(return_value=1)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         with (
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
@@ -3523,10 +3670,10 @@ class TestWatchRecorder:
 
         coord = _make_lifecycle_coord()
         # Mark a recent crash
-        coord._nvr_recent_crash[CAM_ID] = time.monotonic() - 5  # 5 s ago
+        coord.nvr_recent_crash[CAM_ID] = time.monotonic() - 5  # 5 s ago
         proc = _mock_proc(returncode=1, stderr_data=b"crash 2")
         proc.wait = AsyncMock(return_value=1)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         with (
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
@@ -3534,25 +3681,25 @@ class TestWatchRecorder:
         ):
             await recorder._watch_recorder(coord, CAM_ID, proc)
         restart.assert_not_called()
-        assert "crashed" in coord._nvr_error_state.get(CAM_ID, "").lower()
+        assert "crashed" in coord.nvr_error_state.get(CAM_ID, "").lower()
 
     @pytest.mark.asyncio
     async def test_auth_failure_respawns_without_giveup(self):
         """Issue #42: a 401/Unauthorized ffmpeg exit (cred-rotation race) must
         retry without counting toward the 2-crash give-up threshold — a
-        second back-to-back auth-failure must NOT set _nvr_error_state or
+        second back-to-back auth-failure must NOT set nvr_error_state or
         skip the respawn, unlike a genuine repeated crash."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord()
         # Simulate the reported sequence: a crash was already recorded
         # moments ago — with a normal crash this would trigger give-up.
-        coord._nvr_recent_crash[CAM_ID] = time.monotonic() - 5
+        coord.nvr_recent_crash[CAM_ID] = time.monotonic() - 5
         proc = _mock_proc(
             returncode=8, stderr_data=b"method OPTIONS failed: 401 (Unauthorized)"
         )
         proc.wait = AsyncMock(return_value=8)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         with (
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
@@ -3561,10 +3708,10 @@ class TestWatchRecorder:
             await recorder._watch_recorder(coord, CAM_ID, proc)
 
         restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
-        assert CAM_ID not in coord._nvr_error_state
+        assert CAM_ID not in coord.nvr_error_state
         # The crash-window timestamp must be untouched by the auth-failure
         # path — it doesn't count as a "crash" for give-up purposes.
-        assert coord._nvr_recent_crash[CAM_ID] == pytest.approx(
+        assert coord.nvr_recent_crash[CAM_ID] == pytest.approx(
             time.monotonic() - 5, abs=1.0
         )
 
@@ -3577,7 +3724,7 @@ class TestWatchRecorder:
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=8, stderr_data=b"HTTP/1.1 401 \n")
         proc.wait = AsyncMock(return_value=8)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         with (
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
@@ -3586,7 +3733,7 @@ class TestWatchRecorder:
             await recorder._watch_recorder(coord, CAM_ID, proc)
 
         restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
-        assert CAM_ID not in coord._nvr_error_state
+        assert CAM_ID not in coord.nvr_error_state
 
     @pytest.mark.asyncio
     async def test_auth_failure_no_respawn_when_gate_closed_after_sleep(self):
@@ -3597,7 +3744,7 @@ class TestWatchRecorder:
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=8, stderr_data=b"401 unauthorized")
         proc.wait = AsyncMock(return_value=8)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         call_count = [0]
 
@@ -3622,9 +3769,9 @@ class TestWatchRecorder:
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord()
-        coord._nvr_recent_crash = {CAM_ID: float("-inf")}
+        coord.nvr_recent_crash = {CAM_ID: float("-inf")}
         proc = _mock_proc(returncode=1)  # non-zero → crash path
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         # Make should_record return True first time (pre-sleep check) then
         # False after sleep, so we never call start_recorder. We toggle the
@@ -3685,7 +3832,7 @@ class TestWatchRecorder:
         stderr.read = _hang
 
         proc = _mock_proc(returncode=1, stderr=stderr)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         # User intent stays True, so the watcher will try to respawn — we
         # patch `start_recorder` to a no-op so we observe only the drain
@@ -3726,7 +3873,7 @@ class TestWatchRecorder:
         stderr = MagicMock()
         stderr.read = AsyncMock(side_effect=ValueError("stream closed"))
         proc = _mock_proc(returncode=1, stderr=stderr)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         async def _fake_start(_coord, _cam):
             pass
@@ -3760,7 +3907,7 @@ class TestWatchPrerollRecorder:
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         proc = _mock_proc(returncode=None)
-        coord._nvr_preroll_processes[CAM_ID] = proc
+        coord.nvr_preroll_processes[CAM_ID] = proc
 
         prune_calls: list[tuple[str, int]] = []
 
@@ -3799,7 +3946,7 @@ class TestWatchPrerollRecorder:
 
     @pytest.mark.asyncio
     async def test_exits_when_proc_missing_from_dict(self, tmp_path: Path):
-        """If `_nvr_preroll_processes[cam_id]` is gone (clean stop / crash
+        """If `nvr_preroll_processes[cam_id]` is gone (clean stop / crash
         race), the watcher must exit on the next tick."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -3831,7 +3978,7 @@ class TestWatchPrerollRecorder:
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         proc = _mock_proc(returncode=None)
-        coord._nvr_preroll_processes[CAM_ID] = proc
+        coord.nvr_preroll_processes[CAM_ID] = proc
 
         call_count = {"n": 0}
 
@@ -3876,7 +4023,7 @@ class TestWatchPrerollRecorder:
 
         mock_proc = MagicMock()
         mock_proc.returncode = None
-        coord._nvr_preroll_processes[cam_id] = mock_proc
+        coord.nvr_preroll_processes[cam_id] = mock_proc
 
         prune_calls = []
 
@@ -3923,8 +4070,8 @@ class TestWatchPrerollRecorder:
         coord = _make_phase_coord(cam_id=cam_id)
         cam_dir = "/dev/shm/bosch_nvr_cache/Terrasse"
 
-        # No process in _nvr_preroll_processes → watcher should return
-        coord._nvr_preroll_processes = {}
+        # No process in nvr_preroll_processes → watcher should return
+        coord.nvr_preroll_processes = {}
 
         async def _run():
             with patch("asyncio.sleep", new=AsyncMock()):
@@ -3944,7 +4091,7 @@ class TestWatchPrerollRecorder:
 
         mock_proc = MagicMock()
         mock_proc.returncode = 0  # already exited
-        coord._nvr_preroll_processes[cam_id] = mock_proc
+        coord.nvr_preroll_processes[cam_id] = mock_proc
 
         async def _run():
             with patch("asyncio.sleep", new=AsyncMock()):
@@ -3977,8 +4124,8 @@ class TestWatchPrerollRecorder:
                 await recorder.start_preroll_recorder(coord, cam_id)
 
         asyncio.get_event_loop().run_until_complete(_run())
-        assert hasattr(coord, "_nvr_preroll_tasks"), "_nvr_preroll_tasks not created"
-        assert cam_id in coord._nvr_preroll_tasks, "watcher task not stored for cam_id"
+        assert hasattr(coord, "nvr_preroll_tasks"), "nvr_preroll_tasks not created"
+        assert cam_id in coord.nvr_preroll_tasks, "watcher task not stored for cam_id"
 
 
 class TestPrerollWiring(unittest.TestCase):
@@ -4015,7 +4162,9 @@ class TestPrerollWiring(unittest.TestCase):
         async def _run():
             with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
                 with patch.object(
-                    recorder, "start_preroll_recorder", side_effect=fake_start_preroll
+                    recorder,
+                    "_spawn_preroll_recorder_locked",
+                    side_effect=fake_start_preroll,
                 ):
                     await recorder.start_recorder(coord, cam_id)
 
@@ -4051,7 +4200,9 @@ class TestPrerollWiring(unittest.TestCase):
         async def _run():
             with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
                 with patch.object(
-                    recorder, "start_preroll_recorder", side_effect=fake_start_preroll
+                    recorder,
+                    "_spawn_preroll_recorder_locked",
+                    side_effect=fake_start_preroll,
                 ):
                     await recorder.start_recorder(coord, cam_id)
 
@@ -4082,10 +4233,10 @@ class TestNvrSwitchTurnOnOff:
                     "events": [],
                 }
             },
-            _live_connections={CAM_ID: {"_connection_type": "LOCAL"}},
-            _nvr_processes={},
-            _nvr_user_intent={},
-            _nvr_error_state={},
+            live_connections={CAM_ID: {"_connection_type": "LOCAL"}},
+            nvr_processes={},
+            nvr_user_intent={},
+            nvr_error_state={},
             last_update_success=True,
             options={"enable_nvr": True},
             is_camera_online=lambda cid: True,
@@ -4158,7 +4309,7 @@ class TestNvrSwitchTurnOnOff:
         coord = self._stub_coord()
         sw = BoschNvrRecordingSwitch(coord, CAM_ID, self._stub_entry())
         assert sw.is_on is False
-        coord._nvr_user_intent[CAM_ID] = True
+        coord.nvr_user_intent[CAM_ID] = True
         assert sw.is_on is True
 
     def test_available_only_when_local(self):
@@ -4175,7 +4326,7 @@ class TestNvrSwitchTurnOnOff:
         # Baseline = LOCAL + ONLINE + last_update_success → available.
         assert sw.available is True
         # Flip to REMOTE → unavailable.
-        coord._live_connections[CAM_ID]["_connection_type"] = "REMOTE"
+        coord.live_connections[CAM_ID]["_connection_type"] = "REMOTE"
         assert sw.available is False
 
     def test_available_false_when_camera_offline(self):
@@ -4211,10 +4362,10 @@ class TestSwitchSetupGate:
                     "events": [],
                 }
             },
-            _live_connections={},
-            _nvr_processes={},
-            _nvr_user_intent={},
-            _nvr_error_state={},
+            live_connections={},
+            nvr_processes={},
+            nvr_user_intent={},
+            nvr_error_state={},
             last_update_success=True,
             options={"enable_nvr": True},
             is_camera_online=lambda cid: True,
@@ -4231,7 +4382,7 @@ class TestSwitchSetupGate:
         assert sw.unique_id.startswith("bosch_shc_nvr_recording_")
 
 
-# staging-drain pipeline (recorder._drain_staging_to_remote, sync_drain_tick
+# staging-drain pipeline (recorder.drain_staging_to_remote, sync_drain_tick
 # and friends) — NVR-storage-target upload/promote/retention flow introduced
 # in v11.0.4. Covers: _is_segment_finalized (mtime+size gate),
 # _list_staging_candidates (directory walker), sync_drain_tick (local/smb/ftp
@@ -4473,7 +4624,7 @@ class TestSyncDrainTickRetryCap:
         failed_path = tmp_path / "_failed" / CAM / "2026-05-06" / "10-00.mp4"
         assert failed_path.exists()
         # Counter is cleared once the file is quarantined.
-        assert path.as_posix() not in coord._nvr_drain_failures
+        assert path.as_posix() not in coord.nvr_drain_failures
 
 
 class TestSyncDrainTickStateCounters:
@@ -4484,7 +4635,7 @@ class TestSyncDrainTickStateCounters:
         _make_segment(tmp_path, CAM, "2026-05-06", "10-00.mp4")
         coord = _make_coord(tmp_path, target="local")
         recorder.sync_drain_tick(coord, now=time.time())
-        state = coord._nvr_drain_state
+        state = coord.nvr_drain_state
         assert state["target"] == "local"
         assert state["promoted"] == 1
         assert "last_age_by_cam" in state
@@ -4644,7 +4795,7 @@ class TestDrainStagingWatcher:
             patch.object(recorder, "_DRAIN_TICK_SECONDS", 0.05),
         ):
             task = asyncio.create_task(
-                recorder._drain_staging_to_remote(coord),
+                recorder.drain_staging_to_remote(coord),
             )
             await asyncio.sleep(0.15)  # let it run a couple of ticks
             task.cancel()
@@ -4669,7 +4820,7 @@ class TestDrainStagingWatcher:
             patch.object(recorder, "_DRAIN_TICK_SECONDS", 0.05),
         ):
             task = asyncio.create_task(
-                recorder._drain_staging_to_remote(coord),
+                recorder.drain_staging_to_remote(coord),
             )
             await asyncio.sleep(0.15)
             task.cancel()
@@ -4701,7 +4852,7 @@ class TestDrainStagingWatcher:
             patch.object(recorder, "_DRAIN_TICK_SECONDS", 0.05),
         ):
             task = asyncio.create_task(
-                recorder._drain_staging_to_remote(coord),
+                recorder.drain_staging_to_remote(coord),
             )
             await asyncio.sleep(0.20)
             task.cancel()
@@ -5938,10 +6089,10 @@ class TestPersistentNotificationScheduling:
         services_async_call = MagicMock()
 
         coord = SimpleNamespace(
-            _nvr_processes={},
-            _nvr_user_intent={cam_id: True},
-            _nvr_recent_crash={},
-            _nvr_error_state={},
+            nvr_processes={},
+            nvr_user_intent={cam_id: True},
+            nvr_recent_crash={},
+            nvr_error_state={},
             data={
                 cam_id: {
                     "info": {"title": "Terrasse"},
@@ -5951,7 +6102,7 @@ class TestPersistentNotificationScheduling:
             options={"nvr_base_path": "/tmp/nvr_test", "enable_nvr": True},
             is_camera_online=lambda cid: True,
             async_update_listeners=MagicMock(),
-            _live_connections={
+            live_connections={
                 cam_id: {
                     "_connection_type": "LOCAL",
                     "rtspsUrl": "rtsp://u:p@127.0.0.1:9999/rtsp_tunnel?inst=1",
@@ -5975,7 +6126,7 @@ class TestPersistentNotificationScheduling:
             return 1
 
         proc.wait = _wait
-        coord._nvr_processes[cam_id] = proc
+        coord.nvr_processes[cam_id] = proc
 
         await recorder._watch_recorder(coord, cam_id, proc)
 
@@ -5983,7 +6134,7 @@ class TestPersistentNotificationScheduling:
         create_task.assert_called_once()
         # call_soon_threadsafe must NOT be used — we're already on the loop.
         call_soon_threadsafe.assert_not_called()
-        assert coord._nvr_error_state.get(cam_id) == "disk full"
+        assert coord.nvr_error_state.get(cam_id) == "disk full"
 
     @pytest.mark.asyncio
     async def test_watch_recorder_diskfull_swallows_async_create_task_error(
@@ -5994,15 +6145,15 @@ class TestPersistentNotificationScheduling:
         cam_id = "AABBCCDD-0000-0000-0000-000000000001"
 
         coord = SimpleNamespace(
-            _nvr_processes={},
-            _nvr_user_intent={cam_id: True},
-            _nvr_recent_crash={},
-            _nvr_error_state={},
+            nvr_processes={},
+            nvr_user_intent={cam_id: True},
+            nvr_recent_crash={},
+            nvr_error_state={},
             data={cam_id: {"info": {"title": "Cam"}, "status": "ONLINE"}},
             options={"nvr_base_path": "/tmp/nvr_test", "enable_nvr": True},
             is_camera_online=lambda cid: True,
             async_update_listeners=MagicMock(),
-            _live_connections={
+            live_connections={
                 cam_id: {
                     "_connection_type": "LOCAL",
                     "rtspsUrl": "rtsp://u:p@127.0.0.1:9999/rtsp_tunnel?inst=1",
@@ -6029,12 +6180,12 @@ class TestPersistentNotificationScheduling:
             return 1
 
         proc.wait = _wait
-        coord._nvr_processes[cam_id] = proc
+        coord.nvr_processes[cam_id] = proc
 
         # Must not raise even though async_create_task blows up.
         await recorder._watch_recorder(coord, cam_id, proc)
 
-        assert coord._nvr_error_state.get(cam_id) == "disk full"
+        assert coord.nvr_error_state.get(cam_id) == "disk full"
 
     def test_drain_tick_quarantine_uses_call_soon_threadsafe(
         self, tmp_path: Path
@@ -6060,12 +6211,12 @@ class TestPersistentNotificationScheduling:
         assert (tmp_path / "_failed" / CAM / "2026-05-06" / "10-00.mp4").exists()
 
 
-# `_nvr_recent_crash` SENTINEL_RULE default (relocated from
+# `nvr_recent_crash` SENTINEL_RULE default (relocated from
 # tests/test_bug_regression_v11.py)
 
 
 class TestNvrRecentCrashSentinel:
-    """`_nvr_recent_crash.get(cam_id, ...)` must default to float('-inf')
+    """`nvr_recent_crash.get(cam_id, ...)` must default to float('-inf')
     (SENTINEL_RULE). On CI VMs where time.monotonic() < _RESPAWN_WINDOW_SECONDS,
     a 0.0 default makes the FIRST crash look like a second crash within the
     window, permanently suppressing respawn."""
@@ -6076,8 +6227,8 @@ class TestNvrRecentCrashSentinel:
         from custom_components.bosch_shc_camera import recorder
 
         src = inspect.getsource(recorder)
-        assert "_nvr_recent_crash.get(cam_id, 0.0)" not in src, (
-            "recorder.py must not use 0.0 as default for _nvr_recent_crash; "
+        assert "nvr_recent_crash.get(cam_id, 0.0)" not in src, (
+            "recorder.py must not use 0.0 as default for nvr_recent_crash; "
             "on CI VMs with low monotonic, first crash triggers false crash-loop detection"
         )
 
@@ -6087,7 +6238,7 @@ class TestNvrRecentCrashSentinel:
         from custom_components.bosch_shc_camera import recorder
 
         src = inspect.getsource(recorder)
-        assert_in_source(src, '_nvr_recent_crash.get(cam_id, float("-inf"))')
+        assert_in_source(src, 'nvr_recent_crash.get(cam_id, float("-inf"))')
 
     def test_first_crash_does_not_suppress_respawn_at_low_monotonic(self):
         """With monotonic=30s and _RESPAWN_WINDOW_SECONDS=60s, the first
@@ -6117,7 +6268,7 @@ class TestNvrRecentCrashSentinel:
 
 
 # issue #42 follow-up — cred-rotation race root-cause fix
-# (late re-read + shared lock with _refresh_local_creds_from_heartbeat) and
+# (late re-read + shared lock with refresh_local_creds_from_heartbeat) and
 # bounded auth-retry so a genuine broken credential surfaces instead of
 # retrying forever.
 
@@ -6128,19 +6279,19 @@ class TestStartRecorderCredRotationRace:
         """A heartbeat cred rotation landing between the makedirs executor
         job and the ffmpeg spawn must NOT result in ffmpeg being launched
         with the stale, already-invalidated URL captured earlier in
-        start_recorder — it must re-read _live_connections one more time
+        start_recorder — it must re-read live_connections one more time
         right before spawning."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
-        stale_url = coord._live_connections[CAM_ID]["rtspsUrl"]
+        stale_url = coord.live_connections[CAM_ID]["rtspsUrl"]
         fresh_url = "rtsp://newuser:newpass@127.0.0.1:46597/rtsp_tunnel?inst=1"
 
         async def _rotating_executor(fn, *args, **kwargs):
-            # Simulate _refresh_local_creds_from_heartbeat firing while
+            # Simulate refresh_local_creds_from_heartbeat firing while
             # start_recorder is awaiting the staging-dir makedirs job.
             if fn is os.makedirs:
-                coord._live_connections[CAM_ID]["rtspsUrl"] = fresh_url
+                coord.live_connections[CAM_ID]["rtspsUrl"] = fresh_url
             return fn(*args, **kwargs)
 
         coord.hass.async_add_executor_job = _rotating_executor
@@ -6176,7 +6327,7 @@ class TestStartRecorderCredRotationRace:
 
         async def _tearing_down_executor(fn, *args, **kwargs):
             if fn is os.makedirs:
-                coord._live_connections[CAM_ID]["_connection_type"] = "REMOTE"
+                coord.live_connections[CAM_ID]["_connection_type"] = "REMOTE"
             return fn(*args, **kwargs)
 
         coord.hass.async_add_executor_job = _tearing_down_executor
@@ -6184,12 +6335,12 @@ class TestStartRecorderCredRotationRace:
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
             await recorder.start_recorder(coord, CAM_ID)
         spawn.assert_not_called()
-        assert CAM_ID not in coord._nvr_processes
+        assert CAM_ID not in coord.nvr_processes
 
     @pytest.mark.asyncio
     async def test_spawn_serializes_against_heartbeat_lock(self, tmp_path: Path):
         """start_recorder's final re-read+spawn must run under the SAME
-        per-camera lock instance _refresh_local_creds_from_heartbeat uses,
+        per-camera lock instance refresh_local_creds_from_heartbeat uses,
         so the two can never interleave mid-mutation."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -6199,7 +6350,7 @@ class TestStartRecorderCredRotationRace:
 
         async def _spawn(*args, **kwargs):
             seen_locked_during_spawn.append(
-                coord._get_nvr_recorder_lock(CAM_ID).locked()
+                coord.get_nvr_recorder_lock(CAM_ID).locked()
             )
             return proc
 
@@ -6210,7 +6361,78 @@ class TestStartRecorderCredRotationRace:
             "ffmpeg spawn must happen while holding the per-camera NVR recorder lock"
         )
         # Lock must be released again once start_recorder returns.
-        assert not coord._get_nvr_recorder_lock(CAM_ID).locked()
+        assert not coord.get_nvr_recorder_lock(CAM_ID).locked()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_start_recorder_calls_never_double_spawn(
+        self, tmp_path: Path
+    ):
+        """GitHub #49 secondary finding (realKim-dotcom, 2026-07-15,
+        pre-existing on v15.0.2 AND v16.0.0 -- not a v16 regression): two
+        concurrent start_recorder calls for the SAME camera (e.g. a switch
+        toggle racing a coordinator-tick auto-heal) must never both spawn
+        a live ffmpeg process writing to the same staging segment file.
+
+        Before the fix, only the tail-end spawn was lock-protected -- the
+        leading `stop_recorder` call ran unlocked, so two callers could
+        each pass it, then each independently (serially, not exclusively
+        against each other's decision to spawn) acquire the lock and spawn
+        their own ffmpeg, leaving two live processes both writing the same
+        %H-%M.mp4 segment (confirmed via /proc/PID/fd in the report).
+
+        With the fix (this function's entire body -- stop AND spawn -- runs
+        under one lock acquisition), the second caller's own leading
+        stop_recorder call runs AFTER the first caller's spawn has already
+        completed and released the lock, so it correctly finds and
+        terminates the first caller's process before spawning its own.
+        Net result: exactly one live process at the end, and the first
+        caller's process was actually torn down (SIGTERM sent), not
+        silently orphaned.
+        """
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+
+        spawned_procs = []
+
+        def _make_new_proc():
+            proc = MagicMock()
+            proc.returncode = None
+            proc.wait = AsyncMock(return_value=0)
+            proc.pid = 1000 + len(spawned_procs)
+            proc.stderr = MagicMock()
+            proc.stderr.read = AsyncMock(return_value=b"")
+            spawned_procs.append(proc)
+            return proc
+
+        async def _spawn(*args, **kwargs):
+            # Yield control so the two concurrent start_recorder calls
+            # genuinely have a chance to interleave around this point,
+            # not just run back-to-back synchronously.
+            await asyncio.sleep(0)
+            return _make_new_proc()
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await asyncio.gather(
+                recorder.start_recorder(coord, CAM_ID),
+                recorder.start_recorder(coord, CAM_ID),
+            )
+
+        assert len(spawned_procs) == 2, (
+            "expected both calls to eventually spawn (one respawns after "
+            "the other), not that only one call attempted a spawn at all"
+        )
+        # The critical property: only ONE process is left tracked as live —
+        # the other must have been torn down (SIGTERM), not orphaned as a
+        # second, untracked ffmpeg still writing to the same segment file.
+        assert coord.nvr_processes[CAM_ID] is spawned_procs[-1], (
+            "the coordinator must track only the LATEST process"
+        )
+        first_proc = spawned_procs[0]
+        assert first_proc.wait.await_count >= 1 or first_proc.send_signal.called, (
+            "the first spawned process must have been actively stopped "
+            "(SIGTERM + wait), not left running untracked in the background"
+        )
 
 
 class TestWatchRecorderBoundedAuthRetry:
@@ -6224,7 +6446,7 @@ class TestWatchRecorderBoundedAuthRetry:
         Regression: this must exercise the REAL `start_recorder` (only
         `asyncio.create_subprocess_exec` mocked), not a fake stand-in —
         the bug this guards against was `start_recorder`'s own
-        auth-retry respawn resetting `_nvr_auth_retry_count` before the
+        auth-retry respawn resetting `nvr_auth_retry_count` before the
         next 401 could ever accumulate past 1, which a fake respawn that
         skips `start_recorder` entirely cannot catch."""
         from custom_components.bosch_shc_camera import recorder
@@ -6244,7 +6466,7 @@ class TestWatchRecorderBoundedAuthRetry:
             returncode=8,
             stderr_data=b"method OPTIONS failed: 401 (Unauthorized)",
         )
-        coord._nvr_processes[CAM_ID] = first_proc
+        coord.nvr_processes[CAM_ID] = first_proc
 
         with (
             patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn),
@@ -6258,7 +6480,7 @@ class TestWatchRecorderBoundedAuthRetry:
             proc = first_proc
             for _ in range(recorder._MAX_CONSECUTIVE_AUTH_RETRIES + 1):
                 await recorder._watch_recorder(coord, CAM_ID, proc)
-                proc = coord._nvr_processes.get(CAM_ID)
+                proc = coord.nvr_processes.get(CAM_ID)
                 if proc is None:
                     break  # gave up
 
@@ -6266,18 +6488,18 @@ class TestWatchRecorderBoundedAuthRetry:
             "must respawn via the REAL start_recorder exactly "
             "_MAX_CONSECUTIVE_AUTH_RETRIES times, not loop forever"
         )
-        assert coord._nvr_auth_retry_count[CAM_ID] == (
+        assert coord.nvr_auth_retry_count[CAM_ID] == (
             recorder._MAX_CONSECUTIVE_AUTH_RETRIES + 1
         )
-        assert "repeated auth failures" in coord._nvr_error_state.get(CAM_ID, "")
-        assert CAM_ID not in coord._nvr_processes, (
+        assert "repeated auth failures" in coord.nvr_error_state.get(CAM_ID, "")
+        assert CAM_ID not in coord.nvr_processes, (
             "must give up with no process registered, not keep respawning"
         )
 
     @pytest.mark.asyncio
     async def test_single_auth_failure_does_not_give_up(self):
         """A lone 401 (the common transient-race case) must retry without
-        touching _nvr_error_state — the bounded cap must not make the
+        touching nvr_error_state — the bounded cap must not make the
         common case worse."""
         from custom_components.bosch_shc_camera import recorder
 
@@ -6285,7 +6507,7 @@ class TestWatchRecorderBoundedAuthRetry:
         proc = _mock_proc(
             returncode=8, stderr_data=b"method OPTIONS failed: 401 (Unauthorized)"
         )
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         with (
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
@@ -6294,8 +6516,8 @@ class TestWatchRecorderBoundedAuthRetry:
             await recorder._watch_recorder(coord, CAM_ID, proc)
 
         restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
-        assert CAM_ID not in coord._nvr_error_state
-        assert coord._nvr_auth_retry_count[CAM_ID] == 1
+        assert CAM_ID not in coord.nvr_error_state
+        assert coord.nvr_auth_retry_count[CAM_ID] == 1
 
     @pytest.mark.asyncio
     async def test_auth_retry_counter_reset_on_successful_spawn(self, tmp_path: Path):
@@ -6305,7 +6527,7 @@ class TestWatchRecorderBoundedAuthRetry:
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
-        coord._nvr_auth_retry_count[CAM_ID] = recorder._MAX_CONSECUTIVE_AUTH_RETRIES
+        coord.nvr_auth_retry_count[CAM_ID] = recorder._MAX_CONSECUTIVE_AUTH_RETRIES
         proc = _mock_proc(returncode=None)
 
         async def _spawn(*args, **kwargs):
@@ -6314,12 +6536,12 @@ class TestWatchRecorderBoundedAuthRetry:
         with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
             await recorder.start_recorder(coord, CAM_ID)
 
-        assert CAM_ID not in coord._nvr_auth_retry_count
+        assert CAM_ID not in coord.nvr_auth_retry_count
 
 
 class TestNvrStateChangePushesImmediateUpdate:
     """Issue #42 follow-up (realKim-dotcom, 2026-07-10): the `mini_nvr_state`
-    sensor reads `_nvr_processes`/`_nvr_error_state` live (no I/O), but
+    sensor reads `nvr_processes`/`nvr_error_state` live (no I/O), but
     nothing told HA to re-render those entities when those dicts changed —
     so the sensor only refreshed on the next ~60s coordinator tick, lagging
     up to 20s behind a real start and 1-2 min behind a real stop. Every
@@ -6344,7 +6566,7 @@ class TestNvrStateChangePushesImmediateUpdate:
         self, tmp_path: Path
     ):
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
-        coord._nvr_processes[CAM_ID] = _mock_proc(returncode=None)
+        coord.nvr_processes[CAM_ID] = _mock_proc(returncode=None)
 
         await recorder.stop_recorder(coord, CAM_ID)
 
@@ -6354,7 +6576,7 @@ class TestNvrStateChangePushesImmediateUpdate:
     async def test_stop_recorder_no_push_when_nothing_was_running(self, tmp_path: Path):
         """No process registered → nothing actually changed → no spurious push."""
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
-        assert CAM_ID not in coord._nvr_processes
+        assert CAM_ID not in coord.nvr_processes
 
         await recorder.stop_recorder(coord, CAM_ID)
 
@@ -6364,7 +6586,7 @@ class TestNvrStateChangePushesImmediateUpdate:
     async def test_unexpected_crash_pushes_update(self, tmp_path: Path):
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         proc = _mock_proc(returncode=1)
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         with (
             patch.object(recorder, "start_recorder", new=AsyncMock()),
@@ -6380,38 +6602,38 @@ class TestNvrStateChangePushesImmediateUpdate:
         proc = _mock_proc(
             returncode=1, stderr_data=b"Error writing trailer: No space left on device"
         )
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         await recorder._watch_recorder(coord, CAM_ID, proc)
 
-        assert coord._nvr_error_state[CAM_ID] == "disk full"
+        assert coord.nvr_error_state[CAM_ID] == "disk full"
         coord.async_update_listeners.assert_called()
 
     @pytest.mark.asyncio
     async def test_auth_retry_give_up_pushes_update(self, tmp_path: Path):
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
-        coord._nvr_auth_retry_count[CAM_ID] = recorder._MAX_CONSECUTIVE_AUTH_RETRIES
+        coord.nvr_auth_retry_count[CAM_ID] = recorder._MAX_CONSECUTIVE_AUTH_RETRIES
         proc = _mock_proc(
             returncode=8, stderr_data=b"method OPTIONS failed: 401 (Unauthorized)"
         )
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         await recorder._watch_recorder(coord, CAM_ID, proc)
 
-        assert "repeated auth failures" in coord._nvr_error_state[CAM_ID]
+        assert "repeated auth failures" in coord.nvr_error_state[CAM_ID]
         coord.async_update_listeners.assert_called()
 
     @pytest.mark.asyncio
     async def test_crash_twice_give_up_pushes_update(self, tmp_path: Path):
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
-        coord._nvr_recent_crash[CAM_ID] = time.monotonic()
+        coord.nvr_recent_crash[CAM_ID] = time.monotonic()
         proc = _mock_proc(returncode=1, stderr_data=b"some other ffmpeg error")
-        coord._nvr_processes[CAM_ID] = proc
+        coord.nvr_processes[CAM_ID] = proc
 
         with patch.object(asyncio, "sleep", new=AsyncMock()):
             await recorder._watch_recorder(coord, CAM_ID, proc)
 
-        assert coord._nvr_error_state[CAM_ID] == "ffmpeg crashed twice"
+        assert coord.nvr_error_state[CAM_ID] == "ffmpeg crashed twice"
         coord.async_update_listeners.assert_called()
 
 
@@ -6462,7 +6684,7 @@ class TestCapturePostroll:
     @pytest.mark.asyncio
     async def test_not_local_returns_false(self):
         coord = SimpleNamespace(
-            _live_connections={CAM_ID: {"_connection_type": "REMOTE"}}
+            live_connections={CAM_ID: {"_connection_type": "REMOTE"}}
         )
         result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
         assert result is False
@@ -6470,7 +6692,7 @@ class TestCapturePostroll:
     @pytest.mark.asyncio
     async def test_no_rtsp_url_returns_false(self):
         coord = SimpleNamespace(
-            _live_connections={CAM_ID: {"_connection_type": "LOCAL", "rtspsUrl": ""}}
+            live_connections={CAM_ID: {"_connection_type": "LOCAL", "rtspsUrl": ""}}
         )
         result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
         assert result is False
@@ -6478,7 +6700,7 @@ class TestCapturePostroll:
     @pytest.mark.asyncio
     async def test_ffmpeg_not_found_returns_false(self):
         coord = SimpleNamespace(
-            _live_connections={
+            live_connections={
                 CAM_ID: {
                     "_connection_type": "LOCAL",
                     "rtspsUrl": "rtsp://127.0.0.1:9000/x",
@@ -6496,7 +6718,7 @@ class TestCapturePostroll:
     async def test_oserror_on_spawn_returns_false(self):
         """Generic OSError (e.g. EAGAIN fork-limit) during spawn → False."""
         coord = SimpleNamespace(
-            _live_connections={
+            live_connections={
                 CAM_ID: {
                     "_connection_type": "LOCAL",
                     "rtspsUrl": "rtsp://127.0.0.1:9000/x",
@@ -6513,7 +6735,7 @@ class TestCapturePostroll:
     @pytest.mark.asyncio
     async def test_timeout_kills_and_returns_false(self):
         coord = SimpleNamespace(
-            _live_connections={
+            live_connections={
                 CAM_ID: {
                     "_connection_type": "LOCAL",
                     "rtspsUrl": "rtsp://127.0.0.1:9000/x",
@@ -6541,7 +6763,7 @@ class TestCapturePostroll:
         """proc.kill() raising ProcessLookupError (already dead) after a
         communicate() timeout must not propagate."""
         coord = SimpleNamespace(
-            _live_connections={
+            live_connections={
                 CAM_ID: {
                     "_connection_type": "LOCAL",
                     "rtspsUrl": "rtsp://127.0.0.1:9000/x",
@@ -6567,7 +6789,7 @@ class TestCapturePostroll:
     @pytest.mark.asyncio
     async def test_rc_nonzero_returns_false(self):
         coord = SimpleNamespace(
-            _live_connections={
+            live_connections={
                 CAM_ID: {
                     "_connection_type": "LOCAL",
                     "rtspsUrl": "rtsp://127.0.0.1:9000/x",
@@ -6585,7 +6807,7 @@ class TestCapturePostroll:
     @pytest.mark.asyncio
     async def test_success_returns_true(self):
         coord = SimpleNamespace(
-            _live_connections={
+            live_connections={
                 CAM_ID: {
                     "_connection_type": "LOCAL",
                     "rtspsUrl": "rtsp://127.0.0.1:9000/x",
@@ -6622,7 +6844,7 @@ def _make_assembly_coord(
             "nvr_postroll_seconds": postroll_seconds,
             "nvr_finalize_ring_on_event": finalize_ring_on_event,
         },
-        _live_connections={
+        live_connections={
             CAM_ID: {
                 "_connection_type": "LOCAL",
                 "rtspsUrl": "rtsp://127.0.0.1:9000/x",
@@ -6640,7 +6862,7 @@ def _make_assembly_coord(
             coord._nvr_clip_assembly_locks[cam_id] = lock
         return lock
 
-    coord._get_nvr_clip_assembly_lock = _get_lock
+    coord.get_nvr_clip_assembly_lock = _get_lock
     coord.get_nvr_event_clip_enabled = lambda cam_id: coord._nvr_event_clip_enabled.get(
         cam_id, True
     )
@@ -6656,7 +6878,7 @@ class TestAssembleAndShipMotionClip:
         don't queue (issue #43 follow-up: bursty motion events must not
         pile up overlapping ffmpeg concats)."""
         coord = _make_assembly_coord(tmp_path)
-        lock = coord._get_nvr_clip_assembly_lock(CAM_ID)
+        lock = coord.get_nvr_clip_assembly_lock(CAM_ID)
         await lock.acquire()
         try:
             result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
@@ -6947,7 +7169,7 @@ class TestAssembleAndShipMotionClip:
         assert result is False
         mock_list.assert_not_called()
         mock_spawn.assert_not_called()
-        assert not coord._get_nvr_clip_assembly_lock(CAM_ID).locked()
+        assert not coord.get_nvr_clip_assembly_lock(CAM_ID).locked()
 
     @pytest.mark.asyncio
     async def test_event_clip_switch_on_by_default(self, tmp_path: Path):
@@ -6970,7 +7192,7 @@ class TestAssembleAndShipMotionClip:
     @pytest.mark.asyncio
     async def test_finalize_ring_on_event_disabled_by_default(self, tmp_path: Path):
         """nvr_finalize_ring_on_event defaults to off: the assembly must
-        never call finalize_and_restart_preroll_recorder unless the option
+        never call stop_and_finalize_preroll_recorder unless the option
         is explicitly turned on."""
         coord = _make_assembly_coord(tmp_path)
 
@@ -6981,8 +7203,11 @@ class TestAssembleAndShipMotionClip:
                 return_value=[str(tmp_path / "pre0.mp4")],
             ),
             patch.object(
-                recorder, "finalize_and_restart_preroll_recorder"
+                recorder, "stop_and_finalize_preroll_recorder"
             ) as mock_finalize,
+            patch.object(
+                recorder, "restart_preroll_recorder_after_finalize"
+            ) as mock_restart,
         ):
             (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
             mock_proc = MagicMock()
@@ -6993,21 +7218,24 @@ class TestAssembleAndShipMotionClip:
 
         assert result is True
         mock_finalize.assert_not_called()
+        mock_restart.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_finalize_ring_on_event_attaches_finalized_segment(
+    async def test_finalize_ring_on_event_uses_stable_segment_list(
         self, tmp_path: Path
     ):
-        """nvr_finalize_ring_on_event=True: the finalized segment path is
-        appended to the concat list, after the (drop-newest) pre-roll list
-        and before any postroll capture — recovering the freshest footage
-        instead of losing it (feature request, realKim-dotcom)."""
+        """nvr_finalize_ring_on_event=True: the ring-stopped segment list
+        from stop_and_finalize_preroll_recorder is used DIRECTLY (bypassing
+        list_preroll_files entirely — GitHub #50), with any postroll
+        capture still appended after. The ring is restarted only AFTER the
+        clip is built."""
         coord = _make_assembly_coord(
             tmp_path, postroll_seconds=5, finalize_ring_on_event=True
         )
-        finalized_path = str(tmp_path / "finalized.mp4")
-        (tmp_path / "finalized.mp4").write_bytes(b"x" * 2048)
-        (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
+        stable_segments = [str(tmp_path / "pre0.mp4"), str(tmp_path / "pre1.mp4")]
+        for p in stable_segments:
+            with open(p, "wb") as f:
+                f.write(b"x" * 2048)
 
         seen_paths: dict[str, list[str]] = {}
 
@@ -7025,16 +7253,17 @@ class TestAssembleAndShipMotionClip:
         mock_proc.returncode = 0
 
         with (
+            patch.object(recorder, "list_preroll_files") as mock_list_preroll_files,
             patch.object(
                 recorder,
-                "list_preroll_files",
-                return_value=[str(tmp_path / "pre0.mp4")],
-            ),
-            patch.object(
-                recorder,
-                "finalize_and_restart_preroll_recorder",
-                new=AsyncMock(return_value=finalized_path),
+                "stop_and_finalize_preroll_recorder",
+                new=AsyncMock(return_value=(True, stable_segments)),
             ) as mock_finalize,
+            patch.object(
+                recorder,
+                "restart_preroll_recorder_after_finalize",
+                new=AsyncMock(),
+            ) as mock_restart,
             patch.object(
                 recorder, "_capture_postroll", side_effect=_fake_capture_postroll
             ),
@@ -7049,18 +7278,23 @@ class TestAssembleAndShipMotionClip:
 
         assert result is True
         mock_finalize.assert_awaited_once_with(coord, CAM_ID)
-        assert seen_paths["paths"][0] == str(tmp_path / "pre0.mp4")
-        assert seen_paths["paths"][1] == finalized_path
-        # postroll (3rd) comes after the finalized segment.
+        # list_preroll_files must NOT be consulted — the stable, already-
+        # correct list from stop_and_finalize_preroll_recorder is used as-is.
+        mock_list_preroll_files.assert_not_called()
+        assert seen_paths["paths"][:2] == stable_segments
+        # postroll (3rd) comes after the finalized segments.
         assert len(seen_paths["paths"]) == 3
+        # Ring restart happens (only) after the clip was built.
+        mock_restart.assert_awaited_once_with(coord, CAM_ID)
 
     @pytest.mark.asyncio
-    async def test_finalize_ring_on_event_none_falls_back_silently(
+    async def test_finalize_ring_on_event_nothing_to_finalize_falls_back(
         self, tmp_path: Path
     ):
-        """finalize_and_restart_preroll_recorder returning None (nothing to
-        finalize, or had to hard-kill) must not break the assembly — it
-        just ships without the extra segment, same as before this feature."""
+        """stop_and_finalize_preroll_recorder returning (False, []) — ring
+        wasn't running / had nothing to finalize — must fall back to the
+        normal list_preroll_files() path, same as before this feature, and
+        must NOT attempt a restart (nothing was stopped)."""
         coord = _make_assembly_coord(tmp_path, finalize_ring_on_event=True)
 
         with (
@@ -7071,9 +7305,12 @@ class TestAssembleAndShipMotionClip:
             ),
             patch.object(
                 recorder,
-                "finalize_and_restart_preroll_recorder",
-                new=AsyncMock(return_value=None),
+                "stop_and_finalize_preroll_recorder",
+                new=AsyncMock(return_value=(False, [])),
             ),
+            patch.object(
+                recorder, "restart_preroll_recorder_after_finalize"
+            ) as mock_restart,
         ):
             (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
             mock_proc = MagicMock()
@@ -7083,6 +7320,41 @@ class TestAssembleAndShipMotionClip:
                 result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
 
         assert result is True
+        mock_restart.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_finalize_ring_on_event_restarts_even_if_clip_build_fails(
+        self, tmp_path: Path
+    ):
+        """GitHub #50: the ring must be restarted even if create_motion_clip
+        fails/raises after the ring was already stopped — otherwise a
+        transient ffmpeg failure would leave the pre-roll ring permanently
+        down until something unrelated happens to restart it."""
+        coord = _make_assembly_coord(tmp_path, finalize_ring_on_event=True)
+        stable_segments = [str(tmp_path / "pre0.mp4")]
+        (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
+
+        with (
+            patch.object(
+                recorder,
+                "stop_and_finalize_preroll_recorder",
+                new=AsyncMock(return_value=(True, stable_segments)),
+            ),
+            patch.object(
+                recorder,
+                "restart_preroll_recorder_after_finalize",
+                new=AsyncMock(),
+            ) as mock_restart,
+            patch.object(
+                recorder,
+                "create_motion_clip",
+                new=AsyncMock(side_effect=RuntimeError("simulated ffmpeg crash")),
+            ),
+        ):
+            with pytest.raises(RuntimeError):
+                await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
+
+        mock_restart.assert_awaited_once_with(coord, CAM_ID)
 
 
 class TestStopPrerollRecorderCachePrune:
@@ -7099,7 +7371,7 @@ class TestStopPrerollRecorderCachePrune:
         seg.write_bytes(b"x" * (_PREROLL_MIN_SIZE_BYTES + 10))
 
         proc = _mock_proc(returncode=0)
-        coord._nvr_preroll_processes[CAM_ID] = proc
+        coord.nvr_preroll_processes[CAM_ID] = proc
 
         await recorder.stop_preroll_recorder(coord, CAM_ID)
 
@@ -7150,7 +7422,7 @@ class TestStopPrerollRecorderCachePrune:
         seg.write_bytes(b"x" * (_PREROLL_MIN_SIZE_BYTES + 10))
 
         proc = _mock_proc(returncode=0)
-        coord._nvr_preroll_processes[CAM_ID] = proc
+        coord.nvr_preroll_processes[CAM_ID] = proc
 
         await recorder.stop_preroll_recorder(coord, CAM_ID, prune_cache=False)
 
@@ -7191,7 +7463,7 @@ class TestStartRecorderEventBufferedPushesUpdate:
     @pytest.mark.asyncio
     async def test_async_update_listeners_called_after_preroll_start(self):
         coord = SimpleNamespace(
-            _live_connections={
+            live_connections={
                 CAM_ID_SHORT: {
                     "_connection_type": "LOCAL",
                     "rtspsUrl": "rtsp://127.0.0.1:5000/cam",
@@ -7203,11 +7475,17 @@ class TestStartRecorderEventBufferedPushesUpdate:
             async_update_listeners=MagicMock(),
         )
         coord.get_nvr_mode = lambda cid: "event_buffered"
+        coord._nvr_recorder_locks = {}
+        coord.get_nvr_recorder_lock = lambda cid: coord._nvr_recorder_locks.setdefault(
+            cid, asyncio.Lock()
+        )
 
         with (
             patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)),
             patch.object(
-                recorder, "start_preroll_recorder", new=AsyncMock(return_value=None)
+                recorder,
+                "_spawn_preroll_recorder_locked",
+                new=AsyncMock(return_value=None),
             ),
         ):
             await recorder.start_recorder(coord, CAM_ID_SHORT)
@@ -7219,7 +7497,7 @@ class TestStartRecorderEventBufferedPushesUpdate:
         """No ring is started (preroll_seconds=0) -> nothing changed, no
         spurious listener push."""
         coord = SimpleNamespace(
-            _live_connections={
+            live_connections={
                 CAM_ID_SHORT: {
                     "_connection_type": "LOCAL",
                     "rtspsUrl": "rtsp://127.0.0.1:5000/cam",
@@ -7231,6 +7509,10 @@ class TestStartRecorderEventBufferedPushesUpdate:
             async_update_listeners=MagicMock(),
         )
         coord.get_nvr_mode = lambda cid: "event_buffered"
+        coord._nvr_recorder_locks = {}
+        coord.get_nvr_recorder_lock = lambda cid: coord._nvr_recorder_locks.setdefault(
+            cid, asyncio.Lock()
+        )
 
         with patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)):
             await recorder.start_recorder(coord, CAM_ID_SHORT)

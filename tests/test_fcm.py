@@ -50,7 +50,7 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x42" * 400  # 404 B -- real-looking snapshot
 JPEG_BYTES_ALT = b"\xff\xd8\xff\xe0" + b"\x99" * 400  # different content, same length
 
-# Supervisor lifecycle (ensure/stop), hard-heal reasons, poll-loop branches, path-a/b step1 failure + clip-guard tests, patched-client/listen-body creation branches, drift-heal registration markers (from: bug-hunt grab-bag, coverage-gate grab-bag, clip coverage, coverage gaps, drift/heal registration)
+# Supervisor lifecycle (ensure/stop), hard-heal reasons, poll-loop branches, path-a/b step1 failure + clip-guard tests, patched-client/_listen-body creation branches, drift-heal registration markers (from: bug-hunt grab-bag, coverage-gate grab-bag, clip coverage, coverage gaps, drift/heal registration)
 
 
 class TestSafePathSegment:
@@ -93,20 +93,20 @@ def _make_supervisor_coord(
 ) -> SimpleNamespace:
     """Minimal coordinator for _async_run_fcm_supervisor tests.
 
-    Does NOT pre-set _fcm_start_lock, so tests covering the lock-absent path
+    Does NOT pre-set fcm_start_lock, so tests covering the lock-absent path
     can leave it unset. Callers needing the lock use
     _make_supervisor_coord_with_lock() instead.
     """
     coord = SimpleNamespace()
-    coord._entry = SimpleNamespace(data=dict(entry_data))
+    coord.entry = SimpleNamespace(data=dict(entry_data))
     coord.hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=MagicMock()),
     )
     coord.options = {"enable_fcm_push": True}
-    coord._fcm_force_hard_heal = force_hard
-    coord._fcm_last_push = float("-inf")
-    coord._fcm_running = False
-    coord._fcm_healthy = False
+    coord.fcm_force_hard_heal = force_hard
+    coord.fcm_last_push = float("-inf")
+    coord.fcm_running = False
+    coord.fcm_healthy = False
     return coord
 
 
@@ -114,7 +114,7 @@ def _make_supervisor_coord_with_lock(
     entry_data: dict, *, force_hard: bool = False
 ) -> SimpleNamespace:
     coord = _make_supervisor_coord(entry_data, force_hard=force_hard)
-    coord._fcm_start_lock = asyncio.Lock()
+    coord.fcm_start_lock = asyncio.Lock()
     return coord
 
 
@@ -142,7 +142,7 @@ async def test_ensure_supervisor_returns_early_when_fcm_disabled() -> None:
         options={"enable_fcm_push": False},
     )
     await fcm.async_ensure_fcm_supervisor(coord)
-    assert not hasattr(coord, "_fcm_supervisor_task")
+    assert not hasattr(coord, "fcm_supervisor_task")
 
 
 async def test_ensure_supervisor_spawns_task_when_none() -> None:
@@ -151,15 +151,15 @@ async def test_ensure_supervisor_spawns_task_when_none() -> None:
 
     coord = SimpleNamespace(
         options={"enable_fcm_push": True},
-        _fcm_supervisor_task=None,
+        fcm_supervisor_task=None,
     )
     with patch.object(fcm, "_async_run_fcm_supervisor", new=AsyncMock()):
         await fcm.async_ensure_fcm_supervisor(coord)
 
-    assert coord._fcm_supervisor_task is not None
-    coord._fcm_supervisor_task.cancel()
+    assert coord.fcm_supervisor_task is not None
+    coord.fcm_supervisor_task.cancel()
     try:
-        await coord._fcm_supervisor_task
+        await coord.fcm_supervisor_task
     except (asyncio.CancelledError, Exception):
         pass
 
@@ -174,12 +174,12 @@ async def test_ensure_supervisor_idempotent_when_task_alive() -> None:
     existing = asyncio.create_task(_hang())
     coord = SimpleNamespace(
         options={"enable_fcm_push": True},
-        _fcm_supervisor_task=existing,
+        fcm_supervisor_task=existing,
     )
 
     await fcm.async_ensure_fcm_supervisor(coord)
 
-    assert coord._fcm_supervisor_task is existing  # not replaced
+    assert coord.fcm_supervisor_task is existing  # not replaced
 
     existing.cancel()
     try:
@@ -197,15 +197,15 @@ async def test_stop_supervisor_cancels_running_task_and_calls_stop_push() -> Non
 
     running = asyncio.create_task(_hang())
     coord = SimpleNamespace(
-        _fcm_supervisor_task=running,
-        _fcm_client=None,
-        _fcm_running=False,
+        fcm_supervisor_task=running,
+        fcm_client=None,
+        fcm_running=False,
     )
 
     with patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()) as mock_stop:
         await fcm.async_stop_fcm_supervisor(coord)
 
-    assert coord._fcm_supervisor_task is None
+    assert coord.fcm_supervisor_task is None
     mock_stop.assert_called_once_with(coord)
     assert running.done()
 
@@ -303,7 +303,7 @@ async def test_supervisor_hard_heal_reason_no_credentials(
     from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
-    # Empty entry data → not coordinator._entry.data.get("fcm_credentials") is True.
+    # Empty entry data → not coordinator.entry.data.get("fcm_credentials") is True.
     coord = _make_supervisor_coord_with_lock({}, force_hard=False)
 
     with (
@@ -334,13 +334,13 @@ async def test_supervisor_hard_heal_reason_no_credentials(
 
 
 async def test_supervisor_creates_lock_when_absent_and_breaks_on_cancelled() -> None:
-    """A missing _fcm_start_lock is lazily created; CancelledError from the
+    """A missing fcm_start_lock is lazily created; CancelledError from the
     start call makes the supervisor break out and return normally."""
     from custom_components.bosch_shc_camera import fcm
     from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
-    # Coordinator WITHOUT _fcm_start_lock so the lazy-init path is reached.
+    # Coordinator WITHOUT fcm_start_lock so the lazy-init path is reached.
     coord = _make_supervisor_coord({"fcm_credentials": {"gcm": "x"}}, force_hard=False)
 
     with patch.object(
@@ -356,7 +356,7 @@ async def test_supervisor_creates_lock_when_absent_and_breaks_on_cancelled() -> 
 
     assert task.done()
     # Lock was created on the coordinator.
-    assert hasattr(coord, "_fcm_start_lock")
+    assert hasattr(coord, "fcm_start_lock")
 
 
 async def test_supervisor_exception_during_start_logs_and_continues() -> None:
@@ -405,7 +405,7 @@ async def test_supervisor_poll_exits_when_listener_stops() -> None:
 
     fcm_client = MagicMock()
     fcm_client.is_started.return_value = False
-    coord._fcm_client = fcm_client
+    coord.fcm_client = fcm_client
 
     call_count = 0
 
@@ -445,7 +445,7 @@ async def test_supervisor_cancelled_during_poll_calls_stop_push() -> None:
     fcm_client.is_started.return_value = (
         True  # stays "alive" so poll doesn't break by itself
     )
-    coord._fcm_client = fcm_client
+    coord.fcm_client = fcm_client
 
     with (
         patch.object(
@@ -476,7 +476,7 @@ async def test_supervisor_push_received_resets_counters() -> None:
 
     fcm_client = MagicMock()
     fcm_client.is_started.return_value = False
-    coord._fcm_client = fcm_client
+    coord.fcm_client = fcm_client
 
     call_count = 0
 
@@ -485,7 +485,7 @@ async def test_supervisor_push_received_resets_counters() -> None:
         call_count += 1
         if call_count == 1:
             # Simulate a push arriving while this listener was alive.
-            coord._fcm_last_push = time.monotonic()
+            coord.fcm_last_push = time.monotonic()
             return True
         raise asyncio.CancelledError()
 
@@ -521,7 +521,7 @@ async def test_supervisor_cancelled_during_final_backoff_sleep() -> None:
 
     fcm_client = MagicMock()
     fcm_client.is_started.return_value = False  # poll breaks immediately
-    coord._fcm_client = fcm_client
+    coord.fcm_client = fcm_client
 
     # Save real asyncio.sleep before patching to avoid infinite recursion in the hook.
     _real_sleep = _asyncio.sleep
@@ -553,7 +553,7 @@ async def test_supervisor_cancelled_during_final_backoff_sleep() -> None:
 
 
 async def test_supervisor_inner_poll_breaks_on_forced_hard_heal() -> None:
-    """The inner poll loop must honor _fcm_force_hard_heal even while the
+    """The inner poll loop must honor fcm_force_hard_heal even while the
     listener still reports is_started()==True (the silent-delivery-death
     case the flag exists for) — it must not wait for an independent socket
     death that, in this scenario, may never come.
@@ -574,7 +574,7 @@ async def test_supervisor_inner_poll_breaks_on_forced_hard_heal() -> None:
     # Listener stays "started" — the silent-delivery-death case.
     fcm_client = MagicMock()
     fcm_client.is_started.return_value = True
-    coord._fcm_client = fcm_client
+    coord.fcm_client = fcm_client
 
     start_calls = 0
 
@@ -594,7 +594,7 @@ async def test_supervisor_inner_poll_breaks_on_forced_hard_heal() -> None:
         if sleep_calls == 1:
             # First sleep is inside the inner poll loop: simulate the watchdog
             # flagging delivery death while the listener still reports started.
-            coord._fcm_force_hard_heal = True
+            coord.fcm_force_hard_heal = True
         elif sleep_calls > 50:
             # Safety net: a regressed inner loop that never breaks would spin
             # here forever — abort so the test FAILS (on start_calls) not hangs.
@@ -619,7 +619,7 @@ async def test_supervisor_inner_poll_breaks_on_forced_hard_heal() -> None:
     # The hard-heal actually purged the credentials from the entry data.
     coord.hass.config_entries.async_update_entry.assert_called()
     # Flag consumed (and reset) by the top-of-loop hard-heal.
-    assert coord._fcm_force_hard_heal is False
+    assert coord.fcm_force_hard_heal is False
 
 
 async def test_supervisor_hard_heal_purge_exception_logs_and_retries() -> None:
@@ -746,7 +746,7 @@ async def test_supervisor_poll_loop_exception_logs_and_treats_as_terminated() ->
 
     fcm_client = MagicMock()
     fcm_client.is_started.side_effect = RuntimeError("boom")
-    coord._fcm_client = fcm_client
+    coord.fcm_client = fcm_client
 
     start_calls = 0
 
@@ -789,11 +789,11 @@ async def test_handle_push_retries_when_http200_but_no_new_event() -> None:
     coord = SimpleNamespace()
     coord.token = "bearer_tok"
     coord.data = {"cam1": {"info": {"title": "Cam1"}}}
-    coord._last_event_ids = {}  # prev_id=None → no dispatch, but _any_fetch_ok=True
-    coord._alert_sent_ids = {}
-    coord._fcm_running = True  # enables the retry branch
+    coord.last_event_ids = {}  # prev_id=None → no dispatch, but _any_fetch_ok=True
+    coord.alert_sent_ids = {}
+    coord.fcm_running = True  # enables the retry branch
     coord.options = {}
-    coord._camera_entities = {}
+    coord.camera_entities = {}
     coord.hass = SimpleNamespace(
         states=SimpleNamespace(get=MagicMock(return_value=None))
     )
@@ -816,7 +816,7 @@ async def test_handle_push_retries_when_http200_but_no_new_event() -> None:
         ),
         patch("asyncio.sleep", new=AsyncMock()),
     ):
-        # _attempt=0: no dispatch + HTTP200 + _fcm_running → recurse with _attempt=1
+        # _attempt=0: no dispatch + HTTP200 + fcm_running → recurse with _attempt=1
         # _attempt=1: same → recurse with _attempt=2
         # _attempt=2: 2 < 2 is False → stop
         await fcm.async_handle_fcm_push(coord, 0)
@@ -867,7 +867,7 @@ def _make_alert_coord(options=None, **overrides):
         data={
             CAM_ID: {"info": {"title": "Terrasse"}, "events": []},
         },
-        _last_event_ids={CAM_ID: "event-id-001"},
+        last_event_ids={CAM_ID: "event-id-001"},
     )
     for k, v in overrides.items():
         setattr(coord, k, v)
@@ -1423,12 +1423,12 @@ class TestAsyncStartFcmPushNullClientWarning:
         import custom_components.bosch_shc_camera.fcm as fcm_mod
 
         coord = SimpleNamespace(
-            _fcm_running=False,
+            fcm_running=False,
             options={"enable_fcm_push": True},
             data={},
-            _entry=SimpleNamespace(data={}, options={}),
+            entry=SimpleNamespace(data={}, options={}),
             hass=SimpleNamespace(),
-            _fcm_start_lock=asyncio.Lock(),
+            fcm_start_lock=asyncio.Lock(),
         )
 
         logged = []
@@ -1449,7 +1449,7 @@ class TestAsyncStartFcmPushNullClientWarning:
 
 
 class TestFcmStartLockLazyInit:
-    """When coordinator._fcm_start_lock is None/missing,
+    """When coordinator.fcm_start_lock is None/missing,
     async_start_fcm_push must create a new asyncio.Lock and store it."""
 
     def setup_method(self):
@@ -1466,18 +1466,18 @@ class TestFcmStartLockLazyInit:
 
     @pytest.mark.asyncio
     async def test_lazy_init_creates_lock_when_missing(self):
-        """Coordinator without _fcm_start_lock → lazy-init creates one."""
+        """Coordinator without fcm_start_lock → lazy-init creates one."""
         _install_firebase_module()
         import custom_components.bosch_shc_camera.fcm as fcm_mod
 
         coord = SimpleNamespace(
             options={"fcm_push_mode": "auto"},
             data={},
-            _entry=SimpleNamespace(data={}, options={}),
+            entry=SimpleNamespace(data={}, options={}),
             hass=SimpleNamespace(),
-            # No _fcm_start_lock attribute
+            # No fcm_start_lock attribute
         )
-        assert not hasattr(coord, "_fcm_start_lock")
+        assert not hasattr(coord, "fcm_start_lock")
 
         # Return early after entering the lock (mock out the complex internals)
         call_log = []
@@ -1502,10 +1502,10 @@ class TestFcmStartLockLazyInit:
 
             async def _patched_start(coordinator):
                 # Replicate only the lock lazy-init logic, then return
-                lock = getattr(coordinator, "_fcm_start_lock", None)
+                lock = getattr(coordinator, "fcm_start_lock", None)
                 if lock is None:
                     lock = asyncio.Lock()
-                    coordinator._fcm_start_lock = lock
+                    coordinator.fcm_start_lock = lock
                 call_log.append("lock_created")
                 return
 
@@ -1517,8 +1517,8 @@ class TestFcmStartLockLazyInit:
 
     @pytest.mark.asyncio
     async def test_lazy_init_in_real_flow_when_lock_missing(self):
-        """Coordinator without _fcm_start_lock: async_start_fcm_push must
-        set coordinator._fcm_start_lock before entering the critical section.
+        """Coordinator without fcm_start_lock: async_start_fcm_push must
+        set coordinator.fcm_start_lock before entering the critical section.
 
         We make _async_start_fcm_push_locked return immediately so the test
         is fast.
@@ -1529,10 +1529,10 @@ class TestFcmStartLockLazyInit:
         coord = SimpleNamespace(
             options={},
             data={},
-            _entry=SimpleNamespace(data={}, options={}),
+            entry=SimpleNamespace(data={}, options={}),
             hass=MagicMock(),
         )
-        assert not hasattr(coord, "_fcm_start_lock")
+        assert not hasattr(coord, "fcm_start_lock")
 
         # Make the locked function return immediately (avoids complex coordinator setup)
         with patch.object(
@@ -1540,38 +1540,38 @@ class TestFcmStartLockLazyInit:
         ):
             await fcm_mod.async_start_fcm_push(coord)
 
-        # After the call, coordinator must have _fcm_start_lock (was lazy-initted)
-        assert hasattr(coord, "_fcm_start_lock"), (
-            "coordinator._fcm_start_lock must be set after lazy-init"
+        # After the call, coordinator must have fcm_start_lock (was lazy-initted)
+        assert hasattr(coord, "fcm_start_lock"), (
+            "coordinator.fcm_start_lock must be set after lazy-init"
         )
-        assert isinstance(coord._fcm_start_lock, asyncio.Lock), (
-            "_fcm_start_lock must be an asyncio.Lock"
+        assert isinstance(coord.fcm_start_lock, asyncio.Lock), (
+            "fcm_start_lock must be an asyncio.Lock"
         )
 
     @pytest.mark.asyncio
     async def test_async_start_fcm_push_shim_lazy_init(self):
-        """async_start_fcm_push shim must lazy-init _fcm_start_lock when missing."""
+        """async_start_fcm_push shim must lazy-init fcm_start_lock when missing."""
         _install_firebase_module()
         import custom_components.bosch_shc_camera.fcm as fcm_mod
 
         coord = SimpleNamespace(
             options={"enable_fcm_push": True},
             data={},
-            _entry=SimpleNamespace(data={}),
+            entry=SimpleNamespace(data={}),
             hass=MagicMock(),
-            _fcm_running=False,
+            fcm_running=False,
         )
-        assert not hasattr(coord, "_fcm_start_lock")
+        assert not hasattr(coord, "fcm_start_lock")
 
         with patch.object(
             fcm_mod, "_async_start_fcm_push_locked", new=AsyncMock(return_value=False)
         ):
             await fcm_mod.async_start_fcm_push(coord)
 
-        assert hasattr(coord, "_fcm_start_lock"), (
-            "async_start_fcm_push shim must lazy-init _fcm_start_lock"
+        assert hasattr(coord, "fcm_start_lock"), (
+            "async_start_fcm_push shim must lazy-init fcm_start_lock"
         )
-        assert isinstance(coord._fcm_start_lock, asyncio.Lock)
+        assert isinstance(coord.fcm_start_lock, asyncio.Lock)
 
 
 class TestPatchedListenBody:
@@ -1749,8 +1749,8 @@ def _make_register_coord(data: dict | None = None) -> SimpleNamespace:
 
     coord = SimpleNamespace(
         token="bearer-abc",
-        _fcm_token="fcm-tok-new",
-        _entry=entry,
+        fcm_token="fcm-tok-new",
+        entry=entry,
         hass=hass,
     )
     # Attach update_calls so tests can inspect them
@@ -1851,7 +1851,7 @@ async def test_drift_heal_b_already_healed_skips_post() -> None:
     """
     coord = _make_register_coord(
         data={
-            "fcm_registered_token": "fcm-tok-new",  # same as _fcm_token
+            "fcm_registered_token": "fcm-tok-new",  # same as fcm_token
             "fcm_registered_device_type": "ANDROID",
             "fcm_registered_at": time.time(),  # fresh → fast-path skip
         }
@@ -2000,7 +2000,7 @@ async def test_drift_heal_d_token_changed_posts_and_writes_marker() -> None:
     """
     coord = _make_register_coord(
         data={
-            "fcm_registered_token": "fcm-tok-OLD",  # differs from _fcm_token
+            "fcm_registered_token": "fcm-tok-OLD",  # differs from fcm_token
             "fcm_registered_device_type": "ANDROID",
         }
     )
@@ -2110,7 +2110,7 @@ async def test_drift_heal_f_server_401_returns_false_no_marker_written() -> None
     )
 
 
-# Noise filter, safe-URL validation, notify-data building, alert-service slot resolution, path A/B event handling + snapshot/dedup/ordering, creds-staleness helpers, listen() branches, mode/pin migration (from: event-snapshot, extra coverage, filter helpers, general helpers, listen branches, mode/pin)
+# Noise filter, safe-URL validation, notify-data building, alert-service slot resolution, path A/B event handling + snapshot/dedup/ordering, creds-staleness helpers, _listen() branches, mode/pin migration (from: event-snapshot, extra coverage, filter helpers, general helpers, _listen branches, mode/pin)
 
 
 def _isolate_shared_state():
@@ -2164,14 +2164,14 @@ def _make_push_coord(**overrides: Any) -> Any:
         token="tok-test",
         hass=hass,
         data={CAM_ID: {"info": {"title": "Terrasse"}, "events": []}},
-        _last_event_ids={},
-        _alert_sent_ids={},
-        _camera_entities={},
-        _image_entities={},
-        _shc_state_cache={},
-        _cached_events={},
-        _bg_tasks=set(),
-        _hw_version={CAM_ID: "HOME_Eyes_Outdoor"},  # Gen2 Outdoor → delay=0
+        last_event_ids={},
+        alert_sent_ids={},
+        camera_entities={},
+        image_entities={},
+        shc_state_cache={},
+        cached_events={},
+        bg_tasks=set(),
+        hw_version={CAM_ID: "HOME_Eyes_Outdoor"},  # Gen2 Outdoor → delay=0
         options={},
     )
     coord.async_update_listeners = MagicMock()
@@ -2209,10 +2209,10 @@ def _make_alert_coord2(options: dict[str, Any] | None = None, **overrides: Any) 
         data={
             CAM_ID: {"info": {"title": "Terrasse"}, "events": []},
         },
-        _last_event_ids={CAM_ID: "prior-event-id"},
-        _camera_entities={},
-        _image_entities={},
-        _shc_state_cache={},
+        last_event_ids={CAM_ID: "prior-event-id"},
+        camera_entities={},
+        image_entities={},
+        shc_state_cache={},
     )
     for k, v in overrides.items():
         setattr(coord, k, v)
@@ -2250,19 +2250,19 @@ async def _run_alert(
 
 
 class TestPathAMovement:
-    """MOVEMENT event → _async_trigger_image_refresh called exactly once."""
+    """MOVEMENT event → async_trigger_image_refresh called exactly once."""
 
     @pytest.mark.asyncio
     async def test_movement_triggers_refresh(self) -> None:
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
-        cam_entity._async_trigger_image_refresh = AsyncMock(return_value=None)
+        cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
         cam_entity.is_streaming = False  # not streaming → Path A must fire
         task_stub = MagicMock(add_done_callback=MagicMock())
         coord = _make_push_coord(
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={CAM_ID: cam_entity},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={CAM_ID: cam_entity},
         )
         coord.hass.async_create_task = MagicMock(return_value=task_stub)
 
@@ -2284,7 +2284,7 @@ class TestPathAMovement:
                 await async_handle_fcm_push(coord)
 
         coord.hass.async_create_task.assert_called()
-        cam_entity._async_trigger_image_refresh.assert_called_once_with(delay=0)
+        cam_entity.async_trigger_image_refresh.assert_called_once_with(delay=0)
 
 
 def _make_nvr_push_coord(
@@ -2308,8 +2308,8 @@ def _make_nvr_push_coord(
         "nvr_postroll_seconds": postroll_seconds,
     }
     coord.get_nvr_mode = MagicMock(return_value=mode)
-    coord._nvr_user_intent = {CAM_ID: switch_on}
-    coord._live_connections = {CAM_ID: {"_connection_type": conn_type}}
+    coord.nvr_user_intent = {CAM_ID: switch_on}
+    coord.live_connections = {CAM_ID: {"_connection_type": conn_type}}
     coord.is_camera_online = MagicMock(return_value=online)
     return coord
 
@@ -2343,7 +2343,7 @@ class TestNvrEventBufferedClipDispatch:
     @pytest.mark.asyncio
     async def test_event_buffered_switch_on_schedules_assembly(self) -> None:
         coord = _make_nvr_push_coord(
-            _last_event_ids={CAM_ID: "old-evt"}, _camera_entities={}
+            last_event_ids={CAM_ID: "old-evt"}, camera_entities={}
         )
         with patch(
             f"{MODULE}.assemble_and_ship_motion_clip",
@@ -2358,7 +2358,7 @@ class TestNvrEventBufferedClipDispatch:
         """mode='continuous' — the always-on recorder already handles this
         camera; no separate clip assembly needed."""
         coord = _make_nvr_push_coord(
-            mode="continuous", _last_event_ids={CAM_ID: "old-evt"}, _camera_entities={}
+            mode="continuous", last_event_ids={CAM_ID: "old-evt"}, camera_entities={}
         )
         with patch(
             f"{MODULE}.assemble_and_ship_motion_clip",
@@ -2371,8 +2371,8 @@ class TestNvrEventBufferedClipDispatch:
     async def test_switch_off_not_scheduled(self) -> None:
         coord = _make_nvr_push_coord(
             switch_on=False,
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={},
         )
         with patch(
             f"{MODULE}.assemble_and_ship_motion_clip",
@@ -2389,8 +2389,8 @@ class TestNvrEventBufferedClipDispatch:
         follow-up)."""
         coord = _make_nvr_push_coord(
             enable_nvr=False,
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={},
         )
         with patch(
             f"{MODULE}.assemble_and_ship_motion_clip",
@@ -2406,8 +2406,8 @@ class TestNvrEventBufferedClipDispatch:
         coord = _make_nvr_push_coord(
             preroll_seconds=0,
             postroll_seconds=0,
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={},
         )
         with patch(
             f"{MODULE}.assemble_and_ship_motion_clip",
@@ -2423,8 +2423,8 @@ class TestNvrEventBufferedClipDispatch:
         coord = _make_nvr_push_coord(
             preroll_seconds=0,
             postroll_seconds=15,
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={},
         )
         with patch(
             f"{MODULE}.assemble_and_ship_motion_clip",
@@ -2439,8 +2439,8 @@ class TestNvrEventBufferedClipDispatch:
         clip assembly the same as continuous recording."""
         coord = _make_nvr_push_coord(
             conn_type="REMOTE",
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={},
         )
         with patch(
             f"{MODULE}.assemble_and_ship_motion_clip",
@@ -2453,8 +2453,8 @@ class TestNvrEventBufferedClipDispatch:
     async def test_camera_offline_not_scheduled(self) -> None:
         coord = _make_nvr_push_coord(
             online=False,
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={},
         )
         with patch(
             f"{MODULE}.assemble_and_ship_motion_clip",
@@ -2468,9 +2468,7 @@ class TestNvrEventBufferedClipDispatch:
         """Minimal test-fixture coordinators without `get_nvr_mode` (most of
         this file's other push-coord factories) must not raise — mirrors the
         `_is_rcp_lan_denied` defensive-getattr pattern elsewhere."""
-        coord = _make_push_coord(
-            _last_event_ids={CAM_ID: "old-evt"}, _camera_entities={}
-        )
+        coord = _make_push_coord(last_event_ids={CAM_ID: "old-evt"}, camera_entities={})
         assert not hasattr(coord, "get_nvr_mode")
         with patch(
             f"{MODULE}.assemble_and_ship_motion_clip",
@@ -2481,19 +2479,19 @@ class TestNvrEventBufferedClipDispatch:
 
 
 class TestPathAPersonEvent:
-    """PERSON event → _async_trigger_image_refresh called exactly once."""
+    """PERSON event → async_trigger_image_refresh called exactly once."""
 
     @pytest.mark.asyncio
     async def test_person_triggers_refresh(self) -> None:
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
-        cam_entity._async_trigger_image_refresh = AsyncMock(return_value=None)
+        cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
         cam_entity.is_streaming = False  # not streaming → Path A must fire
         task_stub = MagicMock(add_done_callback=MagicMock())
         coord = _make_push_coord(
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={CAM_ID: cam_entity},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={CAM_ID: cam_entity},
         )
         coord.hass.async_create_task = MagicMock(return_value=task_stub)
 
@@ -2516,7 +2514,7 @@ class TestPathAPersonEvent:
             ):
                 await async_handle_fcm_push(coord)
 
-        cam_entity._async_trigger_image_refresh.assert_called_once_with(delay=0)
+        cam_entity.async_trigger_image_refresh.assert_called_once_with(delay=0)
 
 
 class TestPathAGen1Delay:
@@ -2532,13 +2530,13 @@ class TestPathAGen1Delay:
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
-        cam_entity._async_trigger_image_refresh = AsyncMock(return_value=None)
+        cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
         cam_entity.is_streaming = False  # not streaming → Path A must fire
         task_stub = MagicMock(add_done_callback=MagicMock())
         coord = _make_push_coord(
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={CAM_ID: cam_entity},
-            _hw_version={CAM_ID: "INDOOR"},  # Gen1 360 Innenkamera
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={CAM_ID: cam_entity},
+            hw_version={CAM_ID: "INDOOR"},  # Gen1 360 Innenkamera
         )
         coord.hass.async_create_task = MagicMock(return_value=task_stub)
 
@@ -2559,22 +2557,22 @@ class TestPathAGen1Delay:
             ):
                 await async_handle_fcm_push(coord)
 
-        cam_entity._async_trigger_image_refresh.assert_called_once_with(delay=1.5)
+        cam_entity.async_trigger_image_refresh.assert_called_once_with(delay=1.5)
 
 
 class TestPathAStatusOnlyEvent:
-    """Status-only event type → _async_trigger_image_refresh NOT called."""
+    """Status-only event type → async_trigger_image_refresh NOT called."""
 
     @pytest.mark.asyncio
     async def test_trouble_connect_does_not_trigger_refresh(self) -> None:
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
-        cam_entity._async_trigger_image_refresh = AsyncMock(return_value=None)
+        cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
         task_stub = MagicMock(add_done_callback=MagicMock())
         coord = _make_push_coord(
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={CAM_ID: cam_entity},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={CAM_ID: cam_entity},
         )
         coord.hass.async_create_task = MagicMock(return_value=task_stub)
 
@@ -2595,18 +2593,18 @@ class TestPathAStatusOnlyEvent:
             ):
                 await async_handle_fcm_push(coord)
 
-        cam_entity._async_trigger_image_refresh.assert_not_called()
+        cam_entity.async_trigger_image_refresh.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_trouble_disconnect_does_not_trigger_refresh(self) -> None:
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
-        cam_entity._async_trigger_image_refresh = AsyncMock(return_value=None)
+        cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
         task_stub = MagicMock(add_done_callback=MagicMock())
         coord = _make_push_coord(
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={CAM_ID: cam_entity},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={CAM_ID: cam_entity},
         )
         coord.hass.async_create_task = MagicMock(return_value=task_stub)
 
@@ -2627,7 +2625,7 @@ class TestPathAStatusOnlyEvent:
             ):
                 await async_handle_fcm_push(coord)
 
-        cam_entity._async_trigger_image_refresh.assert_not_called()
+        cam_entity.async_trigger_image_refresh.assert_not_called()
 
 
 class TestPathBValidJpeg:
@@ -2636,16 +2634,16 @@ class TestPathBValidJpeg:
     @pytest.mark.asyncio
     async def test_path_b_updates_cache_and_notifies(self) -> None:
         cam_entity = MagicMock()
-        cam_entity._cached_image = None  # no existing cache
-        cam_entity._last_image_fetch = float("-inf")
+        cam_entity.cached_image = None  # no existing cache
+        cam_entity.last_image_fetch = float("-inf")
 
         image_entity = MagicMock()
         image_entity.async_notify_refreshed = AsyncMock()
 
         coord = _make_alert_coord2(
-            _camera_entities={CAM_ID: cam_entity},
-            _image_entities={CAM_ID: image_entity},
-            _shc_state_cache={CAM_ID: {"privacy_mode": False}},
+            camera_entities={CAM_ID: cam_entity},
+            image_entities={CAM_ID: image_entity},
+            shc_state_cache={CAM_ID: {"privacy_mode": False}},
         )
 
         session = MagicMock()
@@ -2661,7 +2659,7 @@ class TestPathBValidJpeg:
                 session_override=session,
             )
 
-        assert cam_entity._cached_image == JPEG_BYTES, (
+        assert cam_entity.cached_image == JPEG_BYTES, (
             "cache must hold the event image bytes"
         )
         mock_save.assert_awaited_once_with(coord.hass, CAM_ID, JPEG_BYTES)
@@ -2669,15 +2667,15 @@ class TestPathBValidJpeg:
 
     @pytest.mark.asyncio
     async def test_path_b_updates_last_image_fetch(self) -> None:
-        """_last_image_fetch must be set to current monotonic time."""
+        """last_image_fetch must be set to current monotonic time."""
         cam_entity = MagicMock()
-        cam_entity._cached_image = None
-        cam_entity._last_image_fetch = float("-inf")
+        cam_entity.cached_image = None
+        cam_entity.last_image_fetch = float("-inf")
 
         coord = _make_alert_coord2(
-            _camera_entities={CAM_ID: cam_entity},
-            _image_entities={},
-            _shc_state_cache={},
+            camera_entities={CAM_ID: cam_entity},
+            image_entities={},
+            shc_state_cache={},
         )
 
         session = MagicMock()
@@ -2695,9 +2693,9 @@ class TestPathBValidJpeg:
             )
         after = time.monotonic()
 
-        fetch_ts: float = cam_entity._last_image_fetch
+        fetch_ts: float = cam_entity.last_image_fetch
         assert before <= fetch_ts <= after, (
-            f"_last_image_fetch must be updated to current monotonic; "
+            f"last_image_fetch must be updated to current monotonic; "
             f"got {fetch_ts!r}, expected [{before:.3f}, {after:.3f}]"
         )
 
@@ -2708,16 +2706,16 @@ class TestPathBPrivacyModeBlocked:
     @pytest.mark.asyncio
     async def test_path_b_blocked_by_privacy_mode(self) -> None:
         cam_entity = MagicMock()
-        cam_entity._cached_image = None
-        cam_entity._last_image_fetch = float("-inf")
+        cam_entity.cached_image = None
+        cam_entity.last_image_fetch = float("-inf")
 
         image_entity = MagicMock()
         image_entity.async_notify_refreshed = AsyncMock()
 
         coord = _make_alert_coord2(
-            _camera_entities={CAM_ID: cam_entity},
-            _image_entities={CAM_ID: image_entity},
-            _shc_state_cache={CAM_ID: {"privacy_mode": True}},
+            camera_entities={CAM_ID: cam_entity},
+            image_entities={CAM_ID: image_entity},
+            shc_state_cache={CAM_ID: {"privacy_mode": True}},
         )
 
         session = MagicMock()
@@ -2733,7 +2731,7 @@ class TestPathBPrivacyModeBlocked:
                 session_override=session,
             )
 
-        assert cam_entity._cached_image is None, (
+        assert cam_entity.cached_image is None, (
             "cache must NOT be updated when privacy is ON"
         )
         mock_save.assert_not_awaited()
@@ -2750,16 +2748,16 @@ class TestPathBDeduplication:
         assert existing == JPEG_BYTES
 
         cam_entity = MagicMock()
-        cam_entity._cached_image = existing
-        cam_entity._last_image_fetch = time.monotonic()
+        cam_entity.cached_image = existing
+        cam_entity.last_image_fetch = time.monotonic()
 
         image_entity = MagicMock()
         image_entity.async_notify_refreshed = AsyncMock()
 
         coord = _make_alert_coord2(
-            _camera_entities={CAM_ID: cam_entity},
-            _image_entities={CAM_ID: image_entity},
-            _shc_state_cache={CAM_ID: {"privacy_mode": False}},
+            camera_entities={CAM_ID: cam_entity},
+            image_entities={CAM_ID: image_entity},
+            shc_state_cache={CAM_ID: {"privacy_mode": False}},
         )
 
         session = MagicMock()
@@ -2793,16 +2791,16 @@ class TestPathBDeduplication:
         assert JPEG_BYTES_ALT != JPEG_BYTES
 
         cam_entity = MagicMock()
-        cam_entity._cached_image = JPEG_BYTES_ALT  # cached: different image, same size
-        cam_entity._last_image_fetch = time.monotonic()
+        cam_entity.cached_image = JPEG_BYTES_ALT  # cached: different image, same size
+        cam_entity.last_image_fetch = time.monotonic()
 
         image_entity = MagicMock()
         image_entity.async_notify_refreshed = AsyncMock()
 
         coord = _make_alert_coord2(
-            _camera_entities={CAM_ID: cam_entity},
-            _image_entities={CAM_ID: image_entity},
-            _shc_state_cache={CAM_ID: {"privacy_mode": False}},
+            camera_entities={CAM_ID: cam_entity},
+            image_entities={CAM_ID: image_entity},
+            shc_state_cache={CAM_ID: {"privacy_mode": False}},
         )
 
         session = MagicMock()
@@ -2829,16 +2827,16 @@ class TestPathBDeduplication:
         assert len(short_existing) != len(JPEG_BYTES)
 
         cam_entity = MagicMock()
-        cam_entity._cached_image = short_existing
-        cam_entity._last_image_fetch = time.monotonic()
+        cam_entity.cached_image = short_existing
+        cam_entity.last_image_fetch = time.monotonic()
 
         image_entity = MagicMock()
         image_entity.async_notify_refreshed = AsyncMock()
 
         coord = _make_alert_coord2(
-            _camera_entities={CAM_ID: cam_entity},
-            _image_entities={CAM_ID: image_entity},
-            _shc_state_cache={CAM_ID: {"privacy_mode": False}},
+            camera_entities={CAM_ID: cam_entity},
+            image_entities={CAM_ID: image_entity},
+            shc_state_cache={CAM_ID: {"privacy_mode": False}},
         )
 
         session = MagicMock()
@@ -2864,9 +2862,9 @@ class TestPathBNoCameraEntity:
     @pytest.mark.asyncio
     async def test_path_b_no_camera_entity_is_silent(self) -> None:
         coord = _make_alert_coord2(
-            _camera_entities={},
-            _image_entities={},
-            _shc_state_cache={},
+            camera_entities={},
+            image_entities={},
+            shc_state_cache={},
         )
 
         session = MagicMock()
@@ -2905,11 +2903,11 @@ class TestPathAandBOrdering:
 
         # Set up a cam entity for Path A
         cam_entity = MagicMock()
-        cam_entity._async_trigger_image_refresh = AsyncMock(return_value=None)
+        cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
         cam_entity.is_streaming = False  # not streaming → Path A must fire
         # Set it up so Path B can also update it (no existing cache → update will fire)
-        cam_entity._cached_image = None
-        cam_entity._last_image_fetch = float("-inf")
+        cam_entity.cached_image = None
+        cam_entity.last_image_fetch = float("-inf")
 
         image_entity = MagicMock()
         image_entity.async_notify_refreshed = AsyncMock()
@@ -2917,10 +2915,10 @@ class TestPathAandBOrdering:
         task_stub = MagicMock(add_done_callback=MagicMock())
 
         coord = _make_push_coord(
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={CAM_ID: cam_entity},
-            _image_entities={CAM_ID: image_entity},
-            _shc_state_cache={CAM_ID: {"privacy_mode": False}},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={CAM_ID: cam_entity},
+            image_entities={CAM_ID: image_entity},
+            shc_state_cache={CAM_ID: {"privacy_mode": False}},
         )
         coord.hass.async_create_task = MagicMock(return_value=task_stub)
         # Alert send must be patchable — replace with no-op so we can test push handler alone
@@ -2931,7 +2929,7 @@ class TestPathAandBOrdering:
         def _track_create_task(coro: Any) -> Any:
             nonlocal path_a_fired
             # If the cam entity refresh was scheduled, Path A fired
-            if cam_entity._async_trigger_image_refresh.called:
+            if cam_entity.async_trigger_image_refresh.called:
                 path_a_fired = True
             return task_stub
 
@@ -2956,13 +2954,13 @@ class TestPathAandBOrdering:
                     await async_handle_fcm_push(coord)
 
         # Path A: refresh must have been called
-        cam_entity._async_trigger_image_refresh.assert_called_once_with(delay=0)
+        cam_entity.async_trigger_image_refresh.assert_called_once_with(delay=0)
 
         # Path B: simulate the alert pipeline completing with imageUrl bytes
         alert_coord = _make_alert_coord2(
-            _camera_entities={CAM_ID: cam_entity},
-            _image_entities={CAM_ID: image_entity},
-            _shc_state_cache={CAM_ID: {"privacy_mode": False}},
+            camera_entities={CAM_ID: cam_entity},
+            image_entities={CAM_ID: image_entity},
+            shc_state_cache={CAM_ID: {"privacy_mode": False}},
         )
 
         img_session = MagicMock()
@@ -3321,8 +3319,8 @@ class TestCredsStatenessHelpers:
 
 class TestOnFcmPush:
     """`_on_fcm_push` is the FCM client callback. Must:
-    1. Drop pushes when `_fcm_running` is False (post-stop trailing push).
-    2. Update `_fcm_last_push` + `_fcm_healthy` flags.
+    1. Drop pushes when `fcm_running` is False (post-stop trailing push).
+    2. Update `fcm_last_push` + `fcm_healthy` flags.
     3. Schedule `async_handle_fcm_push` on the HA loop.
     """
 
@@ -3335,10 +3333,10 @@ class TestOnFcmPush:
         import threading
 
         return SimpleNamespace(
-            _fcm_lock=threading.Lock(),
-            _fcm_running=running,
-            _fcm_last_push=0.0,
-            _fcm_healthy=False,
+            fcm_lock=threading.Lock(),
+            fcm_running=running,
+            fcm_last_push=0.0,
+            fcm_healthy=False,
             hass=hass,
         )
 
@@ -3350,16 +3348,16 @@ class TestOnFcmPush:
         coord = self._make_coord(running=False)
         _on_fcm_push(coord, {"from": "test"}, "push-id-1")
         coord.hass.loop.call_soon_threadsafe.assert_not_called()
-        assert coord._fcm_last_push == 0.0
-        assert coord._fcm_healthy is False
+        assert coord.fcm_last_push == 0.0
+        assert coord.fcm_healthy is False
 
     def test_updates_health_flags_when_running(self):
         from custom_components.bosch_shc_camera.fcm import _on_fcm_push
 
         coord = self._make_coord(running=True)
         _on_fcm_push(coord, {"from": "test"}, "push-id-1")
-        assert coord._fcm_last_push > 0.0
-        assert coord._fcm_healthy is True
+        assert coord.fcm_last_push > 0.0
+        assert coord.fcm_healthy is True
 
     def test_schedules_handler_via_loop(self):
         """Must schedule via `loop.call_soon_threadsafe` since the FCM
@@ -3862,13 +3860,13 @@ def _make_coord(**overrides: object) -> SimpleNamespace:
     """Minimal coordinator stub for FCM mode tests."""
     base = dict(
         token="tok-A",
-        _fcm_token="fcm-token-xyz",
-        _fcm_push_mode="unknown",
-        _fcm_lock=RLock(),
-        _fcm_running=False,
-        _fcm_healthy=False,
-        _fcm_client=None,
-        _entry=SimpleNamespace(data={}),
+        fcm_token="fcm-token-xyz",
+        fcm_push_mode="unknown",
+        fcm_lock=RLock(),
+        fcm_running=False,
+        fcm_healthy=False,
+        fcm_client=None,
+        entry=SimpleNamespace(data={}),
         options={"enable_fcm_push": True, "fcm_push_mode": "auto"},
         hass=MagicMock(),
     )
@@ -4337,14 +4335,14 @@ def _coord(data: Any) -> Any:
         token="tok",
         hass=MagicMock(),
         data=data,
-        _last_event_ids={},
-        _alert_sent_ids={},
-        _camera_entities={},
-        _image_entities={},
-        _shc_state_cache={},
-        _cached_events={},
-        _bg_tasks=set(),
-        _hw_version={},
+        last_event_ids={},
+        alert_sent_ids={},
+        camera_entities={},
+        image_entities={},
+        shc_state_cache={},
+        cached_events={},
+        bg_tasks=set(),
+        hw_version={},
         options={},
     )
 
@@ -4361,14 +4359,14 @@ def _make_push_coord2(**overrides: Any) -> Any:
         token="tok-test",
         hass=hass,
         data={CAM_ID: {"info": {"title": "Terrasse"}, "events": []}},
-        _last_event_ids={CAM_ID: "old-evt"},
-        _alert_sent_ids={},
-        _camera_entities={},
-        _image_entities={},
-        _shc_state_cache={},
-        _cached_events={},
-        _bg_tasks=set(),
-        _hw_version={CAM_ID: "HOME_Eyes_Outdoor"},
+        last_event_ids={CAM_ID: "old-evt"},
+        alert_sent_ids={},
+        camera_entities={},
+        image_entities={},
+        shc_state_cache={},
+        cached_events={},
+        bg_tasks=set(),
+        hw_version={CAM_ID: "HOME_Eyes_Outdoor"},
         options={},
     )
     coord.async_update_listeners = MagicMock()
@@ -4401,15 +4399,15 @@ def _make_start_coord(push_mode: str = "ios") -> Any:
     hass.async_create_task = MagicMock()
     entry = SimpleNamespace(data={})
     return SimpleNamespace(
-        _fcm_running=False,
-        _fcm_client=None,
-        _fcm_token=None,
-        _fcm_lock=threading.Lock(),
-        _fcm_healthy=False,
-        _fcm_push_mode="unknown",
+        fcm_running=False,
+        fcm_client=None,
+        fcm_token=None,
+        fcm_lock=threading.Lock(),
+        fcm_healthy=False,
+        fcm_push_mode="unknown",
         options={"enable_fcm_push": True, "fcm_push_mode": push_mode},
         hass=hass,
-        _entry=entry,
+        entry=entry,
         data={},
     )
 
@@ -4443,7 +4441,7 @@ def _make_alert_coord3(options: dict[str, Any] | None = None) -> Any:
         hass=hass,
         options=base_opts,
         data={CAM_ID: {"info": {"title": "Terrasse"}, "events": []}},
-        _last_event_ids={CAM_ID: "event-id-001"},
+        last_event_ids={CAM_ID: "event-id-001"},
     )
 
 
@@ -4452,14 +4450,14 @@ def _stub_coord(**overrides: Any) -> Any:
     base = dict(
         options={},
         token="tok-A",
-        _fcm_token="fcm-token-xyz",
-        _fcm_push_mode="ios",
-        _fcm_lock=RLock(),
-        _fcm_running=False,
-        _fcm_healthy=False,
-        _fcm_client=None,
-        _fcm_last_push=float("-inf"),
-        _entry=SimpleNamespace(data={}),
+        fcm_token="fcm-token-xyz",
+        fcm_push_mode="ios",
+        fcm_lock=RLock(),
+        fcm_running=False,
+        fcm_healthy=False,
+        fcm_client=None,
+        fcm_last_push=float("-inf"),
+        entry=SimpleNamespace(data={}),
         data={},
         hass=SimpleNamespace(
             config_entries=SimpleNamespace(async_update_entry=MagicMock()),
@@ -4501,9 +4499,9 @@ class TestAsyncStartFcmPushNoLib:
         `async_start_fcm_push` logs a warning and returns without touching
         the coordinator state."""
         coord = SimpleNamespace(
-            _fcm_running=False,
+            fcm_running=False,
             options={"enable_fcm_push": True, "fcm_push_mode": "auto"},
-            _entry=SimpleNamespace(data={}),
+            entry=SimpleNamespace(data={}),
         )
         # Patch FcmRegisterConfig presence so the first ImportError check is
         # bypassed — we want execution to land on the FcmPushClient check.
@@ -4521,8 +4519,8 @@ class TestAsyncStartFcmPushNoLib:
                 # env — that's already covered by another test; we only care
                 # about the warn-and-return branch here.
                 pytest.skip("firebase_messaging library not installed in test env")
-        # Must not have flipped _fcm_running.
-        assert coord._fcm_running is False
+        # Must not have flipped fcm_running.
+        assert coord.fcm_running is False
 
 
 class TestQuietFcmPushClient:
@@ -4609,7 +4607,7 @@ class TestQuietFcmPushClient:
             _QuietFcmPushClient,
         )
 
-        # Force the cache to None (simulates patch_class() returning None)
+        # Force the cache to None (simulates _patch_class() returning None)
         _QuietFcmPushClient._patched_class = None
         cls = _get_fcm_push_client_class()
         assert cls is FcmPushClient, (
@@ -5157,35 +5155,35 @@ class TestOnFcmPush2:
         that already considers FCM down. Pin the gate."""
         from custom_components.bosch_shc_camera.fcm import _on_fcm_push
 
-        coord = _stub_coord(_fcm_running=False)
+        coord = _stub_coord(fcm_running=False)
         _on_fcm_push(coord, {"from": "x"}, "push-id-1")
         coord.hass.loop.call_soon_threadsafe.assert_not_called()
 
     def test_running_true_schedules_handler(self):
         from custom_components.bosch_shc_camera.fcm import _on_fcm_push
 
-        coord = _stub_coord(_fcm_running=True)
+        coord = _stub_coord(fcm_running=True)
         _on_fcm_push(coord, {"from": "Bosch"}, "push-id-2")
         coord.hass.loop.call_soon_threadsafe.assert_called_once()
 
     def test_marks_fcm_healthy_and_stamps_last_push(self):
         from custom_components.bosch_shc_camera.fcm import _on_fcm_push
 
-        coord = _stub_coord(_fcm_running=True, _fcm_healthy=False)
-        before = coord._fcm_last_push
+        coord = _stub_coord(fcm_running=True, fcm_healthy=False)
+        before = coord.fcm_last_push
         _on_fcm_push(coord, {"from": "x"}, "push-id-3")
-        assert coord._fcm_healthy is True
-        assert coord._fcm_last_push > before
+        assert coord.fcm_healthy is True
+        assert coord.fcm_last_push > before
 
 
 class TestOnFcmPushSpawnHandler:
     """`_on_fcm_push` schedules `_spawn_fcm_handler` on the HA loop; invoking that
-    closure must create the event-fetch task AND store it in `_bg_tasks` so it
+    closure must create the event-fetch task AND store it in `bg_tasks` so it
     holds a strong reference (an untracked task can be GC-cancelled mid-flight).
 
     Near-duplicate note: `test_trailing_push_after_stop_is_dropped` below
     overlaps with `TestOnFcmPush2.test_running_false_drops_push` above (same
-    `_fcm_running=False` drop behavior) — kept both since they use distinct
+    `fcm_running=False` drop behavior) — kept both since they use distinct
     coordinator-stub setups exercising slightly different code paths, but a
     future consolidation could collapse them.
     """
@@ -5198,11 +5196,11 @@ class TestOnFcmPushSpawnHandler:
         hass.loop.call_soon_threadsafe = lambda fn: scheduled.append(fn)
         coord = SimpleNamespace(
             hass=hass,
-            _fcm_lock=threading.Lock(),
-            _fcm_running=True,
-            _fcm_last_push=0.0,
-            _fcm_healthy=False,
-            _bg_tasks=set(),
+            fcm_lock=threading.Lock(),
+            fcm_running=True,
+            fcm_last_push=0.0,
+            fcm_healthy=False,
+            bg_tasks=set(),
         )
         return coord, scheduled, fake_task
 
@@ -5214,25 +5212,25 @@ class TestOnFcmPushSpawnHandler:
         with patch.object(fcm, "async_handle_fcm_push", new=MagicMock()):
             fcm._on_fcm_push(coord, {"from": "bosch"}, "pid-1")
             # Push marked healthy; exactly one closure scheduled on the loop.
-            assert coord._fcm_healthy is True
+            assert coord.fcm_healthy is True
             assert len(scheduled) == 1
             # Run the scheduled closure → create + track the handler task.
             scheduled[0]()
 
         coord.hass.async_create_task.assert_called_once()
-        assert fake_task in coord._bg_tasks, (
-            "REGRESSION: FCM handler task not tracked in _bg_tasks — it can be "
+        assert fake_task in coord.bg_tasks, (
+            "REGRESSION: FCM handler task not tracked in bg_tasks — it can be "
             "GC-cancelled mid-flight, leaving coordinator.data partially updated."
         )
-        fake_task.add_done_callback.assert_called_once_with(coord._bg_tasks.discard)
+        fake_task.add_done_callback.assert_called_once_with(coord.bg_tasks.discard)
 
     @pytest.mark.asyncio
     async def test_trailing_push_after_stop_is_dropped(self):
-        """_fcm_running=False (client stopped) → push dropped, nothing scheduled."""
+        """fcm_running=False (client stopped) → push dropped, nothing scheduled."""
         from custom_components.bosch_shc_camera import fcm
 
         coord, scheduled, _ = self._coord()
-        coord._fcm_running = False
+        coord.fcm_running = False
         fcm._on_fcm_push(coord, {"from": "bosch"}, "pid-2")
         assert scheduled == []
 
@@ -5304,7 +5302,7 @@ class TestPathAExceptionSwallow:
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
-        coord = _make_push_coord2(_camera_entities={CAM_ID: cam_entity})
+        coord = _make_push_coord2(camera_entities={CAM_ID: cam_entity})
 
         session = MagicMock()
         session.get = MagicMock(
@@ -5335,10 +5333,10 @@ class TestPathBExceptionSwallow:
         warning and continues — no propagation, no FCM listener crash."""
         from custom_components.bosch_shc_camera.fcm import async_send_alert
 
-        cam_b = MagicMock(_cached_image=None, _last_image_fetch=0.0)
+        cam_b = MagicMock(cached_image=None, last_image_fetch=0.0)
         coord = _make_push_coord2(
-            _camera_entities={CAM_ID: cam_b},
-            _shc_state_cache={CAM_ID: {"privacy_mode": False}},
+            camera_entities={CAM_ID: cam_b},
+            shc_state_cache={CAM_ID: {"privacy_mode": False}},
         )
         coord.data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": []}}
         coord.options = {
@@ -5410,15 +5408,15 @@ class TestHandleFcmPushMarkEventsReadException:
             token="tok-handle",
             hass=hass,
             data={CAM_ID: {"info": {"title": "Terrasse"}, "events": []}},
-            _last_event_ids={CAM_ID: "old-event-id"},
-            _alert_sent_ids={},
-            _cached_events={},
-            _camera_entities={},
-            _bg_tasks=set(),
+            last_event_ids={CAM_ID: "old-event-id"},
+            alert_sent_ids={},
+            cached_events={},
+            camera_entities={},
+            bg_tasks=set(),
             options={"mark_events_read": True},
             async_update_listeners=MagicMock(),
-            _fcm_last_push=float("-inf"),
-            _cached_status={},
+            fcm_last_push=float("-inf"),
+            cached_status={},
         )
 
     @pytest.mark.asyncio
@@ -5455,7 +5453,7 @@ class TestHandleFcmPushMarkEventsReadException:
                 await async_handle_fcm_push(coord)
 
         # The new event id must still have been recorded despite the mark failure
-        assert coord._last_event_ids[CAM_ID] == "new-event-id"
+        assert coord.last_event_ids[CAM_ID] == "new-event-id"
 
     @pytest.mark.asyncio
     async def test_mark_events_read_not_called_when_option_off(self):
@@ -5761,12 +5759,12 @@ class TestStopFcmPushCancellation:
             return None
 
         coord = SimpleNamespace(
-            _fcm_lock=threading.Lock(),
-            _fcm_client=MagicMock(
+            fcm_lock=threading.Lock(),
+            fcm_client=MagicMock(
                 stop=AsyncMock(return_value=None),
                 tasks=[_dummy()],
             ),
-            _fcm_running=True,
+            fcm_running=True,
         )
 
         with patch(
@@ -5781,7 +5779,7 @@ class TestAsyncStopFcmPush:
     async def test_no_client_no_op(self):
         from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
 
-        coord = _stub_coord(_fcm_client=None, _fcm_running=False)
+        coord = _stub_coord(fcm_client=None, fcm_running=False)
         # Must NOT raise
         await async_stop_fcm_push(coord)
 
@@ -5791,14 +5789,14 @@ class TestAsyncStopFcmPush:
 
         client = MagicMock()
         client.stop = AsyncMock()
-        coord = _stub_coord(_fcm_client=client, _fcm_running=True, _fcm_healthy=True)
+        coord = _stub_coord(fcm_client=client, fcm_running=True, fcm_healthy=True)
         await async_stop_fcm_push(coord)
         client.stop.assert_awaited_once()
         # All state cleared
-        assert coord._fcm_running is False
-        assert coord._fcm_healthy is False
-        assert coord._fcm_client is None
-        assert coord._fcm_push_mode == "unknown"
+        assert coord.fcm_running is False
+        assert coord.fcm_healthy is False
+        assert coord.fcm_client is None
+        assert coord.fcm_push_mode == "unknown"
 
     @pytest.mark.asyncio
     async def test_client_stop_exception_swallowed(self):
@@ -5808,10 +5806,10 @@ class TestAsyncStopFcmPush:
 
         client = MagicMock()
         client.stop = AsyncMock(side_effect=RuntimeError("library bug"))
-        coord = _stub_coord(_fcm_client=client, _fcm_running=True)
+        coord = _stub_coord(fcm_client=client, fcm_running=True)
         await async_stop_fcm_push(coord)
-        assert coord._fcm_client is None
-        assert coord._fcm_running is False
+        assert coord.fcm_client is None
+        assert coord.fcm_running is False
 
     @pytest.mark.asyncio
     async def test_cancellation_propagates(self):
@@ -5820,7 +5818,7 @@ class TestAsyncStopFcmPush:
 
         client = MagicMock()
         client.stop = AsyncMock(side_effect=asyncio.CancelledError())
-        coord = _stub_coord(_fcm_client=client, _fcm_running=True)
+        coord = _stub_coord(fcm_client=client, fcm_running=True)
         with pytest.raises(asyncio.CancelledError):
             await async_stop_fcm_push(coord)
 
@@ -5847,10 +5845,10 @@ class TestAsyncStopFcmPush:
             ssl_close_done.set()
 
         client.tasks = [asyncio.create_task(slow_ssl_close())]
-        coord = _stub_coord(_fcm_client=client, _fcm_running=True)
+        coord = _stub_coord(fcm_client=client, fcm_running=True)
         await async_stop_fcm_push(coord)
         assert ssl_close_done.is_set(), "stop must await pending SSL-close tasks"
-        assert coord._fcm_client is None
+        assert coord.fcm_client is None
 
     @pytest.mark.asyncio
     async def test_pending_tasks_timeout_does_not_block_forever(self):
@@ -5867,7 +5865,7 @@ class TestAsyncStopFcmPush:
 
         hung = asyncio.create_task(never_finishes())
         client.tasks = [hung]
-        coord = _stub_coord(_fcm_client=client, _fcm_running=True)
+        coord = _stub_coord(fcm_client=client, fcm_running=True)
 
         with patch(
             "custom_components.bosch_shc_camera.fcm.asyncio.wait_for",
@@ -5875,8 +5873,8 @@ class TestAsyncStopFcmPush:
         ):
             await async_stop_fcm_push(coord)
         # State cleared regardless of timeout
-        assert coord._fcm_client is None
-        assert coord._fcm_running is False
+        assert coord.fcm_client is None
+        assert coord.fcm_running is False
         hung.cancel()
 
     @pytest.mark.asyncio
@@ -5887,9 +5885,9 @@ class TestAsyncStopFcmPush:
 
         client = MagicMock(spec=["stop"])  # no `tasks` attribute
         client.stop = AsyncMock()
-        coord = _stub_coord(_fcm_client=client, _fcm_running=True)
+        coord = _stub_coord(fcm_client=client, fcm_running=True)
         await async_stop_fcm_push(coord)
-        assert coord._fcm_client is None
+        assert coord.fcm_client is None
 
 
 class TestAsyncPersistFcmCreds:
@@ -5898,7 +5896,7 @@ class TestAsyncPersistFcmCreds:
         from custom_components.bosch_shc_camera.fcm import _async_persist_fcm_creds
 
         coord = _stub_coord()
-        coord._entry = SimpleNamespace(data={"existing": "value"})
+        coord.entry = SimpleNamespace(data={"existing": "value"})
         creds = {"refresh_token": "rfr", "android_id": 12345}
         await _async_persist_fcm_creds(coord, creds)
         coord.hass.config_entries.async_update_entry.assert_called_once()
@@ -5935,7 +5933,7 @@ class TestRegisterFcmWithBosch:
     async def test_no_fcm_token_returns_false(self):
         from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
 
-        coord = _stub_coord(_fcm_token="")
+        coord = _stub_coord(fcm_token="")
         ok = await register_fcm_with_bosch(coord)
         assert ok is False
 
@@ -6040,7 +6038,7 @@ class TestRegisterFcmWithBosch:
 
         session = MagicMock()
         session.post = _post
-        coord = _stub_coord(_entry=SimpleNamespace(data={}))
+        coord = _stub_coord(entry=SimpleNamespace(data={}))
         with patch(
             "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
@@ -6091,7 +6089,7 @@ class TestRegisterFcmWithBosch:
 
         session = MagicMock()
         session.post = _post
-        coord = _stub_coord(_fcm_push_mode="android")
+        coord = _stub_coord(fcm_push_mode="android")
         with patch(
             "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
@@ -6128,7 +6126,7 @@ class TestRegisterFcmWithBosch:
         import time as _time
 
         coord = _stub_coord(
-            _entry=SimpleNamespace(
+            entry=SimpleNamespace(
                 data={
                     "fcm_registered_token": "fcm-token-xyz",
                     "fcm_registered_device_type": "ANDROID",  # both conditions must hold
@@ -6163,7 +6161,7 @@ class TestRegisterFcmWithBosch:
 
         session = MagicMock()
         session.post = _post
-        coord = _stub_coord(_entry=SimpleNamespace(data={}))
+        coord = _stub_coord(entry=SimpleNamespace(data={}))
         with patch(
             "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
@@ -6185,7 +6183,7 @@ class TestRegisterFcmWithBosch:
 
         session = MagicMock()
         session.post = _post
-        coord = _stub_coord(_entry=SimpleNamespace(data={}))
+        coord = _stub_coord(entry=SimpleNamespace(data={}))
         with patch(
             "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
@@ -6413,11 +6411,11 @@ def _make_push_coord3(**overrides):
         token="tok-A",
         hass=hass,
         data={CAM_ID: {"info": {"title": "Terrasse"}, "events": []}},
-        _last_event_ids={},
-        _alert_sent_ids={},
-        _camera_entities={},
-        _cached_events={},
-        _bg_tasks=set(),
+        last_event_ids={},
+        alert_sent_ids={},
+        camera_entities={},
+        cached_events={},
+        bg_tasks=set(),
         options={},
     )
     coord.async_update_listeners = MagicMock()
@@ -6469,7 +6467,7 @@ def _make_alert_coord4(options=None, **overrides):
         data={
             CAM_ID: {"info": {"title": "Terrasse"}, "events": []},
         },
-        _last_event_ids={CAM_ID: "event-id-001"},
+        last_event_ids={CAM_ID: "event-id-001"},
     )
     for k, v in overrides.items():
         setattr(coord, k, v)
@@ -6574,10 +6572,10 @@ class TestAsyncStartFcmPushEarlyExits:
 
     def _stub(self, **overrides):
         base = dict(
-            _fcm_running=False,
+            fcm_running=False,
             options={"enable_fcm_push": True},
             hass=MagicMock(),
-            _entry=SimpleNamespace(data={}),
+            entry=SimpleNamespace(data={}),
             data={},
         )
         base.update(overrides)
@@ -6585,10 +6583,10 @@ class TestAsyncStartFcmPushEarlyExits:
 
     @pytest.mark.asyncio
     async def test_already_running_returns_immediately(self):
-        """_fcm_running=True → function must return without touching options."""
+        """fcm_running=True → function must return without touching options."""
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
-        coord = self._stub(_fcm_running=True)
+        coord = self._stub(fcm_running=True)
         # options intentionally absent so any options read would KeyError
         del coord.options
         # Must not raise
@@ -6604,7 +6602,7 @@ class TestAsyncStartFcmPushEarlyExits:
         with patch.dict(sys.modules, {"firebase_messaging": None}):
             await async_start_fcm_push(coord)
         # No exception = early exit worked
-        assert not coord._fcm_running, "FCM must not be marked running after early exit"
+        assert not coord.fcm_running, "FCM must not be marked running after early exit"
 
     @pytest.mark.asyncio
     async def test_import_error_returns_with_warning(self):
@@ -6627,9 +6625,7 @@ class TestAsyncStartFcmPushEarlyExits:
             else:
                 sys.modules.pop("firebase_messaging", None)
 
-        assert not coord._fcm_running, (
-            "FCM must not be marked running after ImportError"
-        )
+        assert not coord.fcm_running, "FCM must not be marked running after ImportError"
 
     @pytest.mark.asyncio
     async def test_fcm_disabled_default_false(self):
@@ -6638,7 +6634,7 @@ class TestAsyncStartFcmPushEarlyExits:
 
         coord = self._stub(options={})  # key absent → .get(..., False) = False
         await async_start_fcm_push(coord)
-        assert not coord._fcm_running, (
+        assert not coord.fcm_running, (
             "missing enable_fcm_push must default to False and exit early"
         )
 
@@ -6764,7 +6760,7 @@ class TestAsyncHandleFcmPushHttpBranches:
 
 
 class TestAsyncHandleFcmPushDedup:
-    """newest_id already in _alert_sent_ids within 60s → skip; entries beyond
+    """newest_id already in alert_sent_ids within 60s → skip; entries beyond
     the window are not deduped and get evicted from the cache."""
 
     @pytest.mark.asyncio
@@ -6773,8 +6769,8 @@ class TestAsyncHandleFcmPushDedup:
 
         recent_ts = time.monotonic() - 10.0  # 10 s ago → within 60 s window
         coord = _make_push_coord3(
-            _last_event_ids={CAM_ID: "old-event-id"},
-            _alert_sent_ids={"new-event-id": recent_ts},
+            last_event_ids={CAM_ID: "old-event-id"},
+            alert_sent_ids={"new-event-id": recent_ts},
         )
         events = _one_event3("new-event-id")
         session = MagicMock()
@@ -6800,8 +6796,8 @@ class TestAsyncHandleFcmPushDedup:
 
         old_ts = time.monotonic() - 70.0  # 70 s ago → outside 60 s window
         coord = _make_push_coord3(
-            _last_event_ids={CAM_ID: "old-event-id"},
-            _alert_sent_ids={"new-event-id": old_ts},
+            last_event_ids={CAM_ID: "old-event-id"},
+            alert_sent_ids={"new-event-id": old_ts},
         )
         events = _one_event3("new-event-id")
         session = MagicMock()
@@ -6819,13 +6815,13 @@ class TestAsyncHandleFcmPushDedup:
 
     @pytest.mark.asyncio
     async def test_old_entries_evicted_from_sent_cache(self):
-        """_alert_sent_ids entries older than 120s are evicted on each call."""
+        """alert_sent_ids entries older than 120s are evicted on each call."""
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         very_old_ts = time.monotonic() - 130.0
         coord = _make_push_coord3(
-            _last_event_ids={CAM_ID: "old-event-id"},
-            _alert_sent_ids={
+            last_event_ids={CAM_ID: "old-event-id"},
+            alert_sent_ids={
                 "ancient-id": very_old_ts,
                 "new-event-id": very_old_ts - 5,
             },
@@ -6839,8 +6835,8 @@ class TestAsyncHandleFcmPushDedup:
         ):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
-        assert "ancient-id" not in coord._alert_sent_ids, (
-            "entries older than 120s must be evicted from _alert_sent_ids"
+        assert "ancient-id" not in coord.alert_sent_ids, (
+            "entries older than 120s must be evicted from alert_sent_ids"
         )
 
 
@@ -6851,7 +6847,7 @@ class TestAsyncHandleFcmPushNewEvent:
 
     def _coord_with_prev(self, prev_id=None):
         coord = _make_push_coord3(
-            _last_event_ids={CAM_ID: prev_id} if prev_id else {},
+            last_event_ids={CAM_ID: prev_id} if prev_id else {},
             options={},
         )
         return coord
@@ -6860,7 +6856,7 @@ class TestAsyncHandleFcmPushNewEvent:
     async def test_new_event_fires_motion_bus_event(self):
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "MOVEMENT")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
@@ -6879,7 +6875,7 @@ class TestAsyncHandleFcmPushNewEvent:
     async def test_new_event_creates_alert_task(self):
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "MOVEMENT")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
@@ -6898,7 +6894,7 @@ class TestAsyncHandleFcmPushNewEvent:
     async def test_new_event_updates_last_event_id(self):
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
@@ -6908,15 +6904,15 @@ class TestAsyncHandleFcmPushNewEvent:
         ):
             with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
                 await async_handle_fcm_push(coord)
-        assert coord._last_event_ids[CAM_ID] == "new-id", (
-            "_last_event_ids must be updated to newest_id on new event"
+        assert coord.last_event_ids[CAM_ID] == "new-id", (
+            "last_event_ids must be updated to newest_id on new event"
         )
 
     @pytest.mark.asyncio
     async def test_new_event_calls_async_update_listeners(self):
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
@@ -6936,7 +6932,7 @@ class TestAsyncHandleFcmPushNewEvent:
         """prev_id is None (first push) → elif branch: just store newest_id, no bus fire."""
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={})  # no prev_id
+        coord = _make_push_coord3(last_event_ids={})  # no prev_id
         events = _one_event3("first-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
@@ -6949,8 +6945,8 @@ class TestAsyncHandleFcmPushNewEvent:
             coord.hass.bus.async_fire.assert_not_called(),
             "elif branch (no prev_id) must not fire HA events — only record the id",
         )
-        assert coord._last_event_ids.get(CAM_ID) == "first-id", (
-            "elif branch must store newest_id in _last_event_ids"
+        assert coord.last_event_ids.get(CAM_ID) == "first-id", (
+            "elif branch must store newest_id in last_event_ids"
         )
 
     @pytest.mark.asyncio
@@ -6958,7 +6954,7 @@ class TestAsyncHandleFcmPushNewEvent:
         """newest_id == prev_id → neither if nor elif branch → no bus fire."""
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "same-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "same-id"})
         events = _one_event3("same-id")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
@@ -6976,7 +6972,7 @@ class TestAsyncHandleFcmPushNewEvent:
     async def test_audio_alarm_fires_audio_alarm_event(self):
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "AUDIO_ALARM")
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
@@ -7007,7 +7003,7 @@ class TestAsyncHandleFcmPushMarkEventsRead:
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(
-            _last_event_ids={CAM_ID: "old-id"},
+            last_event_ids={CAM_ID: "old-id"},
             options={"mark_events_read": True},
         )
         events = _one_event3("new-id")
@@ -7056,7 +7052,7 @@ class TestAsyncHandleFcmPushMarkEventsRead:
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(
-            _last_event_ids={CAM_ID: "old-id"},
+            last_event_ids={CAM_ID: "old-id"},
             options={"mark_events_read": False},
         )
         events = _one_event3("new-id")
@@ -7081,7 +7077,7 @@ class TestAsyncHandleFcmPushMarkEventsRead:
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(
-            _last_event_ids={CAM_ID: "old-id"},
+            last_event_ids={CAM_ID: "old-id"},
             options={},  # key absent
         )
         events = _one_event3("new-id")
@@ -7108,7 +7104,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
     async def test_movement_with_person_tag_fires_person_event(self):
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "MOVEMENT", ["PERSON"])
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
@@ -7130,7 +7126,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
     async def test_movement_without_person_tag_fires_motion_event(self):
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "MOVEMENT", [])  # no PERSON tag
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
@@ -7153,7 +7149,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
         """eventType=PERSON (rare, but possible) fires person without upgrade path."""
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "PERSON", [])
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
@@ -7173,7 +7169,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
         """PERSON tag only upgrades MOVEMENT, not AUDIO_ALARM etc."""
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "AUDIO_ALARM", ["PERSON"])
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
@@ -7202,7 +7198,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
 
         master_state = MagicMock()
         master_state.state = "off"
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         # Make states.get return OFF for the master switch
         coord.hass.states.get = MagicMock(return_value=master_state)
         events = _one_event3("new-id", "MOVEMENT")
@@ -7228,7 +7224,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
 
         master_state = MagicMock()
         master_state.state = "on"
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         coord.hass.states.get = MagicMock(return_value=master_state)
         events = _one_event3("new-id", "MOVEMENT")
         session = MagicMock()
@@ -7249,7 +7245,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
         """states.get returns None (switch not found) → no blocking → alert allowed."""
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         coord.hass.states.get = MagicMock(return_value=None)  # switch not found
         events = _one_event3("new-id", "MOVEMENT")
         session = MagicMock()
@@ -7282,7 +7278,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
                 return master_on
             return None
 
-        coord = _make_push_coord3(_last_event_ids={CAM_ID: "old-id"})
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         coord.hass.states.get = MagicMock(side_effect=_states_get)
         events = _one_event3("new-id", "MOVEMENT")
         session = MagicMock()
@@ -8741,11 +8737,11 @@ def _make_push_coord4(**overrides):
         token="tok-B",
         hass=hass,
         data={CAM_ID: {"info": {"title": "Terrasse"}, "events": []}},
-        _last_event_ids={},
-        _alert_sent_ids={},
-        _camera_entities={},
-        _cached_events={},
-        _bg_tasks=set(),
+        last_event_ids={},
+        alert_sent_ids={},
+        camera_entities={},
+        cached_events={},
+        bg_tasks=set(),
         options={},
     )
     coord.async_update_listeners = MagicMock()
@@ -8787,15 +8783,15 @@ class TestAsyncStartFcmPushModeBranches:
         if fcm_cfg:
             entry_data["fcm_config"] = fcm_cfg
         return SimpleNamespace(
-            _fcm_running=False,
-            _fcm_client=None,
-            _fcm_token=None,
-            _fcm_lock=__import__("threading").Lock(),
-            _fcm_healthy=False,
-            _fcm_push_mode="unknown",
+            fcm_running=False,
+            fcm_client=None,
+            fcm_token=None,
+            fcm_lock=__import__("threading").Lock(),
+            fcm_healthy=False,
+            fcm_push_mode="unknown",
             options={"enable_fcm_push": True, "fcm_push_mode": push_mode},
             hass=MagicMock(),
-            _entry=self._entry_stub(entry_data),
+            entry=self._entry_stub(entry_data),
             data=data or {},
         )
 
@@ -8814,7 +8810,7 @@ class TestAsyncStartFcmPushModeBranches:
             with patch(f"{MODULE}._install_fcm_noise_filter"):
                 await async_start_fcm_push(coord)
 
-        assert not coord._fcm_running
+        assert not coord.fcm_running
 
     @pytest.mark.asyncio
     async def test_unknown_mode_uses_ios_fallback(self):
@@ -8850,7 +8846,7 @@ class TestAsyncStartFcmPushModeBranches:
 
     @pytest.mark.asyncio
     async def test_registration_failure_does_not_set_running(self):
-        """FcmPushClient.checkin_or_register raises → _fcm_running stays False."""
+        """FcmPushClient.checkin_or_register raises → fcm_running stays False."""
         try:
             from firebase_messaging import FcmPushClient, FcmRegisterConfig
         except ImportError:
@@ -8859,7 +8855,7 @@ class TestAsyncStartFcmPushModeBranches:
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
         coord = self._coord_stub(push_mode="ios")
-        coord._entry = self._entry_stub()
+        coord.entry = self._entry_stub()
 
         mock_client = MagicMock()
         mock_client.checkin_or_register = AsyncMock(
@@ -8885,11 +8881,11 @@ class TestAsyncStartFcmPushModeBranches:
                 ):
                     await async_start_fcm_push(coord)
 
-        assert not coord._fcm_running
+        assert not coord.fcm_running
 
     @pytest.mark.asyncio
     async def test_start_failure_clears_client(self):
-        """FcmPushClient.start() raises → _fcm_client set to None."""
+        """FcmPushClient.start() raises → fcm_client set to None."""
         try:
             from firebase_messaging import FcmPushClient, FcmRegisterConfig
         except ImportError:
@@ -8898,7 +8894,7 @@ class TestAsyncStartFcmPushModeBranches:
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
         coord = self._coord_stub(push_mode="ios")
-        coord._entry = self._entry_stub()
+        coord.entry = self._entry_stub()
 
         mock_client = MagicMock()
         mock_client.checkin_or_register = AsyncMock(return_value="fake-token-xyz")
@@ -8925,7 +8921,7 @@ class TestAsyncStartFcmPushModeBranches:
                     ):
                         await async_start_fcm_push(coord)
 
-        assert coord._fcm_client is None
+        assert coord.fcm_client is None
 
 
 class TestStartFcmEarlyExits:
@@ -8937,7 +8933,7 @@ class TestStartFcmEarlyExits:
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
         coord = SimpleNamespace(
-            _fcm_running=True,
+            fcm_running=True,
             options={"enable_fcm_push": True},
         )
         await async_start_fcm_push(coord)
@@ -8947,7 +8943,7 @@ class TestStartFcmEarlyExits:
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
         coord = SimpleNamespace(
-            _fcm_running=False,
+            fcm_running=False,
             options={"enable_fcm_push": False},
         )
         await async_start_fcm_push(coord)
@@ -8958,7 +8954,7 @@ class TestStartFcmEarlyExits:
         from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
 
         coord = SimpleNamespace(
-            _fcm_running=False,
+            fcm_running=False,
             options={},
         )
         await async_start_fcm_push(coord)
@@ -9001,17 +8997,15 @@ class TestHandlePushSnapshotTask:
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord4(
-            _last_event_ids={CAM_ID: "old-evt"},
+            last_event_ids={CAM_ID: "old-evt"},
         )
         cam_entity = MagicMock()
 
         async def _fake_refresh(delay=2):
             pass
 
-        cam_entity._async_trigger_image_refresh = MagicMock(
-            return_value=_fake_refresh()
-        )
-        coord._camera_entities = {CAM_ID: cam_entity}
+        cam_entity.async_trigger_image_refresh = MagicMock(return_value=_fake_refresh())
+        coord.camera_entities = {CAM_ID: cam_entity}
 
         task_stub = MagicMock()
         task_stub.add_done_callback = MagicMock()
@@ -9106,11 +9100,11 @@ class TestHandlePushExceptions:
         coord = SimpleNamespace(
             token="tok",
             data={CAM: {"info": {"title": "Kamera"}, "events": []}},
-            _last_event_ids={CAM: "old-id"},  # different from event_id → new event
-            _alert_sent_ids={},
-            _bg_tasks=set(),
-            _camera_entities={},
-            _cached_events={},
+            last_event_ids={CAM: "old-id"},  # different from event_id → new event
+            alert_sent_ids={},
+            bg_tasks=set(),
+            camera_entities={},
+            cached_events={},
             options={"mark_events_read": True},  # enable the mark-as-read branch
             hass=hass,
         )
@@ -9151,12 +9145,12 @@ class TestHandlePushExceptions:
 
     @pytest.mark.asyncio
     async def test_empty_prev_id_sets_last_event_id(self):
-        """newest_id present + prev_id=None → _last_event_ids[cam] set to newest_id."""
+        """newest_id present + prev_id=None → last_event_ids[cam] set to newest_id."""
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord4()
         # No prior event ID → prev_id will be None (key absent)
-        coord._last_event_ids = {}
+        coord.last_event_ids = {}
 
         session = MagicMock()
         session.get = MagicMock(
@@ -9173,18 +9167,18 @@ class TestHandlePushExceptions:
             ):
                 await async_handle_fcm_push(coord)
 
-        assert coord._last_event_ids.get(CAM_ID) == "first-evt"
+        assert coord.last_event_ids.get(CAM_ID) == "first-evt"
 
 
 class TestOnFcmPushDroppedWhenNotRunning:
-    """_on_fcm_push: if _fcm_running=False, push is silently dropped."""
+    """_on_fcm_push: if fcm_running=False, push is silently dropped."""
 
     def test_push_dropped_when_not_running(self):
         from custom_components.bosch_shc_camera.fcm import _on_fcm_push
 
         coord = _make_push_coord4()
-        coord._fcm_running = False
-        coord._fcm_lock = __import__("threading").Lock()
+        coord.fcm_running = False
+        coord.fcm_lock = __import__("threading").Lock()
 
         _on_fcm_push(coord, {"from": "test"}, "pid-1")
 
@@ -9194,15 +9188,15 @@ class TestOnFcmPushDroppedWhenNotRunning:
         from custom_components.bosch_shc_camera.fcm import _on_fcm_push
 
         coord = _make_push_coord4()
-        coord._fcm_running = True
-        coord._fcm_healthy = False
-        coord._fcm_last_push = float("-inf")
-        coord._fcm_lock = __import__("threading").Lock()
+        coord.fcm_running = True
+        coord.fcm_healthy = False
+        coord.fcm_last_push = float("-inf")
+        coord.fcm_lock = __import__("threading").Lock()
 
         _on_fcm_push(coord, {"from": "test"}, "pid-2")
 
         coord.hass.loop.call_soon_threadsafe.assert_called_once()
-        assert coord._fcm_healthy is True
+        assert coord.fcm_healthy is True
 
 
 class TestNotifyTypeExceptionHandled:
@@ -9240,7 +9234,7 @@ class TestNotifyTypeExceptionHandled:
                 "alert_delete_after_send": False,
             },
             data={},
-            _last_event_ids={},
+            last_event_ids={},
             hass=hass,
         )
 
@@ -9394,7 +9388,7 @@ class TestStep2NoImageData:
                 "alert_delete_after_send": False,
             },
             data={},
-            _last_event_ids={},
+            last_event_ids={},
             hass=hass,
         )
 
@@ -9504,7 +9498,7 @@ class TestStep3DirectClipDetected:
                 "alert_delete_after_send": False,
             },
             data={CAM: {"info": {"title": "TestCam"}}},
-            _last_event_ids={CAM: event_id},
+            last_event_ids={CAM: event_id},
             hass=hass,
         )
 
@@ -9681,7 +9675,7 @@ class TestStep3PollException:
                 "alert_delete_after_send": False,
             },
             data={CAM: {"info": {"title": "TestCam"}}},
-            _last_event_ids={CAM: ""},
+            last_event_ids={CAM: ""},
             hass=hass,
         )
 
@@ -9814,7 +9808,7 @@ class TestMarkEventsReadGate:
                 "alert_delete_after_send": False,
             },
             data={CAM: {"info": {"title": "TestCam"}}},
-            _last_event_ids={CAM: event_id},
+            last_event_ids={CAM: event_id},
             hass=hass,
         )
 
@@ -9922,7 +9916,7 @@ class TestSmbUploadTimeout:
                 "alert_delete_after_send": False,
             },
             data={CAM: {"info": {"title": "TestCam"}}},
-            _last_event_ids={CAM: "evt-smb-001"},
+            last_event_ids={CAM: "evt-smb-001"},
             hass=hass,
         )
 
@@ -10020,7 +10014,7 @@ class TestLocalSaveTimeout:
                 "alert_delete_after_send": False,
             },
             data={CAM: {"info": {"title": "TestCam"}}},
-            _last_event_ids={CAM: "evt-local-001"},
+            last_event_ids={CAM: "evt-local-001"},
             hass=hass,
         )
 
@@ -10272,15 +10266,15 @@ class TestEventIdNotOverwrittenByConcurrentPush:
     """Regression: concurrent FCM pipelines must not cross-report each other's
     event_id in FTP/local-save filenames.
 
-    Bug: async_send_alert fetched coordinator._last_event_ids[cam_id] at
+    Bug: async_send_alert fetched coordinator.last_event_ids[cam_id] at
     SMB/local-save time (after up to 90s of clip polling). A later FCM push
-    arriving during that window overwrote _last_event_ids, so all concurrent
+    arriving during that window overwrote last_event_ids, so all concurrent
     pipelines reported the newest event_id regardless of which event triggered
     them (observed: three PERSON events within 47s all uploaded under the
     last push's event ID).
 
     Fix: pass event_id as a parameter to async_send_alert; use it instead of
-    looking up _last_event_ids at upload time.
+    looking up last_event_ids at upload time.
     """
 
     def _get_smb_ev_id(self, coord, mock_smb_upload) -> str | None:
@@ -10295,7 +10289,7 @@ class TestEventIdNotOverwrittenByConcurrentPush:
 
     @pytest.mark.asyncio
     async def test_passed_event_id_used_over_last_event_ids(self):
-        """event_id kwarg must be used for SMB filename, not _last_event_ids at upload time."""
+        """event_id kwarg must be used for SMB filename, not last_event_ids at upload time."""
         coord = _make_alert_coord(
             options={
                 "alert_notify_service": "notify.mobile_app",
@@ -10304,8 +10298,8 @@ class TestEventIdNotOverwrittenByConcurrentPush:
                 "smb_share": "cameras",
             }
         )
-        # Simulate a later push overwriting _last_event_ids before this pipeline's upload
-        coord._last_event_ids[CAM_ID] = "NEWER_OVERWRITE_ID"
+        # Simulate a later push overwriting last_event_ids before this pipeline's upload
+        coord.last_event_ids[CAM_ID] = "NEWER_OVERWRITE_ID"
 
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
@@ -10334,13 +10328,13 @@ class TestEventIdNotOverwrittenByConcurrentPush:
                         ev_id = self._get_smb_ev_id(coord, mock_smb)
 
         assert ev_id == "ORIGINAL_PIPELINE_ID", (
-            f"SMB upload must use the event_id passed at pipeline start, not _last_event_ids "
+            f"SMB upload must use the event_id passed at pipeline start, not last_event_ids "
             f"which may have been overwritten by a concurrent push. Got: {ev_id!r}"
         )
 
     @pytest.mark.asyncio
     async def test_falls_back_to_last_event_ids_when_no_event_id_passed(self):
-        """When event_id kwarg is omitted, fall back to _last_event_ids (backwards compat)."""
+        """When event_id kwarg is omitted, fall back to last_event_ids (backwards compat)."""
         coord = _make_alert_coord(
             options={
                 "alert_notify_service": "notify.mobile_app",
@@ -10349,7 +10343,7 @@ class TestEventIdNotOverwrittenByConcurrentPush:
                 "smb_share": "cameras",
             }
         )
-        coord._last_event_ids[CAM_ID] = "FALLBACK_ID"
+        coord.last_event_ids[CAM_ID] = "FALLBACK_ID"
 
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
@@ -10373,12 +10367,12 @@ class TestEventIdNotOverwrittenByConcurrentPush:
                             "",
                             "",
                             "",
-                            # no event_id — must fall back to _last_event_ids
+                            # no event_id — must fall back to last_event_ids
                         )
                         ev_id = self._get_smb_ev_id(coord, mock_smb)
 
         assert ev_id == "FALLBACK_ID", (
-            f"Without explicit event_id, SMB upload must fall back to _last_event_ids. "
+            f"Without explicit event_id, SMB upload must fall back to last_event_ids. "
             f"Got: {ev_id!r}"
         )
 
@@ -10420,14 +10414,14 @@ def _make_creds_race_coord() -> SimpleNamespace:
 
     return SimpleNamespace(
         token="tok-A",
-        _fcm_token=None,
-        _fcm_push_mode="unknown",
-        _fcm_lock=Lock(),
-        _fcm_running=False,
-        _fcm_healthy=False,
-        _fcm_client=None,
-        _fcm_started_at=float("-inf"),
-        _entry=SimpleNamespace(
+        fcm_token=None,
+        fcm_push_mode="unknown",
+        fcm_lock=Lock(),
+        fcm_running=False,
+        fcm_healthy=False,
+        fcm_client=None,
+        fcm_started_at=float("-inf"),
+        entry=SimpleNamespace(
             data={
                 "fcm_config": {
                     "api_key": "fake-key",
@@ -10452,7 +10446,7 @@ class TestStaleClientCredsCallbackIgnoredAfterHardHeal:
 
     Fix: `_try_fcm()` in fcm.py captures the client instance it created in a
     closure variable (`_this_client`), and `_on_creds_updated`'s inner
-    `_persist` only proceeds if `coordinator._fcm_client is _this_client` at
+    `_persist` only proceeds if `coordinator.fcm_client is _this_client` at
     call time — detecting that the coordinator has since moved on to a newer
     client.
 
@@ -10493,12 +10487,12 @@ class TestStaleClientCredsCallbackIgnoredAfterHardHeal:
             # Simulate a hard-heal: coordinator moves on to a fresh client
             # (mirrors async_stop_fcm_push + a second _async_start_fcm_push_locked
             # call in _async_run_fcm_supervisor).
-            coord._fcm_running = False
+            coord.fcm_running = False
             started_2 = await fcm._async_start_fcm_push_locked(coord)
             assert started_2 is True
             assert len(_StubFcmClient.instances) == 2
             gen2 = _StubFcmClient.instances[1]
-            assert coord._fcm_client is gen2  # sanity: coordinator points at gen2
+            assert coord.fcm_client is gen2  # sanity: coordinator points at gen2
             assert gen2 is not gen1  # sanity: distinct client instances
 
             # Generation 2 is fresh: its own callback persists normally.
@@ -10536,8 +10530,8 @@ def _make_register_coord2(data: dict) -> SimpleNamespace:
     )
     coord = SimpleNamespace(
         token="bearer-abc",
-        _fcm_token="fcm-tok-X",
-        _entry=SimpleNamespace(data=dict(data)),
+        fcm_token="fcm-tok-X",
+        entry=SimpleNamespace(data=dict(data)),
         hass=hass,
     )
     coord._update_calls = update_calls  # type: ignore[attr-defined]
@@ -10634,27 +10628,27 @@ class TestPeriodicReRegistration:
 
 def _make_heal_coord(entry_data: dict, force_hard: bool = True) -> SimpleNamespace:
     coord = SimpleNamespace()
-    coord._entry = SimpleNamespace(data=dict(entry_data))
+    coord.entry = SimpleNamespace(data=dict(entry_data))
     coord.hass = SimpleNamespace(
         config_entries=SimpleNamespace(async_update_entry=MagicMock()),
     )
     coord.options = {"enable_fcm_push": True}
-    coord._fcm_start_lock = asyncio.Lock()
-    coord._fcm_force_hard_heal = force_hard
-    coord._fcm_last_push = float("-inf")
-    coord._fcm_running = False
-    coord._fcm_healthy = False
+    coord.fcm_start_lock = asyncio.Lock()
+    coord.fcm_force_hard_heal = force_hard
+    coord.fcm_last_push = float("-inf")
+    coord.fcm_running = False
+    coord.fcm_healthy = False
     return coord
 
 
 class TestForceHardHeal:
     """When the periodic /v11/events poll has confirmed push delivery is dead
-    (`_fcm_force_hard_heal=True`), the supervisor must purge credentials and
+    (`fcm_force_hard_heal=True`), the supervisor must purge credentials and
     hard-heal regardless of socket-liveness state; without the flag, and no
     staleness markers, it takes the soft path and must not purge creds."""
 
     async def test_supervisor_clears_force_hard_flag_and_purges_creds(self) -> None:
-        """`_fcm_force_hard_heal=True` → supervisor purges fcm_* creds and clears flag."""
+        """`fcm_force_hard_heal=True` → supervisor purges fcm_* creds and clears flag."""
         from custom_components.bosch_shc_camera import fcm
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
 
@@ -10685,8 +10679,8 @@ class TestForceHardHeal:
             except asyncio.CancelledError:
                 pass
 
-        assert coord._fcm_force_hard_heal is False, (
-            "_fcm_force_hard_heal must be cleared after supervisor hard-heal"
+        assert coord.fcm_force_hard_heal is False, (
+            "fcm_force_hard_heal must be cleared after supervisor hard-heal"
         )
         update_call = coord.hass.config_entries.async_update_entry.call_args
         assert update_call is not None, (
@@ -10702,7 +10696,7 @@ class TestForceHardHeal:
         )
 
     async def test_no_force_flag_skips_hard_heal(self) -> None:
-        """Without _fcm_force_hard_heal=True and no staleness markers, supervisor
+        """Without fcm_force_hard_heal=True and no staleness markers, supervisor
         takes the soft path — async_update_entry (cred-purge) is NOT called."""
         from custom_components.bosch_shc_camera import fcm
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
@@ -10738,26 +10732,26 @@ def test_fast_poll_is_inside_default_motion_window() -> None:
     """A polled event must be younger than the motion window when first seen,
     otherwise the motion sensor can never turn ON in polling-only (push-dead)
     mode."""
-    import custom_components.bosch_shc_camera as init_mod
+    import custom_components.bosch_shc_camera.coordinator as init_mod
     from custom_components.bosch_shc_camera.const import DEFAULT_MOTION_ACTIVE_WINDOW
 
     assert init_mod.FCM_DOWN_EVENT_POLL_SEC < DEFAULT_MOTION_ACTIVE_WINDOW
 
 
-# Section: _alert_sent_ids eviction + FCM watchdog tempo (relocated from
+# Section: alert_sent_ids eviction + FCM watchdog tempo (relocated from
 # tests/test_theoretical_bugs.py)
 
 
 class TestAlertSentIdsEviction:
-    """Eviction of `_alert_sent_ids` must run whenever the cache is non-empty,
+    """Eviction of `alert_sent_ids` must run whenever the cache is non-empty,
     not only once it exceeds a fixed size — a size-gated eviction starves
     when a burst of events (e.g. 4 cameras all seeing motion) keeps every
     entry younger than 120s while still growing the cache unbounded."""
 
     def _build_coord(self, sent_ids: dict[str, float]):
         return SimpleNamespace(
-            _alert_sent_ids=sent_ids,
-            _last_event_ids={},
+            alert_sent_ids=sent_ids,
+            last_event_ids={},
             data={CAM_ID: {"info": {"title": "x"}}},
             options={},
             token="tok",
@@ -10766,7 +10760,7 @@ class TestAlertSentIdsEviction:
                 states=SimpleNamespace(get=lambda eid: None),
                 async_create_task=lambda c: c.close() if hasattr(c, "close") else None,
             ),
-            _bg_tasks=set(),
+            bg_tasks=set(),
         )
 
     def test_old_entries_evicted_on_dedup_check(self):
@@ -10842,12 +10836,12 @@ class TestAlertSentIdsEviction:
 
 
 class TestFCMWatchdogTempo:
-    """`_fcm_healthy` gates the events-poll cadence (fast 60s fallback while
+    """`fcm_healthy` gates the events-poll cadence (fast 60s fallback while
     FCM is unhealthy vs. the relaxed default while healthy) and must be
     reset consistently by `async_stop_fcm_push`."""
 
     def test_fcm_unhealthy_uses_60s_interval(self):
-        """When `_fcm_healthy = False`, the events poll falls back to 60s —
+        """When `fcm_healthy = False`, the events poll falls back to 60s —
         the tempo-fallback that keeps event detection working when FCM dies
         (router reboot, WAN blip)."""
         opts = {"interval_events": 60}
@@ -10868,12 +10862,12 @@ class TestFCMWatchdogTempo:
 
         src = inspect.getsource(BoschCameraCoordinator.__init__)
         assert_in_source(
-            src, "_fcm_running: bool = False", "_fcm_running = False", any_of=True
+            src, "fcm_running: bool = False", "fcm_running = False", any_of=True
         )
 
     def test_async_stop_fcm_push_clears_state(self):
-        """After `async_stop_fcm_push`, `_fcm_running`, `_fcm_healthy`,
-        `_fcm_client` must all be cleared so a subsequent restart starts fresh."""
+        """After `async_stop_fcm_push`, `fcm_running`, `fcm_healthy`,
+        `fcm_client` must all be cleared so a subsequent restart starts fresh."""
         from pathlib import Path
 
         fcm_src = (
@@ -10884,9 +10878,9 @@ class TestFCMWatchdogTempo:
         )
         text = fcm_src.read_text()
         for must_assign in (
-            "_fcm_running = False",
-            "_fcm_healthy = False",
-            "_fcm_client = None",
+            "fcm_running = False",
+            "fcm_healthy = False",
+            "fcm_client = None",
         ):
             assert must_assign in text, (
                 f"async_stop_fcm_push must clear `{must_assign}` to allow clean restart"
@@ -10938,21 +10932,21 @@ def _make_push_coord_motion(is_streaming: bool = False, **overrides: Any) -> Any
     hass.bus.async_fire = MagicMock()
 
     cam_entity = MagicMock()
-    cam_entity._async_trigger_image_refresh = AsyncMock(return_value=None)
+    cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
     cam_entity.is_streaming = is_streaming
 
     coord = SimpleNamespace(
         token="tok-test",
         hass=hass,
         data={CAM_ID: {"info": {"title": "Innenbereich"}, "events": []}},
-        _last_event_ids={CAM_ID: "old-evt"},
-        _alert_sent_ids={},
-        _camera_entities={CAM_ID: cam_entity},
-        _image_entities={},
-        _shc_state_cache={},
-        _cached_events={},
-        _bg_tasks=set(),
-        _hw_version={CAM_ID: "HOME_Eyes_Indoor"},  # Gen2 Indoor
+        last_event_ids={CAM_ID: "old-evt"},
+        alert_sent_ids={},
+        camera_entities={CAM_ID: cam_entity},
+        image_entities={},
+        shc_state_cache={},
+        cached_events={},
+        bg_tasks=set(),
+        hw_version={CAM_ID: "HOME_Eyes_Indoor"},  # Gen2 Indoor
         options={},
     )
     coord.async_update_listeners = MagicMock()
@@ -10986,10 +10980,10 @@ def _make_alert_coord_motion(cam_entity: Any | None = None, **overrides: Any) ->
         data={
             CAM_ID: {"info": {"title": "Innenbereich"}, "events": []},
         },
-        _last_event_ids={CAM_ID: "prior-event-id"},
-        _camera_entities={CAM_ID: cam_entity} if cam_entity else {},
-        _image_entities={},
-        _shc_state_cache={CAM_ID: {"privacy_mode": False}},
+        last_event_ids={CAM_ID: "prior-event-id"},
+        camera_entities={CAM_ID: cam_entity} if cam_entity else {},
+        image_entities={},
+        shc_state_cache={CAM_ID: {"privacy_mode": False}},
     )
     for k, v in overrides.items():
         setattr(coord, k, v)
@@ -10998,15 +10992,15 @@ def _make_alert_coord_motion(cam_entity: Any | None = None, **overrides: Any) ->
 
 @pytest.mark.asyncio
 class TestPathAStreamingGuard:
-    """Path A must skip _async_trigger_image_refresh when is_streaming=True —
+    """Path A must skip async_trigger_image_refresh when is_streaming=True —
     both a live-stream and Path A's own PUT /connection + snap.jpg compete
     for a Gen2 camera's single TLS control channel; saturating it starves the
     RTSP keepalive and freezes the stream."""
 
     async def test_path_a_skipped_when_streaming(self) -> None:
-        """MOVEMENT event + is_streaming=True → NO _async_trigger_image_refresh call."""
+        """MOVEMENT event + is_streaming=True → NO async_trigger_image_refresh call."""
         coord = _make_push_coord_motion(is_streaming=True)
-        cam_entity = coord._camera_entities[CAM_ID]
+        cam_entity = coord.camera_entities[CAM_ID]
 
         session = MagicMock()
         session.get = MagicMock(
@@ -11026,14 +11020,14 @@ class TestPathAStreamingGuard:
         ):
             await async_handle_fcm_push(coord)
 
-        cam_entity._async_trigger_image_refresh.assert_not_called()
+        cam_entity.async_trigger_image_refresh.assert_not_called()
 
     async def test_path_a_fires_when_not_streaming(self) -> None:
-        """MOVEMENT event + is_streaming=False → _async_trigger_image_refresh IS
+        """MOVEMENT event + is_streaming=False → async_trigger_image_refresh IS
         called — PIN_EVERY_MODE: the not-streaming mode must keep the original
         behaviour."""
         coord = _make_push_coord_motion(is_streaming=False)
-        cam_entity = coord._camera_entities[CAM_ID]
+        cam_entity = coord.camera_entities[CAM_ID]
 
         session = MagicMock()
         session.get = MagicMock(
@@ -11053,7 +11047,7 @@ class TestPathAStreamingGuard:
         ):
             await async_handle_fcm_push(coord)
 
-        cam_entity._async_trigger_image_refresh.assert_called_once_with(delay=0)
+        cam_entity.async_trigger_image_refresh.assert_called_once_with(delay=0)
 
 
 @pytest.mark.asyncio
@@ -11213,11 +11207,11 @@ def _make_push_coord_misc14(**overrides):
         token="tok-push",
         hass=hass,
         data={CAM_ID: {"info": {"title": "Terrasse"}, "events": []}},
-        _last_event_ids={},
-        _alert_sent_ids={},
-        _camera_entities={},
-        _cached_events={},
-        _bg_tasks=set(),
+        last_event_ids={},
+        alert_sent_ids={},
+        camera_entities={},
+        cached_events={},
+        bg_tasks=set(),
         options={},
     )
     coord.async_update_listeners = MagicMock()
@@ -11254,10 +11248,10 @@ def _make_alert_coord_misc14(options=None, **overrides):
         hass=hass,
         options=base_opts,
         data={CAM_ID: {"info": {"title": "Terrasse"}, "events": []}},
-        _last_event_ids={CAM_ID: "event-old"},
-        _shc_state_cache={},
-        _cached_status={},
-        _lan_tcp_reachable={},
+        last_event_ids={CAM_ID: "event-old"},
+        shc_state_cache={},
+        cached_status={},
+        lan_tcp_reachable={},
     )
     for k, v in overrides.items():
         setattr(coord, k, v)
@@ -11287,7 +11281,7 @@ def _one_event_misc14(
 
 class TestFcmPathAExceptionWarning:
     """`async_handle_fcm_push`: when Path A's try block raises (e.g.
-    `cam_entity._async_trigger_image_refresh` raises), the except logs a
+    `cam_entity.async_trigger_image_refresh` raises), the except logs a
     WARNING and does NOT propagate."""
 
     @pytest.mark.asyncio
@@ -11297,13 +11291,13 @@ class TestFcmPathAExceptionWarning:
         """Path A try raises RuntimeError → WARNING logged, no propagation."""
         cam_entity = MagicMock()
         cam_entity.is_streaming = False
-        cam_entity._async_trigger_image_refresh = MagicMock(
+        cam_entity.async_trigger_image_refresh = MagicMock(
             side_effect=RuntimeError("refresh boom")
         )
 
         coord = _make_push_coord_misc14(
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={CAM_ID: cam_entity},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={CAM_ID: cam_entity},
         )
 
         session = MagicMock()
@@ -11334,13 +11328,13 @@ class TestFcmPathAExceptionWarning:
         """Path A exception must be swallowed — async_handle_fcm_push returns normally."""
         cam_entity = MagicMock()
         cam_entity.is_streaming = False
-        cam_entity._async_trigger_image_refresh = MagicMock(
+        cam_entity.async_trigger_image_refresh = MagicMock(
             side_effect=ValueError("boom inside path A")
         )
 
         coord = _make_push_coord_misc14(
-            _last_event_ids={CAM_ID: "old-evt"},
-            _camera_entities={CAM_ID: cam_entity},
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={CAM_ID: cam_entity},
         )
 
         session = MagicMock()
@@ -11369,7 +11363,7 @@ class TestMarkReadBgInnerExcept:
     @pytest.mark.asyncio
     async def test_mark_read_bg_exception_is_swallowed(self):
         coord = _make_push_coord_misc14(
-            _last_event_ids={CAM_ID: "old-evt"},
+            last_event_ids={CAM_ID: "old-evt"},
             options={"mark_events_read": True},
         )
 
@@ -11404,11 +11398,19 @@ class TestMarkReadBgInnerExcept:
         ):
             await async_handle_fcm_push(coord)
 
-        for t in created_tasks:
-            try:
-                await t
-            except Exception:
-                pass  # _mark_read_bg itself swallows — if we see an error, it leaked
+            # Await the background tasks WHILE the patches above are still
+            # active. asyncio.create_task() only schedules the coroutine —
+            # it doesn't run any of its body until the loop yields control,
+            # which may happen only here at the first real await. Awaiting
+            # outside this `with` block is a race: if the task's body hadn't
+            # started yet, it resumes only after the patches unwind and
+            # calls the REAL async_mark_events_read (a real network PUT),
+            # rather than the mock this test exists to exercise.
+            for t in created_tasks:
+                try:
+                    await t
+                except Exception:
+                    pass  # _mark_read_bg itself swallows — if we see an error, it leaked
 
         for t in created_tasks:
             if not t.done():
@@ -11639,7 +11641,7 @@ class TestClipPollMatchGuards:
         """No event_id: the fallback uses timestamp[:19] matching. A poll
         result with a non-matching timestamp is skipped."""
         coord = self._poll_coord()
-        coord._last_event_ids = {}
+        coord.last_event_ids = {}
 
         call_count = [0]
 
@@ -11720,15 +11722,15 @@ def _mock_fcm_module(
 def _fcm_coord(push_mode="ios", entry_data=None, **overrides):
     entry_data = entry_data or {}
     base = SimpleNamespace(
-        _fcm_running=False,
-        _fcm_client=None,
-        _fcm_token=None,
-        _fcm_lock=threading.Lock(),
-        _fcm_healthy=False,
-        _fcm_push_mode="unknown",
+        fcm_running=False,
+        fcm_client=None,
+        fcm_token=None,
+        fcm_lock=threading.Lock(),
+        fcm_healthy=False,
+        fcm_push_mode="unknown",
         options={"enable_fcm_push": True, "fcm_push_mode": push_mode},
         hass=MagicMock(),
-        _entry=SimpleNamespace(data=entry_data),
+        entry=SimpleNamespace(data=entry_data),
         data={},
     )
     for k, v in overrides.items():
@@ -11817,14 +11819,14 @@ class TestTryFcmWithModeGuards:
                 with patch(f"{MODULE}.fetch_firebase_config", side_effect=fake_fetch):
                     await async_start_fcm_push(coord)
 
-        assert not coord._fcm_running, (
+        assert not coord.fcm_running, (
             "FCM must not start when api_key is missing from config"
         )
         mock_client.checkin_or_register.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_checkin_failure_keeps_running_false(self):
-        """checkin_or_register raises → _fcm_running stays False, _fcm_client None."""
+        """checkin_or_register raises → fcm_running stays False, fcm_client None."""
         mock_fcm, _ = _mock_fcm_module(checkin_raises=True)
         coord = _fcm_coord("ios")
 
@@ -11836,12 +11838,12 @@ class TestTryFcmWithModeGuards:
                 ):
                     await async_start_fcm_push(coord)
 
-        assert not coord._fcm_running, "checkin failure must not set _fcm_running=True"
-        assert coord._fcm_client is None, "checkin failure must clear _fcm_client"
+        assert not coord.fcm_running, "checkin failure must not set fcm_running=True"
+        assert coord.fcm_client is None, "checkin failure must clear fcm_client"
 
     @pytest.mark.asyncio
     async def test_start_failure_clears_client(self):
-        """FcmPushClient.start() raises → _fcm_client set to None."""
+        """FcmPushClient.start() raises → fcm_client set to None."""
         mock_fcm, _ = _mock_fcm_module(start_raises=True)
         coord = _fcm_coord("ios")
 
@@ -11853,8 +11855,8 @@ class TestTryFcmWithModeGuards:
                 ):
                     await async_start_fcm_push(coord)
 
-        assert coord._fcm_client is None, "start() failure must clear _fcm_client"
-        assert not coord._fcm_running, "start() failure must not set _fcm_running"
+        assert coord.fcm_client is None, "start() failure must clear fcm_client"
+        assert not coord.fcm_running, "start() failure must not set fcm_running"
 
 
 class TestDispatchModes:
@@ -11883,9 +11885,7 @@ class TestDispatchModes:
                     await async_start_fcm_push(coord)
 
         assert len(call_count) == 1, "auto mode: exactly one FCM client created"
-        assert coord._fcm_running is True, (
-            "auto mode success must set _fcm_running=True"
-        )
+        assert coord.fcm_running is True, "auto mode success must set fcm_running=True"
 
     @pytest.mark.asyncio
     async def test_auto_mode_fcm_fail_no_crash(self):
@@ -11909,11 +11909,11 @@ class TestDispatchModes:
                 ):
                     await async_start_fcm_push(coord)
 
-        assert not coord._fcm_running, "FCM fail → must not set _fcm_running"
+        assert not coord.fcm_running, "FCM fail → must not set fcm_running"
 
     @pytest.mark.asyncio
     async def test_unknown_mode_coerces_to_auto(self):
-        """push_mode='weirdvalue' → coerced to 'auto' → _fcm_push_mode='auto' on success."""
+        """push_mode='weirdvalue' → coerced to 'auto' → fcm_push_mode='auto' on success."""
         mock_fcm, _mock_client = _mock_fcm_module()
         coord = _fcm_coord("weirdvalue")
 
@@ -11925,16 +11925,16 @@ class TestDispatchModes:
                 ):
                     await async_start_fcm_push(coord)
 
-        assert coord._fcm_push_mode == "auto", (
-            "unknown push_mode must coerce to auto → _fcm_push_mode='auto'"
+        assert coord.fcm_push_mode == "auto", (
+            "unknown push_mode must coerce to auto → fcm_push_mode='auto'"
         )
 
     @pytest.mark.asyncio
     async def test_android_legacy_coerces_to_auto(self):
-        """push_mode='android' (legacy) → coerced to 'auto' → _fcm_push_mode='auto' on success."""
+        """push_mode='android' (legacy) → coerced to 'auto' → fcm_push_mode='auto' on success."""
         mock_fcm, _mock_client = _mock_fcm_module()
         coord = _fcm_coord("android")
-        coord._entry = SimpleNamespace(
+        coord.entry = SimpleNamespace(
             data={
                 "fcm_config": {
                     "project_id": "p",
@@ -11952,8 +11952,8 @@ class TestDispatchModes:
                 ):
                     await async_start_fcm_push(coord)
 
-        assert coord._fcm_push_mode == "auto", (
-            "legacy 'android' mode must coerce to auto → _fcm_push_mode='auto'"
+        assert coord.fcm_push_mode == "auto", (
+            "legacy 'android' mode must coerce to auto → fcm_push_mode='auto'"
         )
 
 
@@ -11990,7 +11990,7 @@ def _make_fresh_coord(**overrides):
         hass=hass,
         options=dict(DEFAULT_OPTIONS),  # fresh install = all defaults
         data={CAM_ID: {"info": {"title": "Aussenkamera"}, "events": []}},
-        _last_event_ids={CAM_ID: "fresh-event-001"},
+        last_event_ids={CAM_ID: "fresh-event-001"},
         _download_started_at=time.time() - 10,  # started 10s ago
     )
     for k, v in overrides.items():
@@ -12101,13 +12101,13 @@ class TestFreshInstallAlertSave:
         )
 
 
-# Section: fcm.py _alert_sent_ids SENTINEL_RULE default (relocated from
+# Section: fcm.py alert_sent_ids SENTINEL_RULE default (relocated from
 # tests/test_bug_regression_v11.py — the __init__.py sibling of this same
 # bug pattern lives in tests/test_init.py::TestAlertSentIdsSentinel)
 
 
 class TestFcmAlertSentIdsSentinel:
-    """fcm.py's own `_alert_sent_ids.get(id, ...)` dedup gate must default to
+    """fcm.py's own `alert_sent_ids.get(id, ...)` dedup gate must default to
     float('-inf'), not 0.0 — on hosts with monotonic < 60s, `0.0 > (now-60)`
     is True, suppressing the first FCM push for any event."""
 
@@ -12118,7 +12118,7 @@ class TestFcmAlertSentIdsSentinel:
 
         src = inspect.getsource(fcm_mod)
         assert "_sent.get(newest_id, 0.0) > _now - 60.0" not in src, (
-            "fcm.py must not use 0.0 as default for _alert_sent_ids.get(); "
+            "fcm.py must not use 0.0 as default for alert_sent_ids.get(); "
             "on hosts with monotonic < 60s first FCM alert is suppressed"
         )
 

@@ -29,7 +29,7 @@ per the plan) adds `_poll_slow_tier_endpoints`: the 10-20-endpoint
 parallel `asyncio.gather` fetch that only runs on the ~5-min slow-tier
 interval (`ctx.do_slow_cam and ctx.is_online`), plus its full
 per-endpoint result dispatcher (wifiinfo/firmware/zones/alarm/etc.,
-many gated by `coordinator._is_write_locked(...)` to avoid reverting a
+many gated by `coordinator.is_write_locked(...)` to avoid reverting a
 just-written optimistic cache value). Takes a `fire_intrusion_event`
 callable instead of calling `coordinator._maybe_fire_intrusion_event`
 directly — the original inline code called that via
@@ -62,14 +62,14 @@ if TYPE_CHECKING:  # pragma: no cover — only for type hints
 _LOGGER = logging.getLogger(__name__)
 
 
-def _err_str(err: BaseException) -> str:
+def err_str(err: BaseException) -> str:
     """Format an exception so empty-message types (TimeoutError, some
     aiohttp errors) still produce meaningful log output. Falls back to
     repr(err) when str(err) is empty.
 
-    Deliberately NOT `coordinator._err_str(err)` — that is a
+    Deliberately NOT `coordinator.err_str(err)` — that is a
     `@staticmethod` on `BoschCameraCoordinator` called via CLASS
-    dispatch (`BoschCameraCoordinator._err_str(err)`) in the original
+    dispatch (`BoschCameraCoordinator.err_str(err)`) in the original
     inline code specifically because unit-test fixtures across the
     suite inject `SimpleNamespace` stubs as the coordinator (no
     `__init__`, so no instance attribute lookup fallback works either).
@@ -106,7 +106,7 @@ def _compute_cam_context(
 ) -> CamContext:
     """Compute the per-camera context for the slow-tier pass, including
     the stream-contention defer-gate side effects (mutates
-    `coordinator._slow_tier_deferred`/`_slow_tier_defer_since`)."""
+    `coordinator.slow_tier_deferred`/`slow_tier_defer_since`)."""
     cam_status = data[cam_id].get("status", "UNKNOWN")
     is_online = cam_status == "ONLINE"
 
@@ -123,7 +123,7 @@ def _compute_cam_context(
     # a 30-s RTSP session timeout → go2rtc EOF → 5-10 s video freeze.
     # Fix: defer (NOT drop) the slow-tier fetch for a camera while its live
     # stream is active. The next coordinator tick where the stream is idle
-    # picks it up via _slow_tier_deferred. A *continuously* active stream
+    # picks it up via slow_tier_deferred. A *continuously* active stream
     # (dashboard left on live view) never goes idle, so the deferral is
     # bounded by SLOW_TIER_MAX_DEFER_SEC: once exceeded we force one read
     # despite the stream, then restart the cycle — no permanent staleness.
@@ -135,18 +135,18 @@ def _compute_cam_context(
     # Facade Slice 1, see session_state.py) — a plain set is only ever
     # assigned on a bare test stub, never on the real class, hence the
     # ignore comment below.
-    if not hasattr(coordinator, "_slow_tier_deferred"):
-        coordinator._slow_tier_deferred = set()  # type: ignore[assignment]
-    if not hasattr(coordinator, "_slow_tier_defer_since"):
-        coordinator._slow_tier_defer_since = {}
-    stream_active = cam_id in coordinator._live_connections
+    if not hasattr(coordinator, "slow_tier_deferred"):
+        coordinator.slow_tier_deferred = set()  # type: ignore[assignment]
+    if not hasattr(coordinator, "slow_tier_defer_since"):
+        coordinator.slow_tier_defer_since = {}
+    stream_active = cam_id in coordinator.live_connections
     # Option: defer slow-tier when stream is active (default ON).
     # When OFF, slow-tier runs regardless — diagnostic sensors stay
     # current during streaming at the cost of potential TLS contention.
     _defer_diag = bool(opts.get("defer_diag_during_stream", True))
     # Bounded defer: a deferral that has lasted ≥ the cap must yield one
     # read even while the stream is live, else diagnostics freeze forever.
-    _defer_started = coordinator._slow_tier_defer_since.get(cam_id)
+    _defer_started = coordinator.slow_tier_defer_since.get(cam_id)
     defer_bound_reached = (
         _defer_started is not None
         and time.monotonic() - _defer_started >= SLOW_TIER_MAX_DEFER_SEC
@@ -155,23 +155,23 @@ def _compute_cam_context(
     # fetch is now safe to run (stream gone idle since last deferral).
     do_slow_cam = (
         do_slow
-        or (cam_id in coordinator._slow_tier_deferred and not stream_active)
+        or (cam_id in coordinator.slow_tier_deferred and not stream_active)
         or defer_bound_reached
     )
     if _defer_diag and do_slow_cam and stream_active and not defer_bound_reached:
         # Defer: stream is live — adding to deferred set instead of running.
-        coordinator._slow_tier_deferred.add(cam_id)
-        coordinator._slow_tier_defer_since.setdefault(cam_id, time.monotonic())
+        coordinator.slow_tier_deferred.add(cam_id)
+        coordinator.slow_tier_defer_since.setdefault(cam_id, time.monotonic())
         _LOGGER.debug(
             "Slow-tier deferred for %s (live stream active)",
             cam_id,
         )
         do_slow_cam = False  # skip the fetch blocks below for this camera
-    elif do_slow_cam and cam_id in coordinator._slow_tier_deferred:
+    elif do_slow_cam and cam_id in coordinator.slow_tier_deferred:
         # Deferred fetch now safe: stream gone idle, defer disabled, or the
         # defer bound was reached (forced read despite an active stream).
-        coordinator._slow_tier_deferred.discard(cam_id)
-        coordinator._slow_tier_defer_since.pop(cam_id, None)
+        coordinator.slow_tier_deferred.discard(cam_id)
+        coordinator.slow_tier_defer_since.pop(cam_id, None)
         _LOGGER.debug(
             "Slow-tier running deferred fetch for %s (%s)",
             cam_id,
@@ -183,8 +183,8 @@ def _compute_cam_context(
         _LOGGER.debug("Slow-tier skipped for %s (%s)", cam_id, cam_status.lower())
 
     local_stream_active = (
-        cam_id in coordinator._live_connections
-        and coordinator._live_connections[cam_id].get("_connection_type") == "LOCAL"
+        cam_id in coordinator.live_connections
+        and coordinator.live_connections[cam_id].get("_connection_type") == "LOCAL"
     )
     privacy_on = cam_raw.get("privacyMode", "").upper() == "ON"
 
@@ -206,7 +206,7 @@ def _poll_cam_info_caches(
     cam_id: str,
     cam_raw: dict[str, Any],
 ) -> None:
-    """Update `coordinator._shc_state_cache[cam_id]` from fields already
+    """Update `coordinator.shc_state_cache[cam_id]` from fields already
     present in `cam_raw` (privacy mode, camera-light state, notifications
     status) — no network I/O, unlike every later slow-tier sub-function.
     """
@@ -216,7 +216,7 @@ def _poll_cam_info_caches(
     feat_status = cam_raw.get("featureStatus", {})
     light_on = feat_status.get("frontIlluminatorInGeneralLightOn")
 
-    cache = coordinator._shc_state_cache.setdefault(
+    cache = coordinator.shc_state_cache.setdefault(
         cam_id,
         {
             "device_id": None,
@@ -230,12 +230,12 @@ def _poll_cam_info_caches(
         },
     )
     # Cloud is authoritative for privacy (fast, always available).
-    # Skip overwrite if a write happened within _WRITE_LOCK_SECS — same
+    # Skip overwrite if a write happened within WRITE_LOCK_SECS — same
     # propagation-delay race as camera light.
     privacy_locked = (
-        cam_id in coordinator._privacy_set_at
-        and (time.monotonic() - coordinator._privacy_set_at[cam_id])
-        < coordinator._WRITE_LOCK_SECS
+        cam_id in coordinator.privacy_set_at
+        and (time.monotonic() - coordinator.privacy_set_at[cam_id])
+        < coordinator.WRITE_LOCK_SECS
     )
     if privacy_str and not privacy_locked:
         new_privacy = privacy_str.upper() == "ON"
@@ -245,7 +245,7 @@ def _poll_cam_info_caches(
         # When the cam's physical privacy button is pressed (or someone
         # toggles privacy in the Bosch app), the cloud reports
         # privacyMode=ON but our `BoschPrivacyModeSwitch.async_turn_on`
-        # — which is the only path that calls `_tear_down_live_stream`
+        # — which is the only path that calls `tear_down_live_stream`
         # — never runs. The result is a stuck `state: streaming`,
         # the live-stream switch frozen on `on`, and the TLS proxy
         # entering an endless reconnect loop against the now-gone
@@ -255,24 +255,24 @@ def _poll_cam_info_caches(
         if (
             new_privacy is True
             and old_privacy is not True
-            and coordinator._live_connections.get(cam_id)
+            and coordinator.live_connections.get(cam_id)
         ):
             _LOGGER.info(
                 "Privacy ON detected externally for %s — tearing down active stream",
                 cam_id[:8],
             )
             coordinator.hass.async_create_task(
-                coordinator._tear_down_live_stream(cam_id)
+                coordinator.tear_down_live_stream(cam_id)
             )
     cache["has_light"] = has_light
     # Use cloud featureStatus for light state; SHC supplements if available.
-    # Skip overwrite if a write happened within _WRITE_LOCK_SECS — the cloud
+    # Skip overwrite if a write happened within WRITE_LOCK_SECS — the cloud
     # API returns stale data briefly after a PUT /lighting_override, which
     # would flip the switch back to OFF right after the user turned it ON.
     light_locked = (
-        cam_id in coordinator._light_set_at
-        and (time.monotonic() - coordinator._light_set_at[cam_id])
-        < coordinator._WRITE_LOCK_SECS
+        cam_id in coordinator.light_set_at
+        and (time.monotonic() - coordinator.light_set_at[cam_id])
+        < coordinator.WRITE_LOCK_SECS
     )
     if light_on is not None and not light_locked:
         # Gen2: Use lighting/switch cache for actual light state
@@ -282,7 +282,7 @@ def _poll_cam_info_caches(
             # Gen2: Only update light state from lighting/switch cache
             # Do NOT use featureStatus (reports config, not physical state)
             # If cache not yet populated, keep current state (don't overwrite)
-            lsc = coordinator._lighting_switch_cache.get(cam_id)
+            lsc = coordinator.lighting_switch_cache.get(cam_id)
             if lsc:
                 front_bri = lsc.get("frontLightSettings", {}).get("brightness", 0)
                 top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
@@ -305,9 +305,9 @@ def _poll_cam_info_caches(
     # Skip overwrite if written recently (same propagation-delay race as light).
     notif_status = cam_raw.get("notificationsEnabledStatus", "")
     notif_locked = (
-        cam_id in coordinator._notif_set_at
-        and (time.monotonic() - coordinator._notif_set_at[cam_id])
-        < coordinator._WRITE_LOCK_SECS
+        cam_id in coordinator.notif_set_at
+        and (time.monotonic() - coordinator.notif_set_at[cam_id])
+        < coordinator.WRITE_LOCK_SECS
     )
     if notif_status and not notif_locked:
         cache["notifications_status"] = notif_status
@@ -332,14 +332,14 @@ async def _poll_cam_control(
                 ) as pan_resp:
                     if pan_resp.status == 200:
                         pan_data = await pan_resp.json()
-                        coordinator._pan_cache[cam_id] = pan_data.get(
+                        coordinator.pan_cache[cam_id] = pan_data.get(
                             "currentAbsolutePosition"
                         )
         except Exception as err:
             _LOGGER.debug(
                 "Pan fetch error for %s: %s",
                 cam_id,
-                _err_str(err),
+                err_str(err),
             )
 
     # ── Gen2 lighting/switch — fetched every tick (60s) ──
@@ -353,14 +353,12 @@ async def _poll_cam_control(
                     headers=headers,
                 ) as ls_resp:
                     if ls_resp.status == 200:
-                        coordinator._lighting_switch_cache[
-                            cam_id
-                        ] = await ls_resp.json()
+                        coordinator.lighting_switch_cache[cam_id] = await ls_resp.json()
         except Exception as err:
             _LOGGER.debug(
                 "lighting/switch fetch error for %s: %s",
                 cam_id,
-                _err_str(err),
+                err_str(err),
             )
 
 
@@ -417,7 +415,7 @@ async def _poll_slow_tier_endpoints(
                 "%s fetch error for %s: %s",
                 endpoint,
                 cam_id,  # closure awaited within the same loop iteration
-                _err_str(err),
+                err_str(err),
             )
             return (endpoint, 0, None)
 
@@ -495,7 +493,12 @@ async def _poll_slow_tier_endpoints(
         if ep_status != 200 or ep_data is None:
             continue
         if ep == "wifiinfo":
-            coordinator._wifiinfo_cache[cam_id] = ep_data
+            # isinstance guard — see the "ambient_light_sensor_level" branch
+            # below (chaos-fault-injection regression) for why this is
+            # required. A malformed-but-200 body is skipped rather than
+            # overwriting a previously-good cached value.
+            if isinstance(ep_data, dict):
+                coordinator.wifiinfo_cache[cam_id] = ep_data
         elif ep == "ambient_light_sensor_level":
             # isinstance guard (chaos-fault-injection regression,
             # tests/test_chaos_fault_injection.py): every sibling branch in
@@ -509,7 +512,7 @@ async def _poll_slow_tier_endpoints(
             # coordinator tick — `_async_update_data`'s outer handler only
             # catches `UpdateFailed`/`TimeoutError`/`aiohttp.ClientError`,
             # not AttributeError.
-            coordinator._ambient_light_cache[cam_id] = (
+            coordinator.ambient_light_cache[cam_id] = (
                 ep_data.get("ambientLightSensorLevel")
                 if isinstance(ep_data, dict)
                 else None
@@ -518,7 +521,7 @@ async def _poll_slow_tier_endpoints(
             # Skip within the write-lock window so a poll that
             # lands before the cloud reflects the user's
             # sensitivity change doesn't revert the UI.
-            if not coordinator._is_write_locked(cam_id, coordinator._motion_set_at):
+            if not coordinator.is_write_locked(cam_id, coordinator.motion_set_at):
                 data[cam_id]["motion"] = ep_data
         elif ep == "firmware":
             # Write-locked like motion/privacy_sound_override above —
@@ -526,89 +529,102 @@ async def _poll_slow_tier_endpoints(
             # optimistic updating=True (before Bosch's backend has
             # actually flagged the install) reverts it to stale
             # "not updating" and a second install PUT could fire.
-            if not coordinator._is_write_locked(cam_id, coordinator._firmware_set_at):
-                coordinator._firmware_cache[cam_id] = ep_data
+            # isinstance guard — see the "ambient_light_sensor_level" branch
+            # below (chaos-fault-injection regression) for why this is
+            # required.
+            if not coordinator.is_write_locked(
+                cam_id, coordinator.firmware_set_at
+            ) and isinstance(ep_data, dict):
+                coordinator.firmware_cache[cam_id] = ep_data
         elif ep == "recording_options":
             data[cam_id]["recordingOptions"] = ep_data
         elif ep == "unread_events_count":
             if isinstance(ep_data, dict):
-                coordinator._unread_events_cache[cam_id] = int(
+                coordinator.unread_events_cache[cam_id] = int(
                     ep_data.get("count", ep_data.get("result", 0)) or 0
                 )
             elif isinstance(ep_data, (int, float)):
-                coordinator._unread_events_cache[cam_id] = int(ep_data)
+                coordinator.unread_events_cache[cam_id] = int(ep_data)
         elif ep == "privacy_sound_override":
             # isinstance guard — see the "ambient_light_sensor_level" branch
             # above (chaos-fault-injection regression) for why this is
             # required: an unguarded `.get()` on a malformed-but-200 body
             # crashes the whole coordinator tick uncaught.
-            if not coordinator._is_write_locked(
-                cam_id, coordinator._privacy_sound_set_at
+            if not coordinator.is_write_locked(
+                cam_id, coordinator.privacy_sound_set_at
             ):
-                coordinator._privacy_sound_cache[cam_id] = (
+                coordinator.privacy_sound_cache[cam_id] = (
                     ep_data.get("result", False) if isinstance(ep_data, dict) else False
                 )
         elif ep == "commissioned":
-            coordinator._commissioned_cache[cam_id] = ep_data
+            # isinstance guard — see the "ambient_light_sensor_level" branch
+            # below (chaos-fault-injection regression) for why this is
+            # required.
+            if isinstance(ep_data, dict):
+                coordinator.commissioned_cache[cam_id] = ep_data
         elif ep == "autofollow":
             data[cam_id]["autofollow"] = ep_data
         elif ep == "timestamp":
             # isinstance guard — see the "ambient_light_sensor_level" branch
             # above (chaos-fault-injection regression) for why this is
             # required.
-            if not coordinator._is_write_locked(cam_id, coordinator._timestamp_set_at):
-                coordinator._timestamp_cache[cam_id] = (
+            if not coordinator.is_write_locked(cam_id, coordinator.timestamp_set_at):
+                coordinator.timestamp_cache[cam_id] = (
                     ep_data.get("result", False) if isinstance(ep_data, dict) else False
                 )
         elif ep == "notifications":
-            coordinator._notifications_cache[cam_id] = ep_data
+            # isinstance guard — see the "ambient_light_sensor_level" branch
+            # above (chaos-fault-injection regression) for why this is
+            # required.
+            if isinstance(ep_data, dict):
+                coordinator.notifications_cache[cam_id] = ep_data
         elif ep == "rules":
-            coordinator._rules_cache[cam_id] = (
+            coordinator.rules_cache[cam_id] = (
                 ep_data if isinstance(ep_data, list) else []
             )
         elif ep == "motion_sensitive_areas":
-            coordinator._cloud_zones_cache[cam_id] = (
+            coordinator.cloud_zones_cache[cam_id] = (
                 ep_data if isinstance(ep_data, list) else []
             )
         elif ep == "privacy_masks":
-            coordinator._cloud_privacy_masks_cache[cam_id] = (
+            coordinator.cloud_privacy_masks_cache[cam_id] = (
                 ep_data if isinstance(ep_data, list) else []
             )
         elif ep == "lighting_options":
             # Write-locked like motion/privacy_sound_override above — otherwise
             # a poll landing before Bosch's cloud reflects a set_lighting_schedule
             # write can revert the cache to the stale pre-write schedule.
-            if not coordinator._is_write_locked(
-                cam_id, coordinator._lighting_options_set_at
+            if not coordinator.is_write_locked(
+                cam_id, coordinator.lighting_options_set_at
             ):
-                coordinator._lighting_options_cache[cam_id] = (
+                coordinator.lighting_options_cache[cam_id] = (
                     ep_data if isinstance(ep_data, dict) else {}
                 )
         elif ep == "ledlights":
-            if not coordinator._is_write_locked(cam_id, coordinator._ledlights_set_at):
-                coordinator._ledlights_cache[cam_id] = (
+            if not coordinator.is_write_locked(cam_id, coordinator.ledlights_set_at):
+                coordinator.ledlights_cache[cam_id] = (
                     ep_data.get("state") == "ON" if isinstance(ep_data, dict) else None
                 )
         elif ep == "lens_elevation":
-            coordinator._lens_elevation_cache[cam_id] = (
+            coordinator.lens_elevation_cache[cam_id] = (
                 ep_data.get("elevation") if isinstance(ep_data, dict) else None
             )
         elif ep == "audio":
-            coordinator._audio_cache[cam_id] = (
+            coordinator.audio_cache[cam_id] = (
                 ep_data if isinstance(ep_data, dict) else {}
             )
         elif ep == "lighting/motion":
-            coordinator._motion_light_cache[cam_id] = (
+            coordinator.motion_light_cache[cam_id] = (
                 ep_data if isinstance(ep_data, dict) else {}
             )
             # MotionLightSwitch state is synced via switch._is_on
             # on its next update — nothing to do here.
         elif ep == "lighting/ambient":
-            coordinator._ambient_lighting_cache[cam_id] = (
+            coordinator.ambient_lighting_cache[cam_id] = (
                 ep_data if isinstance(ep_data, dict) else {}
             )
         elif ep == "lighting":
-            coordinator._global_lighting_cache[cam_id] = (
+            coordinator.global_lighting_cache[cam_id] = (
                 ep_data if isinstance(ep_data, dict) else {}
             )
         elif ep == "intrusionDetectionConfig":
@@ -616,10 +632,10 @@ async def _poll_slow_tier_endpoints(
             # otherwise a slow-tier poll hitting before the cloud
             # has caught up to the user's toggle reverts the
             # switch back to the stale enabled value.
-            if not coordinator._is_write_locked(
-                cam_id, coordinator._intrusion_config_set_at
+            if not coordinator.is_write_locked(
+                cam_id, coordinator.intrusion_config_set_at
             ):
-                coordinator._intrusion_config_cache[cam_id] = (
+                coordinator.intrusion_config_cache[cam_id] = (
                     ep_data if isinstance(ep_data, dict) else {}
                 )
         elif ep == "audioDetectionConfig":
@@ -627,35 +643,35 @@ async def _poll_slow_tier_endpoints(
             # Audio-Plus). Skip cache overwrite within the
             # write-lock window so an optimistic toggle isn't
             # reverted by a slow-tier poll before cloud catches up.
-            if not coordinator._is_write_locked(
-                cam_id, coordinator._audio_detection_set_at
+            if not coordinator.is_write_locked(
+                cam_id, coordinator.audio_detection_set_at
             ):
-                coordinator._audio_detection_cache[cam_id] = (
+                coordinator.audio_detection_cache[cam_id] = (
                     ep_data if isinstance(ep_data, dict) else {}
                 )
         elif ep == "alarm_settings":
             # Skip within the write-lock window (cloud
             # propagation) so the optimistic cache isn't reverted.
-            if not coordinator._is_write_locked(
-                cam_id, coordinator._alarm_settings_set_at
+            if not coordinator.is_write_locked(
+                cam_id, coordinator.alarm_settings_set_at
             ):
-                coordinator._alarm_settings_cache[cam_id] = (
+                coordinator.alarm_settings_cache[cam_id] = (
                     ep_data if isinstance(ep_data, dict) else {}
                 )
         elif ep == "alarmStatus":
             # Actual response format confirmed 2026-04-11:
             #   {"alarmType": "NONE" | ..., "intrusionSystem": "INACTIVE" | "ACTIVE" | ...}
-            coordinator._alarm_status_cache[cam_id] = (
+            coordinator.alarm_status_cache[cam_id] = (
                 ep_data if isinstance(ep_data, dict) else {}
             )
-            if isinstance(ep_data, dict) and not coordinator._is_write_locked(
-                cam_id, coordinator._arming_set_at
+            if isinstance(ep_data, dict) and not coordinator.is_write_locked(
+                cam_id, coordinator.arming_set_at
             ):
                 intrusion = str(ep_data.get("intrusionSystem", "")).upper()
                 if intrusion == "ACTIVE":
-                    coordinator._arming_cache[cam_id] = True
+                    coordinator.arming_cache[cam_id] = True
                 elif intrusion == "INACTIVE":
-                    coordinator._arming_cache[cam_id] = False
+                    coordinator.arming_cache[cam_id] = False
             if isinstance(ep_data, dict):
                 fire_intrusion_event(
                     cam_id,
@@ -666,12 +682,12 @@ async def _poll_slow_tier_endpoints(
             # Power-LED brightness 0-4 (5 discrete steps: off + 4 levels)
             try:
                 val = int(ep_data.get("value", 0)) if isinstance(ep_data, dict) else 0
-                coordinator._icon_led_brightness_cache[cam_id] = max(0, min(4, val))
+                coordinator.icon_led_brightness_cache[cam_id] = max(0, min(4, val))
             except (TypeError, ValueError):
-                coordinator._icon_led_brightness_cache[cam_id] = 0
+                coordinator.icon_led_brightness_cache[cam_id] = 0
         elif ep == "zones":
             zones_data: list[Any] = ep_data if isinstance(ep_data, list) else []
-            coordinator._gen2_zones_cache[cam_id] = zones_data
+            coordinator.gen2_zones_cache[cam_id] = zones_data
             _LOGGER.debug(
                 "Gen2 zones for %s: %d zones fetched",
                 cam_id[:8],
@@ -679,7 +695,7 @@ async def _poll_slow_tier_endpoints(
             )
         elif ep == "privateAreas":
             areas_data: list[Any] = ep_data if isinstance(ep_data, list) else []
-            coordinator._gen2_private_areas_cache[cam_id] = areas_data
+            coordinator.gen2_private_areas_cache[cam_id] = areas_data
             _LOGGER.debug(
                 "Gen2 privateAreas for %s: %d areas fetched",
                 cam_id[:8],

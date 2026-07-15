@@ -1004,9 +1004,9 @@ async def test_oauth_create_entry_redacts_in_diagnostics(
         {
             "data": {},
             "last_update_success": True,
-            "_fcm_running": False,
-            "_fcm_healthy": True,
-            "_auth_outage_count": 0,
+            "fcm_running": False,
+            "fcm_healthy": True,
+            "auth_outage_count": 0,
             "update_interval": None,
         },
     )()
@@ -2117,7 +2117,13 @@ class TestOptionsStepInitSubmit:
             }
         )
         assert result["reason"] == "migration_started"
-        flow.hass.async_create_task.assert_called_once()
+        # async_start_reauth is a synchronous @callback that schedules its own
+        # task internally -- it must be called directly, never wrapped in
+        # hass.async_create_task (that would pass it a plain None, raising
+        # TypeError at runtime; regression caught during HA-Core-submission-
+        # prep mypy work 2026-07-15).
+        flow._config_entry.async_start_reauth.assert_called_once_with(flow.hass)
+        flow.hass.async_create_task.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_submit_normalizes_booleans(self):
@@ -2866,8 +2872,15 @@ class TestFullRoundTrip:
             "alert_notify_service": "notify.mobile_app",
         }
         entry = _make_entry(options=prior, bearer_token=_legacy_token())
-        # async_start_reauth is called as a coroutine on the config entry
-        entry.async_start_reauth = AsyncMock(return_value=None)  # type: ignore[attr-defined]
+        # async_start_reauth is a synchronous @callback on ConfigEntry (current
+        # HA-core config_entries.py) -- it schedules its own reauth-flow task
+        # internally and returns None directly, it is NOT a coroutine. A prior
+        # version of this test mocked it as an AsyncMock, which masked a real
+        # bug where the production code wrapped its (plain None) return value
+        # in hass.async_create_task() -- that would raise TypeError at runtime
+        # the moment this code path actually ran, caught during HA-Core-
+        # submission-prep mypy work 2026-07-15.
+        entry.async_start_reauth = MagicMock(return_value=None)  # type: ignore[attr-defined]
         flow = BoschCameraOptionsFlow(entry)
         flow.hass = MagicMock()
         flow.hass.config_entries = MagicMock()
@@ -2891,6 +2904,11 @@ class TestFullRoundTrip:
         # suggested_value fields absent from user_input must be in the persisted options
         assert saved_options.get("smb_server") == "192.168.2.25"
         assert saved_options.get("alert_notify_service") == "notify.mobile_app"
+
+        # Regression guard: async_start_reauth must be called directly, never
+        # wrapped in async_create_task (it is sync and schedules its own task).
+        entry.async_start_reauth.assert_called_once_with(flow.hass)
+        flow.hass.async_create_task.assert_not_called()
 
 
 class TestDefaultOptionsCompleteness:

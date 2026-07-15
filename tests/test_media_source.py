@@ -460,7 +460,7 @@ class TestFileRegexEdgeCases:
     def test_unknown_id_rejected(self):
         """Files saved with id='UNKNOWN' (non-hex) must NOT match _FILE_RE.
 
-        This is the case when coordinator._last_event_ids returns 'unknown'
+        This is the case when coordinator.last_event_ids returns 'unknown'
         as the fallback -- those files are invisible in the Media Browser.
         Regression guard: if the ev_id guard is ever loosened, add a
         hex-validation step in sync_local_save instead.
@@ -2579,10 +2579,10 @@ def _make_smb_media_source(tmp_path):
     # Phase 2 #12) before dispatching into the tree-walk logic. These
     # fixture-based tests patch a single leaf `list_*` method directly and
     # never intend to exercise real smbclient network I/O — stub the
-    # session open/close on this instance so `_new_session_cache()` doesn't
+    # session open/close on this instance so `new_session_cache()` doesn't
     # attempt a real `register_session()`/socket connect.
-    backend._new_session_cache = MagicMock(return_value={})
-    backend._close_session_cache = MagicMock()
+    backend.new_session_cache = MagicMock(return_value={})
+    backend.close_session_cache = MagicMock()
     return media, src, backend
 
 
@@ -3086,14 +3086,14 @@ class TestOpenFileExceptionCleanup:
     sweeper catches it."""
 
     def test_open_file_closes_session_on_smb_error(self):
-        """`open_file()` raises -> `_close_session_cache(cache)` runs +
+        """`open_file()` raises -> `close_session_cache(cache)` runs +
         exception propagates."""
         backend = _backend_min()
         _install_failing_smbclient(open_raises=OSError("NtStatus 0xc0000043"))
         with patch.object(
             backend,
-            "_close_session_cache",
-            wraps=backend._close_session_cache,
+            "close_session_cache",
+            wraps=backend.close_session_cache,
         ) as close_spy:
             with pytest.raises(OSError, match="NtStatus 0xc0000043"):
                 backend.open_file(
@@ -3111,8 +3111,8 @@ class TestOpenFileExceptionCleanup:
         _install_failing_smbclient(open_raises=OSError("simulated SMB blowup"))
         with patch.object(
             backend,
-            "_close_session_cache",
-            wraps=backend._close_session_cache,
+            "close_session_cache",
+            wraps=backend.close_session_cache,
         ) as close_spy:
             with pytest.raises(OSError, match="simulated SMB blowup"):
                 backend.open_flat_file(
@@ -3126,8 +3126,8 @@ class TestOpenFileExceptionCleanup:
         _install_failing_smbclient(stat_raises=PermissionError("EACCES"))
         with patch.object(
             backend,
-            "_close_session_cache",
-            wraps=backend._close_session_cache,
+            "close_session_cache",
+            wraps=backend.close_session_cache,
         ) as close_spy:
             with pytest.raises(PermissionError):
                 backend.open_file(
@@ -3192,8 +3192,8 @@ class TestSmbPathTraversal:
         mod = _install_failing_smbclient()
         with patch.object(
             backend,
-            "_close_session_cache",
-            wraps=backend._close_session_cache,
+            "close_session_cache",
+            wraps=backend.close_session_cache,
         ) as close_spy:
             with pytest.raises(FileNotFoundError):
                 backend.open_file(

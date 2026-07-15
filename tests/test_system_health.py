@@ -3,7 +3,7 @@
 Covers every branch: no integration loaded, FCM healthy/degraded,
 last_push=never vs. recent, and cloud-URL check coroutine passthrough.
 
-Regression: ensures _fcm_last_push=float('-inf') returns "never" (not a
+Regression: ensures fcm_last_push=float('-inf') returns "never" (not a
 negative integer or crash) — CI VMs start fresh so monotonic() is small.
 """
 
@@ -40,8 +40,8 @@ def _make_coord(
         "CoordStub",
         (),
         {
-            "_fcm_running": fcm_running,
-            "_fcm_last_push": fcm_last_push,
+            "fcm_running": fcm_running,
+            "fcm_last_push": fcm_last_push,
             "data": cameras if cameras is not None else {},
         },
     )()
@@ -207,7 +207,7 @@ async def test_system_health_fcm_degraded(hass: HomeAssistant) -> None:
 
 
 async def test_system_health_fcm_last_push_never(hass: HomeAssistant) -> None:
-    """_fcm_last_push=float('-inf') → last_fcm_push_ago='never' (sentinel rule)."""
+    """fcm_last_push=float('-inf') → last_fcm_push_ago='never' (sentinel rule)."""
     coord = _make_coord(fcm_running=True, fcm_last_push=float("-inf"))
     entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
     entry.add_to_hass(hass)
@@ -230,7 +230,7 @@ async def test_system_health_fcm_last_push_never(hass: HomeAssistant) -> None:
 
 
 async def test_system_health_fcm_last_push_recent(hass: HomeAssistant) -> None:
-    """_fcm_last_push ~5s ago → last_fcm_push_ago='5s ago' (±3s tolerance)."""
+    """fcm_last_push ~5s ago → last_fcm_push_ago='5s ago' (±3s tolerance)."""
     coord = _make_coord(fcm_running=True, fcm_last_push=time.monotonic() - 5)
     entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
     entry.add_to_hass(hass)
@@ -290,9 +290,9 @@ async def test_system_health_cloud_url_check_is_awaitable(
 async def test_system_health_coord_missing_fcm_last_push(
     hass: HomeAssistant,
 ) -> None:
-    """Coordinator without _fcm_last_push attr → falls back to float('-inf') → 'never'."""
-    coord = type("CoordStub", (), {"_fcm_running": True, "data": {}})()
-    # Note: _fcm_last_push is intentionally NOT set on this stub
+    """Coordinator without fcm_last_push attr → falls back to float('-inf') → 'never'."""
+    coord = type("CoordStub", (), {"fcm_running": True, "data": {}})()
+    # Note: fcm_last_push is intentionally NOT set on this stub
     entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
     entry.add_to_hass(hass)
     entry.runtime_data = coord
@@ -316,7 +316,7 @@ async def test_system_health_coord_missing_data_attr(hass: HomeAssistant) -> Non
     coord = type(
         "CoordStub",
         (),
-        {"_fcm_running": False, "_fcm_last_push": float("-inf")},
+        {"fcm_running": False, "fcm_last_push": float("-inf")},
     )()
     entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
     entry.add_to_hass(hass)

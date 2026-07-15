@@ -7,7 +7,7 @@ reading the module's own source — ``inspect.getsource(...)`` or
 ``Path(...).read_text()`` — and asserting that a code fragment is present::
 
     src = inspect.getsource(BoschCameraCoordinator.__init__)
-    assert "self._stream_warming = set()" in src   # <-- BRITTLE
+    assert "self.stream_warming = set()" in src   # <-- BRITTLE
 
 The problem: a naive ``"<fragment>" in source`` couples the test to the exact
 *formatting* of the production code, not its *logic*. The moment ``ruff format``
@@ -52,7 +52,7 @@ USAGE
 -----
     from tests.source_match import assert_in_source
 
-    assert_in_source(src, "self._stream_warming = set()")          # one fragment
+    assert_in_source(src, "self.stream_warming = set()")          # one fragment
     assert_in_source(src, "frag a", "frag b")                       # all must match
     assert_in_source(src, 'float("-inf")', "float('-inf')",         # quote variants
                      any_of=True)

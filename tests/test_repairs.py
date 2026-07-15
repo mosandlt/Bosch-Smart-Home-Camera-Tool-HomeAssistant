@@ -24,7 +24,7 @@ CAM_ID = "11111111-1111-1111-1111-111111111111"
 def _make_coord() -> SimpleNamespace:
     return SimpleNamespace(
         data={CAM_ID: {"info": {"title": "Terrasse"}}},
-        _firmware_cache={
+        firmware_cache={
             CAM_ID: {"current": "9.40.102", "upToDate": False, "update": "9.40.104"}
         },
         async_install_firmware=AsyncMock(return_value=None),

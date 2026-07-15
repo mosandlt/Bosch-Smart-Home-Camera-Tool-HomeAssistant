@@ -91,17 +91,14 @@ def stub_entry() -> SimpleNamespace:
 # budget-store persistence, and the one-call-per-motion-event guarantee.
 #
 # NOTE: this section binds coordinator methods via an explicit
-# `custom_components.bosch_shc_camera.__init__`-qualified import (aliased as
-# `_AiCoordinatorCls`) rather than the plain top-level `BoschCameraCoordinator`
-# import used elsewhere in this file. Python's import machinery treats
-# `pkg.__init__` as a submodule distinct from `pkg` itself, so it loads a
-# second copy of __init__.py under a separate sys.modules entry with its own
-# globals (including its own `_LOGGER`). The `patch("...__init__._LOGGER")`
-# calls in TestBudgetLogOnce only intercept that second copy's globals, so the
-# coordinator methods bound onto test stubs here must come from the SAME
-# `.__init__`-qualified copy for the patch to actually take effect — this
-# matches the original (pre-merge) file's behavior exactly.
-from custom_components.bosch_shc_camera.__init__ import (  # type: ignore[import]
+# `custom_components.bosch_shc_camera.coordinator`-qualified import (aliased
+# as `_AiCoordinatorCls`) rather than the plain top-level
+# `BoschCameraCoordinator` import used elsewhere in this file, so that a
+# function's `__globals__` (and therefore `_LOGGER`/`dt_util`) resolves
+# against `coordinator.py` — where BoschCameraCoordinator actually lives —
+# not `__init__.py`. The `patch("...coordinator._LOGGER")` / `.dt_util.now`
+# calls below target that same module for exactly this reason.
+from custom_components.bosch_shc_camera.coordinator import (
     BoschCameraCoordinator as _AiCoordinatorCls,
 )
 
@@ -695,14 +692,14 @@ def _make_ai_coord(
         data=data,
         options=opts,
         hass=MagicMock(),
-        _shc_state_cache=shc_cache,
-        _camera_entities={
+        shc_state_cache=shc_cache,
+        camera_entities={
             cam_id: SimpleNamespace(entity_id=f"camera.bosch_{cam_id[:4]}")
         },
         _ai_last_call={},
         _ai_day_count=0,
         _ai_day_stamp="",
-        _ai_in_flight=in_flight,
+        ai_in_flight=in_flight,
         _ai_budget_logged_day="",
         _ai_budget_store=MagicMock(),
         async_set_updated_data=MagicMock(),
@@ -711,7 +708,7 @@ def _make_ai_coord(
     # Bind real coordinator methods so they use `coord` as self
     coord.ai_budget_state = _AiCoordinatorCls.ai_budget_state.__get__(coord)
     coord._ai_rate_allowed = _AiCoordinatorCls._ai_rate_allowed.__get__(coord)
-    coord._ai_record_call = _AiCoordinatorCls._ai_record_call.__get__(coord)
+    coord.ai_record_call = _AiCoordinatorCls.ai_record_call.__get__(coord)
     coord._ai_window_allowed = _AiCoordinatorCls._ai_window_allowed.__get__(coord)
     coord._async_save_ai_budget = _AiCoordinatorCls._async_save_ai_budget.__get__(coord)
     coord.async_generate_ai_description = (
@@ -776,27 +773,27 @@ class TestAsyncGenerateAiDescription:
 
     @pytest.mark.asyncio
     async def test_in_flight_decremented_on_exception(self) -> None:
-        """_ai_in_flight must be decremented even when ai_task raises."""
+        """ai_in_flight must be decremented even when ai_task raises."""
         coord = _make_ai_coord()
-        coord._ai_in_flight = 0
+        coord.ai_in_flight = 0
         coord.hass.services.async_call = AsyncMock(side_effect=RuntimeError("ai down"))
         result = await coord.async_generate_ai_description(CAM_ID, force=True)
         assert result is None
         # finally block must have decremented in_flight back to 0
-        assert coord._ai_in_flight == 0
+        assert coord.ai_in_flight == 0
 
     @pytest.mark.asyncio
     async def test_in_flight_decremented_on_success(self) -> None:
-        """_ai_in_flight must be 0 after a successful call completes."""
+        """ai_in_flight must be 0 after a successful call completes."""
         coord = _make_ai_coord()
-        coord._ai_in_flight = 0
+        coord.ai_in_flight = 0
         coord.hass.services.async_call = AsyncMock(
             return_value={"data": "A car in the driveway."}
         )
         coord.hass.bus.async_fire = MagicMock()
         result = await coord.async_generate_ai_description(CAM_ID, force=True)
         assert result == "A car in the driveway."
-        assert coord._ai_in_flight == 0
+        assert coord.ai_in_flight == 0
 
     @pytest.mark.asyncio
     async def test_on_motion_uses_budget_guard(self) -> None:
@@ -860,7 +857,7 @@ class TestTimeoutReturnsNone:
     async def test_timeout_returns_none(self) -> None:
         """When ai_task raises TimeoutError, method returns None."""
         coord = _make_ai_coord()
-        coord._ai_in_flight = 0
+        coord.ai_in_flight = 0
         coord.hass.services.async_call = AsyncMock(side_effect=TimeoutError())
         result = await coord.async_generate_ai_description(CAM_ID, force=True)
         assert result is None
@@ -869,10 +866,10 @@ class TestTimeoutReturnsNone:
     async def test_timeout_decrements_in_flight(self) -> None:
         """TimeoutError in try block must still hit finally and decrement in_flight."""
         coord = _make_ai_coord()
-        coord._ai_in_flight = 0
+        coord.ai_in_flight = 0
         coord.hass.services.async_call = AsyncMock(side_effect=TimeoutError())
         await coord.async_generate_ai_description(CAM_ID, force=True)
-        assert coord._ai_in_flight == 0
+        assert coord.ai_in_flight == 0
 
     @pytest.mark.asyncio
     async def test_timeout_does_not_fire_bus_event(self) -> None:
@@ -1095,7 +1092,7 @@ class TestBudgetLogOnce:
         coord._ai_day_stamp = dt_util.now().date().isoformat()  # prevent rollover
 
         with patch(
-            "custom_components.bosch_shc_camera.__init__._LOGGER"
+            "custom_components.bosch_shc_camera.coordinator._LOGGER"
         ) as mock_logger:
             result = coord._ai_rate_allowed(CAM_ID)
             assert result is False
@@ -1114,7 +1111,7 @@ class TestBudgetLogOnce:
         coord._ai_day_stamp = today  # prevent rollover
 
         with patch(
-            "custom_components.bosch_shc_camera.__init__._LOGGER"
+            "custom_components.bosch_shc_camera.coordinator._LOGGER"
         ) as mock_logger:
             coord._ai_rate_allowed(CAM_ID)
             mock_logger.info.assert_not_called()
@@ -1133,7 +1130,7 @@ class TestBudgetLogOnce:
         coord._ai_budget_logged_day = ""
         coord._ai_day_stamp = today_ha
 
-        with patch("custom_components.bosch_shc_camera.__init__._LOGGER"):
+        with patch("custom_components.bosch_shc_camera.coordinator._LOGGER"):
             coord._ai_rate_allowed(CAM_ID)
 
         assert coord._ai_budget_logged_day == today_ha
@@ -1154,9 +1151,9 @@ class TestBudgetLogOnce:
         coord._ai_day_stamp = "2000-01-01"  # matches mocked date → no rollover
 
         with (
-            patch("custom_components.bosch_shc_camera.__init__._LOGGER"),
+            patch("custom_components.bosch_shc_camera.coordinator._LOGGER"),
             patch(
-                "custom_components.bosch_shc_camera.__init__.dt_util.now",
+                "custom_components.bosch_shc_camera.coordinator.dt_util.now",
                 return_value=fixed_local,
             ),
         ):
@@ -1222,7 +1219,7 @@ class TestAiWindowAllowedTimeGate:
         coord = _make_gating_coord(time_start=time_start, time_end=time_end)
         fake_now = datetime(2026, 6, 15, now_hour, now_min, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=fake_now,
         ):
             return coord._ai_window_allowed()
@@ -1380,7 +1377,7 @@ class TestAiWindowBothGates:
         )
         fake_now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=fake_now,
         ):
             assert coord._ai_window_allowed() is True
@@ -1396,7 +1393,7 @@ class TestAiWindowBothGates:
         )
         fake_now = datetime(2026, 6, 15, 23, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=fake_now,
         ):
             assert coord._ai_window_allowed() is False
@@ -1412,7 +1409,7 @@ class TestAiWindowBothGates:
         )
         fake_now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=fake_now,
         ):
             assert coord._ai_window_allowed() is False
@@ -1440,7 +1437,7 @@ class TestAiWindowForceBypass:
         coord.hass.bus.async_fire = MagicMock()
 
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=fake_now,
         ):
             # Auto call (force=False) — window blocks
@@ -1523,11 +1520,11 @@ class TestBudgetStorePersistence:
 
     @pytest.mark.asyncio
     async def test_save_called_on_record(self) -> None:
-        """_ai_record_call must schedule a save (async_create_task called)."""
+        """ai_record_call must schedule a save (async_create_task called)."""
         coord = _make_ai_coord(cooldown=0.0)
         coord.hass.async_create_task = MagicMock()
 
-        coord._ai_record_call(CAM_ID)
+        coord.ai_record_call(CAM_ID)
 
         # async_create_task must have been called (the save is scheduled)
         coord.hass.async_create_task.assert_called()
@@ -1643,7 +1640,7 @@ class TestAiWindowEdgeCases:
         coord = _make_gating_coord(time_start=time_start, time_end=time_end)
         fake_now = datetime(2026, 6, 15, now_hour, now_min, now_sec, now_us, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=fake_now,
         ):
             return coord._ai_window_allowed()
@@ -1740,7 +1737,7 @@ class TestAiWindowEdgeCases:
 
 # ── Window gate does NOT consume budget ──────────────────────────────────────
 # PIN_EVERY_MODE: verify that a window-blocked call never increments
-# _ai_in_flight, _ai_day_count, or _ai_last_call.
+# ai_in_flight, _ai_day_count, or _ai_last_call.
 
 
 class TestWindowGateDoesNotConsumeBudget:
@@ -1760,7 +1757,7 @@ class TestWindowGateDoesNotConsumeBudget:
         # Time 23:00 is outside 08:00-10:00 -> window blocked
         fake_now = datetime(2026, 6, 15, 23, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=fake_now,
         ):
             result = await coord.async_generate_ai_description(CAM_ID, force=False)
@@ -1770,7 +1767,7 @@ class TestWindowGateDoesNotConsumeBudget:
 
     @pytest.mark.asyncio
     async def test_window_blocked_does_not_increment_in_flight(self) -> None:
-        """When window blocks, _ai_in_flight must never increase (no try/finally entered)."""
+        """When window blocks, ai_in_flight must never increase (no try/finally entered)."""
         coord = _make_ai_coord(cooldown=0.0)
         coord.options = dict(coord.options)
         coord.options["ai_active_time_start"] = "08:00"
@@ -1778,16 +1775,16 @@ class TestWindowGateDoesNotConsumeBudget:
         coord._ai_window_allowed = _AiCoordinatorCls._ai_window_allowed.__get__(coord)
         coord.hass.services.async_call = AsyncMock(return_value={"data": "X"})
         coord.hass.bus.async_fire = MagicMock()
-        initial_in_flight = coord._ai_in_flight
+        initial_in_flight = coord.ai_in_flight
 
         fake_now = datetime(2026, 6, 15, 23, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=fake_now,
         ):
             await coord.async_generate_ai_description(CAM_ID, force=False)
 
-        assert coord._ai_in_flight == initial_in_flight
+        assert coord.ai_in_flight == initial_in_flight
 
     @pytest.mark.asyncio
     async def test_window_blocked_does_not_update_last_call(self) -> None:
@@ -1804,7 +1801,7 @@ class TestWindowGateDoesNotConsumeBudget:
 
         fake_now = datetime(2026, 6, 15, 23, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=fake_now,
         ):
             await coord.async_generate_ai_description(CAM_ID, force=False)
@@ -1824,7 +1821,7 @@ class TestWindowGateDoesNotConsumeBudget:
 
         fake_now = datetime(2026, 6, 15, 23, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=fake_now,
         ):
             await coord.async_generate_ai_description(CAM_ID, force=False)
@@ -1853,7 +1850,7 @@ class TestWindowGateDoesNotConsumeBudget:
 
         # 5 blocked calls (outside window) must not consume the single-unit budget
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=outside_window,
         ):
             for _ in range(5):
@@ -1864,7 +1861,7 @@ class TestWindowGateDoesNotConsumeBudget:
 
         # One in-window call must succeed and consume exactly one budget unit
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=inside_window,
         ):
             result = await coord.async_generate_ai_description(CAM_ID, force=False)
@@ -1932,9 +1929,9 @@ class TestAiWindowEntityEdgeCases:
         assert coord._ai_window_allowed() is False
 
     def test_budget_dual_save_idempotent(self) -> None:
-        """_ai_record_call triggers 2 async_create_task saves; counter must be 1.
+        """ai_record_call triggers 2 async_create_task saves; counter must be 1.
 
-        Sequence inside _ai_record_call:
+        Sequence inside ai_record_call:
           1. ai_budget_state() for day-rollover: stamp was '' != today → reset +
              schedule save (task #1).
           2. _ai_day_count incremented to 1.
@@ -1954,19 +1951,19 @@ class TestAiWindowEntityEdgeCases:
             _ai_day_count=0,
             _ai_day_stamp="",
             _ai_budget_logged_day="",
-            _ai_in_flight=0,
+            ai_in_flight=0,
             _ai_last_call={},
         )
         coord._async_save_ai_budget = MagicMock()
         coord.ai_budget_state = _AiCoordinatorCls.ai_budget_state.__get__(coord)
-        coord._ai_record_call = _AiCoordinatorCls._ai_record_call.__get__(coord)
+        coord.ai_record_call = _AiCoordinatorCls.ai_record_call.__get__(coord)
 
         fake_now = _dt.datetime(2026, 6, 15, 12, 0, tzinfo=_dt.UTC)
         with patch(
-            "custom_components.bosch_shc_camera.__init__.dt_util.now",
+            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
             return_value=fake_now,
         ):
-            coord._ai_record_call("cam-aabbccdd")
+            coord.ai_record_call("cam-aabbccdd")
 
         # Day-rollover save (task #1) + record save (task #2)
         assert len(tasks_created) == 2
@@ -2001,7 +1998,7 @@ def _make_wifi_fw_coord(
     coord = SimpleNamespace(
         data={CAM_ID: {"info": info, "status": "ONLINE", "events": []}},
         last_update_success=last_update_success,
-        _wifiinfo_cache={} if wifiinfo is None else {CAM_ID: wifiinfo},
+        wifiinfo_cache={} if wifiinfo is None else {CAM_ID: wifiinfo},
         rcp_lan_ip=lambda cid: rcp_lan_ip,
         rcp_bitrate_ladder=lambda cid: rcp_bitrate_ladder,
         rcp_product_name=lambda cid: rcp_product_name,
@@ -2372,24 +2369,24 @@ def _make_lan_diag_coord(
     coord = SimpleNamespace(
         data={CAM_ID: {"info": info, "status": "ONLINE", "events": []}},
         last_update_success=last_update_success,
-        _rcp_onvif_scopes_cache=(
+        rcp_onvif_scopes_cache=(
             {CAM_ID: onvif_scopes} if onvif_scopes is not None else {}
         ),
-        _rcp_version_cache=({CAM_ID: rcp_version} if rcp_version is not None else {}),
-        _feature_flags=feature_flags if feature_flags is not None else {},
-        _local_creds_cache={CAM_ID: _local_creds} if _local_creds else {},
-        _rcp_lan_ip_cache={CAM_ID: lan_ip} if lan_ip else {},
+        rcp_version_cache=({CAM_ID: rcp_version} if rcp_version is not None else {}),
+        feature_flags=feature_flags if feature_flags is not None else {},
+        local_creds_cache={CAM_ID: _local_creds} if _local_creds else {},
+        rcp_lan_ip_cache={CAM_ID: lan_ip} if lan_ip else {},
         async_request_refresh=None,
     )
 
-    def _get_cam_lan_ip(cam_id: str) -> str | None:
-        ip = coord._rcp_lan_ip_cache.get(cam_id)
+    def get_cam_lan_ip(cam_id: str) -> str | None:
+        ip = coord.rcp_lan_ip_cache.get(cam_id)
         if ip:
             return ip
-        creds = coord._local_creds_cache.get(cam_id)
+        creds = coord.local_creds_cache.get(cam_id)
         return creds.get("host") if creds else None
 
-    coord._get_cam_lan_ip = _get_cam_lan_ip
+    coord.get_cam_lan_ip = get_cam_lan_ip
     return coord
 
 
@@ -2436,7 +2433,7 @@ class TestBoschOnvifScopesSensor:
     def test_native_value_none_when_empty_dict(self) -> None:
         # empty dict is falsy
         coord = _make_lan_diag_coord(onvif_scopes=None)
-        coord._rcp_onvif_scopes_cache = {CAM_ID: {}}
+        coord.rcp_onvif_scopes_cache = {CAM_ID: {}}
         s = self._make(coord)
         assert s.native_value is None
 
@@ -2554,7 +2551,7 @@ class TestBoschRcpVersionSensor:
     def test_extra_attrs_partial_version(self) -> None:
         # Short version string with fewer than 4 components
         coord = _make_lan_diag_coord(rcp_version=None)
-        coord._rcp_version_cache = {CAM_ID: "1.2"}
+        coord.rcp_version_cache = {CAM_ID: "1.2"}
         s = self._make(coord)
         attrs = s.extra_state_attributes
         assert attrs["major"] == "1"
@@ -2635,10 +2632,10 @@ class TestBoschCloudFeatureFlagsSensor:
 
 
 class TestParseOnvifScopes:
-    """Tests for _parse_onvif_scopes (module-level helper in __init__.py)."""
+    """Tests for _parse_onvif_scopes (module-level helper in coordinator.py)."""
 
     def _parse(self, raw: bytes) -> dict[str, Any]:
-        from custom_components.bosch_shc_camera import _parse_onvif_scopes
+        from custom_components.bosch_shc_camera.coordinator import _parse_onvif_scopes
 
         return _parse_onvif_scopes(raw)
 
@@ -2718,18 +2715,18 @@ class TestFetchRcpLan:
         """Return a minimal coordinator instance for _fetch_rcp_lan."""
         # Build with the minimum required attributes
         coord = object.__new__(BoschCameraCoordinator)
-        coord._rcp_lan_ip_cache = {CAM_ID: lan_ip} if lan_ip else {}
-        coord._local_creds_cache = {CAM_ID: local_creds} if local_creds else {}
+        coord.rcp_lan_ip_cache = {CAM_ID: lan_ip} if lan_ip else {}
+        coord.local_creds_cache = {CAM_ID: local_creds} if local_creds else {}
         coord.hass = MagicMock()
 
-        def _get_cam_lan_ip(cam_id: str) -> str | None:
-            ip = coord._rcp_lan_ip_cache.get(cam_id)
+        def get_cam_lan_ip(cam_id: str) -> str | None:
+            ip = coord.rcp_lan_ip_cache.get(cam_id)
             if ip:
                 return ip
-            creds = coord._local_creds_cache.get(cam_id)
+            creds = coord.local_creds_cache.get(cam_id)
             return creds.get("host") if creds else None
 
-        coord._get_cam_lan_ip = _get_cam_lan_ip  # type: ignore[method-assign]
+        coord.get_cam_lan_ip = get_cam_lan_ip  # type: ignore[method-assign]
         return coord
 
     @pytest.mark.asyncio
@@ -2913,10 +2910,10 @@ class TestAsyncUpdateLanDiagnosticSensors:
 
     def _make_coordinator_with_caches(self) -> Any:
         coord = object.__new__(BoschCameraCoordinator)
-        coord._rcp_onvif_scopes_cache = {}
-        coord._rcp_version_cache = {}
-        coord._rcp_lan_ip_cache = {CAM_ID: "192.0.2.149"}
-        coord._local_creds_cache = {
+        coord.rcp_onvif_scopes_cache = {}
+        coord.rcp_version_cache = {}
+        coord.rcp_lan_ip_cache = {CAM_ID: "192.0.2.149"}
+        coord.local_creds_cache = {
             CAM_ID: {
                 "user": "cbs-XYZ",
                 "password": "pw",
@@ -2927,10 +2924,10 @@ class TestAsyncUpdateLanDiagnosticSensors:
         }
         coord.hass = MagicMock()
 
-        def _get_cam_lan_ip(cam_id: str) -> str | None:
-            return coord._rcp_lan_ip_cache.get(cam_id)
+        def get_cam_lan_ip(cam_id: str) -> str | None:
+            return coord.rcp_lan_ip_cache.get(cam_id)
 
-        coord._get_cam_lan_ip = _get_cam_lan_ip  # type: ignore[method-assign]
+        coord.get_cam_lan_ip = get_cam_lan_ip  # type: ignore[method-assign]
         return coord
 
     @pytest.mark.asyncio
@@ -2945,8 +2942,8 @@ class TestAsyncUpdateLanDiagnosticSensors:
 
         coord._fetch_rcp_lan = _fetch_mock  # type: ignore[method-assign]
         await coord._async_update_lan_diagnostic_sensors(CAM_ID)
-        assert CAM_ID in coord._rcp_onvif_scopes_cache
-        assert coord._rcp_onvif_scopes_cache[CAM_ID]["name"] == "TestCam"
+        assert CAM_ID in coord.rcp_onvif_scopes_cache
+        assert coord.rcp_onvif_scopes_cache[CAM_ID]["name"] == "TestCam"
 
     @pytest.mark.asyncio
     async def test_f6_rcp_version_populated_on_success(self) -> None:
@@ -2961,7 +2958,7 @@ class TestAsyncUpdateLanDiagnosticSensors:
 
         coord._fetch_rcp_lan = _fetch_mock  # type: ignore[method-assign]
         await coord._async_update_lan_diagnostic_sensors(CAM_ID)
-        assert coord._rcp_version_cache.get(CAM_ID) == "1.2.38.150"
+        assert coord.rcp_version_cache.get(CAM_ID) == "1.2.38.150"
 
     @pytest.mark.asyncio
     async def test_version_bytes_too_short_no_update(self) -> None:
@@ -2974,7 +2971,7 @@ class TestAsyncUpdateLanDiagnosticSensors:
 
         coord._fetch_rcp_lan = _fetch_mock  # type: ignore[method-assign]
         await coord._async_update_lan_diagnostic_sensors(CAM_ID)
-        assert coord._rcp_version_cache.get(CAM_ID) is None
+        assert coord.rcp_version_cache.get(CAM_ID) is None
 
     @pytest.mark.asyncio
     async def test_onvif_none_does_not_update_cache(self) -> None:
@@ -2985,8 +2982,8 @@ class TestAsyncUpdateLanDiagnosticSensors:
 
         coord._fetch_rcp_lan = _fetch_mock  # type: ignore[method-assign]
         await coord._async_update_lan_diagnostic_sensors(CAM_ID)
-        assert CAM_ID not in coord._rcp_onvif_scopes_cache
-        assert CAM_ID not in coord._rcp_version_cache
+        assert CAM_ID not in coord.rcp_onvif_scopes_cache
+        assert CAM_ID not in coord.rcp_version_cache
 
     @pytest.mark.asyncio
     async def test_exception_in_onvif_does_not_prevent_version_fetch(self) -> None:
@@ -3006,7 +3003,7 @@ class TestAsyncUpdateLanDiagnosticSensors:
         # Should NOT raise — exception is swallowed per spec
         await coord._async_update_lan_diagnostic_sensors(CAM_ID)
         # Version should still be updated
-        assert coord._rcp_version_cache.get(CAM_ID) == "1.2.9.225"
+        assert coord.rcp_version_cache.get(CAM_ID) == "1.2.9.225"
 
 
 # External stream URL sensors (+ BoschExternalStreamSwitch)
@@ -3057,8 +3054,8 @@ def _make_ext_stream_coord(
                 },
             }
         },
-        _external_stream_enabled={},
-        _live_connections=({CAM_ID: {"rtspsUrl": rtsps_url}} if rtsps_url else {}),
+        external_stream_enabled={},
+        live_connections=({CAM_ID: {"rtspsUrl": rtsps_url}} if rtsps_url else {}),
         last_update_success=True,
         async_update_listeners=MagicMock(),
     )
@@ -3117,7 +3114,7 @@ async def test_switch_turn_on_sets_flag(stub_entry: SimpleNamespace) -> None:
 
     await entity.async_turn_on()
 
-    assert coord._external_stream_enabled[CAM_ID] is True
+    assert coord.external_stream_enabled[CAM_ID] is True
     assert entity.is_on is True
     # The two URL sensors recompute when the switch flips
     coord.async_update_listeners.assert_called_once()
@@ -3128,13 +3125,13 @@ async def test_switch_turn_off_clears_flag(stub_entry: SimpleNamespace) -> None:
     from custom_components.bosch_shc_camera.switch import BoschExternalStreamSwitch
 
     coord = _make_ext_stream_coord()
-    coord._external_stream_enabled[CAM_ID] = True
+    coord.external_stream_enabled[CAM_ID] = True
     entity = BoschExternalStreamSwitch(coord, CAM_ID, stub_entry)
     entity.async_write_ha_state = MagicMock()
 
     await entity.async_turn_off()
 
-    assert coord._external_stream_enabled[CAM_ID] is False
+    assert coord.external_stream_enabled[CAM_ID] is False
     assert entity.is_on is False
 
 
@@ -3162,7 +3159,7 @@ async def test_switch_restores_on_state_from_previous_session(
 
     await entity.async_added_to_hass()
 
-    assert coord._external_stream_enabled[CAM_ID] is True
+    assert coord.external_stream_enabled[CAM_ID] is True
 
 
 @pytest.mark.asyncio
@@ -3183,7 +3180,7 @@ async def test_switch_restore_off_does_not_set_flag(
 
     await entity.async_added_to_hass()
 
-    assert coord._external_stream_enabled.get(CAM_ID, False) is False
+    assert coord.external_stream_enabled.get(CAM_ID, False) is False
 
 
 # ── BoschStreamUrlSensor (main, inst=1) ──────────────────────────────────────
@@ -3195,7 +3192,7 @@ def test_main_sensor_returns_none_when_switch_off(stub_entry: SimpleNamespace) -
     from custom_components.bosch_shc_camera.sensor import BoschStreamUrlSensor
 
     coord = _make_ext_stream_coord()
-    coord._external_stream_enabled[CAM_ID] = False
+    coord.external_stream_enabled[CAM_ID] = False
     sensor = BoschStreamUrlSensor(coord, CAM_ID, stub_entry)
     assert sensor.native_value is None
 
@@ -3204,7 +3201,7 @@ def test_main_sensor_returns_url_when_switch_on(stub_entry: SimpleNamespace) -> 
     from custom_components.bosch_shc_camera.sensor import BoschStreamUrlSensor
 
     coord = _make_ext_stream_coord()
-    coord._external_stream_enabled[CAM_ID] = True
+    coord.external_stream_enabled[CAM_ID] = True
     sensor = BoschStreamUrlSensor(coord, CAM_ID, stub_entry)
     assert sensor.native_value == _EXT_STREAM_LOCAL_RTSP_URL
 
@@ -3217,7 +3214,7 @@ def test_main_sensor_returns_none_when_no_session_open(
     from custom_components.bosch_shc_camera.sensor import BoschStreamUrlSensor
 
     coord = _make_ext_stream_coord(rtsps_url=None)
-    coord._external_stream_enabled[CAM_ID] = True
+    coord.external_stream_enabled[CAM_ID] = True
     sensor = BoschStreamUrlSensor(coord, CAM_ID, stub_entry)
     assert sensor.native_value is None
 
@@ -3229,7 +3226,7 @@ def test_sub_sensor_returns_none_when_switch_off(stub_entry: SimpleNamespace) ->
     from custom_components.bosch_shc_camera.sensor import BoschStreamUrlSubSensor
 
     coord = _make_ext_stream_coord()
-    coord._external_stream_enabled[CAM_ID] = False
+    coord.external_stream_enabled[CAM_ID] = False
     sensor = BoschStreamUrlSubSensor(coord, CAM_ID, stub_entry)
     assert sensor.native_value is None
 
@@ -3239,7 +3236,7 @@ def test_sub_sensor_rewrites_inst_to_2(stub_entry: SimpleNamespace) -> None:
     from custom_components.bosch_shc_camera.sensor import BoschStreamUrlSubSensor
 
     coord = _make_ext_stream_coord()
-    coord._external_stream_enabled[CAM_ID] = True
+    coord.external_stream_enabled[CAM_ID] = True
     sensor = BoschStreamUrlSubSensor(coord, CAM_ID, stub_entry)
     val = sensor.native_value
     assert val is not None
@@ -3252,7 +3249,7 @@ def test_sub_sensor_rewrites_inst_4_to_2_on_remote(stub_entry: SimpleNamespace) 
     from custom_components.bosch_shc_camera.sensor import BoschStreamUrlSubSensor
 
     coord = _make_ext_stream_coord(rtsps_url=_EXT_STREAM_REMOTE_RTSP_URL)
-    coord._external_stream_enabled[CAM_ID] = True
+    coord.external_stream_enabled[CAM_ID] = True
     sensor = BoschStreamUrlSubSensor(coord, CAM_ID, stub_entry)
     val = sensor.native_value
     assert val is not None
@@ -3313,13 +3310,13 @@ def _make_nvr_coord(
                 }
             }
         },
-        _nvr_drain_state=drain_state or {},
-        _nvr_processes=nvr_processes or {},
-        _nvr_preroll_processes={},
-        _nvr_preroll_tasks={},
-        _nvr_preroll_segment_counts=preroll_counts or {},
-        _nvr_user_intent=user_intent or {},
-        _nvr_error_state=error_state or {},
+        nvr_drain_state=drain_state or {},
+        nvr_processes=nvr_processes or {},
+        nvr_preroll_processes={},
+        nvr_preroll_tasks={},
+        nvr_preroll_segment_counts=preroll_counts or {},
+        nvr_user_intent=user_intent or {},
+        nvr_error_state=error_state or {},
         options={
             "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",
             "nvr_preroll_seconds": 0,
@@ -3416,7 +3413,7 @@ class TestNvrStateSensorAttributes:
         assert attrs["failed_uploads"] == 2
 
     def test_last_segment_age_keyed_by_camera(self):
-        """``_nvr_drain_state.last_age_by_cam`` is keyed by sanitized
+        """``nvr_drain_state.last_age_by_cam`` is keyed by sanitized
         camera title so the per-camera lookup must use the same _safe_name."""
         from custom_components.bosch_shc_camera.sensor import BoschNvrStateSensor
 
@@ -3479,7 +3476,7 @@ class TestNvrStateSensorAttributes:
         """extra_state_attributes must NOT call list_preroll_files (which does
         os.listdir) — that's a blocking call in the event loop. The count is
         populated by the preroll watcher into
-        ``_nvr_preroll_segment_counts`` and read from there.
+        ``nvr_preroll_segment_counts`` and read from there.
 
         Source: HA detected a blocking call to listdir at recorder.py:221
         during a v12.x test — the preroll watcher now caches the count and
@@ -3495,7 +3492,7 @@ class TestNvrStateSensorAttributes:
             called["n"] += 1
             raise AssertionError(
                 "list_preroll_files must not be called from event loop — "
-                "use _nvr_preroll_segment_counts cache",
+                "use nvr_preroll_segment_counts cache",
             )
 
         recorder_mod.list_preroll_files = boom
@@ -3571,8 +3568,8 @@ def _make_maintenance_coord(
     *, cache: MaintenanceWindow | None, last_fetch: float = float("-inf")
 ) -> SimpleNamespace:
     c = SimpleNamespace()
-    c._maintenance_cache = cache
-    c._maintenance_last_fetch = last_fetch
+    c.maintenance_cache = cache
+    c.maintenance_last_fetch = last_fetch
     # _BoschSensorBase.__init__ reads coordinator.data[cam_id]['info'] for
     # device-info fields — stub it so the constructor succeeds.
     c.data = {"CAM_ID_X": {"info": {"title": "TestCam"}}}
@@ -3663,7 +3660,7 @@ class TestCloudMaintenanceSensorValue:
 # - BoschCameraStatusSensor.native_value returns "session_limit"
 # - Persistent notification fires after N>=3 hits in a 5-min window
 # - Notification does NOT fire on first or second hit within the window
-# - _offline_since is NOT updated on SESSION_LIMIT (camera is reachable)
+# - offline_since is NOT updated on SESSION_LIMIT (camera is reachable)
 #
 # Source: user-reported confusion "camera shown offline during Bosch app
 # parallel use" — root cause was HTTP 444 being treated as OFFLINE.
@@ -3694,8 +3691,8 @@ def _make_session_quota_coord(cam_id: str = CAM_ID) -> SimpleNamespace:
         async_create_task=MagicMock(),
     )
     # Caches expected by BoschCameraStatusSensor.__init__ / _cam_data property
-    coord._commissioned_cache = {}
-    coord._firmware_cache = {}
+    coord.commissioned_cache = {}
+    coord.firmware_cache = {}
     return coord
 
 
@@ -3839,16 +3836,16 @@ class TestSessionQuotaNotification:
         assert coord.hass.services.async_call.call_count == 2
 
 
-# ── _offline_since not updated on SESSION_LIMIT ──────────────────────────────
+# ── offline_since not updated on SESSION_LIMIT ──────────────────────────────
 
 
 class TestSessionLimitOfflineSince:
-    """SESSION_LIMIT must not add camera to _offline_since (not a connectivity failure)."""
+    """SESSION_LIMIT must not add camera to offline_since (not a connectivity failure)."""
 
     def test_session_limit_does_not_set_offline_since(self) -> None:
-        """The status == 'SESSION_LIMIT' branch does NOT add to _offline_since."""
+        """The status == 'SESSION_LIMIT' branch does NOT add to offline_since."""
         # We test the logic inline — if status is SESSION_LIMIT it falls into the
-        # `else` branch (not in OFFLINE/UPDATING) so _offline_since.pop() is called.
+        # `else` branch (not in OFFLINE/UPDATING) so offline_since.pop() is called.
         offline_since: dict[str, float] = {
             CAM_ID: 12345.0
         }  # simulate pre-existing entry
@@ -3861,7 +3858,7 @@ class TestSessionLimitOfflineSince:
         assert CAM_ID not in offline_since
 
     def test_offline_does_set_offline_since(self) -> None:
-        """OFFLINE should still set _offline_since — regression guard."""
+        """OFFLINE should still set offline_since — regression guard."""
         offline_since: dict[str, float] = {}
         now = time.monotonic()
         status = "OFFLINE"
@@ -3901,48 +3898,48 @@ def _stub_coord_bugfixes(**overrides: object) -> SimpleNamespace:
                 "events": [],
             }
         },
-        _commissioned_cache={},
-        _firmware_cache={},
-        _wifiinfo_cache={},
-        _ambient_light_cache={},
-        _rcp_dimmer_cache={},
-        _rcp_alarm_catalog_cache={},
-        _rcp_motion_zones_cache={},
-        _rcp_motion_coords_cache={},
-        _cloud_zones_cache={},
-        _gen2_zones_cache={},
-        _rcp_tls_cert_cache={},
-        _rcp_network_services_cache={},
-        _rcp_iva_catalog_cache={},
+        commissioned_cache={},
+        firmware_cache={},
+        wifiinfo_cache={},
+        ambient_light_cache={},
+        rcp_dimmer_cache={},
+        rcp_alarm_catalog_cache={},
+        rcp_motion_zones_cache={},
+        rcp_motion_coords_cache={},
+        cloud_zones_cache={},
+        gen2_zones_cache={},
+        rcp_tls_cert_cache={},
+        rcp_network_services_cache={},
+        rcp_iva_catalog_cache={},
         _rcp_private_areas_cache={},
-        _gen2_private_areas_cache={},
-        _cloud_privacy_masks_cache={},
-        _ambient_lighting_cache={},
-        _alarm_status_cache={},
-        _alarm_settings_cache={},
-        _arming_cache={},
-        _live_connections={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _stream_warming=set(),
-        _fcm_running=False,
-        _fcm_healthy=True,
-        _fcm_push_mode="auto",
-        _fcm_last_push=float("-inf"),
-        _maintenance_cache=None,
-        _maintenance_last_fetch=float("-inf"),
-        _nvr_drain_state={},
-        _nvr_error_state={},
-        _nvr_processes={},
-        _nvr_user_intent={},
-        _nvr_preroll_segment_counts={},
-        _nvr_preroll_processes={},
-        _unread_events_cache={},
-        _rules_cache={},
-        _feature_flags={},
-        _rcp_onvif_scopes_cache={},
-        _rcp_version_cache={},
-        _external_stream_enabled={},
+        gen2_private_areas_cache={},
+        cloud_privacy_masks_cache={},
+        ambient_lighting_cache={},
+        alarm_status_cache={},
+        alarm_settings_cache={},
+        arming_cache={},
+        live_connections={},
+        stream_fell_back={},
+        stream_error_count={},
+        stream_warming=set(),
+        fcm_running=False,
+        fcm_healthy=True,
+        fcm_push_mode="auto",
+        fcm_last_push=float("-inf"),
+        maintenance_cache=None,
+        maintenance_last_fetch=float("-inf"),
+        nvr_drain_state={},
+        nvr_error_state={},
+        nvr_processes={},
+        nvr_user_intent={},
+        nvr_preroll_segment_counts={},
+        nvr_preroll_processes={},
+        unread_events_cache={},
+        rules_cache={},
+        feature_flags={},
+        rcp_onvif_scopes_cache={},
+        rcp_version_cache={},
+        external_stream_enabled={},
         last_update_success=True,
         options={"enable_fcm_push": True, "enable_sensors": True, "enable_nvr": False},
         motion_settings=lambda cid: {
@@ -4040,7 +4037,7 @@ class TestTlsCertSensorTzAwareDatetime:
         from custom_components.bosch_shc_camera.sensor import BoschTlsCertSensor
 
         coord = _stub_coord_bugfixes(
-            _rcp_tls_cert_cache={CAM_ID: {"not_after": "2027-06-15T12:00:00"}}
+            rcp_tls_cert_cache={CAM_ID: {"not_after": "2027-06-15T12:00:00"}}
         )
         s = BoschTlsCertSensor(coord, CAM_ID, _stub_entry())
         val = s.native_value
@@ -4052,7 +4049,7 @@ class TestTlsCertSensorTzAwareDatetime:
         from custom_components.bosch_shc_camera.sensor import BoschTlsCertSensor
 
         coord = _stub_coord_bugfixes(
-            _rcp_tls_cert_cache={CAM_ID: {"not_after": "2027-06-15T12:00:00+00:00"}}
+            rcp_tls_cert_cache={CAM_ID: {"not_after": "2027-06-15T12:00:00+00:00"}}
         )
         s = BoschTlsCertSensor(coord, CAM_ID, _stub_entry())
         val = s.native_value
@@ -4062,7 +4059,7 @@ class TestTlsCertSensorTzAwareDatetime:
     def test_missing_cert_returns_none(self) -> None:
         from custom_components.bosch_shc_camera.sensor import BoschTlsCertSensor
 
-        coord = _stub_coord_bugfixes(_rcp_tls_cert_cache={})
+        coord = _stub_coord_bugfixes(rcp_tls_cert_cache={})
         s = BoschTlsCertSensor(coord, CAM_ID, _stub_entry())
         assert s.native_value is None
 
@@ -4070,7 +4067,7 @@ class TestTlsCertSensorTzAwareDatetime:
         from custom_components.bosch_shc_camera.sensor import BoschTlsCertSensor
 
         coord = _stub_coord_bugfixes(
-            _rcp_tls_cert_cache={CAM_ID: {"not_after": "not-a-date"}}
+            rcp_tls_cert_cache={CAM_ID: {"not_after": "not-a-date"}}
         )
         s = BoschTlsCertSensor(coord, CAM_ID, _stub_entry())
         assert s.native_value is None
@@ -4182,7 +4179,7 @@ class TestCommissionedSensorSnakeCaseEnum:
         from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
         coord = _stub_coord_bugfixes(
-            _commissioned_cache={
+            commissioned_cache={
                 CAM_ID: {"configured": True, "connected": True, "commissioned": True}
             }
         )
@@ -4193,7 +4190,7 @@ class TestCommissionedSensorSnakeCaseEnum:
         from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
         coord = _stub_coord_bugfixes(
-            _commissioned_cache={
+            commissioned_cache={
                 CAM_ID: {"configured": True, "connected": True, "commissioned": False}
             }
         )
@@ -4204,7 +4201,7 @@ class TestCommissionedSensorSnakeCaseEnum:
         from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
         coord = _stub_coord_bugfixes(
-            _commissioned_cache={
+            commissioned_cache={
                 CAM_ID: {"configured": False, "connected": False, "commissioned": False}
             }
         )
@@ -4214,7 +4211,7 @@ class TestCommissionedSensorSnakeCaseEnum:
     def test_no_cache_returns_none(self) -> None:
         from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
-        coord = _stub_coord_bugfixes(_commissioned_cache={})
+        coord = _stub_coord_bugfixes(commissioned_cache={})
         s = BoschCommissionedSensor(coord, CAM_ID, _stub_entry())
         assert s.native_value is None
 
@@ -4239,7 +4236,7 @@ class TestCommissionedSensorSnakeCaseEnum:
                 "not_connected",
             ),
         ]:
-            coord._commissioned_cache[CAM_ID] = data
+            coord.commissioned_cache[CAM_ID] = data
             val = s.native_value
             assert val in options, f"{val!r} not in _attr_options"
             assert val == expected
@@ -4258,7 +4255,7 @@ class TestCloudFeatureFlagsSensor:
 
         # Build a flags dict whose joined string exceeds 255 chars
         many_flags = {f"feature_flag_{i:04d}": True for i in range(50)}
-        coord = _stub_coord_bugfixes(_feature_flags=many_flags)
+        coord = _stub_coord_bugfixes(feature_flags=many_flags)
         s = BoschCloudFeatureFlagsSensor(coord, CAM_ID, _stub_entry())
         val = s.native_value
         assert val is not None
@@ -4269,7 +4266,7 @@ class TestCloudFeatureFlagsSensor:
             BoschCloudFeatureFlagsSensor,
         )
 
-        coord = _stub_coord_bugfixes(_feature_flags={"alpha": True, "beta": False})
+        coord = _stub_coord_bugfixes(feature_flags={"alpha": True, "beta": False})
         s = BoschCloudFeatureFlagsSensor(coord, CAM_ID, _stub_entry())
         assert s.native_value == "alpha"
 
@@ -4278,7 +4275,7 @@ class TestCloudFeatureFlagsSensor:
             BoschCloudFeatureFlagsSensor,
         )
 
-        coord = _stub_coord_bugfixes(_feature_flags={"alpha": False, "beta": False})
+        coord = _stub_coord_bugfixes(feature_flags={"alpha": False, "beta": False})
         s = BoschCloudFeatureFlagsSensor(coord, CAM_ID, _stub_entry())
         assert s.native_value == "none"
 
@@ -4287,7 +4284,7 @@ class TestCloudFeatureFlagsSensor:
             BoschCloudFeatureFlagsSensor,
         )
 
-        coord = _stub_coord_bugfixes(_feature_flags={})
+        coord = _stub_coord_bugfixes(feature_flags={})
         s = BoschCloudFeatureFlagsSensor(coord, CAM_ID, _stub_entry())
         assert s.native_value is None
 
@@ -4318,7 +4315,7 @@ class TestOnvifScopesSensor:
         from custom_components.bosch_shc_camera.sensor import BoschOnvifScopesSensor
 
         coord = _stub_coord_bugfixes(
-            _rcp_onvif_scopes_cache={
+            rcp_onvif_scopes_cache={
                 CAM_ID: {
                     "name": "Terrasse",
                     "hardware": "HOME_Eyes_Outdoor",
@@ -4332,7 +4329,7 @@ class TestOnvifScopesSensor:
     def test_native_value_is_none_when_no_scopes(self) -> None:
         from custom_components.bosch_shc_camera.sensor import BoschOnvifScopesSensor
 
-        coord = _stub_coord_bugfixes(_rcp_onvif_scopes_cache={})
+        coord = _stub_coord_bugfixes(rcp_onvif_scopes_cache={})
         s = BoschOnvifScopesSensor(coord, CAM_ID, _stub_entry())
         assert s.native_value is None
 
@@ -4340,7 +4337,7 @@ class TestOnvifScopesSensor:
         from custom_components.bosch_shc_camera.sensor import BoschOnvifScopesSensor
 
         coord = _stub_coord_bugfixes(
-            _rcp_onvif_scopes_cache={CAM_ID: {"profiles": ["S", "T"]}}
+            rcp_onvif_scopes_cache={CAM_ID: {"profiles": ["S", "T"]}}
         )
         s = BoschOnvifScopesSensor(coord, CAM_ID, _stub_entry())
         val = s.native_value
@@ -4378,45 +4375,45 @@ def _stub_coord_edge_cases(**overrides):
             }
         },
         # Sensor caches
-        _commissioned_cache={},
-        _firmware_cache={},
+        commissioned_cache={},
+        firmware_cache={},
         _wifi_cache={},
-        _ambient_light_cache={},
+        ambient_light_cache={},
         _motion_sensitivity_cache={},
         _ledlight_brightness_cache={},
         _clock_offset_cache={},
-        _ledlights_cache={},
+        ledlights_cache={},
         _last_event_seen={},
-        _live_connections={},
-        _stream_warming=set(),
-        _stream_fell_back={},
-        _stream_error_count={},
-        _ambient_lighting_cache={},
-        _rcp_dimmer_cache={},
-        _unread_events_cache={},
-        _rules_cache={},
-        _rcp_alarm_catalog_cache={},
-        _rcp_motion_zones_cache={},
-        _rcp_motion_coords_cache={},
-        _cloud_zones_cache={},
-        _gen2_zones_cache={},
-        _rcp_tls_cert_cache={},
-        _rcp_network_services_cache={},
-        _rcp_iva_catalog_cache={},
-        _cloud_privacy_masks_cache={},
-        _gen2_private_areas_cache={},
+        live_connections={},
+        stream_warming=set(),
+        stream_fell_back={},
+        stream_error_count={},
+        ambient_lighting_cache={},
+        rcp_dimmer_cache={},
+        unread_events_cache={},
+        rules_cache={},
+        rcp_alarm_catalog_cache={},
+        rcp_motion_zones_cache={},
+        rcp_motion_coords_cache={},
+        cloud_zones_cache={},
+        gen2_zones_cache={},
+        rcp_tls_cert_cache={},
+        rcp_network_services_cache={},
+        rcp_iva_catalog_cache={},
+        cloud_privacy_masks_cache={},
+        gen2_private_areas_cache={},
         last_update_success=True,
         token="tok",
         options={"enable_fcm_push": False},
-        _fcm_running=False,
-        _fcm_healthy=False,
+        fcm_running=False,
+        fcm_healthy=False,
         # Coordinator helpers used by sensors
         rcp_product_name=lambda cid: None,
         motion_settings=lambda cid: {},
         clock_offset=lambda cid: None,
         # FCM monotonic sentinel — use float('-inf') per SENTINEL_RULE
-        _fcm_last_push=float("-inf"),
-        _fcm_push_mode="auto",
+        fcm_last_push=float("-inf"),
+        fcm_push_mode="auto",
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -4694,7 +4691,7 @@ class TestMotionZonesSensorAvailability:
         real, distinguishable value — not the same as "never fetched"."""
         from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
 
-        edge_cases_coord._rcp_motion_zones_cache[CAM_ID] = []
+        edge_cases_coord.rcp_motion_zones_cache[CAM_ID] = []
         s = BoschMotionZonesSensor(edge_cases_coord, CAM_ID, stub_entry)
         assert s.native_value == 0
         assert s.available is True
@@ -4704,8 +4701,8 @@ class TestMotionZonesSensorAvailability:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
 
-        edge_cases_coord._gen2_zones_cache[CAM_ID] = [{"points": []}, {"points": []}]
-        edge_cases_coord._cloud_zones_cache[CAM_ID] = [{"x": 0}]
+        edge_cases_coord.gen2_zones_cache[CAM_ID] = [{"points": []}, {"points": []}]
+        edge_cases_coord.cloud_zones_cache[CAM_ID] = [{"x": 0}]
         s = BoschMotionZonesSensor(edge_cases_coord, CAM_ID, stub_entry)
         assert s.native_value == 2
 
@@ -4714,8 +4711,8 @@ class TestMotionZonesSensorAvailability:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
 
-        edge_cases_coord._cloud_zones_cache[CAM_ID] = [{"x": 0}, {"x": 1}, {"x": 2}]
-        edge_cases_coord._rcp_motion_zones_cache[CAM_ID] = [{"legacy": True}]
+        edge_cases_coord.cloud_zones_cache[CAM_ID] = [{"x": 0}, {"x": 1}, {"x": 2}]
+        edge_cases_coord.rcp_motion_zones_cache[CAM_ID] = [{"legacy": True}]
         s = BoschMotionZonesSensor(edge_cases_coord, CAM_ID, stub_entry)
         assert s.native_value == 3
 
@@ -4724,7 +4721,7 @@ class TestMotionZonesSensorAvailability:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
 
-        edge_cases_coord._rcp_motion_zones_cache[CAM_ID] = []
+        edge_cases_coord.rcp_motion_zones_cache[CAM_ID] = []
         edge_cases_coord.last_update_success = False
         s = BoschMotionZonesSensor(edge_cases_coord, CAM_ID, stub_entry)
         assert s.available is False
@@ -4745,7 +4742,7 @@ class TestPrivateAreasSensorAvailability:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschPrivateAreasSensor
 
-        edge_cases_coord._cloud_privacy_masks_cache[CAM_ID] = []
+        edge_cases_coord.cloud_privacy_masks_cache[CAM_ID] = []
         s = BoschPrivateAreasSensor(edge_cases_coord, CAM_ID, stub_entry)
         assert s.native_value == 0
         assert s.available is True
@@ -4755,8 +4752,8 @@ class TestPrivateAreasSensorAvailability:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschPrivateAreasSensor
 
-        edge_cases_coord._gen2_private_areas_cache[CAM_ID] = [{"points": []}]
-        edge_cases_coord._cloud_privacy_masks_cache[CAM_ID] = [{"x": 0}, {"x": 1}]
+        edge_cases_coord.gen2_private_areas_cache[CAM_ID] = [{"points": []}]
+        edge_cases_coord.cloud_privacy_masks_cache[CAM_ID] = [{"x": 0}, {"x": 1}]
         s = BoschPrivateAreasSensor(edge_cases_coord, CAM_ID, stub_entry)
         assert s.native_value == 1
 
@@ -4788,7 +4785,7 @@ class TestAmbientLightScheduleAttributes:
             BoschAmbientLightScheduleSensor,
         )
 
-        edge_cases_coord._ambient_lighting_cache[CAM_ID] = {
+        edge_cases_coord.ambient_lighting_cache[CAM_ID] = {
             "ambientLightEnabled": True,
             "ambientLightSchedule": "ENVIRONMENT",  # plain string, not dict
         }
@@ -4805,7 +4802,7 @@ class TestAmbientLightScheduleAttributes:
             BoschAmbientLightScheduleSensor,
         )
 
-        edge_cases_coord._ambient_lighting_cache[CAM_ID] = {
+        edge_cases_coord.ambient_lighting_cache[CAM_ID] = {
             "ambientLightEnabled": True,
             "ambientLightSchedule": "MANUAL",
             "ambientLightManualStartTime": "20:00",
@@ -4825,7 +4822,7 @@ class TestAmbientLightScheduleAttributes:
             BoschAmbientLightScheduleSensor,
         )
 
-        edge_cases_coord._ambient_lighting_cache[CAM_ID] = {
+        edge_cases_coord.ambient_lighting_cache[CAM_ID] = {
             "ambientLightEnabled": True,
             "ambientLightSchedule": "ENVIRONMENT",
             "frontLightSettings": {
@@ -4896,31 +4893,31 @@ def _make_broad_sensor_coord(**overrides):
         },
         last_update_success=True,
         options={"enable_fcm_push": False},
-        _commissioned_cache={},
-        _firmware_cache={},
-        _wifiinfo_cache={},
-        _ambient_light_cache={},
-        _rcp_dimmer_cache={},
-        _unread_events_cache={},
-        _rules_cache={},
-        _rcp_alarm_catalog_cache={},
-        _rcp_motion_zones_cache={},
-        _rcp_motion_coords_cache={},
-        _cloud_zones_cache={},
-        _gen2_zones_cache={},
-        _cloud_privacy_masks_cache={},
-        _gen2_private_areas_cache={},
-        _rcp_tls_cert_cache={},
-        _rcp_network_services_cache={},
-        _rcp_iva_catalog_cache={},
-        _ambient_lighting_cache={},
-        _alarm_status_cache={},
-        _arming_cache={},
-        _shc_state_cache={CAM_ID: {}},
-        _fcm_healthy=False,
-        _fcm_running=False,
-        _fcm_push_mode="auto",
-        _fcm_last_push=0,
+        commissioned_cache={},
+        firmware_cache={},
+        wifiinfo_cache={},
+        ambient_light_cache={},
+        rcp_dimmer_cache={},
+        unread_events_cache={},
+        rules_cache={},
+        rcp_alarm_catalog_cache={},
+        rcp_motion_zones_cache={},
+        rcp_motion_coords_cache={},
+        cloud_zones_cache={},
+        gen2_zones_cache={},
+        cloud_privacy_masks_cache={},
+        gen2_private_areas_cache={},
+        rcp_tls_cert_cache={},
+        rcp_network_services_cache={},
+        rcp_iva_catalog_cache={},
+        ambient_lighting_cache={},
+        alarm_status_cache={},
+        arming_cache={},
+        shc_state_cache={CAM_ID: {}},
+        fcm_healthy=False,
+        fcm_running=False,
+        fcm_push_mode="auto",
+        fcm_last_push=0,
         is_camera_online=lambda cid: True,
         clock_offset=lambda cid: None,
         motion_settings=lambda cid: None,
@@ -4976,10 +4973,10 @@ def test_status_sensor_extra_attrs_with_comm_and_fw():
     from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
 
     c = _make_broad_sensor_coord(
-        _commissioned_cache={
+        commissioned_cache={
             CAM_ID: {"configured": True, "connected": True, "commissioned": True}
         },
-        _firmware_cache={CAM_ID: {"updating": False, "status": "OK", "upToDate": True}},
+        firmware_cache={CAM_ID: {"updating": False, "status": "OK", "upToDate": True}},
     )
     sw = _make_sensor_via_new(BoschCameraStatusSensor, c)
     attrs = sw.extra_state_attributes
@@ -5132,7 +5129,7 @@ def test_wifi_signal_native_value_int():
     from custom_components.bosch_shc_camera.sensor import BoschWifiSignalSensor
 
     c = _make_broad_sensor_coord(
-        _wifiinfo_cache={
+        wifiinfo_cache={
             CAM_ID: {
                 "signalStrength": 85,
                 "ssid": "HOME",
@@ -5156,7 +5153,7 @@ def test_wifi_signal_extra_attrs_with_rcp():
     from custom_components.bosch_shc_camera.sensor import BoschWifiSignalSensor
 
     c = _make_broad_sensor_coord(
-        _wifiinfo_cache={
+        wifiinfo_cache={
             CAM_ID: {
                 "signalStrength": 70,
                 "ssid": "X",
@@ -5219,7 +5216,7 @@ def test_ambient_light_native_value_none():
 def test_ambient_light_native_value():
     from custom_components.bosch_shc_camera.sensor import BoschAmbientLightSensor
 
-    c = _make_broad_sensor_coord(_ambient_light_cache={CAM_ID: 0.65})
+    c = _make_broad_sensor_coord(ambient_light_cache={CAM_ID: 0.65})
     sw = _make_sensor_via_new(BoschAmbientLightSensor, c)
     assert sw.native_value == 65
 
@@ -5227,7 +5224,7 @@ def test_ambient_light_native_value():
 def test_ambient_light_available():
     from custom_components.bosch_shc_camera.sensor import BoschAmbientLightSensor
 
-    c = _make_broad_sensor_coord(_ambient_light_cache={CAM_ID: 0.5})
+    c = _make_broad_sensor_coord(ambient_light_cache={CAM_ID: 0.5})
     sw = _make_sensor_via_new(BoschAmbientLightSensor, c)
     assert sw.available is True
 
@@ -5238,7 +5235,7 @@ def test_ambient_light_available():
 def test_led_dimmer_native_value():
     from custom_components.bosch_shc_camera.sensor import BoschLedDimmerSensor
 
-    c = _make_broad_sensor_coord(_rcp_dimmer_cache={CAM_ID: 75})
+    c = _make_broad_sensor_coord(rcp_dimmer_cache={CAM_ID: 75})
     sw = _make_sensor_via_new(BoschLedDimmerSensor, c)
     assert sw.native_value == 75
 
@@ -5439,7 +5436,7 @@ def test_fcm_status_fcm_push():
 
     c = _make_broad_sensor_coord()
     c.options = {"enable_fcm_push": True}
-    c._fcm_healthy = True
+    c.fcm_healthy = True
     sw = _make_sensor_via_new(BoschFcmPushStatusSensor, c)
     assert sw.native_value == "fcm_push"
 
@@ -5449,7 +5446,7 @@ def test_fcm_status_polling():
 
     c = _make_broad_sensor_coord()
     c.options = {"enable_fcm_push": True}
-    c._fcm_healthy = False
+    c.fcm_healthy = False
     sw = _make_sensor_via_new(BoschFcmPushStatusSensor, c)
     assert sw.native_value == "polling"
 
@@ -5459,7 +5456,7 @@ def test_fcm_status_extra_attrs_last_push():
 
     c = _make_broad_sensor_coord()
     c.options = {"enable_fcm_push": True, "fcm_push_mode": "auto"}
-    c._fcm_last_push = time.monotonic() - 30
+    c.fcm_last_push = time.monotonic() - 30
     sw = _make_sensor_via_new(BoschFcmPushStatusSensor, c)
     attrs = sw.extra_state_attributes
     assert "last_push_seconds_ago" in attrs
@@ -5480,7 +5477,7 @@ def test_unread_events_none():
 def test_unread_events_count():
     from custom_components.bosch_shc_camera.sensor import BoschUnreadEventsCountSensor
 
-    c = _make_broad_sensor_coord(_unread_events_cache={CAM_ID: 5})
+    c = _make_broad_sensor_coord(unread_events_cache={CAM_ID: 5})
     sw = _make_sensor_via_new(BoschUnreadEventsCountSensor, c)
     assert sw.native_value == 5
     assert sw.available is True
@@ -5501,7 +5498,7 @@ def test_commissioned_not_connected():
     from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
     c = _make_broad_sensor_coord(
-        _commissioned_cache={
+        commissioned_cache={
             CAM_ID: {"configured": True, "connected": False, "commissioned": False}
         }
     )
@@ -5513,7 +5510,7 @@ def test_commissioned_yes():
     from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
     c = _make_broad_sensor_coord(
-        _commissioned_cache={
+        commissioned_cache={
             CAM_ID: {"configured": True, "connected": True, "commissioned": True}
         }
     )
@@ -5525,7 +5522,7 @@ def test_commissioned_not_commissioned():
     from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
     c = _make_broad_sensor_coord(
-        _commissioned_cache={
+        commissioned_cache={
             CAM_ID: {"configured": True, "connected": True, "commissioned": False}
         }
     )
@@ -5537,7 +5534,7 @@ def test_commissioned_extra_attrs():
     from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
     c = _make_broad_sensor_coord(
-        _commissioned_cache={
+        commissioned_cache={
             CAM_ID: {"configured": True, "connected": True, "commissioned": True}
         }
     )
@@ -5578,7 +5575,7 @@ def test_rules_count_value():
             "weekdays": [],
         },
     ]
-    c = _make_broad_sensor_coord(_rules_cache={CAM_ID: rules})
+    c = _make_broad_sensor_coord(rules_cache={CAM_ID: rules})
     sw = _make_sensor_via_new(BoschRulesCountSensor, c)
     assert sw.native_value == 2
     attrs = sw.extra_state_attributes
@@ -5601,7 +5598,7 @@ def test_alarm_catalog_count():
     from custom_components.bosch_shc_camera.sensor import BoschAlarmCatalogSensor
 
     alarms = [{"name": "MOTION", "type": "motion"}, {"name": "SMOKE", "type": "smoke"}]
-    c = _make_broad_sensor_coord(_rcp_alarm_catalog_cache={CAM_ID: alarms})
+    c = _make_broad_sensor_coord(rcp_alarm_catalog_cache={CAM_ID: alarms})
     sw = _make_sensor_via_new(BoschAlarmCatalogSensor, c)
     assert sw.native_value == 2
     attrs = sw.extra_state_attributes
@@ -5616,10 +5613,10 @@ def test_motion_zones_gen2_priority():
     from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
 
     c = _make_broad_sensor_coord(
-        _gen2_zones_cache={CAM_ID: [{"id": 1}, {"id": 2}]},
-        _cloud_zones_cache={CAM_ID: [{"id": 3}]},
-        _rcp_motion_zones_cache={CAM_ID: []},
-        _rcp_motion_coords_cache={CAM_ID: []},
+        gen2_zones_cache={CAM_ID: [{"id": 1}, {"id": 2}]},
+        cloud_zones_cache={CAM_ID: [{"id": 3}]},
+        rcp_motion_zones_cache={CAM_ID: []},
+        rcp_motion_coords_cache={CAM_ID: []},
     )
     sw = _make_sensor_via_new(BoschMotionZonesSensor, c)
     assert sw.native_value == 2  # gen2 wins
@@ -5629,10 +5626,10 @@ def test_motion_zones_cloud_fallback():
     from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
 
     c = _make_broad_sensor_coord(
-        _gen2_zones_cache={CAM_ID: []},
-        _cloud_zones_cache={CAM_ID: [{"id": 1}]},
-        _rcp_motion_zones_cache={CAM_ID: []},
-        _rcp_motion_coords_cache={CAM_ID: []},
+        gen2_zones_cache={CAM_ID: []},
+        cloud_zones_cache={CAM_ID: [{"id": 1}]},
+        rcp_motion_zones_cache={CAM_ID: []},
+        rcp_motion_coords_cache={CAM_ID: []},
     )
     sw = _make_sensor_via_new(BoschMotionZonesSensor, c)
     assert sw.native_value == 1
@@ -5642,10 +5639,10 @@ def test_motion_zones_rcp_fallback():
     from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
 
     c = _make_broad_sensor_coord(
-        _gen2_zones_cache={CAM_ID: []},
-        _cloud_zones_cache={CAM_ID: []},
-        _rcp_motion_zones_cache={CAM_ID: [{"id": 1}, {"id": 2}, {"id": 3}]},
-        _rcp_motion_coords_cache={CAM_ID: []},
+        gen2_zones_cache={CAM_ID: []},
+        cloud_zones_cache={CAM_ID: []},
+        rcp_motion_zones_cache={CAM_ID: [{"id": 1}, {"id": 2}, {"id": 3}]},
+        rcp_motion_coords_cache={CAM_ID: []},
     )
     sw = _make_sensor_via_new(BoschMotionZonesSensor, c)
     assert sw.native_value == 3
@@ -5655,10 +5652,10 @@ def test_motion_zones_note_when_empty():
     from custom_components.bosch_shc_camera.sensor import BoschMotionZonesSensor
 
     c = _make_broad_sensor_coord(
-        _gen2_zones_cache={CAM_ID: []},
-        _cloud_zones_cache={CAM_ID: []},
-        _rcp_motion_zones_cache={CAM_ID: []},
-        _rcp_motion_coords_cache={CAM_ID: []},
+        gen2_zones_cache={CAM_ID: []},
+        cloud_zones_cache={CAM_ID: []},
+        rcp_motion_zones_cache={CAM_ID: []},
+        rcp_motion_coords_cache={CAM_ID: []},
     )
     sw = _make_sensor_via_new(BoschMotionZonesSensor, c)
     assert "note" in sw.extra_state_attributes
@@ -5679,7 +5676,7 @@ def test_tls_cert_valid():
     from custom_components.bosch_shc_camera.sensor import BoschTlsCertSensor
 
     c = _make_broad_sensor_coord(
-        _rcp_tls_cert_cache={CAM_ID: {"not_after": "2027-01-01T00:00:00"}}
+        rcp_tls_cert_cache={CAM_ID: {"not_after": "2027-01-01T00:00:00"}}
     )
     sw = _make_sensor_via_new(BoschTlsCertSensor, c)
     val = sw.native_value
@@ -5691,7 +5688,7 @@ def test_tls_cert_bad_date():
     from custom_components.bosch_shc_camera.sensor import BoschTlsCertSensor
 
     c = _make_broad_sensor_coord(
-        _rcp_tls_cert_cache={CAM_ID: {"not_after": "not-a-date"}}
+        rcp_tls_cert_cache={CAM_ID: {"not_after": "not-a-date"}}
     )
     sw = _make_sensor_via_new(BoschTlsCertSensor, c)
     assert sw.native_value is None
@@ -5716,7 +5713,7 @@ def test_iva_catalog_count_and_active():
         {"id": 2, "active": False},
         {"id": 3, "active": True},
     ]
-    c = _make_broad_sensor_coord(_rcp_iva_catalog_cache={CAM_ID: modules})
+    c = _make_broad_sensor_coord(rcp_iva_catalog_cache={CAM_ID: modules})
     sw = _make_sensor_via_new(BoschIvaCatalogSensor, c)
     assert sw.native_value == 3
     attrs = sw.extra_state_attributes
@@ -5730,8 +5727,8 @@ def test_private_areas_gen2_priority():
     from custom_components.bosch_shc_camera.sensor import BoschPrivateAreasSensor
 
     c = _make_broad_sensor_coord(
-        _gen2_private_areas_cache={CAM_ID: [{"id": 1}, {"id": 2}]},
-        _cloud_privacy_masks_cache={CAM_ID: [{"id": 3}]},
+        gen2_private_areas_cache={CAM_ID: [{"id": 1}, {"id": 2}]},
+        cloud_privacy_masks_cache={CAM_ID: [{"id": 3}]},
     )
     sw = _make_sensor_via_new(BoschPrivateAreasSensor, c)
     assert sw.native_value == 2
@@ -5741,8 +5738,8 @@ def test_private_areas_cloud_fallback():
     from custom_components.bosch_shc_camera.sensor import BoschPrivateAreasSensor
 
     c = _make_broad_sensor_coord(
-        _gen2_private_areas_cache={CAM_ID: []},
-        _cloud_privacy_masks_cache={CAM_ID: [{"id": 1}]},
+        gen2_private_areas_cache={CAM_ID: []},
+        cloud_privacy_masks_cache={CAM_ID: [{"id": 1}]},
     )
     sw = _make_sensor_via_new(BoschPrivateAreasSensor, c)
     assert sw.native_value == 1
@@ -5752,8 +5749,8 @@ def test_private_areas_note_when_empty():
     from custom_components.bosch_shc_camera.sensor import BoschPrivateAreasSensor
 
     c = _make_broad_sensor_coord(
-        _gen2_private_areas_cache={CAM_ID: []},
-        _cloud_privacy_masks_cache={CAM_ID: []},
+        gen2_private_areas_cache={CAM_ID: []},
+        cloud_privacy_masks_cache={CAM_ID: []},
     )
     sw = _make_sensor_via_new(BoschPrivateAreasSensor, c)
     assert "note" in sw.extra_state_attributes
@@ -5778,7 +5775,7 @@ def test_ambient_schedule_disabled():
     )
 
     c = _make_broad_sensor_coord(
-        _ambient_lighting_cache={
+        ambient_lighting_cache={
             CAM_ID: {
                 "ambientLightEnabled": False,
                 "ambientLightSchedule": "ENVIRONMENT",
@@ -5795,7 +5792,7 @@ def test_ambient_schedule_dusk_to_dawn():
     )
 
     c = _make_broad_sensor_coord(
-        _ambient_lighting_cache={
+        ambient_lighting_cache={
             CAM_ID: {"ambientLightEnabled": True, "ambientLightSchedule": "ENVIRONMENT"}
         }
     )
@@ -5809,7 +5806,7 @@ def test_ambient_schedule_manual():
     )
 
     c = _make_broad_sensor_coord(
-        _ambient_lighting_cache={
+        ambient_lighting_cache={
             CAM_ID: {"ambientLightEnabled": True, "ambientLightSchedule": "MANUAL"}
         }
     )
@@ -5823,7 +5820,7 @@ def test_ambient_schedule_dict_schedule():
     )
 
     c = _make_broad_sensor_coord(
-        _ambient_lighting_cache={
+        ambient_lighting_cache={
             CAM_ID: {
                 "ambientLightEnabled": True,
                 "ambientLightSchedule": {
@@ -5847,7 +5844,7 @@ def test_alarm_state_from_status_cache():
     from custom_components.bosch_shc_camera.sensor import BoschAlarmStateSensor
 
     c = _make_broad_sensor_coord(
-        _alarm_status_cache={
+        alarm_status_cache={
             CAM_ID: {"intrusionSystem": "ACTIVE", "alarmType": "MOTION"}
         }
     )
@@ -5858,7 +5855,7 @@ def test_alarm_state_from_status_cache():
 def test_alarm_state_from_arming_cache_armed():
     from custom_components.bosch_shc_camera.sensor import BoschAlarmStateSensor
 
-    c = _make_broad_sensor_coord(_arming_cache={CAM_ID: True})
+    c = _make_broad_sensor_coord(arming_cache={CAM_ID: True})
     sw = _make_sensor_via_new(BoschAlarmStateSensor, c)
     assert sw.native_value == "active"
 
@@ -5866,7 +5863,7 @@ def test_alarm_state_from_arming_cache_armed():
 def test_alarm_state_from_arming_cache_disarmed():
     from custom_components.bosch_shc_camera.sensor import BoschAlarmStateSensor
 
-    c = _make_broad_sensor_coord(_arming_cache={CAM_ID: False})
+    c = _make_broad_sensor_coord(arming_cache={CAM_ID: False})
     sw = _make_sensor_via_new(BoschAlarmStateSensor, c)
     assert sw.native_value == "inactive"
 
@@ -5902,33 +5899,33 @@ def _stub_coord_phase2(**overrides):
                 "events": [],
             }
         },
-        _wifiinfo_cache={},
-        _rcp_alarm_catalog_cache={},
-        _rcp_motion_zones_cache={},
-        _rcp_motion_coords_cache={},
-        _cloud_zones_cache={},
-        _gen2_zones_cache={},
-        _rcp_tls_cert_cache={},
-        _rcp_network_services_cache={},
-        _rcp_iva_catalog_cache={},
+        wifiinfo_cache={},
+        rcp_alarm_catalog_cache={},
+        rcp_motion_zones_cache={},
+        rcp_motion_coords_cache={},
+        cloud_zones_cache={},
+        gen2_zones_cache={},
+        rcp_tls_cert_cache={},
+        rcp_network_services_cache={},
+        rcp_iva_catalog_cache={},
         _rcp_private_areas_cache={},
-        _ambient_lighting_cache={},
+        ambient_lighting_cache={},
         _ambient_schedule_cache={},
-        _alarm_status_cache={},
-        _alarm_settings_cache={},
-        _arming_cache={},
-        _live_connections={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _stream_warming=set(),
-        _nvr_drain_state={},
-        _commissioned_cache={},
-        _firmware_cache={},
-        _unread_events_cache={},
-        _fcm_running=False,
-        _fcm_healthy=True,
-        _fcm_push_mode="auto",
-        _fcm_last_push=0.0,
+        alarm_status_cache={},
+        alarm_settings_cache={},
+        arming_cache={},
+        live_connections={},
+        stream_fell_back={},
+        stream_error_count={},
+        stream_warming=set(),
+        nvr_drain_state={},
+        commissioned_cache={},
+        firmware_cache={},
+        unread_events_cache={},
+        fcm_running=False,
+        fcm_healthy=True,
+        fcm_push_mode="auto",
+        fcm_last_push=0.0,
         last_update_success=True,
         options={"enable_fcm_push": True, "enable_sensors": True, "enable_nvr": False},
         motion_settings=lambda cid: {
@@ -6099,7 +6096,7 @@ class TestAlarmCatalogSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschAlarmCatalogSensor
 
-        phase2_coord._rcp_alarm_catalog_cache[CAM_ID] = [
+        phase2_coord.rcp_alarm_catalog_cache[CAM_ID] = [
             {"name": "motion", "type": "motion"},
             {"name": "audio", "type": "audio"},
         ]
@@ -6127,7 +6124,7 @@ class TestAlarmCatalogSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschAlarmCatalogSensor
 
-        phase2_coord._rcp_alarm_catalog_cache[CAM_ID] = []
+        phase2_coord.rcp_alarm_catalog_cache[CAM_ID] = []
         entity = BoschAlarmCatalogSensor(phase2_coord, CAM_ID, stub_entry)
         assert entity.available is True, (
             "Must be available when cache is present (even if empty)"
@@ -6138,7 +6135,7 @@ class TestAlarmCatalogSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschAlarmCatalogSensor
 
-        phase2_coord._rcp_alarm_catalog_cache[CAM_ID] = [
+        phase2_coord.rcp_alarm_catalog_cache[CAM_ID] = [
             {"name": "flame", "type": "fire"},
             {"name": "motion", "type": "motion"},
         ]
@@ -6165,7 +6162,7 @@ class TestTlsCertSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschTlsCertSensor
 
-        phase2_coord._rcp_tls_cert_cache[CAM_ID] = {
+        phase2_coord.rcp_tls_cert_cache[CAM_ID] = {
             "not_after": "2028-12-31T23:59:59",
             "not_before": "2024-01-01T00:00:00",
             "issuer": "Bosch",
@@ -6189,7 +6186,7 @@ class TestTlsCertSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschTlsCertSensor
 
-        phase2_coord._rcp_tls_cert_cache[CAM_ID] = {"not_after": "not-a-date"}
+        phase2_coord.rcp_tls_cert_cache[CAM_ID] = {"not_after": "not-a-date"}
         entity = BoschTlsCertSensor(phase2_coord, CAM_ID, stub_entry)
         assert entity.native_value is None, "Must return None for unparseable date"
 
@@ -6198,7 +6195,7 @@ class TestTlsCertSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschTlsCertSensor
 
-        phase2_coord._rcp_tls_cert_cache[CAM_ID] = {"not_after": "2028-01-01T00:00:00"}
+        phase2_coord.rcp_tls_cert_cache[CAM_ID] = {"not_after": "2028-01-01T00:00:00"}
         entity = BoschTlsCertSensor(phase2_coord, CAM_ID, stub_entry)
         assert entity.available is True, "Must be available when cert data is cached"
 
@@ -6207,7 +6204,7 @@ class TestTlsCertSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschTlsCertSensor
 
-        phase2_coord._rcp_tls_cert_cache[CAM_ID] = {
+        phase2_coord.rcp_tls_cert_cache[CAM_ID] = {
             "issuer": "Bosch CA",
             "subject": "camera-001",
             "key_size": 2048,
@@ -6231,7 +6228,7 @@ class TestNetworkServicesSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschNetworkServicesSensor
 
-        phase2_coord._rcp_network_services_cache[CAM_ID] = [
+        phase2_coord.rcp_network_services_cache[CAM_ID] = [
             {"name": "RTSP", "enabled": True},
             {"name": "HTTPS", "enabled": True},
         ]
@@ -6262,7 +6259,7 @@ class TestNetworkServicesSensor:
         from custom_components.bosch_shc_camera.sensor import BoschNetworkServicesSensor
 
         services = [{"name": "RTSP", "enabled": True}]
-        phase2_coord._rcp_network_services_cache[CAM_ID] = services
+        phase2_coord.rcp_network_services_cache[CAM_ID] = services
         entity = BoschNetworkServicesSensor(phase2_coord, CAM_ID, stub_entry)
         attrs = entity.extra_state_attributes
         assert attrs["services"] == services, (
@@ -6281,7 +6278,7 @@ class TestAmbientLightScheduleSensor:
             BoschAmbientLightScheduleSensor,
         )
 
-        phase2_coord._ambient_lighting_cache[CAM_ID] = {"ambientLightEnabled": False}
+        phase2_coord.ambient_lighting_cache[CAM_ID] = {"ambientLightEnabled": False}
         entity = BoschAmbientLightScheduleSensor(phase2_coord, CAM_ID, stub_entry)
         assert entity.native_value == "disabled", (
             "Must return 'disabled' when ambientLightEnabled=False"
@@ -6294,7 +6291,7 @@ class TestAmbientLightScheduleSensor:
             BoschAmbientLightScheduleSensor,
         )
 
-        phase2_coord._ambient_lighting_cache[CAM_ID] = {
+        phase2_coord.ambient_lighting_cache[CAM_ID] = {
             "ambientLightEnabled": True,
             "ambientLightSchedule": {"type": "ENVIRONMENT"},
         }
@@ -6310,7 +6307,7 @@ class TestAmbientLightScheduleSensor:
             BoschAmbientLightScheduleSensor,
         )
 
-        phase2_coord._ambient_lighting_cache[CAM_ID] = {
+        phase2_coord.ambient_lighting_cache[CAM_ID] = {
             "ambientLightEnabled": True,
             "ambientLightSchedule": "ENVIRONMENT",  # flat string form
         }
@@ -6326,7 +6323,7 @@ class TestAmbientLightScheduleSensor:
             BoschAmbientLightScheduleSensor,
         )
 
-        phase2_coord._ambient_lighting_cache[CAM_ID] = {
+        phase2_coord.ambient_lighting_cache[CAM_ID] = {
             "ambientLightEnabled": True,
             "ambientLightSchedule": {
                 "type": "MANUAL",
@@ -6356,7 +6353,7 @@ class TestAmbientLightScheduleSensor:
             BoschAmbientLightScheduleSensor,
         )
 
-        phase2_coord._ambient_lighting_cache[CAM_ID] = {"ambientLightEnabled": False}
+        phase2_coord.ambient_lighting_cache[CAM_ID] = {"ambientLightEnabled": False}
         entity = BoschAmbientLightScheduleSensor(phase2_coord, CAM_ID, stub_entry)
         assert entity.available is True, "Must be available when cache has data"
 
@@ -6367,7 +6364,7 @@ class TestAmbientLightScheduleSensor:
             BoschAmbientLightScheduleSensor,
         )
 
-        phase2_coord._ambient_lighting_cache[CAM_ID] = {
+        phase2_coord.ambient_lighting_cache[CAM_ID] = {
             "ambientLightEnabled": True,
             "ambientLightSchedule": {
                 "type": "MANUAL",
@@ -6394,7 +6391,7 @@ class TestAlarmStateSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschAlarmStateSensor
 
-        phase2_coord._alarm_status_cache[CAM_ID] = {
+        phase2_coord.alarm_status_cache[CAM_ID] = {
             "intrusionSystem": "ACTIVE",
             "alarmType": "INTRUSION",
         }
@@ -6408,8 +6405,8 @@ class TestAlarmStateSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschAlarmStateSensor
 
-        phase2_coord._alarm_status_cache = {}
-        phase2_coord._arming_cache[CAM_ID] = True
+        phase2_coord.alarm_status_cache = {}
+        phase2_coord.arming_cache[CAM_ID] = True
         entity = BoschAlarmStateSensor(phase2_coord, CAM_ID, stub_entry)
         assert entity.native_value == "active", (
             "Must fall back to arming cache when status cache empty"
@@ -6420,8 +6417,8 @@ class TestAlarmStateSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschAlarmStateSensor
 
-        phase2_coord._alarm_status_cache = {}
-        phase2_coord._arming_cache[CAM_ID] = False
+        phase2_coord.alarm_status_cache = {}
+        phase2_coord.arming_cache[CAM_ID] = False
         entity = BoschAlarmStateSensor(phase2_coord, CAM_ID, stub_entry)
         assert entity.native_value == "inactive", (
             "Must return 'inactive' when arming_cache=False"
@@ -6453,13 +6450,13 @@ class TestAlarmStateSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschAlarmStateSensor
 
-        phase2_coord._alarm_settings_cache[CAM_ID] = {
+        phase2_coord.alarm_settings_cache[CAM_ID] = {
             "alarmMode": "ON",
             "preAlarmMode": "OFF",
             "alarmDelayInSeconds": 30,
             "alarmActivationDelaySeconds": 10,
         }
-        phase2_coord._alarm_status_cache[CAM_ID] = {
+        phase2_coord.alarm_status_cache[CAM_ID] = {
             "alarmType": "NONE",
             "intrusionSystem": "INACTIVE",
         }
@@ -6480,7 +6477,7 @@ class TestStreamStatusSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschStreamStatusSensor
 
-        phase2_coord._live_connections = {}
+        phase2_coord.live_connections = {}
         entity = BoschStreamStatusSensor(phase2_coord, CAM_ID, stub_entry)
         assert entity.native_value == "idle", "Must be 'idle' when no live connection"
 
@@ -6490,7 +6487,7 @@ class TestStreamStatusSensor:
         from custom_components.bosch_shc_camera.sensor import BoschStreamStatusSensor
 
         phase2_coord.is_stream_warming = lambda cid: True
-        phase2_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
+        phase2_coord.live_connections[CAM_ID] = {"rtspsUrl": "rtsps://x"}
         entity = BoschStreamStatusSensor(phase2_coord, CAM_ID, stub_entry)
         assert entity.native_value == "warming_up", (
             "Must be 'warming_up' while stream pre-warms"
@@ -6501,7 +6498,7 @@ class TestStreamStatusSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschStreamStatusSensor
 
-        phase2_coord._live_connections[CAM_ID] = {
+        phase2_coord.live_connections[CAM_ID] = {
             "rtspsUrl": "rtsps://cam/stream",
             "_connection_type": "LOCAL",
         }
@@ -6515,8 +6512,8 @@ class TestStreamStatusSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschStreamStatusSensor
 
-        phase2_coord._live_connections[CAM_ID] = {"rtspsUrl": "rtsps://cam/stream"}
-        phase2_coord._stream_fell_back[CAM_ID] = True
+        phase2_coord.live_connections[CAM_ID] = {"rtspsUrl": "rtsps://cam/stream"}
+        phase2_coord.stream_fell_back[CAM_ID] = True
         entity = BoschStreamStatusSensor(phase2_coord, CAM_ID, stub_entry)
         assert entity.native_value == "streaming_remote", (
             "Must be 'streaming_remote' when fell back to cloud"
@@ -6527,7 +6524,7 @@ class TestStreamStatusSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschStreamStatusSensor
 
-        phase2_coord._live_connections[CAM_ID] = {}  # session open but no rtspsUrl yet
+        phase2_coord.live_connections[CAM_ID] = {}  # session open but no rtspsUrl yet
         entity = BoschStreamStatusSensor(phase2_coord, CAM_ID, stub_entry)
         assert entity.native_value == "connecting", (
             "Must be 'connecting' when session exists but no URL"
@@ -6538,11 +6535,11 @@ class TestStreamStatusSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschStreamStatusSensor
 
-        phase2_coord._live_connections[CAM_ID] = {
+        phase2_coord.live_connections[CAM_ID] = {
             "_connection_type": "LOCAL",
             "rtspsUrl": "rtsps://x",
         }
-        phase2_coord._stream_error_count[CAM_ID] = 2
+        phase2_coord.stream_error_count[CAM_ID] = 2
         entity = BoschStreamStatusSensor(phase2_coord, CAM_ID, stub_entry)
         attrs = entity.extra_state_attributes
         assert attrs["connection_type"] == "LOCAL", (
@@ -6572,21 +6569,21 @@ def base_sensor_coord() -> SimpleNamespace:
             }
         },
         # Sensor-specific caches
-        _commissioned_cache={},
-        _firmware_cache={},
+        commissioned_cache={},
+        firmware_cache={},
         _wifi_cache={CAM_ID: {"signal": 75, "ssid": "WLAN"}},
-        _ambient_light_cache={CAM_ID: 0.42},
+        ambient_light_cache={CAM_ID: 0.42},
         _motion_sensitivity_cache={CAM_ID: "MEDIUM_HIGH"},
         _ledlight_brightness_cache={CAM_ID: 80},
         _clock_offset_cache={CAM_ID: 1.23},
-        _ledlights_cache={CAM_ID: True},
+        ledlights_cache={CAM_ID: True},
         _last_event_seen={CAM_ID: None},
-        _live_connections={},
-        _stream_warming=set(),
-        _stream_fell_back={},
-        _stream_error_count={},
-        _fcm_running=True,
-        _fcm_healthy=True,
+        live_connections={},
+        stream_warming=set(),
+        stream_fell_back={},
+        stream_error_count={},
+        fcm_running=True,
+        fcm_healthy=True,
         # FCM status
         options={"enable_fcm_push": False},
     )
@@ -6638,7 +6635,7 @@ class TestStatusSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
 
-        base_sensor_coord._commissioned_cache[CAM_ID] = {
+        base_sensor_coord.commissioned_cache[CAM_ID] = {
             "configured": True,
             "connected": True,
             "commissioned": True,
@@ -6653,7 +6650,7 @@ class TestStatusSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschCameraStatusSensor
 
-        base_sensor_coord._firmware_cache[CAM_ID] = {
+        base_sensor_coord.firmware_cache[CAM_ID] = {
             "updating": True,
             "status": "downloading",
             "upToDate": False,
@@ -6860,7 +6857,7 @@ class TestFcmPushStatusSensor:
     ):
         """enable_fcm_push=True + healthy → state is 'fcm_push'."""
         base_sensor_coord.options = {"enable_fcm_push": True}
-        base_sensor_coord._fcm_healthy = True
+        base_sensor_coord.fcm_healthy = True
         from custom_components.bosch_shc_camera.sensor import BoschFcmPushStatusSensor
 
         s = BoschFcmPushStatusSensor(base_sensor_coord, CAM_ID, stub_entry)
@@ -6871,7 +6868,7 @@ class TestFcmPushStatusSensor:
     ):
         """enable_fcm_push=True + UNhealthy → state is 'polling' (degradation visible)."""
         base_sensor_coord.options = {"enable_fcm_push": True}
-        base_sensor_coord._fcm_healthy = False
+        base_sensor_coord.fcm_healthy = False
         from custom_components.bosch_shc_camera.sensor import BoschFcmPushStatusSensor
 
         s = BoschFcmPushStatusSensor(base_sensor_coord, CAM_ID, stub_entry)
@@ -6888,10 +6885,10 @@ class TestFcmPushStatusSensor:
         from custom_components.bosch_shc_camera.sensor import BoschFcmPushStatusSensor
 
         base_sensor_coord.options = {"enable_fcm_push": True}
-        base_sensor_coord._fcm_healthy = True
-        base_sensor_coord._fcm_running = True
-        base_sensor_coord._fcm_push_mode = "auto"
-        base_sensor_coord._fcm_last_push = time.monotonic()
+        base_sensor_coord.fcm_healthy = True
+        base_sensor_coord.fcm_running = True
+        base_sensor_coord.fcm_push_mode = "auto"
+        base_sensor_coord.fcm_last_push = time.monotonic()
         s = BoschFcmPushStatusSensor(base_sensor_coord, CAM_ID, stub_entry)
         assert "last_push_seconds_ago" in s.extra_state_attributes
         assert "last_push_seconds_ago" in s._unrecorded_attributes
@@ -7014,17 +7011,17 @@ def _stub_coord_extra(**overrides):
             },
         },
         # Caches
-        _wifiinfo_cache={},
-        _rcp_dimmer_cache={},
-        _ambient_light_cache={},
-        _rcp_clock_offset_cache={},
-        _commissioned_cache={},
-        _rules_cache={},
-        _unread_events_cache={},
-        _rcp_alarm_catalog_cache={},
-        _rcp_tls_cert_cache={},
-        _rcp_network_services_cache={},
-        _rcp_iva_catalog_cache={},
+        wifiinfo_cache={},
+        rcp_dimmer_cache={},
+        ambient_light_cache={},
+        rcp_clock_offset_cache={},
+        commissioned_cache={},
+        rules_cache={},
+        unread_events_cache={},
+        rcp_alarm_catalog_cache={},
+        rcp_tls_cert_cache={},
+        rcp_network_services_cache={},
+        rcp_iva_catalog_cache={},
         _rcp_private_areas_cache={},
         _ambient_schedule_cache={},
         # Coord helpers
@@ -7035,10 +7032,10 @@ def _stub_coord_extra(**overrides):
         rcp_bitrate_ladder=lambda cid: [],
         rcp_product_name=lambda cid: None,
         options={},
-        _fcm_running=False,
-        _fcm_healthy=False,
-        _fcm_push_mode="auto",
-        _fcm_last_push=0.0,
+        fcm_running=False,
+        fcm_healthy=False,
+        fcm_push_mode="auto",
+        fcm_last_push=0.0,
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -7056,7 +7053,7 @@ class TestWifiSignalSensorAdditionalCoverage:
     def test_native_value_from_cache(self, stub_entry: SimpleNamespace):
         from custom_components.bosch_shc_camera.sensor import BoschWifiSignalSensor
 
-        coord = _stub_coord_extra(_wifiinfo_cache={CAM_ID: {"signalStrength": 75}})
+        coord = _stub_coord_extra(wifiinfo_cache={CAM_ID: {"signalStrength": 75}})
         s = BoschWifiSignalSensor(coord, CAM_ID, stub_entry)
         assert s.native_value == 75
 
@@ -7073,7 +7070,7 @@ class TestWifiSignalSensorAdditionalCoverage:
         not crash. Defensive against partial cache writes."""
         from custom_components.bosch_shc_camera.sensor import BoschWifiSignalSensor
 
-        coord = _stub_coord_extra(_wifiinfo_cache={CAM_ID: {"ssid": "wlan"}})
+        coord = _stub_coord_extra(wifiinfo_cache={CAM_ID: {"ssid": "wlan"}})
         s = BoschWifiSignalSensor(coord, CAM_ID, stub_entry)
         assert s.native_value is None
 
@@ -7084,7 +7081,7 @@ class TestWifiSignalSensorAdditionalCoverage:
 
         s = BoschWifiSignalSensor(extra_sensor_coord, CAM_ID, stub_entry)
         assert s.available is False
-        coord = _stub_coord_extra(_wifiinfo_cache={CAM_ID: {"signalStrength": 50}})
+        coord = _stub_coord_extra(wifiinfo_cache={CAM_ID: {"signalStrength": 50}})
         s2 = BoschWifiSignalSensor(coord, CAM_ID, stub_entry)
         assert s2.available is True
 
@@ -7092,7 +7089,7 @@ class TestWifiSignalSensorAdditionalCoverage:
         from custom_components.bosch_shc_camera.sensor import BoschWifiSignalSensor
 
         coord = _stub_coord_extra(
-            _wifiinfo_cache={
+            wifiinfo_cache={
                 CAM_ID: {
                     "signalStrength": 80,
                     "ssid": "MYWLAN",
@@ -7112,7 +7109,7 @@ class TestWifiSignalSensorAdditionalCoverage:
         it for dashboards that display both."""
         from custom_components.bosch_shc_camera.sensor import BoschWifiSignalSensor
 
-        coord = _stub_coord_extra(_wifiinfo_cache={CAM_ID: {"signalStrength": 50}})
+        coord = _stub_coord_extra(wifiinfo_cache={CAM_ID: {"signalStrength": 50}})
         coord.rcp_lan_ip = lambda cid: "10.0.0.7"
         s = BoschWifiSignalSensor(coord, CAM_ID, stub_entry)
         assert s.extra_state_attributes["lan_ip_rcp"] == "10.0.0.7"
@@ -7120,7 +7117,7 @@ class TestWifiSignalSensorAdditionalCoverage:
     def test_extra_state_adds_bitrate_ladder(self, stub_entry: SimpleNamespace):
         from custom_components.bosch_shc_camera.sensor import BoschWifiSignalSensor
 
-        coord = _stub_coord_extra(_wifiinfo_cache={CAM_ID: {"signalStrength": 50}})
+        coord = _stub_coord_extra(wifiinfo_cache={CAM_ID: {"signalStrength": 50}})
         coord.rcp_bitrate_ladder = lambda cid: [1500, 2500, 4000]
         s = BoschWifiSignalSensor(coord, CAM_ID, stub_entry)
         attrs = s.extra_state_attributes
@@ -7135,7 +7132,7 @@ class TestLedDimmerSensor:
     def test_native_value_from_cache(self, stub_entry: SimpleNamespace):
         from custom_components.bosch_shc_camera.sensor import BoschLedDimmerSensor
 
-        coord = _stub_coord_extra(_rcp_dimmer_cache={CAM_ID: 60})
+        coord = _stub_coord_extra(rcp_dimmer_cache={CAM_ID: 60})
         s = BoschLedDimmerSensor(coord, CAM_ID, stub_entry)
         assert s.native_value == 60
 
@@ -7152,7 +7149,7 @@ class TestLedDimmerSensor:
 
         s = BoschLedDimmerSensor(_stub_coord_extra(), CAM_ID, stub_entry)
         assert s.available is False
-        coord = _stub_coord_extra(_rcp_dimmer_cache={CAM_ID: 30})
+        coord = _stub_coord_extra(rcp_dimmer_cache={CAM_ID: 30})
         s2 = BoschLedDimmerSensor(coord, CAM_ID, stub_entry)
         assert s2.available is True
 
@@ -7359,7 +7356,7 @@ class TestUnreadEventsCountSensor:
             BoschUnreadEventsCountSensor,
         )
 
-        coord = _stub_coord_extra(_unread_events_cache={CAM_ID: 7})
+        coord = _stub_coord_extra(unread_events_cache={CAM_ID: 7})
         s = BoschUnreadEventsCountSensor(coord, CAM_ID, stub_entry)
         assert s.native_value == 7
 
@@ -7381,7 +7378,7 @@ class TestUnreadEventsCountSensor:
             BoschUnreadEventsCountSensor,
         )
 
-        coord = _stub_coord_extra(_unread_events_cache={CAM_ID: 0})
+        coord = _stub_coord_extra(unread_events_cache={CAM_ID: 0})
         s = BoschUnreadEventsCountSensor(coord, CAM_ID, stub_entry)
         assert s.native_value == 0
         assert s.available is True
@@ -7395,7 +7392,7 @@ class TestCommissionedSensor:
         from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
         coord = _stub_coord_extra(
-            _commissioned_cache={
+            commissioned_cache={
                 CAM_ID: {"configured": True, "connected": True, "commissioned": True},
             }
         )
@@ -7406,7 +7403,7 @@ class TestCommissionedSensor:
         from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
         coord = _stub_coord_extra(
-            _commissioned_cache={
+            commissioned_cache={
                 CAM_ID: {"configured": True, "connected": True, "commissioned": False},
             }
         )
@@ -7419,7 +7416,7 @@ class TestCommissionedSensor:
         from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
         coord = _stub_coord_extra(
-            _commissioned_cache={
+            commissioned_cache={
                 CAM_ID: {"configured": True, "connected": False, "commissioned": True},
             }
         )
@@ -7441,7 +7438,7 @@ class TestCommissionedSensor:
         from custom_components.bosch_shc_camera.sensor import BoschCommissionedSensor
 
         coord = _stub_coord_extra(
-            _commissioned_cache={
+            commissioned_cache={
                 CAM_ID: {"configured": True, "connected": True, "commissioned": False},
             }
         )
@@ -7458,7 +7455,7 @@ class TestRulesCountSensor:
         from custom_components.bosch_shc_camera.sensor import BoschRulesCountSensor
 
         coord = _stub_coord_extra(
-            _rules_cache={
+            rules_cache={
                 CAM_ID: [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}],
             }
         )
@@ -7468,7 +7465,7 @@ class TestRulesCountSensor:
     def test_zero_when_empty_list(self, stub_entry: SimpleNamespace):
         from custom_components.bosch_shc_camera.sensor import BoschRulesCountSensor
 
-        coord = _stub_coord_extra(_rules_cache={CAM_ID: []})
+        coord = _stub_coord_extra(rules_cache={CAM_ID: []})
         s = BoschRulesCountSensor(coord, CAM_ID, stub_entry)
         assert s.native_value == 0
 
@@ -7485,7 +7482,7 @@ class TestRulesCountSensor:
         from custom_components.bosch_shc_camera.sensor import BoschRulesCountSensor
 
         coord = _stub_coord_extra(
-            _rules_cache={
+            rules_cache={
                 CAM_ID: [
                     {
                         "id": "r1",
@@ -7513,7 +7510,7 @@ class TestRulesCountSensor:
     ):
         from custom_components.bosch_shc_camera.sensor import BoschRulesCountSensor
 
-        coord = _stub_coord_extra(_rules_cache={CAM_ID: [{}]})  # empty rule dict
+        coord = _stub_coord_extra(rules_cache={CAM_ID: [{}]})  # empty rule dict
         s = BoschRulesCountSensor(coord, CAM_ID, stub_entry)
         rules = s.extra_state_attributes["rules"]
         # All fields default to safe values; no KeyError
@@ -7600,33 +7597,33 @@ class TestSensorSetupAiDescriptionOption:
                     "events": [],
                 }
             },
-            _wifiinfo_cache={},
-            _rcp_alarm_catalog_cache={},
-            _rcp_motion_zones_cache={},
-            _rcp_motion_coords_cache={},
-            _cloud_zones_cache={},
-            _gen2_zones_cache={},
-            _rcp_tls_cert_cache={},
-            _rcp_network_services_cache={},
-            _rcp_iva_catalog_cache={},
+            wifiinfo_cache={},
+            rcp_alarm_catalog_cache={},
+            rcp_motion_zones_cache={},
+            rcp_motion_coords_cache={},
+            cloud_zones_cache={},
+            gen2_zones_cache={},
+            rcp_tls_cert_cache={},
+            rcp_network_services_cache={},
+            rcp_iva_catalog_cache={},
             _rcp_private_areas_cache={},
-            _ambient_lighting_cache={},
+            ambient_lighting_cache={},
             _ambient_schedule_cache={},
-            _alarm_status_cache={},
-            _alarm_settings_cache={},
-            _arming_cache={},
-            _live_connections={},
-            _stream_fell_back={},
-            _stream_error_count={},
-            _stream_warming=set(),
-            _nvr_drain_state={},
-            _commissioned_cache={},
-            _firmware_cache={},
-            _unread_events_cache={},
-            _fcm_running=False,
-            _fcm_healthy=True,
-            _fcm_push_mode="auto",
-            _fcm_last_push=0.0,
+            alarm_status_cache={},
+            alarm_settings_cache={},
+            arming_cache={},
+            live_connections={},
+            stream_fell_back={},
+            stream_error_count={},
+            stream_warming=set(),
+            nvr_drain_state={},
+            commissioned_cache={},
+            firmware_cache={},
+            unread_events_cache={},
+            fcm_running=False,
+            fcm_healthy=True,
+            fcm_push_mode="auto",
+            fcm_last_push=0.0,
             last_update_success=True,
             options={
                 "enable_fcm_push": True,

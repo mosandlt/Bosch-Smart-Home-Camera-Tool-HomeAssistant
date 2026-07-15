@@ -1,7 +1,7 @@
 """Tests for lock_utils.get_or_create_lock — the get-or-create per-key
 asyncio.Lock helper that collapsed the coordinator's several duplicated
-copies of this pattern (_get_stream_lock/_get_rcp_session_lock/
-_get_nvr_recorder_lock/_get_nvr_clip_assembly_lock/_snapshot_fetch_locks/
+copies of this pattern (get_stream_lock/_get_rcp_session_lock/
+get_nvr_recorder_lock/get_nvr_clip_assembly_lock/_snapshot_fetch_locks/
 _fresh_snap_locks). See
 tests/test_session_state_facade_slice4.py for the lock-IDENTITY-preserving
 CacheFieldView integration these coordinator dicts now use in production."""

@@ -266,13 +266,13 @@ class BoschNvrModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):  # typ
         explicitly instead, reusing the same idempotent respawn path
         `BoschNvrRecordingSwitch.async_turn_on` uses — safe to call even
         though it also (redundantly, since it's already true) sets
-        `_nvr_user_intent`, because it's gated on "recorder already active"
+        `nvr_user_intent`, because it's gated on "recorder already active"
         so it can never turn NVR ON for a camera whose switch is off.
         """
         self.coordinator.set_nvr_mode(self._cam_id, option)
         recorder_active = (
-            self._cam_id in self.coordinator._nvr_processes
-            or self._cam_id in self.coordinator._nvr_preroll_processes
+            self._cam_id in self.coordinator.nvr_processes
+            or self._cam_id in self.coordinator.nvr_preroll_processes
         )
         if recorder_active:
             await self.coordinator.start_recorder(self._cam_id)
@@ -370,7 +370,7 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
                 self.coordinator.data[self._cam_id]["motion"] = motion_data
             # Write-lock so the slow-tier poll doesn't revert the optimistic
             # value before the cloud catches up.
-            self.coordinator._motion_set_at[self._cam_id] = time.monotonic()
+            self.coordinator.motion_set_at[self._cam_id] = time.monotonic()
             _LOGGER.debug(
                 "Motion sensitivity set to %s for %s", api_value, self._cam_id
             )
@@ -443,14 +443,14 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[m
         )
         # Restart FCM with new mode
         await self.coordinator.async_stop_fcm_push()
-        self.coordinator._fcm_push_mode = "unknown"
+        self.coordinator.fcm_push_mode = "unknown"
         if self.coordinator.options.get("enable_fcm_push", False):
             # Track the restart task on the coordinator so async_unload_entry can
             # cancel it — an untracked fire-and-forget task could otherwise keep
             # running (and re-establish FCM) after the entry is unloaded/reloaded.
             task = self.hass.async_create_task(self.coordinator.async_start_fcm_push())
-            self.coordinator._bg_tasks.add(task)
-            task.add_done_callback(self.coordinator._bg_tasks.discard)
+            self.coordinator.bg_tasks.add(task)
+            task.add_done_callback(self.coordinator.bg_tasks.discard)
         self.async_write_ha_state()
 
 
@@ -463,7 +463,7 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
       "Nur Lokal"            — direct LAN only (no internet required)
       "Nur Cloud"            — cloud proxy only (always REMOTE)
 
-    Changes _stream_type_override in-memory — no integration reload needed.
+    Changes stream_type_override in-memory — no integration reload needed.
     Takes effect on the next live stream activation.
     One per integration (not per camera).
     """
@@ -501,7 +501,7 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
     @property
     def current_option(self) -> str:
         """Return the current stream mode key."""
-        mode = self.coordinator._stream_type_override
+        mode = self.coordinator.stream_type_override
         if mode is None:
             mode = self._entry.options.get(
                 "stream_connection_type", "local"
@@ -510,7 +510,7 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
 
     async def async_select_option(self, option: str) -> None:
         """Handle stream mode selection — update in-memory preference immediately."""
-        self.coordinator._stream_type_override = option
+        self.coordinator.stream_type_override = option
         _LOGGER.info("Stream mode set to %s", option)
         self.async_write_ha_state()
 
@@ -521,7 +521,7 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
 
     API values: ALL_MOTIONS / ONLY_HUMANS / ZONES — confirmed via mitm captures
     of the iOS app 2026-04-08 + 2026-04-11.
-    Reads from coordinator._intrusion_config_cache[cam_id]["detectionMode"].
+    Reads from coordinator.intrusion_config_cache[cam_id]["detectionMode"].
     Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig.
     """
 
@@ -558,7 +558,7 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
 
     @property
     def current_option(self) -> str | None:
-        cfg = self.coordinator._intrusion_config_cache.get(self._cam_id, {})
+        cfg = self.coordinator.intrusion_config_cache.get(self._cam_id, {})
         val = cfg.get("detectionMode")
         if val:
             lower = str(val).lower()
@@ -574,7 +574,7 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
     @property
     def available(self) -> bool:
         return self.coordinator.last_update_success and bool(
-            self.coordinator._intrusion_config_cache.get(self._cam_id)
+            self.coordinator.intrusion_config_cache.get(self._cam_id)
         )
 
     async def async_select_option(self, option: str) -> None:
@@ -583,7 +583,7 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
         if await _warn_if_privacy_on(self, "Detection Mode"):
             return
         api_value = DETECTION_TO_API[option]
-        cfg = dict(self.coordinator._intrusion_config_cache.get(self._cam_id, {}))
+        cfg = dict(self.coordinator.intrusion_config_cache.get(self._cam_id, {}))
         if not cfg:
             return
         cfg["detectionMode"] = api_value
@@ -591,10 +591,10 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
             self._cam_id, "intrusionDetectionConfig", cfg
         )
         if success:
-            self.coordinator._intrusion_config_cache[self._cam_id] = cfg
+            self.coordinator.intrusion_config_cache[self._cam_id] = cfg
             # Stamp the write-lock so the slow-tier poll doesn't revert the UI
             # before the cloud reflects this change (siblings do the same).
-            self.coordinator._intrusion_config_set_at[self._cam_id] = time.monotonic()
+            self.coordinator.intrusion_config_set_at[self._cam_id] = time.monotonic()
             _LOGGER.debug(
                 "Detection mode set to %s for %s", api_value, self._cam_id[:8]
             )
@@ -611,7 +611,7 @@ class BoschPanPresetSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mis
     Each selection calls coordinator.async_cloud_set_pan with the mapped angle.
     Only created when featureSupport.panLimit > 0 (CAMERA_360).
 
-    The "current option" is derived live from the coordinator._pan_cache value:
+    The "current option" is derived live from the coordinator.pan_cache value:
     the closest mapped preset whose angle matches exactly, or None when the
     camera is between presets (e.g. after a manual slider move).
     """
@@ -654,13 +654,13 @@ class BoschPanPresetSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mis
     @property
     def current_option(self) -> str | None:
         """Return the preset name that matches the current pan position exactly, or None."""
-        raw = self.coordinator._pan_cache.get(self._cam_id)
+        raw = self.coordinator.pan_cache.get(self._cam_id)
         if raw is None:
             return None
         # Invert sign for ceiling-mounted cameras (mirrors BoschPanNumber logic)
         pos = (
             -int(raw)
-            if getattr(self.coordinator, "_image_rotation_180", {}).get(self._cam_id)
+            if getattr(self.coordinator, "image_rotation_180", {}).get(self._cam_id)
             else int(raw)
         )
         for name, angle in PAN_PRESET_ANGLES.items():
@@ -672,7 +672,7 @@ class BoschPanPresetSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mis
     def available(self) -> bool:
         return (
             self.coordinator.last_update_success
-            and self.coordinator._pan_cache.get(self._cam_id) is not None
+            and self.coordinator.pan_cache.get(self._cam_id) is not None
         )
 
     async def async_select_option(self, option: str) -> None:
@@ -684,12 +684,12 @@ class BoschPanPresetSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mis
         # Invert sign for ceiling-mounted cameras
         actual = (
             -target_angle
-            if getattr(self.coordinator, "_image_rotation_180", {}).get(self._cam_id)
+            if getattr(self.coordinator, "image_rotation_180", {}).get(self._cam_id)
             else target_angle
         )
         success = await self.coordinator.async_cloud_set_pan(self._cam_id, actual)
         if success:
-            self.coordinator._pan_cache[self._cam_id] = actual
+            self.coordinator.pan_cache[self._cam_id] = actual
             _LOGGER.debug(
                 "Pan preset %s → %d° for %s", option, actual, self._cam_id[:8]
             )

@@ -46,9 +46,9 @@ def _make_coord(**overrides):
 
     base = dict(
         hass=SimpleNamespace(async_create_task=MagicMock(side_effect=_create_task)),
-        _ensure_valid_token=AsyncMock(return_value="fresh-token"),
+        ensure_valid_token=AsyncMock(return_value="fresh-token"),
         _async_refresh_maintenance=AsyncMock(),
-        _async_outage_ping_all=AsyncMock(),
+        async_outage_ping_all=AsyncMock(),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -70,7 +70,7 @@ class TestFetchCameraListHappyPath:
         assert cams == [{"id": CAM_A}]
         assert token == "old-token"
         assert headers == HEADERS
-        coord._ensure_valid_token.assert_not_called()
+        coord.ensure_valid_token.assert_not_called()
 
 
 class TestFetchCameraListNon200:
@@ -83,7 +83,7 @@ class TestFetchCameraListNon200:
             await fetch_camera_list(coord, session, HEADERS, "old-token")
 
         coord._async_refresh_maintenance.assert_called_once_with(reactive=True)
-        coord._async_outage_ping_all.assert_called_once_with()
+        coord.async_outage_ping_all.assert_called_once_with()
 
     @pytest.mark.asyncio
     async def test_missing_hooks_are_a_noop(self):
@@ -91,7 +91,7 @@ class TestFetchCameraListNon200:
         methods must not crash."""
         coord = _make_coord()
         del coord._async_refresh_maintenance
-        del coord._async_outage_ping_all
+        del coord.async_outage_ping_all
         session = _make_session(_make_resp(503))
 
         with pytest.raises(UpdateFailed, match="HTTP 503"):
@@ -111,7 +111,7 @@ class TestFetchCameraList401Retry:
         assert cams == [{"id": CAM_A}]
         assert token == "fresh-token"
         assert headers["Authorization"] == "Bearer fresh-token"
-        coord._ensure_valid_token.assert_called_once_with("old-token")
+        coord.ensure_valid_token.assert_called_once_with("old-token")
 
     @pytest.mark.asyncio
     async def test_401_then_401_generic_raises_relogin_message(self):

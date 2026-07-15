@@ -80,8 +80,8 @@ def stub_coord() -> SimpleNamespace:
                 },
             }
         },
-        _pan_cache={},
-        _image_rotation_180={},
+        pan_cache={},
+        image_rotation_180={},
         _front_light_intensity_cache={CAM_ID: 0.5},
         _front_light_color_temp_cache={CAM_ID: 4000},
         _top_led_brightness_cache={CAM_ID: 0.7},
@@ -122,7 +122,7 @@ class TestPanNumber:
     def test_native_value_reads_cache(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        stub_coord._pan_cache[CAM_ID] = 30
+        stub_coord.pan_cache[CAM_ID] = 30
         from custom_components.bosch_shc_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
@@ -139,7 +139,7 @@ class TestPanNumber:
     def test_available_when_cache_populated(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        stub_coord._pan_cache[CAM_ID] = 0
+        stub_coord.pan_cache[CAM_ID] = 0
         from custom_components.bosch_shc_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
@@ -149,8 +149,8 @@ class TestPanNumber:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Ceiling-mounted: cam-physical +30° → user-visible -30°."""
-        stub_coord._pan_cache[CAM_ID] = 30
-        stub_coord._image_rotation_180[CAM_ID] = True
+        stub_coord.pan_cache[CAM_ID] = 30
+        stub_coord.image_rotation_180[CAM_ID] = True
         from custom_components.bosch_shc_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
@@ -159,8 +159,8 @@ class TestPanNumber:
     def test_rotation_180_off_no_inversion(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        stub_coord._pan_cache[CAM_ID] = 30
-        stub_coord._image_rotation_180[CAM_ID] = False
+        stub_coord.pan_cache[CAM_ID] = 30
+        stub_coord.image_rotation_180[CAM_ID] = False
         from custom_components.bosch_shc_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
@@ -171,7 +171,7 @@ class TestPanNumber:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """User drags slider to +50 (right) on ceiling-mounted cam → send -50 to camera."""
-        stub_coord._image_rotation_180[CAM_ID] = True
+        stub_coord.image_rotation_180[CAM_ID] = True
         from custom_components.bosch_shc_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
@@ -237,16 +237,16 @@ def coord() -> SimpleNamespace:
         last_update_success=True,
         options={},
         token="test-token",
-        _pan_cache={},
-        _image_rotation_180={},
-        _lens_elevation_cache={},
-        _audio_cache={},
-        _lighting_switch_cache={},
-        _motion_light_cache={},
-        _global_lighting_cache={},
-        _icon_led_brightness_cache={},
-        _alarm_settings_cache={},
-        _shc_state_cache={CAM_ID: {}},
+        pan_cache={},
+        image_rotation_180={},
+        lens_elevation_cache={},
+        audio_cache={},
+        lighting_switch_cache={},
+        motion_light_cache={},
+        global_lighting_cache={},
+        icon_led_brightness_cache={},
+        alarm_settings_cache={},
+        shc_state_cache={CAM_ID: {}},
         async_put_camera=AsyncMock(return_value=True),
         async_cloud_set_pan=AsyncMock(),
         async_cloud_set_light_component=AsyncMock(),
@@ -491,12 +491,12 @@ def _coord(
         last_update_success=True,
         token="test-token",
         options={},
-        _audio_cache=audio_cache if audio_cache is not None else {},
-        _intrusion_config_cache=intrusion_cache if intrusion_cache is not None else {},
-        _intrusion_config_set_at=intrusion_set_at
+        audio_cache=audio_cache if audio_cache is not None else {},
+        intrusion_config_cache=intrusion_cache if intrusion_cache is not None else {},
+        intrusion_config_set_at=intrusion_set_at
         if intrusion_set_at is not None
         else {},
-        _shc_state_cache=shc_state_cache
+        shc_state_cache=shc_state_cache
         if shc_state_cache is not None
         else {cam_id: {}},
         async_put_camera=AsyncMock(return_value=put_return),
@@ -537,18 +537,16 @@ def _stub_coord_guards(**overrides):
                 },
             },
         },
-        _shc_state_cache={
-            CAM_ID: {"front_light_intensity": 0.5, "privacy_mode": False}
-        },
-        _pan_cache={},
-        _lens_elevation_cache={},
-        _audio_cache={},
-        _lighting_switch_cache={},
-        _motion_light_cache={},
-        _global_lighting_cache={},
-        _icon_led_brightness_cache={},
-        _alarm_settings_cache={},
-        _image_rotation_180={},
+        shc_state_cache={CAM_ID: {"front_light_intensity": 0.5, "privacy_mode": False}},
+        pan_cache={},
+        lens_elevation_cache={},
+        audio_cache={},
+        lighting_switch_cache={},
+        motion_light_cache={},
+        global_lighting_cache={},
+        icon_led_brightness_cache={},
+        alarm_settings_cache={},
+        image_rotation_180={},
         last_update_success=True,
         token="tok-A",
         options={},
@@ -615,7 +613,7 @@ def _make_put_session_guards(
 
 
 class TestBoschSpeakerLevelNumber:
-    """Verify that speaker level reads from _audio_cache, not a static default."""
+    """Verify that speaker level reads from audio_cache, not a static default."""
 
     def _make(self, audio_cache=None, cam_id=CAM_ID_GEN2_OUTDOOR, put_return=True):
         from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
@@ -678,7 +676,7 @@ class TestBoschSpeakerLevelNumber:
         audio = dict(_AUDIO_CFG)
         ent, coord = self._make(audio_cache={CAM_ID_GEN2_OUTDOOR: audio})
         await ent.async_set_native_value(30.0)
-        assert coord._audio_cache[CAM_ID_GEN2_OUTDOOR]["speakerLevel"] == 30
+        assert coord.audio_cache[CAM_ID_GEN2_OUTDOOR]["speakerLevel"] == 30
 
     @pytest.mark.asyncio
     async def test_set_value_no_cache_update_on_failure(self):
@@ -689,7 +687,7 @@ class TestBoschSpeakerLevelNumber:
         )
         await ent.async_set_native_value(20.0)
         # Cache must stay at original value
-        assert coord._audio_cache[CAM_ID_GEN2_OUTDOOR]["speakerLevel"] == 75
+        assert coord.audio_cache[CAM_ID_GEN2_OUTDOOR]["speakerLevel"] == 75
 
     @pytest.mark.asyncio
     async def test_set_value_rounds_float(self):
@@ -726,7 +724,7 @@ class TestBoschSpeakerLevelNumber:
             await ent.async_set_native_value(90.0)
         except Exception:
             pass
-        assert coord._audio_cache[CAM_ID_GEN2_OUTDOOR]["speakerLevel"] == 75
+        assert coord.audio_cache[CAM_ID_GEN2_OUTDOOR]["speakerLevel"] == 75
 
     @pytest.mark.asyncio
     async def test_set_value_preserves_microphone_sibling(self):
@@ -736,8 +734,8 @@ class TestBoschSpeakerLevelNumber:
             audio_cache={CAM_ID_GEN2_OUTDOOR: {"microphoneLevel": 42}}
         )
         await ent.async_set_native_value(80.0)
-        assert coord._audio_cache[CAM_ID_GEN2_OUTDOOR]["speakerLevel"] == 80
-        assert coord._audio_cache[CAM_ID_GEN2_OUTDOOR]["microphoneLevel"] == 42
+        assert coord.audio_cache[CAM_ID_GEN2_OUTDOOR]["speakerLevel"] == 80
+        assert coord.audio_cache[CAM_ID_GEN2_OUTDOOR]["microphoneLevel"] == 42
 
     # --- metadata ---
 
@@ -870,7 +868,7 @@ class TestBoschMicrophoneLevelNumber:
 
     @pytest.mark.asyncio
     async def test_privacy_guard_indoor_blocks_write_via_real_state(self):
-        """Same guard exercised end-to-end via the real _shc_state_cache
+        """Same guard exercised end-to-end via the real shc_state_cache
         privacy_mode flag, without mocking internal helpers."""
         from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
 
@@ -895,11 +893,11 @@ class TestBoschMicrophoneLevelNumber:
 
         coord = _stub_coord_guards(
             async_put_camera=AsyncMock(return_value=False),
-            _audio_cache={CAM_ID: {"microphoneLevel": 30}},
+            audio_cache={CAM_ID: {"microphoneLevel": 30}},
         )
         e = _make_entity_guards(BoschMicrophoneLevelNumber, coord)
         await e.async_set_native_value(80.0)
-        assert coord._audio_cache[CAM_ID]["microphoneLevel"] == 30, (
+        assert coord.audio_cache[CAM_ID]["microphoneLevel"] == 30, (
             "mic-level cache must keep its prior value when the PUT fails"
         )
 
@@ -911,11 +909,11 @@ class TestBoschMicrophoneLevelNumber:
 
         coord = _stub_coord_guards(
             async_put_camera=AsyncMock(return_value=True),
-            _audio_cache={CAM_ID: {"microphoneLevel": 30}},
+            audio_cache={CAM_ID: {"microphoneLevel": 30}},
         )
         e = _make_entity_guards(BoschMicrophoneLevelNumber, coord)
         await e.async_set_native_value(80.0)
-        assert coord._audio_cache[CAM_ID]["microphoneLevel"] == 80
+        assert coord.audio_cache[CAM_ID]["microphoneLevel"] == 80
 
     def test_translation_key(self):
         from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
@@ -927,13 +925,13 @@ class TestBoschMicrophoneLevelNumber:
 
 # Shared per-camera lock — BoschSpeakerLevelNumber / BoschMicrophoneLevelNumber /
 # BoschIntercomSwitch (switch.py) all read-modify-write the same /audio endpoint
-# and _audio_cache.
+# and audio_cache.
 class TestAudioConfigLockConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_speaker_and_mic_writes_serialize(self):
         """Regression (bug-hunt 2026-07-03): BoschSpeakerLevelNumber and
         BoschMicrophoneLevelNumber already merge only their own field back
-        into _audio_cache after a successful PUT (bug-hunt 2026-06-02), but
+        into audio_cache after a successful PUT (bug-hunt 2026-06-02), but
         without a lock the READ before that merge could still race: two
         concurrent writes for different fields could both snapshot the
         cache before either finishes writing, so whichever completes last
@@ -977,8 +975,8 @@ class TestAudioConfigLockConcurrency:
         await task_a
         await task_b
 
-        assert coord._audio_cache[cam_id]["speakerLevel"] == 90
-        assert coord._audio_cache[cam_id]["microphoneLevel"] == 10
+        assert coord.audio_cache[cam_id]["speakerLevel"] == 90
+        assert coord.audio_cache[cam_id]["microphoneLevel"] == 10
 
 
 class TestBoschIntrusionSensitivityNumber:
@@ -1084,28 +1082,28 @@ class TestBoschIntrusionSensitivityNumber:
     async def test_cache_updated_on_success(self):
         ent, coord = self._make()
         await ent.async_set_native_value(6.0)
-        assert coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["sensitivity"] == 6
+        assert coord.intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["sensitivity"] == 6
 
     @pytest.mark.asyncio
     async def test_write_lock_set_on_success(self):
-        """_intrusion_config_set_at must be set after successful PUT."""
+        """intrusion_config_set_at must be set after successful PUT."""
         ent, coord = self._make()
         before = time.monotonic()
         await ent.async_set_native_value(4.0)
         after = time.monotonic()
-        assert CAM_ID_GEN2_OUTDOOR in coord._intrusion_config_set_at
-        ts = coord._intrusion_config_set_at[CAM_ID_GEN2_OUTDOOR]
+        assert CAM_ID_GEN2_OUTDOOR in coord.intrusion_config_set_at
+        ts = coord.intrusion_config_set_at[CAM_ID_GEN2_OUTDOOR]
         assert before <= ts <= after
 
     @pytest.mark.asyncio
     async def test_no_cache_update_on_failure(self):
         ent, coord = self._make(put_return=False)
-        original_sensitivity = coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR][
+        original_sensitivity = coord.intrusion_config_cache[CAM_ID_GEN2_OUTDOOR][
             "sensitivity"
         ]
         await ent.async_set_native_value(7.0)
         assert (
-            coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["sensitivity"]
+            coord.intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["sensitivity"]
             == original_sensitivity
         )
 
@@ -1113,7 +1111,7 @@ class TestBoschIntrusionSensitivityNumber:
     async def test_no_write_lock_on_failure(self):
         ent, coord = self._make(put_return=False)
         await ent.async_set_native_value(7.0)
-        assert CAM_ID_GEN2_OUTDOOR not in coord._intrusion_config_set_at
+        assert CAM_ID_GEN2_OUTDOOR not in coord.intrusion_config_set_at
 
     @pytest.mark.asyncio
     async def test_empty_cache_is_noop(self):
@@ -1316,7 +1314,7 @@ class TestBoschIntrusionDistanceNumber:
         clamped to 8; values 1-8 must pass through unchanged."""
         ent, coord = self._make()
         await ent.async_set_native_value(float(input_val))
-        actual = coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["distance"]
+        actual = coord.intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["distance"]
         assert actual == expected, (
             f"input={input_val}: expected clamped distance={expected}, got {actual}"
         )
@@ -1348,7 +1346,7 @@ class TestBoschIntrusionDistanceNumber:
     async def test_cache_updated_on_success(self):
         ent, coord = self._make()
         await ent.async_set_native_value(7.0)
-        assert coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["distance"] == 7
+        assert coord.intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["distance"] == 7
 
     @pytest.mark.asyncio
     async def test_write_lock_set_on_success(self):
@@ -1356,19 +1354,19 @@ class TestBoschIntrusionDistanceNumber:
         before = time.monotonic()
         await ent.async_set_native_value(5.0)
         after = time.monotonic()
-        assert CAM_ID_GEN2_OUTDOOR in coord._intrusion_config_set_at
-        ts = coord._intrusion_config_set_at[CAM_ID_GEN2_OUTDOOR]
+        assert CAM_ID_GEN2_OUTDOOR in coord.intrusion_config_set_at
+        ts = coord.intrusion_config_set_at[CAM_ID_GEN2_OUTDOOR]
         assert before <= ts <= after
 
     @pytest.mark.asyncio
     async def test_no_cache_update_on_failure(self):
         ent, coord = self._make(put_return=False)
-        original_distance = coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR][
+        original_distance = coord.intrusion_config_cache[CAM_ID_GEN2_OUTDOOR][
             "distance"
         ]
         await ent.async_set_native_value(2.0)
         assert (
-            coord._intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["distance"]
+            coord.intrusion_config_cache[CAM_ID_GEN2_OUTDOOR]["distance"]
             == original_distance
         )
 
@@ -1376,7 +1374,7 @@ class TestBoschIntrusionDistanceNumber:
     async def test_no_write_lock_on_failure(self):
         ent, coord = self._make(put_return=False)
         await ent.async_set_native_value(2.0)
-        assert CAM_ID_GEN2_OUTDOOR not in coord._intrusion_config_set_at
+        assert CAM_ID_GEN2_OUTDOOR not in coord.intrusion_config_set_at
 
     @pytest.mark.asyncio
     async def test_empty_cache_is_noop(self):
@@ -1716,29 +1714,27 @@ def _coord2(
         last_update_success=True,
         options={},
         token="test-token",
-        _pan_cache=pan_cache if pan_cache is not None else {},
-        _image_rotation_180={},
-        _lens_elevation_cache=lens_elevation_cache
+        pan_cache=pan_cache if pan_cache is not None else {},
+        image_rotation_180={},
+        lens_elevation_cache=lens_elevation_cache
         if lens_elevation_cache is not None
         else {},
-        _audio_cache=audio_cache if audio_cache is not None else {},
-        _lighting_switch_cache=lighting_switch_cache
+        audio_cache=audio_cache if audio_cache is not None else {},
+        lighting_switch_cache=lighting_switch_cache
         if lighting_switch_cache is not None
         else {},
-        _motion_light_cache=motion_light_cache
-        if motion_light_cache is not None
-        else {},
-        _global_lighting_cache=global_lighting_cache
+        motion_light_cache=motion_light_cache if motion_light_cache is not None else {},
+        global_lighting_cache=global_lighting_cache
         if global_lighting_cache is not None
         else {},
-        _icon_led_brightness_cache=icon_led_brightness_cache
+        icon_led_brightness_cache=icon_led_brightness_cache
         if icon_led_brightness_cache is not None
         else {},
-        _alarm_settings_cache=alarm_settings_cache
+        alarm_settings_cache=alarm_settings_cache
         if alarm_settings_cache is not None
         else {},
-        _alarm_settings_set_at={},
-        _shc_state_cache=shc_state_cache
+        alarm_settings_set_at={},
+        shc_state_cache=shc_state_cache
         if shc_state_cache is not None
         else {CAM_ID: {}},
         async_put_camera=AsyncMock(return_value=True),
@@ -1785,13 +1781,13 @@ def _stub_coord_gen2_factory(**overrides: object) -> SimpleNamespace:
                 "events": [],
             }
         },
-        _shc_state_cache={CAM_ID: {"front_light_intensity": 0.5}},
-        _pan_cache={},
-        _lens_elevation_cache={},
-        _audio_cache={},
-        _audio_volume={},
-        _lighting_switch_cache={},
-        _image_rotation_180={},
+        shc_state_cache={CAM_ID: {"front_light_intensity": 0.5}},
+        pan_cache={},
+        lens_elevation_cache={},
+        audio_cache={},
+        audio_volume={},
+        lighting_switch_cache={},
+        image_rotation_180={},
         last_update_success=True,
         token="tok-A",
         options={},
@@ -1812,7 +1808,7 @@ class TestFrontLightIntensityNumber:
             BoschFrontLightIntensityNumber,
         )
 
-        stub_coord_gen2._shc_state_cache[CAM_ID]["front_light_intensity"] = 0.75
+        stub_coord_gen2.shc_state_cache[CAM_ID]["front_light_intensity"] = 0.75
         entity = BoschFrontLightIntensityNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert entity.native_value == 75, "Must scale 0.75 API value to 75 percent"
 
@@ -1823,7 +1819,7 @@ class TestFrontLightIntensityNumber:
             BoschFrontLightIntensityNumber,
         )
 
-        stub_coord_gen2._shc_state_cache[CAM_ID] = {}
+        stub_coord_gen2.shc_state_cache[CAM_ID] = {}
         entity = BoschFrontLightIntensityNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert entity.native_value is None, (
             "Must return None when intensity not in cache"
@@ -1839,7 +1835,7 @@ class TestFrontLightIntensityNumber:
             BoschFrontLightIntensityNumber,
         )
 
-        stub_coord_gen2._shc_state_cache[CAM_ID] = {}
+        stub_coord_gen2.shc_state_cache[CAM_ID] = {}
         entity = BoschFrontLightIntensityNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert entity.available is False
 
@@ -1850,7 +1846,7 @@ class TestFrontLightIntensityNumber:
             BoschFrontLightIntensityNumber,
         )
 
-        stub_coord_gen2._shc_state_cache[CAM_ID] = {"front_light_intensity": 0.5}
+        stub_coord_gen2.shc_state_cache[CAM_ID] = {"front_light_intensity": 0.5}
         entity = BoschFrontLightIntensityNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert entity.available is True
 
@@ -1928,7 +1924,7 @@ class TestLensElevationNumber:
         sw.coordinator.async_put_camera.assert_awaited_once_with(
             CAM_ID, "lens_elevation", {"elevation": 3.0}
         )
-        assert sw.coordinator._lens_elevation_cache[CAM_ID] == 3.0
+        assert sw.coordinator.lens_elevation_cache[CAM_ID] == 3.0
 
     @pytest.mark.asyncio
     async def test_set_value_puts_rounded_value(
@@ -1944,7 +1940,7 @@ class TestLensElevationNumber:
         assert call_args[0][2]["elevation"] == round(2.123, 2), (
             "Must PUT rounded elevation value"
         )
-        assert stub_coord_gen2._lens_elevation_cache[CAM_ID] == 2.123, (
+        assert stub_coord_gen2.lens_elevation_cache[CAM_ID] == 2.123, (
             "Cache must be updated immediately"
         )
 
@@ -1957,7 +1953,7 @@ class TestLensElevationNumber:
         coord = _stub_coord_guards(async_put_camera=AsyncMock(return_value=False))
         e = _make_entity_guards(BoschLensElevationNumber, coord)
         await e.async_set_native_value(12.0)
-        assert CAM_ID not in coord._lens_elevation_cache, (
+        assert CAM_ID not in coord.lens_elevation_cache, (
             "lens_elevation cache must stay empty when the PUT fails"
         )
 
@@ -1968,7 +1964,7 @@ class TestLensElevationNumber:
         coord = _stub_coord_guards(async_put_camera=AsyncMock(return_value=True))
         e = _make_entity_guards(BoschLensElevationNumber, coord)
         await e.async_set_native_value(12.0)
-        assert coord._lens_elevation_cache[CAM_ID] == 12.0
+        assert coord.lens_elevation_cache[CAM_ID] == 12.0
 
     def test_gen2_base_device_info(self):
         """`_BoschGen2NumberBase.device_info` covered via any Gen2 subclass."""
@@ -2032,12 +2028,12 @@ class TestWhiteBalanceNumber:
     ):
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
 
-        stub_coord_gen2._lighting_switch_cache[CAM_ID] = {
+        stub_coord_gen2.lighting_switch_cache[CAM_ID] = {
             "frontLightSettings": {"brightness": 80, "whiteBalance": 0.3}
         }
         entity = BoschWhiteBalanceNumber(stub_coord_gen2, CAM_ID, stub_entry)
         val1 = entity.native_value
-        stub_coord_gen2._lighting_switch_cache = {}  # clear cache
+        stub_coord_gen2.lighting_switch_cache = {}  # clear cache
         val2 = entity.native_value  # must return remembered value
         assert val2 == 0.3, (
             "Must remember last read whiteBalance even after cache cleared"
@@ -2059,7 +2055,7 @@ class TestWhiteBalanceNumber:
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord_guards(
-            _lighting_switch_cache={CAM_ID: {"frontLightSettings": {}}}
+            lighting_switch_cache={CAM_ID: {"frontLightSettings": {}}}
         )
         e = _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
         assert e.available is True
@@ -2067,7 +2063,7 @@ class TestWhiteBalanceNumber:
     def test_available_false_when_cache_empty(self):
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
 
-        coord = _stub_coord_guards()  # _lighting_switch_cache={} by default
+        coord = _stub_coord_guards()  # lighting_switch_cache={} by default
         e = _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
         assert e.available is False
 
@@ -2143,7 +2139,7 @@ class TestWhiteBalanceNumber:
         coord.async_put_camera.assert_awaited_once()
         assert e._wb_value == 0.5
         assert (
-            coord._lighting_switch_cache[CAM_ID]["frontLightSettings"]["whiteBalance"]
+            coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]["whiteBalance"]
             == 0.5
         )
 
@@ -2155,14 +2151,14 @@ class TestWhiteBalanceNumber:
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord_guards(
-            _lighting_switch_cache={CAM_ID: {"topLedLightSettings": {"brightness": 77}}}
+            lighting_switch_cache={CAM_ID: {"topLedLightSettings": {"brightness": 77}}}
         )
         coord.async_put_camera = AsyncMock(return_value=True)
         e = _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
 
         await e.async_set_native_value(0.5)
 
-        cache = coord._lighting_switch_cache[CAM_ID]
+        cache = coord.lighting_switch_cache[CAM_ID]
         assert cache["frontLightSettings"]["whiteBalance"] == 0.5  # our write
         assert cache["topLedLightSettings"]["brightness"] == 77  # sibling kept
 
@@ -2229,7 +2225,7 @@ class TestTopLedBrightnessNumber:
         )
 
         coord = _stub_coord_guards(
-            _lighting_switch_cache={CAM_ID: {"topLedLightSettings": {}}}
+            lighting_switch_cache={CAM_ID: {"topLedLightSettings": {}}}
         )
         e = _make_entity_guards(
             BoschTopLedBrightnessNumber, coord=coord, led_key="topLedLightSettings"
@@ -2272,7 +2268,7 @@ class TestTopLedBrightnessNumber:
         coord.async_put_camera.assert_awaited_once()
         assert e._brightness == 80.0
         assert (
-            coord._lighting_switch_cache[CAM_ID]["topLedLightSettings"]["brightness"]
+            coord.lighting_switch_cache[CAM_ID]["topLedLightSettings"]["brightness"]
             == 80
         )
 
@@ -2386,13 +2382,13 @@ class TestDarknessThresholdNumber:
 
     def test_available_true_when_cache_populated(self):
         """`available` requires both coordinator-ok AND non-empty
-        `_global_lighting_cache` for this cam_id."""
+        `global_lighting_cache` for this cam_id."""
         from custom_components.bosch_shc_camera.number import (
             BoschDarknessThresholdNumber,
         )
 
         coord = _stub_coord_guards()
-        coord._global_lighting_cache[CAM_ID] = {"darknessThreshold": 0.5}
+        coord.global_lighting_cache[CAM_ID] = {"darknessThreshold": 0.5}
         e = _make_entity_guards(BoschDarknessThresholdNumber, coord=coord)
         assert e.available is True
 
@@ -2502,7 +2498,7 @@ class TestAlarmDelayNumber:
         assert body["alarmDelayInSeconds"] == 90
         assert body["alarmMode"] == "ON"
         # bug-hunt 2026-06-02: write-lock stamped so the slow-tier poll won't revert.
-        assert CAM_ID in sw.coordinator._alarm_settings_set_at
+        assert CAM_ID in sw.coordinator.alarm_settings_set_at
 
     @pytest.mark.asyncio
     async def test_set_empty_noop(self):
@@ -2521,7 +2517,7 @@ class TestAudioVolumeNumber:
     ):
         from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
 
-        stub_coord_gen2._audio_volume = {}
+        stub_coord_gen2.audio_volume = {}
         e = BoschAudioVolumeNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert e.native_value == 50.0  # default returned without pre-seeding
 
@@ -2531,11 +2527,11 @@ class TestAudioVolumeNumber:
     ):
         from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
 
-        stub_coord_gen2._audio_volume = {}
+        stub_coord_gen2.audio_volume = {}
         e = BoschAudioVolumeNumber(stub_coord_gen2, CAM_ID, stub_entry)
         e.async_write_ha_state = MagicMock()
         await e.async_set_native_value(75)
-        assert stub_coord_gen2._audio_volume[CAM_ID] == 75
+        assert stub_coord_gen2.audio_volume[CAM_ID] == 75
         assert e.native_value == 75.0
         # Virtual preference — no Bosch write must happen.
         stub_coord_gen2.async_put_camera.assert_not_called()
@@ -2609,12 +2605,12 @@ def _stub_coord_with_privacy_number(
                 },
             }
         },
-        _shc_state_cache={CAM_ID: {"privacy_mode": privacy_on}},
-        _panic_alarm_cache={},
-        _alarm_settings_cache={},
-        _alarm_settings_set_at={},
-        _lighting_switch_cache={},
-        _light_set_at={},
+        shc_state_cache={CAM_ID: {"privacy_mode": privacy_on}},
+        panic_alarm_cache={},
+        alarm_settings_cache={},
+        alarm_settings_set_at={},
+        lighting_switch_cache={},
+        light_set_at={},
         last_update_success=True,
         token="tok-A",
         is_camera_online=lambda cid: True,
@@ -2649,7 +2645,7 @@ class TestAlarmDelayPrivacyGuard:
         entity._fw = "9.40.25"
         entity._mac = "aa:bb:cc:dd:ee:02"
         entity._field = "alarmDelayInSeconds"
-        coord._alarm_settings_cache[CAM_ID] = {
+        coord.alarm_settings_cache[CAM_ID] = {
             "alarmDelayInSeconds": 10,
             "sirenDurationInSeconds": 30,
         }
@@ -2662,13 +2658,13 @@ class TestAlarmDelayPrivacyGuard:
         """Gen2 Indoor + privacy ON → async_put_camera must NOT be called."""
         coord = _stub_coord_with_privacy_number(privacy_on=True, hw="HOME_Eyes_Indoor")
         entity = self._make_entity(coord)
-        original_delay = coord._alarm_settings_cache[CAM_ID]["alarmDelayInSeconds"]
+        original_delay = coord.alarm_settings_cache[CAM_ID]["alarmDelayInSeconds"]
 
         await entity.async_set_native_value(15.0)
 
         coord.async_put_camera.assert_not_called()
         assert (
-            coord._alarm_settings_cache[CAM_ID]["alarmDelayInSeconds"] == original_delay
+            coord.alarm_settings_cache[CAM_ID]["alarmDelayInSeconds"] == original_delay
         )
 
     @pytest.mark.asyncio
@@ -2684,7 +2680,7 @@ class TestAlarmDelayPrivacyGuard:
     @pytest.mark.asyncio
     async def test_set_value_proceeds_for_gen2_outdoor_regardless_of_privacy(self):
         """Gen2 Outdoor is NOT in `_GEN2_INDOOR_HW` → guard does NOT fire
-        even when `_shc_state_cache` says privacy_mode=True."""
+        even when `shc_state_cache` says privacy_mode=True."""
         coord = _stub_coord_with_privacy_number(privacy_on=True, hw="HOME_Eyes_Outdoor")
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Outdoor"
         entity = self._make_entity(coord)

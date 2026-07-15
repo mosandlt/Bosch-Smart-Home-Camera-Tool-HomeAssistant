@@ -55,20 +55,20 @@ def _make_coord(cam_id: str = CAM_ID) -> SimpleNamespace:
     """Minimal coordinator stub required by async_update_rcp_data."""
     coord = SimpleNamespace(
         hass=MagicMock(),
-        _rcp_session_cache={},
-        _rcp_session_locks={},
-        _rcp_dimmer_cache={},
-        _rcp_privacy_cache={},
-        _rcp_clock_offset_cache={},
-        _rcp_lan_ip_cache={},
-        _rcp_product_name_cache={},
-        _rcp_bitrate_cache={},
-        _rcp_alarm_catalog_cache={},
-        _rcp_motion_zones_cache={},
-        _rcp_motion_coords_cache={},
-        _rcp_tls_cert_cache={},
-        _rcp_network_services_cache={},
-        _rcp_iva_catalog_cache={},
+        rcp_session_cache={},
+        rcp_session_locks={},
+        rcp_dimmer_cache={},
+        rcp_privacy_cache={},
+        rcp_clock_offset_cache={},
+        rcp_lan_ip_cache={},
+        rcp_product_name_cache={},
+        rcp_bitrate_cache={},
+        rcp_alarm_catalog_cache={},
+        rcp_motion_zones_cache={},
+        rcp_motion_coords_cache={},
+        rcp_tls_cert_cache={},
+        rcp_network_services_cache={},
+        rcp_iva_catalog_cache={},
         _rcp_cmd_failures={},
     )
     coord._rcp_cmd_failures[cam_id] = {}
@@ -91,18 +91,18 @@ class TestAsyncUpdateRcpDataNoSession:
         ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
-        assert coord._rcp_dimmer_cache == {}
-        assert coord._rcp_privacy_cache == {}
-        assert coord._rcp_clock_offset_cache == {}
-        assert coord._rcp_lan_ip_cache == {}
-        assert coord._rcp_product_name_cache == {}
-        assert coord._rcp_bitrate_cache == {}
-        assert coord._rcp_alarm_catalog_cache == {}
-        assert coord._rcp_motion_zones_cache == {}
-        assert coord._rcp_motion_coords_cache == {}
-        assert coord._rcp_tls_cert_cache == {}
-        assert coord._rcp_network_services_cache == {}
-        assert coord._rcp_iva_catalog_cache == {}
+        assert coord.rcp_dimmer_cache == {}
+        assert coord.rcp_privacy_cache == {}
+        assert coord.rcp_clock_offset_cache == {}
+        assert coord.rcp_lan_ip_cache == {}
+        assert coord.rcp_product_name_cache == {}
+        assert coord.rcp_bitrate_cache == {}
+        assert coord.rcp_alarm_catalog_cache == {}
+        assert coord.rcp_motion_zones_cache == {}
+        assert coord.rcp_motion_coords_cache == {}
+        assert coord.rcp_tls_cert_cache == {}
+        assert coord.rcp_network_services_cache == {}
+        assert coord.rcp_iva_catalog_cache == {}
 
 
 class TestAsyncUpdateRcpDataFullyPopulated:
@@ -135,18 +135,18 @@ class TestAsyncUpdateRcpDataFullyPopulated:
         ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
-        assert coord._rcp_dimmer_cache[CAM_ID] == 42
-        assert coord._rcp_privacy_cache[CAM_ID] == 1
-        assert coord._rcp_clock_offset_cache[CAM_ID] == -1.5
-        assert coord._rcp_lan_ip_cache[CAM_ID] == "192.0.2.149"
-        assert coord._rcp_product_name_cache[CAM_ID] == "HOME_Eyes_Outdoor_II"
-        assert coord._rcp_bitrate_cache[CAM_ID] == [1000, 2000, 3000]
-        assert coord._rcp_alarm_catalog_cache[CAM_ID] == data.alarm_catalog
-        assert coord._rcp_motion_zones_cache[CAM_ID] == data.motion_zones
-        assert coord._rcp_motion_coords_cache[CAM_ID] == data.motion_coords
-        assert coord._rcp_tls_cert_cache[CAM_ID] == data.tls_cert
-        assert coord._rcp_network_services_cache[CAM_ID] == data.network_services
-        assert coord._rcp_iva_catalog_cache[CAM_ID] == data.iva_catalog
+        assert coord.rcp_dimmer_cache[CAM_ID] == 42
+        assert coord.rcp_privacy_cache[CAM_ID] == 1
+        assert coord.rcp_clock_offset_cache[CAM_ID] == -1.5
+        assert coord.rcp_lan_ip_cache[CAM_ID] == "192.0.2.149"
+        assert coord.rcp_product_name_cache[CAM_ID] == "HOME_Eyes_Outdoor_II"
+        assert coord.rcp_bitrate_cache[CAM_ID] == [1000, 2000, 3000]
+        assert coord.rcp_alarm_catalog_cache[CAM_ID] == data.alarm_catalog
+        assert coord.rcp_motion_zones_cache[CAM_ID] == data.motion_zones
+        assert coord.rcp_motion_coords_cache[CAM_ID] == data.motion_coords
+        assert coord.rcp_tls_cert_cache[CAM_ID] == data.tls_cert
+        assert coord.rcp_network_services_cache[CAM_ID] == data.network_services
+        assert coord.rcp_iva_catalog_cache[CAM_ID] == data.iva_catalog
 
 
 class TestAsyncUpdateRcpDataPartiallyPopulated:
@@ -160,7 +160,7 @@ class TestAsyncUpdateRcpDataPartiallyPopulated:
 
         coord = _make_coord()
         # Pre-existing cached value for a field this round did NOT read.
-        coord._rcp_lan_ip_cache[CAM_ID] = "10.0.0.5"
+        coord.rcp_lan_ip_cache[CAM_ID] = "10.0.0.5"
 
         data = RcpCameraData(dimmer=50, privacy=0)  # everything else None
 
@@ -170,19 +170,19 @@ class TestAsyncUpdateRcpDataPartiallyPopulated:
         ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
-        assert coord._rcp_dimmer_cache[CAM_ID] == 50
-        assert coord._rcp_privacy_cache[CAM_ID] == 0
+        assert coord.rcp_dimmer_cache[CAM_ID] == 50
+        assert coord.rcp_privacy_cache[CAM_ID] == 0
         # Untouched fields: no new entry, and the pre-existing one survives.
-        assert coord._rcp_clock_offset_cache == {}
-        assert coord._rcp_lan_ip_cache[CAM_ID] == "10.0.0.5"
-        assert coord._rcp_product_name_cache == {}
-        assert coord._rcp_bitrate_cache == {}
-        assert coord._rcp_alarm_catalog_cache == {}
-        assert coord._rcp_motion_zones_cache == {}
-        assert coord._rcp_motion_coords_cache == {}
-        assert coord._rcp_tls_cert_cache == {}
-        assert coord._rcp_network_services_cache == {}
-        assert coord._rcp_iva_catalog_cache == {}
+        assert coord.rcp_clock_offset_cache == {}
+        assert coord.rcp_lan_ip_cache[CAM_ID] == "10.0.0.5"
+        assert coord.rcp_product_name_cache == {}
+        assert coord.rcp_bitrate_cache == {}
+        assert coord.rcp_alarm_catalog_cache == {}
+        assert coord.rcp_motion_zones_cache == {}
+        assert coord.rcp_motion_coords_cache == {}
+        assert coord.rcp_tls_cert_cache == {}
+        assert coord.rcp_network_services_cache == {}
+        assert coord.rcp_iva_catalog_cache == {}
 
     @pytest.mark.asyncio
     async def test_privacy_zero_is_not_treated_as_falsy_none(self):
@@ -199,8 +199,8 @@ class TestAsyncUpdateRcpDataPartiallyPopulated:
         ):
             await async_update_rcp_data(coord, CAM_ID, PROXY_HOST, PROXY_HASH)
 
-        assert coord._rcp_dimmer_cache[CAM_ID] == 0
-        assert coord._rcp_privacy_cache[CAM_ID] == 0
+        assert coord.rcp_dimmer_cache[CAM_ID] == 0
+        assert coord.rcp_privacy_cache[CAM_ID] == 0
 
 
 class TestAsyncUpdateRcpDataCallArguments:
@@ -223,8 +223,8 @@ class TestAsyncUpdateRcpDataCallArguments:
         args = mock_fetch.await_args.args
         # (session, ssl_context, session_cache, session_locks, cmd_failures,
         #  cam_id, proxy_host, proxy_hash)
-        assert args[2] is coord._rcp_session_cache
-        assert args[3] is coord._rcp_session_locks
+        assert args[2] is coord.rcp_session_cache
+        assert args[3] is coord.rcp_session_locks
         assert args[4] is coord._rcp_cmd_failures[CAM_ID]
         assert args[5] == CAM_ID
         assert args[6] == PROXY_HOST

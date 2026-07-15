@@ -2,8 +2,8 @@
 
 The coordinator (``__init__.py``) independently grew several near-identical
 copies of the same "get-or-create a lock for this key in my dict" pattern —
-``_get_stream_lock``, ``_get_rcp_session_lock``, ``_get_nvr_recorder_lock``,
-``_get_nvr_clip_assembly_lock``, ``async_fetch_live_snapshot``'s
+``get_stream_lock``, ``_get_rcp_session_lock``, ``get_nvr_recorder_lock``,
+``get_nvr_clip_assembly_lock``, ``async_fetch_live_snapshot``'s
 ``_snapshot_fetch_locks`` lookup, the go2rtc re-registration coalescing
 lookup, and ``async_fetch_fresh_event_snapshot``'s ``_fresh_snap_locks``
 lookup — as new per-camera/per-session locking needs were bolted on release

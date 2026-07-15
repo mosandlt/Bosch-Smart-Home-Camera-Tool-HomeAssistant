@@ -49,9 +49,9 @@ def _make_session(url_responses: dict):
 
 def _make_coord(**overrides):
     base = dict(
-        _last_event_ids={},
-        _cached_events={},
-        _err_str=staticmethod(lambda err: str(err) or repr(err)),
+        last_event_ids={},
+        cached_events={},
+        err_str=staticmethod(lambda err: str(err) or repr(err)),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -63,8 +63,8 @@ class TestFetchOneCameraEvents:
         """If last_event's id matches the cached id, skip the full fetch
         and return the already-cached events list."""
         coord = _make_coord(
-            _last_event_ids={CAM_A: "evt-1"},
-            _cached_events={CAM_A: [{"id": "evt-1"}]},
+            last_event_ids={CAM_A: "evt-1"},
+            cached_events={CAM_A: [{"id": "evt-1"}]},
         )
         session = _make_session({"last_event": _make_resp(200, {"id": "evt-1"})})
 
@@ -80,7 +80,7 @@ class TestFetchOneCameraEvents:
 
     @pytest.mark.asyncio
     async def test_last_event_changed_triggers_full_fetch(self):
-        coord = _make_coord(_last_event_ids={CAM_A: "evt-old"})
+        coord = _make_coord(last_event_ids={CAM_A: "evt-old"})
         session = _make_session(
             {
                 "last_event": _make_resp(200, {"id": "evt-new"}),
@@ -98,7 +98,7 @@ class TestFetchOneCameraEvents:
 
     @pytest.mark.asyncio
     async def test_no_prior_last_event_id_triggers_full_fetch(self):
-        """cam_id absent from _last_event_ids (fresh camera) must fall
+        """cam_id absent from last_event_ids (fresh camera) must fall
         through to the full fetch, not crash on a None comparison."""
         coord = _make_coord()
         session = _make_session(
@@ -199,11 +199,11 @@ class TestPollEvents:
         result = await poll_events(coord, [CAM_A], session, HEADERS, do_events=True)
 
         assert result is True
-        assert coord._cached_events[CAM_A] == [{"id": "evt-1"}]
+        assert coord.cached_events[CAM_A] == [{"id": "evt-1"}]
 
     @pytest.mark.asyncio
     async def test_failed_fetch_does_not_overwrite_cache_or_report_fetched(self):
-        coord = _make_coord(_cached_events={CAM_A: [{"id": "stale"}]})
+        coord = _make_coord(cached_events={CAM_A: [{"id": "stale"}]})
         session = _make_session(
             {"last_event": _make_resp(500), "v11/events": _make_resp(503)}
         )
@@ -211,7 +211,7 @@ class TestPollEvents:
         result = await poll_events(coord, [CAM_A], session, HEADERS, do_events=True)
 
         assert result is False
-        assert coord._cached_events[CAM_A] == [{"id": "stale"}]
+        assert coord.cached_events[CAM_A] == [{"id": "stale"}]
 
     @pytest.mark.asyncio
     async def test_one_camera_exception_does_not_abort_others(self):
@@ -248,8 +248,8 @@ class TestPollEvents:
             ep._fetch_one_camera_events = original
 
         assert result is True
-        assert CAM_B in coord._cached_events
-        assert CAM_A not in coord._cached_events
+        assert CAM_B in coord.cached_events
+        assert CAM_A not in coord.cached_events
         assert call_count[0] == 2
 
     @pytest.mark.asyncio
@@ -270,5 +270,5 @@ class TestPollEvents:
         )
 
         assert result is True
-        assert CAM_A in coord._cached_events
-        assert CAM_B in coord._cached_events
+        assert CAM_A in coord.cached_events
+        assert CAM_B in coord.cached_events

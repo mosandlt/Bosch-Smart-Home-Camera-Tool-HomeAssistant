@@ -31,15 +31,15 @@ def _make_coord(**overrides):
         hass=SimpleNamespace(async_create_task=MagicMock(side_effect=_create_task)),
         _async_maybe_announce_cloud_state=AsyncMock(),
         _async_refresh_maintenance=AsyncMock(),
-        _async_outage_ping_all=AsyncMock(),
+        async_outage_ping_all=AsyncMock(),
     )
     base.update(overrides)
     coord = SimpleNamespace(**base)
-    # `_spawn_tracked` mirrors BoschCameraCoordinator._spawn_tracked closely
+    # `spawn_tracked` mirrors BoschCameraCoordinator.spawn_tracked closely
     # enough for these direct-module unit tests: routes through
     # hass.async_create_task (already asserted on directly below) instead of
-    # needing a real _bg_tasks set on this bare SimpleNamespace stub.
-    coord._spawn_tracked = lambda coro, **kw: coord.hass.async_create_task(coro, **kw)
+    # needing a real bg_tasks set on this bare SimpleNamespace stub.
+    coord.spawn_tracked = lambda coro, **kw: coord.hass.async_create_task(coro, **kw)
     return coord
 
 
@@ -71,7 +71,7 @@ class TestDispatchTimeout:
         manager = MagicMock()
         coord = _make_coord()
         manager.attach_mock(coord._async_refresh_maintenance, "maint")
-        manager.attach_mock(coord._async_outage_ping_all, "outage")
+        manager.attach_mock(coord.async_outage_ping_all, "outage")
         manager.attach_mock(coord._async_maybe_announce_cloud_state, "cloud")
 
         result = await dispatch_timeout(coord)
@@ -80,7 +80,7 @@ class TestDispatchTimeout:
         assert "Timeout fetching camera data from Bosch cloud" in str(result)
         assert coord.hass.async_create_task.call_count == 3
         coord._async_refresh_maintenance.assert_called_once_with(reactive=True)
-        coord._async_outage_ping_all.assert_called_once_with()
+        coord.async_outage_ping_all.assert_called_once_with()
         coord._async_maybe_announce_cloud_state.assert_called_once_with(False)
         assert [c[0] for c in manager.mock_calls] == ["maint", "outage", "cloud"]
 
@@ -88,7 +88,7 @@ class TestDispatchTimeout:
     async def test_missing_hooks_are_a_noop(self):
         coord = _make_coord()
         del coord._async_refresh_maintenance
-        del coord._async_outage_ping_all
+        del coord.async_outage_ping_all
         del coord._async_maybe_announce_cloud_state
         result = await dispatch_timeout(coord)
         assert isinstance(result, UpdateFailed)

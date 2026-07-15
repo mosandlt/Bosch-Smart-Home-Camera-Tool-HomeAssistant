@@ -31,7 +31,7 @@ from contextlib import asynccontextmanager
 from typing import Any, cast
 
 import aiohttp
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.const import EVENT_HOMEASSISTANT_CLOSE
 from homeassistant.core import HomeAssistant
 
 # Bosch "Video CA 2A" intermediate CA, issued by the private "Bosch ST Root CA".
@@ -122,6 +122,17 @@ async def async_get_bosch_cloud_session(hass: HomeAssistant) -> aiohttp.ClientSe
     OAuth / Keycloak token exchange, and the live video proxy. Replaces the
     previous ``verify_ssl=False`` sessions that accepted any certificate
     (GHSA-6qh5-x5m5-vj6v / CWE-295).
+
+    Mirrors the HA-Core-submission-prep tree's cloud_ssl.py: the cleanup
+    listener fires on ``EVENT_HOMEASSISTANT_CLOSE`` (matching Core's own
+    ``aiohttp_client.py`` session/connector cleanup, which also listens on
+    CLOSE, the last shutdown event -- fires after STOP and FINAL_WRITE), not
+    the earlier ``EVENT_HOMEASSISTANT_STOP``, so this session isn't torn down
+    while other integrations' stop-phase cleanup may still need it. Core's
+    ``async_create_clientsession`` still can't be used directly here: its
+    connector has no extension point for a pinned custom CA
+    (``BOSCH_CLOUD_CA_PEM``), see the Core-tree's ``quality_scale.yaml`` for
+    the full research.
     """
     global _SESSION_LOCK
     existing = cast("aiohttp.ClientSession | None", hass.data.get(_SESSION_DATA_KEY))
@@ -151,7 +162,7 @@ async def async_get_bosch_cloud_session(hass: HomeAssistant) -> aiohttp.ClientSe
             if not session.closed:
                 await session.close()
 
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _close_session)
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_CLOSE, _close_session)
         return session
 
 

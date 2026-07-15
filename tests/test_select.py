@@ -67,10 +67,10 @@ def stub_coord_naming() -> SimpleNamespace:
                 "motion": {},
             }
         },
-        _camera_entities={},
-        _firmware_cache={},
-        _intrusion_config_cache={},
-        _stream_type_override=None,
+        camera_entities={},
+        firmware_cache={},
+        intrusion_config_cache={},
+        stream_type_override=None,
         last_update_success=True,
         get_quality=lambda cid: "auto",
         set_quality=lambda cid, q: None,
@@ -312,8 +312,8 @@ def stub_coord_nvr_mode() -> SimpleNamespace:
         get_nvr_mode=_get_nvr_mode,
         set_nvr_mode=_set_nvr_mode,
         options={"enable_nvr": True},
-        _nvr_processes={},
-        _nvr_preroll_processes={},
+        nvr_processes={},
+        nvr_preroll_processes={},
         start_recorder=AsyncMock(),
     )
 
@@ -398,7 +398,7 @@ class TestNvrModeSelectBasic:
         pick this up was removed in v14.5.4)."""
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
 
-        stub_coord_nvr_mode._nvr_processes[CAM_ID] = MagicMock()  # already running
+        stub_coord_nvr_mode.nvr_processes[CAM_ID] = MagicMock()  # already running
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         sel.async_write_ha_state = MagicMock()
         await sel.async_select_option("event_buffered")
@@ -409,10 +409,10 @@ class TestNvrModeSelectBasic:
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Same as above, but the camera was running event-buffered mode
-        (tracked in _nvr_preroll_processes, not _nvr_processes)."""
+        (tracked in nvr_preroll_processes, not nvr_processes)."""
         from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
 
-        stub_coord_nvr_mode._nvr_preroll_processes[CAM_ID] = MagicMock()
+        stub_coord_nvr_mode.nvr_preroll_processes[CAM_ID] = MagicMock()
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         sel.async_write_ha_state = MagicMock()
         await sel.async_select_option("continuous")
@@ -526,7 +526,7 @@ class TestMotionSensitivitySelectBasic:
 #
 # Most select entities use a tiered fallback chain to derive the
 # displayed option:
-#   1. In-memory override (`coordinator._stream_type_override`)
+#   1. In-memory override (`coordinator.stream_type_override`)
 #   2. Persisted entry option (`get_options(entry)["..."]`)
 #   3. Hard-coded default ("auto" / first option)
 #   4. None when the underlying data isn't fetched yet (slow-tier)
@@ -560,12 +560,12 @@ def stub_coord_extra() -> SimpleNamespace:
             "stream_connection_type": "auto",
             "enable_fcm_push": True,
         },
-        _stream_type_override=None,
-        _fcm_push_mode="auto",
-        _intrusion_config_cache={},
-        _intrusion_config_set_at={},
-        _motion_set_at={},
-        _alarm_settings_set_at={},
+        stream_type_override=None,
+        fcm_push_mode="auto",
+        intrusion_config_cache={},
+        intrusion_config_set_at={},
+        motion_set_at={},
+        alarm_settings_set_at={},
         async_put_camera=AsyncMock(return_value=True),
         async_stop_fcm_push=AsyncMock(),
         async_start_fcm_push=AsyncMock(),
@@ -636,12 +636,12 @@ class TestStreamModeSelectFallbackChain:
     def test_override_takes_precedence_over_options(
         self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
-        """When the user changes the dropdown live, `_stream_type_override`
+        """When the user changes the dropdown live, `stream_type_override`
         wins over the persisted option until the integration reloads.
         Otherwise the next coordinator tick would flip the dropdown back."""
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
 
-        stub_coord_extra._stream_type_override = "local"
+        stub_coord_extra.stream_type_override = "local"
         stub_entry_extra.options["stream_connection_type"] = "auto"
         sel = BoschStreamModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.current_option == "local"
@@ -652,7 +652,7 @@ class TestStreamModeSelectFallbackChain:
         """Without an in-memory override, persisted option wins."""
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
 
-        stub_coord_extra._stream_type_override = None
+        stub_coord_extra.stream_type_override = None
         stub_entry_extra.options["stream_connection_type"] = "remote"
         sel = BoschStreamModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.current_option == "remote"
@@ -665,7 +665,7 @@ class TestStreamModeSelectFallbackChain:
         Default collapse target is 'local' since v12.4.2 (LOCAL-first)."""
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
 
-        stub_coord_extra._stream_type_override = "made-up-mode"
+        stub_coord_extra.stream_type_override = "made-up-mode"
         sel = BoschStreamModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.current_option == "local"
 
@@ -682,7 +682,7 @@ class TestStreamModeSelectFallbackChain:
         """
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
 
-        stub_coord_extra._stream_type_override = None
+        stub_coord_extra.stream_type_override = None
         stub_entry_extra.options["stream_connection_type"] = "auto"
         sel = BoschStreamModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.current_option == "auto", (
@@ -695,7 +695,7 @@ class TestStreamModeSelectFallbackChain:
     async def test_select_option_writes_override(
         self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
-        """User picks 'remote' in the dropdown → `_stream_type_override`
+        """User picks 'remote' in the dropdown → `stream_type_override`
         flips immediately. Takes effect on the next stream activation,
         no integration reload required."""
         from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
@@ -703,7 +703,7 @@ class TestStreamModeSelectFallbackChain:
         sel = BoschStreamModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         sel.async_write_ha_state = MagicMock()
         await sel.async_select_option("remote")
-        assert stub_coord_extra._stream_type_override == "remote"
+        assert stub_coord_extra.stream_type_override == "remote"
         sel.async_write_ha_state.assert_called_once()
 
 
@@ -1007,15 +1007,13 @@ class TestDetectionModeSelectPins:
     ) -> None:
         """Pin: coordinator cache value '{api_value}' → current_option == '{expected_key}'.
 
-        BoschDetectionModeSelect reads coordinator._intrusion_config_cache[cam_id]
+        BoschDetectionModeSelect reads coordinator.intrusion_config_cache[cam_id]
         ['detectionMode'] and lower-cases it. If the lower-cased value is in
         DETECTION_MODE_OPTIONS it is returned; otherwise None.
         A failure here means the detection-mode dropdown shows 'unknown' despite
         a valid API value being cached, confusing users who check their settings.
         """
-        stub_coord_extra._intrusion_config_cache = {
-            CAM_ID: {"detectionMode": api_value}
-        }
+        stub_coord_extra.intrusion_config_cache = {CAM_ID: {"detectionMode": api_value}}
         from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
 
         sel = BoschDetectionModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -1044,12 +1042,12 @@ def _stub_coord_platform(gen2: bool = True):
         },
         options={"enable_fcm_push": False},
         last_update_success=True,
-        _stream_type_override=None,
-        _intrusion_config_cache={},
-        _intrusion_config_set_at={},
-        _alarm_settings_set_at={},
-        _motion_set_at={},
-        _fcm_push_mode="unknown",
+        stream_type_override=None,
+        intrusion_config_cache={},
+        intrusion_config_set_at={},
+        alarm_settings_set_at={},
+        motion_set_at={},
+        fcm_push_mode="unknown",
         motion_settings=lambda cam_id: {
             "motionAlarmConfiguration": "HIGH",
             "enabled": True,
@@ -1329,7 +1327,7 @@ class TestMotionSensitivitySelectWrite:
         )
         # Write-lock stamped so the slow-tier poll won't revert the optimistic
         # value before the cloud catches up.
-        assert CAM_ID in sel.coordinator._motion_set_at
+        assert CAM_ID in sel.coordinator.motion_set_at
 
     @pytest.mark.asyncio
     async def test_select_option_failure_logs_warning(self):
@@ -1402,9 +1400,9 @@ class TestFcmPushModeSelectRestart:
         """Selecting a mode persists to options and restarts FCM when enabled."""
         sel = self._make(options={"enable_fcm_push": True})
         sel.coordinator.options = {"enable_fcm_push": True}
-        # Restart task is tracked on coordinator._bg_tasks (cancelled on
+        # Restart task is tracked on coordinator.bg_tasks (cancelled on
         # unload) instead of fire-and-forget.
-        sel.coordinator._bg_tasks = set()
+        sel.coordinator.bg_tasks = set()
 
         def _create(coro):
             coro.close()  # avoid ResourceWarning; we only assert tracking here
@@ -1416,7 +1414,7 @@ class TestFcmPushModeSelectRestart:
         sel.coordinator.async_stop_fcm_push.assert_called_once()
         sel.async_write_ha_state.assert_called_once()
         # Restart task registered for cancellation on unload.
-        assert len(sel.coordinator._bg_tasks) == 1
+        assert len(sel.coordinator.bg_tasks) == 1
 
     @pytest.mark.asyncio
     async def test_select_option_no_fcm_restart_when_disabled(self):
@@ -1451,7 +1449,7 @@ class TestDetectionModeSelect:
         from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
 
         coord = _stub_coord_platform(gen2=True)
-        coord._intrusion_config_cache = intrusion_cache or {}
+        coord.intrusion_config_cache = intrusion_cache or {}
         coord.async_put_camera = AsyncMock(return_value=put_return)
         entry = _stub_entry_platform()
         sel = BoschDetectionModeSelect(coord, CAM_ID, entry)
@@ -1510,7 +1508,7 @@ class TestDetectionModeSelect:
         ):
             await sel.async_select_option("only_humans")
         assert (
-            sel.coordinator._intrusion_config_cache[CAM_ID]["detectionMode"]
+            sel.coordinator.intrusion_config_cache[CAM_ID]["detectionMode"]
             == "ONLY_HUMANS"
         )
 
@@ -1579,8 +1577,8 @@ def stub_coord_pan() -> SimpleNamespace:
                 }
             }
         },
-        _pan_cache={PAN_CAM_ID: 0},  # parked at home position
-        _image_rotation_180={},
+        pan_cache={PAN_CAM_ID: 0},  # parked at home position
+        image_rotation_180={},
         last_update_success=True,
         async_cloud_set_pan=AsyncMock(return_value=True),
     )
@@ -1622,35 +1620,35 @@ class TestCurrentOptionPresetPositions:
     def test_home_position(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._pan_cache[PAN_CAM_ID] = 0
+        stub_coord_pan.pan_cache[PAN_CAM_ID] = 0
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.current_option == "home"  # type: ignore[attr-defined]
 
     def test_left_position(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._pan_cache[PAN_CAM_ID] = -60
+        stub_coord_pan.pan_cache[PAN_CAM_ID] = -60
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.current_option == "left"  # type: ignore[attr-defined]
 
     def test_right_position(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._pan_cache[PAN_CAM_ID] = 60
+        stub_coord_pan.pan_cache[PAN_CAM_ID] = 60
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.current_option == "right"  # type: ignore[attr-defined]
 
     def test_back_left_position(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._pan_cache[PAN_CAM_ID] = -120
+        stub_coord_pan.pan_cache[PAN_CAM_ID] = -120
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.current_option == "back_left"  # type: ignore[attr-defined]
 
     def test_back_right_position(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._pan_cache[PAN_CAM_ID] = 120
+        stub_coord_pan.pan_cache[PAN_CAM_ID] = 120
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.current_option == "back_right"  # type: ignore[attr-defined]
 
@@ -1658,20 +1656,20 @@ class TestCurrentOptionPresetPositions:
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
         """Manual slider move to a non-preset angle → current_option is None."""
-        stub_coord_pan._pan_cache[PAN_CAM_ID] = 45
+        stub_coord_pan.pan_cache[PAN_CAM_ID] = 45
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.current_option is None  # type: ignore[attr-defined]
 
     def test_cache_empty_returns_none(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._pan_cache = {}
+        stub_coord_pan.pan_cache = {}
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.current_option is None  # type: ignore[attr-defined]
 
 
 class TestCurrentOptionCeilingMount:
-    """When _image_rotation_180 is set the pan cache value sign is inverted
+    """When image_rotation_180 is set the pan cache value sign is inverted
     before comparing against preset angles — so the user sees the correct
     preset name even when the camera is ceiling-mounted.
     """
@@ -1679,8 +1677,8 @@ class TestCurrentOptionCeilingMount:
     def test_ceiling_home(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._image_rotation_180 = {PAN_CAM_ID: True}
-        stub_coord_pan._pan_cache[PAN_CAM_ID] = 0  # 0 inverted = 0 → home
+        stub_coord_pan.image_rotation_180 = {PAN_CAM_ID: True}
+        stub_coord_pan.pan_cache[PAN_CAM_ID] = 0  # 0 inverted = 0 → home
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.current_option == "home"  # type: ignore[attr-defined]
 
@@ -1688,16 +1686,16 @@ class TestCurrentOptionCeilingMount:
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
         # Camera reports raw +60 (physical right); inversion → user sees −60 (left)
-        stub_coord_pan._image_rotation_180 = {PAN_CAM_ID: True}
-        stub_coord_pan._pan_cache[PAN_CAM_ID] = 60
+        stub_coord_pan.image_rotation_180 = {PAN_CAM_ID: True}
+        stub_coord_pan.pan_cache[PAN_CAM_ID] = 60
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.current_option == "left"  # type: ignore[attr-defined]
 
     def test_ceiling_right_shows_right(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._image_rotation_180 = {PAN_CAM_ID: True}
-        stub_coord_pan._pan_cache[PAN_CAM_ID] = -60
+        stub_coord_pan.image_rotation_180 = {PAN_CAM_ID: True}
+        stub_coord_pan.pan_cache[PAN_CAM_ID] = -60
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.current_option == "right"  # type: ignore[attr-defined]
 
@@ -1706,14 +1704,14 @@ class TestAvailable:
     def test_available_when_cache_populated(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._pan_cache[PAN_CAM_ID] = 0
+        stub_coord_pan.pan_cache[PAN_CAM_ID] = 0
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.available is True  # type: ignore[attr-defined]
 
     def test_not_available_when_cache_missing(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._pan_cache = {}
+        stub_coord_pan.pan_cache = {}
         sel = _make_sel(stub_coord_pan, stub_entry)
         assert sel.available is False  # type: ignore[attr-defined]
 
@@ -1736,7 +1734,7 @@ class TestSelectOption:
         sel.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
         await sel.async_select_option("home")  # type: ignore[attr-defined]
         stub_coord_pan.async_cloud_set_pan.assert_called_once_with(PAN_CAM_ID, 0)
-        assert stub_coord_pan._pan_cache[PAN_CAM_ID] == 0
+        assert stub_coord_pan.pan_cache[PAN_CAM_ID] == 0
 
     @pytest.mark.asyncio
     async def test_select_left(
@@ -1746,7 +1744,7 @@ class TestSelectOption:
         sel.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
         await sel.async_select_option("left")  # type: ignore[attr-defined]
         stub_coord_pan.async_cloud_set_pan.assert_called_once_with(PAN_CAM_ID, -60)
-        assert stub_coord_pan._pan_cache[PAN_CAM_ID] == -60
+        assert stub_coord_pan.pan_cache[PAN_CAM_ID] == -60
 
     @pytest.mark.asyncio
     async def test_select_right(
@@ -1756,7 +1754,7 @@ class TestSelectOption:
         sel.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
         await sel.async_select_option("right")  # type: ignore[attr-defined]
         stub_coord_pan.async_cloud_set_pan.assert_called_once_with(PAN_CAM_ID, 60)
-        assert stub_coord_pan._pan_cache[PAN_CAM_ID] == 60
+        assert stub_coord_pan.pan_cache[PAN_CAM_ID] == 60
 
     @pytest.mark.asyncio
     async def test_select_back_left(
@@ -1766,7 +1764,7 @@ class TestSelectOption:
         sel.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
         await sel.async_select_option("back_left")  # type: ignore[attr-defined]
         stub_coord_pan.async_cloud_set_pan.assert_called_once_with(PAN_CAM_ID, -120)
-        assert stub_coord_pan._pan_cache[PAN_CAM_ID] == -120
+        assert stub_coord_pan.pan_cache[PAN_CAM_ID] == -120
 
     @pytest.mark.asyncio
     async def test_select_back_right(
@@ -1776,7 +1774,7 @@ class TestSelectOption:
         sel.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
         await sel.async_select_option("back_right")  # type: ignore[attr-defined]
         stub_coord_pan.async_cloud_set_pan.assert_called_once_with(PAN_CAM_ID, 120)
-        assert stub_coord_pan._pan_cache[PAN_CAM_ID] == 120
+        assert stub_coord_pan.pan_cache[PAN_CAM_ID] == 120
 
     @pytest.mark.asyncio
     async def test_unknown_option_no_call(
@@ -1794,13 +1792,13 @@ class TestSelectOption:
     ) -> None:
         """When async_cloud_set_pan returns False the cache must not be updated."""
         stub_coord_pan.async_cloud_set_pan = AsyncMock(return_value=False)
-        stub_coord_pan._pan_cache[PAN_CAM_ID] = 0  # parked at home
+        stub_coord_pan.pan_cache[PAN_CAM_ID] = 0  # parked at home
         sel = _make_sel(stub_coord_pan, stub_entry)
         sel.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
         await sel.async_select_option("right")  # type: ignore[attr-defined]
         stub_coord_pan.async_cloud_set_pan.assert_called_once_with(PAN_CAM_ID, 60)
         # Cache must remain at 0 (unchanged) — no optimistic update on failure
-        assert stub_coord_pan._pan_cache[PAN_CAM_ID] == 0
+        assert stub_coord_pan.pan_cache[PAN_CAM_ID] == 0
 
 
 class TestSelectOptionCeilingMount:
@@ -1810,7 +1808,7 @@ class TestSelectOptionCeilingMount:
     async def test_right_inverted_to_minus60_on_ceiling(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._image_rotation_180 = {PAN_CAM_ID: True}
+        stub_coord_pan.image_rotation_180 = {PAN_CAM_ID: True}
         sel = _make_sel(stub_coord_pan, stub_entry)
         sel.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
         await sel.async_select_option("right")  # type: ignore[attr-defined]
@@ -1821,7 +1819,7 @@ class TestSelectOptionCeilingMount:
     async def test_left_inverted_to_plus60_on_ceiling(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._image_rotation_180 = {PAN_CAM_ID: True}
+        stub_coord_pan.image_rotation_180 = {PAN_CAM_ID: True}
         sel = _make_sel(stub_coord_pan, stub_entry)
         sel.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
         await sel.async_select_option("left")  # type: ignore[attr-defined]
@@ -1831,7 +1829,7 @@ class TestSelectOptionCeilingMount:
     async def test_home_not_inverted_on_ceiling(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        stub_coord_pan._image_rotation_180 = {PAN_CAM_ID: True}
+        stub_coord_pan.image_rotation_180 = {PAN_CAM_ID: True}
         sel = _make_sel(stub_coord_pan, stub_entry)
         sel.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
         await sel.async_select_option("home")  # type: ignore[attr-defined]
@@ -1901,8 +1899,8 @@ def _coord(*, with_pan: bool):
                 }
             }
         },
-        _pan_cache={cam_id: 0},
-        _image_rotation_180={},
+        pan_cache={cam_id: 0},
+        image_rotation_180={},
         last_update_success=True,
         async_cloud_set_pan=AsyncMock(return_value=True),
     )
@@ -2074,7 +2072,7 @@ class TestFcmPushModeSelectAvailableSuperFalse:
 @pytest.mark.asyncio
 async def test_fcm_mode_select_tracks_restart_task() -> None:
     """Selecting a new FCM push mode must register the async_start_fcm_push()
-    task in coordinator._bg_tasks so async_unload_entry can cancel it — an
+    task in coordinator.bg_tasks so async_unload_entry can cancel it — an
     untracked fire-and-forget task could keep running (and re-establish FCM)
     after the entry was unloaded."""
     from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
@@ -2082,8 +2080,8 @@ async def test_fcm_mode_select_tracks_restart_task() -> None:
     coordinator = SimpleNamespace(
         data={CAM_ID: {"info": {"title": "Terrasse"}}},
         options={"enable_fcm_push": True},
-        _fcm_push_mode="auto",
-        _bg_tasks=set(),
+        fcm_push_mode="auto",
+        bg_tasks=set(),
         async_stop_fcm_push=AsyncMock(),
         async_start_fcm_push=AsyncMock(),
         last_update_success=True,
@@ -2101,14 +2099,14 @@ async def test_fcm_mode_select_tracks_restart_task() -> None:
     await sel.async_select_option("all")
 
     # Task is registered before it completes.
-    assert len(coordinator._bg_tasks) == 1
+    assert len(coordinator.bg_tasks) == 1
     coordinator.async_stop_fcm_push.assert_awaited_once()
 
     # Let the scheduled task run, then a further tick for the done-callback
     # (add_done_callback fires via call_soon on the next loop iteration).
     for _ in range(5):
         await asyncio.sleep(0)
-        if not coordinator._bg_tasks:
+        if not coordinator.bg_tasks:
             break
     coordinator.async_start_fcm_push.assert_awaited_once()
-    assert len(coordinator._bg_tasks) == 0
+    assert len(coordinator.bg_tasks) == 0

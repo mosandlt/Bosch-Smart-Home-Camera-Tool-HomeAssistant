@@ -13,10 +13,10 @@ CLOUD_API = "https://residential.cbs.boschsecurity.com"
 # has arrived in this window, push delivery is dead at the cloud/Google layer
 # even though the socket reports is_started()=True (the exact silent-death case
 # the fcm.py module docstring describes). The poll is ground truth that push
-# missed a real event, so we flip _fcm_healthy=False and force a HARD heal
+# missed a real event, so we flip fcm_healthy=False and force a HARD heal
 # (purge + fresh registration) — which also re-POSTs to Bosch /v11/devices,
 # healing a server-side-dropped device registration. 10 min is wide enough that
-# a push arriving just before the poll (race) keeps _fcm_last_push recent and
+# a push arriving just before the poll (race) keeps fcm_last_push recent and
 # suppresses a false positive.
 FCM_DELIVERY_DEAD_AFTER_SEC = 600.0
 
@@ -128,13 +128,13 @@ MOTION_ACTIVE_WINDOW_MAX = 300  # seconds
 # sessions at 60 min) instead of lingering until the maxSessionDuration recycle.
 # Reaping is driven by consumer presence, not by the switch: an active viewer or
 # Mini-NVR recorder counts as a consumer and is never reaped, so automations that
-# use the stream are unaffected. See __init__.py _idle_session_reaper.
+# use the stream are unaffected. See __init__.py idle_session_reaper.
 STREAM_IDLE_REAP_SEC = 180  # no-consumer grace before tearing a session down
 STREAM_IDLE_REAP_CHECK_SEC = 30  # reaper poll interval
 # An HLS stream counts as actively watched if a playlist/segment was fetched
 # within this window (clients refetch every few seconds). Used instead of HA's
 # unreliable Stream.available (which stays True for the whole session). See
-# cf_unbuffer.hls_access_age + __init__.py _has_active_consumer.
+# cf_unbuffer.hls_access_age + __init__.py has_active_consumer.
 STREAM_HLS_FRESH_SEC = 30
 
 DEFAULT_AI_DESCRIBE_PROMPT = "Du bist eine Überwachungskamera-Assistenz. Melde NUR sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere, Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes erkennbar ist, sage das kurz, z. B.: Keine sicherheitsrelevanten Beobachtungen."
@@ -188,7 +188,7 @@ DEFAULT_OPTIONS = {
     # NVR storage target: "local" (default — segments stay under nvr_base_path),
     # "smb" (drain finalized segments to the same SMB share used for events),
     # "ffp" / "ftp" (drain to FTP server). ffmpeg ALWAYS writes to a local
-    # staging dir first; the watcher in recorder._drain_staging_to_remote moves
+    # staging dir first; the watcher in recorder.drain_staging_to_remote moves
     # finalized files to the remote target.
     "nvr_storage_target": "local",
     # Subfolder under smb_base_path / FTP base_path to keep NVR segments

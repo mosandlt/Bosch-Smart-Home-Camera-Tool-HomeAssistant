@@ -42,7 +42,7 @@ def stub_coord() -> SimpleNamespace:
                 "status": "ONLINE",
             }
         },
-        _camera_entities={},
+        camera_entities={},
         async_request_refresh=AsyncMock(),
         async_put_camera=AsyncMock(return_value=True),
     )
@@ -131,8 +131,8 @@ class TestRefreshSnapshotPress:
         from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
         fake_cam = MagicMock()
-        fake_cam._async_trigger_image_refresh = AsyncMock(return_value=None)
-        stub_coord._camera_entities[CAM_ID] = fake_cam
+        fake_cam.async_trigger_image_refresh = AsyncMock(return_value=None)
+        stub_coord.camera_entities[CAM_ID] = fake_cam
 
         btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
         fake_hass = MagicMock()
@@ -170,8 +170,8 @@ class TestRefreshSnapshotErrorHandling:
         from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
 
         fake_cam = MagicMock()
-        fake_cam._async_trigger_image_refresh = AsyncMock(return_value=None)
-        stub_coord._camera_entities[CAM_ID] = fake_cam
+        fake_cam.async_trigger_image_refresh = AsyncMock(return_value=None)
+        stub_coord.camera_entities[CAM_ID] = fake_cam
 
         btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
         fake_hass = MagicMock()
@@ -381,10 +381,10 @@ def _naming_stub_coord() -> SimpleNamespace:
                 "motion": {},
             }
         },
-        _camera_entities={},
-        _firmware_cache={},
-        _intrusion_config_cache={},
-        _stream_type_override=None,
+        camera_entities={},
+        firmware_cache={},
+        intrusion_config_cache={},
+        stream_type_override=None,
         last_update_success=True,
         get_quality=lambda cid: "auto",
         set_quality=lambda cid, q: None,

@@ -51,10 +51,10 @@ def _enable_loopback_sockets(socket_enabled: None) -> Generator[None, None, None
 
 def _coord(**overrides: object) -> SimpleNamespace:
     base: dict[str, object] = dict(
-        _live_connections={},
-        _tls_proxy_ports={},
-        _remote_viewing_front_door_runner=None,
-        _remote_viewing_sticky_port={},
+        live_connections={},
+        tls_proxy_ports={},
+        remote_viewing_front_door_runner=None,
+        remote_viewing_sticky_port={},
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -77,42 +77,42 @@ class TestRemoteResolveInner:
         session must never be served by the REMOTE relay's path-rewrite
         (there's no hash-bearing path to rewrite to in a LOCAL session)."""
         coord = _coord(
-            _live_connections={CAM_A: {"_connection_type": "LOCAL"}},
-            _tls_proxy_ports={CAM_A: 12345},
+            live_connections={CAM_A: {"_connection_type": "LOCAL"}},
+            tls_proxy_ports={CAM_A: 12345},
         )
         assert await remote_resolve_inner(coord, CAM_A) is None
 
     @pytest.mark.asyncio
     async def test_missing_port_returns_none(self):
         coord = _coord(
-            _live_connections={
+            live_connections={
                 CAM_A: {
                     "_connection_type": "REMOTE",
                     "_remote_path": "/hashXXX/rtsp_tunnel?inst=1",
                 }
             },
-            _tls_proxy_ports={},  # no port cached yet
+            tls_proxy_ports={},  # no port cached yet
         )
         assert await remote_resolve_inner(coord, CAM_A) is None
 
     @pytest.mark.asyncio
     async def test_missing_path_returns_none(self):
         coord = _coord(
-            _live_connections={CAM_A: {"_connection_type": "REMOTE"}},
-            _tls_proxy_ports={CAM_A: 12345},
+            live_connections={CAM_A: {"_connection_type": "REMOTE"}},
+            tls_proxy_ports={CAM_A: 12345},
         )
         assert await remote_resolve_inner(coord, CAM_A) is None
 
     @pytest.mark.asyncio
     async def test_all_present_returns_remote_target(self):
         coord = _coord(
-            _live_connections={
+            live_connections={
                 CAM_A: {
                     "_connection_type": "REMOTE",
                     "_remote_path": "/hashFRESH/rtsp_tunnel?inst=1&fmtp=1",
                 }
             },
-            _tls_proxy_ports={CAM_A: 55123},
+            tls_proxy_ports={CAM_A: 55123},
         )
         target = await remote_resolve_inner(coord, CAM_A)
         assert target is not None
@@ -132,27 +132,27 @@ class TestRemoteResolveInner:
     async def test_picks_up_rotated_hash_on_next_resolve(self):
         """A session-boundary reconnect mints a new hash — the NEXT resolve
         (i.e. the next client connect) must see it, with no special
-        handling needed beyond reading `_live_connections` fresh."""
+        handling needed beyond reading `live_connections` fresh."""
         coord = _coord(
-            _live_connections={
+            live_connections={
                 CAM_A: {
                     "_connection_type": "REMOTE",
                     "_remote_path": "/hashOLD/rtsp_tunnel?inst=1",
                 }
             },
-            _tls_proxy_ports={CAM_A: 11111},
+            tls_proxy_ports={CAM_A: 11111},
         )
         first = await remote_resolve_inner(coord, CAM_A)
         assert first is not None
         assert first.path == "/hashOLD/rtsp_tunnel?inst=1"
 
         # Simulate the session-boundary reconnect: live_connection.py
-        # overwrites _live_connections[cam_id] with a fresh hash + port.
-        coord._live_connections[CAM_A] = {
+        # overwrites live_connections[cam_id] with a fresh hash + port.
+        coord.live_connections[CAM_A] = {
             "_connection_type": "REMOTE",
             "_remote_path": "/hashNEW/rtsp_tunnel?inst=1",
         }
-        coord._tls_proxy_ports[CAM_A] = 22222
+        coord.tls_proxy_ports[CAM_A] = 22222
 
         second = await remote_resolve_inner(coord, CAM_A)
         assert second is not None
@@ -169,7 +169,7 @@ class TestRemoteResolveInner:
 def runner_coord():
     coord = _coord()
     yield coord
-    runner = coord._remote_viewing_front_door_runner
+    runner = coord.remote_viewing_front_door_runner
     if runner is not None:
         runner.stop_all()
 
@@ -206,12 +206,12 @@ class TestStartRemoteViewingFrontDoor:
 
     @pytest.mark.asyncio
     async def test_lazily_creates_runner(self, runner_coord):
-        assert runner_coord._remote_viewing_front_door_runner is None
+        assert runner_coord.remote_viewing_front_door_runner is None
         await start_remote_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=3600
         )
         assert isinstance(
-            runner_coord._remote_viewing_front_door_runner, FrontDoorRunner
+            runner_coord.remote_viewing_front_door_runner, FrontDoorRunner
         )
 
     @pytest.mark.asyncio
@@ -219,7 +219,7 @@ class TestStartRemoteViewingFrontDoor:
         await start_remote_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=3600
         )
-        server = runner_coord._remote_viewing_front_door_runner._servers[CAM_A]
+        server = runner_coord.remote_viewing_front_door_runner._servers[CAM_A]
         assert server.config.bind_host == "127.0.0.1"
         assert server.config.auth_mode == AUTH_NONE
         assert server.config.ip_allowlist == frozenset()
@@ -233,7 +233,7 @@ class TestStartRemoteViewingFrontDoor:
         await start_remote_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=3600
         )
-        server = runner_coord._remote_viewing_front_door_runner._servers[CAM_A]
+        server = runner_coord.remote_viewing_front_door_runner._servers[CAM_A]
         assert server._relay_factory is _remote_relay_factory
 
     @pytest.mark.asyncio
@@ -241,11 +241,11 @@ class TestStartRemoteViewingFrontDoor:
         url1 = await start_remote_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=3600
         )
-        port1 = runner_coord._remote_viewing_sticky_port[CAM_A]
+        port1 = runner_coord.remote_viewing_sticky_port[CAM_A]
         url2 = await start_remote_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=3600
         )
-        port2 = runner_coord._remote_viewing_sticky_port[CAM_A]
+        port2 = runner_coord.remote_viewing_sticky_port[CAM_A]
         assert port1 == port2
         assert url1 == url2
 
@@ -258,7 +258,7 @@ class TestStartRemoteViewingFrontDoor:
         await start_remote_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=3600
         )
-        server_before = runner_coord._remote_viewing_front_door_runner._servers[CAM_A]
+        server_before = runner_coord.remote_viewing_front_door_runner._servers[CAM_A]
         with patch.object(
             FrontDoorRunner, "start_server", AsyncMock()
         ) as start_server_spy:
@@ -266,7 +266,7 @@ class TestStartRemoteViewingFrontDoor:
                 runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=3600
             )
         start_server_spy.assert_not_called()
-        server_after = runner_coord._remote_viewing_front_door_runner._servers[CAM_A]
+        server_after = runner_coord.remote_viewing_front_door_runner._servers[CAM_A]
         assert server_before is server_after
 
     @pytest.mark.asyncio
@@ -276,7 +276,7 @@ class TestStartRemoteViewingFrontDoor:
         url1 = await start_remote_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=3600
         )
-        port1 = runner_coord._remote_viewing_sticky_port[CAM_A]
+        port1 = runner_coord.remote_viewing_sticky_port[CAM_A]
         url2 = await start_remote_viewing_front_door(
             runner_coord,
             CAM_A,
@@ -284,7 +284,7 @@ class TestStartRemoteViewingFrontDoor:
             audio_param="&enableaudio=1",
             max_session_duration=3600,
         )
-        port2 = runner_coord._remote_viewing_sticky_port[CAM_A]
+        port2 = runner_coord.remote_viewing_sticky_port[CAM_A]
         assert port1 == port2  # same listener, same port
         assert "inst=1" in url1
         assert "inst=2" in url2
@@ -294,12 +294,12 @@ class TestStartRemoteViewingFrontDoor:
         blocker = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
         blocked_port = blocker.sockets[0].getsockname()[1]
         try:
-            runner_coord._remote_viewing_sticky_port[CAM_A] = blocked_port
+            runner_coord.remote_viewing_sticky_port[CAM_A] = blocked_port
             url = await start_remote_viewing_front_door(
                 runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=3600
             )
             assert url is not None
-            new_port = runner_coord._remote_viewing_sticky_port[CAM_A]
+            new_port = runner_coord.remote_viewing_sticky_port[CAM_A]
             assert new_port != blocked_port
         finally:
             blocker.close()
@@ -328,9 +328,9 @@ class TestStopRemoteViewingFrontDoor:
         await start_remote_viewing_front_door(
             runner_coord, CAM_A, inst=1, audio_param="", max_session_duration=3600
         )
-        assert runner_coord._remote_viewing_front_door_runner.has_server(CAM_A)
+        assert runner_coord.remote_viewing_front_door_runner.has_server(CAM_A)
         await stop_remote_viewing_front_door(runner_coord, CAM_A)
-        assert not runner_coord._remote_viewing_front_door_runner.has_server(CAM_A)
+        assert not runner_coord.remote_viewing_front_door_runner.has_server(CAM_A)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

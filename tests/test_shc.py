@@ -7,7 +7,7 @@ Covers:
     refresh re-touches go2rtc stream registration for every active camera and
     causes unrelated cameras' live sessions to TEARDOWN + reconnect).
   - Privacy-mode / camera-light cache write-lock race: the SHC background
-    poller must honor `_privacy_set_at` / `_light_set_at` so a stale poll
+    poller must honor `privacy_set_at` / `light_set_at` so a stale poll
     response cannot revert a just-written user value (PRIVACY_REVERT bug,
     fixed 2026-05-05).
   - `async_shc_request` / `async_update_shc_states`: the raw SHC HTTP client
@@ -126,9 +126,9 @@ def _put_200_json_session(json_data: dict) -> MagicMock:
 def _stub_coord_privacy_no_refresh():
     return SimpleNamespace(
         token="tok-AAA",
-        _cached_status={},
-        _privacy_set_at={},
-        _shc_state_cache={CAM_ID: {"device_id": "shc-dev-1"}},
+        cached_status={},
+        privacy_set_at={},
+        shc_state_cache={CAM_ID: {"device_id": "shc-dev-1"}},
         async_update_listeners=MagicMock(),
         async_request_refresh=AsyncMock(),
         hass=SimpleNamespace(async_create_task=MagicMock()),
@@ -150,8 +150,8 @@ class TestPrivacyModeNoFullRefresh:
         ):
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, True)
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["privacy_mode"] is True
-        assert CAM_ID in coord._privacy_set_at
+        assert coord.shc_state_cache[CAM_ID]["privacy_mode"] is True
+        assert CAM_ID in coord.privacy_set_at
         coord.async_update_listeners.assert_called()  # optimistic UI push kept
         coord.async_request_refresh.assert_not_called()  # path C: no forced refresh
         coord.hass.async_create_task.assert_not_called()  # nothing scheduled
@@ -172,7 +172,7 @@ class TestPrivacyModeNoFullRefresh:
         ):
             result = await async_cloud_set_privacy_mode(coord, CAM_ID, False)
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["privacy_mode"] is False
+        assert coord.shc_state_cache[CAM_ID]["privacy_mode"] is False
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         # The lightweight privacy-OFF snapshot trigger is still scheduled — it
@@ -183,18 +183,18 @@ class TestPrivacyModeNoFullRefresh:
 def _base_coord() -> SimpleNamespace:
     return SimpleNamespace(
         token="tok-AAA",
-        _cached_status={},
-        _privacy_set_at={},
-        _notif_set_at={},
-        _light_set_at={},
-        _pan_cache={},
-        _shc_state_cache={
+        cached_status={},
+        privacy_set_at={},
+        notif_set_at={},
+        light_set_at={},
+        pan_cache={},
+        shc_state_cache={
             CAM_ID: {"device_id": "shc-dev-1", "front_light_intensity": 0.5}
         },
-        _hw_version={CAM_ID: "HOME_Eyes_Outdoor"},  # gen2
-        _lighting_switch_cache={},
-        _local_creds_cache={},
-        _rcp_lan_ip_cache={},
+        hw_version={CAM_ID: "HOME_Eyes_Outdoor"},  # gen2
+        lighting_switch_cache={},
+        local_creds_cache={},
+        rcp_lan_ip_cache={},
         async_update_listeners=MagicMock(),
         async_request_refresh=AsyncMock(),
         hass=SimpleNamespace(async_create_task=MagicMock()),
@@ -215,7 +215,7 @@ class TestShcSetCameraLightNoRefresh:
             result = await async_shc_set_camera_light(coord, CAM_ID, True)
 
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["camera_light"] is True
+        assert coord.shc_state_cache[CAM_ID]["camera_light"] is True
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         coord.hass.async_create_task.assert_not_called()
@@ -226,7 +226,7 @@ class TestShcSetCameraLightNoRefresh:
         from custom_components.bosch_shc_camera.shc import async_shc_set_camera_light
 
         coord = _base_coord()
-        coord._shc_state_cache[CAM_ID]["camera_light"] = True
+        coord.shc_state_cache[CAM_ID]["camera_light"] = True
         with patch(
             "custom_components.bosch_shc_camera.shc.async_shc_request",
             AsyncMock(return_value={"status": 204, "ok": True}),
@@ -234,7 +234,7 @@ class TestShcSetCameraLightNoRefresh:
             result = await async_shc_set_camera_light(coord, CAM_ID, False)
 
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["camera_light"] is False
+        assert coord.shc_state_cache[CAM_ID]["camera_light"] is False
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         coord.hass.async_create_task.assert_not_called()
@@ -264,7 +264,7 @@ class TestCloudSetCameraLightNoRefresh:
             result = await async_cloud_set_camera_light(coord, CAM_ID, True)
 
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["camera_light"] is True
+        assert coord.shc_state_cache[CAM_ID]["camera_light"] is True
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         coord.hass.async_create_task.assert_not_called()
@@ -275,7 +275,7 @@ class TestCloudSetCameraLightNoRefresh:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_camera_light
 
         coord = _base_coord()
-        coord._hw_version[CAM_ID] = "OUTDOOR"  # Gen1
+        coord.hw_version[CAM_ID] = "OUTDOOR"  # Gen1
 
         with (
             patch(
@@ -290,7 +290,7 @@ class TestCloudSetCameraLightNoRefresh:
             result = await async_cloud_set_camera_light(coord, CAM_ID, False)
 
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["camera_light"] is False
+        assert coord.shc_state_cache[CAM_ID]["camera_light"] is False
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         coord.hass.async_create_task.assert_not_called()
@@ -319,7 +319,7 @@ class TestCloudSetLightComponentNoRefresh:
             result = await async_cloud_set_light_component(coord, CAM_ID, "front", True)
 
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["front_light"] is True
+        assert coord.shc_state_cache[CAM_ID]["front_light"] is True
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         coord.hass.async_create_task.assert_not_called()
@@ -332,7 +332,7 @@ class TestCloudSetLightComponentNoRefresh:
         )
 
         coord = _base_coord()
-        coord._shc_state_cache[CAM_ID]["front_light"] = True
+        coord.shc_state_cache[CAM_ID]["front_light"] = True
 
         with (
             patch(
@@ -349,7 +349,7 @@ class TestCloudSetLightComponentNoRefresh:
             )
 
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["front_light"] is False
+        assert coord.shc_state_cache[CAM_ID]["front_light"] is False
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         coord.hass.async_create_task.assert_not_called()
@@ -371,10 +371,10 @@ class TestCloudSetNotificationsNoRefresh:
 
         assert result is True
         assert (
-            coord._shc_state_cache[CAM_ID]["notifications_status"]
+            coord.shc_state_cache[CAM_ID]["notifications_status"]
             == "FOLLOW_CAMERA_SCHEDULE"
         )
-        assert CAM_ID in coord._notif_set_at
+        assert CAM_ID in coord.notif_set_at
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         coord.hass.async_create_task.assert_not_called()
@@ -393,7 +393,7 @@ class TestCloudSetNotificationsNoRefresh:
             result = await async_cloud_set_notifications(coord, CAM_ID, False)
 
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["notifications_status"] == "ALWAYS_OFF"
+        assert coord.shc_state_cache[CAM_ID]["notifications_status"] == "ALWAYS_OFF"
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         coord.hass.async_create_task.assert_not_called()
@@ -406,7 +406,7 @@ class TestCloudSetPanNoRefresh:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_pan
 
         coord = _base_coord()
-        coord._shc_state_cache[CAM_ID]["privacy_mode"] = False
+        coord.shc_state_cache[CAM_ID]["privacy_mode"] = False
 
         with patch(
             "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
@@ -415,7 +415,7 @@ class TestCloudSetPanNoRefresh:
             result = await async_cloud_set_pan(coord, CAM_ID, 90)
 
         assert result is True
-        assert coord._pan_cache[CAM_ID] == 90
+        assert coord.pan_cache[CAM_ID] == 90
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         coord.hass.async_create_task.assert_not_called()
@@ -426,7 +426,7 @@ class TestCloudSetPanNoRefresh:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_pan
 
         coord = _base_coord()
-        coord._shc_state_cache[CAM_ID]["privacy_mode"] = False
+        coord.shc_state_cache[CAM_ID]["privacy_mode"] = False
 
         with patch(
             "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
@@ -435,7 +435,7 @@ class TestCloudSetPanNoRefresh:
             result = await async_cloud_set_pan(coord, CAM_ID, -45)
 
         assert result is True
-        assert coord._pan_cache[CAM_ID] == -45
+        assert coord.pan_cache[CAM_ID] == -45
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         coord.hass.async_create_task.assert_not_called()
@@ -446,7 +446,7 @@ class TestCloudSetPanNoRefresh:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_pan
 
         coord = _base_coord()
-        coord._shc_state_cache[CAM_ID]["privacy_mode"] = False
+        coord.shc_state_cache[CAM_ID]["privacy_mode"] = False
 
         with patch(
             "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
@@ -459,7 +459,7 @@ class TestCloudSetPanNoRefresh:
             result = await async_cloud_set_pan(coord, CAM_ID, 45)
 
         assert result is True
-        assert coord._pan_cache[CAM_ID] == 42  # actual from response, not requested
+        assert coord.pan_cache[CAM_ID] == 42  # actual from response, not requested
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
         coord.hass.async_create_task.assert_not_called()
@@ -470,26 +470,26 @@ class TestCloudSetPanNoRefresh:
 # Bug discovered 2026-04-27: first OFF-toggle of the privacy switch visibly
 # reverts to ON for ~1-2 seconds, then settles. Second OFF-toggle works
 # immediately. Root cause: the SHC fetcher in shc.py overwrote the
-# `_shc_state_cache[cam_id]["privacy_mode"]` field on every poll without
-# honoring the `_privacy_set_at` write-lock that the cloud-fetcher path
+# `shc_state_cache[cam_id]["privacy_mode"]` field on every poll without
+# honoring the `privacy_set_at` write-lock that the cloud-fetcher path
 # already respects. Fixed 2026-05-05 by adding the same write-lock check
 # inside `async_update_shc_states`. Same bug shape applies to camera_light
-# via `_light_set_at`.
+# via `light_set_at`.
 #
 # These tests pin the contract: when a user write happened within
-# `_WRITE_LOCK_SECS`, a stale SHC poll response must NOT overwrite the
+# `WRITE_LOCK_SECS`, a stale SHC poll response must NOT overwrite the
 # freshly-set cache value.
 
 
 def _make_stub_coordinator(write_lock_secs: float = 30.0):
     """Minimal coordinator stub with the fields shc.py's SHC fetcher touches."""
     return SimpleNamespace(
-        _shc_state_cache={},
-        _privacy_set_at={},
-        _light_set_at={},
-        _shc_devices_raw=[{"id": "dev-1", "name": "terrasse"}],
-        _last_shc_fetch=time.monotonic(),
-        _WRITE_LOCK_SECS=write_lock_secs,
+        shc_state_cache={},
+        privacy_set_at={},
+        light_set_at={},
+        shc_devices_raw=[{"id": "dev-1", "name": "terrasse"}],
+        last_shc_fetch=time.monotonic(),
+        WRITE_LOCK_SECS=write_lock_secs,
         # async_update_shc_states uses these for the SHC HTTP path:
         hass=SimpleNamespace(),
     )
@@ -533,13 +533,13 @@ async def test_user_off_toggle_survives_stale_shc_poll() -> None:
     coord = _make_stub_coordinator()
     cam_id = CAM_ID
     # 1. User just toggled privacy OFF. Cloud setter writes the cache + lock.
-    coord._shc_state_cache[cam_id] = {"device_id": "dev-1", "privacy_mode": False}
-    coord._privacy_set_at[cam_id] = time.monotonic()  # fresh write
+    coord.shc_state_cache[cam_id] = {"device_id": "dev-1", "privacy_mode": False}
+    coord.privacy_set_at[cam_id] = time.monotonic()  # fresh write
     # 2. SHC poll runs and sees stale ENABLED (cloud lag).
     data = {cam_id: {"info": {"title": "terrasse"}}}
     await _run_fetcher(coord, data, mock_response_value="ENABLED")
     # 3. Cache must STILL show False — write-lock honored.
-    assert coord._shc_state_cache[cam_id]["privacy_mode"] is False, (
+    assert coord.shc_state_cache[cam_id]["privacy_mode"] is False, (
         "PRIVACY_REVERT regression: SHC fetcher overwrote a fresh "
         "user-OFF write with a stale ENABLED reading. The write-lock "
         "in async_update_shc_states is broken."
@@ -548,14 +548,14 @@ async def test_user_off_toggle_survives_stale_shc_poll() -> None:
 
 @pytest.mark.asyncio
 async def test_shc_poll_applies_after_lock_expires() -> None:
-    """Once `_WRITE_LOCK_SECS` has elapsed, SHC poll IS authoritative again."""
+    """Once `WRITE_LOCK_SECS` has elapsed, SHC poll IS authoritative again."""
     coord = _make_stub_coordinator(write_lock_secs=5.0)
     cam_id = CAM_ID
-    coord._shc_state_cache[cam_id] = {"device_id": "dev-1", "privacy_mode": False}
-    coord._privacy_set_at[cam_id] = time.monotonic() - 10.0  # lock expired 5s ago
+    coord.shc_state_cache[cam_id] = {"device_id": "dev-1", "privacy_mode": False}
+    coord.privacy_set_at[cam_id] = time.monotonic() - 10.0  # lock expired 5s ago
     data = {cam_id: {"info": {"title": "terrasse"}}}
     await _run_fetcher(coord, data, mock_response_value="ENABLED")
-    assert coord._shc_state_cache[cam_id]["privacy_mode"] is True, (
+    assert coord.shc_state_cache[cam_id]["privacy_mode"] is True, (
         "After write-lock expires, SHC must be authoritative again — got stuck "
         "on cached value."
     )
@@ -563,14 +563,14 @@ async def test_shc_poll_applies_after_lock_expires() -> None:
 
 @pytest.mark.asyncio
 async def test_shc_poll_applies_when_no_recent_user_write() -> None:
-    """No `_privacy_set_at` entry → no lock → SHC writes immediately."""
+    """No `privacy_set_at` entry → no lock → SHC writes immediately."""
     coord = _make_stub_coordinator()
     cam_id = CAM_ID
     # Fresh start: cache exists but no user-write timestamp recorded
-    coord._shc_state_cache[cam_id] = {"device_id": "dev-1", "privacy_mode": None}
+    coord.shc_state_cache[cam_id] = {"device_id": "dev-1", "privacy_mode": None}
     data = {cam_id: {"info": {"title": "terrasse"}}}
     await _run_fetcher(coord, data, mock_response_value="ENABLED")
-    assert coord._shc_state_cache[cam_id]["privacy_mode"] is True
+    assert coord.shc_state_cache[cam_id]["privacy_mode"] is True
 
 
 @pytest.mark.asyncio
@@ -582,13 +582,13 @@ async def test_shc_poll_no_overwrite_when_value_matches() -> None:
     """
     coord = _make_stub_coordinator()
     cam_id = CAM_ID
-    coord._shc_state_cache[cam_id] = {"device_id": "dev-1", "privacy_mode": False}
-    coord._privacy_set_at[cam_id] = time.monotonic()  # fresh
+    coord.shc_state_cache[cam_id] = {"device_id": "dev-1", "privacy_mode": False}
+    coord.privacy_set_at[cam_id] = time.monotonic()  # fresh
     data = {cam_id: {"info": {"title": "terrasse"}}}
     # SHC agrees: also OFF (DISABLED)
     await _run_fetcher(coord, data, mock_response_value="DISABLED")
     # Either branch (skip or apply) ends with False — both are correct.
-    assert coord._shc_state_cache[cam_id]["privacy_mode"] is False
+    assert coord.shc_state_cache[cam_id]["privacy_mode"] is False
 
 
 @pytest.mark.asyncio
@@ -601,8 +601,8 @@ async def test_user_light_off_survives_stale_shc_poll() -> None:
     coord = _make_stub_coordinator()
     cam_id = CAM_ID
     # User just toggled light OFF
-    coord._shc_state_cache[cam_id] = {"device_id": "dev-1", "camera_light": False}
-    coord._light_set_at[cam_id] = time.monotonic()
+    coord.shc_state_cache[cam_id] = {"device_id": "dev-1", "camera_light": False}
+    coord.light_set_at[cam_id] = time.monotonic()
     data = {cam_id: {"info": {"title": "terrasse"}}}
     # SHC poll sees stale ON
     await _run_fetcher(
@@ -611,7 +611,7 @@ async def test_user_light_off_survives_stale_shc_poll() -> None:
         mock_response_value="DISABLED",  # privacy stays OFF
         light_value="ON",  # but light still ON in cloud
     )
-    assert coord._shc_state_cache[cam_id]["camera_light"] is False, (
+    assert coord.shc_state_cache[cam_id]["camera_light"] is False, (
         "camera_light cache race: SHC fetcher overwrote a fresh user-OFF "
         "with stale ON reading. Same bug shape as privacy_mode race."
     )
@@ -619,25 +619,25 @@ async def test_user_light_off_survives_stale_shc_poll() -> None:
 
 @pytest.mark.asyncio
 async def test_light_shc_poll_applies_after_lock_expires() -> None:
-    """Once `_WRITE_LOCK_SECS` has elapsed, SHC poll IS authoritative for light."""
+    """Once `WRITE_LOCK_SECS` has elapsed, SHC poll IS authoritative for light."""
     coord = _make_stub_coordinator(write_lock_secs=5.0)
     cam_id = CAM_ID
-    coord._shc_state_cache[cam_id] = {"device_id": "dev-1", "camera_light": False}
-    coord._light_set_at[cam_id] = time.monotonic() - 10.0
+    coord.shc_state_cache[cam_id] = {"device_id": "dev-1", "camera_light": False}
+    coord.light_set_at[cam_id] = time.monotonic() - 10.0
     data = {cam_id: {"info": {"title": "terrasse"}}}
     await _run_fetcher(coord, data, mock_response_value="DISABLED", light_value="ON")
-    assert coord._shc_state_cache[cam_id]["camera_light"] is True
+    assert coord.shc_state_cache[cam_id]["camera_light"] is True
 
 
 @pytest.mark.asyncio
 async def test_light_shc_poll_when_no_recent_user_write() -> None:
-    """No `_light_set_at` entry → no lock → SHC writes immediately."""
+    """No `light_set_at` entry → no lock → SHC writes immediately."""
     coord = _make_stub_coordinator()
     cam_id = CAM_ID
-    coord._shc_state_cache[cam_id] = {"device_id": "dev-1", "camera_light": None}
+    coord.shc_state_cache[cam_id] = {"device_id": "dev-1", "camera_light": None}
     data = {cam_id: {"info": {"title": "terrasse"}}}
     await _run_fetcher(coord, data, mock_response_value="DISABLED", light_value="ON")
-    assert coord._shc_state_cache[cam_id]["camera_light"] is True
+    assert coord.shc_state_cache[cam_id]["camera_light"] is True
 
 
 # Structural: every public function must exist (guards against accidental
@@ -687,33 +687,33 @@ def _stub_coord_round6(
             async_create_task=lambda coro: coro.close(),
             services=SimpleNamespace(async_call=AsyncMock()),
         ),
-        _shc_state_cache={
+        shc_state_cache={
             CAM_ID: {"device_id": "shc-dev-1", "front_light_intensity": 0.5}
         },
         # production async_cloud_set_privacy_mode reads
-        # coordinator._cached_status.get(cam_id) to skip cloud for OFFLINE
+        # coordinator.cached_status.get(cam_id) to skip cloud for OFFLINE
         # cams (HTTP 444 spam guard) — must be present on every stub.
-        _cached_status={},
-        _privacy_set_at={},
-        _light_set_at={},
-        _notif_set_at={},
-        _local_creds_cache={},
-        _rcp_lan_ip_cache={},
-        _pan_cache={},
-        _camera_entities={},
-        _hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
-        _auth_outage_count=0,
-        _shc_devices_raw=[],
-        _last_shc_fetch=float("-inf"),
-        _shc_available=True,
-        _shc_fail_count=0,
-        _shc_last_check=float("-inf"),  # SENTINEL_RULE: never 0.0 for monotonic
-        _SHC_MAX_FAILS=3,
-        _SHC_RETRY_INTERVAL=60,
-        _lighting_switch_cache={},
+        cached_status={},
+        privacy_set_at={},
+        light_set_at={},
+        notif_set_at={},
+        local_creds_cache={},
+        rcp_lan_ip_cache={},
+        pan_cache={},
+        camera_entities={},
+        hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
+        auth_outage_count=0,
+        shc_devices_raw=[],
+        last_shc_fetch=float("-inf"),
+        shc_available=True,
+        shc_fail_count=0,
+        shc_last_check=float("-inf"),  # SENTINEL_RULE: never 0.0 for monotonic
+        SHC_MAX_FAILS=3,
+        SHC_RETRY_INTERVAL=60,
+        lighting_switch_cache={},
         async_update_listeners=lambda: None,
         async_request_refresh=AsyncMock(),
-        _ensure_valid_token=AsyncMock(return_value="tok-FRESH"),
+        ensure_valid_token=AsyncMock(return_value="tok-FRESH"),
     )
     return coord
 
@@ -907,8 +907,8 @@ class TestAsyncUpdateShcStates:
         from custom_components.bosch_shc_camera.shc import async_update_shc_states
 
         coord = _stub_coord_round6()
-        coord._shc_devices_raw = []
-        coord._last_shc_fetch = time.monotonic() - 120  # force fetch
+        coord.shc_devices_raw = []
+        coord.last_shc_fetch = time.monotonic() - 120  # force fetch
         data = {
             CAM_ID: {
                 "info": {"title": "Terrasse"},
@@ -928,7 +928,7 @@ class TestAsyncUpdateShcStates:
         from custom_components.bosch_shc_camera.shc import async_update_shc_states
 
         coord = _stub_coord_round6()
-        coord._last_shc_fetch = float("-inf")  # force refresh
+        coord.last_shc_fetch = float("-inf")  # force refresh
         devices = [
             {
                 "id": "shc-dev-1",
@@ -951,7 +951,7 @@ class TestAsyncUpdateShcStates:
             AsyncMock(return_value=devices),
         ):
             await async_update_shc_states(coord, data)
-        assert coord._shc_devices_raw == devices
+        assert coord.shc_devices_raw == devices
 
 
 class TestAsyncUpdateShcStatesNoDeviceMatch:
@@ -965,8 +965,8 @@ class TestAsyncUpdateShcStatesNoDeviceMatch:
 
         coord = _stub_coord_select_remaining()
         # Pre-populate device list so the fetch branch is skipped
-        coord._shc_devices_raw = [{"id": "dev-99", "name": "Unknown Device"}]
-        coord._last_shc_fetch = float("inf")  # force "recent enough" to skip re-fetch
+        coord.shc_devices_raw = [{"id": "dev-99", "name": "Unknown Device"}]
+        coord.last_shc_fetch = float("inf")  # force "recent enough" to skip re-fetch
 
         data = {
             CAM_ID: {
@@ -981,7 +981,7 @@ class TestAsyncUpdateShcStatesNoDeviceMatch:
         ) as mock_req:
             await async_update_shc_states(coord, data)
             # The cam_id loop body should hit `continue` — no state-cache entry created
-            assert CAM_ID not in coord._shc_state_cache
+            assert CAM_ID not in coord.shc_state_cache
             # async_shc_request was not called because last_shc_fetch is "future"
             mock_req.assert_not_called()
 
@@ -992,13 +992,13 @@ class TestAsyncUpdateShcStatesNoDeviceMatch:
 
         cam2_id = "22222222-OTHER-CAM"
         coord = _stub_coord_round6()
-        coord._shc_devices_raw = [
+        coord.shc_devices_raw = [
             {"id": "dev-1", "name": "terrasse"}
         ]  # only matches first cam
-        coord._last_shc_fetch = float("inf")
+        coord.last_shc_fetch = float("inf")
 
         # Pre-seed cache for CAM2 so we can confirm it's NOT updated
-        coord._shc_state_cache = {}
+        coord.shc_state_cache = {}
 
         data = {
             CAM_ID: {"info": {"title": "Terrasse"}},  # matches → processed
@@ -1013,8 +1013,8 @@ class TestAsyncUpdateShcStatesNoDeviceMatch:
             await async_update_shc_states(coord, data)
 
         # CAM_ID was matched → cache entry created; CAM2_ID was not matched → absent
-        assert CAM_ID in coord._shc_state_cache
-        assert cam2_id not in coord._shc_state_cache
+        assert CAM_ID in coord.shc_state_cache
+        assert cam2_id not in coord.shc_state_cache
 
 
 def _coord_with_shc(
@@ -1027,10 +1027,10 @@ def _coord_with_shc(
             "shc_cert_path": "/path/cert.pem",
             "shc_key_path": "/path/key.pem",
         },
-        _shc_state_cache={cam_id: {"device_id": device_id, "camera_light": False}},
+        shc_state_cache={cam_id: {"device_id": device_id, "camera_light": False}},
         _shc_mark_success=MagicMock(),
         _shc_mark_failure=MagicMock(),
-        _light_set_at={},
+        light_set_at={},
         _shc_consecutive_failures=0,
         async_update_listeners=MagicMock(),
         async_request_refresh=AsyncMock(),
@@ -1044,7 +1044,7 @@ class TestAsyncShcSetCameraLight:
         from custom_components.bosch_shc_camera.shc import async_shc_set_camera_light
 
         coord = _coord_with_shc()
-        coord._shc_state_cache = {CAM_ID: {}}  # no device_id
+        coord.shc_state_cache = {CAM_ID: {}}  # no device_id
 
         result = await async_shc_set_camera_light(coord, CAM_ID, True)
         assert result is False, (
@@ -1054,11 +1054,11 @@ class TestAsyncShcSetCameraLight:
 
     @pytest.mark.asyncio
     async def test_no_cache_entry_returns_false(self):
-        """Camera not in _shc_state_cache at all → False."""
+        """Camera not in shc_state_cache at all → False."""
         from custom_components.bosch_shc_camera.shc import async_shc_set_camera_light
 
         coord = _coord_with_shc()
-        coord._shc_state_cache = {}  # cam_id missing entirely
+        coord.shc_state_cache = {}  # cam_id missing entirely
 
         result = await async_shc_set_camera_light(coord, CAM_ID, True)
         assert result is False
@@ -1075,7 +1075,7 @@ class TestAsyncShcSetCameraLight:
         ):
             result = await async_shc_set_camera_light(coord, CAM_ID, True)
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["camera_light"] is True
+        assert coord.shc_state_cache[CAM_ID]["camera_light"] is True
 
     @pytest.mark.asyncio
     async def test_failure_returns_false(self):
@@ -1096,13 +1096,13 @@ class TestAsyncShcSetPrivacyMode:
         from custom_components.bosch_shc_camera.shc import async_shc_set_privacy_mode
 
         coord = _coord_with_shc()
-        coord._shc_state_cache = {CAM_ID: {}}
+        coord.shc_state_cache = {CAM_ID: {}}
 
         result = await async_shc_set_privacy_mode(coord, CAM_ID, True)
         assert result is False
 
     def test_privacy_set_at_written_in_setter_body(self):
-        """_privacy_set_at must be stamped inside async_shc_set_privacy_mode.
+        """privacy_set_at must be stamped inside async_shc_set_privacy_mode.
 
         Guards against the BUG-4 pattern: write-lock written after cache update
         would leave a race window where the SHC fetcher sees no lock.
@@ -1112,8 +1112,8 @@ class TestAsyncShcSetPrivacyMode:
         assert func_start != -1
         next_func = src.find("\nasync def ", func_start + 1)
         func_body = src[func_start:next_func] if next_func != -1 else src[func_start:]
-        assert "_privacy_set_at" in func_body, (
-            "async_shc_set_privacy_mode must stamp _privacy_set_at "
+        assert "privacy_set_at" in func_body, (
+            "async_shc_set_privacy_mode must stamp privacy_set_at "
             "to prevent BUG-4 race on the SHC fallback path"
         )
 
@@ -1134,8 +1134,8 @@ class TestAsyncShcSetPrivacyMode:
         ):
             result = await async_shc_set_privacy_mode(coord, CAM_ID, False)
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["privacy_mode"] is False
-        assert CAM_ID in coord._privacy_set_at
+        assert coord.shc_state_cache[CAM_ID]["privacy_mode"] is False
+        assert CAM_ID in coord.privacy_set_at
 
     @pytest.mark.asyncio
     async def test_success_enable_does_not_schedule_snapshot(self):
@@ -1177,20 +1177,20 @@ def _stub_coord_setters(*, gen2: bool = True, with_token: bool = True):
             async_create_task=lambda coro: coro.close(),
             services=SimpleNamespace(async_call=AsyncMock()),
         ),
-        _shc_state_cache={CAM_ID: {"front_light_intensity": 0.5}},
-        _privacy_set_at={},
-        _light_set_at={},
-        _notif_set_at={},
-        _local_creds_cache={},
-        _rcp_lan_ip_cache={},
-        _pan_cache={},
-        _camera_entities={},  # used by _schedule_privacy_off_snapshot
-        _hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
-        _cached_status={},
-        _auth_outage_count=0,
+        shc_state_cache={CAM_ID: {"front_light_intensity": 0.5}},
+        privacy_set_at={},
+        light_set_at={},
+        notif_set_at={},
+        local_creds_cache={},
+        rcp_lan_ip_cache={},
+        pan_cache={},
+        camera_entities={},  # used by _schedule_privacy_off_snapshot
+        hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
+        cached_status={},
+        auth_outage_count=0,
         async_update_listeners=lambda: None,
         async_request_refresh=AsyncMock(),
-        _ensure_valid_token=AsyncMock(return_value="token-FRESH"),
+        ensure_valid_token=AsyncMock(return_value="token-FRESH"),
     )
 
 
@@ -1212,10 +1212,10 @@ class TestCloudSetPrivacyMode:
 
             ok = await async_cloud_set_privacy_mode(coord, CAM_ID, True)
         assert ok is True
-        assert coord._shc_state_cache[CAM_ID]["privacy_mode"] is True
-        assert CAM_ID in coord._privacy_set_at  # lock recorded
+        assert coord.shc_state_cache[CAM_ID]["privacy_mode"] is True
+        assert CAM_ID in coord.privacy_set_at  # lock recorded
         # Lock timestamp must be recent
-        assert time.monotonic() - coord._privacy_set_at[CAM_ID] < 1.0
+        assert time.monotonic() - coord.privacy_set_at[CAM_ID] < 1.0
 
     @pytest.mark.asyncio
     async def test_no_token_falls_through_to_shc(self):
@@ -1228,11 +1228,11 @@ class TestCloudSetPrivacyMode:
             ok = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
         assert ok is False
         # Cache untouched (not optimistically written when nothing succeeded)
-        assert "privacy_mode" not in coord._shc_state_cache.get(CAM_ID, {})
+        assert "privacy_mode" not in coord.shc_state_cache.get(CAM_ID, {})
 
     @pytest.mark.asyncio
     async def test_http_401_triggers_token_refresh(self):
-        """Cloud returns 401 → coordinator._ensure_valid_token called."""
+        """Cloud returns 401 → coordinator.ensure_valid_token called."""
         coord = _stub_coord_setters()
         from custom_components.bosch_shc_camera import shc
 
@@ -1248,7 +1248,7 @@ class TestCloudSetPrivacyMode:
             shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
         ):
             await shc.async_cloud_set_privacy_mode(coord, CAM_ID, False)
-        assert coord._ensure_valid_token.called
+        assert coord.ensure_valid_token.called
 
     @pytest.mark.asyncio
     async def test_http_500_does_not_update_cache(self):
@@ -1268,7 +1268,7 @@ class TestCloudSetPrivacyMode:
         ):
             ok = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
         assert ok is False
-        assert CAM_ID not in coord._privacy_set_at
+        assert CAM_ID not in coord.privacy_set_at
 
     @pytest.mark.asyncio
     async def test_offline_cam_skips_cloud_call(self):
@@ -1279,7 +1279,7 @@ class TestCloudSetPrivacyMode:
         cloud_set_privacy_mode. Source: user-reported log noise 2026-05-11.
         """
         coord = _stub_coord_setters(gen2=False)
-        coord._cached_status[CAM_ID] = "OFFLINE"
+        coord.cached_status[CAM_ID] = "OFFLINE"
         from custom_components.bosch_shc_camera import shc
 
         session = MagicMock()
@@ -1295,7 +1295,7 @@ class TestCloudSetPrivacyMode:
             ok = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
         assert ok is False
         assert session.put.called is False  # cloud call never attempted
-        assert CAM_ID not in coord._privacy_set_at
+        assert CAM_ID not in coord.privacy_set_at
 
 
 class TestCloudSetPrivacyModeBranches:
@@ -1308,7 +1308,7 @@ class TestCloudSetPrivacyModeBranches:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
         coord = _stub_coord_round6()
-        coord._shc_state_cache[CAM_ID]["device_id"] = None  # disable SHC fallback
+        coord.shc_state_cache[CAM_ID]["device_id"] = None  # disable SHC fallback
         session = MagicMock()
         cm = MagicMock()
         cm.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError("timeout"))
@@ -1359,7 +1359,7 @@ class TestCloudSetPrivacyModeBranches:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
         coord = _stub_coord_round6()
-        coord._auth_outage_count = 2
+        coord.auth_outage_count = 2
         session = MagicMock()
         cm = MagicMock()
         cm.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError("network"))
@@ -1410,7 +1410,7 @@ class TestCloudSetPrivacyModeBranches:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
         coord = _stub_coord_round6(gen2=True)
-        coord._local_creds_cache[CAM_ID] = {"host": "192.0.2.149"}
+        coord.local_creds_cache[CAM_ID] = {"host": "192.0.2.149"}
         session = MagicMock()
         cm = MagicMock()
         cm.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError("cloud down"))
@@ -1457,7 +1457,7 @@ class TestGen2RcpFallbackFailureDebugLog:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
         coord = _stub_coord_round6(gen2=True)
-        coord._local_creds_cache[CAM_ID] = {"host": "192.0.2.149"}
+        coord.local_creds_cache[CAM_ID] = {"host": "192.0.2.149"}
 
         session = MagicMock()
         cm = MagicMock()
@@ -1485,25 +1485,25 @@ class TestGen2RcpFallbackFailureDebugLog:
         mock_rcp.assert_called_once()
         assert mock_rcp.call_args.args[1] == "192.0.2.149"
         # No write-lock stamped, no cache mutation, no early True return
-        assert CAM_ID not in coord._privacy_set_at
-        assert "privacy_mode" not in coord._shc_state_cache[CAM_ID]
+        assert CAM_ID not in coord.privacy_set_at
+        assert "privacy_mode" not in coord.shc_state_cache[CAM_ID]
         assert result is False
         # Notification fires even though auth_outage_count == 0.
         coord.hass.services.async_call.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_rcp_false_uses_rcp_lan_ip_cache_when_no_creds(self):
-        """When _local_creds_cache is empty, host comes from _rcp_lan_ip_cache.
+        """When local_creds_cache is empty, host comes from rcp_lan_ip_cache.
 
         Same RCP-failure debug-log branch, exercises the alternate cam_host
         lookup:
-            cam_host = creds.get("host") if creds else coordinator._rcp_lan_ip_cache.get(cam_id)
+            cam_host = creds.get("host") if creds else coordinator.rcp_lan_ip_cache.get(cam_id)
         """
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
         coord = _stub_coord_round6(gen2=True)
         # No creds cache entry → falls back to RCP LAN IP cache
-        coord._rcp_lan_ip_cache[CAM_ID] = "192.0.2.149"
+        coord.rcp_lan_ip_cache[CAM_ID] = "192.0.2.149"
 
         session = MagicMock()
         cm = MagicMock()
@@ -1554,7 +1554,7 @@ class TestPersistentNotificationException:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
         coord = _stub_coord_round6(gen2=False)
-        coord._auth_outage_count = 3  # > 0 → notification branch entered
+        coord.auth_outage_count = 3  # > 0 → notification branch entered
         # Make the persistent_notification call blow up
         coord.hass.services.async_call = AsyncMock(
             side_effect=RuntimeError("ServiceNotFound: persistent_notification.create")
@@ -1595,7 +1595,7 @@ class TestPersistentNotificationException:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
         coord = _stub_coord_round6(gen2=False)
-        coord._auth_outage_count = 1
+        coord.auth_outage_count = 1
         coord.hass.services.async_call = AsyncMock(
             side_effect=Exception("notifier crash")
         )
@@ -1637,47 +1637,45 @@ def _stub_coord_select_remaining(*, gen2: bool = True, shc_ip: str = "192.0.2.10
             async_create_task=lambda coro: coro.close(),
             services=SimpleNamespace(async_call=AsyncMock()),
         ),
-        _shc_state_cache={},
-        _cached_status={},
-        _privacy_set_at={},
-        _light_set_at={},
-        _notif_set_at={},
-        _local_creds_cache={},
-        _rcp_lan_ip_cache={},
-        _pan_cache={},
-        _camera_entities={},
-        _hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
-        _auth_outage_count=0,
-        _shc_devices_raw=[],
-        _last_shc_fetch=float("-inf"),
-        _shc_available=True,
-        _shc_fail_count=0,
-        _shc_last_check=float("-inf"),
-        _SHC_MAX_FAILS=3,
-        _SHC_RETRY_INTERVAL=60,
-        _lighting_switch_cache={},
+        shc_state_cache={},
+        cached_status={},
+        privacy_set_at={},
+        light_set_at={},
+        notif_set_at={},
+        local_creds_cache={},
+        rcp_lan_ip_cache={},
+        pan_cache={},
+        camera_entities={},
+        hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
+        auth_outage_count=0,
+        shc_devices_raw=[],
+        last_shc_fetch=float("-inf"),
+        shc_available=True,
+        shc_fail_count=0,
+        shc_last_check=float("-inf"),
+        SHC_MAX_FAILS=3,
+        SHC_RETRY_INTERVAL=60,
+        lighting_switch_cache={},
         async_update_listeners=lambda: None,
         async_request_refresh=AsyncMock(),
-        _ensure_valid_token=AsyncMock(return_value="tok-FRESH"),
-        _fcm_last_push=float("-inf"),
+        ensure_valid_token=AsyncMock(return_value="tok-FRESH"),
+        fcm_last_push=float("-inf"),
     )
     return coord
 
 
 class TestCloudSetPrivacyMode401TokenRefreshFails:
-    """401 response + _ensure_valid_token raises → exception swallowed."""
+    """401 response + ensure_valid_token raises → exception swallowed."""
 
     @pytest.mark.asyncio
     async def test_401_token_refresh_raises_falls_through_to_shc(self):
-        """_ensure_valid_token raises RuntimeError on 401 → swallowed, falls to SHC."""
+        """ensure_valid_token raises RuntimeError on 401 → swallowed, falls to SHC."""
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
         coord = _stub_coord_select_remaining()
-        coord._ensure_valid_token = AsyncMock(
-            side_effect=RuntimeError("refresh failed")
-        )
+        coord.ensure_valid_token = AsyncMock(side_effect=RuntimeError("refresh failed"))
         # SHC is configured but not ready (shc_available=False) so we get a clean return
-        coord._shc_available = False
+        coord.shc_available = False
 
         session = MagicMock()
         session.put = MagicMock(return_value=_mock_resp(401))
@@ -1700,7 +1698,7 @@ class TestCloudSetPrivacyMode401TokenRefreshFails:
 
         # Token refresh failed → no success, result is False
         assert result is False
-        coord._ensure_valid_token.assert_called_once()
+        coord.ensure_valid_token.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_401_token_refresh_raises_exception_is_swallowed(self):
@@ -1708,7 +1706,7 @@ class TestCloudSetPrivacyMode401TokenRefreshFails:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_privacy_mode
 
         coord = _stub_coord_select_remaining()
-        coord._ensure_valid_token = AsyncMock(
+        coord.ensure_valid_token = AsyncMock(
             side_effect=aiohttp.ClientError("network gone")
         )
 
@@ -1747,8 +1745,8 @@ class TestCloudSetCameraLight:
         ):
             ok = await shc.async_cloud_set_camera_light(coord, CAM_ID, True)
         assert ok is True
-        assert coord._shc_state_cache[CAM_ID]["camera_light"] is True
-        assert CAM_ID in coord._light_set_at
+        assert coord.shc_state_cache[CAM_ID]["camera_light"] is True
+        assert CAM_ID in coord.light_set_at
 
     @pytest.mark.asyncio
     async def test_gen2_double_endpoint_partial_success(self):
@@ -1927,8 +1925,8 @@ def _notif_coord(cam_id: str = CAM_ID) -> SimpleNamespace:
     return SimpleNamespace(
         hass=MagicMock(),
         token="fake-bearer-token",
-        _shc_state_cache={cam_id: {}},
-        _notif_set_at={},
+        shc_state_cache={cam_id: {}},
+        notif_set_at={},
         async_update_listeners=MagicMock(),
         async_request_refresh=AsyncMock(),
     )
@@ -1970,7 +1968,7 @@ class TestAsyncCloudSetNotifications:
 
         assert result is True
         assert (
-            coord._shc_state_cache[CAM_ID]["notifications_status"]
+            coord.shc_state_cache[CAM_ID]["notifications_status"]
             == "FOLLOW_CAMERA_SCHEDULE"
         )
 
@@ -1989,7 +1987,7 @@ class TestAsyncCloudSetNotifications:
             result = await async_cloud_set_notifications(coord, CAM_ID, False)
 
         assert result is True
-        assert coord._shc_state_cache[CAM_ID]["notifications_status"] == "ALWAYS_OFF"
+        assert coord.shc_state_cache[CAM_ID]["notifications_status"] == "ALWAYS_OFF"
 
     @pytest.mark.asyncio
     async def test_notif_set_at_stamped_on_success(self):
@@ -2006,11 +2004,11 @@ class TestAsyncCloudSetNotifications:
         ):
             await async_cloud_set_notifications(coord, CAM_ID, True)
 
-        assert CAM_ID in coord._notif_set_at, (
-            "_notif_set_at must be stamped on notification success — "
+        assert CAM_ID in coord.notif_set_at, (
+            "notif_set_at must be stamped on notification success — "
             "write-lock prevents SHC background tick from reverting the cache"
         )
-        assert coord._notif_set_at[CAM_ID] >= before
+        assert coord.notif_set_at[CAM_ID] >= before
 
     @pytest.mark.asyncio
     async def test_http_error_returns_false(self):
@@ -2027,7 +2025,7 @@ class TestAsyncCloudSetNotifications:
             result = await async_cloud_set_notifications(coord, CAM_ID, True)
 
         assert result is False
-        assert "notifications_status" not in coord._shc_state_cache.get(CAM_ID, {})
+        assert "notifications_status" not in coord.shc_state_cache.get(CAM_ID, {})
 
     @pytest.mark.asyncio
     async def test_timeout_returns_false(self):
@@ -2067,10 +2065,10 @@ class TestCloudSetNotifications:
         assert ok is True
         assert captured_body["enabledNotificationsStatus"] == "FOLLOW_CAMERA_SCHEDULE"
         assert (
-            coord._shc_state_cache[CAM_ID]["notifications_status"]
+            coord.shc_state_cache[CAM_ID]["notifications_status"]
             == "FOLLOW_CAMERA_SCHEDULE"
         )
-        assert CAM_ID in coord._notif_set_at
+        assert CAM_ID in coord.notif_set_at
 
     @pytest.mark.asyncio
     async def test_disable_writes_ALWAYS_OFF(self):
@@ -2113,7 +2111,7 @@ class TestCloudSetNotifications:
             ok = await shc.async_cloud_set_notifications(coord, CAM_ID, True)
         assert ok is False
         # Cache must NOT have been updated
-        assert "notifications_status" not in coord._shc_state_cache.get(CAM_ID, {})
+        assert "notifications_status" not in coord.shc_state_cache.get(CAM_ID, {})
 
 
 def _stub_coord_light(*, gen2: bool = True, with_token: bool = True):
@@ -2125,7 +2123,7 @@ def _stub_coord_light(*, gen2: bool = True, with_token: bool = True):
             async_create_task=lambda coro: coro.close(),
             services=SimpleNamespace(async_call=AsyncMock()),
         ),
-        _shc_state_cache={
+        shc_state_cache={
             CAM_ID: {
                 "front_light": False,
                 "wallwasher": False,
@@ -2133,11 +2131,11 @@ def _stub_coord_light(*, gen2: bool = True, with_token: bool = True):
                 "privacy_mode": False,
             }
         },
-        _light_set_at={},
-        _pan_cache={},
-        _camera_entities={},
-        _hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
-        _lighting_switch_cache={
+        light_set_at={},
+        pan_cache={},
+        camera_entities={},
+        hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
+        lighting_switch_cache={
             CAM_ID: {
                 "frontLightSettings": {
                     "brightness": 50,
@@ -2156,15 +2154,15 @@ def _stub_coord_light(*, gen2: bool = True, with_token: bool = True):
                 },
             }
         },
-        _last_topdown_brightness={},
-        _auth_outage_count=0,
+        last_topdown_brightness={},
+        auth_outage_count=0,
         async_update_listeners=lambda: None,
         # Gen2 LAN-RCP light fallback reads these. Empty caches mean the
         # fallback path also fails and the function returns False — which
         # is the documented behaviour when no LAN IP is known.
-        _local_creds_cache={},
-        _rcp_lan_ip_cache={},
-        _local_write_at={},
+        local_creds_cache={},
+        rcp_lan_ip_cache={},
+        local_write_at={},
         async_request_refresh=AsyncMock(),
     )
 
@@ -2180,7 +2178,7 @@ class TestIsGen2:
         from custom_components.bosch_shc_camera.shc import _is_gen2
 
         coord = _stub_coord_light(gen2=False)
-        coord._hw_version[CAM_ID] = "CAMERA_EYES"  # Gen1 outdoor
+        coord.hw_version[CAM_ID] = "CAMERA_EYES"  # Gen1 outdoor
         assert _is_gen2(coord, CAM_ID) is False
 
     def test_unknown_falls_back_to_gen1(self):
@@ -2190,7 +2188,7 @@ class TestIsGen2:
         from custom_components.bosch_shc_camera.shc import _is_gen2
 
         coord = _stub_coord_light()
-        coord._hw_version.pop(CAM_ID, None)  # unknown
+        coord.hw_version.pop(CAM_ID, None)  # unknown
         assert _is_gen2(coord, CAM_ID) is False
 
 
@@ -2218,7 +2216,7 @@ class TestSetLightComponentGen1:
     async def test_front_on_includes_intensity(self):
         """Front=True body must include frontLightIntensity (cached value)."""
         coord = _stub_coord_light(gen2=False)
-        coord._shc_state_cache[CAM_ID]["front_light_intensity"] = 0.75
+        coord.shc_state_cache[CAM_ID]["front_light_intensity"] = 0.75
 
         from custom_components.bosch_shc_camera import shc
 
@@ -2252,7 +2250,7 @@ class TestSetLightComponentGen1:
         """Bosch API rejects intensity when frontLightOn=False (HTTP 400).
         Body MUST omit the field — sending intensity:0 is also rejected."""
         coord = _stub_coord_light(gen2=False)
-        coord._shc_state_cache[CAM_ID]["front_light"] = True
+        coord.shc_state_cache[CAM_ID]["front_light"] = True
 
         from custom_components.bosch_shc_camera import shc
 
@@ -2284,7 +2282,7 @@ class TestSetLightComponentGen1:
     async def test_wallwasher_on_uses_lighting_override(self):
         """Gen1 wallwasher hits the same combined endpoint as front light."""
         coord = _stub_coord_light(gen2=False)
-        coord._shc_state_cache[CAM_ID]["wallwasher"] = False
+        coord.shc_state_cache[CAM_ID]["wallwasher"] = False
 
         from custom_components.bosch_shc_camera import shc
 
@@ -2312,7 +2310,7 @@ class TestSetLightComponentGen1:
     async def test_intensity_writes_cached_value(self):
         """Setting intensity directly — front state must come from cache."""
         coord = _stub_coord_light(gen2=False)
-        coord._shc_state_cache[CAM_ID]["front_light"] = True  # so intensity is allowed
+        coord.shc_state_cache[CAM_ID]["front_light"] = True  # so intensity is allowed
 
         from custom_components.bosch_shc_camera import shc
 
@@ -2348,7 +2346,7 @@ class TestSetLightComponentGen1:
             ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "front", True)
 
         assert ok is False
-        assert CAM_ID not in coord._light_set_at, (
+        assert CAM_ID not in coord.light_set_at, (
             "Failed PUT must not record the write timestamp — otherwise "
             "the write-lock would block legitimate cloud polls for 30 s."
         )
@@ -2482,10 +2480,10 @@ class TestSetLightComponentGen2:
     @pytest.mark.asyncio
     async def test_wallwasher_on_restores_saved_brightness(self):
         """Wallwasher ON: must restore the previously-saved top/bottom
-        brightness from `_last_topdown_brightness`. Without restore, the
+        brightness from `last_topdown_brightness`. Without restore, the
         light comes on at brightness=0 and looks broken."""
         coord = _stub_coord_light(gen2=True)
-        coord._last_topdown_brightness[CAM_ID] = {"top": 80, "bottom": 60}
+        coord.last_topdown_brightness[CAM_ID] = {"top": 80, "bottom": 60}
 
         from custom_components.bosch_shc_camera import shc
 
@@ -2523,10 +2521,8 @@ class TestSetLightComponentGen2:
         so the next ON call can restore it."""
         coord = _stub_coord_light(gen2=True)
         # Currently top=80, bottom=80 in the cache
-        coord._lighting_switch_cache[CAM_ID]["topLedLightSettings"]["brightness"] = 80
-        coord._lighting_switch_cache[CAM_ID]["bottomLedLightSettings"]["brightness"] = (
-            60
-        )
+        coord.lighting_switch_cache[CAM_ID]["topLedLightSettings"]["brightness"] = 80
+        coord.lighting_switch_cache[CAM_ID]["bottomLedLightSettings"]["brightness"] = 60
 
         from custom_components.bosch_shc_camera import shc
 
@@ -2547,7 +2543,7 @@ class TestSetLightComponentGen2:
 
         assert ok is True
         # Must have saved the pre-OFF brightness for next ON
-        saved = coord._last_topdown_brightness[CAM_ID]
+        saved = coord.last_topdown_brightness[CAM_ID]
         assert saved == {"top": 80, "bottom": 60}
         # Request body has zeroed brightness
         _ls_url, ls_body = captured[0]
@@ -2576,7 +2572,7 @@ class TestSetLightComponentGen2:
 class TestSetLightComponentGen2Errors:
     def _stub_gen2_coord(self):
         coord = _stub_coord_round6(gen2=True)
-        coord._lighting_switch_cache = {}
+        coord.lighting_switch_cache = {}
         return coord
 
     @pytest.mark.asyncio
@@ -2587,9 +2583,9 @@ class TestSetLightComponentGen2Errors:
         )
 
         coord = self._stub_gen2_coord()
-        # Simulate hasattr check by removing _last_topdown_brightness
-        if hasattr(coord, "_last_topdown_brightness"):
-            del coord._last_topdown_brightness
+        # Simulate hasattr check by removing last_topdown_brightness
+        if hasattr(coord, "last_topdown_brightness"):
+            del coord.last_topdown_brightness
 
         step1_resp = MagicMock()
         step1_resp.status = 200
@@ -2622,7 +2618,7 @@ class TestSetLightComponentGen2Errors:
         ):
             await async_cloud_set_light_component(coord, CAM_ID, "wallwasher", True)
         # full_body must be set as fallback since json() raised
-        assert CAM_ID in coord._lighting_switch_cache
+        assert CAM_ID in coord.lighting_switch_cache
 
     @pytest.mark.asyncio
     async def test_wallwasher_step1_http_error_logged(self):
@@ -2775,7 +2771,7 @@ class TestCloudSetLightComponentGen2WallwasherNetworkError:
 #   - boolean `front` toggle maps to brightness 100 (on) / 0 (off)
 #   - `intensity` accepts both int 0-100 and float 0.0-1.0
 #   - wallwasher does NOT enter the fallback (payload too complex)
-#   - cache + `_local_write_at` stamped on success
+#   - cache + `local_write_at` stamped on success
 #   - `coordinator.async_update_listeners` fired so the UI re-reads
 #   - RCP-write failure returns False without touching the cache
 #   - Gen1 cams skip the fallback entirely
@@ -2789,13 +2785,13 @@ def light_fallback_stub_coord() -> BoschCameraCoordinator:
     # provide a minimal stub).
     coord.hass = SimpleNamespace(data={})
     coord.token = None  # no token → cloud branch is skipped, fallback only path
-    coord._cached_status = {CAM_ID: "OFFLINE"}  # cloud-skip shortcut
-    coord._shc_state_cache = {}
-    coord._light_set_at = {}
-    coord._local_write_at = {}
-    coord._local_creds_cache = {}
-    coord._rcp_lan_ip_cache = {CAM_ID: "192.0.2.10"}
-    coord._hw_version = {CAM_ID: "HOME_Eyes_Outdoor"}  # Gen2
+    coord.cached_status = {CAM_ID: "OFFLINE"}  # cloud-skip shortcut
+    coord.shc_state_cache = {}
+    coord.light_set_at = {}
+    coord.local_write_at = {}
+    coord.local_creds_cache = {}
+    coord.rcp_lan_ip_cache = {CAM_ID: "192.0.2.10"}
+    coord.hw_version = {CAM_ID: "HOME_Eyes_Outdoor"}  # Gen2
     coord.async_update_listeners = lambda: None
     coord.options = {}
     return cast(BoschCameraCoordinator, coord)
@@ -2805,7 +2801,7 @@ def light_fallback_stub_coord() -> BoschCameraCoordinator:
 def light_fallback_gen1_coord(
     light_fallback_stub_coord: BoschCameraCoordinator,
 ) -> BoschCameraCoordinator:
-    light_fallback_stub_coord._hw_version = {CAM_ID: "OUTDOOR"}  # Gen1
+    light_fallback_stub_coord.hw_version = {CAM_ID: "OUTDOOR"}  # Gen1
     return light_fallback_stub_coord
 
 
@@ -2839,9 +2835,9 @@ class TestGen2LocalRcpLightFallback:
         assert mock_write.await_args.args[1] == "192.0.2.10"
         assert mock_write.await_args.args[2] == 100
         # Cache updated
-        assert light_fallback_stub_coord._shc_state_cache[CAM_ID]["front_light"] is True
-        # _local_write_at stamped for grace-period helper
-        assert CAM_ID in light_fallback_stub_coord._local_write_at
+        assert light_fallback_stub_coord.shc_state_cache[CAM_ID]["front_light"] is True
+        # local_write_at stamped for grace-period helper
+        assert CAM_ID in light_fallback_stub_coord.local_write_at
 
     async def test_front_false_writes_brightness_0(
         self, light_fallback_stub_coord: BoschCameraCoordinator
@@ -2867,9 +2863,7 @@ class TestGen2LocalRcpLightFallback:
             )
         assert ok is True
         assert mock_write.await_args.args[2] == 0
-        assert (
-            light_fallback_stub_coord._shc_state_cache[CAM_ID]["front_light"] is False
-        )
+        assert light_fallback_stub_coord.shc_state_cache[CAM_ID]["front_light"] is False
 
     async def test_intensity_float_maps_to_percent(
         self, light_fallback_stub_coord: BoschCameraCoordinator
@@ -2896,7 +2890,7 @@ class TestGen2LocalRcpLightFallback:
         assert ok is True
         assert mock_write.await_args.args[2] == 50
         assert (
-            light_fallback_stub_coord._shc_state_cache[CAM_ID]["front_light_intensity"]
+            light_fallback_stub_coord.shc_state_cache[CAM_ID]["front_light_intensity"]
             == 0.5
         )
 
@@ -2925,7 +2919,7 @@ class TestGen2LocalRcpLightFallback:
         assert ok is True
         assert mock_write.await_args.args[2] == 75
         assert (
-            light_fallback_stub_coord._shc_state_cache[CAM_ID]["front_light_intensity"]
+            light_fallback_stub_coord.shc_state_cache[CAM_ID]["front_light_intensity"]
             == 75
         )
 
@@ -2934,7 +2928,7 @@ class TestGen2LocalRcpLightFallback:
     ):
         from custom_components.bosch_shc_camera import shc
 
-        light_fallback_stub_coord._shc_state_cache[CAM_ID] = {"wallwasher": False}
+        light_fallback_stub_coord.shc_state_cache[CAM_ID] = {"wallwasher": False}
         mock_write = AsyncMock(return_value=True)
         with (
             patch(
@@ -2949,9 +2943,7 @@ class TestGen2LocalRcpLightFallback:
             await shc.async_cloud_set_light_component(
                 light_fallback_stub_coord, CAM_ID, "front", True
             )
-        assert (
-            light_fallback_stub_coord._shc_state_cache[CAM_ID]["camera_light"] is True
-        )
+        assert light_fallback_stub_coord.shc_state_cache[CAM_ID]["camera_light"] is True
 
     async def test_rcp_failure_returns_false(
         self, light_fallback_stub_coord: BoschCameraCoordinator
@@ -2977,7 +2969,7 @@ class TestGen2LocalRcpLightFallback:
             )
         assert ok is False
         # Cache NOT updated on failure
-        assert "front_light" not in light_fallback_stub_coord._shc_state_cache.get(
+        assert "front_light" not in light_fallback_stub_coord.shc_state_cache.get(
             CAM_ID, {}
         )
 
@@ -3040,8 +3032,8 @@ class TestGen2LocalRcpLightFallback:
     ):
         from custom_components.bosch_shc_camera import shc
 
-        light_fallback_stub_coord._rcp_lan_ip_cache = {}
-        light_fallback_stub_coord._local_creds_cache = {}
+        light_fallback_stub_coord.rcp_lan_ip_cache = {}
+        light_fallback_stub_coord.local_creds_cache = {}
         mock_write = AsyncMock(return_value=True)
         with (
             patch(
@@ -3067,7 +3059,7 @@ class TestGen2LocalRcpLightFallback:
     ):
         from custom_components.bosch_shc_camera import shc
 
-        light_fallback_stub_coord._local_creds_cache[CAM_ID] = {"host": "10.0.0.5"}
+        light_fallback_stub_coord.local_creds_cache[CAM_ID] = {"host": "10.0.0.5"}
         mock_write = AsyncMock(return_value=True)
         with (
             patch(
@@ -3082,7 +3074,7 @@ class TestGen2LocalRcpLightFallback:
             await shc.async_cloud_set_light_component(
                 light_fallback_stub_coord, CAM_ID, "front", True
             )
-        # local_creds.host wins over _rcp_lan_ip_cache
+        # local_creds.host wins over rcp_lan_ip_cache
         assert mock_write.await_args.args[1] == "10.0.0.5"
 
 
@@ -3091,7 +3083,7 @@ class TestCloudSetPan:
     async def test_blocked_when_privacy_on(self):
         """Privacy ON → pan command must be blocked (camera motor disabled)."""
         coord = _stub_coord_setters()
-        coord._shc_state_cache[CAM_ID]["privacy_mode"] = True
+        coord.shc_state_cache[CAM_ID]["privacy_mode"] = True
         from custom_components.bosch_shc_camera import shc
 
         ok = await shc.async_cloud_set_pan(coord, CAM_ID, 30)
@@ -3125,7 +3117,7 @@ class TestSetPanExtras:
 
     @pytest.mark.asyncio
     async def test_http_500_returns_false(self):
-        """Pan API HTTP 500 → return False, don't update _pan_cache."""
+        """Pan API HTTP 500 → return False, don't update pan_cache."""
         coord = _stub_coord_light()
         from custom_components.bosch_shc_camera import shc
 
@@ -3136,7 +3128,7 @@ class TestSetPanExtras:
         ):
             ok = await shc.async_cloud_set_pan(coord, CAM_ID, 90)
         assert ok is False
-        assert CAM_ID not in coord._pan_cache
+        assert CAM_ID not in coord.pan_cache
 
     @pytest.mark.asyncio
     async def test_timeout_returns_false(self):
@@ -3182,7 +3174,7 @@ class TestSetPanExtras:
         assert ok is True
         # Cache must reflect the actual position from the response (87),
         # not the requested 90 — Bosch may clamp to nearest valid step.
-        assert coord._pan_cache[CAM_ID] == 87
+        assert coord.pan_cache[CAM_ID] == 87
 
     @pytest.mark.asyncio
     async def test_204_no_body_falls_back_to_requested(self):
@@ -3198,7 +3190,7 @@ class TestSetPanExtras:
         ):
             ok = await shc.async_cloud_set_pan(coord, CAM_ID, 90)
         assert ok is True
-        assert coord._pan_cache[CAM_ID] == 90
+        assert coord.pan_cache[CAM_ID] == 90
 
 
 class TestCloudSetPanBodyException:
@@ -3208,9 +3200,9 @@ class TestCloudSetPanBodyException:
         from custom_components.bosch_shc_camera.shc import async_cloud_set_pan
 
         coord = _stub_coord_round6()
-        coord._pan_cache = {}
+        coord.pan_cache = {}
         # privacy mode off so pan is not blocked
-        coord._shc_state_cache[CAM_ID]["privacy_mode"] = False
+        coord.shc_state_cache[CAM_ID]["privacy_mode"] = False
 
         resp = MagicMock()
         resp.status = 200
@@ -3228,7 +3220,7 @@ class TestCloudSetPanBodyException:
             result = await async_cloud_set_pan(coord, CAM_ID, 45)
         # Should still return True (200 is success) and cache the requested position
         assert result is True
-        assert coord._pan_cache[CAM_ID] == 45
+        assert coord.pan_cache[CAM_ID] == 45
 
 
 def _stub_coord_for_availability(
@@ -3249,11 +3241,11 @@ def _stub_coord_for_availability(
             "shc_cert_path": cert,
             "shc_key_path": key,
         },
-        _shc_available=available,
-        _shc_fail_count=fail_count,
-        _shc_last_check=time.monotonic() - last_check_age,
-        _SHC_RETRY_INTERVAL=retry_interval,
-        _SHC_MAX_FAILS=max_fails,
+        shc_available=available,
+        shc_fail_count=fail_count,
+        shc_last_check=time.monotonic() - last_check_age,
+        SHC_RETRY_INTERVAL=retry_interval,
+        SHC_MAX_FAILS=max_fails,
     )
 
 
@@ -3341,32 +3333,32 @@ class TestShcMarkSuccessFailure:
 
         coord = _stub_coord_for_availability(available=False, fail_count=3)
         _shc_mark_success(coord)
-        assert coord._shc_available is True, (
-            "_shc_mark_success must set _shc_available=True"
+        assert coord.shc_available is True, (
+            "_shc_mark_success must set shc_available=True"
         )
-        assert coord._shc_fail_count == 0, "_shc_mark_success must reset fail counter"
+        assert coord.shc_fail_count == 0, "_shc_mark_success must reset fail counter"
 
     def test_mark_failure_increments_count(self):
         from custom_components.bosch_shc_camera.shc import _shc_mark_failure
 
         coord = _stub_coord_for_availability(available=True, fail_count=0, max_fails=3)
         _shc_mark_failure(coord)
-        assert coord._shc_fail_count == 1, (
+        assert coord.shc_fail_count == 1, (
             "_shc_mark_failure must increment fail counter"
         )
-        assert coord._shc_available is True, (
+        assert coord.shc_available is True, (
             "One failure must not immediately mark offline"
         )
 
     def test_mark_failure_at_threshold_marks_offline(self):
-        """Exactly _SHC_MAX_FAILS consecutive failures → _shc_available=False."""
+        """Exactly SHC_MAX_FAILS consecutive failures → shc_available=False."""
         from custom_components.bosch_shc_camera.shc import _shc_mark_failure
 
         coord = _stub_coord_for_availability(available=True, fail_count=2, max_fails=3)
         _shc_mark_failure(coord)
-        assert coord._shc_fail_count == 3
-        assert coord._shc_available is False, (
-            "After _SHC_MAX_FAILS failures the SHC must be marked offline"
+        assert coord.shc_fail_count == 3
+        assert coord.shc_available is False, (
+            "After SHC_MAX_FAILS failures the SHC must be marked offline"
         )
 
     def test_mark_failure_when_already_offline_stays_offline(self):
@@ -3375,8 +3367,8 @@ class TestShcMarkSuccessFailure:
 
         coord = _stub_coord_for_availability(available=False, fail_count=5, max_fails=3)
         _shc_mark_failure(coord)
-        assert coord._shc_available is False
-        assert coord._shc_fail_count == 6
+        assert coord.shc_available is False
+        assert coord.shc_fail_count == 6
 
 
 # _schedule_privacy_off_snapshot — indoor (shutter) vs outdoor delay
@@ -3395,10 +3387,10 @@ class TestShcMarkSuccessFailure:
 class TestSchedulePrivacyOffSnapshot:
     def _make_coord(self, hw: str):
         cam_entity = MagicMock()
-        cam_entity._async_trigger_image_refresh = AsyncMock()
+        cam_entity.async_trigger_image_refresh = AsyncMock()
         coord = SimpleNamespace(
-            _camera_entities={CAM_ID: cam_entity},
-            _hw_version={CAM_ID: hw},
+            camera_entities={CAM_ID: cam_entity},
+            hw_version={CAM_ID: hw},
             hass=SimpleNamespace(
                 async_create_task=MagicMock(),
             ),
@@ -3485,8 +3477,8 @@ class TestSchedulePrivacyOffSnapshot:
         )
 
         coord = SimpleNamespace(
-            _camera_entities={},
-            _hw_version={CAM_ID: "HOME_Eyes_Outdoor"},
+            camera_entities={},
+            hw_version={CAM_ID: "HOME_Eyes_Outdoor"},
             hass=SimpleNamespace(async_create_task=MagicMock()),
         )
         _schedule_privacy_off_snapshot(coord, CAM_ID)
@@ -3507,7 +3499,7 @@ class TestSchedulePrivacyOffSnapshotSmoke:
         )
 
         coord = _stub_coord_light()
-        coord._hw_version[CAM_ID] = "HOME_Eyes_Outdoor"
+        coord.hw_version[CAM_ID] = "HOME_Eyes_Outdoor"
         # Capture the delay passed to async_call_later
         captured_delay = []
         coord.hass.loop = SimpleNamespace(
@@ -3529,7 +3521,7 @@ class TestSchedulePrivacyOffSnapshotSmoke:
         )
 
         coord = _stub_coord_light()
-        coord._hw_version[CAM_ID] = "HOME_Eyes_Indoor"
+        coord.hw_version[CAM_ID] = "HOME_Eyes_Indoor"
         # No assertion on internals — just smoke that it doesn't raise.
         try:
             _schedule_privacy_off_snapshot(coord, CAM_ID)
@@ -3546,35 +3538,35 @@ class TestWriteLockOrdering:
     BUG-4 fix, so the SHC fetcher's write-lock check always sees them."""
 
     def test_light_set_at_before_cache_in_cloud_set_camera_light(self):
-        """In async_cloud_set_camera_light, _light_set_at must be written before
+        """In async_cloud_set_camera_light, light_set_at must be written before
         returning so the SHC fetcher's write-lock check always sees it."""
         src = (SRC / "shc.py").read_text()
         func_start = src.find("async def async_cloud_set_camera_light")
         assert func_start != -1
         next_func = src.find("\nasync def ", func_start + 1)
         func_body = src[func_start:next_func] if next_func != -1 else src[func_start:]
-        assert "_light_set_at" in func_body, (
-            "async_cloud_set_camera_light must stamp _light_set_at — "
+        assert "light_set_at" in func_body, (
+            "async_cloud_set_camera_light must stamp light_set_at — "
             "without it the SHC background tick can revert a user-triggered light change"
         )
 
     def test_notif_set_at_in_source(self):
-        """_notif_set_at must exist as a write-lock for notifications state."""
+        """notif_set_at must exist as a write-lock for notifications state."""
         src = (SRC / "shc.py").read_text()
-        assert "_notif_set_at" in src, (
-            "_notif_set_at write-lock not found in shc.py — "
+        assert "notif_set_at" in src, (
+            "notif_set_at write-lock not found in shc.py — "
             "notifications state is unprotected against SHC background tick reverting it"
         )
 
     def test_privacy_set_at_present_in_shc_set_privacy_path(self):
-        """SHC fallback privacy setter must also stamp _privacy_set_at."""
+        """SHC fallback privacy setter must also stamp privacy_set_at."""
         src = (SRC / "shc.py").read_text()
         func_start = src.find("async def async_shc_set_privacy_mode")
         assert func_start != -1
         next_func = src.find("\nasync def ", func_start + 1)
         body = src[func_start:next_func] if next_func != -1 else src[func_start:]
-        assert "_privacy_set_at" in body, (
-            "SHC privacy setter must stamp _privacy_set_at — BUG-4 fix must cover "
+        assert "privacy_set_at" in body, (
+            "SHC privacy setter must stamp privacy_set_at — BUG-4 fix must cover "
             "both the cloud path and the SHC local fallback path"
         )
 
@@ -3597,8 +3589,8 @@ class TestShcFetcherWriteLockCheck:
         body = (
             src[fetcher_start:fetcher_end] if fetcher_end != -1 else src[fetcher_start:]
         )
-        assert "_privacy_set_at" in body, (
-            "_update_one_camera_shc_state must check _privacy_set_at before writing — "
+        assert "privacy_set_at" in body, (
+            "_update_one_camera_shc_state must check privacy_set_at before writing — "
             "without it the SHC poll always overwrites the privacy cache (BUG-4)"
         )
 
@@ -3610,8 +3602,8 @@ class TestShcFetcherWriteLockCheck:
         body = (
             src[fetcher_start:fetcher_end] if fetcher_end != -1 else src[fetcher_start:]
         )
-        assert "_light_set_at" in body, (
-            "_update_one_camera_shc_state must check _light_set_at — same race shape as BUG-4"
+        assert "light_set_at" in body, (
+            "_update_one_camera_shc_state must check light_set_at — same race shape as BUG-4"
         )
 
 
@@ -3624,7 +3616,7 @@ class TestShcFetcherWriteLockCheck:
 class TestShcLanFallbackFiresForUnknownHw:
     """`async_cloud_set_privacy_mode`/`async_cloud_set_light_component` must
     attempt the LAN-fallback even when `_is_gen2()` returns False due to an
-    empty `_hw_version` cache (cold-start during a cloud outage)."""
+    empty `hw_version` cache (cold-start during a cloud outage)."""
 
     @pytest.mark.asyncio
     async def test_lan_fallback_fires_with_unknown_hw(self):
@@ -3657,7 +3649,7 @@ class TestShcLanFallbackFiresForUnknownHw:
 class TestCloud444Cooldown:
     """A cloud HTTP 444 (session quota / freshly re-paired camera that is
     'online' for status but rejects writes) must stamp
-    `coordinator._cloud_444_at[cam_id]`, then make the *next* privacy write
+    `coordinator.cloud_444_at[cam_id]`, then make the *next* privacy write
     within the cooldown skip the cloud entirely and go straight to the
     LAN/SHC fallback."""
 
@@ -3668,21 +3660,21 @@ class TestCloud444Cooldown:
                 async_create_task=lambda coro: coro.close(),
                 services=SimpleNamespace(async_call=AsyncMock()),
             ),
-            _shc_state_cache={CAM_ID: {}},
-            _privacy_set_at={},
-            _light_set_at={},
-            _notif_set_at={},
-            _local_creds_cache={},
-            _rcp_lan_ip_cache={},
-            _pan_cache={},
-            _camera_entities={},
-            _hw_version={CAM_ID: "OUTDOOR"},
-            _cached_status={},  # NOT "OFFLINE" — status reads online
-            _cloud_444_at={},
-            _auth_outage_count=0,
+            shc_state_cache={CAM_ID: {}},
+            privacy_set_at={},
+            light_set_at={},
+            notif_set_at={},
+            local_creds_cache={},
+            rcp_lan_ip_cache={},
+            pan_cache={},
+            camera_entities={},
+            hw_version={CAM_ID: "OUTDOOR"},
+            cached_status={},  # NOT "OFFLINE" — status reads online
+            cloud_444_at={},
+            auth_outage_count=0,
             async_update_listeners=lambda: None,
             async_request_refresh=AsyncMock(),
-            _ensure_valid_token=AsyncMock(return_value="token-FRESH"),
+            ensure_valid_token=AsyncMock(return_value="token-FRESH"),
         )
 
     def _resp(self, status: int):
@@ -3701,7 +3693,7 @@ class TestCloud444Cooldown:
 
         coord = self._coord()
 
-        # First write: cloud returns 444 → must stamp _cloud_444_at and fall
+        # First write: cloud returns 444 → must stamp cloud_444_at and fall
         # through to the (unconfigured) SHC fallback → overall False.
         with (
             patch.object(
@@ -3715,8 +3707,8 @@ class TestCloud444Cooldown:
             ok1 = await shc.async_cloud_set_privacy_mode(coord, CAM_ID, True)
 
         assert ok1 is False
-        assert CAM_ID in coord._cloud_444_at, (
-            "A cloud 444 must stamp _cloud_444_at — otherwise the next write "
+        assert CAM_ID in coord.cloud_444_at, (
+            "A cloud 444 must stamp cloud_444_at — otherwise the next write "
             "re-hits the cloud for another 444."
         )
 
@@ -3746,7 +3738,7 @@ class TestCloud444Cooldown:
 
         coord = self._coord()
         # Stamp a 444 well outside the 120s cooldown.
-        coord._cloud_444_at[CAM_ID] = time.monotonic() - 600
+        coord.cloud_444_at[CAM_ID] = time.monotonic() - 600
 
         with patch.object(
             shc, "async_get_bosch_cloud_session", new_callable=AsyncMock
@@ -3763,7 +3755,7 @@ class TestCloud444Cooldown:
         assert ok is True
 
 
-# Section: _local_write_at timestamp on Gen2 LAN-RCP privacy success
+# Section: local_write_at timestamp on Gen2 LAN-RCP privacy success
 # (relocated from tests/test_misc_small_gaps.py)
 
 
@@ -3772,18 +3764,18 @@ class TestLocalWriteTimestamp:
     async def test_local_write_at_recorded_on_lan_fallback_success(self):
         """When the cloud privacy call fails but the LAN-RCP fallback
         succeeds, the coordinator records `monotonic()` in
-        `_local_write_at[cam_id]` so the next coordinator tick gives the
+        `local_write_at[cam_id]` so the next coordinator tick gives the
         camera a 30s grace period before re-polling state."""
         from custom_components.bosch_shc_camera import shc
 
         coord = SimpleNamespace()
-        coord._cached_status = {}
-        coord._hw_version = {"C": "HOME_Eyes_Outdoor"}
-        coord._shc_state_cache = {}
-        coord._rcp_lan_ip_cache = {"C": "192.0.2.10"}
-        coord._local_creds_cache = {}
-        coord._privacy_set_at = {}
-        coord._local_write_at = {}
+        coord.cached_status = {}
+        coord.hw_version = {"C": "HOME_Eyes_Outdoor"}
+        coord.shc_state_cache = {}
+        coord.rcp_lan_ip_cache = {"C": "192.0.2.10"}
+        coord.local_creds_cache = {}
+        coord.privacy_set_at = {}
+        coord.local_write_at = {}
         coord.hass = MagicMock()
         coord.token = None  # bypass the cloud branch entirely
         coord.async_update_listeners = MagicMock()
@@ -3800,4 +3792,4 @@ class TestLocalWriteTimestamp:
         ):
             ok = await shc.async_cloud_set_privacy_mode(coord, "C", True)
         assert ok is True
-        assert coord._local_write_at["C"] == 4242.0
+        assert coord.local_write_at["C"] == 4242.0

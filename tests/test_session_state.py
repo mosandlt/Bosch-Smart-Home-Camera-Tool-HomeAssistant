@@ -1,6 +1,6 @@
 """Tests for session_state.py — CameraSessionState and the StreamWarmingView/
-LiveOpenedAtView facades that preserve the external `_stream_warming: set[str]`
-/`_live_opened_at: dict[str, float]` contracts camera.py relies on (Phase 1
+LiveOpenedAtView facades that preserve the external `stream_warming: set[str]`
+/`live_opened_at: dict[str, float]` contracts camera.py relies on (Phase 1
 slice 2 of the coordinator rewrite — see .claude/plans/jiggly-moseying-peacock.md)."""
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ class TestStreamWarmingView:
         """len() must count only sessions with warming=True — a session
         object existing with warming=False (or no session at all for a
         cam_id) must not be counted. Regression: diagnostics.py calls
-        len(coordinator._stream_warming) and crashed before __len__ existed."""
+        len(coordinator.stream_warming) and crashed before __len__ existed."""
         sessions = {
             CAM_A: CameraSessionState(warming=True),
             CAM_B: CameraSessionState(warming=False),

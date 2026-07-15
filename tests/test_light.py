@@ -61,7 +61,7 @@ def stub_coord() -> SimpleNamespace:
                 }
             }
         },
-        _lighting_switch_cache={
+        lighting_switch_cache={
             CAM_ID: {
                 "frontLightSettings": {
                     "brightness": 0,
@@ -111,7 +111,7 @@ class TestTopLedLight:
     def test_on_when_brightness_positive(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        stub_coord._lighting_switch_cache[CAM_ID]["topLedLightSettings"][
+        stub_coord.lighting_switch_cache[CAM_ID]["topLedLightSettings"][
             "brightness"
         ] = 75
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
@@ -123,7 +123,7 @@ class TestTopLedLight:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """API uses 0-100, HA uses 0-255 — values must be scaled."""
-        stub_coord._lighting_switch_cache[CAM_ID]["topLedLightSettings"][
+        stub_coord.lighting_switch_cache[CAM_ID]["topLedLightSettings"][
             "brightness"
         ] = 50
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
@@ -219,10 +219,10 @@ def _stub_coord_edge(**overrides):
                 },
             },
         },
-        _lighting_switch_cache={},
-        _shc_state_cache={},
+        lighting_switch_cache={},
+        shc_state_cache={},
         # SENTINEL_RULE: float('-inf') so monotonic comparisons always trigger
-        _light_set_at={},
+        light_set_at={},
         last_update_success=True,
         token="fake-tok",
         async_update_listeners=MagicMock(),
@@ -376,7 +376,7 @@ class TestPutLightingSwitchJsonParseError:
         )
         # Cache IS updated from the sent body (optimistic update), NOT left
         # untouched. This ensures is_on reads True after a 204 No Content response.
-        cache = light.coordinator._lighting_switch_cache[CAM_ID]
+        cache = light.coordinator.lighting_switch_cache[CAM_ID]
         assert "topLedLightSettings" in cache, (
             "Cache must be updated from sent body when resp.json() raises (fallback path)"
         )
@@ -641,7 +641,7 @@ class TestLoadStateFromCache:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {"topLedLightSettings": {"brightness": 0, "color": None}},
             }
         )
@@ -654,7 +654,7 @@ class TestLoadStateFromCache:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {"topLedLightSettings": {"brightness": 75, "color": "#FF00FF"}},
             }
         )
@@ -673,7 +673,7 @@ class TestLoadStateFromCache:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {"topLedLightSettings": {"brightness": 60, "color": None}},
             }
         )
@@ -685,7 +685,7 @@ class TestLoadStateFromCache:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {
                     "topLedLightSettings": {
                         "brightness": 50,
@@ -727,7 +727,7 @@ class TestGetCurrentState:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {
                     "topLedLightSettings": {"brightness": 40, "color": "#FF0000"},
                     "frontLightSettings": {
@@ -795,7 +795,7 @@ class TestPutLightingSwitch:
         session = MagicMock()
         session.put = _put_resp
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {
                     "frontLightSettings": {
                         "brightness": 0,
@@ -827,11 +827,11 @@ class TestPutLightingSwitch:
         assert ok is True
         # Only the changed group is taken from the response; siblings preserved.
         assert (
-            coord._lighting_switch_cache[CAM_ID]["topLedLightSettings"]["brightness"]
+            coord.lighting_switch_cache[CAM_ID]["topLedLightSettings"]["brightness"]
             == 50
         )
-        assert "frontLightSettings" in coord._lighting_switch_cache[CAM_ID]
-        assert "bottomLedLightSettings" in coord._lighting_switch_cache[CAM_ID]
+        assert "frontLightSettings" in coord.lighting_switch_cache[CAM_ID]
+        assert "bottomLedLightSettings" in coord.lighting_switch_cache[CAM_ID]
 
     @pytest.mark.asyncio
     async def test_500_returns_false(self):
@@ -965,7 +965,7 @@ class TestSyncWallwasherCache:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {
                     "topLedLightSettings": {"brightness": 50},
                     "bottomLedLightSettings": {"brightness": 0},
@@ -975,13 +975,13 @@ class TestSyncWallwasherCache:
         )
         light = _make_light(coord)
         light._sync_wallwasher_cache()
-        assert coord._shc_state_cache[CAM_ID]["wallwasher"] is True
+        assert coord.shc_state_cache[CAM_ID]["wallwasher"] is True
 
     def test_only_front_on_does_not_mark_wallwasher(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {
                     "topLedLightSettings": {"brightness": 0},
                     "bottomLedLightSettings": {"brightness": 0},
@@ -991,15 +991,15 @@ class TestSyncWallwasherCache:
         )
         light = _make_light(coord)
         light._sync_wallwasher_cache()
-        assert coord._shc_state_cache[CAM_ID]["wallwasher"] is False
+        assert coord.shc_state_cache[CAM_ID]["wallwasher"] is False
         # camera_light is True — front light counts
-        assert coord._shc_state_cache[CAM_ID]["camera_light"] is True
+        assert coord.shc_state_cache[CAM_ID]["camera_light"] is True
 
     def test_all_off_marks_camera_light_off(self):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {
                     "topLedLightSettings": {"brightness": 0},
                     "bottomLedLightSettings": {"brightness": 0},
@@ -1009,19 +1009,19 @@ class TestSyncWallwasherCache:
         )
         light = _make_light(coord)
         light._sync_wallwasher_cache()
-        assert coord._shc_state_cache[CAM_ID]["camera_light"] is False
+        assert coord.shc_state_cache[CAM_ID]["camera_light"] is False
 
     def test_stamps_light_set_at_for_write_lock(self):
         """The 30s write-lock that prevents stale poll reverts depends on
-        _light_set_at being stamped here. Pin so a refactor can't drop
+        light_set_at being stamped here. Pin so a refactor can't drop
         this and reintroduce the brightness-revert-after-toggle bug."""
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge()
         light = _make_light(coord)
         light._sync_wallwasher_cache()
-        assert CAM_ID in coord._light_set_at
-        assert coord._light_set_at[CAM_ID] > 0
+        assert CAM_ID in coord.light_set_at
+        assert coord.light_set_at[CAM_ID] > 0
 
 
 class TestRgbColor:
@@ -1055,7 +1055,7 @@ class TestRgbColor:
 #
 # Root cause: /lighting/switch returns 204 No Content (empty body).
 # Old code: resp.json() raised (no JSON body) → except swallowed silently
-# → _lighting_switch_cache[cam_id] never updated
+# → lighting_switch_cache[cam_id] never updated
 # → _load_state_from_cache() read brightness=0 → is_on stayed False
 # → HA warned "state change could not be verified".
 #
@@ -1082,7 +1082,7 @@ class TestPutLightingSwitch204NoCacheUpdate:
         session = MagicMock()
         session.put = _put_204
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {
                     "frontLightSettings": {
                         "brightness": 0,
@@ -1120,7 +1120,7 @@ class TestPutLightingSwitch204NoCacheUpdate:
         assert ok is True
         # Cache must be updated from the body we sent — brightness 100, NOT 0
         assert (
-            coord._lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"]
+            coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"]
             == 100
         )
 
@@ -1140,7 +1140,7 @@ class TestPutLightingSwitch204NoCacheUpdate:
         session = MagicMock()
         session.put = _put_204
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {
                     "frontLightSettings": {
                         "brightness": 0,
@@ -1214,7 +1214,7 @@ class TestPutLightingSwitch204NoCacheUpdate:
         session = MagicMock()
         session.put = _put_200
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {
                     "frontLightSettings": {
                         "brightness": 0,
@@ -1255,10 +1255,10 @@ class TestPutLightingSwitch204NoCacheUpdate:
         # only the changed group is merged in, so a concurrently-written sibling
         # group isn't clobbered.
         assert (
-            coord._lighting_switch_cache[CAM_ID]["frontLightSettings"]
+            coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]
             == server_response["frontLightSettings"]
         )
-        assert coord._lighting_switch_cache[CAM_ID] is not server_response
+        assert coord.lighting_switch_cache[CAM_ID] is not server_response
 
 
 class TestPutLightingSwitchConcurrentNoClobber:
@@ -1292,7 +1292,7 @@ class TestPutLightingSwitchConcurrentNoClobber:
         session = MagicMock()
         session.put = _slow_put
         coord = _stub_coord_edge(
-            _lighting_switch_cache={
+            lighting_switch_cache={
                 CAM_ID: {
                     "frontLightSettings": {
                         "brightness": 0,
@@ -1328,7 +1328,7 @@ class TestPutLightingSwitchConcurrentNoClobber:
                 ),
             )
 
-        cache = coord._lighting_switch_cache[CAM_ID]
+        cache = coord.lighting_switch_cache[CAM_ID]
         # Neither write reverted the other in the cache.
         assert cache["topLedLightSettings"]["brightness"] == 50
         assert cache["bottomLedLightSettings"]["brightness"] == 70
@@ -1353,9 +1353,9 @@ def _stub_coord_setup(**overrides):
                 "events": [],
             }
         },
-        _lighting_switch_cache={},
-        _shc_state_cache={CAM_ID: {}},
-        _light_set_at={},
+        lighting_switch_cache={},
+        shc_state_cache={CAM_ID: {}},
+        light_set_at={},
         last_update_success=True,
         token="tok-A",
         async_update_listeners=MagicMock(),
@@ -1484,7 +1484,7 @@ class TestLightAsyncSetupEntry:
     def test_hw_version_fallback_from_persistent_cache(self):
         """When `cam_info.hardwareVersion` is empty (cold-start during cloud
         outage, rehydrated coordinator.data has just `info.title`), light
-        setup falls back to the persistent `_hw_version` store. Same fallback
+        setup falls back to the persistent `hw_version` store. Same fallback
         used by the rest of the integration to determine model behaviour.
         Outdoor II must still get its three light entities on cold start."""
         from custom_components.bosch_shc_camera.light import async_setup_entry
@@ -1494,7 +1494,7 @@ class TestLightAsyncSetupEntry:
         coord.data[CAM_ID]["info"].pop("hardwareVersion", None)
         coord.data[CAM_ID]["info"]["featureSupport"] = {"light": True}
         # Persistent store knows it's Outdoor II
-        coord._hw_version = {CAM_ID: "HOME_Eyes_Outdoor"}
+        coord.hw_version = {CAM_ID: "HOME_Eyes_Outdoor"}
         added = []
 
         def _fake_add(entities, **kw):
@@ -1531,7 +1531,7 @@ class TestFrontLightColorTempKelvin:
         entity._is_on = True
         entity._brightness = 80
         # Bypass _load_state_from_cache by clearing cache
-        stub_coord_setup._lighting_switch_cache = {}
+        stub_coord_setup.lighting_switch_cache = {}
         k = entity.color_temp_kelvin
         assert k == 6500, "whiteBalance=-1.0 must map to 6500K (cool)"
 
@@ -1543,7 +1543,7 @@ class TestFrontLightColorTempKelvin:
         entity._white_balance = 1.0
         entity._is_on = True
         entity._brightness = 80
-        stub_coord_setup._lighting_switch_cache = {}
+        stub_coord_setup.lighting_switch_cache = {}
         k = entity.color_temp_kelvin
         assert k == 2000, "whiteBalance=1.0 must map to 2000K (warm)"
 
@@ -1555,7 +1555,7 @@ class TestFrontLightColorTempKelvin:
         entity._white_balance = 0.0
         entity._is_on = True
         entity._brightness = 80
-        stub_coord_setup._lighting_switch_cache = {}
+        stub_coord_setup.lighting_switch_cache = {}
         k = entity.color_temp_kelvin
         assert k == 4250, "whiteBalance=0.0 must map to 4250K (neutral)"
 
@@ -1567,7 +1567,7 @@ class TestFrontLightColorTempKelvin:
         entity._is_on = False
         entity._white_balance = None
         entity._last_white_balance = -1.0
-        stub_coord_setup._lighting_switch_cache = {}
+        stub_coord_setup.lighting_switch_cache = {}
         k = entity.color_temp_kelvin
         assert k is not None, "color_temp_kelvin must return a value even when off"
 
@@ -1769,7 +1769,7 @@ class TestTopLedLightTurnOn:
         entity = self._make_top_led(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
         entity._is_on = True
         entity._brightness = 70
-        stub_coord_setup._lighting_switch_cache[CAM_ID] = {
+        stub_coord_setup.lighting_switch_cache[CAM_ID] = {
             "topLedLightSettings": {"brightness": 0},
             "bottomLedLightSettings": {"brightness": 0},
         }
@@ -1789,7 +1789,7 @@ class TestTopLedLightTurnOn:
         entity._is_on = True
         entity._brightness = 70
         # Both LEDs at 0 after PUT
-        stub_coord_setup._lighting_switch_cache[CAM_ID] = {
+        stub_coord_setup.lighting_switch_cache[CAM_ID] = {
             "topLedLightSettings": {"brightness": 0},
             "bottomLedLightSettings": {"brightness": 0},
         }
@@ -1820,7 +1820,7 @@ class TestLightBaseAvailableAndBrightness:
         entity._is_on = False
         entity._brightness = 0
         entity._last_brightness = 80
-        stub_coord_setup._lighting_switch_cache = {}  # ensure _load_state_from_cache is a no-op
+        stub_coord_setup.lighting_switch_cache = {}  # ensure _load_state_from_cache is a no-op
         b = entity.brightness
         assert b == round(80 * 255 / 100), (
             "Brightness when off must return last_brightness scaled to HA 0-255"
@@ -1916,7 +1916,7 @@ def stub_coord_light_prefix() -> SimpleNamespace:
                 }
             }
         },
-        _lighting_switch_cache={
+        lighting_switch_cache={
             CAM_ID: {
                 "frontLightSettings": {
                     "brightness": 0,
@@ -2046,7 +2046,7 @@ class TestLightLanFallbackAvailability:
         light.coordinator = SimpleNamespace(
             last_update_success=False,
             is_lan_reachable=lambda _c: True,
-            _hw_version={"C": "CAMERA_EYES"},  # Gen1
+            hw_version={"C": "CAMERA_EYES"},  # Gen1
         )
         with patch(
             "custom_components.bosch_shc_camera.shc._is_gen2",
@@ -2063,7 +2063,7 @@ class TestLightLanFallbackAvailability:
         light.coordinator = SimpleNamespace(
             last_update_success=False,
             is_lan_reachable=lambda _c: True,
-            _hw_version={"C": "HOME_Eyes_Outdoor"},  # Gen2
+            hw_version={"C": "HOME_Eyes_Outdoor"},  # Gen2
         )
         with patch(
             "custom_components.bosch_shc_camera.shc._is_gen2",
@@ -2079,7 +2079,7 @@ class TestLightLanFallbackAvailability:
         light.coordinator = SimpleNamespace(
             last_update_success=False,
             is_lan_reachable=lambda _c: False,
-            _hw_version={"C": "HOME_Eyes_Outdoor"},
+            hw_version={"C": "HOME_Eyes_Outdoor"},
         )
         with patch(
             "custom_components.bosch_shc_camera.shc._is_gen2",
@@ -2108,9 +2108,9 @@ def _stub_coord_with_privacy_light(
                 },
             }
         },
-        _shc_state_cache={CAM_ID: {"privacy_mode": privacy_on}},
-        _lighting_switch_cache={},
-        _light_set_at={},
+        shc_state_cache={CAM_ID: {"privacy_mode": privacy_on}},
+        lighting_switch_cache={},
+        light_set_at={},
         last_update_success=True,
         token="tok-A",
         is_camera_online=lambda cid: True,
@@ -2280,13 +2280,13 @@ def _coord_light_updating(*, is_updating_value: bool) -> SimpleNamespace:
         },
         last_update_success=True,
         is_updating=lambda cam_id: is_updating_value if cam_id == CAM_ID else False,
-        _firmware_cache={CAM_ID: {"updating": is_updating_value}},
-        _shc_state_cache={CAM_ID: {"privacy_mode": False}},
-        _hw_version={CAM_ID: "HOME_Eyes_Outdoor"},
-        _lan_tcp_reachable={CAM_ID: (True, 0.0)},
+        firmware_cache={CAM_ID: {"updating": is_updating_value}},
+        shc_state_cache={CAM_ID: {"privacy_mode": False}},
+        hw_version={CAM_ID: "HOME_Eyes_Outdoor"},
+        lan_tcp_reachable={CAM_ID: (True, 0.0)},
         is_lan_reachable=lambda cam_id: True,
         is_session_stale=lambda cam_id: False,
-        _user_intent_streams=set(),
+        user_intent_streams=set(),
     )
 
 

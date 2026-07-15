@@ -73,7 +73,7 @@ _FLUSH_PREFIX = "text/event-stream; x-actual="
 # once HLS was ever used (it means "can serve", not "is serving") — so it cannot
 # tell a watched stream from an abandoned one. Keyed by the Stream access_token
 # embedded in the HLS URL (/api/hls/<token>/...). See __init__.py
-# _has_active_consumer.
+# has_active_consumer.
 _HLS_ACCESS: dict[str, float] = {}
 # Cap raised from 64 → 256 (B05-5).  64 was enough for typical deployments,
 # but tokens rotate on every HLS session renewal.  With >64 cameras — or after

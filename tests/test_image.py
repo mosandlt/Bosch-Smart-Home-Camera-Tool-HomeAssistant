@@ -51,8 +51,8 @@ def _make_coordinator(cam_id: str = CAM_ID) -> Any:
                 "live": {},
             }
         },
-        _camera_entities={},
-        _image_entities={},
+        camera_entities={},
+        image_entities={},
     )
 
 
@@ -181,8 +181,8 @@ async def test_async_image_disk_takes_priority_over_ram(tmp_path: Path) -> None:
     await save_snapshot(hass, CAM_ID, DISK_JPEG)
 
     coordinator = _make_coordinator()
-    cam_stub = SimpleNamespace(_cached_image=RAM_JPEG)
-    coordinator._camera_entities[CAM_ID] = cam_stub
+    cam_stub = SimpleNamespace(cached_image=RAM_JPEG)
+    coordinator.camera_entities[CAM_ID] = cam_stub
 
     entity = _build_image_entity(hass, coordinator=coordinator)
 
@@ -193,12 +193,12 @@ async def test_async_image_disk_takes_priority_over_ram(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_async_image_fallback_to_ram_cache(tmp_path: Path) -> None:
-    """When no disk file exists, async_image falls back to camera._cached_image."""
+    """When no disk file exists, async_image falls back to camera.cached_image."""
     hass = _make_hass(tmp_path)
 
     coordinator = _make_coordinator()
-    cam_stub = SimpleNamespace(_cached_image=RAM_JPEG)
-    coordinator._camera_entities[CAM_ID] = cam_stub
+    cam_stub = SimpleNamespace(cached_image=RAM_JPEG)
+    coordinator.camera_entities[CAM_ID] = cam_stub
 
     entity = _build_image_entity(hass, coordinator=coordinator)
 
@@ -217,8 +217,8 @@ async def test_async_image_placeholder_not_returned_as_fallback(
     placeholder = b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"\x00" * 120
 
     coordinator = _make_coordinator()
-    cam_stub = SimpleNamespace(_cached_image=placeholder)
-    coordinator._camera_entities[CAM_ID] = cam_stub
+    cam_stub = SimpleNamespace(cached_image=placeholder)
+    coordinator.camera_entities[CAM_ID] = cam_stub
 
     entity = _build_image_entity(hass, coordinator=coordinator)
 
@@ -232,8 +232,8 @@ async def test_async_image_returns_none_when_no_data(tmp_path: Path) -> None:
     hass = _make_hass(tmp_path)
 
     coordinator = _make_coordinator()
-    cam_stub = SimpleNamespace(_cached_image=None)
-    coordinator._camera_entities[CAM_ID] = cam_stub
+    cam_stub = SimpleNamespace(cached_image=None)
+    coordinator.camera_entities[CAM_ID] = cam_stub
 
     entity = _build_image_entity(hass, coordinator=coordinator)
 
@@ -328,13 +328,13 @@ def test_unique_id_stable_across_rebuilds(tmp_path: Path) -> None:
 
 
 def test_entity_registers_with_coordinator(tmp_path: Path) -> None:
-    """The image entity must register itself in coordinator._image_entities."""
+    """The image entity must register itself in coordinator.image_entities."""
     hass = _make_hass(tmp_path)
     coordinator = _make_coordinator()
 
     entity = _build_image_entity(hass, coordinator=coordinator)
 
-    assert coordinator._image_entities.get(CAM_ID) is entity
+    assert coordinator.image_entities.get(CAM_ID) is entity
 
 
 # In-RAM cache (perf 2026-06-18) — disk read only once per refresh
@@ -405,8 +405,8 @@ async def test_ram_fallback_not_cached(tmp_path: Path) -> None:
     once it lands."""
     hass = _make_hass(tmp_path)
     coordinator = _make_coordinator()
-    cam_stub = SimpleNamespace(_cached_image=RAM_JPEG)
-    coordinator._camera_entities[CAM_ID] = cam_stub
+    cam_stub = SimpleNamespace(cached_image=RAM_JPEG)
+    coordinator.camera_entities[CAM_ID] = cam_stub
     entity = _build_image_entity(hass, coordinator=coordinator)
 
     # No disk file → fallback to RAM, but cache stays None.
@@ -424,7 +424,7 @@ class TestImageEntityHooks:
             BoschCameraLastSnapshotImage,
         )
 
-        coord = SimpleNamespace(_image_entities={"C": "self_ref"})
+        coord = SimpleNamespace(image_entities={"C": "self_ref"})
         ent = BoschCameraLastSnapshotImage.__new__(BoschCameraLastSnapshotImage)
         ent._coordinator = coord
         ent._cam_id = "C"
@@ -438,7 +438,7 @@ class TestImageEntityHooks:
 
             super_mock.return_value = _noop()
             await BoschCameraLastSnapshotImage.async_will_remove_from_hass(ent)
-        assert "C" not in coord._image_entities
+        assert "C" not in coord.image_entities
 
     def test_device_info_full_payload(self):
         """`device_info` builds the device-registry payload from cached info."""

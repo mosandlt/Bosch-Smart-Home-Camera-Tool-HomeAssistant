@@ -131,6 +131,50 @@ class TestCloudSslSession:
         await cb(MagicMock())
         fake_session.close.assert_awaited_once()
 
+    async def test_registers_cleanup_on_homeassistant_close_not_stop(self) -> None:
+        """The cleanup listener must be registered on EVENT_HOMEASSISTANT_CLOSE.
+
+        Regression (2026-07-15, ported from the HA-Core-submission-prep tree
+        alongside the inject-websession quality_scale.yaml research): this
+        used to listen on EVENT_HOMEASSISTANT_STOP, which fires before
+        EVENT_HOMEASSISTANT_CLOSE in HA-core's shutdown sequence (STOP ->
+        FINAL_WRITE -> CLOSE) -- closing the shared Bosch cloud session on
+        STOP risked tearing it down while other integrations' stop-phase
+        cleanup (including this one's own) could still need it. Matches
+        homeassistant.helpers.aiohttp_client.py, which closes both its
+        default sessions and their connectors on CLOSE, not STOP.
+        """
+        from homeassistant.const import EVENT_HOMEASSISTANT_CLOSE
+
+        from custom_components.bosch_shc_camera import cloud_ssl
+
+        hass = _make_hass_for_cloud()
+        hass.data.pop(cloud_ssl._SESSION_DATA_KEY, None)
+
+        fake_session = MagicMock()
+        fake_session.closed = False
+
+        with (
+            patch.object(
+                cloud_ssl,
+                "async_get_bosch_cloud_ssl_context",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.TCPConnector",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.ClientSession",
+                return_value=fake_session,
+            ),
+        ):
+            await cloud_ssl.async_get_bosch_cloud_session(hass)
+
+        hass.bus.async_listen_once.assert_called_once()
+        registered_event = hass.bus.async_listen_once.call_args[0][0]
+        assert registered_event == EVENT_HOMEASSISTANT_CLOSE
+
     async def test_concurrent_calls_create_only_one_session(self) -> None:
         """Regression (bug-hunt 2026-07-03): async_get_bosch_cloud_session had
         no lock, unlike its sibling async_get_bosch_cloud_ssl_context which

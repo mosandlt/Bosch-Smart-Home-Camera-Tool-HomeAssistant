@@ -23,8 +23,8 @@ def stub_coord() -> SimpleNamespace:
                 }
             }
         },
-        _firmware_cache={},
-        _firmware_set_at={},
+        firmware_cache={},
+        firmware_set_at={},
         last_update_success=True,
         async_put_camera=AsyncMock(return_value=True),
     )
@@ -70,7 +70,7 @@ class TestFirmwareUpdate:
     def test_installed_version_uses_cache_current_if_present(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        stub_coord._firmware_cache[CAM_ID] = {"current": "9.41.00"}
+        stub_coord.firmware_cache[CAM_ID] = {"current": "9.41.00"}
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
@@ -79,7 +79,7 @@ class TestFirmwareUpdate:
     def test_latest_version_when_up_to_date(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        stub_coord._firmware_cache[CAM_ID] = {
+        stub_coord.firmware_cache[CAM_ID] = {
             "current": "9.40.25",
             "upToDate": True,
         }
@@ -91,7 +91,7 @@ class TestFirmwareUpdate:
     def test_latest_version_when_update_available(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        stub_coord._firmware_cache[CAM_ID] = {
+        stub_coord.firmware_cache[CAM_ID] = {
             "current": "9.40.25",
             "upToDate": False,
             "update": "9.41.00",
@@ -105,7 +105,7 @@ class TestFirmwareUpdate:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Not up to date but no `update` key → 'update available' placeholder."""
-        stub_coord._firmware_cache[CAM_ID] = {
+        stub_coord.firmware_cache[CAM_ID] = {
             "current": "9.40.25",
             "upToDate": False,
         }
@@ -117,7 +117,7 @@ class TestFirmwareUpdate:
     def test_in_progress_reflects_cache(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        stub_coord._firmware_cache[CAM_ID] = {"updating": True}
+        stub_coord.firmware_cache[CAM_ID] = {"updating": True}
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
@@ -144,7 +144,7 @@ class TestFirmwareUpdate:
     def test_extra_attrs(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        stub_coord._firmware_cache[CAM_ID] = {
+        stub_coord.firmware_cache[CAM_ID] = {
             "upToDate": False,
             "updating": True,
             "status": "downloading",
@@ -174,7 +174,7 @@ class TestFirmwareUpdate:
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
-        assert stub_coord._firmware_cache == {}
+        assert stub_coord.firmware_cache == {}
         assert u.latest_version == "9.40.25"
 
     def test_latest_version_returns_none_when_up_to_date_absent(
@@ -184,7 +184,7 @@ class TestFirmwareUpdate:
 
         Previously defaulted to True → silently hid a pending update (B08 #1).
         """
-        stub_coord._firmware_cache[CAM_ID] = {"current": "9.40.25"}
+        stub_coord.firmware_cache[CAM_ID] = {"current": "9.40.25"}
         from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
@@ -213,7 +213,7 @@ class TestSetupEntry:
                     "info": {"title": "Innen", "hardwareVersion": "CAMERA_360"}
                 },
             },
-            _firmware_cache={},
+            firmware_cache={},
             last_update_success=True,
         )
         entry = SimpleNamespace(
@@ -234,7 +234,7 @@ class TestSetupEntry:
     async def test_setup_entry_empty_data_yields_no_entities(self):
         from custom_components.bosch_shc_camera.update import async_setup_entry
 
-        coord = SimpleNamespace(data={}, _firmware_cache={}, last_update_success=True)
+        coord = SimpleNamespace(data={}, firmware_cache={}, last_update_success=True)
         entry = SimpleNamespace(
             entry_id="01ENTRY", data={}, options={}, runtime_data=coord
         )
@@ -316,7 +316,7 @@ class TestAsyncInstall:
         """Live bug (2026-07-08, Thomas): pressing Install showed no progress
         indicator at all. Root cause: without UpdateEntityFeature.PROGRESS, HA's
         own async_install_with_progress() ignores our `in_progress` property
-        (which correctly tracks the coordinator's `_firmware_cache[...]['updating']`
+        (which correctly tracks the coordinator's `firmware_cache[...]['updating']`
         for the whole multi-minute on-camera flash) and instead drives an
         internal flag that's only True while async_install() itself is awaiting
         — i.e. for the single PUT call, not the following minutes of flashing.

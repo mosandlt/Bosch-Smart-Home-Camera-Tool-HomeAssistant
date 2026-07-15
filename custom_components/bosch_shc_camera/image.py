@@ -105,11 +105,11 @@ class BoschCameraLastSnapshotImage(ImageEntity):  # type: ignore[misc]  # HA bas
 
         # Register ourselves with the coordinator's camera entity so
         # BoschCamera can call async_notify_refreshed() after persisting.
-        coordinator._image_entities[cam_id] = self
+        coordinator.image_entities[cam_id] = self
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister from coordinator on removal."""
-        self._coordinator._image_entities.pop(self._cam_id, None)
+        self._coordinator.image_entities.pop(self._cam_id, None)
         await super().async_will_remove_from_hass()
 
     @property
@@ -127,7 +127,7 @@ class BoschCameraLastSnapshotImage(ImageEntity):  # type: ignore[misc]  # HA bas
         """Return the latest persisted JPEG, falling back to camera RAM cache.
 
         Primary source: disk store (.storage/bosch_shc_camera/snapshots/).
-        Fallback: camera entity's _cached_image (RAM only, lost on restart).
+        Fallback: camera entity's cached_image (RAM only, lost on restart).
         Returns None only when both sources are empty (very first startup
         before any snapshot has been fetched).
         """
@@ -143,9 +143,9 @@ class BoschCameraLastSnapshotImage(ImageEntity):  # type: ignore[misc]  # HA bas
         # Fallback to RAM cache from the camera entity. Do NOT store it as our
         # own cache: it's a transient cold-start fallback that the next disk
         # write supersedes, and caching it would shadow the disk snapshot.
-        cam = self._coordinator._camera_entities.get(self._cam_id)
+        cam = self._coordinator.camera_entities.get(self._cam_id)
         if cam is not None:
-            cached = cam._cached_image
+            cached = cam.cached_image
             # Don't serve the 1×1 placeholder as a real snapshot image.
             if cached and len(cached) > 200:
                 return cached  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed

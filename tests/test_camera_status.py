@@ -54,30 +54,30 @@ def _make_coord(**overrides):
         coro.close()
         return MagicMock()
 
-    def _spawn_tracked(coro, **kwargs):
-        # Mirrors BoschCameraCoordinator._spawn_tracked closely enough for
+    def spawn_tracked(coro, **kwargs):
+        # Mirrors BoschCameraCoordinator.spawn_tracked closely enough for
         # these direct-module unit tests: routes through
         # hass.async_create_task (assertable via coord.hass.async_create_task)
         # and closes the coroutine to avoid "never awaited" warnings, without
-        # needing a real _bg_tasks set on this bare SimpleNamespace stub.
+        # needing a real bg_tasks set on this bare SimpleNamespace stub.
         return coord.hass.async_create_task(coro, **kwargs)
 
     base = dict(
         hass=SimpleNamespace(async_create_task=MagicMock(side_effect=_create_task)),
-        _spawn_tracked=_spawn_tracked,
-        _should_check_status=MagicMock(return_value=True),
-        _cached_status={},
-        _async_local_tcp_ping=AsyncMock(return_value=False),
-        _per_cam_status_at={},
-        _offline_since={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _stream_error_at={},
-        _live_connections={},
-        _local_promote_at={},
-        _commissioned_cache={},
-        _entry=SimpleNamespace(options={}),
-        _promote_to_local=AsyncMock(),
+        spawn_tracked=spawn_tracked,
+        should_check_status=MagicMock(return_value=True),
+        cached_status={},
+        async_local_tcp_ping=AsyncMock(return_value=False),
+        per_cam_status_at={},
+        offline_since={},
+        stream_fell_back={},
+        stream_error_count={},
+        stream_error_at={},
+        live_connections={},
+        local_promote_at={},
+        commissioned_cache={},
+        entry=SimpleNamespace(options={}),
+        promote_to_local=AsyncMock(),
     )
     base.update(overrides)
     coord = SimpleNamespace(**base)
@@ -88,8 +88,8 @@ class TestCheckOneCameraStatusGating:
     @pytest.mark.asyncio
     async def test_gate_closed_returns_cached_status(self):
         coord = _make_coord(
-            _should_check_status=MagicMock(return_value=False),
-            _cached_status={CAM_A: "ONLINE"},
+            should_check_status=MagicMock(return_value=False),
+            cached_status={CAM_A: "ONLINE"},
         )
         session = _make_session({})
 
@@ -100,11 +100,11 @@ class TestCheckOneCameraStatusGating:
         assert cam_id == CAM_A
         assert status == "ONLINE"
         session.get.assert_not_called()
-        coord._async_local_tcp_ping.assert_not_called()
+        coord.async_local_tcp_ping.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_gate_closed_unknown_cam_defaults_unknown(self):
-        coord = _make_coord(_should_check_status=MagicMock(return_value=False))
+        coord = _make_coord(should_check_status=MagicMock(return_value=False))
         session = _make_session({})
 
         _cam_id, status = await _check_one_camera_status(
@@ -117,7 +117,7 @@ class TestCheckOneCameraStatusGating:
 class TestCheckOneCameraStatusLocalPing:
     @pytest.mark.asyncio
     async def test_local_ping_ok_returns_online_without_cloud_call(self):
-        coord = _make_coord(_async_local_tcp_ping=AsyncMock(return_value=True))
+        coord = _make_coord(async_local_tcp_ping=AsyncMock(return_value=True))
         session = _make_session({})
 
         _cam_id, status = await _check_one_camera_status(
@@ -126,67 +126,67 @@ class TestCheckOneCameraStatusLocalPing:
 
         assert status == "ONLINE"
         session.get.assert_not_called()
-        assert coord._per_cam_status_at[CAM_A] == NOW
-        assert CAM_A not in coord._offline_since
+        assert coord.per_cam_status_at[CAM_A] == NOW
+        assert CAM_A not in coord.offline_since
 
     @pytest.mark.asyncio
     async def test_local_ping_ok_no_fallback_flag_skips_promotion_logic(self):
-        coord = _make_coord(_async_local_tcp_ping=AsyncMock(return_value=True))
+        coord = _make_coord(async_local_tcp_ping=AsyncMock(return_value=True))
         session = _make_session({})
 
         await _check_one_camera_status(coord, CAM_A, session, HEADERS, NOW, INTERVAL)
 
-        coord._promote_to_local.assert_not_called()
+        coord.promote_to_local.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_local_ping_ok_auto_mode_active_remote_promotes(self):
         """Fallback flag set + AUTO mode + an active REMOTE stream + cooldown
         elapsed → schedule a local-promotion task."""
         coord = _make_coord(
-            _async_local_tcp_ping=AsyncMock(return_value=True),
-            _stream_fell_back={CAM_A: True},
-            _entry=SimpleNamespace(options={"stream_connection_type": "auto"}),
-            _live_connections={CAM_A: {"_connection_type": "REMOTE"}},
-            _local_promote_at={},
+            async_local_tcp_ping=AsyncMock(return_value=True),
+            stream_fell_back={CAM_A: True},
+            entry=SimpleNamespace(options={"stream_connection_type": "auto"}),
+            live_connections={CAM_A: {"_connection_type": "REMOTE"}},
+            local_promote_at={},
         )
         session = _make_session({})
 
         await _check_one_camera_status(coord, CAM_A, session, HEADERS, NOW, INTERVAL)
 
-        coord._promote_to_local.assert_called_once_with(CAM_A)
-        assert CAM_A not in coord._stream_fell_back
-        assert CAM_A not in coord._stream_error_count
+        coord.promote_to_local.assert_called_once_with(CAM_A)
+        assert CAM_A not in coord.stream_fell_back
+        assert CAM_A not in coord.stream_error_count
 
     @pytest.mark.asyncio
     async def test_local_ping_ok_auto_mode_cooldown_active_skips_promotion(self):
         coord = _make_coord(
-            _async_local_tcp_ping=AsyncMock(return_value=True),
-            _stream_fell_back={CAM_A: True},
-            _entry=SimpleNamespace(options={"stream_connection_type": "auto"}),
-            _live_connections={CAM_A: {"_connection_type": "REMOTE"}},
-            _local_promote_at={CAM_A: NOW - 10},  # promoted 10s ago, cooldown=300s
+            async_local_tcp_ping=AsyncMock(return_value=True),
+            stream_fell_back={CAM_A: True},
+            entry=SimpleNamespace(options={"stream_connection_type": "auto"}),
+            live_connections={CAM_A: {"_connection_type": "REMOTE"}},
+            local_promote_at={CAM_A: NOW - 10},  # promoted 10s ago, cooldown=300s
         )
         session = _make_session({})
 
         await _check_one_camera_status(coord, CAM_A, session, HEADERS, NOW, INTERVAL)
 
-        coord._promote_to_local.assert_not_called()
+        coord.promote_to_local.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_local_ping_ok_manual_mode_clears_flag_no_promotion(self):
         """Fallback flag set but stream_connection_type is NOT 'auto' — must
         not clear the fallback flag or attempt promotion at all."""
         coord = _make_coord(
-            _async_local_tcp_ping=AsyncMock(return_value=True),
-            _stream_fell_back={CAM_A: True},
-            _entry=SimpleNamespace(options={"stream_connection_type": "local"}),
+            async_local_tcp_ping=AsyncMock(return_value=True),
+            stream_fell_back={CAM_A: True},
+            entry=SimpleNamespace(options={"stream_connection_type": "local"}),
         )
         session = _make_session({})
 
         await _check_one_camera_status(coord, CAM_A, session, HEADERS, NOW, INTERVAL)
 
-        coord._promote_to_local.assert_not_called()
-        assert coord._stream_fell_back[CAM_A] is True
+        coord.promote_to_local.assert_not_called()
+        assert coord.stream_fell_back[CAM_A] is True
 
     @pytest.mark.asyncio
     async def test_local_ping_ok_auto_mode_no_active_remote_no_promotion(self):
@@ -194,16 +194,16 @@ class TestCheckOneCameraStatusLocalPing:
         active stream at all) — clears the fallback bookkeeping but does
         not attempt promotion (nothing to promote)."""
         coord = _make_coord(
-            _async_local_tcp_ping=AsyncMock(return_value=True),
-            _stream_fell_back={CAM_A: True},
-            _entry=SimpleNamespace(options={"stream_connection_type": "auto"}),
+            async_local_tcp_ping=AsyncMock(return_value=True),
+            stream_fell_back={CAM_A: True},
+            entry=SimpleNamespace(options={"stream_connection_type": "auto"}),
         )
         session = _make_session({})
 
         await _check_one_camera_status(coord, CAM_A, session, HEADERS, NOW, INTERVAL)
 
-        coord._promote_to_local.assert_not_called()
-        assert CAM_A not in coord._stream_fell_back
+        coord.promote_to_local.assert_not_called()
+        assert CAM_A not in coord.stream_fell_back
 
 
 class TestCheckOneCameraStatusCloudPath:
@@ -217,7 +217,7 @@ class TestCheckOneCameraStatusCloudPath:
         )
 
         assert status == "ONLINE"
-        assert coord._per_cam_status_at[CAM_A] == NOW
+        assert coord.per_cam_status_at[CAM_A] == NOW
 
     @pytest.mark.asyncio
     async def test_ping_200_updating_status_mapped(self):
@@ -244,7 +244,7 @@ class TestCheckOneCameraStatusCloudPath:
         assert status == "SESSION_LIMIT"
         coord.hass.async_create_task.assert_called_once()
         # SESSION_LIMIT must not count as an offline-tracking transition
-        assert CAM_A not in coord._offline_since
+        assert CAM_A not in coord.offline_since
 
     @pytest.mark.asyncio
     async def test_ping_444_missing_quota_handler_is_a_noop(self):
@@ -278,7 +278,7 @@ class TestCheckOneCameraStatusCloudPath:
         )
 
         assert status == "ONLINE"
-        assert coord._commissioned_cache[CAM_A] == {
+        assert coord.commissioned_cache[CAM_A] == {
             "connected": True,
             "commissioned": True,
         }
@@ -310,7 +310,7 @@ class TestCheckOneCameraStatusCloudPath:
         )
 
         assert status == "OFFLINE"
-        assert coord._offline_since[CAM_A] == NOW
+        assert coord.offline_since[CAM_A] == NOW
 
     @pytest.mark.asyncio
     async def test_commissioned_200_neither_connected_nor_configured_stays_unknown(
@@ -355,7 +355,7 @@ class TestCheckOneCameraStatusCloudPath:
 
     @pytest.mark.asyncio
     async def test_offline_since_not_overwritten_on_repeated_offline(self):
-        coord = _make_coord(_offline_since={CAM_A: NOW - 500})
+        coord = _make_coord(offline_since={CAM_A: NOW - 500})
         session = _make_session(
             {
                 "/ping": _make_resp(500),
@@ -365,7 +365,7 @@ class TestCheckOneCameraStatusCloudPath:
 
         await _check_one_camera_status(coord, CAM_A, session, HEADERS, NOW, INTERVAL)
 
-        assert coord._offline_since[CAM_A] == NOW - 500
+        assert coord.offline_since[CAM_A] == NOW - 500
 
     @pytest.mark.asyncio
     async def test_commissioned_444_session_limit(self):
@@ -411,15 +411,15 @@ class TestPollStatuses:
         result = await poll_statuses(coord, [CAM_A, CAM_B], session, HEADERS, NOW, {})
 
         assert result is True
-        assert coord._cached_status[CAM_A] == "ONLINE"
-        assert coord._cached_status[CAM_B] == "ONLINE"
+        assert coord.cached_status[CAM_A] == "ONLINE"
+        assert coord.cached_status[CAM_B] == "ONLINE"
 
     @pytest.mark.asyncio
     async def test_any_status_checked_true_even_for_cached_result(self):
         """Per the module's documented semantics: any_status_checked is
         True for every non-exception result, even a gate-skipped one that
         just returned a cached status (NOT only on a fresh fetch)."""
-        coord = _make_coord(_should_check_status=MagicMock(return_value=False))
+        coord = _make_coord(should_check_status=MagicMock(return_value=False))
         session = _make_session({})
 
         result = await poll_statuses(coord, [CAM_A], session, HEADERS, NOW, {})
@@ -447,8 +447,8 @@ class TestPollStatuses:
             cs._check_one_camera_status = original
 
         assert result is True
-        assert coord._cached_status[CAM_B] == "ONLINE"
-        assert CAM_A not in coord._cached_status
+        assert coord.cached_status[CAM_B] == "ONLINE"
+        assert CAM_A not in coord.cached_status
 
     @pytest.mark.asyncio
     async def test_interval_status_read_from_opts_with_default(self):
@@ -457,7 +457,7 @@ class TestPollStatuses:
 
         await poll_statuses(coord, [CAM_A], session, HEADERS, NOW, {})
 
-        coord._should_check_status.assert_called_once_with(CAM_A, NOW, 60)
+        coord.should_check_status.assert_called_once_with(CAM_A, NOW, 60)
 
     @pytest.mark.asyncio
     async def test_interval_status_custom_value_from_opts(self):
@@ -468,7 +468,7 @@ class TestPollStatuses:
             coord, [CAM_A], session, HEADERS, NOW, {"interval_status": 120}
         )
 
-        coord._should_check_status.assert_called_once_with(CAM_A, NOW, 120)
+        coord.should_check_status.assert_called_once_with(CAM_A, NOW, 120)
 
     @pytest.mark.asyncio
     async def test_empty_cam_ids_returns_false(self):

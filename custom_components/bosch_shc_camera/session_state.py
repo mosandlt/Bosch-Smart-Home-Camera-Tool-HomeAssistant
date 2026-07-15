@@ -8,18 +8,18 @@ Slice 1 folded in three dicts with NO external readers (only
 `BoschCameraCoordinator` itself, in ``__init__.py``, ever touched them):
 ``_auto_renew_generation``, ``_session_idle_since``, ``_stream_warming_started``.
 
-Slice 2 (this one) folds in two more: ``_stream_warming`` (a ``set[str]``)
-and ``_live_opened_at`` (a ``dict[str, float]``) — both DO have external
-readers (``camera.py``: ``in``/``not in`` on ``_stream_warming``, ``.get()``/
-``.pop()`` on ``_live_opened_at``). Rather than rewrite those call sites,
+Slice 2 (this one) folds in two more: ``stream_warming`` (a ``set[str]``)
+and ``live_opened_at`` (a ``dict[str, float]``) — both DO have external
+readers (``camera.py``: ``in``/``not in`` on ``stream_warming``, ``.get()``/
+``.pop()`` on ``live_opened_at``). Rather than rewrite those call sites,
 ``_StreamWarmingView``/``_LiveOpenedAtView`` below are thin facades
 implementing exactly the subset of the ``set``/``dict`` protocol those call
 sites use, backed by the same ``_sessions`` store — so
-``coordinator._stream_warming``/``coordinator._live_opened_at`` keep
+``coordinator.stream_warming``/``coordinator.live_opened_at`` keep
 behaving exactly as before to every external caller, with zero changes
 needed in ``camera.py``/``switch.py``.
 
-Deliberately NOT folded into Slice 2: ``_live_connections`` itself — a much
+Deliberately NOT folded into Slice 2: ``live_connections`` itself — a much
 larger, heterogeneous ~15-key dict (raw Bosch API JSON plus derived fields)
 with real external MUTATION (multiple ``.pop()`` call sites across
 ``camera.py``/``switch.py``/``stream_lifecycle.py``/``live_connection.py``),
@@ -32,7 +32,7 @@ Slice 1 of the ``docs/stream-perf-stability-refactor-plan.md`` "Session-
 State-Facade — inkrementeller Migrationsplan" (Anhang 2026-07-13) folds in
 the diagnostic/write-lock timestamp fields: ``offline_seen_at`` and every
 ``*_set_at`` write-lock timestamp (13 of them — one per cloud-writable
-field guarded by ``BoschCameraCoordinator._is_write_locked``), plus three
+field guarded by ``BoschCameraCoordinator.is_write_locked``), plus three
 boolean "already logged/deferred this cycle" flags
 (``notif_disabled_logged``, ``fw_update_alerted``, ``slow_tier_deferred``).
 Generalizes the ``LiveOpenedAtView``/``StreamWarmingView`` pattern above
@@ -56,11 +56,11 @@ State-Facade — inkrementeller Migrationsplan" folds in 27 per-cam_id cache
 fields with no cross-camera access: every ``_rcp_*_cache`` (RCP protocol
 data — dimmer/privacy/clock-offset/lan-ip/product-name/bitrate/alarm-
 catalog/motion-zones/motion-coords/tls-cert/network-services/iva-catalog/
-onvif-scopes/version/state), ``_shc_state_cache``, ``_pan_cache``,
-``_audio_cache``, ``_local_creds_cache``, ``_nvr_mode_preference``, and the
-plain per-cam Mini-NVR status dicts ``_nvr_user_intent``/``_nvr_error_state``/
-``_nvr_recent_crash``/``_nvr_auth_retry_count``/``_nvr_event_clip_enabled``/
-``_nvr_preroll_last_crash``/``_nvr_preroll_segment_counts``. Unlike Slice 1's
+onvif-scopes/version/state), ``shc_state_cache``, ``pan_cache``,
+``audio_cache``, ``local_creds_cache``, ``_nvr_mode_preference``, and the
+plain per-cam Mini-NVR status dicts ``nvr_user_intent``/``nvr_error_state``/
+``nvr_recent_crash``/``nvr_auth_retry_count``/``_nvr_event_clip_enabled``/
+``_nvr_preroll_last_crash``/``nvr_preroll_segment_counts``. Unlike Slice 1's
 float/bool fields, these are heterogeneous (dict/list/int/str/float/bool,
 several themselves ``Optional``) — generalized into one generic
 ``CacheFieldView[_T]`` built on ``collections.abc.MutableMapping`` rather
@@ -72,18 +72,18 @@ camera reported nothing") that must stay distinguishable from "never
 queried" for `in`/`.get()` callers.
 
 Deliberately NOT folded into Slice 2 (audited, not an oversight):
-``_nvr_processes``/``_nvr_preroll_processes`` (live ``asyncio.subprocess.
+``nvr_processes``/``nvr_preroll_processes`` (live ``asyncio.subprocess.
 Process`` handles, not simple cached data — same "needs its own dedicated
-design" reasoning as ``_live_connections`` above), ``_nvr_preroll_tasks``
+design" reasoning as ``live_connections`` above), ``nvr_preroll_tasks``
 (``asyncio.Task`` handles), ``_nvr_recorder_locks``/
-``_nvr_clip_assembly_locks`` (locks — Slice 4), and ``_nvr_drain_state``/
-``_nvr_drain_failures`` — both LOOKED like per-cam_id caches from their
+``_nvr_clip_assembly_locks`` (locks — Slice 4), and ``nvr_drain_state``/
+``nvr_drain_failures`` — both LOOKED like per-cam_id caches from their
 `dict[str, ...]` type hints and their presence in `_PURGE_CAM_DICT_ATTRS`,
 but turned out on inspection of `recorder.py` to NOT be cam_id-keyed at
-all: `_nvr_drain_state` is a single flat dict with fixed string keys
+all: `nvr_drain_state` is a single flat dict with fixed string keys
 ("target"/"pending"/"promoted"/"uploaded"/"failed"/"last_age_by_cam"/
 "last_tick_ts") replaced wholesale every drain tick
-(`recorder.py::sync_drain_tick`), and `_nvr_drain_failures` is keyed by
+(`recorder.py::sync_drain_tick`), and `nvr_drain_failures` is keyed by
 staging **file path**, not cam_id (`recorder.py:1774`,
 `failures[full] = failures.get(full, 0) + 1`). Migrating either into a
 per-cam `CameraSessionState` field would be actively wrong. Their
@@ -94,14 +94,14 @@ cam_id never literally matches a staging file path or a fixed key like
 Slice 3 of the ``docs/stream-perf-stability-refactor-plan.md`` "Session-
 State-Facade — inkrementeller Migrationsplan" folds in the session-/
 stream-state fields flagged there as higher-risk (actively read by
-today's Phase 1/2/3 code): ``_live_connections`` and
-``_user_intent_streams``. ``_sessions`` itself is NOT a migration target —
+today's Phase 1/2/3 code): ``live_connections`` and
+``user_intent_streams``. ``_sessions`` itself is NOT a migration target —
 it already IS the base `dict[cam_id, CameraSessionState]` store every view
-in this module is backed by. ``_live_opened_at``/``_stream_warming`` were
+in this module is backed by. ``live_opened_at``/``stream_warming`` were
 already folded before Slice 1 (see `LiveOpenedAtView`/`StreamWarmingView`
 above) and needed no further work here.
 
-``_live_connections`` (a `dict[str, dict[str, Any]]`, one ~15-key raw-JSON-
+``live_connections`` (a `dict[str, dict[str, Any]]`, one ~15-key raw-JSON-
 plus-derived-fields blob per cam_id) folds into a new
 `live_connection: dict[str, Any] | _Unset` field via the EXISTING
 `CacheFieldView[_T]` (Slice 2) — no new view class needed. Before relying
@@ -118,14 +118,14 @@ storage. The two `.pop()` call sites the module docstring above originally
 flagged (`camera.py`, `switch.py`) — since grown to more call sites across
 `stream_lifecycle.py`/`live_connection.py` too — all use the
 `.pop(cam_id, None)` two-arg form and keep working unchanged. The
-nested-subscript-write pattern (`live = coordinator._live_connections.get
+nested-subscript-write pattern (`live = coordinator.live_connections.get
 (cam_id); live["key"] = value`, used by `session_renewal.py`'s
 credential-rotation path) also keeps working unchanged: `CacheFieldView.
 __getitem__`/`.get()` return the SAME stored dict object, not a copy, so
 in-place mutation persists into the backing `CameraSessionState.
 live_connection` field exactly as it did into the old bare dict.
 
-``_user_intent_streams`` (a `set[str]`, pure cam_id membership with no
+``user_intent_streams`` (a `set[str]`, pure cam_id membership with no
 associated value) folds into a new `user_intent_stream: bool` field via
 the EXISTING `BoolFieldView` (Slice 1) — same reasoning as Slice 1's
 "already logged/deferred" flags: membership in the old set is exactly
@@ -140,8 +140,8 @@ Both fields default to their view's normal "not set" sentinel
 field write) never spuriously reports an existing live connection or
 user-intent flag for a camera that never had one.
 
-No `race` between a `_live_connections` read and a concurrent
-`_user_intent_streams` write is introduced by this migration: both fields
+No `race` between a `live_connections` read and a concurrent
+`user_intent_streams` write is introduced by this migration: both fields
 live on the SAME per-cam_id `CameraSessionState` instance now (previously
 two entirely separate dicts), but neither this module nor any caller ever
 held one field's read across an `await` while relying on the other field's
@@ -175,8 +175,8 @@ contract (``.get(key)`` returning ``None`` for a missing key,
 provides as a full `MutableMapping`.
 
 Deliberately NOT migrated (excluded by the plan itself, audited again
-here): ``_rcp_session_locks`` — keyed by `proxy_hash`, not `cam_id`; wrong
-shape for a per-camera facade field, same reasoning as `_rcp_session_cache`
+here): ``rcp_session_locks`` — keyed by `proxy_hash`, not `cam_id`; wrong
+shape for a per-camera facade field, same reasoning as `rcp_session_cache`
 in the Slice 2 exclusion list. Also audited and left out of scope:
 ``guards.py::_get_cam_lock`` manages a structurally different per-cam lock
 registry (``_audio_config_locks``, its only caller-supplied ``lock_attr``
@@ -190,7 +190,7 @@ dynamic-attribute pattern was not folded in.
 **Why identity is the whole risk here (unlike Slice 1-3's plain data
 fields):** an `asyncio.Lock` is a stateful, identity-bearing object — two
 different `Lock()` instances are NEVER interchangeable even both-unlocked.
-The entire point of `_get_stream_lock(cam_id)` et al is that repeated calls
+The entire point of `get_stream_lock(cam_id)` et al is that repeated calls
 for the SAME `cam_id` return the SAME lock object, so that two coroutines
 serializing on "the lock for this camera" are actually contending on one
 shared object rather than each silently getting their own. `CacheFieldView`
@@ -216,7 +216,7 @@ A lock is never dropped while held: `_purge_cam_id` (the only code path
 that ever removes a `CameraSessionState` — via `self._sessions.pop
 (cam_id, None)`, which the Slice 4 lock fields ride along with, same as
 every earlier slice) is documented and structurally guaranteed to run only
-after `_cleanup_stale_devices` has confirmed a camera is gone from the
+after `cleanup_stale_devices` has confirmed a camera is gone from the
 Bosch cloud account entirely — never mid-operation while one of that
 camera's locks could be `locked()` by an in-flight coroutine. This
 guarantee predates Slice 4 (the old bare-dict `_stream_locks.pop(cam_id,
@@ -231,7 +231,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator, MutableMapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeVar, cast
 
 _T = TypeVar("_T")
@@ -279,6 +279,17 @@ class CameraSessionState:
     warming_started: float = float("-inf")
     warming: bool = False
     opened_at: float | None = None
+    # Set exactly when live_connection.py actually publishes a usable
+    # rtspsUrl for a LOCAL session (GitHub #49 fix, 2026-07-15) — replaces
+    # a duplicate, independently-guessed timeout constant in recorder.py
+    # that had silently drifted out of sync with the real per-model
+    # min_total_wait pacing enforced here, causing the NVR recorder to give
+    # up on every coordinator tick for slower-encoder/weaker-WiFi cameras.
+    # Cleared at the start of every fresh LOCAL warm-up attempt so a stale
+    # "ready" signal from a previous session can never leak into a new one;
+    # default_factory gives every camera its own Event instance (a bare
+    # `= asyncio.Event()` default would share ONE Event across all cameras).
+    stream_ready_event: asyncio.Event = field(default_factory=asyncio.Event)
     # ── Slice 1: diagnostic/write-lock timestamps ──────────────────────
     offline_seen_at: float | None = None
     light_set_at: float | None = None
@@ -364,7 +375,7 @@ def get_or_create_session(
 class StreamWarmingView:
     """Set-like facade over `CameraSessionState.warming`.
 
-    Preserves the `_stream_warming: set[str]` contract external callers
+    Preserves the `stream_warming: set[str]` contract external callers
     (`camera.py`: `in`/`not in`) rely on, without them needing to change.
     """
 
@@ -390,7 +401,7 @@ class StreamWarmingView:
 class LiveOpenedAtView:
     """Dict-like facade over `CameraSessionState.opened_at`.
 
-    Preserves the `_live_opened_at: dict[str, float]` contract external
+    Preserves the `live_opened_at: dict[str, float]` contract external
     callers (`camera.py`: `.get()`/`.pop()`) rely on, without them needing
     to change.
     """
@@ -532,10 +543,10 @@ class CacheFieldView(MutableMapping[str, _T]):
     supplies `.get()`/`.pop()`/`.setdefault()`/`.update()`/`.clear()`/
     `.items()`/`.values()`/`.keys()`/`in`/`==`/`bool()` on top — including
     the two whole-dict-iteration call sites this slice's caches have
-    (`_rcp_lan_ip_cache` in `__init__.py`'s outage-ping loop and
+    (`rcp_lan_ip_cache` in `__init__.py`'s outage-ping loop and
     `tick_housekeeping.py`'s persisted-snapshot comprehension;
-    `_local_creds_cache` in the same `tick_housekeeping.py` snapshot path)
-    and the nested-subscript-write pattern several `_shc_state_cache`
+    `local_creds_cache` in the same `tick_housekeeping.py` snapshot path)
+    and the nested-subscript-write pattern several `shc_state_cache`
     writers use (`cache[cam_id]["key"] = value`) — `__getitem__` returns
     the SAME stored object reference (not a copy), so in-place mutation of
     a returned dict/list persists correctly.
@@ -576,7 +587,7 @@ class CacheFieldView(MutableMapping[str, _T]):
         # field's `get_or_create_session()` call elsewhere growing the
         # shared `_sessions` dict mid-loop cannot raise "dictionary
         # changed size during iteration" on a caller iterating THIS view
-        # (`for cid in coordinator._rcp_lan_ip_cache:` etc.) — the
+        # (`for cid in coordinator.rcp_lan_ip_cache:` etc.) — the
         # original dedicated per-field dict this replaces never had that
         # cross-field growth risk, so preserving eager materialization
         # keeps the exact same failure mode (none).

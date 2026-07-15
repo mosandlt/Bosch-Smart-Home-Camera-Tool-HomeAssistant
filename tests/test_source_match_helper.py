@@ -29,10 +29,9 @@ def test_matches_regardless_of_inner_spacing() -> None:
 
 def test_collapses_newlines_and_indentation() -> None:
     source = (
-        "    self._last_event_ids[cam_id] = newest_id\n"
-        "    self.async_write_ha_state()\n"
+        "    self.last_event_ids[cam_id] = newest_id\n    self.async_write_ha_state()\n"
     )
-    assert_in_source(source, "self._last_event_ids[cam_id] = newest_id")
+    assert_in_source(source, "self.last_event_ids[cam_id] = newest_id")
 
 
 def test_missing_fragment_raises() -> None:

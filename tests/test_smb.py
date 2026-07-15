@@ -3049,7 +3049,7 @@ class TestLocalSaveFilenaming:
             hass=hass,
             options=dict(DEFAULT_OPTIONS),
             data={CAM_ID: {"info": {"title": "Aussenkamera"}, "events": []}},
-            _last_event_ids={CAM_ID: "fresh-event-001"},
+            last_event_ids={CAM_ID: "fresh-event-001"},
             _download_started_at=0.0,  # disable "predates startup" guard
         )
         coord.options["enable_local_save"] = True

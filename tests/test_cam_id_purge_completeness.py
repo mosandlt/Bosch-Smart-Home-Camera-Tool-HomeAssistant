@@ -1,6 +1,6 @@
 """Completeness tests for `BoschCameraCoordinator._purge_cam_id` (Runde 2 P1 #1).
 
-`_cleanup_stale_devices` previously only removed the device-registry entry
+`cleanup_stale_devices` previously only removed the device-registry entry
 for a camera no longer present in the Bosch cloud account — none of the
 ~100+ per-cam_id-keyed coordinator dict/set attributes were ever cleared, so
 they grew unbounded across camera swaps/renames over the coordinator
@@ -41,12 +41,12 @@ TEST_OPCODE = "0xABCD"
 # still contain it after `_purge_cam_id` runs, proving purge did NOT touch it.
 EXCLUDED_STR_KEYED_DICTS = {
     # keyed by proxy_hash, not cam_id
-    "_rcp_session_cache",
-    "_rcp_session_locks",
+    "rcp_session_cache",
+    "rcp_session_locks",
     # keyed by event_id, not cam_id (pruned to 32 most recent separately)
-    "_alert_sent_ids",
+    "alert_sent_ids",
     # account-level (GET /v11/feature_flags once), keyed by flag name
-    "_feature_flags",
+    "feature_flags",
     # coordinator-instance-level snapshot of options at creation time, not
     # keyed by cam_id at all (str keys just happen to be option names)
     "_options_snapshot",
@@ -57,9 +57,9 @@ EXCLUDED_STR_KEYED_DICTS = {
 
 # Same idea for `set` attributes — sets of non-str members (e.g. Task
 # objects) look identical to an empty `set[str]` candidate at construction
-# time. Audited: `_bg_tasks` holds `asyncio.Task` references, not cam_ids.
+# time. Audited: `bg_tasks` holds `asyncio.Task` references, not cam_ids.
 EXCLUDED_SETS = {
-    "_bg_tasks",
+    "bg_tasks",
 }
 
 # Attribute handled specially: dict[tuple[str, str], float] keyed by
@@ -110,7 +110,7 @@ async def test_purge_cam_id_completeness(hass: HomeAssistant) -> None:
     candidate_dict_attrs: list[str] = []
     candidate_set_attrs: list[str] = []
     for name, value in vars(coord).items():
-        if not name.startswith("_") or name == TUPLE_KEYED_ATTR:
+        if name == TUPLE_KEYED_ATTR:
             continue
         if isinstance(value, dict) and _is_str_keyed_dict(value):
             candidate_dict_attrs.append(name)
@@ -185,17 +185,17 @@ async def test_purge_cam_id_representative_sample(hass: HomeAssistant) -> None:
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
 
-    coord._rcp_dimmer_cache[TEST_CAM_ID] = 42
-    coord._shc_state_cache[TEST_CAM_ID] = {"privacy_mode": True}
-    coord._pan_cache[TEST_CAM_ID] = 10
-    coord._get_session(TEST_CAM_ID)  # populates coord._sessions[TEST_CAM_ID]
+    coord.rcp_dimmer_cache[TEST_CAM_ID] = 42
+    coord.shc_state_cache[TEST_CAM_ID] = {"privacy_mode": True}
+    coord.pan_cache[TEST_CAM_ID] = 10
+    coord.get_session(TEST_CAM_ID)  # populates coord._sessions[TEST_CAM_ID]
     assert TEST_CAM_ID in coord._sessions
 
     coord._purge_cam_id(TEST_CAM_ID)
 
-    assert TEST_CAM_ID not in coord._rcp_dimmer_cache
-    assert TEST_CAM_ID not in coord._shc_state_cache
-    assert TEST_CAM_ID not in coord._pan_cache
+    assert TEST_CAM_ID not in coord.rcp_dimmer_cache
+    assert TEST_CAM_ID not in coord.shc_state_cache
+    assert TEST_CAM_ID not in coord.pan_cache
     assert TEST_CAM_ID not in coord._sessions
 
 
@@ -206,7 +206,7 @@ async def test_purge_cam_id_all_slice2_cache_fields(hass: HomeAssistant) -> None
     see these — they are `CacheFieldView` (a `MutableMapping`), not a bare
     `dict` instance, since Slice 2 (docs/stream-perf-stability-refactor-
     plan.md) backs them via `self._sessions`. Only 3 of the 27
-    (`_rcp_dimmer_cache`/`_shc_state_cache`/`_pan_cache`) had a dedicated
+    (`rcp_dimmer_cache`/`shc_state_cache`/`pan_cache`) had a dedicated
     regression check before this test (`test_purge_cam_id_representative_
     sample` below) — this covers the remaining 24 explicitly so a future
     change to `CacheFieldView`/`get_or_create_session` that broke purge for
@@ -217,32 +217,32 @@ async def test_purge_cam_id_all_slice2_cache_fields(hass: HomeAssistant) -> None
 
     slice2_probe_values: dict[str, object] = {
         "_rcp_state_cache": {"privacy_mode": False},
-        "_shc_state_cache": {"privacy_mode": True},
-        "_pan_cache": 10,
-        "_rcp_dimmer_cache": 42,
-        "_rcp_privacy_cache": 1,
-        "_rcp_clock_offset_cache": 1.5,
-        "_rcp_lan_ip_cache": "192.0.2.10",
-        "_rcp_product_name_cache": "Eyes Outdoor",
-        "_rcp_bitrate_cache": [512, 1024],
-        "_rcp_alarm_catalog_cache": [{"id": 1}],
-        "_rcp_motion_zones_cache": [{"id": 1}],
-        "_rcp_motion_coords_cache": [{"x": 1, "y": 1}],
-        "_rcp_tls_cert_cache": {"issuer": "Bosch"},
-        "_rcp_network_services_cache": ["rtsp"],
-        "_rcp_iva_catalog_cache": [{"id": 1}],
-        "_rcp_onvif_scopes_cache": {"name": "cam"},
-        "_rcp_version_cache": "1.2",
+        "shc_state_cache": {"privacy_mode": True},
+        "pan_cache": 10,
+        "rcp_dimmer_cache": 42,
+        "rcp_privacy_cache": 1,
+        "rcp_clock_offset_cache": 1.5,
+        "rcp_lan_ip_cache": "192.0.2.10",
+        "rcp_product_name_cache": "Eyes Outdoor",
+        "rcp_bitrate_cache": [512, 1024],
+        "rcp_alarm_catalog_cache": [{"id": 1}],
+        "rcp_motion_zones_cache": [{"id": 1}],
+        "rcp_motion_coords_cache": [{"x": 1, "y": 1}],
+        "rcp_tls_cert_cache": {"issuer": "Bosch"},
+        "rcp_network_services_cache": ["rtsp"],
+        "rcp_iva_catalog_cache": [{"id": 1}],
+        "rcp_onvif_scopes_cache": {"name": "cam"},
+        "rcp_version_cache": "1.2",
         "_nvr_mode_preference": "event_buffered",
-        "_local_creds_cache": {"user": "u", "password": "p"},
-        "_audio_cache": {"volume": 50},
-        "_nvr_user_intent": True,
-        "_nvr_error_state": "some error",
-        "_nvr_recent_crash": 123.0,
-        "_nvr_auth_retry_count": 2,
+        "local_creds_cache": {"user": "u", "password": "p"},
+        "audio_cache": {"volume": 50},
+        "nvr_user_intent": True,
+        "nvr_error_state": "some error",
+        "nvr_recent_crash": 123.0,
+        "nvr_auth_retry_count": 2,
         "_nvr_event_clip_enabled": True,
         "_nvr_preroll_last_crash": 456.0,
-        "_nvr_preroll_segment_counts": 7,
+        "nvr_preroll_segment_counts": 7,
     }
 
     for attr_name, probe_value in slice2_probe_values.items():
@@ -264,7 +264,7 @@ async def test_purge_cam_id_all_slice2_cache_fields(hass: HomeAssistant) -> None
 
 
 async def test_purge_cam_id_slice3_session_stream_fields(hass: HomeAssistant) -> None:
-    """`_live_connections` (CacheFieldView) and `_user_intent_streams`
+    """`live_connections` (CacheFieldView) and `user_intent_streams`
     (BoolFieldView) — Session-State-Facade Slice 3 — purge correctly.
 
     Neither `test_purge_cam_id_completeness`'s `vars(coord)` auto-discovery
@@ -275,15 +275,15 @@ async def test_purge_cam_id_slice3_session_stream_fields(hass: HomeAssistant) ->
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
 
-    coord._live_connections[TEST_CAM_ID] = {"proxyUrl": "https://example.invalid"}
-    coord._user_intent_streams.add(TEST_CAM_ID)
-    assert TEST_CAM_ID in coord._live_connections
-    assert TEST_CAM_ID in coord._user_intent_streams
+    coord.live_connections[TEST_CAM_ID] = {"proxyUrl": "https://example.invalid"}
+    coord.user_intent_streams.add(TEST_CAM_ID)
+    assert TEST_CAM_ID in coord.live_connections
+    assert TEST_CAM_ID in coord.user_intent_streams
 
     coord._purge_cam_id(TEST_CAM_ID)
 
-    assert TEST_CAM_ID not in coord._live_connections
-    assert TEST_CAM_ID not in coord._user_intent_streams
+    assert TEST_CAM_ID not in coord.live_connections
+    assert TEST_CAM_ID not in coord.user_intent_streams
 
 
 async def test_purge_cam_id_slice4_lock_fields(hass: HomeAssistant) -> None:
@@ -330,7 +330,7 @@ async def test_purge_cam_id_set_attr_loop_mechanism_still_works(
     hass: HomeAssistant,
 ) -> None:
     """`_PURGE_CAM_SET_ATTRS` became empty in Slice 3 (its last member,
-    `_user_intent_streams`, is now a `BoolFieldView` facade — see the
+    `user_intent_streams`, is now a `BoolFieldView` facade — see the
     excluded-list comment above `_PURGE_CAM_DICT_ATTRS` in `__init__.py`).
     The generic `for attr_name in self._PURGE_CAM_SET_ATTRS: ... .discard
     (cam_id)` loop body in `_purge_cam_id` is therefore currently
@@ -355,7 +355,7 @@ async def test_purge_cam_id_set_attr_loop_mechanism_still_works(
 
 
 async def test_cleanup_stale_devices_purges_removed_camera(hass: HomeAssistant) -> None:
-    """`_cleanup_stale_devices` purges the per-cam caches for a camera that
+    """`cleanup_stale_devices` purges the per-cam caches for a camera that
     disappeared from the Bosch cloud account, not just the device registry."""
     from homeassistant.helpers import device_registry as dr
 
@@ -363,10 +363,10 @@ async def test_cleanup_stale_devices_purges_removed_camera(hass: HomeAssistant) 
     coord = BoschCameraCoordinator(hass, entry)
 
     # Seed caches for a camera that is about to "disappear".
-    coord._rcp_dimmer_cache[TEST_CAM_ID] = 7
-    coord._shc_state_cache[TEST_CAM_ID] = {"privacy_mode": False}
-    coord._pan_cache[TEST_CAM_ID] = 3
-    coord._sessions[TEST_CAM_ID] = coord._get_session(TEST_CAM_ID)
+    coord.rcp_dimmer_cache[TEST_CAM_ID] = 7
+    coord.shc_state_cache[TEST_CAM_ID] = {"privacy_mode": False}
+    coord.pan_cache[TEST_CAM_ID] = 3
+    coord._sessions[TEST_CAM_ID] = coord.get_session(TEST_CAM_ID)
 
     dev_reg = dr.async_get(hass)
     dev_reg.async_get_or_create(
@@ -376,11 +376,11 @@ async def test_cleanup_stale_devices_purges_removed_camera(hass: HomeAssistant) 
     )
 
     # Camera no longer present in the fresh cloud list.
-    coord._cleanup_stale_devices(current_cam_ids=set())
+    coord.cleanup_stale_devices(current_cam_ids=set())
 
-    assert TEST_CAM_ID not in coord._rcp_dimmer_cache
-    assert TEST_CAM_ID not in coord._shc_state_cache
-    assert TEST_CAM_ID not in coord._pan_cache
+    assert TEST_CAM_ID not in coord.rcp_dimmer_cache
+    assert TEST_CAM_ID not in coord.shc_state_cache
+    assert TEST_CAM_ID not in coord.pan_cache
     assert TEST_CAM_ID not in coord._sessions
     # Device entry itself is gone too (pre-existing behaviour, still true).
     assert dev_reg.async_get_device(identifiers={(DOMAIN, TEST_CAM_ID)}) is None
@@ -389,7 +389,7 @@ async def test_cleanup_stale_devices_purges_removed_camera(hass: HomeAssistant) 
 async def test_purge_cam_id_closes_leftover_tls_proxy_server(
     hass: HomeAssistant,
 ) -> None:
-    """`_tls_proxy_servers[cam_id]` must be popped synchronously (so it's
+    """`tls_proxy_servers[cam_id]` must be popped synchronously (so it's
     already gone by the time `_purge_cam_id` returns, satisfying the
     completeness scan above) AND its `asyncio.Server` actually closed
     (`close()` + `close_clients()` + `wait_closed()`) via a tracked
@@ -402,15 +402,15 @@ async def test_purge_cam_id_closes_leftover_tls_proxy_server(
     mock_server.close = MagicMock()
     mock_server.close_clients = MagicMock()
     mock_server.wait_closed = AsyncMock()
-    coord._tls_proxy_servers[TEST_CAM_ID] = mock_server
+    coord.tls_proxy_servers[TEST_CAM_ID] = mock_server
 
     coord._purge_cam_id(TEST_CAM_ID)
 
     # Popped synchronously — no need to await anything to observe this.
-    assert TEST_CAM_ID not in coord._tls_proxy_servers
+    assert TEST_CAM_ID not in coord.tls_proxy_servers
     # The actual close I/O is deferred to a tracked background task.
-    assert len(coord._bg_tasks) == 1
-    await asyncio.gather(*coord._bg_tasks)
+    assert len(coord.bg_tasks) == 1
+    await asyncio.gather(*coord.bg_tasks)
 
     mock_server.close.assert_called_once()
     mock_server.close_clients.assert_called_once()
@@ -431,65 +431,65 @@ async def test_purge_cam_id_tls_proxy_server_close_exception_is_swallowed(
     mock_server.close = MagicMock()
     mock_server.close_clients = MagicMock()
     mock_server.wait_closed = AsyncMock(side_effect=RuntimeError("synthetic"))
-    coord._tls_proxy_servers[TEST_CAM_ID] = mock_server
+    coord.tls_proxy_servers[TEST_CAM_ID] = mock_server
 
     coord._purge_cam_id(TEST_CAM_ID)
-    await asyncio.gather(*coord._bg_tasks)  # must not raise
+    await asyncio.gather(*coord.bg_tasks)  # must not raise
 
 
 async def test_purge_cam_id_stops_leftover_viewing_front_door(
     hass: HomeAssistant,
 ) -> None:
-    """`_viewing_sticky_port[cam_id]` presence must trigger an explicit
-    `_stop_viewing_front_door` call via a tracked background task — same
+    """`viewing_sticky_port[cam_id]` presence must trigger an explicit
+    `stop_viewing_front_door` call via a tracked background task — same
     "leftover listener would leak for the process lifetime" rationale as
-    the `_tls_proxy_servers` case above, since the actual listener lives
-    inside the single shared `_viewing_front_door_runner`, not in the plain
-    int `_viewing_sticky_port` dict the generic purge loop already pops."""
+    the `tls_proxy_servers` case above, since the actual listener lives
+    inside the single shared `viewing_front_door_runner`, not in the plain
+    int `viewing_sticky_port` dict the generic purge loop already pops."""
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
 
-    coord._viewing_sticky_port[TEST_CAM_ID] = 55123
-    coord._stop_viewing_front_door = AsyncMock()
+    coord.viewing_sticky_port[TEST_CAM_ID] = 55123
+    coord.stop_viewing_front_door = AsyncMock()
 
     coord._purge_cam_id(TEST_CAM_ID)
 
     # Popped synchronously by the generic dict-attr loop.
-    assert TEST_CAM_ID not in coord._viewing_sticky_port
-    assert len(coord._bg_tasks) == 1
-    await asyncio.gather(*coord._bg_tasks)
-    coord._stop_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
+    assert TEST_CAM_ID not in coord.viewing_sticky_port
+    assert len(coord.bg_tasks) == 1
+    await asyncio.gather(*coord.bg_tasks)
+    coord.stop_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
 
 
 async def test_purge_cam_id_viewing_front_door_stop_exception_is_swallowed(
     hass: HomeAssistant,
 ) -> None:
-    """A raising `_stop_viewing_front_door` during the purge-triggered
+    """A raising `stop_viewing_front_door` during the purge-triggered
     background stop must be logged at DEBUG and swallowed, not crash the
     background task."""
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
 
-    coord._viewing_sticky_port[TEST_CAM_ID] = 55123
-    coord._stop_viewing_front_door = AsyncMock(side_effect=RuntimeError("synthetic"))
+    coord.viewing_sticky_port[TEST_CAM_ID] = 55123
+    coord.stop_viewing_front_door = AsyncMock(side_effect=RuntimeError("synthetic"))
 
     coord._purge_cam_id(TEST_CAM_ID)
-    await asyncio.gather(*coord._bg_tasks)  # must not raise
+    await asyncio.gather(*coord.bg_tasks)  # must not raise
 
 
 async def test_purge_cam_id_no_viewing_front_door_bg_task_when_not_bound(
     hass: HomeAssistant,
 ) -> None:
-    """No `_viewing_sticky_port[cam_id]` entry → no background stop task is
+    """No `viewing_sticky_port[cam_id]` entry → no background stop task is
     scheduled at all (nothing to stop)."""
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
-    coord._stop_viewing_front_door = AsyncMock()
+    coord.stop_viewing_front_door = AsyncMock()
 
     coord._purge_cam_id(TEST_CAM_ID)
 
-    assert len(coord._bg_tasks) == 0
-    coord._stop_viewing_front_door.assert_not_called()
+    assert len(coord.bg_tasks) == 0
+    coord.stop_viewing_front_door.assert_not_called()
 
 
 async def test_purge_cam_id_viewing_front_door_stop_waits_for_stream_lock(
@@ -498,7 +498,7 @@ async def test_purge_cam_id_viewing_front_door_stop_waits_for_stream_lock(
     """Bug-hunt finding (TOCTOU race): unlike every other mutator of the
     viewing front-door state, this purge-triggered stop used to run WITHOUT
     the per-cam stream lock — a concurrent renewal holding that lock could
-    resurrect a fresh listener + `_viewing_sticky_port` entry for a camera
+    resurrect a fresh listener + `viewing_sticky_port` entry for a camera
     that was just confirmed gone from the Bosch cloud account, orphaning a
     bound socket forever (nothing left to purge it again). The purge's
     background stop must now block until a concurrent lock-holder releases
@@ -507,32 +507,32 @@ async def test_purge_cam_id_viewing_front_door_stop_waits_for_stream_lock(
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
 
-    coord._viewing_sticky_port[TEST_CAM_ID] = 55123
-    coord._stop_viewing_front_door = AsyncMock()
+    coord.viewing_sticky_port[TEST_CAM_ID] = 55123
+    coord.stop_viewing_front_door = AsyncMock()
 
-    lock = coord._get_stream_lock(TEST_CAM_ID)
+    lock = coord.get_stream_lock(TEST_CAM_ID)
     await lock.acquire()  # simulate a concurrent renewal holding the lock
 
     coord._purge_cam_id(TEST_CAM_ID)
     await asyncio.sleep(0)  # let the bg task reach `async with lock` and block
 
-    assert len(coord._bg_tasks) == 1
-    bg_task = next(iter(coord._bg_tasks))
+    assert len(coord.bg_tasks) == 1
+    bg_task = next(iter(coord.bg_tasks))
     assert not bg_task.done(), (
         "REGRESSION: purge-triggered viewing front-door stop must block on "
         "the stream lock while a concurrent renewal holds it, not race it."
     )
-    coord._stop_viewing_front_door.assert_not_called()
+    coord.stop_viewing_front_door.assert_not_called()
 
     lock.release()  # renewal finished
     await asyncio.gather(bg_task)
-    coord._stop_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
+    coord.stop_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
 
 
 async def test_purge_cam_id_viewing_front_door_repops_sticky_port_after_lock(
     hass: HomeAssistant,
 ) -> None:
-    """If a concurrent renewal re-inserts `_viewing_sticky_port[cam_id]`
+    """If a concurrent renewal re-inserts `viewing_sticky_port[cam_id]`
     while the purge's background stop is waiting for the lock (it had
     already published a fresh listener before the purge's synchronous
     dict-pop ran), the purge must defensively re-pop it once it finally
@@ -541,26 +541,26 @@ async def test_purge_cam_id_viewing_front_door_repops_sticky_port_after_lock(
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
 
-    coord._viewing_sticky_port[TEST_CAM_ID] = 55123
-    coord._stop_viewing_front_door = AsyncMock()
+    coord.viewing_sticky_port[TEST_CAM_ID] = 55123
+    coord.stop_viewing_front_door = AsyncMock()
 
-    lock = coord._get_stream_lock(TEST_CAM_ID)
+    lock = coord.get_stream_lock(TEST_CAM_ID)
     await lock.acquire()
 
     coord._purge_cam_id(TEST_CAM_ID)
     await asyncio.sleep(0)
-    assert TEST_CAM_ID not in coord._viewing_sticky_port  # popped synchronously
+    assert TEST_CAM_ID not in coord.viewing_sticky_port  # popped synchronously
 
     # Simulate the racing renewal re-inserting the entry while it still
     # holds the lock, then releasing.
-    coord._viewing_sticky_port[TEST_CAM_ID] = 66234
+    coord.viewing_sticky_port[TEST_CAM_ID] = 66234
     lock.release()
 
-    bg_task = next(iter(coord._bg_tasks))
+    bg_task = next(iter(coord.bg_tasks))
     await asyncio.gather(bg_task)
 
-    coord._stop_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
-    assert TEST_CAM_ID not in coord._viewing_sticky_port, (
+    coord.stop_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
+    assert TEST_CAM_ID not in coord.viewing_sticky_port, (
         "REGRESSION: a sticky-port entry re-inserted by a racing renewal "
         "must not survive a confirmed camera purge."
     )
@@ -569,7 +569,7 @@ async def test_purge_cam_id_viewing_front_door_repops_sticky_port_after_lock(
 # ─────────────────────────────────────────────────────────────────────────────
 # REMOTE viewing front-door purge (remote_viewing_front_door.py) — mirrors
 # every LOCAL viewing-front-door purge test above, since `_purge_cam_id`
-# handles `_remote_viewing_sticky_port`/`_stop_remote_viewing_front_door`
+# handles `remote_viewing_sticky_port`/`stop_remote_viewing_front_door`
 # with the exact same lock-then-stop-then-defensive-repop logic.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -577,54 +577,54 @@ async def test_purge_cam_id_viewing_front_door_repops_sticky_port_after_lock(
 async def test_purge_cam_id_stops_leftover_remote_viewing_front_door(
     hass: HomeAssistant,
 ) -> None:
-    """`_remote_viewing_sticky_port[cam_id]` presence must trigger an
-    explicit `_stop_remote_viewing_front_door` call via a tracked background
+    """`remote_viewing_sticky_port[cam_id]` presence must trigger an
+    explicit `stop_remote_viewing_front_door` call via a tracked background
     task — same rationale as the LOCAL case above, separate runner."""
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
 
-    coord._remote_viewing_sticky_port[TEST_CAM_ID] = 55124
-    coord._stop_remote_viewing_front_door = AsyncMock()
+    coord.remote_viewing_sticky_port[TEST_CAM_ID] = 55124
+    coord.stop_remote_viewing_front_door = AsyncMock()
 
     coord._purge_cam_id(TEST_CAM_ID)
 
-    assert TEST_CAM_ID not in coord._remote_viewing_sticky_port
-    assert len(coord._bg_tasks) == 1
-    await asyncio.gather(*coord._bg_tasks)
-    coord._stop_remote_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
+    assert TEST_CAM_ID not in coord.remote_viewing_sticky_port
+    assert len(coord.bg_tasks) == 1
+    await asyncio.gather(*coord.bg_tasks)
+    coord.stop_remote_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
 
 
 async def test_purge_cam_id_remote_viewing_front_door_stop_exception_is_swallowed(
     hass: HomeAssistant,
 ) -> None:
-    """A raising `_stop_remote_viewing_front_door` during the purge-triggered
+    """A raising `stop_remote_viewing_front_door` during the purge-triggered
     background stop must be logged at DEBUG and swallowed, not crash the
     background task."""
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
 
-    coord._remote_viewing_sticky_port[TEST_CAM_ID] = 55124
-    coord._stop_remote_viewing_front_door = AsyncMock(
+    coord.remote_viewing_sticky_port[TEST_CAM_ID] = 55124
+    coord.stop_remote_viewing_front_door = AsyncMock(
         side_effect=RuntimeError("synthetic")
     )
 
     coord._purge_cam_id(TEST_CAM_ID)
-    await asyncio.gather(*coord._bg_tasks)  # must not raise
+    await asyncio.gather(*coord.bg_tasks)  # must not raise
 
 
 async def test_purge_cam_id_no_remote_viewing_front_door_bg_task_when_not_bound(
     hass: HomeAssistant,
 ) -> None:
-    """No `_remote_viewing_sticky_port[cam_id]` entry → no background stop
+    """No `remote_viewing_sticky_port[cam_id]` entry → no background stop
     task is scheduled at all (nothing to stop)."""
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
-    coord._stop_remote_viewing_front_door = AsyncMock()
+    coord.stop_remote_viewing_front_door = AsyncMock()
 
     coord._purge_cam_id(TEST_CAM_ID)
 
-    assert len(coord._bg_tasks) == 0
-    coord._stop_remote_viewing_front_door.assert_not_called()
+    assert len(coord.bg_tasks) == 0
+    coord.stop_remote_viewing_front_door.assert_not_called()
 
 
 async def test_purge_cam_id_remote_viewing_front_door_stop_waits_for_stream_lock(
@@ -636,57 +636,57 @@ async def test_purge_cam_id_remote_viewing_front_door_stop_waits_for_stream_lock
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
 
-    coord._remote_viewing_sticky_port[TEST_CAM_ID] = 55124
-    coord._stop_remote_viewing_front_door = AsyncMock()
+    coord.remote_viewing_sticky_port[TEST_CAM_ID] = 55124
+    coord.stop_remote_viewing_front_door = AsyncMock()
 
-    lock = coord._get_stream_lock(TEST_CAM_ID)
+    lock = coord.get_stream_lock(TEST_CAM_ID)
     await lock.acquire()  # simulate a concurrent renewal holding the lock
 
     coord._purge_cam_id(TEST_CAM_ID)
     await asyncio.sleep(0)  # let the bg task reach `async with lock` and block
 
-    assert len(coord._bg_tasks) == 1
-    bg_task = next(iter(coord._bg_tasks))
+    assert len(coord.bg_tasks) == 1
+    bg_task = next(iter(coord.bg_tasks))
     assert not bg_task.done(), (
         "REGRESSION: purge-triggered REMOTE viewing front-door stop must "
         "block on the stream lock while a concurrent renewal holds it, not "
         "race it."
     )
-    coord._stop_remote_viewing_front_door.assert_not_called()
+    coord.stop_remote_viewing_front_door.assert_not_called()
 
     lock.release()  # renewal finished
     await asyncio.gather(bg_task)
-    coord._stop_remote_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
+    coord.stop_remote_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
 
 
 async def test_purge_cam_id_remote_viewing_front_door_repops_sticky_port_after_lock(
     hass: HomeAssistant,
 ) -> None:
-    """If a concurrent renewal re-inserts `_remote_viewing_sticky_port[cam_id]`
+    """If a concurrent renewal re-inserts `remote_viewing_sticky_port[cam_id]`
     while the purge's background stop is waiting for the lock, the purge
     must defensively re-pop it once it finally acquires the lock and stops
     the listener."""
     entry = _make_entry(hass)
     coord = BoschCameraCoordinator(hass, entry)
 
-    coord._remote_viewing_sticky_port[TEST_CAM_ID] = 55124
-    coord._stop_remote_viewing_front_door = AsyncMock()
+    coord.remote_viewing_sticky_port[TEST_CAM_ID] = 55124
+    coord.stop_remote_viewing_front_door = AsyncMock()
 
-    lock = coord._get_stream_lock(TEST_CAM_ID)
+    lock = coord.get_stream_lock(TEST_CAM_ID)
     await lock.acquire()
 
     coord._purge_cam_id(TEST_CAM_ID)
     await asyncio.sleep(0)
-    assert TEST_CAM_ID not in coord._remote_viewing_sticky_port  # popped synchronously
+    assert TEST_CAM_ID not in coord.remote_viewing_sticky_port  # popped synchronously
 
-    coord._remote_viewing_sticky_port[TEST_CAM_ID] = 66235
+    coord.remote_viewing_sticky_port[TEST_CAM_ID] = 66235
     lock.release()
 
-    bg_task = next(iter(coord._bg_tasks))
+    bg_task = next(iter(coord.bg_tasks))
     await asyncio.gather(bg_task)
 
-    coord._stop_remote_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
-    assert TEST_CAM_ID not in coord._remote_viewing_sticky_port, (
+    coord.stop_remote_viewing_front_door.assert_awaited_once_with(TEST_CAM_ID)
+    assert TEST_CAM_ID not in coord.remote_viewing_sticky_port, (
         "REGRESSION: a sticky-port entry re-inserted by a racing renewal "
         "must not survive a confirmed camera purge."
     )

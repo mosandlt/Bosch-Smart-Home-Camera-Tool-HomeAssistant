@@ -202,7 +202,7 @@ def _make_coord(**overrides):
         return MagicMock(spec=asyncio.Task)
 
     base = dict(
-        _entry=SimpleNamespace(
+        entry=SimpleNamespace(
             data={"bearer_token": "tok-A", "refresh_token": "rfr-B"},
             options={},
             entry_id="01CHAOSENTRY000000000000",
@@ -212,106 +212,106 @@ def _make_coord(**overrides):
         token="tok-A",
         refresh_token="rfr-B",
         options={},
-        _feature_flags={"dummy": True},
-        _protocol_checked=True,
-        _fcm_lock=threading.Lock(),
-        _fcm_running=False,
-        _fcm_healthy=True,
-        _fcm_client=None,
+        feature_flags={"dummy": True},
+        protocol_checked=True,
+        fcm_lock=threading.Lock(),
+        fcm_running=False,
+        fcm_healthy=True,
+        fcm_client=None,
         _last_status=float("-inf"),
         _last_events=float("-inf"),
         _last_slow=time.monotonic(),
-        _last_smb_cleanup=time.monotonic(),
-        _last_nvr_cleanup=time.monotonic(),
-        _hw_version={},
-        _cached_status={},
-        _cached_events={},
-        _commissioned_cache={},
-        _offline_since={},
-        _per_cam_status_at={},
-        _stream_fell_back={},
-        _stream_error_count={},
-        _stream_error_at={},
-        _live_connections={},
-        _local_promote_at={},
-        _lan_tcp_reachable={},
-        _rcp_lan_ip_cache={},
-        _local_creds_cache={},
-        _shc_state_cache={},
-        _wifiinfo_cache={},
-        _last_event_ids={},
+        last_smb_cleanup=time.monotonic(),
+        last_nvr_cleanup=time.monotonic(),
+        hw_version={},
+        cached_status={},
+        cached_events={},
+        commissioned_cache={},
+        offline_since={},
+        per_cam_status_at={},
+        stream_fell_back={},
+        stream_error_count={},
+        stream_error_at={},
+        live_connections={},
+        local_promote_at={},
+        lan_tcp_reachable={},
+        rcp_lan_ip_cache={},
+        local_creds_cache={},
+        shc_state_cache={},
+        wifiinfo_cache={},
+        last_event_ids={},
         _event_dedup_cache={},
-        _alert_sent_ids={},
-        _pan_cache={},
-        _lighting_switch_cache={},
-        _privacy_set_at={},
-        _light_set_at={},
-        _notif_set_at={},
-        _privacy_sound_set_at={},
-        _timestamp_set_at={},
-        _ledlights_set_at={},
-        _integration_version="chaos-test",
+        alert_sent_ids={},
+        pan_cache={},
+        lighting_switch_cache={},
+        privacy_set_at={},
+        light_set_at={},
+        notif_set_at={},
+        privacy_sound_set_at={},
+        timestamp_set_at={},
+        ledlights_set_at={},
+        integration_version="chaos-test",
         _OFFLINE_EXTENDED_INTERVAL=900,
-        _WRITE_LOCK_SECS=30.0,
+        WRITE_LOCK_SECS=30.0,
         _session_quota_hits={},
         _SESSION_QUOTA_WINDOW_S=300.0,
         _SESSION_QUOTA_NOTIFY_THRESHOLD=3,
         shc_ready=False,
-        _camera_entities={},
+        camera_entities={},
         _stream_locks={},
-        _tls_proxy_ports={},
-        _audio_enabled={},
-        _session_stale={},
-        _renewal_tasks={},
-        _bg_tasks=set(),
-        _nvr_processes={},
-        _nvr_user_intent={},
-        _rcp_session_cache={},
+        tls_proxy_ports={},
+        audio_enabled={},
+        session_stale={},
+        renewal_tasks={},
+        bg_tasks=set(),
+        nvr_processes={},
+        nvr_user_intent={},
+        rcp_session_cache={},
         # ── slow-tier per-endpoint caches (slow_tier.py) ─────────────────────
-        _ambient_light_cache={},
-        _ambient_lighting_cache={},
-        _alarm_settings_cache={},
-        _alarm_settings_set_at={},
-        _alarm_status_cache={},
-        _arming_cache={},
-        _arming_set_at={},
-        _audio_cache={},
-        _audio_detection_cache={},
-        _audio_detection_set_at={},
-        _cloud_privacy_masks_cache={},
-        _cloud_zones_cache={},
-        _firmware_cache={},
-        _firmware_set_at={},
-        _gen2_private_areas_cache={},
-        _gen2_zones_cache={},
-        _global_lighting_cache={},
-        _icon_led_brightness_cache={},
-        _intrusion_config_cache={},
-        _intrusion_config_set_at={},
-        _ledlights_cache={},
-        _lens_elevation_cache={},
-        _lighting_options_cache={},
-        _lighting_options_set_at={},
-        _motion_light_cache={},
-        _motion_set_at={},
-        _notifications_cache={},
-        _privacy_sound_cache={},
-        _rules_cache={},
-        _timestamp_cache={},
-        _unread_events_cache={},
-        _ensure_valid_token=AsyncMock(return_value="fresh-tok"),
+        ambient_light_cache={},
+        ambient_lighting_cache={},
+        alarm_settings_cache={},
+        alarm_settings_set_at={},
+        alarm_status_cache={},
+        arming_cache={},
+        arming_set_at={},
+        audio_cache={},
+        audio_detection_cache={},
+        audio_detection_set_at={},
+        cloud_privacy_masks_cache={},
+        cloud_zones_cache={},
+        firmware_cache={},
+        firmware_set_at={},
+        gen2_private_areas_cache={},
+        gen2_zones_cache={},
+        global_lighting_cache={},
+        icon_led_brightness_cache={},
+        intrusion_config_cache={},
+        intrusion_config_set_at={},
+        ledlights_cache={},
+        lens_elevation_cache={},
+        lighting_options_cache={},
+        lighting_options_set_at={},
+        motion_light_cache={},
+        motion_set_at={},
+        notifications_cache={},
+        privacy_sound_cache={},
+        rules_cache={},
+        timestamp_cache={},
+        unread_events_cache={},
+        ensure_valid_token=AsyncMock(return_value="fresh-tok"),
         _async_update_shc_states=AsyncMock(),
         _async_update_rcp_data=AsyncMock(),
         _async_update_rcp_data_for_cam=AsyncMock(),
         async_mark_events_read=AsyncMock(),
-        _is_write_locked=MagicMock(return_value=False),
-        _cleanup_stale_devices=MagicMock(),
-        _tear_down_live_stream=AsyncMock(),
-        _promote_to_local=AsyncMock(),
-        _async_send_alert=AsyncMock(),
-        _async_local_tcp_ping=AsyncMock(return_value=False),
-        _should_check_status=MagicMock(return_value=True),
-        _get_cam_lan_ip=MagicMock(return_value=None),
+        is_write_locked=MagicMock(return_value=False),
+        cleanup_stale_devices=MagicMock(),
+        tear_down_live_stream=AsyncMock(),
+        promote_to_local=AsyncMock(),
+        async_send_alert=AsyncMock(),
+        async_local_tcp_ping=AsyncMock(return_value=False),
+        should_check_status=MagicMock(return_value=True),
+        get_cam_lan_ip=MagicMock(return_value=None),
         get_model_config=lambda cid: SimpleNamespace(generation=2),
         hass=SimpleNamespace(
             async_create_task=MagicMock(side_effect=_create_task),
@@ -329,10 +329,10 @@ def _make_coord(**overrides):
     ns._first_tick_done = (
         True  # simulate second+ tick (do_events/do_slow not force-disabled)
     )
-    if not hasattr(ns, "_bg_tasks"):
-        ns._bg_tasks = set()
-    ns._spawn_tracked = __import__("types").MethodType(
-        BoschCameraCoordinator._spawn_tracked, ns
+    if not hasattr(ns, "bg_tasks"):
+        ns.bg_tasks = set()
+    ns.spawn_tracked = __import__("types").MethodType(
+        BoschCameraCoordinator.spawn_tracked, ns
     )
     return ns
 
@@ -464,7 +464,7 @@ class TestCloudApiFaultInjectionPerCameraChaos:
     async def test_repeated_chaos_ticks_never_raise_and_lock_state_stays_clean(self):
         """10 consecutive chaos ticks in a row (not just one) — the
         systematic version of the above: no accumulation of stuck
-        `_is_write_locked`/`_bg_tasks` state across many bad ticks."""
+        `is_write_locked`/`bg_tasks` state across many bad ticks."""
         rng = random.Random(4242)
         coord = _make_coord()
         url_map = _base_url_map(
@@ -483,8 +483,8 @@ class TestCloudApiFaultInjectionPerCameraChaos:
                 )
             assert isinstance(result, dict)
         # No background tasks were left dangling across the whole burst.
-        assert coord._bg_tasks == set() or all(
-            getattr(t, "done", lambda: True)() for t in coord._bg_tasks
+        assert coord.bg_tasks == set() or all(
+            getattr(t, "done", lambda: True)() for t in coord.bg_tasks
         )
 
 
@@ -691,10 +691,10 @@ class TestGo2rtcUnreachableWhileStreaming:
 
     def _coord(self, *, session=None, teardown_done: bool = False) -> SimpleNamespace:
         return SimpleNamespace(
-            _camera_entities={},
+            camera_entities={},
             hass=SimpleNamespace(config=SimpleNamespace(config_dir=None)),
-            _go2rtc_session=session,
-            _go2rtc_teardown_done=teardown_done,
+            go2rtc_session=session,
+            go2rtc_teardown_done=teardown_done,
         )
 
     async def test_unregister_survives_mixed_faults(self):
@@ -728,18 +728,18 @@ def _make_coord_token_chaos(**overrides):
         return MagicMock(spec=asyncio.Task)
 
     base = dict(
-        _entry=SimpleNamespace(
+        entry=SimpleNamespace(
             data={"bearer_token": "tok-OLD", "refresh_token": "rfr-OLD"}, options={}
         ),
         _refreshed_token=None,
         _refreshed_refresh=None,
-        _auth_outage_count=0,
+        auth_outage_count=0,
         _auth_outage_next_retry_ts=float("-inf"),  # SENTINEL_RULE: never 0.0
         _auth_outage_alert_sent=False,
         _token_fail_count=0,
         _token_alert_sent=False,
         _token_still_valid=lambda min_remaining=60: False,
-        _schedule_token_refresh=MagicMock(),
+        schedule_token_refresh=MagicMock(),
         _token_refresh_lock=asyncio.Lock(),
         token="tok-OLD",
         hass=SimpleNamespace(
@@ -750,7 +750,7 @@ def _make_coord_token_chaos(**overrides):
     )
     base.update(overrides)
     ns = SimpleNamespace(**base)
-    # `_ensure_valid_token` (the method under test) internally calls
+    # `ensure_valid_token` (the method under test) internally calls
     # `self._refresh_token_locked(...)` — bind the REAL production method
     # onto this stub so the full lock-then-refresh path actually runs
     # (mirrors tests/test_init.py's `_wire_spawn_tracked` pattern).
@@ -785,7 +785,7 @@ class TestTokenRefreshCascadeChaos:
             for expected_fail_count in (1, 2):
                 with pytest.raises(UpdateFailed):
                     await asyncio.wait_for(
-                        BoschCameraCoordinator._ensure_valid_token(coord, "tok-OLD"),
+                        BoschCameraCoordinator.ensure_valid_token(coord, "tok-OLD"),
                         timeout=3.0,
                     )
                 assert coord._token_fail_count == expected_fail_count
@@ -793,7 +793,7 @@ class TestTokenRefreshCascadeChaos:
 
             with pytest.raises(ConfigEntryAuthFailed):
                 await asyncio.wait_for(
-                    BoschCameraCoordinator._ensure_valid_token(coord, "tok-OLD"),
+                    BoschCameraCoordinator.ensure_valid_token(coord, "tok-OLD"),
                     timeout=3.0,
                 )
         assert coord._token_fail_count == 3
@@ -817,7 +817,7 @@ class TestTokenRefreshCascadeChaos:
             ),
         ):
             out = await asyncio.wait_for(
-                BoschCameraCoordinator._ensure_valid_token(coord, "tok-OLD"),
+                BoschCameraCoordinator.ensure_valid_token(coord, "tok-OLD"),
                 timeout=3.0,
             )
         assert out == "tok-RECOVERED"
@@ -827,7 +827,7 @@ class TestTokenRefreshCascadeChaos:
     async def test_concurrent_callers_under_mixed_faults_never_deadlock(self):
         """Several coordinator call sites (401-recovery in
         live_connection.py, camera.py, __init__.py's RCP tier, etc.) can
-        all hit `_ensure_valid_token` around the same moment. Under a mix
+        all hit `ensure_valid_token` around the same moment. Under a mix
         of outage/transient/success faults, none may hang past a bounded
         timeout, none may raise an unclassified exception, and the lock
         must end up free."""
@@ -866,7 +866,7 @@ class TestTokenRefreshCascadeChaos:
             results = await asyncio.wait_for(
                 asyncio.gather(
                     *[
-                        BoschCameraCoordinator._ensure_valid_token(coord, "tok-OLD")
+                        BoschCameraCoordinator.ensure_valid_token(coord, "tok-OLD")
                         for _ in range(6)
                     ],
                     return_exceptions=True,
@@ -894,22 +894,22 @@ def _make_purge_stub() -> BoschCameraCoordinator:
     for attr in BoschCameraCoordinator._PURGE_CAM_SET_ATTRS:
         setattr(coord, attr, set())
     coord._rcp_lan_denied_until = {}
-    # `_tls_proxy_servers` is deliberately NOT in `_PURGE_CAM_DICT_ATTRS`
+    # `tls_proxy_servers` is deliberately NOT in `_PURGE_CAM_DICT_ATTRS`
     # (its value is a live asyncio.Server, closed explicitly by
     # `_purge_cam_id` instead of a bare dict.pop) — wire it up separately so
-    # `_purge_cam_id`'s `cam_id in self._tls_proxy_servers` check has an
+    # `_purge_cam_id`'s `cam_id in self.tls_proxy_servers` check has an
     # attribute to read. Left empty: these tests don't exercise an active
     # TLS proxy, so `_purge_cam_id` never reaches the async-close branch
-    # that would otherwise need `coord.hass`/`coord._bg_tasks` stubbed too.
-    coord._tls_proxy_servers = {}
-    # Session-State-Facade Slice 3: `_live_connections`/`_user_intent_streams`
+    # that would otherwise need `coord.hass`/`coord.bg_tasks` stubbed too.
+    coord.tls_proxy_servers = {}
+    # Session-State-Facade Slice 3: `live_connections`/`user_intent_streams`
     # are no longer plain dict/set instances (folded into `_sessions`, which
     # the loop above already wired up via `_PURGE_CAM_DICT_ATTRS`) — wire the
     # same CacheFieldView/BoolFieldView facades the real coordinator uses in
     # __init__, matching this stub's pre-existing pattern for the earlier
     # slices' folded fields.
-    coord._live_connections = CacheFieldView(coord._sessions, "live_connection")
-    coord._user_intent_streams = BoolFieldView(coord._sessions, "user_intent_stream")
+    coord.live_connections = CacheFieldView(coord._sessions, "live_connection")
+    coord.user_intent_streams = BoolFieldView(coord._sessions, "user_intent_stream")
     return coord
 
 
@@ -917,7 +917,7 @@ class TestCameraRemovalRace:
     """A camera can be removed from the Bosch cloud account (deleted /
     unshared) at any moment — including while an RCP fetch or a stream
     request for that exact cam_id is still in flight.
-    `_cleanup_stale_devices` calls `_purge_cam_id` as soon as it notices
+    `cleanup_stale_devices` calls `_purge_cam_id` as soon as it notices
     the camera is gone; the in-flight operation's write-back can land
     either before or after that purge. Neither ordering may raise a
     KeyError or leave the coordinator in a state where the NEXT tick's
@@ -925,9 +925,9 @@ class TestCameraRemovalRace:
 
     async def test_purge_during_inflight_write_no_keyerror_and_self_heals(self):
         coord = _make_purge_stub()
-        coord._cached_status[CAM_A] = {"status": "ONLINE"}
-        coord._live_connections[CAM_A] = {"rtspsUrl": "rtsps://original"}
-        coord._user_intent_streams.add(CAM_A)
+        coord.cached_status[CAM_A] = {"status": "ONLINE"}
+        coord.live_connections[CAM_A] = {"rtspsUrl": "rtsps://original"}
+        coord.user_intent_streams.add(CAM_A)
 
         fetch_started = asyncio.Event()
         resume = asyncio.Event()
@@ -937,41 +937,41 @@ class TestCameraRemovalRace:
             await resume.wait()
             # The in-flight fetch's write-back lands AFTER the camera was
             # already purged from the account — a real race, not just a
-            # theoretical one (RCP fetch + `_cleanup_stale_devices` run on
+            # theoretical one (RCP fetch + `cleanup_stale_devices` run on
             # independent schedules within the same tick).
-            coord._cached_status[CAM_A] = {"status": "ONLINE", "stale": True}
-            coord._live_connections[CAM_A] = {"rtspsUrl": "rtsps://resurrected"}
+            coord.cached_status[CAM_A] = {"status": "ONLINE", "stale": True}
+            coord.live_connections[CAM_A] = {"rtspsUrl": "rtsps://resurrected"}
 
         task = asyncio.create_task(inflight_rcp_fetch())
         await asyncio.wait_for(fetch_started.wait(), timeout=2.0)
 
         # Camera vanishes from the Bosch account mid-fetch.
         BoschCameraCoordinator._purge_cam_id(coord, CAM_A)
-        assert CAM_A not in coord._cached_status
-        assert CAM_A not in coord._live_connections
-        assert CAM_A not in coord._user_intent_streams
+        assert CAM_A not in coord.cached_status
+        assert CAM_A not in coord.live_connections
+        assert CAM_A not in coord.user_intent_streams
 
         resume.set()
         await asyncio.wait_for(task, timeout=2.0)
         # The stale write resurrected the cam_id — expected, the fetch
         # started before the purge and nothing can retroactively cancel it.
-        assert CAM_A in coord._cached_status
+        assert CAM_A in coord.cached_status
 
-        # Self-heal: the NEXT tick's `_cleanup_stale_devices` purges again
+        # Self-heal: the NEXT tick's `cleanup_stale_devices` purges again
         # (idempotent — no KeyError on an already-purged/re-populated dict)
         # and this time nothing resurrects it.
         BoschCameraCoordinator._purge_cam_id(coord, CAM_A)
-        assert CAM_A not in coord._cached_status
-        assert CAM_A not in coord._live_connections
-        assert CAM_A not in coord._user_intent_streams
+        assert CAM_A not in coord.cached_status
+        assert CAM_A not in coord.live_connections
+        assert CAM_A not in coord.user_intent_streams
 
     async def test_purge_of_one_camera_never_touches_another(self):
         """Cross-contamination guard: purging CAM_A while a concurrent
         operation for CAM_B is in flight must leave CAM_B's state
         completely untouched."""
         coord = _make_purge_stub()
-        coord._cached_status[CAM_A] = {"status": "ONLINE"}
-        coord._cached_status[CAM_B] = {"status": "ONLINE"}
+        coord.cached_status[CAM_A] = {"status": "ONLINE"}
+        coord.cached_status[CAM_B] = {"status": "ONLINE"}
         coord._rcp_lan_denied_until[(CAM_A, "0x01")] = time.monotonic()
         coord._rcp_lan_denied_until[(CAM_B, "0x01")] = time.monotonic()
 
@@ -979,7 +979,7 @@ class TestCameraRemovalRace:
 
         async def inflight_cam_b_write():
             await asyncio.sleep(0.01)
-            coord._cached_status[CAM_B] = {"status": "ONLINE", "touched": True}
+            coord.cached_status[CAM_B] = {"status": "ONLINE", "touched": True}
             concurrent_write_done.set()
 
         task = asyncio.create_task(inflight_cam_b_write())
@@ -987,10 +987,10 @@ class TestCameraRemovalRace:
         await asyncio.wait_for(concurrent_write_done.wait(), timeout=2.0)
         await asyncio.wait_for(task, timeout=2.0)
 
-        assert CAM_A not in coord._cached_status
+        assert CAM_A not in coord.cached_status
         assert (CAM_A, "0x01") not in coord._rcp_lan_denied_until
         # CAM_B is completely unaffected by CAM_A's purge.
-        assert coord._cached_status[CAM_B] == {"status": "ONLINE", "touched": True}
+        assert coord.cached_status[CAM_B] == {"status": "ONLINE", "touched": True}
         assert (CAM_B, "0x01") in coord._rcp_lan_denied_until
 
         # Double-purge (simulating the camera also vanishing next tick)

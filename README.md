@@ -55,6 +55,7 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
   - [Built-in 3-Step Alert System](#built-in-3-step-alert-system)
   - [AI Snapshot Descriptions](#ai-snapshot-descriptions-opt-in-v1370) — AI Task describes what a camera sees + prompt tips
   - [FCM Push vs Polling](#fcm-push-vs-polling)
+  - [Webhook Delivery](#webhook-delivery) — POST event JSON to an external endpoint
   - [SMB/NAS Upload](#smbnas-upload)
   - [Developer Tools — Services](#developer-tools--services)
 - [Lovelace Cards](#lovelace-cards)
@@ -884,6 +885,8 @@ sequenceDiagram
 | Motion-triggered lighting on/off | `switch` | Gen2 only |
 | Ambient/permanent lighting on/off | `switch` | Gen2 only |
 | DualRadar intrusion detection on/off | `switch` | Gen2 only |
+| Glass-break detection on/off | `switch` | Gen2 Audio-Plus cameras only |
+| Smoke/fire-alarm sound detection on/off | `switch` | Gen2 Audio-Plus cameras only |
 | Mounting height (meters) | `number` | Gen2 only |
 | Microphone recording level (0–100%) | `number` | Gen2 only |
 | Front light color temperature | `number` | Gen2 only |
@@ -1072,6 +1075,31 @@ stateDiagram-v2
 
 Full diagnostic dump available via integration **Settings → Configure → Debug logging** when troubleshooting; lessons-learned write-up: `knowledge-base/fcm-self-heal-lessons.md`.
 
+### Webhook Delivery
+
+Off by default. Turn it on when you want to feed camera events into something outside Home Assistant entirely — a Node-RED flow, a self-hosted automation platform, a custom dashboard — without going through HA's own event bus or notify services.
+
+**Settings → Configure → Webhook delivery:**
+
+| Setting | Description | Default |
+|---|---|---|
+| **Enable webhook delivery** | POST a JSON payload to the URL below on every motion, audio-alarm, person-detection, and intrusion event. | OFF |
+| **Webhook URL** | The HTTP/HTTPS endpoint that receives the payload. Only `http://`/`https://` are accepted — anything else is rejected. Leave empty to disable even with the switch ON. | empty |
+
+Payload posted for every event (10 s timeout, non-2xx/4xx/5xx responses and connection errors are logged but never block the rest of the alert pipeline):
+
+```json
+{
+  "event_type": "bosch_shc_camera_motion",
+  "camera": "Garden",
+  "camera_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "timestamp": "2026-07-14T10:31:56+00:00",
+  "extra": { "...": "additional event-specific fields" }
+}
+```
+
+Use the `bosch_shc_camera.send_event_webhook` service (see [Developer Tools — Services](#developer-tools--services)) to fire a one-off test POST against your endpoint without waiting for a real camera event.
+
 ### SMB/NAS Upload
 
 Upload event snapshots and video clips directly to a SMB/CIFS network share (FRITZ!Box NAS, Synology, any Windows share, etc.). Disabled by default.
@@ -1092,7 +1120,7 @@ Example file path on NAS (default camera-first layout):
 \\192.168.1.1\FRITZ.NAS\Bosch-Cameras\Garden\2026\03\25\Garden_2026-03-25_14-32-05_MOVEMENT_abc123.mp4
 ```
 
-> Requires the `smbprotocol` Python package, listed as an optional dependency in `manifest.json`. If it isn't available in your environment, SMB-based media browsing degrades gracefully — the integration still sets up and works normally, and a Repairs issue explains what's missing.
+> Requires the `smbprotocol` Python package, installed automatically via the manifest like every other dependency. On the rare platform where that install itself fails (e.g. an unsupported OS/architecture wheel), SMB upload and NAS media browsing degrade gracefully instead of blocking setup — the integration still sets up and works normally, and a Repairs issue explains what's missing.
 
 #### FRITZ!Box NAS Setup
 
@@ -1431,7 +1459,9 @@ All services are available in **Developer Tools → Services** (or via automatio
 | `bosch_shc_camera.invite_friend` | Send camera sharing invitation by email | `email` |
 | `bosch_shc_camera.list_friends` | List all friends and camera shares (persistent notification) | — |
 | `bosch_shc_camera.remove_friend` | Remove a friend and revoke all camera shares | `friend_id` |
-| `bosch_shc_camera.get_lighting_schedule` | Read full lighting schedule (persistent notification) | `camera_id` |
+| `bosch_shc_camera.get_lighting_schedule` | Read full lighting schedule (persistent notification). Outdoor cameras only. | `camera_id` |
+| `bosch_shc_camera.set_lighting_schedule` | Set the LED on/off time, motion trigger, and darkness threshold. Outdoor cameras only; empty fields keep their current value. | `camera_id`, `on_time`?, `off_time`?, `motion`?, `darkness_threshold`? |
+| `bosch_shc_camera.send_event_webhook` | Manually fire a webhook POST for a camera — handy for testing an endpoint without waiting for a real event. Requires **Webhook delivery** enabled and a URL configured (see [Webhook Delivery](#webhook-delivery)). | `entity_id`? |
 | `bosch_shc_camera.delete_motion_zone` | Delete a single motion zone by index | `camera_id`, `zone_index` |
 | `bosch_shc_camera.get_privacy_masks` | Read privacy mask zones (persistent notification) | `camera_id` |
 | `bosch_shc_camera.set_privacy_masks` | Set/clear privacy mask zones (0.0–1.0 coordinates) | `camera_id`, `masks` |
@@ -1497,6 +1527,19 @@ data:
     - "cam-id-1"
     - "cam-id-2"
   days: 30
+
+# Set an outdoor camera's LED lighting schedule
+service: bosch_shc_camera.set_lighting_schedule
+data:
+  camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  on_time: "18:00"
+  off_time: "23:00"
+  motion: true
+
+# Fire a test webhook POST without waiting for a real event
+service: bosch_shc_camera.send_event_webhook
+data:
+  entity_id: camera.bosch_terrasse
 ```
 
 > **Tip:** Find the `camera_id` in the camera entity's attributes (Developer Tools → States → `camera.bosch_*` → `camera_id` attribute).
@@ -1999,8 +2042,8 @@ Repeat the per-camera grid for each camera you have. The view uses the standard 
 
 ## Requirements
 
-- Home Assistant 2024.1+
-- Python packages: `firebase-messaging`, `bosch-shc-camera-client` (auto-installed via manifest); `smbprotocol` is optional — enables NAS media browsing, everything else works without it
+- Home Assistant 2026.7.1+ (see `hacs.json` for the current minimum — it moves forward as the integration adopts newer HA-core APIs)
+- Python packages: `firebase-messaging`, `bosch-shc-camera-client`, `smbprotocol` (all auto-installed via the manifest — no manual `pip install` needed). `smbprotocol` powers SMB/NAS upload and NAS media browsing; if its install ever fails on your platform the integration still sets up and works, with a Repairs issue explaining what's missing.
 - For live video: go2rtc (built into HA) or ffplay/mpv
 
 ---
@@ -2096,7 +2139,7 @@ For a detailed setup guide, troubleshooting steps, and YAML configuration option
 
 ### Requirements
 
-- Home Assistant 2024.1 or later
+- Home Assistant 2026.7.1 or later (same minimum as the integration itself, see [Requirements](#requirements))
 - HomeKit Bridge integration (built into HA Core — no separate install)
 - iOS 16+ / macOS 13+ / tvOS 16+ with Home app
 
@@ -2226,11 +2269,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v16.0.0** — see the GitHub release page for full notes:
-[**v16.0.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v16.0.0)
+Latest: **v16.0.1** — see the GitHub release page for full notes:
+[**v16.0.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v16.0.1)
 
 | Version | Highlights |
 |---|---|
+| **v16.0.1** | **Three real bug fixes.** Mini-NVR could fail to start recording on slower-encoder or weaker-WiFi cameras (fixed timing assumption that only fit Gen2 hardware). Two concurrent recorder-start attempts for the same camera could rarely spawn two ffmpeg processes writing the same file. Motion-triggered event clips could lose 15-31 seconds of footage right around the triggering event when the optional ring-finalize setting was enabled; fixed, along with a filename-timezone mismatch in the same feature. No breaking changes. |
 | **v16.0.0** | **Large internal architecture refactor, no user-facing change.** Preparation for eventual Home Assistant Core submission: the TLS video proxy is now built on Python's native async networking instead of a custom thread-based one, live-stream URLs stay stable for the whole session instead of changing on every credential rotation, streams register with the bundled go2rtc component the same way Core's own integrations do, sign-in now goes through Core's standard credential-storage mechanism, and the optional SMB-recordings-browsing feature degrades gracefully (with a clear Repairs notice) if its dependency isn't available instead of blocking setup. A large amount of protocol-handling code also moved into a separate, independently-published library, shrinking this integration's own codebase substantially. No breaking changes, no action needed to upgrade. |
 | **v15.0.2** | **iOS Picture-in-Picture, LAN-IP recovery, and translation fixes.** PiP could get permanently stuck after using iOS's native fullscreen video mode; fixed. A camera whose LAN IP changed (e.g. after a router/DHCP change) could get stuck never retrying its local connection; it now periodically retries. A few remaining hardcoded German strings in the card (from the v14.x translation cleanup) are now properly translated in all 11 supported languages. |
 | **v15.0.1** | **Internal cleanup only, no user-facing change.** Completes the Session-State-Facade migration started in v15.0.0 — the coordinator's remaining per-camera session data and lock objects now live on one shared per-camera state object instead of scattered dicts. Every step independently bug-hunted and verified before release. |
@@ -2329,7 +2373,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling p
 |---|---|---|---|---|---|---|
 | **Maturity** | v15.0+ — HA Quality Scale **Platinum** | v10.12+ stable (Mini-NVR BETA) | v1.8+ stable · npm | v1.7+ stable · PyPI | v0.4.0 **alpha** · PyPI | v0.4.0 **alpha** · npm |
 | **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) | Python 3.10+ · pipx / uvx · stdio + streamable-HTTP for MCP clients (Claude Desktop, Claude Code, custom) | NiceGUI web app · Python 3.10+ | Node-RED palette · npm |
-| **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser, one-time) | ◑ shares CLI `bosch_config.json` | ◑ refresh-token from CLI |
+| **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | ◑ shares CLI `bosch_config.json` | ◑ shares CLI `bosch_config.json` | ◑ refresh-token from CLI |
 | **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP | ✅ `bosch_camera_snapshot` (LAN-only) | ✅ live + event fallback | ✅ `snapshot` node |
 | **Live RTSP stream (LAN)** | ✅ via HA Stream component | ✅ ffmpeg/RTSPS output | ✅ TLS proxy → local RTSP | ✅ `bosch_camera_stream_url` (LAN-only, no cloud relay) | ◑ internal (go2rtc) | ◑ `stream-url` node (URL only) |
 | **WebRTC (sub-second latency)** | ✅ via integrated go2rtc | ✅ *(v10.6.0)* `live --webrtc` | ❌ | ❌ | ✅ via go2rtc (else snapshot) | ❌ |
@@ -2377,13 +2421,13 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.5.11** · HA Quality Scale **Platinum** · production-ready |
-| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.5** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v16.0.1** · HA Quality Scale **Platinum** · production-ready |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.6** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.8** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
-| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.5** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
-| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.6-alpha** · stream-url node · 4 nodes (event / snapshot / privacy / config) |
+| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.6.0** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
+| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.7-alpha** · stream-url node · 4 nodes (event / snapshot / privacy / config) |
 
-Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — **v0.1.5-alpha** (dashboard + camera detail + settings) — community interest welcome
+Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — **v0.1.6a0** (dashboard + camera detail + settings) — community interest welcome
 
 HA stays the **reference implementation** — features land here first; the Python CLI, ioBroker Adapter and MCP Server catch up over time.
 

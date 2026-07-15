@@ -969,9 +969,9 @@ class TestFeatureFlagCoverage:
 def lan_stub_coord() -> SimpleNamespace:
     coord = SimpleNamespace()
     coord.data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": []}}
-    coord._lan_tcp_reachable = {}
-    coord._local_write_at = {}
-    coord._LOCAL_WRITE_GRACE_S = 30.0
+    coord.lan_tcp_reachable = {}
+    coord.local_write_at = {}
+    coord.LOCAL_WRITE_GRACE_S = 30.0
     coord.is_lan_reachable = lambda _cid: None
     return coord
 
@@ -1048,7 +1048,7 @@ class TestExtraStateAttributes:
     ):
         # cache populated 10s ago (current monotonic - 10)
         with patch("time.monotonic", return_value=1010.0):
-            lan_stub_coord._lan_tcp_reachable[CAM_ID] = (True, 1000.0)
+            lan_stub_coord.lan_tcp_reachable[CAM_ID] = (True, 1000.0)
             s = _make_lan_sensor(lan_stub_coord, stub_entry)
             attrs = s.extra_state_attributes
         assert attrs["camera_id"] == CAM_ID
@@ -1058,7 +1058,7 @@ class TestExtraStateAttributes:
         self, lan_stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         with patch("time.monotonic", return_value=1010.0):
-            lan_stub_coord._local_write_at[CAM_ID] = 1000.0  # 10s ago, inside 30s grace
+            lan_stub_coord.local_write_at[CAM_ID] = 1000.0  # 10s ago, inside 30s grace
             s = _make_lan_sensor(lan_stub_coord, stub_entry)
             attrs = s.extra_state_attributes
         # grace_left = 30 - 10 = 20s
@@ -1068,7 +1068,7 @@ class TestExtraStateAttributes:
         self, lan_stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         with patch("time.monotonic", return_value=1100.0):
-            lan_stub_coord._local_write_at[CAM_ID] = (
+            lan_stub_coord.local_write_at[CAM_ID] = (
                 1000.0  # 100s ago, outside 30s grace
             )
             s = _make_lan_sensor(lan_stub_coord, stub_entry)
@@ -1079,7 +1079,7 @@ class TestExtraStateAttributes:
         self, lan_stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Belt-and-braces guard for stub coordinators in legacy tests."""
-        del lan_stub_coord._local_write_at
+        del lan_stub_coord.local_write_at
         s = _make_lan_sensor(lan_stub_coord, stub_entry)
         attrs = s.extra_state_attributes
         assert "write_grace_seconds_left" not in attrs
@@ -1088,8 +1088,8 @@ class TestExtraStateAttributes:
         self, lan_stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         with patch("time.monotonic", return_value=1010.0):
-            lan_stub_coord._lan_tcp_reachable[CAM_ID] = (True, 1005.0)
-            lan_stub_coord._local_write_at[CAM_ID] = 1000.0
+            lan_stub_coord.lan_tcp_reachable[CAM_ID] = (True, 1005.0)
+            lan_stub_coord.local_write_at[CAM_ID] = 1000.0
             s = _make_lan_sensor(lan_stub_coord, stub_entry)
             attrs = s.extra_state_attributes
         assert attrs["last_check_seconds_ago"] == 5
@@ -1585,7 +1585,7 @@ class TestMotionWindowOffset:
         assert s.is_on is True
 
 
-# simon42-forum issue #5/#6 — binary sensor missing/inconsistent motion events (relocated from tests/test_forum_issues.py; __init__.py polling-seeds-_last_event_ids part of the same issue lives in tests/test_init.py).
+# simon42-forum issue #5/#6 — binary sensor missing/inconsistent motion events (relocated from tests/test_forum_issues.py; __init__.py polling-seeds-last_event_ids part of the same issue lives in tests/test_init.py).
 
 
 class TestForumIssueBinarySensorMissesEvents:

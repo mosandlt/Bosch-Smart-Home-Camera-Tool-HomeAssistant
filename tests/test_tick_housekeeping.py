@@ -26,21 +26,21 @@ def _make_coord(**overrides):
     attribute instead of leaving it missing."""
     coord = SimpleNamespace(
         hass=MagicMock(),
-        _last_smb_cleanup=overrides.pop("_last_smb_cleanup", float("-inf")),
-        _last_nvr_cleanup=overrides.pop("_last_nvr_cleanup", float("-inf")),
-        _run_smb_cleanup_bg=MagicMock(return_value="smb-coro"),
-        _run_nvr_cleanup_bg=MagicMock(return_value="nvr-coro"),
-        _cleanup_stale_devices=MagicMock(),
-        _rcp_lan_ip_cache=overrides.pop("_rcp_lan_ip_cache", {}),
-        _hw_version=overrides.pop("_hw_version", {}),
-        _local_creds_cache=overrides.pop("_local_creds_cache", {}),
+        last_smb_cleanup=overrides.pop("last_smb_cleanup", float("-inf")),
+        last_nvr_cleanup=overrides.pop("last_nvr_cleanup", float("-inf")),
+        run_smb_cleanup_bg=MagicMock(return_value="smb-coro"),
+        run_nvr_cleanup_bg=MagicMock(return_value="nvr-coro"),
+        cleanup_stale_devices=MagicMock(),
+        rcp_lan_ip_cache=overrides.pop("rcp_lan_ip_cache", {}),
+        hw_version=overrides.pop("hw_version", {}),
+        local_creds_cache=overrides.pop("local_creds_cache", {}),
     )
-    # `_spawn_tracked` mirrors BoschCameraCoordinator._spawn_tracked closely
+    # `spawn_tracked` mirrors BoschCameraCoordinator.spawn_tracked closely
     # enough for these direct-module unit tests: routes through
     # hass.async_create_task (a MagicMock here, asserted on directly below)
-    # instead of needing a real _bg_tasks set on this bare SimpleNamespace
+    # instead of needing a real bg_tasks set on this bare SimpleNamespace
     # stub.
-    coord._spawn_tracked = lambda coro, **kw: coord.hass.async_create_task(coro, **kw)
+    coord.spawn_tracked = lambda coro, **kw: coord.hass.async_create_task(coro, **kw)
     for k, v in overrides.items():
         setattr(coord, k, v)
     return coord
@@ -49,7 +49,7 @@ def _make_coord(**overrides):
 class TestSmbCleanup:
     @pytest.mark.asyncio
     async def test_smb_cleanup_triggered_when_due_and_enabled(self):
-        coord = _make_coord(_last_smb_cleanup=float("-inf"))
+        coord = _make_coord(last_smb_cleanup=float("-inf"))
         opts = {
             "enable_smb_upload": True,
             "smb_server": "nas.local",
@@ -60,11 +60,11 @@ class TestSmbCleanup:
         assert coord.hass.async_create_background_task.call_args[0][1] == (
             "bosch_shc_camera_smb_cleanup"
         )
-        assert coord._last_smb_cleanup > 0  # advanced from time.monotonic()
+        assert coord.last_smb_cleanup > 0  # advanced from time.monotonic()
 
     @pytest.mark.asyncio
     async def test_smb_cleanup_skipped_when_disabled(self):
-        coord = _make_coord(_last_smb_cleanup=float("-inf"))
+        coord = _make_coord(last_smb_cleanup=float("-inf"))
         opts = {
             "enable_smb_upload": False,
             "smb_server": "nas.local",
@@ -75,14 +75,14 @@ class TestSmbCleanup:
 
     @pytest.mark.asyncio
     async def test_smb_cleanup_skipped_when_no_server(self):
-        coord = _make_coord(_last_smb_cleanup=float("-inf"))
+        coord = _make_coord(last_smb_cleanup=float("-inf"))
         opts = {"enable_smb_upload": True, "smb_server": "", "smb_retention_days": 30}
         await run_housekeeping(coord, {}, opts, NOW, False)
         coord.hass.async_create_background_task.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_smb_cleanup_skipped_when_retention_zero(self):
-        coord = _make_coord(_last_smb_cleanup=float("-inf"))
+        coord = _make_coord(last_smb_cleanup=float("-inf"))
         opts = {
             "enable_smb_upload": True,
             "smb_server": "nas.local",
@@ -93,7 +93,7 @@ class TestSmbCleanup:
 
     @pytest.mark.asyncio
     async def test_smb_cleanup_skipped_when_not_yet_due(self):
-        coord = _make_coord(_last_smb_cleanup=time.monotonic())
+        coord = _make_coord(last_smb_cleanup=time.monotonic())
         opts = {
             "enable_smb_upload": True,
             "smb_server": "nas.local",
@@ -106,7 +106,7 @@ class TestSmbCleanup:
 class TestNvrCleanup:
     @pytest.mark.asyncio
     async def test_nvr_cleanup_triggered_when_due_and_enabled(self):
-        coord = _make_coord(_last_nvr_cleanup=float("-inf"))
+        coord = _make_coord(last_nvr_cleanup=float("-inf"))
         opts = {"enable_nvr": True, "nvr_retention_days": 3}
         await run_housekeeping(coord, {}, opts, NOW, False)
         coord.hass.async_create_background_task.assert_called_once()
@@ -116,21 +116,21 @@ class TestNvrCleanup:
 
     @pytest.mark.asyncio
     async def test_nvr_cleanup_skipped_when_disabled(self):
-        coord = _make_coord(_last_nvr_cleanup=float("-inf"))
+        coord = _make_coord(last_nvr_cleanup=float("-inf"))
         opts = {"enable_nvr": False, "nvr_retention_days": 3}
         await run_housekeeping(coord, {}, opts, NOW, False)
         coord.hass.async_create_background_task.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_nvr_cleanup_skipped_when_retention_zero(self):
-        coord = _make_coord(_last_nvr_cleanup=float("-inf"))
+        coord = _make_coord(last_nvr_cleanup=float("-inf"))
         opts = {"enable_nvr": True, "nvr_retention_days": 0}
         await run_housekeeping(coord, {}, opts, NOW, False)
         coord.hass.async_create_background_task.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_nvr_cleanup_skipped_when_not_yet_due(self):
-        coord = _make_coord(_last_nvr_cleanup=time.monotonic())
+        coord = _make_coord(last_nvr_cleanup=time.monotonic())
         opts = {"enable_nvr": True, "nvr_retention_days": 3}
         await run_housekeeping(coord, {}, opts, NOW, False)
         coord.hass.async_create_background_task.assert_not_called()
@@ -141,19 +141,19 @@ class TestStaleDeviceCleanup:
     async def test_stale_cleanup_runs_with_data_on_normal_tick(self):
         coord = _make_coord()
         await run_housekeeping(coord, {CAM_A: {}}, {}, NOW, False)
-        coord._cleanup_stale_devices.assert_called_once_with({CAM_A})
+        coord.cleanup_stale_devices.assert_called_once_with({CAM_A})
 
     @pytest.mark.asyncio
     async def test_stale_cleanup_skipped_on_first_tick(self):
         coord = _make_coord()
         await run_housekeeping(coord, {CAM_A: {}}, {}, NOW, True)
-        coord._cleanup_stale_devices.assert_not_called()
+        coord.cleanup_stale_devices.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_stale_cleanup_skipped_when_data_empty(self):
         coord = _make_coord()
         await run_housekeeping(coord, {}, {}, NOW, False)
-        coord._cleanup_stale_devices.assert_not_called()
+        coord.cleanup_stale_devices.assert_not_called()
 
 
 class TestAvailabilityNotifier:
@@ -183,7 +183,7 @@ class TestAvailabilityNotifier:
         fixtures bypassing __init__) that lack these attributes entirely."""
         coord = _make_coord()
         await run_housekeeping(coord, {CAM_A: {}}, {}, NOW, False)
-        coord._cleanup_stale_devices.assert_called_once()
+        coord.cleanup_stale_devices.assert_called_once()
 
 
 class TestLanIpPersistence:
@@ -192,37 +192,37 @@ class TestLanIpPersistence:
         store = MagicMock()
         store.async_save = MagicMock(return_value="coro")
         coord = _make_coord(
-            _rcp_lan_ip_cache={CAM_A: "192.0.2.1"},
-            _lan_ips_store=store,
-            _lan_ips_snapshot=None,
+            rcp_lan_ip_cache={CAM_A: "192.0.2.1"},
+            lan_ips_store=store,
+            lan_ips_snapshot=None,
         )
         await run_housekeeping(coord, {}, {}, NOW, False)
         store.async_save.assert_called_once_with({CAM_A: "192.0.2.1"})
-        assert coord._lan_ips_snapshot == {CAM_A: "192.0.2.1"}
+        assert coord.lan_ips_snapshot == {CAM_A: "192.0.2.1"}
 
     @pytest.mark.asyncio
     async def test_skips_save_when_unchanged(self):
         store = MagicMock()
         coord = _make_coord(
-            _rcp_lan_ip_cache={CAM_A: "192.0.2.1"},
-            _lan_ips_store=store,
-            _lan_ips_snapshot={CAM_A: "192.0.2.1"},
+            rcp_lan_ip_cache={CAM_A: "192.0.2.1"},
+            lan_ips_store=store,
+            lan_ips_snapshot={CAM_A: "192.0.2.1"},
         )
         await run_housekeeping(coord, {}, {}, NOW, False)
         store.async_save.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_store_configured_skips(self):
-        coord = _make_coord(_rcp_lan_ip_cache={CAM_A: "192.0.2.1"})
+        coord = _make_coord(rcp_lan_ip_cache={CAM_A: "192.0.2.1"})
         await run_housekeeping(coord, {}, {}, NOW, False)  # must not raise
 
     @pytest.mark.asyncio
     async def test_empty_ip_values_filtered_out(self):
         store = MagicMock()
         coord = _make_coord(
-            _rcp_lan_ip_cache={CAM_A: ""},
-            _lan_ips_store=store,
-            _lan_ips_snapshot=None,
+            rcp_lan_ip_cache={CAM_A: ""},
+            lan_ips_store=store,
+            lan_ips_snapshot=None,
         )
         await run_housekeeping(coord, {}, {}, NOW, False)
         store.async_save.assert_not_called()
@@ -233,9 +233,9 @@ class TestHwVersionPersistence:
     async def test_saves_when_snapshot_changed(self):
         store = MagicMock()
         coord = _make_coord(
-            _hw_version={CAM_A: "CAMERA_360"},
-            _hw_version_store=store,
-            _hw_version_snapshot=None,
+            hw_version={CAM_A: "CAMERA_360"},
+            hw_version_store=store,
+            hw_version_snapshot=None,
         )
         await run_housekeeping(coord, {}, {}, NOW, False)
         store.async_save.assert_called_once_with({CAM_A: "CAMERA_360"})
@@ -244,16 +244,16 @@ class TestHwVersionPersistence:
     async def test_skips_save_when_unchanged(self):
         store = MagicMock()
         coord = _make_coord(
-            _hw_version={CAM_A: "CAMERA_360"},
-            _hw_version_store=store,
-            _hw_version_snapshot={CAM_A: "CAMERA_360"},
+            hw_version={CAM_A: "CAMERA_360"},
+            hw_version_store=store,
+            hw_version_snapshot={CAM_A: "CAMERA_360"},
         )
         await run_housekeeping(coord, {}, {}, NOW, False)
         store.async_save.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_store_configured_skips(self):
-        coord = _make_coord(_hw_version={CAM_A: "CAMERA_360"})
+        coord = _make_coord(hw_version={CAM_A: "CAMERA_360"})
         await run_housekeeping(coord, {}, {}, NOW, False)  # must not raise
 
 
@@ -262,7 +262,7 @@ class TestLocalCredsPersistence:
     async def test_saves_full_creds_when_changed(self):
         store = MagicMock()
         coord = _make_coord(
-            _local_creds_cache={
+            local_creds_cache={
                 CAM_A: {
                     "user": "admin",
                     "password": "secret",
@@ -270,8 +270,8 @@ class TestLocalCredsPersistence:
                     "port": 443,
                 }
             },
-            _local_creds_store=store,
-            _local_creds_snapshot=None,
+            local_creds_store=store,
+            local_creds_snapshot=None,
         )
         await run_housekeeping(coord, {}, {}, NOW, False)
         store.async_save.assert_called_once_with(
@@ -289,11 +289,11 @@ class TestLocalCredsPersistence:
     async def test_defaults_missing_port_to_443(self):
         store = MagicMock()
         coord = _make_coord(
-            _local_creds_cache={
+            local_creds_cache={
                 CAM_A: {"user": "admin", "password": "secret", "host": "192.0.2.1"}
             },
-            _local_creds_store=store,
-            _local_creds_snapshot=None,
+            local_creds_store=store,
+            local_creds_snapshot=None,
         )
         await run_housekeeping(coord, {}, {}, NOW, False)
         saved = store.async_save.call_args[0][0]
@@ -303,9 +303,9 @@ class TestLocalCredsPersistence:
     async def test_incomplete_entry_filtered_out(self):
         store = MagicMock()
         coord = _make_coord(
-            _local_creds_cache={CAM_A: {"user": "admin"}},  # missing password/host
-            _local_creds_store=store,
-            _local_creds_snapshot=None,
+            local_creds_cache={CAM_A: {"user": "admin"}},  # missing password/host
+            local_creds_store=store,
+            local_creds_snapshot=None,
         )
         await run_housekeeping(coord, {}, {}, NOW, False)
         store.async_save.assert_not_called()
@@ -322,7 +322,7 @@ class TestLocalCredsPersistence:
             }
         }
         coord = _make_coord(
-            _local_creds_cache={
+            local_creds_cache={
                 CAM_A: {
                     "user": "admin",
                     "password": "secret",
@@ -330,8 +330,8 @@ class TestLocalCredsPersistence:
                     "port": 443,
                 }
             },
-            _local_creds_store=store,
-            _local_creds_snapshot=snapshot,
+            local_creds_store=store,
+            local_creds_snapshot=snapshot,
         )
         await run_housekeeping(coord, {}, {}, NOW, False)
         store.async_save.assert_not_called()
@@ -339,7 +339,7 @@ class TestLocalCredsPersistence:
     @pytest.mark.asyncio
     async def test_no_store_configured_skips(self):
         coord = _make_coord(
-            _local_creds_cache={
+            local_creds_cache={
                 CAM_A: {"user": "a", "password": "b", "host": "c", "port": 443}
             }
         )
@@ -351,7 +351,7 @@ class TestMaintenanceFeedRefresh:
     async def test_refresh_triggered_when_due(self):
         refresh = MagicMock(return_value="coro")
         coord = _make_coord(
-            _maintenance_last_fetch=float("-inf"),
+            maintenance_last_fetch=float("-inf"),
             _MAINTENANCE_INTERVAL_S=3600.0,
             _async_refresh_maintenance=refresh,
         )
@@ -362,7 +362,7 @@ class TestMaintenanceFeedRefresh:
     async def test_refresh_skipped_when_not_due(self):
         refresh = MagicMock()
         coord = _make_coord(
-            _maintenance_last_fetch=NOW,
+            maintenance_last_fetch=NOW,
             _MAINTENANCE_INTERVAL_S=3600.0,
             _async_refresh_maintenance=refresh,
         )

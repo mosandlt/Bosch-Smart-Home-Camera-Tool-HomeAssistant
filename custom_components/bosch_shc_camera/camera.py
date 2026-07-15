@@ -173,15 +173,15 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
 
         self._cam_id = cam_id
         self._entry = entry
-        self._cached_image: bytes | None = self._PLACEHOLDER_JPEG
+        self.cached_image: bytes | None = self._PLACEHOLDER_JPEG
         self._force_image_refresh: bool = False  # bypasses HA image cache once
-        self._last_image_fetch: float = float(
+        self.last_image_fetch: float = float(
             "-inf"
         )  # monotonic timestamp of last *successful* fetch (-inf = never fetched; SENTINEL_RULE — CI VMs boot at ~200s monotonic so a finite large-negative can read as "recent")
         self._last_failed_fetch: float = float(
             "-inf"
         )  # monotonic timestamp of last *failed* fetch; separate so successes always update the cache window
-        self._refresh_inflight: bool = False  # synchronous guard: set before first yield, cleared in finally  # prevents concurrent _async_trigger_image_refresh (replaces locked()+async-with race)
+        self._refresh_inflight: bool = False  # synchronous guard: set before first yield, cleared in finally  # prevents concurrent async_trigger_image_refresh (replaces locked()+async-with race)
         self._was_streaming: bool = False
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
@@ -191,8 +191,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         self._attr_name = None  # entity is the main feature of the device; HA uses device name as friendly_name
         self._attr_unique_id = f"bosch_shc_cam_{cam_id.lower()}"
         self._model = info.get("hardwareVersion", "CAMERA")
-        self._hw_version = info.get("hardwareVersion", "")
-        self._model_name = get_display_name(self._hw_version)
+        self.hw_version = info.get("hardwareVersion", "")
+        self._model_name = get_display_name(self.hw_version)
         self._fw = info.get("firmwareVersion", "")
         self._mac = info.get("macAddress", "")
 
@@ -201,15 +201,15 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         """Called when entity is added to HA — kick off initial image fetch."""
         await super().async_added_to_hass()
         # Register with coordinator so button/service can trigger image refresh
-        self.coordinator._camera_entities[self._cam_id] = self
+        self.coordinator.camera_entities[self._cam_id] = self
 
         # Restore the last-persisted snapshot from disk so HA can serve a real
         # image immediately — before the first live fetch completes (~2–4 s).
         # This prevents the 1×1 black placeholder from flashing on a cold start.
         persisted = await load_snapshot(self.hass, self._cam_id)
         if persisted:
-            self._cached_image = persisted
-            # Back-date _last_image_fetch so the normal snapshot_interval still
+            self.cached_image = persisted
+            # Back-date last_image_fetch so the normal snapshot_interval still
             # triggers a live refresh on schedule.  Using float('-inf') would
             # trigger an immediate re-fetch; instead back-date by one full
             # snapshot_interval so the first refresh fires normally.
@@ -220,7 +220,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     self._entry.options.get("snapshot_interval", IMAGE_REFRESH_INTERVAL)
                 )
             )
-            self._last_image_fetch = time.monotonic() - snap_interval
+            self.last_image_fetch = time.monotonic() - snap_interval
             _LOGGER.debug(
                 "%s: restored %d-byte snapshot from disk",
                 self._display_name,
@@ -228,11 +228,11 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             )
 
         # Fetch a real image shortly after startup (let coordinator settle first).
-        self.hass.async_create_task(self._async_trigger_image_refresh(delay=2))
+        self.hass.async_create_task(self.async_trigger_image_refresh(delay=2))
 
     async def async_will_remove_from_hass(self) -> None:
         """Called when entity is removed — unregister from coordinator."""
-        self.coordinator._camera_entities.pop(self._cam_id, None)
+        self.coordinator.camera_entities.pop(self._cam_id, None)
         await super().async_will_remove_from_hass()
 
     def _handle_coordinator_update(self) -> None:
@@ -241,7 +241,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
 
         # Stream just stopped → grab a fresh event snapshot immediately
         if self._was_streaming and not is_now_streaming:
-            self.hass.async_create_task(self._async_trigger_image_refresh(delay=2))
+            self.hass.async_create_task(self.async_trigger_image_refresh(delay=2))
 
         # Proactive background refresh (even when nobody has the page open).
         # Interval: snapshot_interval option (default 1800 s / 30 min).
@@ -253,13 +253,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     self._entry.options.get("snapshot_interval", IMAGE_REFRESH_INTERVAL)
                 )
             )
-            if now - self._last_image_fetch >= proactive_interval:
-                self.hass.async_create_task(self._async_trigger_image_refresh(delay=0))
+            if now - self.last_image_fetch >= proactive_interval:
+                self.hass.async_create_task(self.async_trigger_image_refresh(delay=0))
 
         self._was_streaming = is_now_streaming
         super()._handle_coordinator_update()
 
-    async def _async_trigger_image_refresh(self, delay: float = 0) -> None:
+    async def async_trigger_image_refresh(self, delay: float = 0) -> None:
         """Fetch a fresh image and force HA's camera proxy to serve it.
 
         Primarily used on startup and after stream stop. For CAMERA_360 (whose
@@ -275,7 +275,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         synchronously before the first ``await``, so a second caller sees it
         immediately and returns without opening a duplicate PUT /connection.
         This prevents startup + stream-stop + proactive-tick from each burning
-        the Bosch 3-session budget and racing on _cached_image /
+        the Bosch 3-session budget and racing on cached_image /
         _force_image_refresh.
 
         Note: the previous implementation used ``_refresh_lock.locked()`` +
@@ -290,7 +290,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # Skip refresh when privacy mode is ON — the camera blocks the view,
         # so any image we'd fetch would just be the stale last event snapshot.
         # The frontend card shows the "Privat-Modus aktiv" placeholder instead.
-        shc = self.coordinator._shc_state_cache.get(self._cam_id, {})
+        shc = self.coordinator.shc_state_cache.get(self._cam_id, {})
         if shc.get("privacy_mode") is True:
             _LOGGER.debug(
                 "%s: skipping image refresh — privacy mode is ON", self._display_name
@@ -309,19 +309,19 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         self._refresh_inflight = True
         self._force_image_refresh = True
         try:
-            # Fast path: populate _cached_image from the latest event snapshot
+            # Fast path: populate cached_image from the latest event snapshot
             # immediately so the HA camera proxy can serve something while the
             # live snap is fetching. This ensures the card shows a real image
             # within ~1s of startup/stream-stop, instead of waiting 5-15s for
             # the PUT /connection + snap.jpg round-trip.
             # Guard: only seed when we hold nothing but the 1×1 black placeholder
-            # (not self._cached_image checked `not bytes`, but placeholder is
+            # (not self.cached_image checked `not bytes`, but placeholder is
             # truthy — use identity check).
-            if self._cached_image is self._PLACEHOLDER_JPEG:
+            if self.cached_image is self._PLACEHOLDER_JPEG:
                 quick = await self.async_camera_image()
                 if quick and quick is not self._PLACEHOLDER_JPEG:
-                    self._cached_image = quick
-                    self._last_image_fetch = time.monotonic()
+                    self.cached_image = quick
+                    self.last_image_fetch = time.monotonic()
                     _LOGGER.debug(
                         "%s: quick event-snapshot seed — %d bytes",
                         self._display_name,
@@ -352,8 +352,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             # The placeholder (1×1 black) does NOT count as a real frame — on a
             # genuine cold start we still want to seed from the event image.
             _has_real_frame = (
-                bool(self._cached_image)
-                and self._cached_image is not self._PLACEHOLDER_JPEG
+                bool(self.cached_image)
+                and self.cached_image is not self._PLACEHOLDER_JPEG
             )
             if not image and not self.is_streaming and not _has_real_frame:
                 image = await self.coordinator.async_fetch_fresh_event_snapshot(
@@ -362,20 +362,20 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
 
             if image:
                 # Privacy TOCTOU guard: re-read privacy from the live cache
-                # immediately before writing _cached_image. The coordinator may
+                # immediately before writing cached_image. The coordinator may
                 # have updated between the top-of-method check and now (privacy
                 # turned ON during the 2-10 s fetch). Writing a just-fetched
                 # live frame while privacy is transitioning ON would serve a
                 # real-scene image until the next refresh.
-                shc_state = self.coordinator._shc_state_cache.get(self._cam_id, {})
+                shc_state = self.coordinator.shc_state_cache.get(self._cam_id, {})
                 if shc_state.get("privacy_mode") is True:
                     _LOGGER.debug(
                         "%s: privacy turned ON during fetch — discarding frame",
                         self._display_name,
                     )
                     return
-                self._cached_image = image
-                self._last_image_fetch = time.monotonic()
+                self.cached_image = image
+                self.last_image_fetch = time.monotonic()
                 _LOGGER.debug(
                     "%s: background refresh — %d bytes",
                     self._display_name,
@@ -387,7 +387,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # already prevents reaching here when privacy is ON)
                 if not shc_state.get("privacy_mode"):
                     await save_snapshot(self.hass, self._cam_id, image)
-                    img_entity = self.coordinator._image_entities.get(self._cam_id)
+                    img_entity = self.coordinator.image_entities.get(self._cam_id)
                     if img_entity is not None:
                         await img_entity.async_notify_refreshed()
             elif _has_real_frame:
@@ -395,7 +395,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # but we already hold a good frame — keep it instead of flipping to
                 # a stale event image, and back off a full interval rather than
                 # retrying every coordinator tick.
-                self._last_image_fetch = time.monotonic()
+                self.last_image_fetch = time.monotonic()
                 _LOGGER.debug(
                     "%s: live refresh unavailable — keeping last good frame",
                     self._display_name,
@@ -419,9 +419,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
 
         Controls the HA camera state: True → "streaming", False → "idle".
         Returning True only when `rtspsUrl` is populated (not just when the
-        coordinator's `_live_connections` entry exists) prevents a race that
+        coordinator's `live_connections` entry exists) prevents a race that
         broke WebRTC on first stream-start: try_live_connection writes the
-        cred-bearing result into `_live_connections` BEFORE pre-warm finishes
+        cred-bearing result into `live_connections` BEFORE pre-warm finishes
         (~25-35 s for Gen2), and only sets `rtspsUrl` after pre-warm completes.
         If `is_streaming` flipped to True at the first write, the camera card's
         `_waitForStreamReady` would observe `cam.state === "streaming"`,
@@ -432,7 +432,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         browser reload" (after a reload, pre-warm was already done and rtspsUrl
         was present from the first state read). Bug 2026-05-27 Innenbereich.
         """
-        live = self.coordinator._live_connections.get(self._cam_id, {})
+        live = self.coordinator.live_connections.get(self._cam_id, {})
         if not live:
             return False
         return bool(live.get("rtspsUrl") or live.get("rtspUrl"))
@@ -564,7 +564,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         never raise — `available` is read on every state-machine update.
         """
         coord = self.coordinator
-        mw = getattr(coord, "_maintenance_cache", None)
+        mw = getattr(coord, "maintenance_cache", None)
         if mw is None or not getattr(mw, "camera_relevant", False):
             return False
         try:
@@ -599,13 +599,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # [S2] Evaluate is_streaming once — property does a dict lookup each time
         is_streaming = self.is_streaming
         # Stream status for dashboard display
-        fell_back = self.coordinator._stream_fell_back.get(self._cam_id, False)
-        err_count = self.coordinator._stream_error_count.get(self._cam_id, 0)
+        fell_back = self.coordinator.stream_fell_back.get(self._cam_id, False)
+        err_count = self.coordinator.stream_error_count.get(self._cam_id, 0)
         if self.coordinator.is_stream_warming(self._cam_id):
             stream_status = "warming_up"
         elif is_streaming:
             stream_status = "streaming (REMOTE fallback)" if fell_back else "streaming"
-        elif self._cam_id in self.coordinator._live_connections:
+        elif self._cam_id in self.coordinator.live_connections:
             stream_status = "connecting"
         else:
             stream_status = "idle"
@@ -620,7 +620,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             "last_event": latest.get("timestamp", "")[:19],
             "event_type": latest.get("eventType", ""),
             "model_name": self._model_name,
-            "hardware_version": self._hw_version,
+            "hardware_version": self.hw_version,
             "firmware": self._fw,
             "mac": self._mac,
             "live_rtsps": _redact_rtsp_creds(rtsps_url),
@@ -636,7 +636,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             attrs["stream_url"] = _redact_rtsp_creds(rtsps_url)
         # bufferingTime from PUT /connection (LOCAL=500ms, REMOTE=1000ms)
         # — Bosch-server-side hint, NOT the player buffer. Display only.
-        live_conn = self.coordinator._live_connections.get(self._cam_id, {})
+        live_conn = self.coordinator.live_connections.get(self._cam_id, {})
         bt = live_conn.get("_bufferingTime")
         if bt is not None:
             attrs["buffering_time_ms"] = bt
@@ -657,7 +657,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # glass pill — otherwise the user sees two timestamps stacked, one
         # burned-in by the camera and one drawn by the card. Defensive
         # getattr covers test stubs that lack the cache.
-        ts_cache = getattr(self.coordinator, "_timestamp_cache", None)
+        ts_cache = getattr(self.coordinator, "timestamp_cache", None)
         if ts_cache is not None:
             ts_overlay = ts_cache.get(self._cam_id)
             if ts_overlay is not None:
@@ -715,9 +715,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         We raise HomeAssistantError so HA surfaces a meaningful message instead of
         the generic "does not support play stream service".
         """
-        if not self.coordinator._live_connections.get(self._cam_id):
+        if not self.coordinator.live_connections.get(self._cam_id):
             # Privacy mode gate: do not even attempt a live connection
-            shc = self.coordinator._shc_state_cache.get(self._cam_id, {})
+            shc = self.coordinator.shc_state_cache.get(self._cam_id, {})
             if shc.get("privacy_mode") is True:
                 raise HomeAssistantError(
                     f"{self._display_name}: stream unavailable — privacy mode is ON"
@@ -742,7 +742,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             else:
                 self.coordinator.async_update_listeners()
         # Pre-warm race (observed 2026-05-17 05:16:14 UTC for bosch_innenbereich):
-        # coordinator sets _live_connections[cam_id] BEFORE the LOCAL pre-warm
+        # coordinator sets live_connections[cam_id] BEFORE the LOCAL pre-warm
         # populates rtspsUrl. During that window stream_source() intentionally
         # returns None — but super().async_create_stream() reads stream_source()
         # and returns None too, which HA core surfaces as the misleading
@@ -763,11 +763,11 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         native HA more-info view) fails immediately instead of waiting like the
         card's own JS retry already does.
         """
-        if self._cam_id not in self.coordinator._stream_warming:
+        if self._cam_id not in self.coordinator.stream_warming:
             return True
         cfg = self.coordinator.get_model_config(self._cam_id)
         deadline = time.monotonic() + cfg.min_total_wait + 5
-        while self._cam_id in self.coordinator._stream_warming:
+        while self._cam_id in self.coordinator.stream_warming:
             if time.monotonic() > deadline:
                 _LOGGER.warning(
                     "%s: %s — pre-warm did not complete within %ds",
@@ -801,8 +801,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         screen (MOBILE_BACKLOG). The custom card already retries client-side
         via _waitForStreamReady(); the native path had no equivalent.
         """
-        if not self.coordinator._live_connections.get(self._cam_id):
-            shc = self.coordinator._shc_state_cache.get(self._cam_id, {})
+        if not self.coordinator.live_connections.get(self._cam_id):
+            shc = self.coordinator.shc_state_cache.get(self._cam_id, {})
             if shc.get("privacy_mode") is True:
                 raise HomeAssistantError(
                     f"{self._display_name}: stream unavailable — privacy mode is ON"
@@ -835,12 +835,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         REMOTE streams use rtsps:// directly (Bosch cloud proxy has valid certs).
 
         Returns None when no live session is active (switch is OFF).
-        Always reads from _live_connections (real-time) instead of coordinator
+        Always reads from live_connections (real-time) instead of coordinator
         data cache to avoid stale URLs after session renewal or mode switch.
         """
-        # Read from _live_connections (updated immediately) instead of
+        # Read from live_connections (updated immediately) instead of
         # coordinator data cache (updated on next refresh cycle)
-        live = self.coordinator._live_connections.get(self._cam_id, {})
+        live = self.coordinator.live_connections.get(self._cam_id, {})
         if not live:
             return None
         url: str | None = live.get("rtspsUrl") or live.get("rtspUrl") or None
@@ -904,7 +904,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         camera's RCP endpoint. Much faster than snap.jpg (~instant vs ~1.5 s)
         and used as a fallback when the proxy snap.jpg fetch fails.
         """
-        live = self.coordinator._live_connections.get(self._cam_id, {})
+        live = self.coordinator.live_connections.get(self._cam_id, {})
         urls = live.get("urls", [])
         if not urls:
             return None
@@ -916,7 +916,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         proxy_host = parts[0]
         proxy_hash = parts[1]
 
-        session_id = await self.coordinator._get_cached_rcp_session(
+        session_id = await self.coordinator.get_cached_rcp_session(
             proxy_host, proxy_hash
         )
         if not session_id:
@@ -925,7 +925,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         rcp_base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
 
         # Try 320×180 JPEG via RCP 0x099e (resolution confirmed by 0x0a88 = 320×180)
-        raw: bytes | None = await self.coordinator._rcp_read(
+        raw: bytes | None = await self.coordinator.rcp_read(
             rcp_base, "0x099e", session_id
         )
         if raw and raw[:2] == b"\xff\xd8":
@@ -937,7 +937,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             return raw
 
         # Fallback: 320×180 YUV422 raw frame → convert to JPEG
-        raw = await self.coordinator._rcp_read(rcp_base, "0x0c98", session_id)
+        raw = await self.coordinator.rcp_read(rcp_base, "0x0c98", session_id)
         if raw and len(raw) == 115200:
             jpeg = self._yuv422_to_jpeg(raw)
             if jpeg:
@@ -971,7 +971,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         (26 bytes of plain text in place of an image).
 
         Observed 2026-04-27 on Gen1 cams during the pre-warm transition: while
-        `_live_connections[cam_id]` had a partial entry but no proxyUrl yet,
+        `live_connections[cam_id]` had a partial entry but no proxyUrl yet,
         an unhandled exception path in `_async_camera_image_impl` propagated up
         and HA returned 500. Lovelace's `<img>` element rendered the literal
         text bytes as a brown error frame on every camera card sharing the
@@ -988,12 +988,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 self._display_name,
                 err,
             )
-            jpeg = self._cached_image or self._PLACEHOLDER_JPEG
+            jpeg = self.cached_image or self._PLACEHOLDER_JPEG
         # Apply 180° rotation if the user enabled it via the Bild 180° drehen
         # switch (ceiling-mounted indoor cameras). Skip the placeholder JPEG.
         # [S5] Use None default instead of {} to avoid allocating a throwaway dict
         # on every call when the attribute exists (production path always has it).
-        _rot_cache = getattr(self.coordinator, "_image_rotation_180", None)
+        _rot_cache = getattr(self.coordinator, "image_rotation_180", None)
         rotate = bool(_rot_cache and _rot_cache.get(self._cam_id))
         if rotate and jpeg is not self._PLACEHOLDER_JPEG and jpeg:
             jpeg = await self.hass.async_add_executor_job(_rotate_jpeg_180, jpeg)
@@ -1020,14 +1020,14 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
            If cached image is older than CLOUD_SNAP_CACHE_TTL (30 s): fetches
            fresh synchronously so the user always sees a current image.
         3. Cached image           — fallback when cloud fetch fails (e.g. CAMERA_360
-           whose REMOTE snap.jpg returns 401; refreshed via _async_trigger_image_refresh
+           whose REMOTE snap.jpg returns 401; refreshed via async_trigger_image_refresh
            using LOCAL connection).
         4. Latest event snapshot  — last resort on very first startup before any
            cloud fetch has completed.
 
         The card calls trigger_snapshot on page load / tab switch / 60s timer,
         which sets _force_image_refresh=True (frame_interval → 0.1s) and fetches
-        a fresh image via _async_trigger_image_refresh. This ensures HA's camera
+        a fresh image via async_trigger_image_refresh. This ensures HA's camera
         proxy serves the fresh image on the next request instead of its 60s cache.
 
         width/height: passed by HA when the card requests ?width=N. We use this to
@@ -1061,9 +1061,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # (default is False, so this fast-path fires for all standard installs).
         if self._entry.options.get("use_mjpeg_snapshot", False):
             opts = get_options(self._entry)  # full merge only when feature is enabled
-            model_cfg = get_model_config(self._hw_version)  # [S4] module-level import
+            model_cfg = get_model_config(self.hw_version)  # [S4] module-level import
             if model_cfg.generation >= 2:
-                creds = self.coordinator._local_creds_cache.get(self._cam_id)
+                creds = self.coordinator.local_creds_cache.get(self._cam_id)
                 # cbs creds rotate ~60 s after each PUT /connection without
                 # heartbeat. Skip MJPEG when creds are stale — FFmpeg would
                 # fail "Invalid data found when processing input" otherwise.
@@ -1089,12 +1089,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                             ),
                         )
                         if mjpeg_data:
-                            self._cached_image = mjpeg_data
-                            self._last_image_fetch = time.monotonic()
+                            self.cached_image = mjpeg_data
+                            self.last_image_fetch = time.monotonic()
                             return mjpeg_data
 
         # ── 1. Cloud proxy live snapshot (active live-stream session) ─────────
-        live = self.coordinator._live_connections.get(self._cam_id, {})
+        live = self.coordinator.live_connections.get(self._cam_id, {})
         proxy_url = live.get("proxyUrl", "")
         if proxy_url:
             # LOCAL connection: snap.jpg requires HTTP Digest auth
@@ -1133,20 +1133,20 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         _LOGGER.debug("LOCAL snap via proxy failed: %s", err)
                         data = None
                     if data:
-                        self._cached_image = data
-                        self._last_image_fetch = time.monotonic()
+                        self.cached_image = data
+                        self.last_image_fetch = time.monotonic()
                         _LOGGER.debug(
                             "%s: LOCAL live snap %d bytes",
                             self._display_name,
                             len(data),
                         )
-                        return self._cached_image
+                        return self.cached_image
                     # LOCAL conn: skip the aiohttp fallback below. The proxy_url
                     # for LOCAL is `https://<lan-ip>:443/snap.jpg` which requires
                     # the Digest auth we just tried — aiohttp without auth would
                     # 401 in another ~10 s burning HA's outer budget. Go straight
                     # to cached image / placeholder via the final return.
-                    return self._cached_image or self._PLACEHOLDER_JPEG
+                    return self.cached_image or self._PLACEHOLDER_JPEG
             renew_after_status: int | None = None
             try:
                 async with asyncio.timeout(10):
@@ -1155,20 +1155,20 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         if resp.status == 200 and "image" in ct:
                             data = await resp.read()
                             if data:
-                                self._cached_image = data
-                                self._last_image_fetch = time.monotonic()
+                                self.cached_image = data
+                                self.last_image_fetch = time.monotonic()
                                 _LOGGER.debug(
                                     "%s: live proxy snapshot %d bytes",
                                     self._display_name,
-                                    len(self._cached_image),
+                                    len(self.cached_image),
                                 )
-                                return self._cached_image
+                                return self.cached_image
                         elif resp.status == 404:
                             # 404 = proxy URL expired. Defer the renewal to AFTER
                             # this snapshot timeout closes (see below).
                             renew_after_status = 404
                         elif resp.status in (401, 403):
-                            opened_at = self.coordinator._live_opened_at.get(
+                            opened_at = self.coordinator.live_opened_at.get(
                                 self._cam_id, float("-inf")
                             )
                             age = time.monotonic() - opened_at
@@ -1186,7 +1186,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # be cancelled mid-flight by the snapshot budget — which previously
                 # aborted every renewal on a slow camera (bug-hunt 2026-06-02).
                 if renew_after_status is not None:
-                    opened_at = self.coordinator._live_opened_at.get(
+                    opened_at = self.coordinator.live_opened_at.get(
                         self._cam_id, float("-inf")
                     )
                     age = time.monotonic() - opened_at
@@ -1200,7 +1200,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     if new_live is STREAM_START_SKIPPED:
                         # Another start for this camera is already in flight — it
                         # will publish the session. This is NOT a failure and the
-                        # in-flight start owns _live_connections/_live_opened_at:
+                        # in-flight start owns live_connections/live_opened_at:
                         # popping here would delete a concurrent renewal's fresh
                         # session and kill the stream + any Frigate front-door
                         # reading its creds. Leave the state untouched. This was
@@ -1222,11 +1222,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                                         if retry_resp.status == 200 and "image" in ct2:
                                             data = await retry_resp.read()
                                             if data:
-                                                self._cached_image = data
-                                                self._last_image_fetch = (
-                                                    time.monotonic()
-                                                )
-                                                return self._cached_image
+                                                self.cached_image = data
+                                                self.last_image_fetch = time.monotonic()
+                                                return self.cached_image
                             except (TimeoutError, aiohttp.ClientError):
                                 pass
                     elif renew_after_status in (401, 403):
@@ -1237,15 +1235,15 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                             "%s: session renewal failed — clearing",
                             self._display_name,
                         )
-                        self.coordinator._live_connections.pop(self._cam_id, None)
-                        self.coordinator._live_opened_at.pop(self._cam_id, None)
+                        self.coordinator.live_connections.pop(self._cam_id, None)
+                        self.coordinator.live_opened_at.pop(self._cam_id, None)
             except (TimeoutError, aiohttp.ClientError):
                 # Any network/timeout error on the live proxy snap.jpg — try RCP thumbnail
                 rcp_thumb = await self._async_rcp_thumbnail()
                 if rcp_thumb:
-                    self._cached_image = rcp_thumb
-                    self._last_image_fetch = time.monotonic()
-                    return self._cached_image
+                    self.cached_image = rcp_thumb
+                    self.last_image_fetch = time.monotonic()
+                    return self.cached_image
 
         # ── 2. Cloud proxy on-demand snapshot (PUT /connection REMOTE → snap.jpg) ──
         # Primary snapshot method for idle cameras. Two modes:
@@ -1261,14 +1259,14 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # Skip when streaming — opening a new PUT /connection kills the active RTSP session.
         if not self.is_streaming:
             now = time.monotonic()
-            cache_stale = (now - self._last_image_fetch) >= CLOUD_SNAP_CACHE_TTL
+            cache_stale = (now - self.last_image_fetch) >= CLOUD_SNAP_CACHE_TTL
             if (
-                not self._cached_image or self._cached_image is self._PLACEHOLDER_JPEG
+                not self.cached_image or self.cached_image is self._PLACEHOLDER_JPEG
             ) and cache_stale:
                 # First load — must wait synchronously. The placeholder is a real
-                # (truthy) 1×1 black JPEG, so `not self._cached_image` alone never
+                # (truthy) 1×1 black JPEG, so `not self.cached_image` alone never
                 # fires while we still hold it — use the identity check too (mirror
-                # of _async_trigger_image_refresh). Without this, a cold-boot proxy
+                # of async_trigger_image_refresh). Without this, a cold-boot proxy
                 # request (HA Companion app on restart, before the async disk-restore
                 # in async_added_to_hass completes) was served the black placeholder
                 # instead of fetching a real frame → "black image on mobile".
@@ -1276,7 +1274,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # camera (every fetch fails, placeholder stays) would otherwise
                 # re-enter this slow RCP+REMOTE+LOCAL chain on EVERY proxy request,
                 # since the placeholder identity is true regardless of staleness.
-                # On true first load _last_image_fetch is the boot sentinel, so
+                # On true first load last_image_fetch is the boot sentinel, so
                 # cache_stale is True and this still fetches immediately.
                 # For mobile/thumbnail requests (width ≤ 640): try RCP 0x099e first
                 # (320×180 JPEG, ~3 KB, ~100 ms with cached session) before the slow
@@ -1284,8 +1282,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 if prefer_small:
                     rcp_img = await self._async_rcp_thumbnail()
                     if rcp_img:
-                        self._cached_image = rcp_img
-                        self._last_image_fetch = now
+                        self.cached_image = rcp_img
+                        self.last_image_fetch = now
                         _LOGGER.debug(
                             "%s: RCP thumbnail (first load, prefer_small) — %d bytes",
                             self._display_name,
@@ -1301,8 +1299,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         self._cam_id
                     )
                 if fresh:
-                    self._cached_image = fresh
-                    self._last_image_fetch = now
+                    self.cached_image = fresh
+                    self.last_image_fetch = now
                     _LOGGER.debug(
                         "%s: cloud proxy snapshot %d bytes (first load)",
                         self._display_name,
@@ -1314,9 +1312,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # don't re-run the slow RCP+REMOTE+LOCAL chain on every proxy request;
                 # retry after CLOUD_SNAP_CACHE_TTL. Mirrors the stale branch below.
                 # Falls through to 2b / cached / event-snapshot fallback.
-                self._last_image_fetch = now
+                self.last_image_fetch = now
             elif cache_stale:
-                cache_age = now - self._last_image_fetch
+                cache_age = now - self.last_image_fetch
                 # Always fetch fresh synchronously when cache is stale.
                 # The old background-refresh approach returned the stale image
                 # and refreshed async — but HA's frame_interval meant the fresh
@@ -1330,8 +1328,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 if prefer_small:
                     rcp_img = await self._async_rcp_thumbnail()
                     if rcp_img:
-                        self._cached_image = rcp_img
-                        self._last_image_fetch = now
+                        self.cached_image = rcp_img
+                        self.last_image_fetch = now
                         return rcp_img
                 fresh2: bytes | None = await self.coordinator.async_fetch_live_snapshot(
                     self._cam_id
@@ -1342,34 +1340,34 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         self._cam_id
                     )
                 if fresh2:
-                    self._cached_image = fresh2
-                    self._last_image_fetch = now
+                    self.cached_image = fresh2
+                    self.last_image_fetch = now
                     return fresh2
                 # Both REMOTE + LOCAL failed — advance timestamp so next tick retries instead of looping
-                self._last_image_fetch = now
+                self.last_image_fetch = now
                 _LOGGER.debug(
                     "%s: fresh fetch failed — returning cached (%ds old)",
                     self._display_name,
                     int(cache_age),
                 )
-                return self._cached_image
+                return self.cached_image
             else:
-                return self._cached_image
+                return self.cached_image
 
         # ── 2b. LOCAL snap.jpg with cached Digest creds (cloud-outage fallback) ──
         # When the Bosch cloud or auth server is unreachable, PUT /connection
         # REMOTE fails — but we may still have valid LOCAL creds from the
-        # previous session (cached in coordinator._local_creds_cache). Try
+        # previous session (cached in coordinator.local_creds_cache). Try
         # fetching snap.jpg directly from the camera's LAN IP using those
         # creds before giving up. Digest creds are ephemeral (camera rotates
         # them on reboot) but usually stable for minutes to hours.
-        creds = self.coordinator._local_creds_cache.get(self._cam_id)
+        creds = self.coordinator.local_creds_cache.get(self._cam_id)
         # Skip while streaming: a LOCAL Digest snap.jpg opens a second HTTP
         # session against the camera, contending with the Bosch 3-session limit
         # and risking teardown of the active RTSP stream — same reason section 2
         # is gated on `not is_streaming`. The live proxy (section 1) already
         # serves snapshots during a stream; fall through to the cached image.
-        if creds and self.coordinator._auth_outage_count > 0 and not self.is_streaming:
+        if creds and self.coordinator.auth_outage_count > 0 and not self.is_streaming:
             local_user = creds.get("user", "")
             local_pass = creds.get("password", "")
             host = creds.get("host", "")
@@ -1396,20 +1394,24 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     _LOGGER.debug("LOCAL outage snap failed: %s", err)
                     outage_data = None
                 if outage_data:
-                    self._cached_image = outage_data
-                    self._last_image_fetch = time.monotonic()
+                    self.cached_image = outage_data
+                    self.last_image_fetch = time.monotonic()
                     _LOGGER.info(
                         "%s: outage fallback — LOCAL snap.jpg %d bytes via cached Digest creds",
                         self._display_name,
                         len(outage_data),
                     )
-                    return self._cached_image
+                    return self.cached_image
 
         # ── 3. Cached image (fallback for cameras whose REMOTE snap.jpg needs auth) ──
         # For cameras like CAMERA_360 the cloud fetch above returns None;
-        # _async_trigger_image_refresh keeps this cache warm via LOCAL connection.
-        if self._cached_image:
-            return self._cached_image
+        # async_trigger_image_refresh keeps this cache warm via LOCAL connection.
+        # The placeholder is a real (truthy) 1x1 black JPEG, so `if
+        # self.cached_image:` alone would intercept it here too, before tier 4
+        # (the actual last resort) ever runs on a genuine cold start — use the
+        # identity check too, mirroring the tier-2 guard above.
+        if self.cached_image and self.cached_image is not self._PLACEHOLDER_JPEG:
+            return self.cached_image
 
         # ── 4. Latest event snapshot (last resort — first startup before cloud fetch runs) ──
         events = self._cam_data.get("events", [])
@@ -1430,21 +1432,21 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 async with asyncio.timeout(10):
                     async with session.get(img_url, headers=headers_bearer) as resp:
                         if resp.status == 200:
-                            self._cached_image = await resp.read()
-                            self._last_image_fetch = time.monotonic()
+                            self.cached_image = await resp.read()
+                            self.last_image_fetch = time.monotonic()
                             _LOGGER.debug(
                                 "%s: event snapshot %d bytes @ %s",
                                 self._display_name,
-                                len(self._cached_image),
+                                len(self.cached_image),
                                 ev.get("timestamp", "")[:19],
                             )
-                            return self._cached_image
+                            return self.cached_image
                         if resp.status == 401:
                             _LOGGER.warning(
                                 "%s: token expired — update via integration options",
                                 self._display_name,
                             )
-                            return self._cached_image
+                            return self.cached_image
                         # e.g. 403/404/410 = expired URL — try next event
                         _LOGGER.debug(
                             "%s: event snapshot HTTP %d @ %s — trying next",
@@ -1456,4 +1458,4 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 _LOGGER.debug("%s: event snapshot error: %s", self._display_name, err)
 
         # Return last cached image if all methods failed
-        return self._cached_image or self._PLACEHOLDER_JPEG
+        return self.cached_image or self._PLACEHOLDER_JPEG
