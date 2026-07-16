@@ -1,14 +1,25 @@
 name: Release
 
-# Creates a GitHub Release on tag push (vX.Y.Z).
+# Creates a GitHub Release on tag push (vX.Y.Z, or vX.Y.Z-beta.N for a
+# prerelease — any hyphen in the tag marks it a prerelease, standard semver
+# convention, also covers -rc.N/-alpha.N etc.).
 # GATE: the release is only published AFTER the required CI workflows
 # (Tests, Quality, Validate, Secret scan) have concluded SUCCESS on the same
-# commit. If any required workflow fails, the release job fails and no
-# release is created. This closes the gap where the tag-triggered release
-# published in parallel with — and independently of — the test suite.
-# Release notes are extracted from the matching ## [vX.Y.Z] section in CHANGELOG.md.
-# A missing section fails the job — every tagged release must have a maintained
-# CHANGELOG.md entry, no silent fallback to auto-generated notes.
+# commit — for BOTH channels, no watered-down gate for betas. If any required
+# workflow fails, the release job fails and no release is created. This closes
+# the gap where the tag-triggered release published in parallel with — and
+# independently of — the test suite.
+# Release notes are extracted from the matching ## [vX.Y.Z] section in
+# CHANGELOG.md, keyed off the BASE version (vX.Y.Z with any -beta.N suffix
+# stripped) — so every beta of an upcoming release shares the one section
+# written for it, no per-beta changelog churn. A missing section fails the
+# job for a STABLE release (every stable tag must have a maintained
+# CHANGELOG.md entry); for a BETA it falls back to a generic prerelease note
+# instead of failing, since hot betas are meant to ship faster than the
+# changelog gets written.
+# Channel handling: beta tags get `--prerelease` and are never marked
+# `--latest` (GitHub's own semantics already exclude prereleases from
+# "latest" once `--prerelease` is set); stable tags get `--latest` as before.
 
 on:
   push:
@@ -16,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to release (e.g. v14.3.0)"
+        description: "Existing tag to release (e.g. v14.3.0 or v14.3.0-beta.1)"
         required: true
 
 permissions:
@@ -34,12 +45,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve tag
+      - name: Resolve tag and release channel
         id: tag
         env:
           INPUT_TAG: ${{ github.event.inputs.tag }}
           REF_NAME: ${{ github.ref_name }}
-        run: echo "tag=${INPUT_TAG:-$REF_NAME}" >> "$GITHUB_OUTPUT"
+        run: |
+          TAG="${INPUT_TAG:-$REF_NAME}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # A hyphen anywhere after "v" marks a semver prerelease tag
+          # (v16.2.0-beta.1, v16.2.0-rc.2, ...). Base version = tag up to
+          # (not including) the first hyphen — used to key the shared
+          # CHANGELOG.md section every beta of that version reads from.
+          if [[ "$TAG" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "base_version=${TAG%%-*}" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG resolved as a BETA/prerelease (base ${TAG%%-*})."
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "base_version=$TAG" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG resolved as a STABLE release."
+          fi
 
       # GATE — block the release until the required CI workflows pass on this
       # exact commit. Polls the Actions API; a workflow that concludes in any
@@ -86,9 +112,10 @@ jobs:
       - name: Extract release notes from CHANGELOG.md
         id: notes
         env:
-          TAG: ${{ steps.tag.outputs.tag }}
+          BASE_TAG: ${{ steps.tag.outputs.base_version }}
+          IS_PRERELEASE: ${{ steps.tag.outputs.prerelease }}
         run: |
-          VERSION="${TAG#v}"
+          VERSION="${BASE_TAG#v}"
           # VERSION is passed as an awk variable (-v), never interpolated into the
           # program text — TAG can come from workflow_dispatch free-text input or
           # an attacker-controlled tag name, so string interpolation there would be
@@ -99,38 +126,63 @@ jobs:
             /^## / { flag=0 }
             flag { print }
           ' CHANGELOG.md > /tmp/release-notes.md
-          # First non-empty content line of the section → human title summary.
-          SUMMARY=$(awk -v ver="$VERSION" '
-            index($0, "## [v" ver "]") == 1 { f=1; next }
-            /^## / { f=0 }
-            f && NF { print; exit }
-          ' CHANGELOG.md | sed -E 's/\*\*//g; s/^(Patch|Minor|Major)[[:space:]]+[—-]+[[:space:]]*//')
-          echo "summary=${SUMMARY}" >> "$GITHUB_OUTPUT"
-          if ! grep -q '[^[:space:]]' /tmp/release-notes.md; then
+
+          if grep -q '[^[:space:]]' /tmp/release-notes.md; then
+            # First non-empty content line of the section → human title summary.
+            SUMMARY=$(awk -v ver="$VERSION" '
+              index($0, "## [v" ver "]") == 1 { f=1; next }
+              /^## / { f=0 }
+              f && NF { print; exit }
+            ' CHANGELOG.md | sed -E 's/\*\*//g; s/^(Patch|Minor|Major)[[:space:]]+[—-]+[[:space:]]*//')
+          elif [ "$IS_PRERELEASE" = "true" ]; then
+            # Betas are allowed to ship ahead of the changelog entry — fall
+            # back to a generic note instead of failing the job. The stable
+            # release for this same base version still needs a real entry.
+            echo "No CHANGELOG.md section for v${VERSION} yet — using a generic beta note (prerelease-only fallback)."
+            # printf, not a heredoc: a heredoc body must stay at column 0,
+            # which is below this run block's YAML indentation and would
+            # either break the block scalar or (if indented to match)
+            # inject leading spaces that GitHub renders as a code block.
+            printf 'Beta prerelease build for the upcoming **v%s**. Full release notes will be added to CHANGELOG.md with the stable release.\n\nBeta builds are for testing — expect rough edges. Enable "Show beta versions" for this repository in HACS to install prereleases.\n' "$VERSION" > /tmp/release-notes.md
+            SUMMARY="Beta prerelease"
+          else
             echo "::error::No CHANGELOG.md entry found for v${VERSION} — add a '## [v${VERSION}]' section before tagging."
             exit 1
           fi
+          echo "summary=${SUMMARY}" >> "$GITHUB_OUTPUT"
 
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.tag.outputs.tag }}
+          IS_PRERELEASE: ${{ steps.tag.outputs.prerelease }}
           SUMMARY: ${{ steps.notes.outputs.summary }}
         run: |
           # Keep the leading "v" and append the CHANGELOG one-liner when present,
           # so titles read "v14.3.1 — <summary>" like hand-authored releases.
           TITLE="$TAG"
           [ -n "$SUMMARY" ] && TITLE="$TAG — $SUMMARY"
+
+          # Beta: mark --prerelease, never --latest (GitHub excludes
+          # prereleases from "latest" once that flag is set, so omitting
+          # --latest here is enough — no --latest=false needed).
+          # Stable: --latest as before, no --prerelease.
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            CHANNEL_FLAGS=(--prerelease)
+          else
+            CHANNEL_FLAGS=(--latest)
+          fi
+
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" \
-              --latest \
+              "${CHANNEL_FLAGS[@]}" \
               --notes-file /tmp/release-notes.md
           else
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" \
-              --latest \
+              "${CHANNEL_FLAGS[@]}" \
               --notes-file /tmp/release-notes.md
           fi
