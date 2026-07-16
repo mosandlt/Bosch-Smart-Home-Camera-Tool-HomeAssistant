@@ -97,6 +97,71 @@ def test_exceptions_keys_match_across_files(
     )
 
 
+def _flatten_leaf_paths(d: dict[str, Any], prefix: str = "") -> set[str]:
+    """Return every top-two-level '<domain>.<key>' path under a dict shaped
+    like strings.json's ``entity``/``config_subentries`` blocks (domain ->
+    key -> content) — used to diff key coverage without caring about the
+    content itself."""
+    out: set[str] = set()
+    for domain, keys in d.items():
+        if not isinstance(keys, dict):
+            continue
+        for key in keys:
+            out.add(f"{prefix}{domain}.{key}")
+    return out
+
+
+def test_entity_keys_match_across_files(
+    strings: dict[str, Any], de: dict[str, Any], en: dict[str, Any]
+) -> None:
+    """Every `entity.<domain>.<key>` in strings.json must exist in BOTH
+    de.json and en.json.
+
+    Regression test: an entire batch of new AI Camera Analysis entity keys
+    (switch/text/sensor/binary_sensor/image) was added to strings.json only
+    — HA reads translations/*.json at runtime, not strings.json directly,
+    so the omission produced garbled/collision-disambiguated entity_ids
+    (e.g. `switch.therrasse_bosch_terrasse` instead of
+    `switch.bosch_terrasse_ai_analysis`) on a real HA instance, invisible
+    to every other test in this suite since none of them exercise HA's
+    live translation-driven entity-naming pipeline. Caught only by live
+    deploy-testing before release — this test exists so the next such gap
+    is caught by `pytest` instead.
+    """
+    canonical = _flatten_leaf_paths(strings.get("entity", {}))
+    de_keys = _flatten_leaf_paths(de.get("entity", {}))
+    en_keys = _flatten_leaf_paths(en.get("entity", {}))
+    assert canonical <= de_keys, f"de.json missing entity keys: {canonical - de_keys}"
+    assert canonical <= en_keys, f"en.json missing entity keys: {canonical - en_keys}"
+
+
+def test_service_keys_match_across_files(
+    strings: dict[str, Any], de: dict[str, Any], en: dict[str, Any]
+) -> None:
+    """Every `services.<key>` in strings.json must exist in de.json + en.json."""
+    canonical = set(strings.get("services", {}).keys())
+    de_keys = set(de.get("services", {}).keys())
+    en_keys = set(en.get("services", {}).keys())
+    assert canonical <= de_keys, f"de.json missing service keys: {canonical - de_keys}"
+    assert canonical <= en_keys, f"en.json missing service keys: {canonical - en_keys}"
+
+
+def test_config_subentry_keys_match_across_files(
+    strings: dict[str, Any], de: dict[str, Any], en: dict[str, Any]
+) -> None:
+    """Every `config_subentries.<key>` in strings.json must exist in
+    de.json + en.json."""
+    canonical = set(strings.get("config_subentries", {}).keys())
+    de_keys = set(de.get("config_subentries", {}).keys())
+    en_keys = set(en.get("config_subentries", {}).keys())
+    assert canonical <= de_keys, (
+        f"de.json missing config_subentries keys: {canonical - de_keys}"
+    )
+    assert canonical <= en_keys, (
+        f"en.json missing config_subentries keys: {canonical - en_keys}"
+    )
+
+
 def test_translation_keys_match_hassfest_rule(
     strings: dict[str, Any],
     en: dict[str, Any],

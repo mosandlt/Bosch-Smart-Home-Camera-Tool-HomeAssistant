@@ -762,6 +762,7 @@ Before v11.0.0 these failure paths logged a WARNING and silently returned — cl
 
 ## Features
 
+- **AI Camera Analysis (motion-triggered structured scoring):** opt-in per-camera AI analysis via Home Assistant's `ai_task` platform — requests a structured 1-10 suspicion score + description on motion (not just free text), with per-camera enable/scene-context, multi-target notify routing (per-target score threshold/camera filter/armed-condition), a generalized alarm/siren trigger (works with Alarmo or any `alarm_control_panel`), known-visitor prompt context to cut false positives, and a dedicated timeline card. Design inspired by concepts from [HomeAssistantAICameraCentre](https://github.com/simpleaddins/HomeAssistantAICameraCentre) (MIT) — that project is itself already generic and works with any HA camera including this integration's, with zero setup on our side; this is an independent, native reimplementation against this integration's own coordinator/entity model, no code copied. See `docs/ha-features.md` § AI Camera Analysis.
 - **Cloud-maintenance banner + lifecycle alerts (v12.4.7/v12.4.8):** detects Bosch's announced maintenance windows from the community RSS feed; fires notifications on scheduled → active → past transitions; cameras send online/offline transition alerts.
 - **LAN-fallback during cloud outage (v12.4.10):** privacy and front-light switches stay available as long as the camera is Gen2 and reachable on the LAN. A persistent LAN-IP store and outage-ping sweep keep `binary_sensor.*_lan_reachable` current. The overview-card renders per-camera LAN-status tiles with clickable privacy/light controls while the cloud is down.
 - **Cloud up/down transition alerts (v12.4.11):** the coordinator announces cloud-health transitions via the alert pipeline. Requires ≥60 s of continuous failure before announcing; suppressed during RSS-announced maintenance windows.
@@ -2269,11 +2270,12 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v16.0.1** — see the GitHub release page for full notes:
-[**v16.0.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v16.0.1)
+Latest: **v16.1.0** — see the GitHub release page for full notes:
+[**v16.1.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v16.1.0)
 
 | Version | Highlights |
 |---|---|
+| **v16.1.0** | **New opt-in AI Camera Analysis feature, plus a Mini-NVR clip-assembly fix.** Motion-triggered structured 1-10 suspicion scoring via Home Assistant's AI Task integration, with per-camera controls, configurable notify targets, known-visitor context to reduce false positives, an optional Alarmo/alarm-panel trigger, and a dedicated timeline card. Also fixes a rare Mini-NVR bug where a motion clip could abort entirely if the pre-roll ring was pruned at exactly the wrong moment, and adds automatic recovery if the pre-roll ring ever crashes. No breaking changes. |
 | **v16.0.1** | **Three real bug fixes.** Mini-NVR could fail to start recording on slower-encoder or weaker-WiFi cameras (fixed timing assumption that only fit Gen2 hardware). Two concurrent recorder-start attempts for the same camera could rarely spawn two ffmpeg processes writing the same file. Motion-triggered event clips could lose 15-31 seconds of footage right around the triggering event when the optional ring-finalize setting was enabled; fixed, along with a filename-timezone mismatch in the same feature. No breaking changes. |
 | **v16.0.0** | **Large internal architecture refactor, no user-facing change.** Preparation for eventual Home Assistant Core submission: the TLS video proxy is now built on Python's native async networking instead of a custom thread-based one, live-stream URLs stay stable for the whole session instead of changing on every credential rotation, streams register with the bundled go2rtc component the same way Core's own integrations do, sign-in now goes through Core's standard credential-storage mechanism, and the optional SMB-recordings-browsing feature degrades gracefully (with a clear Repairs notice) if its dependency isn't available instead of blocking setup. A large amount of protocol-handling code also moved into a separate, independently-published library, shrinking this integration's own codebase substantially. No breaking changes, no action needed to upgrade. |
 | **v15.0.2** | **iOS Picture-in-Picture, LAN-IP recovery, and translation fixes.** PiP could get permanently stuck after using iOS's native fullscreen video mode; fixed. A camera whose LAN IP changed (e.g. after a router/DHCP change) could get stuck never retrying its local connection; it now periodically retries. A few remaining hardcoded German strings in the card (from the v14.x translation cleanup) are now properly translated in all 11 supported languages. |
@@ -2421,7 +2423,7 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v16.0.1** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v16.1.0** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.6** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.8** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.6.0** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |

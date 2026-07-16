@@ -6,11 +6,13 @@
 // template literals) — by removing the innermost first, iteratively.
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
-const SRC = "src/bosch-camera-card.js";
+const SRC_FILES = ["src/bosch-camera-card.js", "src/ai-alert-timeline-card.js"];
 const OUT = "build/card-extracted.css";
 
-const src = readFileSync(SRC, "utf8");
-const blocks = [...src.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]);
+const blocks = SRC_FILES.flatMap((srcPath) => {
+  const src = readFileSync(srcPath, "utf8");
+  return [...src.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]);
+});
 let css = blocks.join("\n\n");
 
 // Neutralise interpolations innermost-first so nested ${ … ${x} … } collapses

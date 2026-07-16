@@ -458,3 +458,338 @@ class TestImageEntityHooks:
         assert info["model"] == "Eyes Outdoor II"
         assert info["sw_version"] == "9.40.25"
         assert ("mac", "64:00:00:00:00:01") in info["connections"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BoschAiLatestAlertImage — most recent AI Camera Analysis alert snapshot.
+# Deliberately a plain ImageEntity (not CoordinatorEntity), refreshed by
+# listening for the `bosch_shc_camera_ai_alert` bus event fired by
+# ai_analysis._finalize_alert. See image.py class docstring.
+
+CAM_ID_2 = "22222222-2222-2222-2222-222222222222"
+ALERT_JPEG = b"\xff\xd8\xff\xe0" + b"\x03" * 300
+
+
+def _make_ai_alert_coordinator(
+    cam_ids: list[str] | None = None,
+    image_path: str | None = "20260716-120000.jpg",
+) -> Any:
+    cam_ids = cam_ids or [CAM_ID]
+    data = {}
+    for cid in cam_ids:
+        data[cid] = {
+            "info": {
+                "title": "Terrasse",
+                "hardwareVersion": "HOME_Eyes_Outdoor",
+                "firmwareVersion": "9.40.25",
+                "macAddress": "aa:bb:cc:dd:ee:01",
+            },
+            "ai_analysis": {"image_path": image_path},
+        }
+    return SimpleNamespace(data=data, hass=None)
+
+
+def _build_ai_alert_image_entity(
+    hass: Any,
+    coordinator: Any = None,
+    cam_id: str = CAM_ID,
+) -> Any:
+    """Construct a BoschAiLatestAlertImage bypassing full HA entity lifecycle."""
+    from custom_components.bosch_shc_camera.image import BoschAiLatestAlertImage
+
+    if coordinator is None:
+        coordinator = _make_ai_alert_coordinator([cam_id])
+    coordinator.hass = hass
+
+    entry = _make_entry()
+
+    with patch(
+        "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+        lambda self, h, verify_ssl=False: None,
+    ):
+        entity = BoschAiLatestAlertImage(hass, coordinator, cam_id, entry)
+
+    entity.hass = hass
+    entity.access_tokens: Any = ["dummy-token"]  # type: ignore[assignment]
+    entity._attr_image_last_updated = None
+    return entity
+
+
+@pytest.mark.asyncio
+async def test_ai_alert_image_not_created_when_ai_analysis_disabled(
+    tmp_path: Path,
+) -> None:
+    from custom_components.bosch_shc_camera.image import async_setup_entry
+
+    coordinator = _make_coordinator()
+    entry = SimpleNamespace(
+        runtime_data=coordinator,
+        options={"enable_snapshots": False, "ai_analysis_enabled": False},
+    )
+    added: list[Any] = []
+    hass = _make_hass(tmp_path)
+
+    with patch(
+        "custom_components.bosch_shc_camera.image.get_options",
+        return_value={"enable_snapshots": False, "ai_analysis_enabled": False},
+    ):
+        await async_setup_entry(
+            hass, entry, lambda entities, **kw: added.extend(entities)
+        )
+
+    assert added == []
+
+
+@pytest.mark.asyncio
+async def test_ai_alert_image_created_when_ai_analysis_enabled(
+    tmp_path: Path,
+) -> None:
+    from custom_components.bosch_shc_camera.image import (
+        BoschAiLatestAlertImage,
+        async_setup_entry,
+    )
+
+    coordinator = _make_coordinator()
+    entry = SimpleNamespace(
+        runtime_data=coordinator,
+        options={"enable_snapshots": False, "ai_analysis_enabled": True},
+    )
+    added: list[Any] = []
+    hass = _make_hass(tmp_path)
+
+    with patch(
+        "custom_components.bosch_shc_camera.image.get_options",
+        return_value={"enable_snapshots": False, "ai_analysis_enabled": True},
+    ):
+        with patch(
+            "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+            lambda self, h, verify_ssl=False: None,
+        ):
+            await async_setup_entry(
+                hass, entry, lambda entities, **kw: added.extend(entities)
+            )
+
+    assert len(added) == 1
+    assert isinstance(added[0], BoschAiLatestAlertImage)
+
+
+class TestAiLatestAlertImageAsyncImage:
+    @pytest.mark.asyncio
+    async def test_returns_bytes_when_alert_image_exists(self, tmp_path: Path) -> None:
+        hass = _make_hass(tmp_path)
+        entity = _build_ai_alert_image_entity(hass)
+
+        with patch(
+            "custom_components.bosch_shc_camera.image.ai_alert_store.async_read_alert_image",
+            AsyncMock(return_value=ALERT_JPEG),
+        ):
+            result = await entity.async_image()
+
+        assert result == ALERT_JPEG
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_alert_yet(self, tmp_path: Path) -> None:
+        hass = _make_hass(tmp_path)
+        coordinator = _make_ai_alert_coordinator([CAM_ID], image_path=None)
+        entity = _build_ai_alert_image_entity(hass, coordinator=coordinator)
+
+        result = await entity.async_image()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_disk_read_fails(self, tmp_path: Path) -> None:
+        """image_path set but the persisted file failed to read → safe None,
+        matching ai_alert_store.async_read_alert_image's never-raises contract."""
+        hass = _make_hass(tmp_path)
+        entity = _build_ai_alert_image_entity(hass)
+
+        with patch(
+            "custom_components.bosch_shc_camera.image.ai_alert_store.async_read_alert_image",
+            AsyncMock(return_value=None),
+        ):
+            result = await entity.async_image()
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_caches_bytes_for_same_image_path(self, tmp_path: Path) -> None:
+        hass = _make_hass(tmp_path)
+        entity = _build_ai_alert_image_entity(hass)
+
+        reader = AsyncMock(return_value=ALERT_JPEG)
+        with patch(
+            "custom_components.bosch_shc_camera.image.ai_alert_store.async_read_alert_image",
+            reader,
+        ):
+            first = await entity.async_image()
+            second = await entity.async_image()
+
+        assert first == ALERT_JPEG
+        assert second == ALERT_JPEG
+        assert reader.await_count == 1, (
+            "REGRESSION: async_image re-read disk for the same image_path — "
+            "the in-RAM cache is not serving repeated requests."
+        )
+
+    @pytest.mark.asyncio
+    async def test_rereads_when_image_path_changes(self, tmp_path: Path) -> None:
+        """A NEW alert (different image_path) must not serve the stale cache."""
+        hass = _make_hass(tmp_path)
+        coordinator = _make_ai_alert_coordinator(
+            [CAM_ID], image_path="20260716-120000.jpg"
+        )
+        entity = _build_ai_alert_image_entity(hass, coordinator=coordinator)
+
+        second_jpeg = b"\xff\xd8\xff\xe0" + b"\x04" * 300
+        reader = AsyncMock(side_effect=[ALERT_JPEG, second_jpeg])
+        with patch(
+            "custom_components.bosch_shc_camera.image.ai_alert_store.async_read_alert_image",
+            reader,
+        ):
+            first = await entity.async_image()
+            coordinator.data[CAM_ID]["ai_analysis"]["image_path"] = (
+                "20260716-130000.jpg"
+            )
+            second = await entity.async_image()
+
+        assert first == ALERT_JPEG
+        assert second == second_jpeg
+        assert reader.await_count == 2
+
+
+class TestAiLatestAlertImageAvailable:
+    def test_available_true_when_image_path_set(self, tmp_path: Path) -> None:
+        hass = _make_hass(tmp_path)
+        entity = _build_ai_alert_image_entity(hass)
+        assert entity.available is True
+
+    def test_available_false_when_no_alert_yet(self, tmp_path: Path) -> None:
+        hass = _make_hass(tmp_path)
+        coordinator = _make_ai_alert_coordinator([CAM_ID], image_path=None)
+        entity = _build_ai_alert_image_entity(hass, coordinator=coordinator)
+        assert entity.available is False
+
+
+class TestAiLatestAlertImageEventListener:
+    @pytest.mark.asyncio
+    async def test_async_added_to_hass_registers_own_bus_listener(
+        self, tmp_path: Path
+    ) -> None:
+        hass = _make_hass(tmp_path)
+        entity = _build_ai_alert_image_entity(hass)
+        entity.async_on_remove = MagicMock()
+
+        fake_hass = MagicMock()
+        fake_hass.bus.async_listen = MagicMock(return_value=lambda: None)
+        entity.hass = fake_hass
+
+        with patch(
+            "custom_components.bosch_shc_camera.image.ImageEntity.async_added_to_hass",
+            new=AsyncMock(return_value=None),
+        ):
+            await entity.async_added_to_hass()
+
+        fake_hass.bus.async_listen.assert_called_once()
+        event_type = fake_hass.bus.async_listen.call_args.args[0]
+        assert event_type == "bosch_shc_camera_ai_alert"
+
+    @pytest.mark.asyncio
+    async def test_bus_event_for_own_camera_triggers_state_refresh(
+        self, tmp_path: Path
+    ) -> None:
+        """Firing the registered handler (as the real hass.bus would on a
+        genuine `async_fire`) for THIS camera's alert must bump the image
+        token and push a state write."""
+        hass = _make_hass(tmp_path)
+        entity = _build_ai_alert_image_entity(hass, cam_id=CAM_ID)
+        entity.async_on_remove = MagicMock()
+
+        captured_handler: list[Any] = []
+
+        def _capture_listen(event_type: str, handler: Any) -> Any:
+            captured_handler.append(handler)
+            return lambda: None
+
+        fake_hass = MagicMock()
+        fake_hass.bus.async_listen = MagicMock(side_effect=_capture_listen)
+        entity.hass = fake_hass
+
+        write_calls: list[None] = []
+        entity.async_write_ha_state = lambda: write_calls.append(None)  # type: ignore[method-assign]
+        entity.async_update_token = lambda: None  # type: ignore[method-assign]
+
+        with patch(
+            "custom_components.bosch_shc_camera.image.ImageEntity.async_added_to_hass",
+            new=AsyncMock(return_value=None),
+        ):
+            await entity.async_added_to_hass()
+
+        assert entity._attr_image_last_updated is None
+        handler = captured_handler[0]
+        # Simulate the real bus firing the event this handler was registered for.
+        fake_event = SimpleNamespace(data={"camera_id": CAM_ID})
+        handler(fake_event)
+
+        assert entity._attr_image_last_updated is not None
+        assert len(write_calls) == 1
+        assert entity._cached_bytes is None
+        assert entity._cached_image_path is None
+
+    @pytest.mark.asyncio
+    async def test_bus_event_for_other_camera_is_ignored(self, tmp_path: Path) -> None:
+        """A multi-camera setup: this entity must NOT react to another
+        camera's AI-alert event."""
+        hass = _make_hass(tmp_path)
+        entity = _build_ai_alert_image_entity(hass, cam_id=CAM_ID)
+        entity.async_on_remove = MagicMock()
+        # Pre-populate the cache to prove it survives an unrelated event.
+        entity._cached_bytes = ALERT_JPEG
+        entity._cached_image_path = "some-path.jpg"
+
+        captured_handler: list[Any] = []
+
+        def _capture_listen(event_type: str, handler: Any) -> Any:
+            captured_handler.append(handler)
+            return lambda: None
+
+        fake_hass = MagicMock()
+        fake_hass.bus.async_listen = MagicMock(side_effect=_capture_listen)
+        entity.hass = fake_hass
+
+        write_calls: list[None] = []
+        entity.async_write_ha_state = lambda: write_calls.append(None)  # type: ignore[method-assign]
+        entity.async_update_token = lambda: None  # type: ignore[method-assign]
+
+        with patch(
+            "custom_components.bosch_shc_camera.image.ImageEntity.async_added_to_hass",
+            new=AsyncMock(return_value=None),
+        ):
+            await entity.async_added_to_hass()
+
+        handler = captured_handler[0]
+        fake_event = SimpleNamespace(data={"camera_id": CAM_ID_2})
+        handler(fake_event)
+
+        assert entity._attr_image_last_updated is None
+        assert write_calls == []
+        # Cache must be untouched — proves the early-return guard fired.
+        assert entity._cached_bytes == ALERT_JPEG
+        assert entity._cached_image_path == "some-path.jpg"
+
+
+class TestAiLatestAlertImageUniqueId:
+    def test_unique_id(self, tmp_path: Path) -> None:
+        hass = _make_hass(tmp_path)
+        entity = _build_ai_alert_image_entity(hass)
+        assert entity._attr_unique_id == f"bosch_shc_camera_{CAM_ID}_ai_latest_alert"
+
+
+class TestAiLatestAlertImageDeviceInfo:
+    def test_device_info_returns_identifiers(self, tmp_path: Path) -> None:
+        from custom_components.bosch_shc_camera import DOMAIN
+
+        hass = _make_hass(tmp_path)
+        entity = _build_ai_alert_image_entity(hass)
+        info = entity.device_info
+        assert (DOMAIN, CAM_ID) in info["identifiers"]
+        assert info["manufacturer"] == "Bosch"

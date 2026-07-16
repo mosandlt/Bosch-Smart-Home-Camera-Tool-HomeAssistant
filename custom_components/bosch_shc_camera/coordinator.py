@@ -565,6 +565,32 @@ class BoschCameraCoordinator(
         self._ai_budget_store: Store[dict[str, Any]] = Store(
             hass, 1, f"{DOMAIN}_ai_budget"
         )
+        # AI Camera Analysis (structured motion scoring, ai_analysis.py) — its
+        # OWN cooldown/budget state, deliberately separate from the AI
+        # Snapshot Description fields above so the two features don't
+        # compete for the same daily allowance (each has its own
+        # ai_*_max_per_day option). Same monotonic sentinel discipline.
+        self._ai_analysis_last_call: dict[str, float] = {}
+        self._ai_analysis_day_count: int = 0
+        self._ai_analysis_day_stamp: str = ""
+        self.ai_analysis_in_flight: int = 0
+        self._ai_analysis_budget_logged_day: str = ""
+        self._ai_analysis_budget_store: Store[dict[str, Any]] = Store(
+            hass, 1, f"{DOMAIN}_ai_analysis_budget"
+        )
+        # ai_alert_store.py's in-memory recent-alerts index: cam_id → list of
+        # (generated_at ISO string, score) tuples, newest last, pruned to a
+        # bounded window. Read synchronously by ai_analysis.py's prompt
+        # builder (repeat-context hint) — deliberately NOT a disk read on the
+        # event loop; the JSONL file is the durable log, this is just a fast
+        # recent-window cache rebuilt from it on setup.
+        self.ai_analysis_recent: dict[str, list[tuple[str, int]]] = {}
+        # switch.<cam>_ai_analysis / text.<cam>_ai_scene_context backing
+        # stores — plain per-cam_id dicts (Session-State-Facade slice
+        # pending; small enough to defer, see coordinator.py's own v15.0.0
+        # migration-in-progress note).
+        self.ai_analysis_camera_enabled: dict[str, bool] = {}
+        self.ai_analysis_scene_context: dict[str, str] = {}
         # Last-seen event IDs per camera — used to detect new events for snapshot refresh
         self.last_event_ids: dict[str, str] = {}
         # Epoch timestamp of coordinator start — used to reject event downloads for
@@ -2653,6 +2679,10 @@ class BoschCameraCoordinator(
         "_proxy_url_cache",
         "_fresh_snap_cache",
         "_ai_last_call",
+        "_ai_analysis_last_call",
+        "ai_analysis_recent",
+        "ai_analysis_camera_enabled",
+        "ai_analysis_scene_context",
         "last_event_ids",
         "unread_events_cache",
         "privacy_sound_cache",

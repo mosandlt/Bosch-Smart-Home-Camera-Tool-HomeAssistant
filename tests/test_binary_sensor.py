@@ -26,6 +26,7 @@ from __future__ import annotations
 import inspect
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1742,3 +1743,184 @@ class TestPersonSensorTagUpgrade:
     def test_no_events_is_off(self) -> None:
         sensor = _make_person_sensor([])
         assert sensor.is_on is False
+
+
+# BoschAiRecentAlertBinarySensor — ON for AI_RECENT_ALERT_WINDOW_MINUTES after
+# the most recent AI Camera Analysis alert. Source of truth:
+# coordinator.ai_analysis_recent[cam_id] (list of (generated_at_iso, score)).
+
+
+def _make_ai_alert_coord(entries: list | None = None) -> SimpleNamespace:
+    return SimpleNamespace(
+        data={
+            CAM_ID: {
+                "info": {
+                    "title": "Terrasse",
+                    "hardwareVersion": "HOME_Eyes_Outdoor",
+                    "firmwareVersion": "9.40.25",
+                    "macAddress": "aa:bb:cc:dd:ee:01",
+                    "featureSupport": {"sound": True},
+                },
+                "events": [],
+            }
+        },
+        ai_analysis_recent={CAM_ID: entries or []},
+    )
+
+
+def _make_ai_alert_sensor(
+    coord: SimpleNamespace | None = None,
+    entries: list | None = None,
+) -> Any:
+    from custom_components.bosch_shc_camera.binary_sensor import (
+        BoschAiRecentAlertBinarySensor,
+    )
+
+    if coord is None:
+        coord = _make_ai_alert_coord(entries)
+    entry = SimpleNamespace(entry_id="01ENTRY", data={}, options={})
+    return BoschAiRecentAlertBinarySensor(coord, CAM_ID, entry)
+
+
+class TestAiRecentAlertBinarySensor:
+    def test_unique_id_and_translation_key(self) -> None:
+        sensor = _make_ai_alert_sensor()
+        assert sensor.unique_id == f"bosch_shc_camera_{CAM_ID}_ai_recent_alert"
+        assert sensor._attr_translation_key == "ai_recent_alert"
+
+    def test_is_off_when_no_alert_ever(self) -> None:
+        sensor = _make_ai_alert_sensor(entries=[])
+        assert sensor.is_on is False
+
+    def test_is_on_within_window(self) -> None:
+        recent = _ago_iso(60)  # 1 minute ago, well within the 10-minute window
+        sensor = _make_ai_alert_sensor(entries=[(recent, 7)])
+        assert sensor.is_on is True
+
+    def test_is_off_outside_window(self) -> None:
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            AI_RECENT_ALERT_WINDOW_MINUTES,
+        )
+
+        stale = _ago_iso((AI_RECENT_ALERT_WINDOW_MINUTES + 1) * 60)
+        sensor = _make_ai_alert_sensor(entries=[(stale, 7)])
+        assert sensor.is_on is False
+
+    def test_is_on_right_at_window_boundary(self) -> None:
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            AI_RECENT_ALERT_WINDOW_MINUTES,
+        )
+
+        # 1 second inside the boundary — must still be ON.
+        just_inside = _ago_iso(AI_RECENT_ALERT_WINDOW_MINUTES * 60 - 1)
+        sensor = _make_ai_alert_sensor(entries=[(just_inside, 3)])
+        assert sensor.is_on is True
+
+    def test_uses_latest_of_multiple_entries(self) -> None:
+        old = _ago_iso(3600)
+        recent = _ago_iso(30)
+        sensor = _make_ai_alert_sensor(entries=[(old, 1), (recent, 9)])
+        assert sensor.is_on is True
+        assert sensor.extra_state_attributes["last_score"] == 9
+
+    def test_is_off_on_garbage_timestamp(self) -> None:
+        sensor = _make_ai_alert_sensor(entries=[("not-a-timestamp", 5)])
+        assert sensor.is_on is False
+
+    def test_available_always_true(self) -> None:
+        sensor = _make_ai_alert_sensor(entries=[])
+        assert sensor.available is True
+
+    def test_extra_state_attributes_empty_when_no_alert(self) -> None:
+        sensor = _make_ai_alert_sensor(entries=[])
+        assert sensor.extra_state_attributes == {}
+
+    def test_extra_state_attributes_shape_when_alert_present(self) -> None:
+        recent = _ago_iso(15)
+        sensor = _make_ai_alert_sensor(entries=[(recent, 4)])
+        attrs = sensor.extra_state_attributes
+        assert attrs["last_score"] == 4
+        assert attrs["generated_at"] == recent
+        assert "seconds_since_last_alert" in attrs
+        assert attrs["seconds_since_last_alert"] >= 15
+
+    def test_extra_state_attributes_omits_seconds_on_garbage_timestamp(self) -> None:
+        """generated_at survives even if it can't be parsed into a duration."""
+        sensor = _make_ai_alert_sensor(entries=[("garbage", 2)])
+        attrs = sensor.extra_state_attributes
+        assert attrs["generated_at"] == "garbage"
+        assert "seconds_since_last_alert" not in attrs
+
+    def test_unrecorded_attributes_excludes_churning_field(self) -> None:
+        """v14.3.1 recorder-DB-bloat discipline (HA#39): seconds_since_last_alert
+        changes every coordinator tick while on/off stays put, so it MUST be
+        excluded from the recorder via `_unrecorded_attributes` — verified
+        directly on the class, not merely assumed from the docstring."""
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschAiRecentAlertBinarySensor,
+        )
+
+        assert "seconds_since_last_alert" in (
+            BoschAiRecentAlertBinarySensor._unrecorded_attributes
+        )
+        # last_score/generated_at only change when a NEW alert lands (same
+        # cadence as on/off itself) — they are safe to record and must NOT
+        # be excluded, otherwise history for the alert content is lost.
+        assert "last_score" not in BoschAiRecentAlertBinarySensor._unrecorded_attributes
+        assert (
+            "generated_at" not in BoschAiRecentAlertBinarySensor._unrecorded_attributes
+        )
+
+
+class TestAiRecentAlertBinarySensorSetupGating:
+    """Wired into async_setup_entry only when CONF_AI_ANALYSIS_ENABLED is set."""
+
+    @pytest.mark.asyncio
+    async def test_entity_created_when_ai_analysis_enabled(self) -> None:
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschAiRecentAlertBinarySensor,
+            async_setup_entry,
+        )
+        from custom_components.bosch_shc_camera.const import CONF_AI_ANALYSIS_ENABLED
+
+        coord = _make_coord()
+        entry = SimpleNamespace(
+            entry_id="01ENTRY",
+            data={},
+            options={CONF_AI_ANALYSIS_ENABLED: True},
+            runtime_data=coord,
+        )
+        added: list[Any] = []
+        with patch(
+            "custom_components.bosch_shc_camera.binary_sensor.get_options",
+            return_value={CONF_AI_ANALYSIS_ENABLED: True},
+        ):
+            await async_setup_entry(
+                MagicMock(), entry, lambda ents, **kw: added.extend(ents)
+            )
+        assert any(isinstance(e, BoschAiRecentAlertBinarySensor) for e in added)
+
+    @pytest.mark.asyncio
+    async def test_entity_not_created_when_ai_analysis_disabled(self) -> None:
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschAiRecentAlertBinarySensor,
+            async_setup_entry,
+        )
+        from custom_components.bosch_shc_camera.const import CONF_AI_ANALYSIS_ENABLED
+
+        coord = _make_coord()
+        entry = SimpleNamespace(
+            entry_id="01ENTRY",
+            data={},
+            options={CONF_AI_ANALYSIS_ENABLED: False},
+            runtime_data=coord,
+        )
+        added: list[Any] = []
+        with patch(
+            "custom_components.bosch_shc_camera.binary_sensor.get_options",
+            return_value={CONF_AI_ANALYSIS_ENABLED: False},
+        ):
+            await async_setup_entry(
+                MagicMock(), entry, lambda ents, **kw: added.extend(ents)
+            )
+        assert not any(isinstance(e, BoschAiRecentAlertBinarySensor) for e in added)

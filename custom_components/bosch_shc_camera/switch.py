@@ -315,6 +315,10 @@ async def async_setup_entry(
         # the global `frigate_endpoints_enabled` option.
         entities.append(BoschFrigateHighSwitch(coordinator, cam_id, config_entry))
         entities.append(BoschFrigateLowSwitch(coordinator, cam_id, config_entry))
+        # AI Camera Analysis per-camera opt-out — always registered (see
+        # BoschAiAnalysisSwitch docstring), independent of the global
+        # `ai_analysis_enabled` master option.
+        entities.append(BoschAiAnalysisSwitch(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
 
 
@@ -2598,3 +2602,62 @@ class BoschFrigateLowSwitch(_BoschFrigateEndpointSwitch):
         super().__init__(coordinator, cam_id, entry)
         self._attr_unique_id = f"bosch_shc_camera_{cam_id}_frigate_low"
         self._attr_translation_key = "frigate_low"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAiAnalysisSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc]
+    """Switch: ON (default) = this camera participates in AI Camera Analysis
+    (motion-triggered structured suspicion scoring, `ai_analysis.py`) while
+    the global master toggle (options-flow `ai_analysis_enabled`) is on.
+
+    Per-camera OPT-OUT, not opt-in — matches `BoschNvrEventClipSwitch`'s
+    documented default-on convention: the entity is always registered (not
+    gated on the global master option) so a camera can be pre-configured
+    OFF before the master switch is ever turned on, without a chicken/egg
+    "the switch doesn't exist yet" problem.
+
+    Purely local/in-memory state (`coordinator.ai_analysis_camera_enabled`,
+    see `ai_analysis.per_camera_analysis_enabled`) — no cloud/camera API
+    call, so this switch is always available.
+    """
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ai_analysis"
+        self._attr_translation_key = "ai_analysis"
+        self._attr_entity_category = EntityCategory.CONFIG
+
+    @property
+    def available(self) -> bool:
+        # Purely local state — never gated on camera online/offline, matching
+        # the reasoning already used for the cloud-only switches above.
+        return bool(self.coordinator.last_update_success)
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.ai_analysis_camera_enabled.get(self._cam_id, True))
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last on/off state after HA restart.
+
+        Only acts on an explicit "on"/"off" — NOT "unavailable"/"unknown"
+        (same gotcha `BoschNvrEventClipSwitch` documents: this entity
+        defaults to enabled, so blindly restoring a non-on/off state would
+        silently disable analysis for a camera the user never turned off).
+        """
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state in ("on", "off"):
+            self.coordinator.ai_analysis_camera_enabled[self._cam_id] = (
+                last.state == "on"
+            )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.coordinator.ai_analysis_camera_enabled[self._cam_id] = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.coordinator.ai_analysis_camera_enabled[self._cam_id] = False
+        self.async_write_ha_state()

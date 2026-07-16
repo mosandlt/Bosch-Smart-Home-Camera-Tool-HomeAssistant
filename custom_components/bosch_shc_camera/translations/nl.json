@@ -301,6 +301,38 @@
               "force_relogin": "Inschakelen om opnieuw te koppelen via de browser. Alleen nodig als het vernieuwingstoken is verlopen (zeer zeldzaam).",
               "migrate_to_oss_client": "Schakel over van de verouderde `residential_app`-client naar de speciale `oss_residential_app`-client die Bosch biedt voor open-source-integraties. Bij inschakelen wordt de herverbindingsstroom gestart — u wordt eenmalig gevraagd in te loggen via Bosch SingleKey ID. Alle entiteiten, automatiseringen en opties blijven behouden."
             }
+          },
+          "ai_analysis": {
+            "name": "AI-camera-analyse",
+            "description": "Gestructureerde, door beweging geactiveerde verdachtheidsscore (1-10) met multi-doel meldingsroutering en optionele alarmpaneelactivering. Zusterfunctie van AI-snapshotomschrijving hierboven (vrije tekst): deze functie vraagt een gescoord, gestructureerd resultaat op en kan meldingen naar verschillende doelen routeren en een alarmservice activeren. Vereist een geconfigureerde AI Task-integratie. Beheer meldingsdoelen, bekende bezoekers en per-camera-overschrijvingen via het add-onmenu van de integratie (subitems).",
+            "data": {
+              "ai_analysis_enabled": "AI-camera-analyse inschakelen",
+              "ai_analysis_task_entity": "AI Task-entiteit (optioneel)",
+              "ai_analysis_snapshot_count": "Snapshots per analyse",
+              "ai_analysis_snapshot_interval_ms": "Interval tussen snapshots (ms)",
+              "ai_analysis_cooldown_seconds": "Minimum seconden tussen analyses (per camera)",
+              "ai_analysis_max_per_day": "Dagelijks analysebudget (0 = onbeperkt)",
+              "ai_analysis_retention_days": "Bewaartermijn waarschuwingsgeschiedenis (dagen)",
+              "ai_analysis_repeat_context_minutes": "Contextvenster voor herhaalde waarschuwingen (minuten, 0 = uitgeschakeld)",
+              "ai_analysis_alarm_panel_entity": "Alarmpaneel-entiteit (optioneel)",
+              "ai_analysis_alarmo_enabled": "Alarmpaneelactivering inschakelen",
+              "ai_analysis_alarm_trigger_service": "Alarmactiveringsservice (domain.service)",
+              "ai_analysis_alarm_trigger_score": "Minimale score om het alarm te activeren"
+            },
+            "data_description": {
+              "ai_analysis_enabled": "Hoofdschakelaar voor gestructureerde AI-camera-analyse. Onafhankelijk van de eigen schakelaar en budget van AI-snapshotomschrijving — beide functies delen geen dagelijkse limiet.",
+              "ai_analysis_task_entity": "Selecteer een specifieke AI Task-entiteit voor gestructureerde analyse. Laat leeg om terug te vallen op de AI Task-entiteit die voor AI-snapshotomschrijving is gekozen, of HA's standaard als geen van beide is ingesteld.",
+              "ai_analysis_snapshot_count": "Aantal snapshots dat in een burst wordt vastgelegd per analyse (2-10). Meer snapshots geven de AI meer context maar kosten meer.",
+              "ai_analysis_snapshot_interval_ms": "Tussenruimte tussen burst-snapshots in milliseconden (100-5000).",
+              "ai_analysis_cooldown_seconds": "Minimale tijd tussen automatische analyses per camera. Aparte afkoeltijd van die van AI-snapshotomschrijving.",
+              "ai_analysis_max_per_day": "Maximaal aantal automatische analyses over alle camera's per dag (reset om middernacht). Apart budget van dat van AI-snapshotomschrijving. 0 = onbeperkt.",
+              "ai_analysis_retention_days": "Hoe lang waarschuwingsgeschiedenis (scores + snapshotbeelden) op schijf wordt bewaard voordat deze automatisch wordt gewist (1-90 dagen).",
+              "ai_analysis_repeat_context_minutes": "Indien groter dan 0, wordt de recente waarschuwingsgeschiedenis van deze camera van de laatste N minuten in de AI-prompt vermeld, zodat herhaalde activiteit als zodanig kan worden herkend. 0 schakelt herhalingscontext uit.",
+              "ai_analysis_alarm_panel_entity": "Alarmbedieningspaneel-entiteit waarvan de ingeschakelde/afwezige status de voorwaarden van meldingsdoelen en de activering van de alarmservice hieronder bepaalt. Laat leeg indien geen alarmpaneelroutering wordt gebruikt.",
+              "ai_analysis_alarmo_enabled": "Wanneer ingeschakeld en het bovenstaande alarmpaneel is ingeschakeld, roept een waarschuwing met hoge score de onderstaande alarmactiveringsservice aan (bijv. een Alarmo-sirene/inschakelservice, of een andere domain.service).",
+              "ai_analysis_alarm_trigger_service": "Ruwe domain.service-tekenreeks die wordt aangeroepen bij activering (bijv. alarmo.arm_away, switch.turn_on, of een andere service). Werkt met Alarmo of elke andere alarmpaneelintegratie — niet Alarmo-specifiek.",
+              "ai_analysis_alarm_trigger_score": "Minimale verdachtheidsscore (1-10) vereist voordat de alarmactiveringsservice wordt aangeroepen."
+            }
           }
         }
       },
@@ -344,6 +376,9 @@
     "image": {
       "last_snapshot": {
         "name": "Laatste snapshot"
+      },
+      "ai_latest_alert": {
+        "name": "Laatste AI-waarschuwing"
       }
     },
     "switch": {
@@ -436,6 +471,9 @@
       },
       "fire_alarm_detection": {
         "name": "Rookmelderdetectie"
+      },
+      "ai_analysis": {
+        "name": "AI-camera-analyse"
       }
     },
     "number": {
@@ -575,6 +613,9 @@
       },
       "lan_reachable": {
         "name": "LAN Bereikbaar"
+      },
+      "ai_recent_alert": {
+        "name": "Recente AI-waarschuwing"
       }
     },
     "update": {
@@ -754,6 +795,17 @@
           "unknown": "Geen tijdvensterinformatie",
           "idle": "Geen onderhoudsinformatie"
         }
+      },
+      "ai_alert_score": {
+        "name": "AI-waarschuwingsscore"
+      },
+      "ai_alerts_24h": {
+        "name": "AI-waarschuwingen (24u)"
+      }
+    },
+    "text": {
+      "ai_scene_context": {
+        "name": "AI-scènecontext"
       }
     }
   },

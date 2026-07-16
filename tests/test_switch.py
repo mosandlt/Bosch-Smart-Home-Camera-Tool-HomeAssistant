@@ -34,6 +34,7 @@ from custom_components.bosch_shc_camera.session_state import (
     get_or_create_session,
 )
 from custom_components.bosch_shc_camera.switch import (
+    BoschAiAnalysisSwitch,
     BoschAmbientLightSwitch,
     BoschCameraLightSwitch,
     BoschIntercomSwitch,
@@ -9345,3 +9346,162 @@ class TestTurnOnSkipIsNoOp:
 
         assert CAM_ID not in coord.user_intent_streams
         record_error.assert_called_once_with(CAM_ID)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BoschAiAnalysisSwitch — per-camera opt-out for AI Camera Analysis
+# (ai_analysis.py). Default ON (opt-out, not opt-in) — always registered,
+# independent of the global `ai_analysis_enabled` master option. Purely
+# local/in-memory state (coordinator.ai_analysis_camera_enabled), no cloud
+# API call.
+class TestAiAnalysisSwitch:
+    def test_unique_id(self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace):
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw._attr_unique_id == f"bosch_shc_camera_{CAM_ID}_ai_analysis"
+
+    def test_translation_key(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw._attr_translation_key == "ai_analysis"
+
+    def test_entity_category_config(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        from homeassistant.helpers.entity import EntityCategory
+
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw._attr_entity_category == EntityCategory.CONFIG
+
+    def test_default_is_on_opt_out_design(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """Design: default ON (opt-out) — a camera never explicitly toggled
+        still participates in AI Camera Analysis once the global master
+        option is enabled. Verified against the actual `is_on` implementation
+        rather than assumed."""
+        stub_coord.ai_analysis_camera_enabled = {}  # camera never toggled
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw.is_on is True
+
+    def test_is_on_reflects_dict_true(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        stub_coord.ai_analysis_camera_enabled = {CAM_ID: True}
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw.is_on is True
+
+    def test_is_on_reflects_dict_false(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        stub_coord.ai_analysis_camera_enabled = {CAM_ID: False}
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw.is_on is False
+
+    def test_available_true_on_coordinator_success(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        stub_coord.ai_analysis_camera_enabled = {}
+        stub_coord.last_update_success = True
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw.available is True
+
+    def test_available_even_when_camera_offline(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """Purely local state — never gated on camera online/offline."""
+        stub_coord.ai_analysis_camera_enabled = {}
+        stub_coord.is_camera_online = lambda cid: False
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw.available is True
+
+    def test_unavailable_when_coordinator_update_failed(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        stub_coord.ai_analysis_camera_enabled = {}
+        stub_coord.last_update_success = False
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw.available is False
+
+    @pytest.mark.asyncio
+    async def test_turn_on_sets_dict_true(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        stub_coord.ai_analysis_camera_enabled = {CAM_ID: False}
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        sw.async_write_ha_state = MagicMock()
+        await sw.async_turn_on()
+        assert stub_coord.ai_analysis_camera_enabled[CAM_ID] is True
+        assert sw.is_on is True
+        sw.async_write_ha_state.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_turn_off_sets_dict_false(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        stub_coord.ai_analysis_camera_enabled = {CAM_ID: True}
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        sw.async_write_ha_state = MagicMock()
+        await sw.async_turn_off()
+        assert stub_coord.ai_analysis_camera_enabled[CAM_ID] is False
+        assert sw.is_on is False
+        sw.async_write_ha_state.assert_called_once()
+
+    def test_is_restore_entity(self):
+        """The switch must inherit RestoreEntity for state persistence
+        (verified before assuming — the sibling BoschAudioSwitch does, this
+        one is checked against the actual base classes)."""
+        from homeassistant.helpers.restore_state import RestoreEntity
+
+        assert issubclass(BoschAiAnalysisSwitch, RestoreEntity)
+
+    async def test_restore_on_across_restart(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        stub_coord.ai_analysis_camera_enabled = {}
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        sw.async_get_last_state = AsyncMock(  # type: ignore[method-assign]
+            return_value=SimpleNamespace(state="on")
+        )
+        sw.__class__.__mro__[1].async_added_to_hass = _noop_async  # type: ignore[method-assign]
+        await sw.async_added_to_hass()
+        assert stub_coord.ai_analysis_camera_enabled[CAM_ID] is True
+
+    async def test_restore_off_across_restart(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        stub_coord.ai_analysis_camera_enabled = {}
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        sw.async_get_last_state = AsyncMock(  # type: ignore[method-assign]
+            return_value=SimpleNamespace(state="off")
+        )
+        sw.__class__.__mro__[1].async_added_to_hass = _noop_async  # type: ignore[method-assign]
+        await sw.async_added_to_hass()
+        assert stub_coord.ai_analysis_camera_enabled[CAM_ID] is False
+
+    async def test_restore_ignores_unavailable_state(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """Restoring an "unavailable"/"unknown" state must NOT silently
+        disable analysis for a camera whose default is ON — same gotcha
+        `BoschNvrEventClipSwitch` documents for its own default-on entity."""
+        stub_coord.ai_analysis_camera_enabled = {}
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        sw.async_get_last_state = AsyncMock(  # type: ignore[method-assign]
+            return_value=SimpleNamespace(state="unavailable")
+        )
+        sw.__class__.__mro__[1].async_added_to_hass = _noop_async  # type: ignore[method-assign]
+        await sw.async_added_to_hass()
+        # Dict was never touched by restore — is_on falls back to the True default.
+        assert CAM_ID not in stub_coord.ai_analysis_camera_enabled
+        assert sw.is_on is True
+
+    async def test_restore_no_previous_state_keeps_default_on(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        stub_coord.ai_analysis_camera_enabled = {}
+        sw = BoschAiAnalysisSwitch(stub_coord, CAM_ID, stub_entry)
+        sw.async_get_last_state = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        sw.__class__.__mro__[1].async_added_to_hass = _noop_async  # type: ignore[method-assign]
+        await sw.async_added_to_hass()
+        assert sw.is_on is True

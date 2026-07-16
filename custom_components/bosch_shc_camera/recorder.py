@@ -87,6 +87,22 @@ _PROXY_URL_WAIT_INTERVAL = 0.5
 _PREROLL_SEGMENT_SECONDS = 10  # short segments for fine-grained pre-roll
 _PREROLL_MAX_SEGMENTS = 5  # keep last 5 × 10 s = 50 s max in tmpfs
 _PREROLL_MIN_SIZE_BYTES = 1024  # discard sub-1 KB corrupt segments
+# GitHub #51 follow-up: ffmpeg's concat demuxer can exit rc=0 while having
+# stitched together segments with inconsistent timing (e.g. a mid-ring RTSP
+# reconnect on a flaky camera) — not a failure worth discarding the clip
+# over, but worth a loud log line instead of being silently invisible.
+_CONCAT_DISCONTINUITY_MARKERS = (
+    "non-monotonic",
+    "non monotonically increasing dts",
+    "discontinuity",
+)
+# GitHub #51 bug-hunt follow-up: a hard-killed HA process (SIGKILL/OOM) can
+# leave a `_stage/<clip>` hardlink dir behind between `_stage_segments_for_concat`
+# and its own `finally` cleanup. Swept on ring spawn (below), age-gated well
+# past any realistic assembly duration (postroll capture ≤60s + concat well
+# under its own timeout) so an in-flight concurrent assembly's own
+# seconds-old stage dir is never touched.
+_STAGE_ORPHAN_MAX_AGE_SECONDS = 300.0
 
 # ── Staging-drain watcher tunables ───────────────────────────────────────────
 # ffmpeg writes EVERY segment locally first ("staging") so a half-flushed file
@@ -382,6 +398,14 @@ async def _watch_preroll_recorder(
     Fires every _PREROLL_SEGMENT_SECONDS (10 s) and discards the oldest
     segments so the buffer never grows past max_segs × 10 s. Exits cleanly
     when the process exits or is cancelled.
+
+    GitHub #51 bug-hunt finding: the prune executor job now runs under the
+    same per-camera ``get_nvr_recorder_lock`` that ``create_motion_clip``
+    holds while listing+staging segments for a clip. `asyncio.Task.cancel()`
+    (used by `stop_preroll_recorder`) cannot abort a prune job already
+    dispatched to the executor thread pool — only the lock makes the two
+    genuinely mutually exclusive, closing the race where a listed segment
+    got pruned out from under ffmpeg's concat demuxer moments later.
     """
     while True:
         try:
@@ -392,14 +416,122 @@ async def _watch_preroll_recorder(
         if proc is None or proc.returncode is not None:
             return
         try:
-            remaining = await coordinator.hass.async_add_executor_job(
-                _prune_and_count,
-                cam_dir,
-                max_segs,
-            )
-            coordinator.nvr_preroll_segment_counts[cam_id] = remaining
+            async with coordinator.get_nvr_recorder_lock(cam_id):
+                remaining = await coordinator.hass.async_add_executor_job(
+                    _prune_and_count,
+                    cam_dir,
+                    max_segs,
+                )
+                coordinator.nvr_preroll_segment_counts[cam_id] = remaining
         except Exception:  # best-effort prune-on-stop; non-fatal if cache dir missing  # noqa: S110 # best-effort cache prune, non-fatal if dir missing
             pass
+
+
+async def _watch_preroll_health(
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    proc: asyncio.subprocess.Process,
+) -> None:
+    """Detect an unexpected pre-roll ring ffmpeg exit and respawn it.
+
+    GitHub #51 bug-hunt finding: unlike the main recorder (`_watch_recorder`),
+    the pre-roll ring previously had NO crash-respawn path at all —
+    `_watch_preroll_recorder`'s periodic prune loop only checks
+    `proc.returncode` once every `_PREROLL_SEGMENT_SECONDS` and silently
+    stops pruning (never popping the dead process handle, never logging,
+    never respawning) once it notices the process is gone. A ring that dies
+    mid-idle — e.g. the non-monotonic-DTS aborts a flaky camera can trigger —
+    stayed dead indefinitely until something UNRELATED happened to respawn
+    it (a motion event, a mode-select toggle, a session renewal). Reported
+    as "stalled ... producing no new segments until the recording switch was
+    toggled" (GitHub #51, realKim-dotcom).
+
+    Mirrors `_watch_recorder`'s crash-window/backoff discipline (same
+    `_RESPAWN_DELAY_SECONDS`/`_RESPAWN_WINDOW_SECONDS`) but tracks its own
+    crash timestamps in the dedicated `_nvr_preroll_last_crash` field
+    (already provisioned in `coordinator.py`/`session_state.py` for exactly
+    this, previously unused) so the ring's crash-loop tracking can never
+    clobber the main recorder's `nvr_recent_crash`.
+
+    Uses the same "am I still the tracked process?" identity check as
+    `_watch_recorder` to distinguish an intentional stop/replacement (no
+    action) from a genuine crash — `stop_preroll_recorder` always pops the
+    process from `nvr_preroll_processes` BEFORE signalling it, so by the
+    time any exit is observed here the dict entry has either already moved
+    on (intentional) or still points at this exact `proc` (crash).
+    """
+    rc = await proc.wait()
+    if coordinator.nvr_preroll_processes.get(cam_id) is not proc:
+        return
+    coordinator.nvr_preroll_processes.pop(cam_id, None)
+    coordinator.nvr_preroll_segment_counts.pop(cam_id, None)
+
+    err_tail = ""
+    if proc.stderr is not None:
+        try:
+            err_bytes = await asyncio.wait_for(
+                proc.stderr.read(2048), timeout=TIMEOUT_RECORDER_STDERR_DRAIN
+            )
+            err_tail = err_bytes.decode("utf-8", errors="replace").strip()
+        except (  # noqa: S110 # best-effort stderr drain before respawn; exit already logged
+            TimeoutError,
+            Exception,
+        ):
+            pass
+
+    _LOGGER.warning(
+        "NVR pre-roll ring ffmpeg exited unexpectedly rc=%s for %s — pre-roll "
+        "coverage stopped accumulating. Tail: %s",
+        rc,
+        cam_id[:8],
+        err_tail[-500:] if err_tail else "(no stderr)",
+    )
+
+    if getattr(coordinator, "nvr_shutting_down", False):
+        return
+
+    last = getattr(coordinator, "nvr_user_intent", {}).get(cam_id, False)
+    if not should_record(coordinator, cam_id, switch_on=last):
+        _LOGGER.info("NVR pre-roll not respawning for %s — gate now closed", cam_id[:8])
+        return
+
+    now = time.monotonic()
+    prev_crash = coordinator._nvr_preroll_last_crash.get(
+        cam_id, float("-inf")
+    )  # coordinator-owned per-cam crash tracker, recorder module is its only writer
+    if (now - prev_crash) < _RESPAWN_WINDOW_SECONDS:
+        # Bug-hunt finding: neither a motion event nor an NVR-mode change
+        # actually revives a fully-dead ring — `assemble_and_ship_motion_clip`
+        # only restarts the ring after a *live* finalize, and the mode-select
+        # respawn (`select.py`) only refreshes an *already-running* recorder.
+        # The only automatic recovery is a LOCAL session (re)establishing —
+        # don't tell the operator to wait on paths that won't help.
+        _LOGGER.error(
+            "NVR pre-roll ring crashed twice within %.0fs for %s — giving up "
+            "automatic respawn for now. It will resume once the camera's "
+            "LOCAL session is (re)established (e.g. a reconnect); toggle "
+            "the recording switch off+on to retry immediately.",
+            _RESPAWN_WINDOW_SECONDS,
+            cam_id[:8],
+        )
+        return
+    coordinator._nvr_preroll_last_crash[cam_id] = (
+        now  # coordinator-owned per-cam crash tracker, recorder module is its only writer
+    )
+
+    await asyncio.sleep(_RESPAWN_DELAY_SECONDS)
+    if getattr(coordinator, "nvr_shutting_down", False):
+        return
+    # Re-read intent — `last` above was captured before the sleep; a switch
+    # toggled off DURING the backoff must still be honored, not just a
+    # stale pre-sleep snapshot (bug caught by this fix's own test suite).
+    last = getattr(coordinator, "nvr_user_intent", {}).get(cam_id, False)
+    if not should_record(coordinator, cam_id, switch_on=last):
+        return
+    _LOGGER.info(
+        "NVR pre-roll ring respawning for %s after transient crash", cam_id[:8]
+    )
+    await start_preroll_recorder(coordinator, cam_id)
 
 
 async def _spawn_preroll_recorder_locked(
@@ -480,6 +612,15 @@ async def _spawn_preroll_recorder_locked(
         coordinator.nvr_preroll_segment_counts[cam_id] = remaining
     except Exception:  # best-effort prune-on-spawn; non-fatal if cache dir missing  # noqa: S110 # best-effort cache prune, non-fatal if dir missing
         pass
+    # Sweep any orphaned clip-assembly stage dirs left by a hard-killed
+    # process (GitHub #51 bug-hunt follow-up) — same cadence as the prune
+    # above, harmless no-op when there's nothing to sweep.
+    try:
+        await coordinator.hass.async_add_executor_job(
+            _sweep_orphaned_stage_dirs, cam_dir
+        )
+    except Exception:  # best-effort orphan sweep; non-fatal if cache dir missing  # noqa: S110 # best-effort orphan sweep, non-fatal if dir missing
+        pass
 
     # Start periodic prune watcher — keeps the ring buffer bounded while running.
     if not hasattr(coordinator, "nvr_preroll_tasks"):
@@ -491,6 +632,18 @@ async def _spawn_preroll_recorder_locked(
     coordinator.bg_tasks.add(task)
     task.add_done_callback(coordinator.bg_tasks.discard)
     coordinator.nvr_preroll_tasks[cam_id] = task
+
+    # Start crash-detect/respawn watcher (GitHub #51) — one per spawned proc,
+    # not tracked in a dict (nothing needs to look it up/cancel it later: its
+    # own "am I still the tracked process?" identity check on wake is what
+    # makes an intentional stop a no-op, same discipline as `_watch_recorder`
+    # for the main recorder).
+    health_task = coordinator.hass.async_create_background_task(
+        _watch_preroll_health(coordinator, cam_id, proc),
+        f"bosch_nvr_preroll_health_{cam_id[:8]}",
+    )
+    coordinator.bg_tasks.add(health_task)
+    health_task.add_done_callback(coordinator.bg_tasks.discard)
 
 
 async def start_preroll_recorder(
@@ -772,6 +925,89 @@ def create_motion_clip_args(preroll_paths: list[str], output_path: str) -> list[
     ]
 
 
+def _stage_segments_for_concat(paths: list[str], stage_dir: str) -> list[str]:
+    """Hardlink each segment into a private ``stage_dir`` before concat.
+
+    GitHub #51 (realKim-dotcom): listing segments and later opening those
+    exact paths in ffmpeg's concat demuxer are two separate moments in time;
+    a concurrent ring prune/rotate/respawn could unlink one of them in
+    between, aborting the whole clip (rc=254 "Impossible to open"). A
+    hardlink is effectively free on tmpfs and keeps the data alive under the
+    staged name even if the original directory entry is deleted moments
+    later — so the concat step is immune to whatever happens to the
+    originals after this point.
+
+    Runs inside an executor job (filesystem I/O). A segment that has
+    already vanished by the time we try to link it (a far tighter race than
+    the one this closes — listing and staging are consecutive lines of
+    code) is silently skipped rather than aborting the whole clip; the
+    caller ships whatever segments survived instead of losing the entire
+    event over one missing 10 s slice.
+    """
+    try:
+        os.makedirs(stage_dir, exist_ok=True)
+    except OSError:
+        return []
+    staged: list[str] = []
+    for i, src in enumerate(paths):
+        dst = os.path.join(stage_dir, f"{i:04d}_{os.path.basename(src)}")
+        try:
+            os.link(src, dst)
+        except OSError:
+            continue
+        staged.append(dst)
+    return staged
+
+
+def _cleanup_stage_dir(stage_dir: str) -> None:
+    """Remove every hardlink plus the directory `_stage_segments_for_concat`
+    created. Runs inside an executor job; best-effort, never raises."""
+    try:
+        for name in os.listdir(stage_dir):
+            try:
+                os.unlink(os.path.join(stage_dir, name))
+            except OSError:
+                pass
+        os.rmdir(stage_dir)
+    except OSError:
+        pass
+
+
+def _sweep_orphaned_stage_dirs(cam_dir: str) -> None:
+    """Remove `_stage/<clip>` subdirectories left behind by a process that
+    was hard-killed between `_stage_segments_for_concat` staging a clip's
+    segments and its own `finally` block running `_cleanup_stage_dir`
+    (GitHub #51 bug-hunt follow-up — that `finally` covers every normal
+    exit path, but not SIGKILL/OOM). tmpfs only clears these on a full OS
+    reboot, not an HA restart, so left unswept they'd accumulate forever
+    across repeated hard kills.
+
+    Age-gated at `_STAGE_ORPHAN_MAX_AGE_SECONDS` — well past any realistic
+    assembly duration — so an in-flight concurrent event's own seconds-old
+    stage dir (a session renewal can respawn the ring while another
+    camera's — or even this one's — assembly is still mid-flight) is never
+    touched. Runs inside an executor job at ring spawn time (same cadence
+    as the pre-existing prune-on-spawn step); best-effort, never raises.
+    """
+    stage_root = os.path.join(cam_dir, "_stage")
+    try:
+        entries = os.listdir(stage_root)
+    except OSError:
+        return
+    now = time.time()
+    for name in entries:
+        path = os.path.join(stage_root, name)
+        try:
+            if not os.path.isdir(path):
+                continue
+            age = now - os.stat(path).st_mtime
+        except OSError:
+            continue
+        if age < _STAGE_ORPHAN_MAX_AGE_SECONDS:
+            continue
+        _cleanup_stage_dir(path)
+
+
 async def create_motion_clip(
     coordinator: BoschCameraCoordinator,
     cam_id: str,
@@ -794,19 +1030,57 @@ async def create_motion_clip(
     newest file" heuristic is only correct while the ring is still actively
     writing; applying it again to an already-finalized list would drop a
     real, complete segment for no reason.
+
+    GitHub #51: obtaining the pre-roll segment list (either path above) and
+    staging it into a private hardlink dir both run under
+    ``get_nvr_recorder_lock`` — the same lock the periodic prune watcher and
+    any ring stop/respawn use — so nothing can prune/rotate/wipe a segment
+    between "we decided to use this file" and "it's safely hardlinked".
+    This also covers the override path: a finalized list is only stable at
+    the moment it was built, not for however long the caller takes to reach
+    this function (e.g. an integration unload racing in in between would
+    otherwise wipe the whole cache dir, `stop_all_preroll` → `prune_cache`).
+    The lock is released again before the (potentially slower) ffmpeg
+    concat itself runs.
     """
-    if preroll_paths_override is not None:
-        paths = list(preroll_paths_override)
-    else:
-        paths = await coordinator.hass.async_add_executor_job(
-            list_preroll_files,
-            coordinator,
-            cam_id,
-        )
-    if extra_segments:
-        paths = [*paths, *extra_segments]
+    async with coordinator.get_nvr_recorder_lock(cam_id):
+        if preroll_paths_override is not None:
+            preroll_paths = list(preroll_paths_override)
+        else:
+            preroll_paths = await coordinator.hass.async_add_executor_job(
+                list_preroll_files,
+                coordinator,
+                cam_id,
+            )
+
+        staged_paths: list[str] = []
+        stage_dir: str | None = None
+        if preroll_paths:
+            stage_dir = os.path.join(
+                os.path.dirname(preroll_paths[0]),
+                "_stage",
+                os.path.splitext(os.path.basename(output_path))[0],
+            )
+            staged_paths = await coordinator.hass.async_add_executor_job(
+                _stage_segments_for_concat,
+                preroll_paths,
+                stage_dir,
+            )
+            if len(staged_paths) < len(preroll_paths):
+                _LOGGER.debug(
+                    "NVR motion clip: %d/%d pre-roll segment(s) vanished "
+                    "before staging for %s (ring pruned/rotated "
+                    "concurrently) — continuing with the rest",
+                    len(preroll_paths) - len(staged_paths),
+                    len(preroll_paths),
+                    cam_id[:8],
+                )
+
+    paths = [*staged_paths, *(extra_segments or [])]
     if not paths:
         _LOGGER.debug("NVR motion clip: no pre-roll segments for %s", cam_id[:8])
+        if stage_dir is not None:
+            await coordinator.hass.async_add_executor_job(_cleanup_stage_dir, stage_dir)
         return False
 
     concat_file = output_path + ".concat.txt"
@@ -818,57 +1092,78 @@ async def create_motion_clip(
             f.write(concat_content)
 
     try:
-        await coordinator.hass.async_add_executor_job(_write_concat)
-    except OSError as err:
-        _LOGGER.warning("NVR motion clip: cannot write concat file: %s", err)
-        return False
-
-    args = create_motion_clip_args(paths, output_path)
-    _LOGGER.debug(
-        "NVR motion clip for %s: %d segments -> %s", cam_id[:8], len(paths), output_path
-    )
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-    except FileNotFoundError:
-        _LOGGER.error("NVR motion clip: ffmpeg not found on PATH")
-        return False
-    except OSError as err:
-        _LOGGER.warning("NVR motion clip: ffmpeg spawn failed: %s", err)
-        return False
-
-    try:
-        _, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=TIMEOUT_RECORDER_FFMPEG_INIT
-        )
-    except TimeoutError:
         try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        _LOGGER.warning("NVR motion clip: ffmpeg timed out for %s", cam_id[:8])
-        return False
+            await coordinator.hass.async_add_executor_job(_write_concat)
+        except OSError as err:
+            _LOGGER.warning("NVR motion clip: cannot write concat file: %s", err)
+            return False
 
-    # Clean up concat file
-    try:
-        await coordinator.hass.async_add_executor_job(os.unlink, concat_file)
-    except OSError:
-        pass
-
-    if proc.returncode != 0:
-        tail = (stderr_bytes or b"").decode("utf-8", errors="replace").strip()[-300:]
-        _LOGGER.warning(
-            "NVR motion clip: ffmpeg rc=%d for %s. Tail: %s",
-            proc.returncode,
+        args = create_motion_clip_args(paths, output_path)
+        _LOGGER.debug(
+            "NVR motion clip for %s: %d segments -> %s",
             cam_id[:8],
-            tail,
+            len(paths),
+            output_path,
         )
-        return False
-    return True
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            _LOGGER.error("NVR motion clip: ffmpeg not found on PATH")
+            return False
+        except OSError as err:
+            _LOGGER.warning("NVR motion clip: ffmpeg spawn failed: %s", err)
+            return False
+
+        try:
+            _, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=TIMEOUT_RECORDER_FFMPEG_INIT
+            )
+        except TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            _LOGGER.warning("NVR motion clip: ffmpeg timed out for %s", cam_id[:8])
+            return False
+
+        if proc.returncode != 0:
+            tail = (
+                (stderr_bytes or b"").decode("utf-8", errors="replace").strip()[-300:]
+            )
+            _LOGGER.warning(
+                "NVR motion clip: ffmpeg rc=%d for %s. Tail: %s",
+                proc.returncode,
+                cam_id[:8],
+                tail,
+            )
+            return False
+
+        # GitHub #51 follow-up: rc=0 doesn't guarantee clean timing — a
+        # mid-ring reconnect can still leave a visible glitch at a segment
+        # boundary. Not treated as a failure (the clip is normally still
+        # watchable), just surfaced instead of being silently invisible.
+        stderr_text = (stderr_bytes or b"").decode("utf-8", errors="replace").lower()
+        if any(marker in stderr_text for marker in _CONCAT_DISCONTINUITY_MARKERS):
+            _LOGGER.warning(
+                "NVR motion clip shipped for %s but ffmpeg reported a "
+                "timing discontinuity while concatenating (possible glitch "
+                "at a segment boundary): %s",
+                cam_id[:8],
+                (stderr_bytes or b"").decode("utf-8", errors="replace").strip()[-300:],
+            )
+        return True
+    finally:
+        try:
+            await coordinator.hass.async_add_executor_job(os.unlink, concat_file)
+        except OSError:
+            pass
+        if stage_dir is not None:
+            await coordinator.hass.async_add_executor_job(_cleanup_stage_dir, stage_dir)
 
 
 # ── Phase 5: post-roll capture + event→clip assembly (issue #43) ────────────

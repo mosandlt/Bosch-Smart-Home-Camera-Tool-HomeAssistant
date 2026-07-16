@@ -301,6 +301,38 @@
               "force_relogin": "Marcar para volver a autenticar a través del navegador. Solo necesario si el token de actualización ha caducado (muy poco frecuente).",
               "migrate_to_oss_client": "Cambiar del cliente `residential_app` heredado al cliente dedicado `oss_residential_app` que Bosch proporciona para integraciones de código abierto. Al activarlo se iniciará el flujo de reautenticación — se solicitará iniciar sesión una vez mediante Bosch SingleKey ID, y se conservarán todas las entidades, automatizaciones y opciones existentes."
             }
+          },
+          "ai_analysis": {
+            "name": "Análisis de cámara por IA",
+            "description": "Puntuación de sospecha estructurada (1-10) activada por movimiento, con enrutamiento de notificaciones a varios destinos y activación opcional de una alarma. Hermana de la Descripción de instantánea por IA anterior (texto libre): esta función solicita un resultado estructurado con puntuación y puede enrutar alertas a distintos destinos de notificación y activar un servicio de alarma. Requiere una integración de AI Task configurada. Gestione los destinos de notificación, los visitantes conocidos y las anulaciones por cámara desde el menú de complementos de la integración (subentradas).",
+            "data": {
+              "ai_analysis_enabled": "Activar análisis de cámara por IA",
+              "ai_analysis_task_entity": "Entidad AI Task (opcional)",
+              "ai_analysis_snapshot_count": "Instantáneas por análisis",
+              "ai_analysis_snapshot_interval_ms": "Intervalo entre instantáneas (ms)",
+              "ai_analysis_cooldown_seconds": "Segundos mínimos entre análisis (por cámara)",
+              "ai_analysis_max_per_day": "Presupuesto diario de análisis (0 = ilimitado)",
+              "ai_analysis_retention_days": "Retención del historial de alertas (días)",
+              "ai_analysis_repeat_context_minutes": "Ventana de contexto de alertas repetidas (minutos, 0 = desactivado)",
+              "ai_analysis_alarm_panel_entity": "Entidad de panel de alarma (opcional)",
+              "ai_analysis_alarmo_enabled": "Activar disparo del panel de alarma",
+              "ai_analysis_alarm_trigger_service": "Servicio de disparo de alarma (domain.service)",
+              "ai_analysis_alarm_trigger_score": "Puntuación mínima para activar la alarma"
+            },
+            "data_description": {
+              "ai_analysis_enabled": "Interruptor maestro del análisis de cámara por IA estructurado. Independiente del interruptor y presupuesto propios de la Descripción de instantánea por IA: ambas funciones no comparten cuota diaria.",
+              "ai_analysis_task_entity": "Seleccione una entidad AI Task específica para el análisis estructurado. Déjelo vacío para usar la entidad AI Task seleccionada para la Descripción de instantánea por IA, o el valor predeterminado de HA si ninguna está definida.",
+              "ai_analysis_snapshot_count": "Número de instantáneas capturadas en ráfaga para cada análisis (2-10). Más instantáneas dan más contexto a la IA pero cuestan más.",
+              "ai_analysis_snapshot_interval_ms": "Espaciado entre instantáneas de la ráfaga en milisegundos (100-5000).",
+              "ai_analysis_cooldown_seconds": "Tiempo mínimo entre análisis automáticos por cámara. Tiempo de espera independiente del de la Descripción de instantánea por IA.",
+              "ai_analysis_max_per_day": "Número máximo de análisis automáticos en todas las cámaras por día (se reinicia a medianoche). Presupuesto independiente del propio de la Descripción de instantánea por IA. 0 = ilimitado.",
+              "ai_analysis_retention_days": "Cuánto tiempo se conserva el historial de alertas (puntuaciones + imágenes) en disco antes de purgarse automáticamente (1-90 días).",
+              "ai_analysis_repeat_context_minutes": "Si es mayor que 0, menciona en el aviso de la IA el historial de alertas recientes de esta cámara de los últimos N minutos, para reconocer actividad repetida. 0 desactiva el contexto repetido.",
+              "ai_analysis_alarm_panel_entity": "Entidad de panel de control de alarma cuyo estado armado/ausente condiciona las condiciones de los destinos de notificación y el disparo del servicio de alarma. Déjelo vacío si no usa enrutamiento por panel de alarma.",
+              "ai_analysis_alarmo_enabled": "Si está activado y el panel de alarma indicado arriba está armado, una alerta con puntuación alta llama al servicio de disparo de alarma indicado abajo (p. ej. un servicio de sirena/armado de Alarmo, o cualquier otro domain.service).",
+              "ai_analysis_alarm_trigger_service": "Cadena domain.service llamada al disparar (p. ej. alarmo.arm_away, switch.turn_on, o cualquier otro servicio). Funciona con Alarmo o cualquier otra integración de panel de alarma, no es específico de Alarmo.",
+              "ai_analysis_alarm_trigger_score": "Puntuación mínima de sospecha (1-10) requerida antes de llamar al servicio de disparo de alarma."
+            }
           }
         }
       },
@@ -344,6 +376,9 @@
     "image": {
       "last_snapshot": {
         "name": "Último snapshot"
+      },
+      "ai_latest_alert": {
+        "name": "Última alerta IA"
       }
     },
     "switch": {
@@ -436,6 +471,9 @@
       },
       "fire_alarm_detection": {
         "name": "Detección de alarma de humo"
+      },
+      "ai_analysis": {
+        "name": "Análisis de cámara por IA"
       }
     },
     "number": {
@@ -575,6 +613,9 @@
       },
       "lan_reachable": {
         "name": "LAN Accesible"
+      },
+      "ai_recent_alert": {
+        "name": "Alerta IA reciente"
       }
     },
     "update": {
@@ -754,6 +795,17 @@
       },
       "stream_url_sub": {
         "name": "URL del stream (sub)"
+      },
+      "ai_alert_score": {
+        "name": "Puntuación de alerta IA"
+      },
+      "ai_alerts_24h": {
+        "name": "Alertas IA (24 h)"
+      }
+    },
+    "text": {
+      "ai_scene_context": {
+        "name": "Contexto de escena para IA"
       }
     }
   },

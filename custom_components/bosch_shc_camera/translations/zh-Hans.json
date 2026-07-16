@@ -301,6 +301,38 @@
               "force_relogin": "勾选此项以通过浏览器重新认证。仅在刷新令牌过期时需要（极少发生）。",
               "migrate_to_oss_client": "从旧版 `residential_app` 客户端切换至 Bosch 为开源集成提供的专用 `oss_residential_app` 客户端。启用后将触发重新认证流程 — 您需要通过 Bosch SingleKey ID 登录一次，现有实体、自动化和选项将被保留。"
             }
+          },
+          "ai_analysis": {
+            "name": "AI 摄像头分析",
+            "description": "由移动触发的结构化可疑度评分(1-10),支持多目标通知路由和可选的报警面板触发。是上方 AI 快照描述(自由文本)的姊妹功能:该功能请求带评分的结构化结果,并可将警报路由到不同的通知目标并触发报警服务。需要已配置的 AI Task 集成。通过集成的附加组件菜单(子条目)管理通知目标、已知访客和按摄像头覆盖设置。",
+            "data": {
+              "ai_analysis_enabled": "启用 AI 摄像头分析",
+              "ai_analysis_task_entity": "AI Task 实体(可选)",
+              "ai_analysis_snapshot_count": "每次分析的快照数",
+              "ai_analysis_snapshot_interval_ms": "快照间隔(毫秒)",
+              "ai_analysis_cooldown_seconds": "两次分析之间的最短秒数(按摄像头)",
+              "ai_analysis_max_per_day": "每日分析预算(0 = 无限制)",
+              "ai_analysis_retention_days": "警报历史保留天数",
+              "ai_analysis_repeat_context_minutes": "重复警报上下文窗口(分钟,0 = 禁用)",
+              "ai_analysis_alarm_panel_entity": "报警面板实体(可选)",
+              "ai_analysis_alarmo_enabled": "启用报警面板触发",
+              "ai_analysis_alarm_trigger_service": "报警触发服务(domain.service)",
+              "ai_analysis_alarm_trigger_score": "触发报警所需的最低分数"
+            },
+            "data_description": {
+              "ai_analysis_enabled": "结构化 AI 摄像头分析的总开关。独立于上方 AI 快照描述自身的开关和预算——两项功能不共享每日额度。",
+              "ai_analysis_task_entity": "为结构化分析选择特定的 AI Task 实体。留空则回退使用为 AI 快照描述选择的 AI Task 实体,若均未设置则使用 HA 的默认值。",
+              "ai_analysis_snapshot_count": "每次分析连拍捕获的快照数量(2-10)。更多快照能为 AI 提供更多上下文,但成本更高。",
+              "ai_analysis_snapshot_interval_ms": "连拍快照之间的间隔,单位毫秒(100-5000)。",
+              "ai_analysis_cooldown_seconds": "每个摄像头自动分析之间的最短时间。与 AI 快照描述自身的冷却时间相互独立。",
+              "ai_analysis_max_per_day": "所有摄像头每日自动分析的最大次数(午夜重置)。与 AI 快照描述自身的每日预算相互独立。0 = 无限制。",
+              "ai_analysis_retention_days": "警报历史(分数 + 快照图像)在磁盘上保留多久后自动清除(1-90 天)。",
+              "ai_analysis_repeat_context_minutes": "大于 0 时,会在 AI 提示词中提及该摄像头最近 N 分钟内的警报历史,以便识别重复活动。0 表示禁用重复上下文。",
+              "ai_analysis_alarm_panel_entity": "报警控制面板实体,其布防/离家状态决定下方通知目标条件和报警服务触发的条件。若不使用报警面板路由,请留空。",
+              "ai_analysis_alarmo_enabled": "启用后,若上方报警面板已布防,高分警报将调用下方的报警触发服务(例如 Alarmo 警笛/布防服务,或任何其他 domain.service)。",
+              "ai_analysis_alarm_trigger_service": "触发时调用的原始 domain.service 字符串(例如 alarmo.arm_away、switch.turn_on 或任何其他服务)。可与 Alarmo 或任何其他报警面板集成配合使用——不限于 Alarmo。",
+              "ai_analysis_alarm_trigger_score": "调用报警触发服务前所需的最低可疑度分数(1-10)。"
+            }
           }
         }
       },
@@ -344,6 +376,9 @@
     "image": {
       "last_snapshot": {
         "name": "最新快照"
+      },
+      "ai_latest_alert": {
+        "name": "最新 AI 警报"
       }
     },
     "switch": {
@@ -436,6 +471,9 @@
       },
       "fire_alarm_detection": {
         "name": "烟雾报警检测"
+      },
+      "ai_analysis": {
+        "name": "AI 摄像头分析"
       }
     },
     "number": {
@@ -575,6 +613,9 @@
       },
       "lan_reachable": {
         "name": "LAN 可达"
+      },
+      "ai_recent_alert": {
+        "name": "近期 AI 警报"
       }
     },
     "update": {
@@ -754,6 +795,17 @@
           "unknown": "无时间窗口信息",
           "idle": "无维护信息"
         }
+      },
+      "ai_alert_score": {
+        "name": "AI 警报评分"
+      },
+      "ai_alerts_24h": {
+        "name": "AI 警报数(24小时)"
+      }
+    },
+    "text": {
+      "ai_scene_context": {
+        "name": "AI 场景上下文"
       }
     }
   },

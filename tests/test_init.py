@@ -13147,7 +13147,14 @@ class TestAutoDescribeDebounce:
         # Inject a recent debounce timestamp (now - 5s, well within 30s window)
         _init_mod._AI_MOTION_DEBOUNCE[CAM_ID] = 995.0  # hass.loop.time() = 1000.0
         try:
-            auto_fn = listeners.get("bosch_shc_camera_motion", [None])[-1]
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_describe")
+                ),
+                None,
+            )
             assert auto_fn is not None
             await auto_fn(_make_event({"camera_id": CAM_ID}))
             coord_stub.async_generate_ai_description.assert_not_called()
@@ -13172,7 +13179,14 @@ class TestAutoDescribeDebounce:
 
         _init_mod._AI_MOTION_DEBOUNCE.clear()
         try:
-            auto_fn = listeners.get("bosch_shc_camera_motion", [None])[-1]
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_describe")
+                ),
+                None,
+            )
             assert auto_fn is not None
             await auto_fn(_make_event({"camera_id": CAM_ID}))
             coord_stub.async_generate_ai_description.assert_called_once_with(
@@ -13180,6 +13194,253 @@ class TestAutoDescribeDebounce:
             )
         finally:
             _init_mod._AI_MOTION_DEBOUNCE.clear()
+
+
+class TestAutoAnalyzeMotionListener:
+    """Bug-hunt finding: the AI Camera Analysis feature's motion-trigger
+    listener (`_async_auto_analyze`, sibling to `_async_auto_describe`
+    above) was fully missing when the feature was built — every other
+    piece existed but nothing ever called `async_generate_ai_analysis`
+    non-force. These pin the fix directly."""
+
+    @pytest.mark.asyncio
+    async def test_enabled_and_no_debounce_triggers_non_force_call(self) -> None:
+        import custom_components.bosch_shc_camera as _init_mod
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(options={"ai_analysis_enabled": True})
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        _handlers, listeners = await _setup_and_get_handlers(hass, entry, coord_stub)
+        _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+        try:
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_analyze")
+                ),
+                None,
+            )
+            assert auto_fn is not None
+            with patch(
+                f"{MODULE}.ai_analysis.async_generate_ai_analysis",
+                AsyncMock(return_value=None),
+            ) as mock_generate:
+                await auto_fn(_make_event({"camera_id": CAM_ID}))
+            mock_generate.assert_awaited_once_with(coord_stub, CAM_ID, force=False)
+        finally:
+            _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+
+    @pytest.mark.asyncio
+    async def test_master_option_disabled_skips_call(self) -> None:
+        import custom_components.bosch_shc_camera as _init_mod
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(options={"ai_analysis_enabled": False})
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        _handlers, listeners = await _setup_and_get_handlers(hass, entry, coord_stub)
+        _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+        try:
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_analyze")
+                ),
+                None,
+            )
+            assert auto_fn is not None
+            with patch(
+                f"{MODULE}.ai_analysis.async_generate_ai_analysis",
+                AsyncMock(),
+            ) as mock_generate:
+                await auto_fn(_make_event({"camera_id": CAM_ID}))
+            mock_generate.assert_not_awaited()
+        finally:
+            _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+
+    @pytest.mark.asyncio
+    async def test_debounce_prevents_call(self) -> None:
+        import custom_components.bosch_shc_camera as _init_mod
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(options={"ai_analysis_enabled": True})
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        _handlers, listeners = await _setup_and_get_handlers(hass, entry, coord_stub)
+        _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE[CAM_ID] = (
+            995.0  # hass.loop.time()=1000.0
+        )
+        try:
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_analyze")
+                ),
+                None,
+            )
+            assert auto_fn is not None
+            with patch(
+                f"{MODULE}.ai_analysis.async_generate_ai_analysis",
+                AsyncMock(),
+            ) as mock_generate:
+                await auto_fn(_make_event({"camera_id": CAM_ID}))
+            mock_generate.assert_not_awaited()
+        finally:
+            _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+
+    @pytest.mark.asyncio
+    async def test_debounce_dict_independent_of_describe_feature(self) -> None:
+        """The two AI features' motion debounce dicts must never interfere
+        with each other — a recent describe-debounce entry must not block
+        analyze, and vice versa."""
+        import custom_components.bosch_shc_camera as _init_mod
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(
+            options={"ai_analysis_enabled": True, "ai_describe_on_motion": True}
+        )
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        _handlers, listeners = await _setup_and_get_handlers(hass, entry, coord_stub)
+        _init_mod._AI_MOTION_DEBOUNCE.clear()
+        _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+        # Recent debounce entry for the DESCRIBE feature only.
+        _init_mod._AI_MOTION_DEBOUNCE[CAM_ID] = 995.0
+        try:
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_analyze")
+                ),
+                None,
+            )
+            assert auto_fn is not None
+            with patch(
+                f"{MODULE}.ai_analysis.async_generate_ai_analysis",
+                AsyncMock(return_value=None),
+            ) as mock_generate:
+                await auto_fn(_make_event({"camera_id": CAM_ID}))
+            # analyze's own debounce dict was empty, so it must still fire
+            # despite describe's dict having a fresh entry for this camera.
+            mock_generate.assert_awaited_once_with(coord_stub, CAM_ID, force=False)
+        finally:
+            _init_mod._AI_MOTION_DEBOUNCE.clear()
+            _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+
+    @pytest.mark.asyncio
+    async def test_no_loaded_entries_returns_early(self) -> None:
+        import custom_components.bosch_shc_camera as _init_mod
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(options={"ai_analysis_enabled": True})
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        _handlers, listeners = await _setup_and_get_handlers(hass, entry, coord_stub)
+        _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+        try:
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_analyze")
+                ),
+                None,
+            )
+            assert auto_fn is not None
+            # No entries loaded AT EVENT TIME (setup already ran above, but
+            # the listener re-reads async_loaded_entries on every call).
+            hass.config_entries.async_loaded_entries = MagicMock(return_value=[])
+            with patch(
+                f"{MODULE}.ai_analysis.async_generate_ai_analysis", AsyncMock()
+            ) as mock_generate:
+                await auto_fn(_make_event({"camera_id": CAM_ID}))
+            mock_generate.assert_not_awaited()
+        finally:
+            _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+
+    @pytest.mark.asyncio
+    async def test_camera_not_found_in_any_coordinator_returns_early(self) -> None:
+        import custom_components.bosch_shc_camera as _init_mod
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(options={"ai_analysis_enabled": True})
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        _handlers, listeners = await _setup_and_get_handlers(hass, entry, coord_stub)
+        _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+        try:
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_analyze")
+                ),
+                None,
+            )
+            assert auto_fn is not None
+            with patch(
+                f"{MODULE}.ai_analysis.async_generate_ai_analysis", AsyncMock()
+            ) as mock_generate:
+                # Event for a camera_id no loaded coordinator knows about.
+                await auto_fn(_make_event({"camera_id": "unknown-camera-id"}))
+            mock_generate.assert_not_awaited()
+        finally:
+            _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+
+    @pytest.mark.asyncio
+    async def test_generate_analysis_exception_swallowed(self) -> None:
+        import custom_components.bosch_shc_camera as _init_mod
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(options={"ai_analysis_enabled": True})
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        _handlers, listeners = await _setup_and_get_handlers(hass, entry, coord_stub)
+        _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
+        try:
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_analyze")
+                ),
+                None,
+            )
+            assert auto_fn is not None
+            with patch(
+                f"{MODULE}.ai_analysis.async_generate_ai_analysis",
+                AsyncMock(side_effect=RuntimeError("ai_task provider down")),
+            ):
+                # Must not raise past the listener.
+                await auto_fn(_make_event({"camera_id": CAM_ID}))
+        finally:
+            _init_mod._AI_ANALYSIS_MOTION_DEBOUNCE.clear()
 
 
 class TestAutoDescribeNoLoadedEntries:
@@ -13202,7 +13463,14 @@ class TestAutoDescribeNoLoadedEntries:
 
         _init_mod._AI_MOTION_DEBOUNCE.clear()
         try:
-            auto_fn = listeners.get("bosch_shc_camera_motion", [None])[-1]
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_describe")
+                ),
+                None,
+            )
             assert auto_fn is not None
             await auto_fn(_make_event({"camera_id": CAM_ID}))
             coord_stub.async_generate_ai_description.assert_not_called()
@@ -13231,7 +13499,14 @@ class TestAutoDescribeNoEntityFound:
 
         _init_mod._AI_MOTION_DEBOUNCE.clear()
         try:
-            auto_fn = listeners.get("bosch_shc_camera_motion", [None])[-1]
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_describe")
+                ),
+                None,
+            )
             assert auto_fn is not None
             await auto_fn(_make_event({"camera_id": "unknown-cam"}))
             coord_stub.async_generate_ai_description.assert_not_called()
@@ -13259,7 +13534,14 @@ class TestAutoDescribeOptionDisabled:
 
         _init_mod._AI_MOTION_DEBOUNCE.clear()
         try:
-            auto_fn = listeners.get("bosch_shc_camera_motion", [None])[-1]
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_describe")
+                ),
+                None,
+            )
             assert auto_fn is not None
             await auto_fn(_make_event({"camera_id": CAM_ID}))
             coord_stub.async_generate_ai_description.assert_not_called()
@@ -13282,7 +13564,14 @@ class TestAutoDescribeOptionDisabled:
 
         _init_mod._AI_MOTION_DEBOUNCE.clear()
         try:
-            auto_fn = listeners.get("bosch_shc_camera_motion", [None])[-1]
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_describe")
+                ),
+                None,
+            )
             assert auto_fn is not None
             await auto_fn(_make_event({"camera_id": CAM_ID}))
             coord_stub.async_generate_ai_description.assert_not_called()
@@ -13311,7 +13600,14 @@ class TestAutoDescribeDebounceTimestampUpdated:
 
         _init_mod._AI_MOTION_DEBOUNCE.clear()
         try:
-            auto_fn = listeners.get("bosch_shc_camera_motion", [None])[-1]
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_describe")
+                ),
+                None,
+            )
             assert auto_fn is not None
             await auto_fn(_make_event({"camera_id": CAM_ID}))
             assert _init_mod._AI_MOTION_DEBOUNCE.get(CAM_ID) == 5000.0
@@ -13345,7 +13641,14 @@ class TestAutoDescribeExceptionCaught:
 
         _init_mod._AI_MOTION_DEBOUNCE.clear()
         try:
-            auto_fn = listeners.get("bosch_shc_camera_motion", [None])[-1]
+            auto_fn = next(
+                (
+                    f
+                    for f in listeners.get("bosch_shc_camera_motion", [])
+                    if f.__qualname__.endswith("_async_auto_describe")
+                ),
+                None,
+            )
             assert auto_fn is not None
             # Should NOT raise — exception must be swallowed
             await auto_fn(_make_event({"camera_id": CAM_ID}))
@@ -13512,6 +13815,288 @@ class TestSendEventWebhookInvalidScheme:
             await handler(_make_call({"event_type": "MOVEMENT"}))
 
         session_mock.post.assert_not_called()
+
+
+# Coverage for the `analyze_camera_ai` service (on-demand structured AI
+# Camera Analysis). Mirrors describe_snapshot's camera_id/entity_id
+# resolution — see handle_analyze_camera_ai in __init__.py, registered
+# right after describe_snapshot.
+
+
+class TestAnalyzeCameraAiRegistration:
+    """Registered on integration setup, alongside describe_snapshot."""
+
+    @pytest.mark.asyncio
+    async def test_service_registered(self) -> None:
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot()
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+
+        handlers, _ = await _setup_and_get_handlers(hass, entry, coord_stub)
+
+        assert "describe_snapshot" in handlers
+        assert "analyze_camera_ai" in handlers
+
+
+class TestAnalyzeCameraAiArgumentRequired:
+    """No camera_id AND no entity_id → ServiceValidationError (mirrors
+    describe_snapshot's own argument_required branch)."""
+
+    @pytest.mark.asyncio
+    async def test_no_ids_raises(self) -> None:
+        from homeassistant.exceptions import ServiceValidationError
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot()
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        handlers, _ = await _setup_and_get_handlers(hass, entry, coord_stub)
+        handler = handlers["analyze_camera_ai"]
+
+        with pytest.raises(ServiceValidationError):
+            await handler(_make_call({"camera_id": "", "entity_id": ""}))
+
+
+class TestAnalyzeCameraAiNoLoadedEntries:
+    @pytest.mark.asyncio
+    async def test_no_entries_raises(self) -> None:
+        from homeassistant.exceptions import HomeAssistantError
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot()
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[])
+
+        handlers, _ = await _setup_and_get_handlers(hass, entry, coord_stub)
+        handler = handlers["analyze_camera_ai"]
+
+        with pytest.raises(HomeAssistantError):
+            await handler(_make_call({"camera_id": CAM_ID}))
+
+
+class TestAnalyzeCameraAiCameraIdPath:
+    """camera_id resolution via camera_entities lookup — same shape as
+    describe_snapshot's camera_id path."""
+
+    @pytest.mark.asyncio
+    async def test_camera_id_resolves_and_forces_analysis(self) -> None:
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(options={"ai_analysis_enabled": True})
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        handlers, _ = await _setup_and_get_handlers(hass, entry, coord_stub)
+        handler = handlers["analyze_camera_ai"]
+
+        fake_result = {"score": 8, "short": "Person at door"}
+        with patch(
+            f"{MODULE}.ai_analysis.async_generate_ai_analysis",
+            AsyncMock(return_value=fake_result),
+        ) as mock_generate:
+            result = await handler(_make_call({"camera_id": CAM_ID}))
+
+        # The entire point of a manual trigger: bypass the rate-limit/cooldown
+        # gate via force=True.
+        mock_generate.assert_awaited_once_with(coord_stub, CAM_ID, force=True)
+        assert result == {"triggered": True, "score": 8, "short": "Person at door"}
+
+
+class TestAnalyzeCameraAiEntityIdPath:
+    """entity_id resolution via camera_entities iteration — mirrors
+    describe_snapshot's entity_id path."""
+
+    @pytest.mark.asyncio
+    async def test_entity_id_resolves(self) -> None:
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(options={"ai_analysis_enabled": True})
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        handlers, _ = await _setup_and_get_handlers(hass, entry, coord_stub)
+        handler = handlers["analyze_camera_ai"]
+
+        with patch(
+            f"{MODULE}.ai_analysis.async_generate_ai_analysis",
+            AsyncMock(return_value={"score": 3}),
+        ) as mock_generate:
+            result = await handler(_make_call({"entity_id": "camera.bosch_test"}))
+
+        mock_generate.assert_awaited_once_with(coord_stub, CAM_ID, force=True)
+        assert result == {"triggered": True, "score": 3}
+
+
+class TestAnalyzeCameraAiNothingNotable:
+    """`async_generate_ai_analysis` returning None (score <= 0, "nothing
+    notable") → {"triggered": False}, no exception — matches its own
+    never-raises contract."""
+
+    @pytest.mark.asyncio
+    async def test_none_result_returns_not_triggered(self) -> None:
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(options={"ai_analysis_enabled": True})
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        handlers, _ = await _setup_and_get_handlers(hass, entry, coord_stub)
+        handler = handlers["analyze_camera_ai"]
+
+        with patch(
+            f"{MODULE}.ai_analysis.async_generate_ai_analysis",
+            AsyncMock(return_value=None),
+        ):
+            result = await handler(_make_call({"camera_id": CAM_ID}))
+
+        assert result == {"triggered": False, "reason": "nothing_notable"}
+
+
+class TestAnalyzeCameraAiMasterOptionDisabled:
+    """force=True bypasses cooldown/window but NOT the master
+    ai_analysis_enabled option — must surface a distinct reason, not the
+    byte-identical {"triggered": False} a genuine nothing-notable result
+    produces."""
+
+    @pytest.mark.asyncio
+    async def test_master_disabled_returns_distinct_reason(self) -> None:
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(options={"ai_analysis_enabled": False})
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        handlers, _ = await _setup_and_get_handlers(hass, entry, coord_stub)
+        handler = handlers["analyze_camera_ai"]
+
+        with patch(
+            f"{MODULE}.ai_analysis.async_generate_ai_analysis", AsyncMock()
+        ) as mock_generate:
+            result = await handler(_make_call({"camera_id": CAM_ID}))
+
+        assert result == {"triggered": False, "reason": "ai_analysis_disabled"}
+        mock_generate.assert_not_awaited()
+
+
+class TestAnalyzeCameraAiPerCameraDisabled:
+    """force=True also doesn't bypass the per-camera switch
+    (`ai_analysis.per_camera_analysis_enabled`) — distinct reason again."""
+
+    @pytest.mark.asyncio
+    async def test_per_camera_disabled_returns_distinct_reason(self) -> None:
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot(options={"ai_analysis_enabled": True})
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        handlers, _ = await _setup_and_get_handlers(hass, entry, coord_stub)
+        handler = handlers["analyze_camera_ai"]
+
+        with (
+            patch(
+                f"{MODULE}.ai_analysis.per_camera_analysis_enabled",
+                return_value=False,
+            ),
+            patch(
+                f"{MODULE}.ai_analysis.async_generate_ai_analysis", AsyncMock()
+            ) as mock_generate,
+        ):
+            result = await handler(_make_call({"camera_id": CAM_ID}))
+
+        assert result == {"triggered": False, "reason": "camera_disabled"}
+        mock_generate.assert_not_awaited()
+
+
+class TestAnalyzeCameraAiInvalidTarget:
+    """Unknown camera_id/entity_id → ServiceValidationError(not_found),
+    matching describe_snapshot's own invalid-target handling for
+    consistency (describe_snapshot falls back to the first coordinator
+    then raises not_found on the empty resolved_entity_id; this handler
+    has no camera_entities fallback at all, so an unknown target raises
+    not_found directly — same exception type/translation_key either way)."""
+
+    @pytest.mark.asyncio
+    async def test_unknown_camera_id_raises_not_found(self) -> None:
+        from homeassistant.exceptions import ServiceValidationError
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot()
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        handlers, _ = await _setup_and_get_handlers(hass, entry, coord_stub)
+        handler = handlers["analyze_camera_ai"]
+
+        with pytest.raises(ServiceValidationError) as exc_info:
+            await handler(_make_call({"camera_id": "unknown-id"}))
+        assert "not_found" in str(exc_info.value.translation_key)
+
+    @pytest.mark.asyncio
+    async def test_unknown_entity_id_raises_not_found(self) -> None:
+        from homeassistant.exceptions import ServiceValidationError
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot()
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry)
+        coord_stub.camera_entities = {}
+        entry.runtime_data = coord_stub
+        coord_stub.entry = entry
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        handlers, _ = await _setup_and_get_handlers(hass, entry, coord_stub)
+        handler = handlers["analyze_camera_ai"]
+
+        with pytest.raises(ServiceValidationError) as exc_info:
+            await handler(_make_call({"entity_id": "camera.nonexistent"}))
+        assert "not_found" in str(exc_info.value.translation_key)
+
+    @pytest.mark.asyncio
+    async def test_no_active_coordinator_raises_not_found(self) -> None:
+        """All entries have runtime_data=None → ServiceValidationError(not_found).
+
+        NOTE: unlike describe_snapshot, handle_analyze_camera_ai has no
+        "fallback to first available coordinator" branch (it doesn't need
+        `cur_opts` at all — the whole AI-task-options resolution describe_
+        snapshot does is delegated to ai_analysis.async_generate_ai_analysis
+        instead) and therefore no distinct "no active coordinator" ->
+        HomeAssistantError path either: `coord` simply stays None and falls
+        straight into the same `coord is None or not resolved_cam_id` guard
+        used for an unknown camera_id/entity_id, both raising
+        ServiceValidationError(not_found) — verified directly against the
+        source (__init__.py handle_analyze_camera_ai) rather than assumed
+        from describe_snapshot's shape.
+        """
+        from homeassistant.exceptions import ServiceValidationError
+
+        hass = _make_hass_ai_describe_snapshot()
+        entry = _make_entry_ai_describe_snapshot()
+        entry.runtime_data = None
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        entry2 = _make_entry_ai_describe_snapshot()
+        coord_stub = _make_coord_stub_ai_describe_snapshot([CAM_ID], entry2)
+        entry2.runtime_data = coord_stub
+
+        handlers, _ = await _setup_and_get_handlers(hass, entry2, coord_stub)
+        handler = handlers["analyze_camera_ai"]
+
+        hass.config_entries.async_loaded_entries = MagicMock(return_value=[entry])
+
+        with pytest.raises(ServiceValidationError) as exc_info:
+            await handler(_make_call({"camera_id": CAM_ID}))
+        assert "not_found" in str(exc_info.value.translation_key)
 
 
 # Coverage tests for `async_fetch_fresh_event_snapshot` cache fast-path.

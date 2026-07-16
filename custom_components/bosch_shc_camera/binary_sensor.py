@@ -34,8 +34,9 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, BoschCameraCoordinator  # type: ignore[attr-defined]
+from . import DOMAIN, BoschCameraCoordinator, get_options  # type: ignore[attr-defined]
 from .const import (
+    CONF_AI_ANALYSIS_ENABLED,
     DEFAULT_MOTION_ACTIVE_WINDOW,
     MOTION_ACTIVE_WINDOW_MAX,
     MOTION_ACTIVE_WINDOW_MIN,
@@ -61,6 +62,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up binary sensor entities for each camera."""
     coordinator: BoschCameraCoordinator = config_entry.runtime_data
+    opts = get_options(config_entry)
     entities = []
     for cam_id in coordinator.data:
         cam_info = coordinator.data[cam_id].get("info", {})
@@ -75,6 +77,12 @@ async def async_setup_entry(
         if has_sound:
             entities.append(
                 BoschAudioAlarmBinarySensor(coordinator, cam_id, config_entry)
+            )
+        # AI Camera Analysis — only when the master option is enabled (same
+        # gate as the sensor.py AI-analysis sensors).
+        if opts.get(CONF_AI_ANALYSIS_ENABLED, False):
+            entities.append(
+                BoschAiRecentAlertBinarySensor(coordinator, cam_id, config_entry)
             )
     async_add_entities(entities, update_before_add=False)
 
@@ -361,4 +369,86 @@ class BoschLanReachableBinarySensor(_BoschBinarySensorBase):
             )
             if grace_left > 0:
                 attrs["write_grace_seconds_left"] = round(grace_left)
+        return attrs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Deliberately a FIXED window, not a reuse of the `ai_analysis_repeat_context_minutes`
+# option: that option tunes a PROMPT heuristic (how long AI-provided context
+# should mention recent activity to the model) — a UI "recent activity"
+# indicator is a different concern, and coupling the two would mean changing
+# the prompt-context window silently also changes how long this binary
+# sensor stays on. See task spec / ai-camera-analysis plan.
+AI_RECENT_ALERT_WINDOW_MINUTES = 10
+
+
+class BoschAiRecentAlertBinarySensor(_BoschBinarySensorBase):
+    """ON for `AI_RECENT_ALERT_WINDOW_MINUTES` minutes after the most recent
+    AI Camera Analysis alert for this camera (`ai_analysis.py`).
+
+    Backed by the in-memory `coordinator.ai_analysis_recent[cam_id]` cache
+    (see `ai_alert_store.py`), same source `BoschAiAlerts24hSensor` reads.
+
+    `last_score`/`last_short` only change when a NEW alert lands (same
+    cadence as the on/off state itself), so they're safe to record. The
+    "how long until this turns off" value changes every coordinator tick
+    while on/off stays put — exact recorder-DB-bloat shape the v14.3.1
+    postmortem (HA#39) fixed elsewhere in this file
+    (`BoschLanReachableBinarySensor`) — so it's excluded via
+    `_unrecorded_attributes`, same discipline.
+    """
+
+    _attr_entity_registry_enabled_default = True
+    _attr_translation_key = "ai_recent_alert"
+    _unrecorded_attributes = frozenset({"seconds_since_last_alert"})
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ai_recent_alert"
+
+    def _latest_alert(self) -> tuple[str, int] | None:
+        entries = self.coordinator.ai_analysis_recent.get(self._cam_id, [])
+        return entries[-1] if entries else None
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def is_on(self) -> bool:
+        latest = self._latest_alert()
+        if latest is None:
+            return False
+        generated_at, _score = latest
+        try:
+            gen_dt = datetime.fromisoformat(generated_at)
+        except (TypeError, ValueError):
+            return False
+        if gen_dt.tzinfo is None:
+            gen_dt = gen_dt.replace(tzinfo=UTC)
+        return (datetime.now(UTC) - gen_dt) <= timedelta(
+            minutes=AI_RECENT_ALERT_WINDOW_MINUTES
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        latest = self._latest_alert()
+        if latest is None:
+            return {}
+        generated_at, score = latest
+        attrs: dict[str, Any] = {"last_score": score, "generated_at": generated_at}
+        try:
+            gen_dt = datetime.fromisoformat(generated_at)
+            if gen_dt.tzinfo is None:
+                gen_dt = gen_dt.replace(tzinfo=UTC)
+            attrs["seconds_since_last_alert"] = round(
+                (datetime.now(UTC) - gen_dt).total_seconds()
+            )
+        except (TypeError, ValueError):
+            pass
         return attrs

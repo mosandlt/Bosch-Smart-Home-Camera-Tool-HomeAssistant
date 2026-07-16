@@ -290,6 +290,38 @@
               "ai_active_condition_state": "State the condition entity must be in to allow AI analyses. Default: not_home (AI only runs when nobody is home). Examples: home, on, off, away."
             }
           },
+          "ai_analysis": {
+            "name": "AI Camera Analysis",
+            "description": "Structured, motion-triggered suspicion scoring (1-10) with multi-target notify routing and optional alarm-panel triggering. Sibling to AI Snapshot Description above (free-text) — this feature requests a scored, structured result and can route alerts to different notify targets and trigger an alarm service. Requires a configured AI Task integration. Manage notify targets, known visitors, and per-camera overrides via the integration's Add-on menu (subentries).",
+            "data": {
+              "ai_analysis_enabled": "Enable AI Camera Analysis",
+              "ai_analysis_task_entity": "AI Task entity (optional)",
+              "ai_analysis_snapshot_count": "Snapshots per analysis",
+              "ai_analysis_snapshot_interval_ms": "Snapshot interval (ms)",
+              "ai_analysis_cooldown_seconds": "Minimum seconds between analyses (per camera)",
+              "ai_analysis_max_per_day": "Daily analysis budget (0 = unlimited)",
+              "ai_analysis_retention_days": "Alert history retention (days)",
+              "ai_analysis_repeat_context_minutes": "Repeat-alert context window (minutes, 0 = disabled)",
+              "ai_analysis_alarm_panel_entity": "Alarm panel entity (optional)",
+              "ai_analysis_alarmo_enabled": "Enable alarm-panel triggering",
+              "ai_analysis_alarm_trigger_service": "Alarm trigger service (domain.service)",
+              "ai_analysis_alarm_trigger_score": "Minimum score to trigger the alarm service"
+            },
+            "data_description": {
+              "ai_analysis_enabled": "Master toggle for structured AI Camera Analysis. Independent from AI Snapshot Description's own toggle and budget above — the two features do not share a daily allowance.",
+              "ai_analysis_task_entity": "Select a specific AI Task entity for structured analysis. Leave empty to fall back to the AI Task entity selected for AI Snapshot Description, or HA's preferred default if neither is set.",
+              "ai_analysis_snapshot_count": "Number of snapshots captured in a burst for each analysis (2-10). More snapshots give the AI more context but cost more.",
+              "ai_analysis_snapshot_interval_ms": "Spacing between burst snapshots in milliseconds (100-5000).",
+              "ai_analysis_cooldown_seconds": "Per-camera minimum time between automatic analyses. Separate cooldown from AI Snapshot Description's own cooldown.",
+              "ai_analysis_max_per_day": "Maximum automatic analyses across all cameras per day (resets at midnight). Separate budget from AI Snapshot Description's own daily budget. 0 = unlimited.",
+              "ai_analysis_retention_days": "How long alert history (scores + snapshot images) is kept on disk before automatic purge (1-90 days).",
+              "ai_analysis_repeat_context_minutes": "When greater than 0, mentions this camera's recent alert history from the last N minutes in the AI prompt, so repeated activity can be recognized as such. 0 disables repeat-context.",
+              "ai_analysis_alarm_panel_entity": "Alarm control panel entity whose armed/away state gates notify-target conditions and alarm-service triggering below. Leave empty if not using alarm-panel routing.",
+              "ai_analysis_alarmo_enabled": "When enabled and the alarm panel entity above is armed, a high-scoring alert calls the alarm trigger service below (e.g. an Alarmo siren/arm service, or any other domain.service).",
+              "ai_analysis_alarm_trigger_service": "Raw domain.service string called when triggering (e.g. alarmo.arm_away, switch.turn_on, or any other service). Works with Alarmo or any other alarm-panel integration — not Alarmo-specific.",
+              "ai_analysis_alarm_trigger_score": "Minimum suspicion score (1-10) required before the alarm trigger service is called."
+            }
+          },
           "auth": {
             "name": "Authentication",
             "description": "Force a fresh browser login or migrate to the OSS OAuth client.",
@@ -344,6 +376,9 @@
     "image": {
       "last_snapshot": {
         "name": "Last snapshot"
+      },
+      "ai_latest_alert": {
+        "name": "AI latest alert"
       }
     },
     "switch": {
@@ -436,6 +471,9 @@
       },
       "fire_alarm_detection": {
         "name": "Smoke Alarm Detection"
+      },
+      "ai_analysis": {
+        "name": "AI camera analysis"
       }
     },
     "number": {
@@ -575,6 +613,9 @@
       },
       "lan_reachable": {
         "name": "LAN Reachable"
+      },
+      "ai_recent_alert": {
+        "name": "AI recent alert"
       }
     },
     "update": {
@@ -754,6 +795,17 @@
       },
       "ai_description": {
         "name": "AI Snapshot Description"
+      },
+      "ai_alert_score": {
+        "name": "AI alert score"
+      },
+      "ai_alerts_24h": {
+        "name": "AI alerts (24h)"
+      }
+    },
+    "text": {
+      "ai_scene_context": {
+        "name": "AI scene context"
       }
     }
   },
@@ -871,6 +923,20 @@
           "description": "AI Task entity to use. Leave empty for HA's preferred default."
         }
       }
+    },
+    "analyze_camera_ai": {
+      "name": "Analyze Camera (AI)",
+      "description": "Manually trigger a structured AI Camera Analysis (1-10 suspicion score) for one camera, bypassing the cooldown/window gate.",
+      "fields": {
+        "camera_id": {
+          "name": "Camera ID",
+          "description": "Bosch cloud camera ID (UUID). Use either camera_id or entity_id."
+        },
+        "entity_id": {
+          "name": "Camera Entity",
+          "description": "Camera entity ID (e.g. camera.bosch_terrasse). Use either entity_id or camera_id."
+        }
+      }
     }
   },
   "exceptions": {
@@ -957,6 +1023,70 @@
       "cameras_loaded": "Cameras loaded",
       "last_fcm_push_ago": "Last FCM push",
       "platinum_quality": "Quality Scale"
+    }
+  },
+  "config_subentries": {
+    "ai_target": {
+      "entry_type": "AI alert target",
+      "initiate_flow": {
+        "user": "Add alert target",
+        "reconfigure": "Edit alert target"
+      },
+      "step": {
+        "user": {
+          "title": "Add AI alert notify target",
+          "description": "A named notify target that receives AI Camera Analysis alerts meeting its own score threshold, condition, and camera filter.",
+          "data": {
+            "target_name": "Target name",
+            "notify_service": "Notify service (domain.service)",
+            "min_score": "Minimum score to notify",
+            "condition": "Active when",
+            "camera_filter": "Cameras (empty = all)"
+          }
+        },
+        "reconfigure": {
+          "title": "Edit AI alert notify target",
+          "description": "A named notify target that receives AI Camera Analysis alerts meeting its own score threshold, condition, and camera filter.",
+          "data": {
+            "target_name": "Target name",
+            "notify_service": "Notify service (domain.service)",
+            "min_score": "Minimum score to notify",
+            "condition": "Active when",
+            "camera_filter": "Cameras (empty = all)"
+          }
+        }
+      },
+      "abort": {
+        "reconfigure_successful": "The alert target was updated."
+      }
+    },
+    "ai_visitor": {
+      "entry_type": "Known visitor",
+      "initiate_flow": {
+        "user": "Add known visitor",
+        "reconfigure": "Edit known visitor"
+      },
+      "step": {
+        "user": {
+          "title": "Add known visitor",
+          "description": "Describe a person the AI should recognize as expected/known. This description is injected into every camera's analysis prompt.",
+          "data": {
+            "visitor_name": "Name",
+            "visitor_description": "Description"
+          }
+        },
+        "reconfigure": {
+          "title": "Edit known visitor",
+          "description": "Describe a person the AI should recognize as expected/known. This description is injected into every camera's analysis prompt.",
+          "data": {
+            "visitor_name": "Name",
+            "visitor_description": "Description"
+          }
+        }
+      },
+      "abort": {
+        "reconfigure_successful": "The known visitor was updated."
+      }
     }
   }
 }

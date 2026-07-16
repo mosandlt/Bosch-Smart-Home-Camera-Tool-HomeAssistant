@@ -20,15 +20,22 @@ Requires `enable_snapshots=True` (same gate as the camera platform).
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.components.image import ImageEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from . import DOMAIN, BoschCameraCoordinator, get_options  # type: ignore[attr-defined]
+from . import (  # type: ignore[attr-defined]
+    DOMAIN,
+    BoschCameraCoordinator,
+    ai_alert_store,
+    get_options,
+)
+from .const import CONF_AI_ANALYSIS_ENABLED
 from .models import get_display_name
 from .snapshot_store import load_snapshot
 
@@ -44,15 +51,23 @@ async def async_setup_entry(
 ) -> None:
     """Set up one image entity per discovered Bosch camera."""
     opts = get_options(config_entry)
-    if not opts.get("enable_snapshots", True):
-        _LOGGER.debug("Camera snapshots disabled — skipping image platform")
-        return
-
     coordinator: BoschCameraCoordinator = config_entry.runtime_data
-    entities = [
-        BoschCameraLastSnapshotImage(hass, coordinator, cam_id, config_entry)
-        for cam_id in coordinator.data
-    ]
+    entities: list[Any] = []
+    if opts.get("enable_snapshots", True):
+        entities.extend(
+            BoschCameraLastSnapshotImage(hass, coordinator, cam_id, config_entry)
+            for cam_id in coordinator.data
+        )
+    else:
+        _LOGGER.debug("Camera snapshots disabled — skipping snapshot image entities")
+    # AI Camera Analysis latest-alert image — only when the master option is
+    # enabled (same gate as the sensor.py/binary_sensor.py AI-analysis
+    # entities), independent of `enable_snapshots` above.
+    if opts.get(CONF_AI_ANALYSIS_ENABLED, False):
+        entities.extend(
+            BoschAiLatestAlertImage(hass, coordinator, cam_id, config_entry)
+            for cam_id in coordinator.data
+        )
     async_add_entities(entities, update_before_add=False)
 
 
@@ -170,3 +185,110 @@ class BoschCameraLastSnapshotImage(ImageEntity):  # type: ignore[misc]  # HA bas
             self._cam_id,
             self._attr_image_last_updated,
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAiLatestAlertImage(ImageEntity):  # type: ignore[misc]  # HA base class is untyped (no py.typed) → Any
+    """Image entity exposing the most recent AI Camera Analysis alert
+    snapshot for a Bosch camera (`ai_analysis.py`/`ai_alert_store.py`).
+
+    Deliberately a plain `ImageEntity`, NOT a `CoordinatorEntity` — mirrors
+    `BoschCameraLastSnapshotImage`'s own push-on-event pattern rather than
+    coordinator-tick polling (an AI alert lands far less often than a
+    coordinator tick, so tick-polling would either miss the freshness
+    signal between ticks or add churn for no benefit). Refreshed by
+    listening directly for this camera's own `bosch_shc_camera_ai_alert`
+    bus event (fired by `ai_analysis._finalize_alert` on every stored
+    alert) instead of a coordinator-push comparison, avoiding a fragile
+    multiple-inheritance MRO with `ImageEntity.__init__`'s non-cooperative
+    signature.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "ai_latest_alert"
+    _attr_content_type = "image/jpeg"
+    _attr_should_poll = False
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+    ) -> None:
+        ImageEntity.__init__(self, hass)
+        self._coordinator = coordinator
+        self._cam_id = cam_id
+        self._entry = entry
+
+        info = coordinator.data.get(cam_id, {}).get("info", {})
+        title = info.get("title", cam_id)
+        hw = info.get("hardwareVersion", "CAMERA")
+
+        self._display_name = f"Bosch {title}"
+        self._model_name = get_display_name(hw)
+        self._fw = info.get("firmwareVersion", "")
+        self._mac = info.get("macAddress", "")
+
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ai_latest_alert"
+
+        self._cached_bytes: bytes | None = None
+        self._cached_image_path: str | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                "bosch_shc_camera_ai_alert", self._handle_alert_event
+            )
+        )
+
+    @callback  # type: ignore[untyped-decorator]  # HA @callback is untyped (no py.typed)
+    def _handle_alert_event(self, event: Event) -> None:
+        """Bump the image token on a new alert for THIS camera only."""
+        if event.data.get("camera_id") != self._cam_id:
+            return
+        self._cached_bytes = None
+        self._cached_image_path = None
+        self._attr_image_last_updated = dt_util.utcnow()
+        self.async_update_token()
+        self.async_write_ha_state()
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._cam_id)},
+            name=self._display_name,
+            manufacturer="Bosch",
+            model=self._model_name,
+            sw_version=self._fw,
+            connections={("mac", self._mac)} if self._mac else set(),
+        )
+
+    def _current_image_path(self) -> str | None:
+        path = (
+            self._coordinator.data.get(self._cam_id, {})
+            .get("ai_analysis", {})
+            .get("image_path")
+        )
+        return path if isinstance(path, str) else None
+
+    @property
+    def available(self) -> bool:
+        return self._current_image_path() is not None
+
+    async def async_image(self) -> bytes | None:
+        """Return the latest AI-alert snapshot bytes, or None if there is
+        no alert yet (or its image failed to persist)."""
+        path = self._current_image_path()
+        if path is None:
+            return None
+        if self._cached_bytes is not None and path == self._cached_image_path:
+            return self._cached_bytes
+        data = await ai_alert_store.async_read_alert_image(
+            self._coordinator, self._cam_id, path
+        )
+        if data:
+            self._cached_bytes = data
+            self._cached_image_path = path
+        return data

@@ -301,6 +301,38 @@
               "force_relogin": "Cocher pour se reconnecter via le navigateur. Nécessaire uniquement si le refresh token a expiré (très rare).",
               "migrate_to_oss_client": "Passer du client `residential_app` hérité au client dédié `oss_residential_app` que Bosch fournit pour les intégrations open source. L'activation déclenche le flux de reconnexion — une connexion unique via Bosch SingleKey ID sera demandée, et toutes les entités, automations et options existantes seront conservées."
             }
+          },
+          "ai_analysis": {
+            "name": "Analyse caméra par IA",
+            "description": "Notation de suspicion structurée (1-10) déclenchée par le mouvement, avec routage des notifications vers plusieurs cibles et déclenchement optionnel d'une alarme. Complémentaire de la Description d'instantané IA ci-dessus (texte libre) : cette fonction demande un résultat structuré et noté, et peut router les alertes vers différentes cibles de notification et déclencher un service d'alarme. Nécessite une intégration AI Task configurée. Gérez les cibles de notification, les visiteurs connus et les substitutions par caméra via le menu des modules complémentaires de l'intégration (sous-entrées).",
+            "data": {
+              "ai_analysis_enabled": "Activer l'analyse caméra par IA",
+              "ai_analysis_task_entity": "Entité AI Task (optionnel)",
+              "ai_analysis_snapshot_count": "Instantanés par analyse",
+              "ai_analysis_snapshot_interval_ms": "Intervalle entre instantanés (ms)",
+              "ai_analysis_cooldown_seconds": "Secondes minimales entre analyses (par caméra)",
+              "ai_analysis_max_per_day": "Budget quotidien d'analyses (0 = illimité)",
+              "ai_analysis_retention_days": "Rétention de l'historique des alertes (jours)",
+              "ai_analysis_repeat_context_minutes": "Fenêtre de contexte des alertes répétées (minutes, 0 = désactivé)",
+              "ai_analysis_alarm_panel_entity": "Entité du panneau d'alarme (optionnel)",
+              "ai_analysis_alarmo_enabled": "Activer le déclenchement du panneau d'alarme",
+              "ai_analysis_alarm_trigger_service": "Service de déclenchement d'alarme (domain.service)",
+              "ai_analysis_alarm_trigger_score": "Score minimal pour déclencher l'alarme"
+            },
+            "data_description": {
+              "ai_analysis_enabled": "Interrupteur principal de l'analyse caméra par IA structurée. Indépendant de l'interrupteur et du budget propres à la Description d'instantané IA — les deux fonctions n'ont pas de quota quotidien commun.",
+              "ai_analysis_task_entity": "Sélectionnez une entité AI Task spécifique pour l'analyse structurée. Laissez vide pour utiliser l'entité AI Task choisie pour la Description d'instantané IA, ou la valeur par défaut de HA si aucune n'est définie.",
+              "ai_analysis_snapshot_count": "Nombre d'instantanés capturés en rafale pour chaque analyse (2-10). Plus d'instantanés donnent plus de contexte à l'IA mais coûtent plus cher.",
+              "ai_analysis_snapshot_interval_ms": "Espacement entre les instantanés de la rafale en millisecondes (100-5000).",
+              "ai_analysis_cooldown_seconds": "Temps minimal entre analyses automatiques, par caméra. Délai distinct de celui de la Description d'instantané IA.",
+              "ai_analysis_max_per_day": "Nombre maximal d'analyses automatiques sur toutes les caméras par jour (réinitialisé à minuit). Budget distinct de celui de la Description d'instantané IA. 0 = illimité.",
+              "ai_analysis_retention_days": "Durée de conservation de l'historique des alertes (scores + images) sur le disque avant purge automatique (1-90 jours).",
+              "ai_analysis_repeat_context_minutes": "Si supérieur à 0, mentionne dans le prompt de l'IA l'historique récent des alertes de cette caméra sur les N dernières minutes, afin de reconnaître une activité répétée. 0 désactive le contexte répété.",
+              "ai_analysis_alarm_panel_entity": "Entité de panneau de contrôle d'alarme dont l'état armé/absent conditionne les cibles de notification et le déclenchement du service d'alarme ci-dessous. Laissez vide si vous n'utilisez pas le routage par panneau d'alarme.",
+              "ai_analysis_alarmo_enabled": "Lorsqu'activé et que le panneau d'alarme ci-dessus est armé, une alerte à score élevé appelle le service de déclenchement d'alarme ci-dessous (p. ex. un service sirène/armement Alarmo, ou tout autre domain.service).",
+              "ai_analysis_alarm_trigger_service": "Chaîne domain.service appelée lors du déclenchement (p. ex. alarmo.arm_away, switch.turn_on, ou tout autre service). Fonctionne avec Alarmo ou toute autre intégration de panneau d'alarme, pas spécifique à Alarmo.",
+              "ai_analysis_alarm_trigger_score": "Score de suspicion minimal (1-10) requis avant l'appel du service de déclenchement d'alarme."
+            }
           }
         }
       },
@@ -344,6 +376,9 @@
     "image": {
       "last_snapshot": {
         "name": "Dernier snapshot"
+      },
+      "ai_latest_alert": {
+        "name": "Dernière alerte IA"
       }
     },
     "switch": {
@@ -436,6 +471,9 @@
       },
       "fire_alarm_detection": {
         "name": "Détection d'alarme incendie"
+      },
+      "ai_analysis": {
+        "name": "Analyse caméra par IA"
       }
     },
     "number": {
@@ -575,6 +613,9 @@
       },
       "lan_reachable": {
         "name": "Réseau LAN accessible"
+      },
+      "ai_recent_alert": {
+        "name": "Alerte IA récente"
       }
     },
     "update": {
@@ -754,6 +795,17 @@
       },
       "stream_url_sub": {
         "name": "URL du flux (sub)"
+      },
+      "ai_alert_score": {
+        "name": "Score d'alerte IA"
+      },
+      "ai_alerts_24h": {
+        "name": "Alertes IA (24 h)"
+      }
+    },
+    "text": {
+      "ai_scene_context": {
+        "name": "Contexte de scène IA"
       }
     }
   },

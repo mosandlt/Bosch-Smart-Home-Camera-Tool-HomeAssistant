@@ -290,6 +290,38 @@
               "ai_active_condition_state": "Zustand, in dem sich die Bedingungs-Entität befinden muss, damit KI-Analysen erlaubt sind. Standard: not_home (KI läuft nur, wenn niemand zu Hause ist). Beispiele: home, on, off, away."
             }
           },
+          "ai_analysis": {
+            "name": "KI-Kamera-Analyse",
+            "description": "Strukturierte, bewegungsausgelöste Verdachtsbewertung (1-10) mit Mehrfach-Ziel-Benachrichtigungen und optionaler Alarmanlagen-Auslösung. Ergänzt die KI-Snapshot-Beschreibung oben (Freitext) — dieses Feature liefert ein bewertetes, strukturiertes Ergebnis und kann Alarme an verschiedene Benachrichtigungsziele weiterleiten sowie einen Alarmdienst auslösen. Erfordert eine konfigurierte „AI Task\"-Integration. Benachrichtigungsziele, bekannte Besucher und Kamera-Ausnahmen werden über das Zusatzmenü der Integration (Subentries) verwaltet.",
+            "data": {
+              "ai_analysis_enabled": "KI-Kamera-Analyse aktivieren",
+              "ai_analysis_task_entity": "KI-Task-Entität (optional)",
+              "ai_analysis_snapshot_count": "Snapshots pro Analyse",
+              "ai_analysis_snapshot_interval_ms": "Snapshot-Intervall (ms)",
+              "ai_analysis_cooldown_seconds": "Mindestabstand zwischen Analysen (Sekunden, pro Kamera)",
+              "ai_analysis_max_per_day": "Tagesbudget für Analysen (0 = unbegrenzt)",
+              "ai_analysis_retention_days": "Aufbewahrung der Alarm-Historie (Tage)",
+              "ai_analysis_repeat_context_minutes": "Kontextfenster für Wiederholungsalarme (Minuten, 0 = deaktiviert)",
+              "ai_analysis_alarm_panel_entity": "Alarmanlagen-Entität (optional)",
+              "ai_analysis_alarmo_enabled": "Alarmanlagen-Auslösung aktivieren",
+              "ai_analysis_alarm_trigger_service": "Alarm-Auslösedienst (domain.service)",
+              "ai_analysis_alarm_trigger_score": "Mindest-Score zum Auslösen des Alarms"
+            },
+            "data_description": {
+              "ai_analysis_enabled": "Hauptschalter für die strukturierte KI-Kamera-Analyse. Unabhängig vom Schalter und Budget der KI-Snapshot-Beschreibung oben — beide Funktionen teilen sich kein Tagesbudget.",
+              "ai_analysis_task_entity": "Wähle eine spezifische KI-Task-Entität für die strukturierte Analyse. Leer lassen, um auf die für die KI-Snapshot-Beschreibung gewählte Entität zurückzufallen, oder auf den bevorzugten Standard von HA, falls keine gesetzt ist.",
+              "ai_analysis_snapshot_count": "Anzahl der Snapshots pro Analyse-Burst (2-10). Mehr Snapshots geben der KI mehr Kontext, kosten aber mehr.",
+              "ai_analysis_snapshot_interval_ms": "Abstand zwischen den Burst-Snapshots in Millisekunden (100-5000).",
+              "ai_analysis_cooldown_seconds": "Mindestzeit zwischen automatischen Analysen pro Kamera. Eigener Cooldown, getrennt von der KI-Snapshot-Beschreibung.",
+              "ai_analysis_max_per_day": "Maximale automatische Analysen pro Tag über alle Kameras (Reset um Mitternacht). Eigenes Budget, getrennt vom Tagesbudget der KI-Snapshot-Beschreibung. 0 = unbegrenzt.",
+              "ai_analysis_retention_days": "Wie lange die Alarm-Historie (Scores + Snapshot-Bilder) auf der Festplatte aufbewahrt wird, bevor sie automatisch gelöscht wird (1-90 Tage).",
+              "ai_analysis_repeat_context_minutes": "Wenn größer als 0, wird die jüngste Alarm-Historie dieser Kamera aus den letzten N Minuten im KI-Prompt erwähnt, damit wiederholte Aktivität als solche erkannt werden kann. 0 deaktiviert den Wiederholungskontext.",
+              "ai_analysis_alarm_panel_entity": "Alarmanlagen-Entität, deren Zustand (scharf/unscharf) die Bedingungen der Benachrichtigungsziele sowie die Alarm-Auslösung unten steuert. Leer lassen, falls keine Alarmanlagen-Weiterleitung genutzt wird.",
+              "ai_analysis_alarmo_enabled": "Wenn aktiviert und die Alarmanlage oben scharf ist, ruft ein hoch bewerteter Alarm den unten konfigurierten Alarm-Auslösedienst auf (z. B. einen Alarmo-Sirenen-/Scharf-Dienst oder einen beliebigen anderen domain.service).",
+              "ai_analysis_alarm_trigger_service": "Roher domain.service-String, der beim Auslösen aufgerufen wird (z. B. alarmo.arm_away, switch.turn_on oder ein beliebiger anderer Dienst). Funktioniert mit Alarmo oder jeder anderen Alarmanlagen-Integration — nicht Alarmo-spezifisch.",
+              "ai_analysis_alarm_trigger_score": "Mindest-Verdachts-Score (1-10), der erreicht sein muss, bevor der Alarm-Auslösedienst aufgerufen wird."
+            }
+          },
           "auth": {
             "name": "Authentifizierung",
             "description": "Frische Browser-Anmeldung erzwingen oder zum OSS-OAuth-Client migrieren.",
@@ -340,10 +372,77 @@
       "migration_started": "Migration gestartet — bitte schließe den Neu-konfigurieren-Flow auf der Integrationskarte ab."
     }
   },
+  "config_subentries": {
+    "ai_target": {
+      "entry_type": "KI-Alarm-Ziel",
+      "initiate_flow": {
+        "user": "Alarm-Ziel hinzufügen",
+        "reconfigure": "Alarm-Ziel bearbeiten"
+      },
+      "step": {
+        "user": {
+          "title": "KI-Alarm-Benachrichtigungsziel hinzufügen",
+          "description": "Ein benanntes Benachrichtigungsziel, das KI-Kamera-Analyse-Alarme erhält, die seinen eigenen Score-Schwellenwert, seine Bedingung und seinen Kamerafilter erfüllen.",
+          "data": {
+            "target_name": "Name des Ziels",
+            "notify_service": "Benachrichtigungsdienst (domain.service)",
+            "min_score": "Mindest-Score für Benachrichtigung",
+            "condition": "Aktiv bei",
+            "camera_filter": "Kameras (leer = alle)"
+          }
+        },
+        "reconfigure": {
+          "title": "KI-Alarm-Benachrichtigungsziel bearbeiten",
+          "description": "Ein benanntes Benachrichtigungsziel, das KI-Kamera-Analyse-Alarme erhält, die seinen eigenen Score-Schwellenwert, seine Bedingung und seinen Kamerafilter erfüllen.",
+          "data": {
+            "target_name": "Name des Ziels",
+            "notify_service": "Benachrichtigungsdienst (domain.service)",
+            "min_score": "Mindest-Score für Benachrichtigung",
+            "condition": "Aktiv bei",
+            "camera_filter": "Kameras (leer = alle)"
+          }
+        }
+      },
+      "abort": {
+        "reconfigure_successful": "Das Alarm-Ziel wurde aktualisiert."
+      }
+    },
+    "ai_visitor": {
+      "entry_type": "Bekannter Besucher",
+      "initiate_flow": {
+        "user": "Bekannten Besucher hinzufügen",
+        "reconfigure": "Bekannten Besucher bearbeiten"
+      },
+      "step": {
+        "user": {
+          "title": "Bekannten Besucher hinzufügen",
+          "description": "Beschreibe eine Person, die die KI als erwartet/bekannt erkennen soll. Diese Beschreibung wird in den Analyse-Prompt jeder Kamera eingefügt.",
+          "data": {
+            "visitor_name": "Name",
+            "visitor_description": "Beschreibung"
+          }
+        },
+        "reconfigure": {
+          "title": "Bekannten Besucher bearbeiten",
+          "description": "Beschreibe eine Person, die die KI als erwartet/bekannt erkennen soll. Diese Beschreibung wird in den Analyse-Prompt jeder Kamera eingefügt.",
+          "data": {
+            "visitor_name": "Name",
+            "visitor_description": "Beschreibung"
+          }
+        }
+      },
+      "abort": {
+        "reconfigure_successful": "Der bekannte Besucher wurde aktualisiert."
+      }
+    }
+  },
   "entity": {
     "image": {
       "last_snapshot": {
         "name": "Letzter Snapshot"
+      },
+      "ai_latest_alert": {
+        "name": "KI letzter Alarm"
       }
     },
     "switch": {
@@ -436,6 +535,9 @@
       },
       "fire_alarm_detection": {
         "name": "Rauchmelder-Erkennung"
+      },
+      "ai_analysis": {
+        "name": "KI-Kamera-Analyse"
       }
     },
     "number": {
@@ -575,6 +677,9 @@
       },
       "lan_reachable": {
         "name": "LAN erreichbar"
+      },
+      "ai_recent_alert": {
+        "name": "KI-Alarm kürzlich"
       }
     },
     "update": {
@@ -754,6 +859,17 @@
       },
       "ai_description": {
         "name": "KI-Snapshot-Beschreibung"
+      },
+      "ai_alert_score": {
+        "name": "KI-Alarm-Score"
+      },
+      "ai_alerts_24h": {
+        "name": "KI-Alarme (24h)"
+      }
+    },
+    "text": {
+      "ai_scene_context": {
+        "name": "KI-Szenenkontext"
       }
     }
   },
@@ -869,6 +985,20 @@
         "ai_task_entity": {
           "name": "KI-Task-Entität",
           "description": "Zu verwendende KI-Task-Entität. Leer lassen für den bevorzugten Standard von HA."
+        }
+      }
+    },
+    "analyze_camera_ai": {
+      "name": "Kamera analysieren (KI)",
+      "description": "Löst eine strukturierte KI-Kamera-Analyse (1-10 Verdachts-Score) manuell für eine Kamera aus, umgeht dabei die Cooldown-/Zeitfenster-Sperre.",
+      "fields": {
+        "camera_id": {
+          "name": "Kamera-ID",
+          "description": "Bosch-Cloud-Kamera-ID (UUID). Entweder camera_id oder entity_id verwenden."
+        },
+        "entity_id": {
+          "name": "Kamera-Entity",
+          "description": "Kamera-Entity-ID (z. B. camera.bosch_terrasse). Entweder entity_id oder camera_id verwenden."
         }
       }
     }

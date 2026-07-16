@@ -41,6 +41,7 @@ ALL_PLATFORMS = [
     "select",
     "update",
     "light",
+    "text",
 ]
 
 LIVE_SESSION_TTL = 55  # seconds — proxy sessions last ~60s, expire 5s early
@@ -281,6 +282,26 @@ DEFAULT_OPTIONS = {
     # before AUTO analyses are allowed. Empty = no condition gate.
     "ai_active_condition_entity": "",
     "ai_active_condition_state": "not_home",
+    # ── AI Camera Analysis (motion-triggered structured scoring) ──────────────
+    # Sibling to AI Snapshot Description above (free-text): this requests a
+    # STRUCTURED 1-10 suspicion score + fields from ai_task.generate_data,
+    # with its own gating/budget so the two features don't compete for the
+    # same daily AI-call allowance. Opt-in, default off. Design inspired by
+    # concepts from github.com/simpleaddins/HomeAssistantAICameraCentre (MIT)
+    # per Thomas's request, independently reimplemented against this
+    # integration's own coordinator/entity model — see README credit line.
+    "ai_analysis_enabled": False,
+    "ai_analysis_task_entity": "",  # empty → falls back to ai_task_entity above
+    "ai_analysis_snapshot_count": 3,
+    "ai_analysis_snapshot_interval_ms": 800,
+    "ai_analysis_cooldown_seconds": 30,
+    "ai_analysis_max_per_day": 200,
+    "ai_analysis_retention_days": 30,
+    "ai_analysis_repeat_context_minutes": 30,
+    "ai_analysis_alarm_panel_entity": "",
+    "ai_analysis_alarmo_enabled": False,
+    "ai_analysis_alarm_trigger_service": "",
+    "ai_analysis_alarm_trigger_score": 7,
     # ── Frigate / external-recorder persistent RTSP endpoints ─────────────────
     # Opt-in always-on, credential-free RTSP front-door per camera (see
     # frigate_endpoint.py). Master switch; per-camera High/Low switches gate
@@ -356,3 +377,31 @@ CONF_AI_ACTIVE_TIME_START = "ai_active_time_start"
 CONF_AI_ACTIVE_TIME_END = "ai_active_time_end"
 CONF_AI_ACTIVE_CONDITION_ENTITY = "ai_active_condition_entity"
 CONF_AI_ACTIVE_CONDITION_STATE = "ai_active_condition_state"
+
+# ── AI Camera Analysis (motion-triggered structured scoring) ──────────────────
+CONF_AI_ANALYSIS_ENABLED = "ai_analysis_enabled"
+CONF_AI_ANALYSIS_TASK_ENTITY = "ai_analysis_task_entity"
+CONF_AI_ANALYSIS_SNAPSHOT_COUNT = "ai_analysis_snapshot_count"
+CONF_AI_ANALYSIS_SNAPSHOT_INTERVAL_MS = "ai_analysis_snapshot_interval_ms"
+CONF_AI_ANALYSIS_COOLDOWN_SECONDS = "ai_analysis_cooldown_seconds"
+CONF_AI_ANALYSIS_MAX_PER_DAY = "ai_analysis_max_per_day"
+CONF_AI_ANALYSIS_RETENTION_DAYS = "ai_analysis_retention_days"
+CONF_AI_ANALYSIS_REPEAT_CONTEXT_MINUTES = "ai_analysis_repeat_context_minutes"
+CONF_AI_ANALYSIS_ALARM_PANEL_ENTITY = "ai_analysis_alarm_panel_entity"
+CONF_AI_ANALYSIS_ALARMO_ENABLED = "ai_analysis_alarmo_enabled"
+CONF_AI_ANALYSIS_ALARM_TRIGGER_SERVICE = "ai_analysis_alarm_trigger_service"
+CONF_AI_ANALYSIS_ALARM_TRIGGER_SCORE = "ai_analysis_alarm_trigger_score"
+# Alert-target subentry field names (config_entries subentry data, not a flat option)
+CONF_AI_TARGET_NAME = "target_name"
+CONF_AI_TARGET_NOTIFY_SERVICE = "notify_service"
+CONF_AI_TARGET_MIN_SCORE = "min_score"
+CONF_AI_TARGET_CONDITION = "condition"
+CONF_AI_TARGET_CAMERA_FILTER = "camera_filter"
+AI_TARGET_CONDITIONS = ("always", "away", "armed", "away_or_armed")
+# Known-visitor subentry field names
+CONF_AI_VISITOR_NAME = "visitor_name"
+CONF_AI_VISITOR_DESCRIPTION = "visitor_description"
+# NOTE: no "camera-scope" subentry — per-camera AI-analysis enable/disable
+# lives solely on switch.<cam>_ai_analysis (switch.py), matching every other
+# per-camera toggle in this integration. An earlier draft added a redundant
+# ai_camera_scope subentry with no backend consumer; removed before release.

@@ -48,6 +48,8 @@ from custom_components.bosch_shc_camera.binary_sensor import (
 from custom_components.bosch_shc_camera.camera import BoschCamera
 from custom_components.bosch_shc_camera.maintenance import MaintenanceWindow
 from custom_components.bosch_shc_camera.sensor import (
+    BoschAiAlerts24hSensor,
+    BoschAiAlertScoreSensor,
     BoschAlarmCatalogSensor,
     BoschCameraStatusSensor,
     BoschCloudMaintenanceSensor,
@@ -7700,6 +7702,58 @@ class TestSensorSetupAiDescriptionOption:
         ]
         assert len(ai_sensors) == 0, "No AI sensor when option is absent"
 
+    def test_ai_analysis_sensors_appended_when_option_true(self):
+        """When ai_analysis_enabled=True, both BoschAiAlertScoreSensor and
+        BoschAiAlerts24hSensor are appended per camera — sibling gate to
+        the AI Snapshot Description one above."""
+        import asyncio
+
+        from custom_components.bosch_shc_camera.sensor import async_setup_entry
+
+        coord = self._stub_coord()
+        entry = SimpleNamespace(
+            runtime_data=coord,
+            options={"ai_analysis_enabled": True, "enable_sensors": True},
+        )
+        added_entities: list = []
+
+        def fake_add(entities, **kw):
+            added_entities.extend(entities)
+
+        asyncio.run(async_setup_entry(None, entry, fake_add))
+
+        score_sensors = [
+            e for e in added_entities if isinstance(e, BoschAiAlertScoreSensor)
+        ]
+        count_sensors = [
+            e for e in added_entities if isinstance(e, BoschAiAlerts24hSensor)
+        ]
+        assert len(score_sensors) == 1
+        assert len(count_sensors) == 1
+        assert score_sensors[0]._cam_id == CAM_ID
+
+    def test_ai_analysis_sensors_not_appended_when_option_false(self):
+        import asyncio
+
+        from custom_components.bosch_shc_camera.sensor import async_setup_entry
+
+        coord = self._stub_coord()
+        entry = SimpleNamespace(
+            runtime_data=coord,
+            options={"enable_sensors": True},  # no ai_analysis_enabled
+        )
+        added_entities: list = []
+
+        def fake_add(entities, **kw):
+            added_entities.extend(entities)
+
+        asyncio.run(async_setup_entry(None, entry, fake_add))
+
+        assert not any(
+            isinstance(e, (BoschAiAlertScoreSensor, BoschAiAlerts24hSensor))
+            for e in added_entities
+        )
+
 
 # Bosch event-timestamp offset — sensor.py "today" buckets must use the LOCAL
 # date, not a UTC-prefix slice (relocated from tests/test_event_timestamp_offset.py
@@ -7886,3 +7940,210 @@ class TestTodayBucketsLocalDate:
         p_now, p_local = self._patch_local()
         with p_now, p_local:
             assert s.native_value == 1
+
+
+class TestFrigateUrlSensors:
+    """`BoschFrigateUrlHighSensor`/`BoschFrigateUrlLowSensor`.native_value
+    delegates to `coordinator.frigate_endpoint_url(cam_id, quality)` —
+    previously zero test coverage on either class."""
+
+    def test_high_quality_native_value_delegates(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschFrigateUrlHighSensor,
+        )
+
+        base_sensor_coord.frigate_endpoint_url = lambda cam_id, quality: (
+            f"rtsp://127.0.0.1:8554/{cam_id}?q={quality}"
+        )
+        s = BoschFrigateUrlHighSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.native_value == f"rtsp://127.0.0.1:8554/{CAM_ID}?q=high"
+
+    def test_low_quality_native_value_delegates(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        from custom_components.bosch_shc_camera.sensor import BoschFrigateUrlLowSensor
+
+        base_sensor_coord.frigate_endpoint_url = lambda cam_id, quality: (
+            f"rtsp://127.0.0.1:8554/{cam_id}?q={quality}"
+        )
+        s = BoschFrigateUrlLowSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.native_value == f"rtsp://127.0.0.1:8554/{CAM_ID}?q=low"
+
+    def test_native_value_none_when_not_bound(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschFrigateUrlHighSensor,
+        )
+
+        base_sensor_coord.frigate_endpoint_url = lambda cam_id, quality: None
+        s = BoschFrigateUrlHighSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.native_value is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BoschAiAlertScoreSensor / BoschAiAlerts24hSensor — AI Camera Analysis
+# (ai_analysis.py) structured suspicion-score sensors. Only created when the
+# `ai_analysis_enabled` integration option is enabled; entity behavior itself
+# is independent of that gate (tested via TestSensorSetupAiDescriptionOption-
+# style creation-gating for the switch/text/binary_sensor/image counterparts
+# — here we test the sensor state/attribute logic directly).
+
+
+class TestAiAlertScoreSensor:
+    def test_unique_id(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        s = BoschAiAlertScoreSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s._attr_unique_id == f"bosch_shc_camera_{CAM_ID}_ai_alert_score"
+
+    def test_translation_key(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        s = BoschAiAlertScoreSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s._attr_translation_key == "ai_alert_score"
+
+    def test_native_value_none_when_never_analyzed(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        """No `ai_analysis` key ever written for this camera → unknown."""
+        s = BoschAiAlertScoreSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.native_value is None
+
+    def test_native_value_reflects_score(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        base_sensor_coord.data[CAM_ID]["ai_analysis"] = {"score": 7}
+        s = BoschAiAlertScoreSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.native_value == 7
+
+    def test_native_value_coerces_string_score(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        base_sensor_coord.data[CAM_ID]["ai_analysis"] = {"score": "5"}
+        s = BoschAiAlertScoreSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.native_value == 5
+
+    def test_native_value_none_on_garbage_score(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        base_sensor_coord.data[CAM_ID]["ai_analysis"] = {"score": "not-a-number"}
+        s = BoschAiAlertScoreSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.native_value is None
+
+    def test_extra_state_attributes_empty_when_never_analyzed(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        s = BoschAiAlertScoreSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.extra_state_attributes == {}
+
+    def test_extra_state_attributes_include_all_expected_fields(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        base_sensor_coord.data[CAM_ID]["ai_analysis"] = {
+            "score": 8,
+            "short": "Person at gate",
+            "detail": "A person approached the gate and looked around.",
+            "direction": "approaching",
+            "carrying": "backpack",
+            "activity": "walking",
+            "gate_state": "closed",
+            "gate_risk": "low",
+            "known_person": False,
+            "image_path": "2026-07-16/alert_120000.jpg",
+            "generated_at": "2026-07-16T12:00:00+00:00",
+        }
+        s = BoschAiAlertScoreSensor(base_sensor_coord, CAM_ID, stub_entry)
+        attrs = s.extra_state_attributes
+        for key in (
+            "short",
+            "detail",
+            "direction",
+            "carrying",
+            "activity",
+            "gate_state",
+            "gate_risk",
+            "known_person",
+            "image_path",
+            "generated_at",
+        ):
+            assert key in attrs, f"missing expected attribute {key!r}"
+        assert attrs["short"] == "Person at gate"
+        assert attrs["known_person"] is False
+        assert attrs["image_path"] == "2026-07-16/alert_120000.jpg"
+
+
+class TestAiAlerts24hSensor:
+    def test_unique_id(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        s = BoschAiAlerts24hSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s._attr_unique_id == f"bosch_shc_camera_{CAM_ID}_ai_alerts_24h"
+
+    def test_translation_key(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        s = BoschAiAlerts24hSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s._attr_translation_key == "ai_alerts_24h"
+
+    def test_entity_category_diagnostic(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        s = BoschAiAlerts24hSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+    def test_zero_alerts(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        base_sensor_coord.ai_analysis_recent = {}
+        s = BoschAiAlerts24hSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.native_value == 0
+
+    def test_alerts_within_window_counted(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        now = datetime.now(UTC)
+        base_sensor_coord.ai_analysis_recent = {
+            CAM_ID: [
+                ((now - timedelta(hours=1)).isoformat(), 6),
+                ((now - timedelta(hours=23)).isoformat(), 4),
+            ]
+        }
+        s = BoschAiAlerts24hSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.native_value == 2
+
+    def test_alerts_outside_window_excluded(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        now = datetime.now(UTC)
+        base_sensor_coord.ai_analysis_recent = {
+            CAM_ID: [
+                ((now - timedelta(hours=1)).isoformat(), 6),  # within
+                ((now - timedelta(hours=25)).isoformat(), 4),  # outside
+                ((now - timedelta(days=3)).isoformat(), 9),  # outside
+            ]
+        }
+        s = BoschAiAlerts24hSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.native_value == 1
+
+    def test_garbage_timestamp_skipped_not_crashed(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        now = datetime.now(UTC)
+        base_sensor_coord.ai_analysis_recent = {
+            CAM_ID: [
+                ("not-a-timestamp", 5),
+                ((now - timedelta(minutes=5)).isoformat(), 7),
+            ]
+        }
+        s = BoschAiAlerts24hSensor(base_sensor_coord, CAM_ID, stub_entry)
+        assert s.native_value == 1
+
+    def test_unknown_camera_returns_zero(
+        self, base_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        base_sensor_coord.ai_analysis_recent = {}
+        s = BoschAiAlerts24hSensor(base_sensor_coord, "unknown-cam", stub_entry)
+        assert s.native_value == 0

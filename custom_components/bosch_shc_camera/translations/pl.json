@@ -301,6 +301,38 @@
               "force_relogin": "Zaznacz, aby ponownie uwierzytelnić się przez przeglądarkę. Potrzebne tylko gdy token odświeżania wygasł (bardzo rzadko).",
               "migrate_to_oss_client": "Przełącz ze starszego klienta `residential_app` na dedykowany klient `oss_residential_app`, który Bosch udostępnia dla integracji open source. Włączenie spowoduje uruchomienie przepływu reauth — zostaniesz poproszony o jednorazowe zalogowanie przez Bosch SingleKey ID, a Twoje istniejące encje, automatyzacje i opcje zostaną zachowane."
             }
+          },
+          "ai_analysis": {
+            "name": "Analiza kamery AI",
+            "description": "Ustrukturyzowana ocena podejrzeń (1-10) wyzwalana ruchem, z routingiem powiadomień do wielu celów i opcjonalnym wyzwalaniem alarmu. Funkcja siostrzana do Opisu migawki AI powyżej (tekst dowolny): ta funkcja żąda ustrukturyzowanego, ocenianego wyniku i może kierować alerty do różnych celów powiadomień oraz wyzwalać usługę alarmową. Wymaga skonfigurowanej integracji AI Task. Zarządzaj celami powiadomień, znanymi gośćmi i nadpisaniami dla poszczególnych kamer w menu dodatków integracji (podwpisy).",
+            "data": {
+              "ai_analysis_enabled": "Włącz analizę kamery AI",
+              "ai_analysis_task_entity": "Encja AI Task (opcjonalnie)",
+              "ai_analysis_snapshot_count": "Migawki na analizę",
+              "ai_analysis_snapshot_interval_ms": "Odstęp między migawkami (ms)",
+              "ai_analysis_cooldown_seconds": "Minimalna liczba sekund między analizami (na kamerę)",
+              "ai_analysis_max_per_day": "Dzienny budżet analiz (0 = bez limitu)",
+              "ai_analysis_retention_days": "Przechowywanie historii alertów (dni)",
+              "ai_analysis_repeat_context_minutes": "Okno kontekstu powtarzających się alertów (minuty, 0 = wyłączone)",
+              "ai_analysis_alarm_panel_entity": "Encja panelu alarmowego (opcjonalnie)",
+              "ai_analysis_alarmo_enabled": "Włącz wyzwalanie panelu alarmowego",
+              "ai_analysis_alarm_trigger_service": "Usługa wyzwalania alarmu (domain.service)",
+              "ai_analysis_alarm_trigger_score": "Minimalny wynik wyzwalający alarm"
+            },
+            "data_description": {
+              "ai_analysis_enabled": "Główny przełącznik ustrukturyzowanej analizy kamery AI. Niezależny od własnego przełącznika i budżetu Opisu migawki AI — obie funkcje nie współdzielą dziennego limitu.",
+              "ai_analysis_task_entity": "Wybierz konkretną encję AI Task do analizy ustrukturyzowanej. Pozostaw puste, aby użyć encji AI Task wybranej dla Opisu migawki AI lub domyślnej wartości HA, jeśli żadna nie jest ustawiona.",
+              "ai_analysis_snapshot_count": "Liczba migawek przechwytywanych seryjnie dla każdej analizy (2-10). Więcej migawek daje AI więcej kontekstu, ale kosztuje więcej.",
+              "ai_analysis_snapshot_interval_ms": "Odstęp między migawkami serii w milisekundach (100-5000).",
+              "ai_analysis_cooldown_seconds": "Minimalny czas między automatycznymi analizami dla danej kamery. Odrębny czas oczekiwania od tego w Opisie migawki AI.",
+              "ai_analysis_max_per_day": "Maksymalna liczba automatycznych analiz na wszystkich kamerach dziennie (resetowana o północy). Budżet odrębny od tego w Opisie migawki AI. 0 = bez limitu.",
+              "ai_analysis_retention_days": "Jak długo historia alertów (wyniki + zdjęcia) jest przechowywana na dysku przed automatycznym usunięciem (1-90 dni).",
+              "ai_analysis_repeat_context_minutes": "Jeśli większe niż 0, w promptcie AI wspominana jest ostatnia historia alertów tej kamery z ostatnich N minut, aby powtarzająca się aktywność mogła zostać rozpoznana jako taka. 0 wyłącza kontekst powtórzeń.",
+              "ai_analysis_alarm_panel_entity": "Encja panelu kontroli alarmu, której stan uzbrojenia/nieobecności warunkuje poniższe warunki celów powiadomień i wyzwalanie usługi alarmowej. Pozostaw puste, jeśli nie używasz routingu przez panel alarmowy.",
+              "ai_analysis_alarmo_enabled": "Gdy włączone i powyższy panel alarmowy jest uzbrojony, alert o wysokim wyniku wywołuje poniższą usługę wyzwalania alarmu (np. usługę syreny/uzbrojenia Alarmo lub dowolną inną domain.service).",
+              "ai_analysis_alarm_trigger_service": "Surowy ciąg domain.service wywoływany przy wyzwoleniu (np. alarmo.arm_away, switch.turn_on lub dowolna inna usługa). Działa z Alarmo lub dowolną inną integracją panelu alarmowego — nie jest specyficzny dla Alarmo.",
+              "ai_analysis_alarm_trigger_score": "Minimalny wynik podejrzenia (1-10) wymagany przed wywołaniem usługi wyzwalania alarmu."
+            }
           }
         }
       },
@@ -344,6 +376,9 @@
     "image": {
       "last_snapshot": {
         "name": "Ostatnia migawka"
+      },
+      "ai_latest_alert": {
+        "name": "Najnowszy alert AI"
       }
     },
     "switch": {
@@ -436,6 +471,9 @@
       },
       "fire_alarm_detection": {
         "name": "Wykrywanie Alarmu Pożarowego"
+      },
+      "ai_analysis": {
+        "name": "Analiza kamery AI"
       }
     },
     "number": {
@@ -575,6 +613,9 @@
       },
       "lan_reachable": {
         "name": "LAN Osiągalna"
+      },
+      "ai_recent_alert": {
+        "name": "Ostatni alert AI"
       }
     },
     "update": {
@@ -754,6 +795,17 @@
       },
       "stream_url_sub": {
         "name": "URL strumienia (sub)"
+      },
+      "ai_alert_score": {
+        "name": "Wynik alertu AI"
+      },
+      "ai_alerts_24h": {
+        "name": "Alerty AI (24h)"
+      }
+    },
+    "text": {
+      "ai_scene_context": {
+        "name": "Kontekst sceny AI"
       }
     }
   },

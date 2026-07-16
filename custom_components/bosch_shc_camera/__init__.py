@@ -49,6 +49,7 @@ from homeassistant.helpers.aiohttp_client import (
 )
 from homeassistant.helpers.storage import Store
 
+from . import ai_alert_store, ai_analysis
 from . import recorder as nvr_recorder
 from .cloud_ssl import (
     async_get_bosch_cloud_session as async_get_bosch_cloud_session,  # re-export: mypy --no-implicit-reexport (services.py/live_connection.py/token_auth.py import it via `from . import`)
@@ -83,6 +84,11 @@ _LOGGER = logging.getLogger(__name__)
 # the dict and allow a burst of back-to-back AI calls across the reload gap.
 _AI_MOTION_DEBOUNCE: dict[str, float] = {}
 _AI_MOTION_DEBOUNCE_SEC = 30.0
+# Sibling debounce dict for AI Camera Analysis's own auto-motion listener —
+# kept separate from _AI_MOTION_DEBOUNCE above so the two AI features' motion
+# debouncing can never interfere with each other (same separation principle
+# as their independently-tracked cooldown/budget state in coordinator.py).
+_AI_ANALYSIS_MOTION_DEBOUNCE: dict[str, float] = {}
 
 # Read integration version once at import time (sync I/O at module level is fine — import
 # happens in the executor during HA startup, not inside the event loop).
@@ -335,6 +341,7 @@ def _redact_creds(d: dict[str, Any]) -> dict[str, Any]:
 
 from .const import (
     ALL_PLATFORMS,
+    CONF_AI_ANALYSIS_ENABLED,
     DOMAIN,
     LIVE_SESSION_TTL,  # noqa: F401  # re-exported for tests
 )
@@ -401,6 +408,11 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
                 str(_www / "bosch-camera-autoplay-fix.js"),
                 False,
             ),
+            _StaticPathConfig(
+                f"/{DOMAIN}/ai-alert-timeline-card.js",
+                str(_www / "ai-alert-timeline-card.js"),
+                False,
+            ),
         ]
     )
 
@@ -438,6 +450,12 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
                     "%s: Removed deprecated Lovelace resource: %s", DOMAIN, item["url"]
                 )
 
+        # NOTE: ai-alert-timeline-card.js is deliberately NOT auto-registered
+        # here — same lesson as bosch-camera-autoplay-fix.js above (a second
+        # auto-registered module resource risks double-load/ordering issues
+        # with the main card). It's still served as a static path (below)
+        # and documented for manual dashboard-resource addition, matching
+        # how any second HACS-bundled card would normally be added.
         for card_path in (f"/{DOMAIN}/bosch-camera-card.js",):
             versioned = f"{card_path}?v={CARD_VERSION}"
             existing_id = None
@@ -989,6 +1007,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Restore persisted daily AI budget so the cap survives restart/reload.
     await coordinator.async_load_ai_budget()
+    # Sibling restores for AI Camera Analysis — bug-hunt finding: these were
+    # fully implemented (and unit-tested) but never actually called from
+    # setup, silently resetting the daily budget to 0 on every HA restart
+    # (defeating the cap) and leaving the repeat-context cache empty for up
+    # to ai_analysis_repeat_context_minutes after every restart.
+    await ai_analysis.async_load_ai_analysis_budget(coordinator)
+    await ai_alert_store.async_load_recent_alerts(coordinator)
 
     # Quality-Scale Bronze (runtime-data): store on entry.runtime_data, not hass.data[DOMAIN].
     # HA clears runtime_data automatically on unload — no manual cleanup needed.
@@ -1430,11 +1455,148 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     for _motion_evt in ("bosch_shc_camera_motion", "bosch_shc_camera_person"):
         entry.async_on_unload(hass.bus.async_listen(_motion_evt, _async_auto_describe))
 
+    # ── Auto-analyze on motion (AI Camera Analysis, opt-in) ──────────────────
+    # Sibling to _async_auto_describe above — same event/debounce/coordinator-
+    # resolution shape, calling ai_analysis.async_generate_ai_analysis
+    # instead. Bug-hunt finding: this listener was the one piece never wired
+    # up when the feature was built — every other part (entities, config
+    # flow, storage, routing) existed but nothing ever triggered the
+    # non-force path, so the feature only ever ran via the manual
+    # analyze_camera_ai service despite being designed as motion-triggered.
+    async def _async_auto_analyze(event: Any) -> None:
+        """Auto-call ai_analysis on motion/person events (debounced)."""
+        cam_id_evt: str = event.data.get("camera_id", "")
+        now_ts = hass.loop.time()
+        last = _AI_ANALYSIS_MOTION_DEBOUNCE.get(cam_id_evt, float("-inf"))
+        if now_ts - last < _AI_MOTION_DEBOUNCE_SEC:
+            return
+        loaded_entries = list(hass.config_entries.async_loaded_entries(DOMAIN))
+        if not loaded_entries:
+            return
+        found_coord: Any = None
+        for _entry in loaded_entries:
+            coord_inst = _entry.runtime_data
+            if coord_inst:
+                cam_entity_obj = getattr(coord_inst, "camera_entities", {}).get(
+                    cam_id_evt
+                )
+                if cam_entity_obj:
+                    found_coord = coord_inst
+                    break
+        if found_coord is None:
+            return
+        ai_opts = get_options(found_coord.entry)
+        if not ai_opts.get(CONF_AI_ANALYSIS_ENABLED, False):
+            return
+        _AI_ANALYSIS_MOTION_DEBOUNCE[cam_id_evt] = now_ts
+        try:
+            await ai_analysis.async_generate_ai_analysis(
+                found_coord, cam_id_evt, force=False
+            )
+        except Exception as err:
+            _LOGGER.debug("auto-analyze failed for %s: %s", cam_id_evt, err)
+
+    for _motion_evt in ("bosch_shc_camera_motion", "bosch_shc_camera_person"):
+        entry.async_on_unload(hass.bus.async_listen(_motion_evt, _async_auto_analyze))
+
     if not hass.services.has_service(DOMAIN, "describe_snapshot"):
         hass.services.async_register(
             DOMAIN,
             "describe_snapshot",
             handle_describe_snapshot,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
+    # analyze_camera_ai service — on-demand structured AI Camera Analysis
+    # (ai_analysis.py). Mirrors describe_snapshot's camera_id/entity_id
+    # resolution shape, but delegates the actual AI call + persistence/
+    # routing to ai_analysis.async_generate_ai_analysis(force=True) instead
+    # of duplicating that logic here.
+    async def handle_analyze_camera_ai(call: ServiceCall) -> dict[str, Any]:
+        """Manually trigger a structured AI Camera Analysis for one camera.
+
+        `force=True` bypasses the per-camera cooldown and the on/away
+        window gate but still counts toward the feature's own daily
+        budget — same manual-service convention as `describe_snapshot`.
+        Returns `{"triggered": False}` (no exception) when the analysis
+        ran but produced a "nothing notable" (score <= 0) result, matching
+        `async_generate_ai_analysis`'s own never-raises contract.
+        """
+        camera_id: str = call.data.get("camera_id", "").strip()
+        entity_id_arg: str = call.data.get("entity_id", "").strip()
+
+        if not camera_id and not entity_id_arg:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id or entity_id"},
+            )
+
+        loaded = list(hass.config_entries.async_loaded_entries(DOMAIN))
+        if not loaded:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unexpected_error",
+                translation_placeholders={
+                    "action": "analyze_camera_ai",
+                    "error": "no loaded entries",
+                },
+            )
+
+        resolved_cam_id: str = ""
+        coord: Any = None
+        for entry_inst in loaded:
+            _coord = entry_inst.runtime_data
+            if not _coord:
+                continue
+            if camera_id:
+                cam_entity = getattr(_coord, "camera_entities", {}).get(camera_id)
+                if cam_entity:
+                    coord = _coord
+                    resolved_cam_id = camera_id
+                    break
+            elif entity_id_arg:
+                for cid, cent in getattr(_coord, "camera_entities", {}).items():
+                    if cent.entity_id == entity_id_arg:
+                        coord = _coord
+                        resolved_cam_id = cid
+                        break
+                if coord:
+                    break
+
+        if coord is None or not resolved_cam_id:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="not_found",
+                translation_placeholders={
+                    "kind": "camera entity",
+                    "id": camera_id or entity_id_arg,
+                },
+            )
+
+        # Bug-hunt finding: force=True bypasses cooldown/window but NOT the
+        # master option / per-camera switch — a manual trigger against a
+        # disabled camera previously returned the byte-identical
+        # {"triggered": False} as a genuine "AI scored <=0" result, with no
+        # way for the caller to tell them apart. Surface the reason instead.
+        ai_opts_call = get_options(coord.entry)
+        if not ai_opts_call.get(CONF_AI_ANALYSIS_ENABLED, False):
+            return {"triggered": False, "reason": "ai_analysis_disabled"}
+        if not ai_analysis.per_camera_analysis_enabled(coord, resolved_cam_id):
+            return {"triggered": False, "reason": "camera_disabled"}
+
+        result = await ai_analysis.async_generate_ai_analysis(
+            coord, resolved_cam_id, force=True
+        )
+        if result is None:
+            return {"triggered": False, "reason": "nothing_notable"}
+        return {"triggered": True, **result}
+
+    if not hass.services.has_service(DOMAIN, "analyze_camera_ai"):
+        hass.services.async_register(
+            DOMAIN,
+            "analyze_camera_ai",
+            handle_analyze_camera_ai,
             supports_response=SupportsResponse.OPTIONAL,
         )
 

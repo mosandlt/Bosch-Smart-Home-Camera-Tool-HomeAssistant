@@ -844,11 +844,22 @@ def _make_preroll_coord(tmp_path, *, cam_title: str = CAM_TITLE) -> SimpleNamesp
         # SENTINEL_RULE: monotonic-based "last X" maps default to float('-inf')
         # so any (now - last) >= interval check is True on fresh CI VMs.
         _nvr_last_preroll_prune={CAM_ID: float("-inf")},
+        _nvr_preroll_last_crash={},
+        _nvr_recorder_locks={},
     )
     coord.hass = SimpleNamespace(
         async_add_executor_job=_run_executor,
         async_create_background_task=lambda c, n=None: MagicMock(),
     )
+
+    def get_nvr_recorder_lock(cid: str) -> asyncio.Lock:
+        lock = coord._nvr_recorder_locks.get(cid)
+        if lock is None:
+            lock = asyncio.Lock()
+            coord._nvr_recorder_locks[cid] = lock
+        return lock
+
+    coord.get_nvr_recorder_lock = get_nvr_recorder_lock
     return coord
 
 
@@ -1117,7 +1128,17 @@ class TestCreateMotionClip:
 
         coord = SimpleNamespace(
             hass=SimpleNamespace(async_add_executor_job=_executor),
+            _nvr_recorder_locks={},
         )
+
+        def get_nvr_recorder_lock(cid: str) -> asyncio.Lock:
+            lock = coord._nvr_recorder_locks.get(cid)
+            if lock is None:
+                lock = asyncio.Lock()
+                coord._nvr_recorder_locks[cid] = lock
+            return lock
+
+        coord.get_nvr_recorder_lock = get_nvr_recorder_lock
 
         # proc.communicate() never resolves naturally — wait_for times out
         # before it does. kill() raises ProcessLookupError (already dead).
@@ -1126,12 +1147,18 @@ class TestCreateMotionClip:
         proc.kill = MagicMock(side_effect=ProcessLookupError())
 
         out_path = str(tmp_path / "clip.mp4")
+        # GitHub #51: staging hardlinks the listed segment, so it must be a
+        # real file — a nonexistent mocked path would yield zero staged
+        # segments and short-circuit before ever reaching the ffmpeg spawn
+        # this test exercises.
+        seg1 = tmp_path / "seg1.mp4"
+        seg1.write_bytes(b"x" * 2048)
 
         with (
             patch.object(
                 recorder,
                 "list_preroll_files",
-                return_value=[str(tmp_path / "seg1.mp4")],
+                return_value=[str(seg1)],
             ),
             patch(
                 "asyncio.create_subprocess_exec",
@@ -1218,23 +1245,33 @@ class TestCreateMotionClip:
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
         mock_proc.returncode = 0
 
-        with (
-            patch.object(
-                recorder,
-                "list_preroll_files",
-                return_value=["/tmp/seg0.mp4", "/tmp/seg1.mp4"],
-            ),
-            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
-            tempfile.TemporaryDirectory() as d,
-        ):
-            output = os.path.join(d, "motion.mp4")
+        with tempfile.TemporaryDirectory() as d:
+            # GitHub #51: the new staging step hardlinks every listed
+            # segment, so a mocked-but-nonexistent path would silently
+            # yield zero staged segments (and a false-negative "False"
+            # result for the wrong reason) — segments must be real files.
+            seg0 = os.path.join(d, "seg0.mp4")
+            seg1 = os.path.join(d, "seg1.mp4")
+            for p in (seg0, seg1):
+                with open(p, "wb") as f:
+                    f.write(b"x" * 2048)
 
-            # Patch async_add_executor_job to actually run the function
-            async def _exec_job(fn, *args):
-                return fn(*args) if args else fn()
+            with (
+                patch.object(
+                    recorder,
+                    "list_preroll_files",
+                    return_value=[seg0, seg1],
+                ),
+                patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+            ):
+                output = os.path.join(d, "motion.mp4")
 
-            coord.hass.async_add_executor_job = _exec_job
-            result = await recorder.create_motion_clip(coord, cam_id, output)
+                # Patch async_add_executor_job to actually run the function
+                async def _exec_job(fn, *args):
+                    return fn(*args) if args else fn()
+
+                coord.hass.async_add_executor_job = _exec_job
+                result = await recorder.create_motion_clip(coord, cam_id, output)
 
         assert result is True
 
@@ -1247,23 +1284,25 @@ class TestCreateMotionClip:
         coord = _make_phase_coord()
         cam_id = next(iter(coord.data.keys()))
 
-        with (
-            patch.object(
-                recorder, "list_preroll_files", return_value=["/tmp/seg0.mp4"]
-            ),
-            patch(
-                "asyncio.create_subprocess_exec",
-                side_effect=FileNotFoundError("ffmpeg"),
-            ),
-            tempfile.TemporaryDirectory() as d,
-        ):
-            output = os.path.join(d, "motion.mp4")
+        with tempfile.TemporaryDirectory() as d:
+            seg0 = os.path.join(d, "seg0.mp4")
+            with open(seg0, "wb") as f:
+                f.write(b"x" * 2048)
 
-            async def _exec_job(fn, *args):
-                return fn(*args) if args else fn()
+            with (
+                patch.object(recorder, "list_preroll_files", return_value=[seg0]),
+                patch(
+                    "asyncio.create_subprocess_exec",
+                    side_effect=FileNotFoundError("ffmpeg"),
+                ),
+            ):
+                output = os.path.join(d, "motion.mp4")
 
-            coord.hass.async_add_executor_job = _exec_job
-            result = await recorder.create_motion_clip(coord, cam_id, output)
+                async def _exec_job(fn, *args):
+                    return fn(*args) if args else fn()
+
+                coord.hass.async_add_executor_job = _exec_job
+                result = await recorder.create_motion_clip(coord, cam_id, output)
 
         assert result is False
 
@@ -1279,22 +1318,519 @@ class TestCreateMotionClip:
         mock_proc.communicate = AsyncMock(return_value=(b"", b"error"))
         mock_proc.returncode = 1
 
-        with (
-            patch.object(
-                recorder, "list_preroll_files", return_value=["/tmp/seg0.mp4"]
-            ),
-            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
-            tempfile.TemporaryDirectory() as d,
-        ):
-            output = os.path.join(d, "motion.mp4")
+        with tempfile.TemporaryDirectory() as d:
+            seg0 = os.path.join(d, "seg0.mp4")
+            with open(seg0, "wb") as f:
+                f.write(b"x" * 2048)
 
-            async def _exec_job(fn, *args):
-                return fn(*args) if args else fn()
+            with (
+                patch.object(recorder, "list_preroll_files", return_value=[seg0]),
+                patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+            ):
+                output = os.path.join(d, "motion.mp4")
 
-            coord.hass.async_add_executor_job = _exec_job
-            result = await recorder.create_motion_clip(coord, cam_id, output)
+                async def _exec_job(fn, *args):
+                    return fn(*args) if args else fn()
+
+                coord.hass.async_add_executor_job = _exec_job
+                result = await recorder.create_motion_clip(coord, cam_id, output)
 
         assert result is False
+
+
+class TestStageSegmentsForConcat:
+    """GitHub #51: `_stage_segments_for_concat` hardlinks listed segments
+    into a private dir so a concurrent prune/rotate can't yank one out from
+    under ffmpeg's concat demuxer after it was already selected."""
+
+    def test_hardlinks_every_segment(self, tmp_path: Path):
+        from custom_components.bosch_shc_camera.recorder import (
+            _stage_segments_for_concat,
+        )
+
+        src_dir = tmp_path / "ring"
+        src_dir.mkdir()
+        seg0 = src_dir / "000000.mp4"
+        seg1 = src_dir / "000001.mp4"
+        seg0.write_bytes(b"a" * 2048)
+        seg1.write_bytes(b"b" * 2048)
+
+        stage_dir = tmp_path / "_stage" / "event"
+        staged = _stage_segments_for_concat([str(seg0), str(seg1)], str(stage_dir))
+
+        assert len(staged) == 2
+        for p in staged:
+            assert os.path.isfile(p)
+        # Real hardlinks (same inode), not copies.
+        assert os.stat(staged[0]).st_ino == os.stat(seg0).st_ino
+        assert os.stat(staged[1]).st_ino == os.stat(seg1).st_ino
+
+    def test_survives_original_deleted_after_staging(self, tmp_path: Path):
+        """The whole point: once staged, deleting the original must NOT
+        affect the staged copy's content (tmpfs hardlink semantics)."""
+        from custom_components.bosch_shc_camera.recorder import (
+            _stage_segments_for_concat,
+        )
+
+        src_dir = tmp_path / "ring"
+        src_dir.mkdir()
+        seg0 = src_dir / "000000.mp4"
+        seg0.write_bytes(b"payload" * 100)
+
+        stage_dir = tmp_path / "_stage" / "event"
+        staged = _stage_segments_for_concat([str(seg0)], str(stage_dir))
+        assert len(staged) == 1
+
+        # Simulate the ring pruning/rotating the original right after staging.
+        os.unlink(seg0)
+
+        assert os.path.isfile(staged[0])
+        assert Path(staged[0]).read_bytes() == b"payload" * 100
+
+    def test_missing_segment_skipped_not_raised(self, tmp_path: Path):
+        """A segment already gone by the time we try to link it (the far
+        tighter residual race) is silently skipped — the caller still gets
+        the segments that DID survive, instead of an exception aborting the
+        whole clip."""
+        from custom_components.bosch_shc_camera.recorder import (
+            _stage_segments_for_concat,
+        )
+
+        src_dir = tmp_path / "ring"
+        src_dir.mkdir()
+        seg0 = src_dir / "000000.mp4"
+        seg0.write_bytes(b"x" * 2048)
+        missing = src_dir / "000001.mp4"  # never created
+
+        stage_dir = tmp_path / "_stage" / "event"
+        staged = _stage_segments_for_concat([str(seg0), str(missing)], str(stage_dir))
+
+        assert len(staged) == 1
+        assert os.path.isfile(staged[0])
+
+    def test_empty_input_returns_empty(self, tmp_path: Path):
+        from custom_components.bosch_shc_camera.recorder import (
+            _stage_segments_for_concat,
+        )
+
+        staged = _stage_segments_for_concat([], str(tmp_path / "_stage" / "event"))
+        assert staged == []
+
+    def test_unwritable_stage_dir_returns_empty(self, tmp_path: Path):
+        """`os.makedirs` failing (e.g. permission denied) must degrade to
+        "nothing staged", not raise into the caller."""
+        from custom_components.bosch_shc_camera.recorder import (
+            _stage_segments_for_concat,
+        )
+
+        seg0 = tmp_path / "000000.mp4"
+        seg0.write_bytes(b"x" * 2048)
+
+        with patch("os.makedirs", side_effect=OSError("permission denied")):
+            staged = _stage_segments_for_concat(
+                [str(seg0)], str(tmp_path / "_stage" / "event")
+            )
+        assert staged == []
+
+
+class TestSweepOrphanedStageDirs:
+    """GitHub #51 bug-hunt follow-up: `_stage/<clip>` dirs left behind by a
+    hard-killed process must eventually be reclaimed, but an in-flight
+    concurrent assembly's own fresh stage dir must never be touched."""
+
+    def test_removes_old_orphan(self, tmp_path: Path):
+        from custom_components.bosch_shc_camera.recorder import (
+            _STAGE_ORPHAN_MAX_AGE_SECONDS,
+            _sweep_orphaned_stage_dirs,
+        )
+
+        cam_dir = tmp_path / "cam"
+        stage = cam_dir / "_stage" / "old-clip"
+        stage.mkdir(parents=True)
+        (stage / "0000_seg.mp4").write_bytes(b"x")
+        old_time = time.time() - _STAGE_ORPHAN_MAX_AGE_SECONDS - 60
+        os.utime(stage, (old_time, old_time))
+
+        _sweep_orphaned_stage_dirs(str(cam_dir))
+
+        assert not stage.exists()
+
+    def test_leaves_fresh_stage_dir_untouched(self, tmp_path: Path):
+        """A concurrent in-flight assembly's stage dir is only seconds old
+        — must survive a sweep triggered by an unrelated ring respawn."""
+        from custom_components.bosch_shc_camera.recorder import (
+            _sweep_orphaned_stage_dirs,
+        )
+
+        cam_dir = tmp_path / "cam"
+        stage = cam_dir / "_stage" / "fresh-clip"
+        stage.mkdir(parents=True)
+        (stage / "0000_seg.mp4").write_bytes(b"x")
+
+        _sweep_orphaned_stage_dirs(str(cam_dir))
+
+        assert stage.exists()
+        assert (stage / "0000_seg.mp4").exists()
+
+    def test_no_stage_root_is_a_noop(self, tmp_path: Path):
+        from custom_components.bosch_shc_camera.recorder import (
+            _sweep_orphaned_stage_dirs,
+        )
+
+        cam_dir = tmp_path / "cam"
+        cam_dir.mkdir()
+        # No _stage/ subdirectory at all — must not raise.
+        _sweep_orphaned_stage_dirs(str(cam_dir))
+
+    def test_ignores_non_directory_entries(self, tmp_path: Path):
+        """A stray file directly under `_stage/` (not a clip subdirectory)
+        must be skipped, not raise."""
+        from custom_components.bosch_shc_camera.recorder import (
+            _STAGE_ORPHAN_MAX_AGE_SECONDS,
+            _sweep_orphaned_stage_dirs,
+        )
+
+        cam_dir = tmp_path / "cam"
+        stage_root = cam_dir / "_stage"
+        stage_root.mkdir(parents=True)
+        stray = stage_root / "not_a_dir.txt"
+        stray.write_bytes(b"x")
+        old_time = time.time() - _STAGE_ORPHAN_MAX_AGE_SECONDS - 60
+        os.utime(stray, (old_time, old_time))
+
+        _sweep_orphaned_stage_dirs(str(cam_dir))
+
+        assert stray.exists()
+
+    def test_stat_race_swallowed(self, tmp_path: Path):
+        """A directory that vanishes between the `os.path.isdir` check and
+        the EXPLICIT `os.stat(path).st_mtime` call right after it (e.g. a
+        concurrent cleanup) must be skipped, not raise — this is the exact
+        TOCTOU window the function's own try/except guards against.
+
+        Note: `os.path.isdir` itself calls `os.stat` internally and
+        swallows any OSError (returning False), so a naive "always raise
+        for this path" patch never reaches the code under test — it has to
+        let the FIRST (isdir's internal) stat succeed and only fail the
+        SECOND (explicit) one.
+        """
+        from custom_components.bosch_shc_camera import recorder
+
+        cam_dir = tmp_path / "cam"
+        stage = cam_dir / "_stage" / "racy-clip"
+        stage.mkdir(parents=True)
+
+        real_stat = os.stat
+        call_count = 0
+
+        def _flaky_stat(path, *a, **kw):
+            nonlocal call_count
+            if str(path) == str(stage):
+                call_count += 1
+                if call_count > 1:  # first call is os.path.isdir's own check
+                    raise OSError("no such file or directory (raced away)")
+            return real_stat(path, *a, **kw)
+
+        with patch.object(os, "stat", side_effect=_flaky_stat):
+            recorder._sweep_orphaned_stage_dirs(str(cam_dir))
+        # Must not raise — the racy entry is simply skipped this sweep.
+
+
+class TestCleanupStageDir:
+    """`_cleanup_stage_dir` — best-effort hardlink+dir removal, called from
+    both `create_motion_clip`'s `finally` and `_sweep_orphaned_stage_dirs`.
+    Previously zero direct test coverage (only exercised indirectly via the
+    happy path in staging-race tests)."""
+
+    def test_removes_files_and_dir(self, tmp_path: Path):
+        from custom_components.bosch_shc_camera.recorder import _cleanup_stage_dir
+
+        stage = tmp_path / "_stage" / "clip"
+        stage.mkdir(parents=True)
+        (stage / "0000_seg.mp4").write_bytes(b"x")
+        (stage / "0001_seg.mp4").write_bytes(b"y")
+
+        _cleanup_stage_dir(str(stage))
+
+        assert not stage.exists()
+
+    def test_nonexistent_dir_swallowed(self, tmp_path: Path):
+        from custom_components.bosch_shc_camera.recorder import _cleanup_stage_dir
+
+        # os.listdir on a nonexistent path raises inside the outer try —
+        # must not propagate.
+        _cleanup_stage_dir(str(tmp_path / "never-created"))
+
+    def test_per_file_unlink_failure_swallowed_rmdir_still_attempted(
+        self, tmp_path: Path
+    ):
+        """One file failing to unlink must not stop the others from being
+        removed, and `os.rmdir` is still attempted afterward (it will fail
+        too, on the still-present file, but that failure is ALSO
+        swallowed by the outer except)."""
+        from custom_components.bosch_shc_camera.recorder import _cleanup_stage_dir
+
+        stage = tmp_path / "_stage" / "clip"
+        stage.mkdir(parents=True)
+        good = stage / "0000_good.mp4"
+        bad = stage / "0001_bad.mp4"
+        good.write_bytes(b"x")
+        bad.write_bytes(b"y")
+
+        real_unlink = os.unlink
+
+        def _flaky_unlink(path, *a, **kw):
+            if str(path) == str(bad):
+                raise OSError("permission denied")
+            return real_unlink(path, *a, **kw)
+
+        with patch.object(os, "unlink", side_effect=_flaky_unlink):
+            _cleanup_stage_dir(str(stage))  # must not raise
+
+        assert not good.exists()
+        assert bad.exists()  # the one that failed to unlink is still there
+
+
+class TestCreateMotionClipStagingRace:
+    """GitHub #51 integration-level coverage: the exact race the reporter
+    hit — a segment that `list_preroll_files()` selected gets pruned before
+    ffmpeg's concat demuxer opens it — must no longer lose the whole clip,
+    and the list+stage step must run under the per-camera recorder lock."""
+
+    @pytest.mark.asyncio
+    async def test_segment_pruned_between_list_and_open_still_ships_clip(
+        self, tmp_path: Path
+    ):
+        """Simulates the reported mechanism directly: by the time
+        `create_motion_clip` gets the segment list, one of the two listed
+        files is deleted (as if a concurrent ring prune won the race)
+        BEFORE staging runs. The surviving segment must still ship instead
+        of the whole clip aborting."""
+        coord = _make_preroll_coord(tmp_path)
+        cam_dir = tmp_path / CAM_TITLE
+        cam_dir.mkdir()
+        seg0 = cam_dir / "000000.mp4"
+        seg1 = cam_dir / "000001.mp4"
+        seg0.write_bytes(b"x" * 2048)
+        seg1.write_bytes(b"x" * 2048)
+
+        # list_preroll_files "saw" both segments a moment ago, but seg1 was
+        # pruned/rotated out from under us by the time staging runs.
+        def _list_with_race(_coord, _cam_id):
+            os.unlink(seg1)
+            return [str(seg0), str(seg1)]
+
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc.returncode = 0
+
+        with (
+            patch.object(recorder, "list_preroll_files", side_effect=_list_with_race),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            output = str(tmp_path / "motion.mp4")
+            result = await recorder.create_motion_clip(coord, CAM_ID, output)
+
+        # Old behavior: ffmpeg would be handed seg1's now-missing path and
+        # exit non-zero ("Impossible to open"), losing the whole clip. New
+        # behavior: only the surviving segment is staged and concatenated.
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_all_listed_segments_vanish_before_staging_cleans_up_stage_dir(
+        self, tmp_path: Path
+    ):
+        """Every listed segment vanishing before staging (not just one) —
+        `staged_paths` ends up empty despite `preroll_paths` being
+        non-empty, so `stage_dir` was already created. Must still return
+        False cleanly AND clean up the now-empty stage dir, not leak it."""
+        coord = _make_preroll_coord(tmp_path)
+        cam_dir = tmp_path / CAM_TITLE
+        cam_dir.mkdir()
+        seg0 = cam_dir / "000000.mp4"
+        seg1 = cam_dir / "000001.mp4"
+        seg0.write_bytes(b"x" * 2048)
+        seg1.write_bytes(b"x" * 2048)
+
+        def _list_with_total_race(_coord, _cam_id):
+            os.unlink(seg0)
+            os.unlink(seg1)
+            return [str(seg0), str(seg1)]
+
+        with patch.object(
+            recorder, "list_preroll_files", side_effect=_list_with_total_race
+        ):
+            output = str(tmp_path / "motion.mp4")
+            result = await recorder.create_motion_clip(coord, CAM_ID, output)
+
+        assert result is False
+        assert not (cam_dir / "_stage").exists() or not list(
+            (cam_dir / "_stage").rglob("*")
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_and_stage_runs_under_recorder_lock(self, tmp_path: Path):
+        """A concurrent holder of `get_nvr_recorder_lock` (e.g. the prune
+        watcher or a ring respawn) must block `create_motion_clip`'s
+        list+stage step until it releases — not run concurrently with it."""
+        coord = _make_preroll_coord(tmp_path)
+        cam_dir = tmp_path / CAM_TITLE
+        cam_dir.mkdir()
+        seg0 = cam_dir / "000000.mp4"
+        seg0.write_bytes(b"x" * 2048)
+
+        lock = coord.get_nvr_recorder_lock(CAM_ID)
+        await lock.acquire()
+
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc.returncode = 0
+
+        with (
+            patch.object(recorder, "list_preroll_files", return_value=[str(seg0)]),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            output = str(tmp_path / "motion.mp4")
+            task = asyncio.ensure_future(
+                recorder.create_motion_clip(coord, CAM_ID, output)
+            )
+            await asyncio.sleep(0.05)
+            assert not task.done(), (
+                "create_motion_clip must block on the recorder lock instead "
+                "of proceeding while a concurrent holder has it"
+            )
+            lock.release()
+            result = await task
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_stage_dir_cleaned_up_on_success(self, tmp_path: Path):
+        """The `_stage/<clip>` dir created for one event must not linger
+        after a successful clip — else it accumulates forever."""
+        coord = _make_preroll_coord(tmp_path)
+        cam_dir = tmp_path / CAM_TITLE
+        cam_dir.mkdir()
+        seg0 = cam_dir / "000000.mp4"
+        seg0.write_bytes(b"x" * 2048)
+
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc.returncode = 0
+
+        with (
+            patch.object(recorder, "list_preroll_files", return_value=[str(seg0)]),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            output = str(tmp_path / "motion.mp4")
+            result = await recorder.create_motion_clip(coord, CAM_ID, output)
+
+        assert result is True
+        assert not (cam_dir / "_stage").exists() or not list(
+            (cam_dir / "_stage").rglob("*")
+        )
+
+    @pytest.mark.asyncio
+    async def test_stage_dir_cleaned_up_on_ffmpeg_failure(self, tmp_path: Path):
+        """Same cleanup guarantee on the failure path (rc!=0) — the
+        `finally` must run regardless of outcome."""
+        coord = _make_preroll_coord(tmp_path)
+        cam_dir = tmp_path / CAM_TITLE
+        cam_dir.mkdir()
+        seg0 = cam_dir / "000000.mp4"
+        seg0.write_bytes(b"x" * 2048)
+
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b"boom"))
+        mock_proc.returncode = 1
+
+        with (
+            patch.object(recorder, "list_preroll_files", return_value=[str(seg0)]),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            output = str(tmp_path / "motion.mp4")
+            result = await recorder.create_motion_clip(coord, CAM_ID, output)
+
+        assert result is False
+        assert not (cam_dir / "_stage").exists() or not list(
+            (cam_dir / "_stage").rglob("*")
+        )
+
+    @pytest.mark.asyncio
+    async def test_concat_txt_cleaned_up_on_spawn_failure(self, tmp_path: Path):
+        """Bug-hunt finding: the `.concat.txt` staging file used to leak on
+        the spawn-failure path (only cleaned up after a successful
+        `communicate()`). Must be removed regardless of outcome."""
+        coord = _make_preroll_coord(tmp_path)
+        cam_dir = tmp_path / CAM_TITLE
+        cam_dir.mkdir()
+        seg0 = cam_dir / "000000.mp4"
+        seg0.write_bytes(b"x" * 2048)
+
+        output = str(tmp_path / "motion.mp4")
+        with (
+            patch.object(recorder, "list_preroll_files", return_value=[str(seg0)]),
+            patch(
+                "asyncio.create_subprocess_exec",
+                side_effect=OSError("EAGAIN"),
+            ),
+        ):
+            result = await recorder.create_motion_clip(coord, CAM_ID, output)
+
+        assert result is False
+        assert not os.path.exists(output + ".concat.txt")
+
+    @pytest.mark.asyncio
+    async def test_concat_txt_cleaned_up_on_timeout(self, tmp_path: Path):
+        coord = _make_preroll_coord(tmp_path)
+        cam_dir = tmp_path / CAM_TITLE
+        cam_dir.mkdir()
+        seg0 = cam_dir / "000000.mp4"
+        seg0.write_bytes(b"x" * 2048)
+
+        proc = MagicMock()
+        proc.communicate = AsyncMock(side_effect=TimeoutError())
+        proc.kill = MagicMock()
+
+        output = str(tmp_path / "motion.mp4")
+        with (
+            patch.object(recorder, "list_preroll_files", return_value=[str(seg0)]),
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+        ):
+            result = await recorder.create_motion_clip(coord, CAM_ID, output)
+
+        assert result is False
+        assert not os.path.exists(output + ".concat.txt")
+
+    @pytest.mark.asyncio
+    async def test_rc_zero_with_discontinuity_marker_still_ships_but_warns(
+        self, tmp_path: Path, caplog
+    ):
+        """A concat that reports rc=0 but logged a non-monotonic-DTS style
+        warning in stderr must still ship (usually still watchable) — just
+        surfaced via a WARNING log instead of being silently invisible."""
+        coord = _make_preroll_coord(tmp_path)
+        cam_dir = tmp_path / CAM_TITLE
+        cam_dir.mkdir()
+        seg0 = cam_dir / "000000.mp4"
+        seg0.write_bytes(b"x" * 2048)
+
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(
+            return_value=(b"", b"Non-monotonic DTS in output stream")
+        )
+        mock_proc.returncode = 0
+
+        with (
+            patch.object(recorder, "list_preroll_files", return_value=[str(seg0)]),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+            caplog.at_level("WARNING"),
+        ):
+            output = str(tmp_path / "motion.mp4")
+            result = await recorder.create_motion_clip(coord, CAM_ID, output)
+
+        assert result is True
+        assert any("discontinuity" in rec.message.lower() for rec in caplog.records)
 
 
 class TestCreateMotionClipExtraSegments:
@@ -1324,33 +1860,46 @@ class TestCreateMotionClipExtraSegments:
                     captured_concat["content"] = f.read()
             return real_unlink(path, *a, **kw)
 
-        with (
-            patch.object(
-                recorder,
-                "list_preroll_files",
-                return_value=["/tmp/pre0.mp4", "/tmp/pre1.mp4"],
-            ),
-            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
-            patch("os.unlink", side_effect=_spy_unlink),
-            tempfile.TemporaryDirectory() as d,
-        ):
-            output = os.path.join(d, "motion.mp4")
+        with tempfile.TemporaryDirectory() as d:
+            # GitHub #51: staging hardlinks every listed pre-roll segment,
+            # so these must be real files — extra_segments (the post-roll
+            # capture) is deliberately NOT staged (it's already a private,
+            # single-use file untouched by the ring), so it keeps its
+            # literal path unchanged in the concat list.
+            pre0 = os.path.join(d, "pre0.mp4")
+            pre1 = os.path.join(d, "pre1.mp4")
+            for p in (pre0, pre1):
+                with open(p, "wb") as f:
+                    f.write(b"x" * 2048)
 
-            async def _exec_job(fn, *args):
-                return fn(*args) if args else fn()
+            with (
+                patch.object(
+                    recorder,
+                    "list_preroll_files",
+                    return_value=[pre0, pre1],
+                ),
+                patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+                patch("os.unlink", side_effect=_spy_unlink),
+            ):
+                output = os.path.join(d, "motion.mp4")
 
-            coord.hass.async_add_executor_job = _exec_job
-            result = await recorder.create_motion_clip(
-                coord, cam_id, output, extra_segments=["/tmp/post0.mp4"]
-            )
+                async def _exec_job(fn, *args):
+                    return fn(*args) if args else fn()
+
+                coord.hass.async_add_executor_job = _exec_job
+                result = await recorder.create_motion_clip(
+                    coord, cam_id, output, extra_segments=["/tmp/post0.mp4"]
+                )
 
         assert result is True
         lines = captured_concat["content"].splitlines()
-        assert lines == [
-            "file '/tmp/pre0.mp4'",
-            "file '/tmp/pre1.mp4'",
-            "file '/tmp/post0.mp4'",
-        ]
+        # First two entries are the STAGED hardlink paths (not the original
+        # pre0.mp4/pre1.mp4 names) — GitHub #51's whole point is that the
+        # concat demuxer opens stable, private copies, not the originals.
+        assert len(lines) == 3
+        assert lines[0].endswith("pre0.mp4'") and "/_stage/" in lines[0]
+        assert lines[1].endswith("pre1.mp4'") and "/_stage/" in lines[1]
+        assert lines[2] == "file '/tmp/post0.mp4'"
 
     @pytest.mark.asyncio
     async def test_extra_segments_only_no_preroll(self):
@@ -1649,6 +2198,7 @@ def _make_lifecycle_coord(
         nvr_preroll_tasks={},
         nvr_user_intent={CAM_ID: True},
         nvr_recent_crash={},
+        _nvr_preroll_last_crash={},
         nvr_error_state={},
         nvr_auth_retry_count={},
         _nvr_recorder_locks={},
@@ -1661,6 +2211,7 @@ def _make_lifecycle_coord(
         },
         is_camera_online=lambda cid: True,
         async_update_listeners=MagicMock(),
+        nvr_shutting_down=False,
     )
 
     def get_nvr_recorder_lock(cam_id: str) -> asyncio.Lock:
@@ -3071,6 +3622,35 @@ class TestStartPrerollRecorder:
         # from nvr_preroll_seconds=30 → ceil(30/10)+1 = 4) fires here.
         assert len(prune_calls) == 1
         assert prune_calls[0][1] == 4
+
+    @pytest.mark.asyncio
+    async def test_orphan_sweep_failure_swallowed_spawn_still_succeeds(
+        self, tmp_path: Path
+    ):
+        """The orphan `_stage/*` sweep on ring spawn is best-effort — a
+        failure there (e.g. permission denied) must not abort the spawn
+        itself."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
+        coord.options["nvr_preroll_seconds"] = 30
+        proc = _mock_proc(returncode=None)
+
+        async def _spawn(*_args, **_kwargs):
+            return proc
+
+        async def _flaky_executor(fn, *args, **kwargs):
+            if fn is recorder._sweep_orphaned_stage_dirs:
+                raise OSError("permission denied")
+            return fn(*args, **kwargs) if callable(fn) else None
+
+        coord.hass.async_add_executor_job = _flaky_executor
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await recorder.start_preroll_recorder(coord, CAM_ID)
+
+        assert coord.nvr_preroll_processes[CAM_ID] is proc
         # Watcher task registered
         assert CAM_ID in coord.nvr_preroll_tasks
         assert coord.nvr_preroll_tasks[CAM_ID] is not None
@@ -4126,6 +4706,242 @@ class TestWatchPrerollRecorder:
         asyncio.get_event_loop().run_until_complete(_run())
         assert hasattr(coord, "nvr_preroll_tasks"), "nvr_preroll_tasks not created"
         assert cam_id in coord.nvr_preroll_tasks, "watcher task not stored for cam_id"
+
+
+class TestWatchPrerollHealth:
+    """GitHub #51 bug-hunt finding: unlike `_watch_recorder` (the main
+    recorder's crash watchdog), the pre-roll ring previously had NO
+    crash-respawn path at all — a ring that died mid-idle stayed dead
+    indefinitely. `_watch_preroll_health` closes that gap; these tests pin
+    its respawn/backoff/give-up behavior against the dedicated
+    `_nvr_preroll_last_crash` tracker (kept separate from the main
+    recorder's `nvr_recent_crash` so the two watchdogs can't clobber each
+    other's crash-window state)."""
+
+    @pytest.mark.asyncio
+    async def test_intentional_stop_no_respawn(self):
+        """If the process was already popped/replaced (an intentional stop
+        or a fresh respawn already happened) by the time we wake, this is
+        NOT a crash — must be a silent no-op."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = MagicMock()
+        proc.wait = AsyncMock(return_value=0)
+        # Deliberately NOT registered in nvr_preroll_processes — simulates
+        # stop_preroll_recorder having already popped it before this exit
+        # was observed.
+
+        with patch.object(
+            recorder, "start_preroll_recorder", new=AsyncMock()
+        ) as respawn:
+            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+
+        respawn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_crash_respawns_after_delay(self):
+        """A genuine unexpected exit (process still the tracked one) with
+        the gate open and no recent prior crash → respawn after the normal
+        backoff delay."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = MagicMock()
+        proc.wait = AsyncMock(return_value=-11)
+        proc.stderr = None
+        coord.nvr_preroll_processes[CAM_ID] = proc
+
+        with (
+            patch.object(
+                recorder, "start_preroll_recorder", new=AsyncMock()
+            ) as respawn,
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
+            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+
+        respawn.assert_awaited_once_with(coord, CAM_ID)
+        # The dead process handle must not linger (GitHub #51 bug-hunt
+        # finding: this used to keep `preroll_running` sensor attribute
+        # misleadingly True after a crash).
+        assert CAM_ID not in coord.nvr_preroll_processes
+
+    @pytest.mark.asyncio
+    async def test_second_crash_within_window_gives_up(self):
+        """Two crashes within `_RESPAWN_WINDOW_SECONDS` → the second one
+        does NOT respawn (crash-loop guard), matching `_watch_recorder`'s
+        discipline for the main recorder."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        coord._nvr_preroll_last_crash[CAM_ID] = time.monotonic()
+        proc = MagicMock()
+        proc.wait = AsyncMock(return_value=-11)
+        proc.stderr = None
+        coord.nvr_preroll_processes[CAM_ID] = proc
+
+        with (
+            patch.object(
+                recorder, "start_preroll_recorder", new=AsyncMock()
+            ) as respawn,
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
+            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+
+        respawn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_respawn_when_gate_closed(self):
+        """`should_record` False (switch off, camera offline, or gone
+        REMOTE) → no respawn, even though this was a genuine crash."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        coord.nvr_user_intent[CAM_ID] = False
+        proc = MagicMock()
+        proc.wait = AsyncMock(return_value=-11)
+        proc.stderr = None
+        coord.nvr_preroll_processes[CAM_ID] = proc
+
+        with patch.object(
+            recorder, "start_preroll_recorder", new=AsyncMock()
+        ) as respawn:
+            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+
+        respawn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_respawn_when_shutting_down(self):
+        """Config-entry unload/HA-stop in progress → never respawn (would
+        race `stop_all_preroll`'s sweep, same discipline as
+        `_spawn_preroll_recorder_locked`'s own `nvr_shutting_down` guard)."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        coord.nvr_shutting_down = True
+        proc = MagicMock()
+        proc.wait = AsyncMock(return_value=-11)
+        proc.stderr = None
+        coord.nvr_preroll_processes[CAM_ID] = proc
+
+        with patch.object(
+            recorder, "start_preroll_recorder", new=AsyncMock()
+        ) as respawn:
+            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+
+        respawn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_gate_closes_during_backoff_sleep_no_respawn(self):
+        """The gate is re-checked AFTER the backoff sleep too — a switch
+        toggled off while we were waiting to respawn must still be honored,
+        not just the check taken before the sleep."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = MagicMock()
+        proc.wait = AsyncMock(return_value=-11)
+        proc.stderr = None
+        coord.nvr_preroll_processes[CAM_ID] = proc
+
+        async def _close_gate_during_sleep(*_a, **_kw):
+            coord.nvr_user_intent[CAM_ID] = False
+
+        with (
+            patch.object(
+                recorder, "start_preroll_recorder", new=AsyncMock()
+            ) as respawn,
+            patch.object(
+                asyncio, "sleep", new=AsyncMock(side_effect=_close_gate_during_sleep)
+            ),
+        ):
+            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+
+        respawn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_logs_stderr_tail_on_crash(self, caplog):
+        """The crash must be loud (WARNING log with the stderr tail) —
+        this was the core of the reported gap: previously totally silent."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = MagicMock()
+        proc.wait = AsyncMock(return_value=-11)
+        stderr_reader = AsyncMock()
+        stderr_reader.read = AsyncMock(
+            return_value=b"Non-monotonic DTS in output stream"
+        )
+        proc.stderr = stderr_reader
+        coord.nvr_preroll_processes[CAM_ID] = proc
+
+        with (
+            patch.object(recorder, "start_preroll_recorder", new=AsyncMock()),
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+            caplog.at_level("WARNING"),
+        ):
+            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+
+        assert any("exited unexpectedly" in rec.message for rec in caplog.records)
+        assert any("Non-monotonic DTS" in rec.message for rec in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_stderr_drain_timeout_swallowed(self, caplog):
+        """A stderr drain that times out (or raises for any reason) must be
+        swallowed — the crash-detect/respawn logic still proceeds with
+        "(no stderr)" rather than failing the whole health-check."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = MagicMock()
+        proc.wait = AsyncMock(return_value=-11)
+        stderr_reader = AsyncMock()
+        stderr_reader.read = AsyncMock(side_effect=TimeoutError())
+        proc.stderr = stderr_reader
+        coord.nvr_preroll_processes[CAM_ID] = proc
+
+        with (
+            patch.object(
+                recorder, "start_preroll_recorder", new=AsyncMock()
+            ) as respawn,
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+            caplog.at_level("WARNING"),
+        ):
+            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+
+        assert any("(no stderr)" in rec.message for rec in caplog.records)
+        respawn.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutting_down_during_backoff_sleep_no_respawn(self):
+        """`nvr_shutting_down` is re-checked AFTER the backoff sleep too —
+        a config-entry unload starting DURING the wait must still be
+        honored, not just a pre-sleep snapshot (same discipline already
+        verified for the switch-intent re-read)."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = MagicMock()
+        proc.wait = AsyncMock(return_value=-11)
+        proc.stderr = None
+        coord.nvr_preroll_processes[CAM_ID] = proc
+
+        async def _shutdown_during_sleep(*_a, **_kw):
+            coord.nvr_shutting_down = True
+
+        with (
+            patch.object(
+                recorder, "start_preroll_recorder", new=AsyncMock()
+            ) as respawn,
+            patch.object(
+                asyncio,
+                "sleep",
+                new=AsyncMock(side_effect=_shutdown_during_sleep),
+            ),
+        ):
+            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+
+        respawn.assert_not_awaited()
 
 
 class TestPrerollWiring(unittest.TestCase):
@@ -6852,6 +7668,7 @@ def _make_assembly_coord(
         },
         _nvr_clip_assembly_locks={},
         _nvr_event_clip_enabled={CAM_ID: event_clip_enabled},
+        _nvr_recorder_locks={},
     )
     coord.hass = SimpleNamespace(async_add_executor_job=_run_executor)
 
@@ -6866,6 +7683,15 @@ def _make_assembly_coord(
     coord.get_nvr_event_clip_enabled = lambda cam_id: coord._nvr_event_clip_enabled.get(
         cam_id, True
     )
+
+    def _get_recorder_lock(cam_id: str) -> asyncio.Lock:
+        lock = coord._nvr_recorder_locks.get(cam_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            coord._nvr_recorder_locks[cam_id] = lock
+        return lock
+
+    coord.get_nvr_recorder_lock = _get_recorder_lock
     return coord
 
 
@@ -7279,11 +8105,19 @@ class TestAssembleAndShipMotionClip:
         assert result is True
         mock_finalize.assert_awaited_once_with(coord, CAM_ID)
         # list_preroll_files must NOT be consulted — the stable, already-
-        # correct list from stop_and_finalize_preroll_recorder is used as-is.
+        # correct list from stop_and_finalize_preroll_recorder is used as
+        # its basis (GitHub #51: staged into hardlinks before use, so the
+        # paths actually opened by ffmpeg differ from the originals — that's
+        # the point, not a regression).
         mock_list_preroll_files.assert_not_called()
-        assert seen_paths["paths"][:2] == stable_segments
-        # postroll (3rd) comes after the finalized segments.
         assert len(seen_paths["paths"]) == 3
+        assert seen_paths["paths"][0].endswith("pre0.mp4") and (
+            "/_stage/" in seen_paths["paths"][0]
+        )
+        assert seen_paths["paths"][1].endswith("pre1.mp4") and (
+            "/_stage/" in seen_paths["paths"][1]
+        )
+        # postroll (3rd) comes after the finalized segments.
         # Ring restart happens (only) after the clip was built.
         mock_restart.assert_awaited_once_with(coord, CAM_ID)
 

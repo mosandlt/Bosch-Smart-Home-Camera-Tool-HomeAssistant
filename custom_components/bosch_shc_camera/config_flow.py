@@ -210,6 +210,20 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "ai_active_condition_entity",
         "ai_active_condition_state",
     ],
+    "ai_analysis": [
+        "ai_analysis_enabled",
+        "ai_analysis_task_entity",
+        "ai_analysis_snapshot_count",
+        "ai_analysis_snapshot_interval_ms",
+        "ai_analysis_cooldown_seconds",
+        "ai_analysis_max_per_day",
+        "ai_analysis_retention_days",
+        "ai_analysis_repeat_context_minutes",
+        "ai_analysis_alarm_panel_entity",
+        "ai_analysis_alarmo_enabled",
+        "ai_analysis_alarm_trigger_service",
+        "ai_analysis_alarm_trigger_score",
+    ],
     "auth": [
         "force_relogin",
         "migrate_to_oss_client",
@@ -275,17 +289,37 @@ def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
 
 from . import DEFAULT_OPTIONS, DOMAIN  # type: ignore[attr-defined]
 from .const import (
+    AI_TARGET_CONDITIONS,
     CONF_AI_ACTIVE_CONDITION_ENTITY,
     CONF_AI_ACTIVE_CONDITION_STATE,
     CONF_AI_ACTIVE_TIME_END,
     CONF_AI_ACTIVE_TIME_START,
+    CONF_AI_ANALYSIS_ALARM_PANEL_ENTITY,
+    CONF_AI_ANALYSIS_ALARM_TRIGGER_SCORE,
+    CONF_AI_ANALYSIS_ALARM_TRIGGER_SERVICE,
+    CONF_AI_ANALYSIS_ALARMO_ENABLED,
+    CONF_AI_ANALYSIS_COOLDOWN_SECONDS,
+    CONF_AI_ANALYSIS_ENABLED,
+    CONF_AI_ANALYSIS_MAX_PER_DAY,
+    CONF_AI_ANALYSIS_REPEAT_CONTEXT_MINUTES,
+    CONF_AI_ANALYSIS_RETENTION_DAYS,
+    CONF_AI_ANALYSIS_SNAPSHOT_COUNT,
+    CONF_AI_ANALYSIS_SNAPSHOT_INTERVAL_MS,
+    CONF_AI_ANALYSIS_TASK_ENTITY,
     CONF_AI_COOLDOWN_SECONDS,
     CONF_AI_DESCRIBE_LANGUAGE,
     CONF_AI_DESCRIBE_ON_MOTION,
     CONF_AI_DESCRIBE_PROMPT,
     CONF_AI_MAX_PER_DAY,
     CONF_AI_NOTIFY_INCLUDE_DESCRIPTION,
+    CONF_AI_TARGET_CAMERA_FILTER,
+    CONF_AI_TARGET_CONDITION,
+    CONF_AI_TARGET_MIN_SCORE,
+    CONF_AI_TARGET_NAME,
+    CONF_AI_TARGET_NOTIFY_SERVICE,
     CONF_AI_TASK_ENTITY,
+    CONF_AI_VISITOR_DESCRIPTION,
+    CONF_AI_VISITOR_NAME,
     CONF_DEFER_DIAG_DURING_STREAM,
     CONF_ENABLE_AI_DESCRIPTION,
     CONF_ENABLE_PTZ_CONTROLS,
@@ -811,6 +845,153 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         return BoschCameraOptionsFlow(config_entry)
+
+    @classmethod
+    @callback  # type: ignore[untyped-decorator]
+    def async_get_supported_subentry_types(
+        cls, config_entry: config_entries.ConfigEntry
+    ) -> dict[str, type[config_entries.ConfigSubentryFlow]]:
+        """Return the AI Camera Analysis subentry types this integration supports.
+
+        These string keys ("ai_target", "ai_visitor") are a load-bearing
+        contract with the already-built backend pipeline
+        (`ai_alert_routing.py`/`ai_analysis.py`), which filters
+        `entry.subentries.values()` on exactly these `subentry_type` values.
+        Do not rename without updating both sides.
+
+        Per-camera AI-analysis enable/disable deliberately has NO subentry
+        type — `switch.<cam>_ai_analysis` (switch.py) is the single,
+        idiomatic source of truth for that, matching every other per-camera
+        toggle in this integration (see select.py's BoschNvrModeSelect
+        docstring: per-camera settings live on entities, not the options
+        flow / subentries). An earlier draft added an `ai_camera_scope`
+        subentry duplicating the same switch with no backend consumer —
+        removed before release rather than shipping a config control with
+        no effect.
+        """
+        return {
+            "ai_target": AiTargetSubentryFlowHandler,
+            "ai_visitor": AiVisitorSubentryFlowHandler,
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI Camera Analysis subentry flows — one repeatable structure per type,
+# native HA config_entries.ConfigSubentryFlow mechanism (available since HA
+# 2024.11; this repo pins to a much newer HA, confirmed via .venv). Each
+# subentry is a small standalone add/edit form (no OPTIONS_SECTIONS wiring —
+# subentries are a parallel top-level structure on the config entry, not
+# nested inside the flat options dict `_flatten_sections` round-trips).
+# ─────────────────────────────────────────────────────────────────────────────
+class AiTargetSubentryFlowHandler(config_entries.ConfigSubentryFlow):  # type: ignore[misc]
+    """Add/edit a named AI-alert notify target (score threshold + condition + camera filter)."""
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.SubentryFlowResult:
+        """Add a new alert-target subentry."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title=user_input[CONF_AI_TARGET_NAME],
+                data=user_input,
+            )
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(_ai_target_schema()),
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.SubentryFlowResult:
+        """Edit an existing alert-target subentry."""
+        subentry = self._get_reconfigure_subentry()
+        if user_input is not None:
+            return self.async_update_and_abort(
+                self._get_entry(),
+                subentry,
+                title=user_input[CONF_AI_TARGET_NAME],
+                data=user_input,
+            )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(_ai_target_schema()), subentry.data
+            ),
+        )
+
+
+def _ai_target_schema() -> dict[Any, Any]:
+    """Shared vol schema dict for the ai_target subentry add + edit forms."""
+    return {
+        vol.Required(CONF_AI_TARGET_NAME): str,
+        # Raw "domain.service" string — same convention as the existing
+        # `alert_notify_service` global option (plain str, not a selector).
+        vol.Required(CONF_AI_TARGET_NOTIFY_SERVICE): str,
+        vol.Optional(CONF_AI_TARGET_MIN_SCORE, default=5): NumberSelector(
+            NumberSelectorConfig(min=1, max=10, step=1, mode=NumberSelectorMode.BOX)
+        ),
+        vol.Optional(CONF_AI_TARGET_CONDITION, default="always"): SelectSelector(
+            SelectSelectorConfig(
+                options=list(AI_TARGET_CONDITIONS),
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        # Empty = all cameras.
+        vol.Optional(CONF_AI_TARGET_CAMERA_FILTER, default=[]): EntitySelector(
+            EntitySelectorConfig(domain="camera", multiple=True)
+        ),
+    }
+
+
+class AiVisitorSubentryFlowHandler(config_entries.ConfigSubentryFlow):  # type: ignore[misc]
+    """Add/edit a known-visitor description injected into every camera's AI prompt."""
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.SubentryFlowResult:
+        """Add a new known-visitor subentry."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title=user_input[CONF_AI_VISITOR_NAME],
+                data=user_input,
+            )
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(_ai_visitor_schema()),
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.SubentryFlowResult:
+        """Edit an existing known-visitor subentry."""
+        subentry = self._get_reconfigure_subentry()
+        if user_input is not None:
+            return self.async_update_and_abort(
+                self._get_entry(),
+                subentry,
+                title=user_input[CONF_AI_VISITOR_NAME],
+                data=user_input,
+            )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(_ai_visitor_schema()), subentry.data
+            ),
+        )
+
+
+def _ai_visitor_schema() -> dict[Any, Any]:
+    """Shared vol schema dict for the ai_visitor subentry add + edit forms."""
+    return {
+        vol.Required(CONF_AI_VISITOR_NAME): str,
+        vol.Required(CONF_AI_VISITOR_DESCRIPTION): TextSelector(
+            TextSelectorConfig(multiline=True)
+        ),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1595,6 +1776,121 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                             )
                         },
                     ): TextSelector(TextSelectorConfig()),
+                }
+            ),
+            {"collapsed": True},
+        )
+
+        sectioned_schema[vol.Required("ai_analysis")] = section(
+            vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_ENABLED,
+                        default=bool(opts.get(CONF_AI_ANALYSIS_ENABLED, False)),
+                    ): bool,
+                    # Nullable entity picker — same ``vol.Any(None, <selector>)``
+                    # shape as CONF_AI_TASK_ENTITY above (issue #35: a bare
+                    # ``vol.Any("", ...)`` 500s the options dialog because HA's
+                    # frontend serializer only accepts ``vol.Any(None, ...)``,
+                    # which it renders with ``allow_none: true`` and submits
+                    # ``null`` for a cleared picker). suggested_value must be
+                    # the value or None (never "").
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_TASK_ENTITY,
+                        description={
+                            "suggested_value": opts.get(CONF_AI_ANALYSIS_TASK_ENTITY)
+                            or None
+                        },
+                    ): vol.Any(
+                        None, EntitySelector(EntitySelectorConfig(domain="ai_task"))
+                    ),
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_SNAPSHOT_COUNT,
+                        default=int(opts.get(CONF_AI_ANALYSIS_SNAPSHOT_COUNT, 3)),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=2,
+                            max=10,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_SNAPSHOT_INTERVAL_MS,
+                        default=int(
+                            opts.get(CONF_AI_ANALYSIS_SNAPSHOT_INTERVAL_MS, 800)
+                        ),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=100,
+                            max=5000,
+                            step=100,
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_COOLDOWN_SECONDS,
+                        default=int(opts.get(CONF_AI_ANALYSIS_COOLDOWN_SECONDS, 30)),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_MAX_PER_DAY,
+                        default=int(opts.get(CONF_AI_ANALYSIS_MAX_PER_DAY, 200)),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=0),  # 0 = unlimited; no upper cap
+                    ),
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_RETENTION_DAYS,
+                        default=int(opts.get(CONF_AI_ANALYSIS_RETENTION_DAYS, 30)),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=90)),
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_REPEAT_CONTEXT_MINUTES,
+                        default=int(
+                            opts.get(CONF_AI_ANALYSIS_REPEAT_CONTEXT_MINUTES, 30)
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=120)),
+                    # Nullable entity picker — see CONF_AI_ANALYSIS_TASK_ENTITY
+                    # above for why this exact ``vol.Any(None, ...)`` shape.
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_ALARM_PANEL_ENTITY,
+                        description={
+                            "suggested_value": opts.get(
+                                CONF_AI_ANALYSIS_ALARM_PANEL_ENTITY
+                            )
+                            or None
+                        },
+                    ): vol.Any(
+                        None,
+                        EntitySelector(
+                            EntitySelectorConfig(domain="alarm_control_panel")
+                        ),
+                    ),
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_ALARMO_ENABLED,
+                        default=bool(opts.get(CONF_AI_ANALYSIS_ALARMO_ENABLED, False)),
+                    ): bool,
+                    # Plain raw "domain.service" string — same convention as
+                    # alert_notify_service, since this is a generalized "call
+                    # any service" trigger, not Alarmo-specific.
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_ALARM_TRIGGER_SERVICE,
+                        description={
+                            "suggested_value": opts.get(
+                                CONF_AI_ANALYSIS_ALARM_TRIGGER_SERVICE, ""
+                            )
+                        },
+                    ): str,
+                    vol.Optional(
+                        CONF_AI_ANALYSIS_ALARM_TRIGGER_SCORE,
+                        default=int(opts.get(CONF_AI_ANALYSIS_ALARM_TRIGGER_SCORE, 7)),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=1,
+                            max=10,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
                 }
             ),
             {"collapsed": True},

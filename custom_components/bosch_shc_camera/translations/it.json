@@ -301,6 +301,38 @@
               "force_relogin": "Selezionare per riautenticarsi tramite browser. Necessario solo se il refresh token è scaduto (molto raro).",
               "migrate_to_oss_client": "Passa dal client `residential_app` legacy al client dedicato `oss_residential_app` fornito da Bosch per le integrazioni open source. L'abilitazione avvierà il flusso di riautenticazione — verrà richiesto di accedere una sola volta tramite Bosch SingleKey ID, e tutte le entità, automazioni e opzioni esistenti verranno preservate."
             }
+          },
+          "ai_analysis": {
+            "name": "Analisi camera IA",
+            "description": "Punteggio di sospetto strutturato (1-10) attivato dal movimento, con instradamento delle notifiche verso più destinazioni e attivazione opzionale di un allarme. Funzione gemella della Descrizione snapshot IA sopra (testo libero): questa funzione richiede un risultato strutturato e valutato e può instradare gli avvisi verso destinazioni di notifica diverse e attivare un servizio di allarme. Richiede un'integrazione AI Task configurata. Gestisci le destinazioni di notifica, i visitatori noti e le sostituzioni per camera dal menu dei componenti aggiuntivi dell'integrazione (sotto-voci).",
+            "data": {
+              "ai_analysis_enabled": "Abilita analisi camera IA",
+              "ai_analysis_task_entity": "Entità AI Task (opzionale)",
+              "ai_analysis_snapshot_count": "Snapshot per analisi",
+              "ai_analysis_snapshot_interval_ms": "Intervallo tra snapshot (ms)",
+              "ai_analysis_cooldown_seconds": "Secondi minimi tra le analisi (per camera)",
+              "ai_analysis_max_per_day": "Budget giornaliero di analisi (0 = illimitato)",
+              "ai_analysis_retention_days": "Conservazione cronologia allerte (giorni)",
+              "ai_analysis_repeat_context_minutes": "Finestra di contesto per allerte ripetute (minuti, 0 = disabilitato)",
+              "ai_analysis_alarm_panel_entity": "Entità pannello allarme (opzionale)",
+              "ai_analysis_alarmo_enabled": "Abilita attivazione pannello allarme",
+              "ai_analysis_alarm_trigger_service": "Servizio di attivazione allarme (domain.service)",
+              "ai_analysis_alarm_trigger_score": "Punteggio minimo per attivare l'allarme"
+            },
+            "data_description": {
+              "ai_analysis_enabled": "Interruttore principale per l'analisi camera IA strutturata. Indipendente dall'interruttore e dal budget propri della Descrizione snapshot IA: le due funzioni non condividono una quota giornaliera.",
+              "ai_analysis_task_entity": "Seleziona un'entità AI Task specifica per l'analisi strutturata. Lascia vuoto per usare l'entità AI Task selezionata per la Descrizione snapshot IA, o il predefinito di HA se nessuna è impostata.",
+              "ai_analysis_snapshot_count": "Numero di snapshot catturati in sequenza per ogni analisi (2-10). Più snapshot danno più contesto all'IA ma costano di più.",
+              "ai_analysis_snapshot_interval_ms": "Intervallo tra gli snapshot della sequenza in millisecondi (100-5000).",
+              "ai_analysis_cooldown_seconds": "Tempo minimo tra analisi automatiche per camera. Tempo di attesa separato da quello della Descrizione snapshot IA.",
+              "ai_analysis_max_per_day": "Numero massimo di analisi automatiche su tutte le camere al giorno (si azzera a mezzanotte). Budget separato da quello della Descrizione snapshot IA. 0 = illimitato.",
+              "ai_analysis_retention_days": "Per quanto tempo la cronologia delle allerte (punteggi + immagini) viene conservata su disco prima della rimozione automatica (1-90 giorni).",
+              "ai_analysis_repeat_context_minutes": "Se maggiore di 0, menziona nel prompt IA la cronologia recente delle allerte di questa camera negli ultimi N minuti, così l'attività ripetuta può essere riconosciuta come tale. 0 disabilita il contesto ripetuto.",
+              "ai_analysis_alarm_panel_entity": "Entità del pannello di controllo allarme il cui stato armato/fuori casa condiziona le condizioni delle destinazioni di notifica e l'attivazione del servizio di allarme sotto. Lascia vuoto se non usi l'instradamento tramite pannello allarme.",
+              "ai_analysis_alarmo_enabled": "Se abilitato e il pannello allarme sopra è armato, un'allerta con punteggio alto chiama il servizio di attivazione allarme sotto (es. un servizio sirena/armamento Alarmo, o qualsiasi altro domain.service).",
+              "ai_analysis_alarm_trigger_service": "Stringa domain.service chiamata all'attivazione (es. alarmo.arm_away, switch.turn_on, o qualsiasi altro servizio). Funziona con Alarmo o qualsiasi altra integrazione pannello allarme, non specifico di Alarmo.",
+              "ai_analysis_alarm_trigger_score": "Punteggio di sospetto minimo (1-10) richiesto prima di chiamare il servizio di attivazione allarme."
+            }
           }
         }
       },
@@ -344,6 +376,9 @@
     "image": {
       "last_snapshot": {
         "name": "Ultimo Snapshot"
+      },
+      "ai_latest_alert": {
+        "name": "Ultima allerta IA"
       }
     },
     "switch": {
@@ -436,6 +471,9 @@
       },
       "fire_alarm_detection": {
         "name": "Rilevamento allarme fumo"
+      },
+      "ai_analysis": {
+        "name": "Analisi camera IA"
       }
     },
     "number": {
@@ -575,6 +613,9 @@
       },
       "lan_reachable": {
         "name": "LAN Raggiungibile"
+      },
+      "ai_recent_alert": {
+        "name": "Allerta IA recente"
       }
     },
     "update": {
@@ -754,6 +795,17 @@
       },
       "stream_url_sub": {
         "name": "URL stream (sub)"
+      },
+      "ai_alert_score": {
+        "name": "Punteggio allerta IA"
+      },
+      "ai_alerts_24h": {
+        "name": "Allerte IA (24h)"
+      }
+    },
+    "text": {
+      "ai_scene_context": {
+        "name": "Contesto scena IA"
       }
     }
   },

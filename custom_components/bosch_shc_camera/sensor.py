@@ -15,7 +15,7 @@ Creates sensor entities per camera:
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 from homeassistant.components.sensor import (
@@ -50,7 +50,7 @@ def _event_is_today_local(ts_str: str | None) -> bool:
 
 
 from . import BoschCameraCoordinator, get_options
-from .const import CONF_ENABLE_AI_DESCRIPTION, DOMAIN
+from .const import CONF_AI_ANALYSIS_ENABLED, CONF_ENABLE_AI_DESCRIPTION, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -152,6 +152,12 @@ async def async_setup_entry(
             entities.append(
                 BoschCameraAiDescriptionSensor(coordinator, cam_id, config_entry)
             )
+    # AI Camera Analysis sensors — only when the master option is enabled
+    # (sibling to the AI Snapshot Description gate above).
+    if opts.get(CONF_AI_ANALYSIS_ENABLED, False):
+        for cam_id in coordinator.data:
+            entities.append(BoschAiAlertScoreSensor(coordinator, cam_id, config_entry))
+            entities.append(BoschAiAlerts24hSensor(coordinator, cam_id, config_entry))
     # External stream URL sensors (main + sub). Per-camera, always registered
     # so the BoschExternalStreamSwitch can toggle their value without dynamic
     # entity (re-)registration. Disabled in entity registry by default;
@@ -1598,6 +1604,100 @@ class BoschCameraAiDescriptionSensor(_BoschSensorBase):
             "generated_at": ai.get("generated_at"),
             "ai_task_entity": ai.get("ai_task_entity"),
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAiAlertScoreSensor(_BoschSensorBase):
+    """Sensor: last AI Camera Analysis suspicion score (1-10) for this
+    camera — sibling to `BoschCameraAiDescriptionSensor` (free-text), but
+    for the STRUCTURED analysis feature (`ai_analysis.py`).
+
+    Only created when the `ai_analysis_enabled` integration option is
+    enabled (mirrors the sibling feature's own `enable_ai_description`
+    gate). State is `None` until the first analysis has ever run for this
+    camera. Updated via coordinator push whenever
+    `ai_analysis.async_generate_ai_analysis` stores a new result in
+    `coordinator.data[cam_id]["ai_analysis"]`.
+    """
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ai_alert_score"
+        self._attr_translation_key = "ai_alert_score"
+
+    @property
+    def native_value(self) -> int | None:
+        score = self._cam_data.get("ai_analysis", {}).get("score")
+        if score is None:
+            return None
+        try:
+            return int(score)
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        ai: dict[str, Any] = self._cam_data.get("ai_analysis", {})
+        if not ai:
+            return {}
+        return {
+            "short": ai.get("short"),
+            "detail": ai.get("detail"),
+            "direction": ai.get("direction"),
+            "carrying": ai.get("carrying"),
+            "activity": ai.get("activity"),
+            "gate_state": ai.get("gate_state"),
+            "gate_risk": ai.get("gate_risk"),
+            "known_person": ai.get("known_person"),
+            "image_path": ai.get("image_path"),
+            "generated_at": ai.get("generated_at"),
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschAiAlerts24hSensor(_BoschSensorBase):
+    """Sensor: rolling count of AI Camera Analysis alerts in the last 24h
+    for this camera. Computed from the in-memory
+    `coordinator.ai_analysis_recent[cam_id]` cache (see `ai_alert_store.py`'s
+    `recent_alerts`/`async_load_recent_alerts` — populated on every stored
+    alert and rebuilt from each camera's `alerts.jsonl` tail on startup, so
+    the count survives an HA restart).
+
+    Only created when the `ai_analysis_enabled` integration option is
+    enabled — same gate as `BoschAiAlertScoreSensor`.
+    """
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ai_alerts_24h"
+        self._attr_translation_key = "ai_alerts_24h"
+
+    @property
+    def native_value(self) -> int:
+        entries = self.coordinator.ai_analysis_recent.get(self._cam_id, [])
+        if not entries:
+            return 0
+        cutoff = datetime.now(UTC) - timedelta(hours=24)
+        count = 0
+        for generated_at, _score in entries:
+            try:
+                gen_dt = datetime.fromisoformat(generated_at)
+            except (TypeError, ValueError):
+                continue
+            if gen_dt >= cutoff:
+                count += 1
+        return count
 
 
 # ─────────────────────────────────────────────────────────────────────────────

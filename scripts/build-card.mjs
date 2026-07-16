@@ -35,6 +35,17 @@ const AUTOPLAY_BANNER = `/**
  */
 `;
 
+const AI_TIMELINE_BANNER = `/**
+ * AI Alert Timeline Card — Custom Lovelace Card
+ * Repo:    https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant
+ * License: MIT
+ *
+ * This file is auto-generated from src/ai-alert-timeline-card.js by
+ * scripts/build-card.mjs. Do not edit directly — edit the src file and
+ * rebuild. Comments are stripped to reduce the gzipped payload size.
+ */
+`;
+
 async function stripFile(srcPath, outPath, banner) {
   const src = readFileSync(srcPath, "utf8");
   const result = await minify(src, {
@@ -64,6 +75,22 @@ console.log(`bosch-camera-card.js:          ${card.srcBytes} -> ${card.outBytes}
 copyFileSync(
   resolve(repoRoot, "www/bosch-camera-card.js"),
   resolve(repoRoot, "custom_components/bosch_shc_camera/www/bosch-camera-card.js"),
+);
+console.log("Mirrored to custom_components/bosch_shc_camera/www/");
+
+// AI Alert Timeline card: same strip-and-mirror pattern as the main card,
+// but its own standalone bundle (separate src file, separate custom element,
+// no shared code with bosch-camera-card.js — see Phase 6 plan).
+const aiTimeline = await stripFile(
+  resolve(repoRoot, "src/ai-alert-timeline-card.js"),
+  resolve(repoRoot, "www/ai-alert-timeline-card.js"),
+  AI_TIMELINE_BANNER,
+);
+console.log(`ai-alert-timeline-card.js:     ${aiTimeline.srcBytes} -> ${aiTimeline.outBytes} bytes`);
+
+copyFileSync(
+  resolve(repoRoot, "www/ai-alert-timeline-card.js"),
+  resolve(repoRoot, "custom_components/bosch_shc_camera/www/ai-alert-timeline-card.js"),
 );
 console.log("Mirrored to custom_components/bosch_shc_camera/www/");
 

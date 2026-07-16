@@ -5,6 +5,26 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v16.1.0] - 2026-07-16
+
+Minor — two bundled changes: a Mini-NVR clip-assembly race fix (GitHub #51) and a new opt-in AI Camera Analysis feature. No breaking changes.
+
+### Fixed
+
+- **Mini-NVR motion-clip assembly could abort entirely (`ffmpeg rc=254 … Impossible to open`)** ([#51](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/51), realKim-dotcom). A pre-roll ring segment selected for a motion clip could get pruned or rotated by a concurrent periodic watcher tick or ring respawn before ffmpeg's concat demuxer opened it, losing the whole clip. Fixed by hardlinking every selected segment into a private per-event stage directory while holding the same per-camera recorder lock the prune watcher now also acquires, so nothing can touch a segment between "selected" and "safely staged".
+- **The pre-roll ring had no crash-respawn at all**, unlike the main recorder — a ring that died mid-idle (e.g. a non-monotonic-DTS abort on a flaky camera) stayed dead indefinitely until something unrelated happened to respawn it, matching the "stalled … until the recording switch was toggled" symptom from #51. Added a dedicated crash-detect/respawn watchdog mirroring the main recorder's own crash-window/backoff discipline.
+- Smaller fixes found in the same pass: a `.concat.txt` temp-file leak on ffmpeg spawn-failure/timeout, a stale process handle left behind after a ring crash (misleading the `preroll_running` sensor attribute), orphaned staging directories from a hard-killed process now swept on ring spawn, and an inaccurate log message that told operators to wait on recovery paths that don't actually revive a dead ring.
+
+### Added
+
+- **AI Camera Analysis** (opt-in, off by default): motion-triggered structured suspicion scoring (1-10) via Home Assistant's `ai_task` integration, using its native schema-enforced `structure` output instead of free-text parsing. Sibling to the existing free-text AI Snapshot Description feature, with its own separate cooldown and daily budget so the two never compete for the same allowance. Design inspired by concepts from [HomeAssistantAICameraCentre](https://github.com/simpleaddins/HomeAssistantAICameraCentre) (MIT) — independently reimplemented from scratch against this integration's own architecture, no code copied.
+  - New per-camera entities: `switch.<camera>_ai_analysis` (enable/disable), `text.<camera>_ai_scene_context` (prompt context), `sensor.<camera>_ai_alert_score`, `sensor.<camera>_ai_alerts_24h`, `binary_sensor.<camera>_ai_recent_alert`, `image.<camera>_ai_latest_alert`.
+  - New `analyze_camera_ai` service for on-demand triggering.
+  - New Settings section with global options (AI Task entity, snapshot count, cooldown, daily budget, retention, repeat-context window, Alarmo/alarm-panel integration) plus two new repeatable configuration types: named alert targets (each with its own score threshold, camera filter, and armed/away condition) and known visitors (free-text descriptions fed into the AI prompt to reduce false positives on people you recognize).
+  - Optional alarm/siren trigger: fires a configurable Home Assistant service call when a target's score threshold is met while an alarm panel (Alarmo or any other) is armed.
+  - New dedicated timeline card for browsing AI alert history with images, score badges, and per-camera filtering (added to your dashboard's resources manually — not auto-registered).
+  - **Known limitation**: the configured snapshot-interval setting doesn't yet space out the frames in a burst capture — every frame in a single analysis currently resolves back-to-back. A future release may address this with a larger capture-pipeline change.
+
 ## [v16.0.1] - 2026-07-15
 
 Patch — three real bug fixes reported by realKim-dotcom against v16.0.0, plus a small `cloud_ssl.py` session-lifecycle improvement found during HA-Core-submission-prep work. No breaking changes.

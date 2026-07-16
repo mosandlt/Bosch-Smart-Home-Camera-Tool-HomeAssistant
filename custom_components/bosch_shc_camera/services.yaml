@@ -491,3 +491,32 @@ describe_snapshot:
       selector:
         entity:
           domain: ai_task
+
+analyze_camera_ai:
+  name: Analyze Camera (AI)
+  description: >
+    Manually trigger a structured AI Camera Analysis (1-10 suspicion score)
+    for one camera, bypassing the cooldown/window gate (still counts toward
+    the feature's own daily budget). Requires the ai_analysis_enabled
+    option and the ai_task integration configured with at least one AI
+    entity. The result is stored on sensor.<camera>_ai_alert_score and
+    returned as a response.
+  fields:
+    camera_id:
+      name: Camera ID
+      description: >
+        Bosch cloud camera ID (UUID). Use either camera_id or entity_id.
+      required: false
+      example: "11111111-2222-3333-4444-555555555555"
+      selector:
+        text:
+    entity_id:
+      name: Camera Entity
+      description: >
+        Camera entity ID (e.g. camera.bosch_terrasse). Use either entity_id
+        or camera_id.
+      required: false
+      example: "camera.bosch_terrasse"
+      selector:
+        entity:
+          domain: camera
