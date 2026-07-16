@@ -43,6 +43,7 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
 - [Disclaimer](#disclaimer)
 - [Prerequisites — Setting Up a New Camera](#prerequisites--setting-up-a-new-camera)
 - [Installation](#installation)
+  - [Release Channels — Stable vs. Beta](#release-channels--stable-vs-beta) — how to opt in to beta versions via HACS
 - [Setup](#setup)
   - [I don't see any image / video](#i-dont-see-any-image--video) — troubleshooting for the most common "it's not working" report
 - [Architecture](#architecture)
@@ -174,6 +175,22 @@ To uninstall the integration cleanly:
 3. **Restart Home Assistant.**
 
 The integration leaves no orphan files in `/config/www/`, no leftover entries in `configuration.yaml`, and no system services running. Downloaded event snapshots/videos in `/config/bosch_events/` (or your configured `download_path`) are **not** auto-deleted — remove them manually if no longer needed.
+
+### Release Channels — Stable vs. Beta
+
+This integration ships two release trains:
+
+- **Stable** (`vX.Y.Z`, e.g. `v16.1.0`) — the default channel every install gets. Released after the full CI gate (tests, mypy --strict, quality checks, secret scan) is green and the change is documented in [CHANGELOG.md](CHANGELOG.md). At most one stable release per week.
+- **Beta** (`vX.Y.Z-beta.N`, e.g. `v16.1.1-beta.1`) — pre-release builds for testing a specific fix ahead of the next stable release, usually shipped in response to a GitHub issue so the reporter can confirm before it goes stable. Goes through the exact same CI gate as stable (tests/quality/secret-scan all still have to pass) — the only differences are that it's marked as a GitHub **pre-release** and doesn't need a full CHANGELOG.md entry yet.
+
+**Opting in to beta versions (HACS):**
+
+1. **HACS → Integrations → Bosch Smart Home Camera → ⋮ → Redownload**, or open the repository's HACS page directly.
+2. Toggle **"Show beta versions"** (top right of the version list / redownload dialog).
+3. Pick the `-beta.N` version you want to test and download it.
+4. Restart Home Assistant.
+
+You can switch back to stable at any time the same way — toggle beta versions off (or leave it on and just pick the latest non-beta version), redownload, restart. Beta builds are for testing: expect the occasional rough edge, and please report back on the linked GitHub issue so the fix can be confirmed before it ships stable.
 
 ---
 

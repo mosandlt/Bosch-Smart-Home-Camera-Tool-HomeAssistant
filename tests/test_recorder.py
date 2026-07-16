@@ -7638,6 +7638,50 @@ class TestCapturePostroll:
             result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
         assert result is True
 
+    @pytest.mark.asyncio
+    async def test_timeout_scales_with_duration(self):
+        """GitHub #52: a bare `duration_secs + 10s` budget was too thin for
+        a *cold* RTSP handshake competing with the ring/continuous
+        recorder on a jittery or slow-warming stream — the wait_for
+        deadline must scale with duration_secs (multiplier), not just add
+        a fixed grace, so longer post-roll windows get proportionally more
+        slack instead of being guillotined at duration+10 regardless of
+        length."""
+        coord = SimpleNamespace(
+            live_connections={
+                CAM_ID: {
+                    "_connection_type": "LOCAL",
+                    "rtspsUrl": "rtsp://127.0.0.1:9000/x",
+                }
+            }
+        )
+        proc = MagicMock()
+        proc.communicate = AsyncMock(return_value=(b"", b""))
+        proc.returncode = 0
+
+        captured: dict[str, float] = {}
+
+        async def _fake_wait_for(coro, timeout):
+            captured["timeout"] = timeout
+            return await coro
+
+        with (
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+            patch("asyncio.wait_for", side_effect=_fake_wait_for),
+        ):
+            result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 30)
+        assert result is True
+        expected = (
+            30 * recorder.TIMEOUT_RECORDER_POSTROLL_MULTIPLIER
+            + recorder.TIMEOUT_RECORDER_POSTROLL_GRACE
+        )
+        assert captured["timeout"] == pytest.approx(expected)
+        # Pin the actual numbers too — a formula that's technically
+        # "proportional" but landed back at the old too-thin budget would
+        # still reproduce #52.
+        assert captured["timeout"] == pytest.approx(55.0)
+        assert captured["timeout"] > 30 + 10.0  # strictly more than the old budget
+
 
 def _make_assembly_coord(
     tmp_path,

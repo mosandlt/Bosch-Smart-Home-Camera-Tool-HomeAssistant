@@ -39,6 +39,7 @@ from .const import (
     TIMEOUT_RECORDER_GRACE,
     TIMEOUT_RECORDER_KILL_WAIT,
     TIMEOUT_RECORDER_POSTROLL_GRACE,
+    TIMEOUT_RECORDER_POSTROLL_MULTIPLIER,
     TIMEOUT_RECORDER_STDERR_DRAIN,
 )
 from .smb import _safe_name
@@ -1239,7 +1240,8 @@ async def _capture_postroll(
     try:
         _, stderr_bytes = await asyncio.wait_for(
             proc.communicate(),
-            timeout=duration_secs + TIMEOUT_RECORDER_POSTROLL_GRACE,
+            timeout=duration_secs * TIMEOUT_RECORDER_POSTROLL_MULTIPLIER
+            + TIMEOUT_RECORDER_POSTROLL_GRACE,
         )
     except TimeoutError:
         try:

@@ -5,6 +5,15 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v16.1.1] - 2026-07-16
+
+Patch — Mini-NVR `event_buffered` post-roll capture timeout fix (GitHub #52). No breaking changes.
+
+### Fixed
+
+- **`event_buffered` post-roll tail could time out and never attach** ([#52](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/52), realKim-dotcom). `nvr_postroll_seconds` opens a fresh cold RTSP capture right after a motion event, competing with the pre-roll ring/continuous recorder for the same camera — the old budget (`duration + 10s` flat) was too thin for that cold handshake plus `-c copy` output on a jittery or slow-warming stream, so the capture was killed and the clip shipped pre-roll-only (graceful, but the configured tail never landed). The timeout now scales with the configured duration (`duration × 1.5 + 10s`) instead of a flat `+10s`, giving longer post-roll windows proportionally more slack.
+  - This is a first, lower-risk fix targeting the timeout-budget mechanism the reporter diagnosed. It does not address the reporter's alternate root-cause suggestion (deriving the tail from the already-warm recorder instead of a second cold RTSP session) or the separate `rc=183 … End of file` connection-drop case, which no timeout tuning can fix — shipped as a **beta** first so the reporter can confirm on their hardware whether this closes the gap before it goes stable.
+
 ## [v16.1.0] - 2026-07-16
 
 Minor — two bundled changes: a Mini-NVR clip-assembly race fix (GitHub #51) and a new opt-in AI Camera Analysis feature. No breaking changes.

@@ -288,10 +288,13 @@ async def test_integration_version_exposed(hass: HomeAssistant) -> None:
     )
     # Must match what INTEGRATION_VERSION constant reports
     assert ver == INTEGRATION_VERSION, "diagnostics version must match module constant"
-    # Must look like a semver (N.N.N) so we catch manifest parsing breaks
-    parts = ver.split(".")
+    # Must look like a semver (N.N.N, optionally with a -beta.N/-rc.N
+    # prerelease suffix for a beta release train build) so we catch
+    # manifest parsing breaks without hard-failing on a valid beta version.
+    base, _, _prerelease = ver.partition("-")
+    parts = base.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts), (
-        f"Expected N.N.N version string, got {ver!r}"
+        f"Expected N.N.N[-prerelease] version string, got {ver!r}"
     )
 
 
