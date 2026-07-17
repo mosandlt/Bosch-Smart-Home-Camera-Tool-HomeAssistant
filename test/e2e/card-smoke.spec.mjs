@@ -623,6 +623,55 @@ test("a fresh snapshot arriving in the single-tick window right after tap (befor
   expect(r.streamConnectingAfter, "_streamConnecting survives a snapshot landing in the tap-only window").toBe(true);
 });
 
+// _waitForStreamReady's 90s dead-end must clear _startingLiveVideo too, not
+// just _waitingForStream/_streamConnecting (bug-hunt finding, 2026-07-17,
+// maintenance round). _startLiveVideo's own catch-block can delegate to
+// _waitForStreamReady while leaving _startingLiveVideo=true (set at the top
+// of _startLiveVideo) — every auto-recovery gate in the file (_update()'s
+// auto-start gate, the 30s retry timer this same dead-end arms,
+// _resumeLiveStreamIfNeeded) requires !_startingLiveVideo, so leaving it
+// stuck true here permanently defeats every one of them despite this being
+// the exact "B6" dead-end fix (2026-06-22) meant to prevent that class of
+// bug in the first place.
+test("_waitForStreamReady's 90s dead-end clears _startingLiveVideo (not just _waitingForStream)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card._hass = {
+      states: { "camera.test": { state: "idle", attributes: {} } },
+      config: {}, language: "en", localize: () => "",
+      callService: () => {}, callWS: async () => ({}),
+    };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    // Simulate the exact stuck-flag precondition: a stream-start attempt
+    // delegated to _waitForStreamReady while _startingLiveVideo is still
+    // true from _startLiveVideo's own top.
+    card._waitingForStream = true;
+    card._streamConnecting = true;
+    card._startingLiveVideo = true;
+
+    // attempt=91 drives straight into the ">90" dead-end branch — camera
+    // state stays "idle" (never reports "streaming"), matching the timeout
+    // scenario.
+    card._waitForStreamReady(91);
+
+    const startingLiveVideoAfter = card._startingLiveVideo;
+    const waitingForStreamAfter = card._waitingForStream;
+    const streamConnectingAfter = card._streamConnecting;
+
+    if (card._waitForStreamRetryTimer) clearTimeout(card._waitForStreamRetryTimer);
+    card.remove();
+    return { startingLiveVideoAfter, waitingForStreamAfter, streamConnectingAfter };
+  });
+  expect(r.waitingForStreamAfter, "_waitingForStream is cleared by the dead-end (pre-existing behavior)").toBe(false);
+  expect(r.streamConnectingAfter, "_streamConnecting is cleared by the dead-end (pre-existing behavior)").toBe(false);
+  expect(r.startingLiveVideoAfter, "_startingLiveVideo must also be cleared, or every auto-recovery gate stays defeated forever").toBe(false);
+});
+
 // firstHass refresh-overlay must not stomp connect-phase text (bug-hunt
 // finding, 2026-07-17 follow-up): the `hass` setter's firstHass block calls
 // _setLoadingOverlay(true, loading_refreshing) unconditionally whenever a
@@ -2255,9 +2304,19 @@ test("2026-06-22 bug-hunt fixes are wired: stale-pc guard, getStats oracle, HLS 
   expect(CARD_SRC).toMatch(/const\s+liveProof\s*=\s*freshFrame[\s\S]{0,80}?timeAdvanced\s*&&\s*\(!!this\._hls\s*\|\|\s*\(!rvfcSupported\s*&&\s*!this\._isIOS\(\)\)\)/);
 
   // B6: _waitForStreamReady must NOT dead-end at 90s — it re-arms a delayed re-poll.
+  // Widened to 2200 for 2026-07-17 (maintenance-round bug-hunt): the dead-end
+  // block gained a `this._startingLiveVideo = false;` reset (with explanatory
+  // comment) so this auto-recovery gate doesn't stay defeated forever, pushing
+  // the retry-timer match further down (distance measured at 2024).
   const wfsIdx = CARD_SRC.indexOf("if (attempt > 90)");
-  const wfsSlice = CARD_SRC.slice(wfsIdx, wfsIdx + 1500);
+  const wfsSlice = CARD_SRC.slice(wfsIdx, wfsIdx + 2700);
   expect(wfsSlice).toMatch(/this\._waitingForStream\s*=\s*true;\s*\n\s*this\._waitForStreamReady\(\);/);
+  // Same bug-hunt: pin that _startingLiveVideo is actually reset in this
+  // block, not just _waitingForStream/_streamConnecting (distance measured
+  // at 1063, past the explanatory comment; window widened generously past
+  // that per a bug-hunt fragility flag, 2026-07-17).
+  const deadEndSlice = CARD_SRC.slice(wfsIdx, wfsIdx + 1800);
+  expect(deadEndSlice).toMatch(/this\._startingLiveVideo\s*=\s*false;/);
 });
 
 // 2026-06-22 runtime: the getStats() oracle returns "frozen" only when

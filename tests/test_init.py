@@ -23502,6 +23502,125 @@ class TestWarmUpUnexpectedExceptionCleanup:
         )
         assert coord.live_connections[CAM_A] is result
 
+    @pytest.mark.asyncio
+    async def test_exception_after_success_reschedules_renewal(self):
+        """Maintenance-round bug-hunt follow-up (2026-07-17): the
+        "already succeeded" exception branch above must also (re-)schedule
+        LOCAL auto-renewal, not just preserve the session — otherwise a
+        session that hits this exact path would silently never renew and
+        go stale at the next Bosch cred rotation with no observable symptom
+        until it does.
+
+        Triggers the exception via `replace_reaper_task` (enabled through
+        `enable_green_it`), which runs AFTER `replace_renewal_task` in the
+        normal flow — not via `replace_renewal_task` itself — so the
+        original scheduling call succeeds first. This proves the fix's own
+        defensive re-call actually fires (2 total calls), not merely that a
+        self-inflicted `replace_renewal_task` failure got swallowed.
+
+        Also pins a bug-hunt follow-up on the fix itself: the defensive
+        re-call must reuse the SAME session generation the reaper task
+        (`idle_session_reaper`) already captured when `replace_reaper_task`
+        ran moments earlier — not mint a fresh one. `generation` is used
+        elsewhere as "is this the still-current session", and the reaper
+        polls it to decide whether to keep running; a second independent
+        bump here would desync the reaper's own capture from a
+        renewal-only re-arm, making it self-exit ("stale generation") for a
+        session that was never actually superseded — silently disabling
+        ghost-session reaping until the next genuine OFF→ON cycle.
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        local_body = json.dumps(
+            {
+                "user": "u-local",
+                "password": "p-local",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
+        coord = _make_coord_sprint_kd(
+            entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={
+                    "stream_connection_type": "local",
+                    "enable_green_it": True,
+                },
+            ),
+            rcp_lan_ip_cache={},
+            local_creds_cache={},
+            get_cam_lan_ip=MagicMock(return_value=None),
+            start_tls_proxy=AsyncMock(return_value=12345),
+            tls_proxy_ports={CAM_A: 12345},
+            stop_tls_proxy=AsyncMock(),
+        )
+        renewal_calls: list[str] = []
+        renewal_generations: list[int] = []
+        reaper_generations: list[int] = []
+
+        def _replace_renewal_task(cam_id, coro):
+            renewal_calls.append(cam_id)
+            coro.close()
+            return MagicMock()
+
+        def _replace_reaper_task(cam_id, coro):
+            coro.close()
+            raise RuntimeError("reaper bug")
+
+        def _auto_renew_local_session(cam_id, gen):
+            renewal_generations.append(gen)
+            return _closed_coro()
+
+        def _idle_session_reaper(cam_id, gen):
+            reaper_generations.append(gen)
+            return _closed_coro()
+
+        async def _closed_coro_body():
+            return None
+
+        def _closed_coro():
+            c = _closed_coro_body()
+            return c
+
+        coord.replace_renewal_task = _replace_renewal_task
+        coord.replace_reaper_task = _replace_reaper_task
+        coord.auto_renew_local_session = _auto_renew_local_session
+        coord.idle_session_reaper = _idle_session_reaper
+
+        resp = _put_resp(200, local_body)
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is not None
+        assert result.get("rtspsUrl")
+        assert CAM_A in coord.live_connections
+        assert len(renewal_calls) == 2, (
+            "renewal must be scheduled once by the normal flow AND again "
+            "defensively by the exception handler — proving the re-call "
+            "actually fires, not just that the original call is untouched"
+        )
+        assert len(reaper_generations) == 1, (
+            "reaper is only scheduled once (it's the one that raises)"
+        )
+        assert renewal_generations == [
+            reaper_generations[0],
+            reaper_generations[0],
+        ], (
+            "both the normal-path and the defensive-redo renewal calls must "
+            "use the EXACT SAME generation the reaper captured — a second "
+            "independent bump would desync the reaper's own generation "
+            "check and silently disable it"
+        )
+
 
 class TestPut200LocalSuccess:
     """Lines 2465-2695: LOCAL 200 response populates result, starts TLS proxy."""

@@ -9254,6 +9254,130 @@ class TestNotifyTypeExceptionHandled:
                 clip_status="",
             )
 
+    @pytest.mark.asyncio
+    async def test_step1_all_configured_services_fail_logs_not_delivered(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Maintenance-round bug-hunt finding, 2026-07-17: _notify_type used
+        to return `bool(services)` — true whenever a service was CONFIGURED,
+        even if every single `hass.services.async_call` raised. A genuinely
+        configured-but-failing notify target (e.g. a briefly-unavailable
+        mobile_app device, a Signal/Telegram outage) would still be logged
+        as "sent", the exact same misreport class as the alert_notify_video
+        bug fixed earlier the same day — just triggered by a live call
+        failure instead of an unset option. `_notify_type` now tracks
+        actual per-call success; this test configures step 1's service and
+        makes every call to it raise, then asserts the log says the
+        message was NOT delivered, not "sent"."""
+        from custom_components.bosch_shc_camera.fcm import async_send_alert
+
+        hass = MagicMock()
+        hass.config.config_dir = "/tmp"
+        hass.async_add_executor_job = AsyncMock()
+        hass.services.async_call = AsyncMock(side_effect=RuntimeError("svc boom"))
+
+        coord = SimpleNamespace(
+            token="tok",
+            options={
+                "alert_notify_service": "notify.test",
+                "alert_notify_information": "notify.test",
+                "alert_save_snapshots": False,
+                "alert_delete_after_send": False,
+            },
+            data={},
+            last_event_ids={},
+            hass=hass,
+        )
+
+        session = MagicMock()
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.fcm"),
+        ):
+            await async_send_alert(
+                coord,
+                "TestCam",
+                "MOVEMENT",
+                "2026-01-01T10:00:00",
+                image_url="",
+                clip_url="",
+                clip_status="",
+            )
+
+        hass.services.async_call.assert_awaited()
+        messages = [r.message for r in caplog.records]
+        assert any("Alert step 1 (text) NOT delivered" in m for m in messages), (
+            "a service that is configured but whose every call fails must "
+            "log NOT delivered, not the misleading 'sent'"
+        )
+        assert not any(m.startswith("Alert step 1 (text) sent") for m in messages), (
+            "the 'sent' log must not fire when every configured call failed"
+        )
+
+    @pytest.mark.asyncio
+    async def test_step1_returns_delivered_when_at_least_one_service_succeeds(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Control case for the fix above: with MULTIPLE configured services
+        where at least one call succeeds, the step must still be logged as
+        sent — the fix tracks "at least one delivered", not "all delivered"."""
+        from custom_components.bosch_shc_camera.fcm import async_send_alert
+
+        call_log: list[str] = []
+
+        async def _svc_call(domain, service, data, **kw):
+            call_log.append(service)
+            if service == "fails":
+                raise RuntimeError("this target is down")
+
+        hass = MagicMock()
+        hass.config.config_dir = "/tmp"
+        hass.async_add_executor_job = AsyncMock()
+        hass.services.async_call = AsyncMock(side_effect=_svc_call)
+
+        coord = SimpleNamespace(
+            token="tok",
+            options={
+                "alert_notify_service": "notify.fails,notify.works",
+                "alert_notify_information": "notify.fails,notify.works",
+                "alert_save_snapshots": False,
+                "alert_delete_after_send": False,
+            },
+            data={},
+            last_event_ids={},
+            hass=hass,
+        )
+
+        session = MagicMock()
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.fcm"),
+        ):
+            await async_send_alert(
+                coord,
+                "TestCam",
+                "MOVEMENT",
+                "2026-01-01T10:00:00",
+                image_url="",
+                clip_url="",
+                clip_status="",
+            )
+
+        assert call_log == ["fails", "works"], (
+            "both configured services must be attempted, in order"
+        )
+        messages = [r.message for r in caplog.records]
+        assert any(m.startswith("Alert step 1 (text) sent") for m in messages), (
+            "one successful delivery among several configured targets must "
+            "still count as sent"
+        )
+
 
 class TestTroubleEventStep1EarlyReturn:
     """A TROUBLE-class event returns after step 1 — no step-2 file writes happen."""
@@ -9603,9 +9727,9 @@ class TestAlertStepSkipLogging:
         )
         messages = [r.message for r in caplog.records]
         assert any(
-            "Alert step 3 (video) downloaded but NOT sent" in m for m in messages
+            "Alert step 3 (video) downloaded but NOT delivered" in m for m in messages
         ), (
-            "log must clearly say the video was NOT sent, not the old "
+            "log must clearly say the video was NOT delivered, not the old "
             "misleading unconditional 'sent'"
         )
         assert not any(m.startswith("Alert step 3 (video) sent") for m in messages), (
@@ -9681,7 +9805,7 @@ class TestAlertStepSkipLogging:
         assert any(m.startswith("Alert step 3 (video) sent") for m in messages), (
             "log must say 'sent' when the video was actually delivered"
         )
-        assert not any("downloaded but NOT sent" in m for m in messages)
+        assert not any("downloaded but NOT delivered" in m for m in messages)
 
     @pytest.mark.asyncio
     async def test_screenshot_skipped_logs_not_sent_when_alert_notify_screenshot_unset(
@@ -9742,8 +9866,8 @@ class TestAlertStepSkipLogging:
             "alert_notify_screenshot is unset"
         )
         messages = [r.message for r in caplog.records]
-        assert any("Alert step 2 (screenshot) skipped" in m for m in messages), (
-            "log must say the screenshot was skipped, not the old "
+        assert any("Alert step 2 (screenshot) NOT delivered" in m for m in messages), (
+            "log must say the screenshot was NOT delivered, not the old "
             "misleading unconditional 'sent'"
         )
         assert not any(m.startswith("Alert step 2 (screenshot) sent") for m in messages)

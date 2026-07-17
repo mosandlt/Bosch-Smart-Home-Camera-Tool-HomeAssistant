@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.9";
+const CARD_VERSION = "14.1.10";
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -6332,6 +6332,7 @@ class BoschCameraCard extends HTMLElement {
     if (attempt > 90) {
       this._waitingForStream = false;
       this._streamConnecting = false;
+      this._startingLiveVideo = false;
       if (this._connectSteps) {
         this._connectSteps.forEach(t => clearTimeout(t));
         this._connectSteps = null;

@@ -104,21 +104,43 @@ mypy runs with `platform = "linux"` so macOS dev and Linux CI agree on stdlib.
 
 ## Release process
 
+Two release trains — see README's [Release Channels](../README.md#release-channels--stable-vs-beta)
+section for the user-facing explanation. **Beta** (`vX.Y.Z-beta-N`) ships as soon
+as a fix is ready; consecutive fixes for the same upcoming release increment `N`
+rather than bumping the patch version. **Stable** (`vX.Y.Z`) is a weekly bundle
+of that version's beta iterations, promoted automatically every Friday 18:00
+Europe/Berlin by `.github/workflows/promote-beta.yml` (the one deliberate,
+narrow exception to this repo's NEVER_AUTO_PUSH policy) — if a week has no open
+beta, there's no stable release that week.
+
 1. Bump version in **three** places: `src/bosch-camera-card.js` `CARD_VERSION`,
    `custom_components/bosch_shc_camera/const.py` `CARD_VERSION`, `manifest.json`
-   `version`. (Thomas picks every version — no auto-bump. In-session card
-   iteration uses a 4th `.X` segment, e.g. `13.4.3.1`, purely to cache-bust the
-   `?v=` resource URL; the base never changes.)
+   `version` (`vX.Y.Z-beta-N` for a beta, or `vX.Y.Z` for a manually-cut stable —
+   Friday's auto-promotion does this step itself for the promoted release).
+   (Thomas picks every version — no auto-bump. In-session card iteration uses a
+   4th `.X` segment, e.g. `13.4.3.1`, purely to cache-bust the `?v=` resource
+   URL; the base never changes.)
 2. Rebuild card (`scripts/build-card.mjs` → `www/` + mirror into `custom_components/.../www/`).
 3. All local gates green (above).
-4. Commit (DCO sign-off, author `mosandlt`), then **squash** all commits since the
+4. Add/update the `## [vX.Y.Z]` section in `CHANGELOG.md` — mandatory for a
+   stable tag (the release job hard-fails without one); optional for a beta
+   (falls back to a generic prerelease note).
+5. Commit (DCO sign-off, author `mosandlt`), then **squash** all commits since the
    previous tag into one release commit via `git commit-tree` (SQUASH_RELEASE).
-5. `git push --force origin main` + push the tag.
-6. `gh release create vX.Y.Z --latest --notes-file …`.
-7. Verify all CI checks green.
-8. Announce: create a Discussion in *HA Announcements*, lock the previous
-   announcement with a link to the new one, comment on the relevant issues
-   (kept open until the reporter confirms), update the blog only for user-facing
+6. `git push --force origin main` + push the tag.
+7. **Do not** run `gh release create`/`gh release edit` — the tag push triggers
+   `.github/workflows/release.yml`, which polls `tests.yml`/`quality.yml`/
+   `validate.yml`/`secret-scan.yml` for SUCCESS on that exact commit, then
+   creates or edits the GitHub Release itself (title + CHANGELOG-extracted
+   notes; `--prerelease`/no-`--latest` for a beta tag, `--latest` for stable —
+   detected from whether the tag contains a hyphen). Poll `gh run list --commit
+   <sha>` until it concludes; if it fails, fix and redo the squash+push, never
+   leave a failed-CI tag in place (CI_DOES_THE_RELEASE).
+8. Announce (stable releases only, or beta if user-facing): create a Discussion
+   in *HA Announcements* on a MAJOR bump, or a comment on the current major's
+   living Discussion for minor/patch. Lock the previous announcement with a
+   link to the new one on a MAJOR bump. Comment on the relevant issues (kept
+   open until the reporter confirms), update the blog only for user-facing
    features.
 
 ## Secret hygiene

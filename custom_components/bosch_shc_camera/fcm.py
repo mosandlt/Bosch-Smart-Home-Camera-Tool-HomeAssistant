@@ -1644,26 +1644,33 @@ async def async_send_alert(
     ) -> bool:
         """Send to services configured for this alert type (information/screenshot/video).
 
-        Returns True iff at least one configured service was actually called
-        (a per-service call failure still counts as "attempted"). False means
-        get_alert_services() returned an empty list — e.g. "screenshot"/
-        "video" don't fall back to alert_notify_service, so an unset
-        alert_notify_video silently means zero services here. Callers use
-        this to log "sent"/"skipped" accurately instead of always claiming
-        "sent" regardless of whether anything was actually dispatched
-        (2026-07-17, Thomas: notifications not reliably arriving — traced to
-        this exact misleading log for a camera whose alert_notify_video was
-        intentionally left unset).
+        Returns True iff at least one configured service was ACTUALLY
+        delivered (the `hass.services.async_call` completed without
+        raising) — not merely configured. Two distinct ways this can be
+        False: get_alert_services() returned an empty list (e.g.
+        "screenshot"/"video" don't fall back to alert_notify_service, so an
+        unset alert_notify_video means zero services here), or every
+        configured service's call raised (each failure is still logged at
+        WARNING here, but that's easy to miss — the caller's "sent"/"skipped"
+        summary log must not claim delivery either way). Originally this
+        returned `bool(services)` — true whenever anything was CONFIGURED,
+        even if every single call failed — which is the same "attempted vs.
+        delivered" misreport class as the bug this function was first fixed
+        for (2026-07-17, Thomas: notifications not reliably arriving),
+        just triggered by a live service-call failure instead of an unset
+        option (maintenance-round bug-hunt finding, same day).
         """
         services = get_alert_services(coordinator, type_key)
+        delivered = False
         for svc in services:
             try:
                 domain, service = svc.split(".", 1)
                 call_data = build_notify_data(svc, message, file_path)
                 await coordinator.hass.services.async_call(domain, service, call_data)
+                delivered = True
             except Exception as err:
                 _LOGGER.warning("Alert send failed for %s (%s): %s", svc, type_key, err)
-        return bool(services)
+        return delivered
 
     # -- Step 1: Instant text alert ----------------------------------------
     # TROUBLE_CONNECT/DISCONNECT are connectivity events — route to "system",
@@ -1677,8 +1684,10 @@ async def async_send_alert(
             _LOGGER.debug("Alert step 1 (text) sent via %s", _step1_key)
         else:
             _LOGGER.debug(
-                "Alert step 1 (text) skipped: no notify service configured for %s"
-                " (and alert_notify_service is also unset)",
+                "Alert step 1 (text) NOT delivered via %s — either no notify"
+                " service is configured (and alert_notify_service is also"
+                " unset), or the configured service call(s) failed (see any"
+                " 'Alert send failed' warning above)",
                 _step1_key,
             )
     except Exception as err:
@@ -1828,10 +1837,12 @@ async def async_send_alert(
                                 )
                             else:
                                 _LOGGER.debug(
-                                    "Alert step 2 (screenshot) skipped: "
-                                    "alert_notify_screenshot is unset (no "
-                                    "fallback to alert_notify_service for this "
-                                    "step): %s",
+                                    "Alert step 2 (screenshot) NOT delivered: "
+                                    "either alert_notify_screenshot is unset "
+                                    "(no fallback to alert_notify_service for "
+                                    "this step), or the configured service "
+                                    "call(s) failed (see any 'Alert send "
+                                    "failed' warning above): %s",
                                     snap_path,
                                 )
                             if not save_snapshots:
@@ -2037,9 +2048,12 @@ async def async_send_alert(
                                 else:
                                     _LOGGER.info(
                                         "Alert step 3 (video) downloaded but NOT"
-                                        " sent — alert_notify_video is unset (no"
-                                        " fallback to alert_notify_service for"
-                                        " this step): %s (%d KB)",
+                                        " delivered — either alert_notify_video"
+                                        " is unset (no fallback to"
+                                        " alert_notify_service for this step),"
+                                        " or the configured service call(s)"
+                                        " failed (see any 'Alert send failed'"
+                                        " warning above): %s (%d KB)",
                                         clip_path,
                                         size_kb,
                                     )

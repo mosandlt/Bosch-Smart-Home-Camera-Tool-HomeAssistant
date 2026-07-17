@@ -4296,6 +4296,62 @@ class TestWatchRecorder:
         )
 
     @pytest.mark.asyncio
+    async def test_respawn_raising_unexpectedly_sets_error_state_transient_path(self):
+        """Maintenance-round bug-hunt finding, 2026-07-17: an unexpected
+        exception from start_recorder's respawn call used to kill this
+        background watcher task silently — no nvr_error_state, no listener
+        push, leaving recording permanently stopped with zero user-visible
+        signal (same "external trigger never fires again" shape as the
+        fixed #51 bug). Must be caught, logged, and surfaced."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = _mock_proc(returncode=1, stderr_data=b"transient")
+        proc.wait = AsyncMock(return_value=1)
+        coord.nvr_processes[CAM_ID] = proc
+
+        with (
+            patch.object(
+                recorder,
+                "start_recorder",
+                new=AsyncMock(side_effect=OSError("port bind failed")),
+            ),
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
+            # Must NOT raise.
+            await recorder._watch_recorder(coord, CAM_ID, proc)
+
+        assert "respawn" in coord.nvr_error_state.get(CAM_ID, "").lower()
+        coord.async_update_listeners.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_respawn_raising_unexpectedly_sets_error_state_auth_retry_path(self):
+        """Same fix, exercised via the auth-retry respawn call instead of
+        the transient-crash one."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        coord.nvr_recent_crash[CAM_ID] = time.monotonic() - 5
+        proc = _mock_proc(
+            returncode=8, stderr_data=b"method OPTIONS failed: 401 (Unauthorized)"
+        )
+        proc.wait = AsyncMock(return_value=8)
+        coord.nvr_processes[CAM_ID] = proc
+
+        with (
+            patch.object(
+                recorder,
+                "start_recorder",
+                new=AsyncMock(side_effect=OSError("port bind failed")),
+            ),
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
+            await recorder._watch_recorder(coord, CAM_ID, proc)
+
+        assert "respawn" in coord.nvr_error_state.get(CAM_ID, "").lower()
+        coord.async_update_listeners.assert_called()
+
+    @pytest.mark.asyncio
     async def test_auth_failure_case_insensitive_and_lowercase_401(self):
         """The marker match must be case-insensitive and also catch a bare
         '401' without the word 'Unauthorized' in the tail."""
@@ -4789,6 +4845,43 @@ class TestWatchPrerollHealth:
             await recorder._watch_preroll_health(coord, CAM_ID, proc)
 
         respawn.assert_not_awaited()
+        # Maintenance-round bug-hunt finding, 2026-07-17: unlike
+        # _watch_recorder's equivalent give-up paths, this branch used to
+        # only log — no nvr_error_state, no listener push — so the
+        # mini_nvr_state sensor's `error` attribute and the recording
+        # switch's `last_error` attribute stayed blank with the ring
+        # permanently dead and no UI signal.
+        assert "pre-roll" in coord.nvr_error_state.get(CAM_ID, "").lower()
+        coord.async_update_listeners.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_respawn_raising_unexpectedly_sets_error_state(self):
+        """Same class of bug as _watch_recorder's respawn-raises fix,
+        applied to the pre-roll ring's own health watcher — ironic since
+        this function exists specifically to close the 'external trigger
+        never fires again' gap from #51. Must be caught, logged, and
+        surfaced, not silently kill this background task."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = MagicMock()
+        proc.wait = AsyncMock(return_value=-11)
+        proc.stderr = None
+        coord.nvr_preroll_processes[CAM_ID] = proc
+
+        with (
+            patch.object(
+                recorder,
+                "start_preroll_recorder",
+                new=AsyncMock(side_effect=OSError("port bind failed")),
+            ),
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+        ):
+            # Must NOT raise.
+            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+
+        assert "respawn" in coord.nvr_error_state.get(CAM_ID, "").lower()
+        coord.async_update_listeners.assert_called()
 
     @pytest.mark.asyncio
     async def test_no_respawn_when_gate_closed(self):

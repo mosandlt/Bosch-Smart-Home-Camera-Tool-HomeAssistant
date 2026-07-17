@@ -515,6 +515,15 @@ async def _watch_preroll_health(
             _RESPAWN_WINDOW_SECONDS,
             cam_id[:8],
         )
+        # Unlike _watch_recorder's equivalent give-up paths, this branch
+        # previously only logged — no nvr_error_state, no listener push, so
+        # the mini_nvr_state sensor's `error` attribute and the recording
+        # switch's `last_error` attribute stayed blank with the ring
+        # permanently dead. Mirror the main recorder's give-up discipline
+        # so this is visible in the UI, not log-only (maintenance-round
+        # bug-hunt finding, 2026-07-17).
+        coordinator.nvr_error_state[cam_id] = "pre-roll ring crashed twice"
+        coordinator.async_update_listeners()
         return
     coordinator._nvr_preroll_last_crash[cam_id] = (
         now  # coordinator-owned per-cam crash tracker, recorder module is its only writer
@@ -532,7 +541,22 @@ async def _watch_preroll_health(
     _LOGGER.info(
         "NVR pre-roll ring respawning for %s after transient crash", cam_id[:8]
     )
-    await start_preroll_recorder(coordinator, cam_id)
+    try:
+        await start_preroll_recorder(coordinator, cam_id)
+    except Exception as respawn_err:
+        # Same "external trigger never fires again" shape as the fixed #51
+        # bug — an unexpected exception here would otherwise kill this
+        # health-watch task silently, permanently disabling the pre-roll
+        # ring's own crash recovery (ironic: this function exists
+        # specifically to close that class of gap). Maintenance-round
+        # bug-hunt finding, 2026-07-17.
+        _LOGGER.error(
+            "NVR pre-roll respawn raised unexpectedly for %s: %s",
+            cam_id[:8],
+            respawn_err,
+        )
+        coordinator.nvr_error_state[cam_id] = "pre-roll respawn failed unexpectedly"
+        coordinator.async_update_listeners()
 
 
 async def _spawn_preroll_recorder_locked(
@@ -1927,7 +1951,23 @@ async def _watch_recorder(
         await asyncio.sleep(_RESPAWN_DELAY_SECONDS)
         if not should_record(coordinator, cam_id, switch_on=last):
             return
-        await start_recorder(coordinator, cam_id, is_auto_retry=True)
+        try:
+            await start_recorder(coordinator, cam_id, is_auto_retry=True)
+        except Exception as respawn_err:
+            # Same "external trigger never fires again" shape as the fixed
+            # #51 bug (live_connection.py's LOCAL warm-up exception handler)
+            # — an unexpected exception here would otherwise kill this
+            # background watcher task silently, with no nvr_error_state and
+            # no listener push, leaving recording permanently stopped with
+            # zero user-visible signal (maintenance-round bug-hunt finding,
+            # 2026-07-17).
+            _LOGGER.error(
+                "NVR respawn (auth-retry path) raised unexpectedly for %s: %s",
+                cam_id[:8],
+                respawn_err,
+            )
+            coordinator.nvr_error_state[cam_id] = "respawn failed unexpectedly"
+            coordinator.async_update_listeners()
         return
 
     # B13-2: Always record the crash timestamp (not only for short-lived
@@ -1953,7 +1993,18 @@ async def _watch_recorder(
     if not should_record(coordinator, cam_id, switch_on=last):
         return
     _LOGGER.info("NVR respawning ffmpeg for %s after transient crash", cam_id[:8])
-    await start_recorder(coordinator, cam_id)
+    try:
+        await start_recorder(coordinator, cam_id)
+    except Exception as respawn_err:
+        # See the matching comment on the auth-retry respawn above — same
+        # fix, same reasoning.
+        _LOGGER.error(
+            "NVR respawn (transient-crash path) raised unexpectedly for %s: %s",
+            cam_id[:8],
+            respawn_err,
+        )
+        coordinator.nvr_error_state[cam_id] = "respawn failed unexpectedly"
+        coordinator.async_update_listeners()
 
 
 # ── staging-drain watcher (per-coordinator background task) ──────────────────

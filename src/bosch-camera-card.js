@@ -149,7 +149,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.9";
+const CARD_VERSION = "14.1.10";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -10776,6 +10776,15 @@ class BoschCameraCard extends HTMLElement {
       // slow/unreachable. B6 fix 2026-06-22.
       this._waitingForStream = false;
       this._streamConnecting = false;
+      // _startingLiveVideo must also be cleared here (bug-hunt finding,
+      // 2026-07-17): _startLiveVideo's catch-block can delegate to THIS
+      // function while leaving _startingLiveVideo=true from its own top.
+      // Every auto-recovery gate in the file (_update()'s auto-start gate,
+      // the 30s retry timer just below, _resumeLiveStreamIfNeeded) requires
+      // !_startingLiveVideo — leaving it stuck true here would permanently
+      // defeat every one of them despite this being the exact dead-end
+      // reset (B6, 2026-06-22) meant to prevent that class of bug.
+      this._startingLiveVideo = false;
       if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
       this._setLoadingOverlay(false);
       this._startRefreshTimer();

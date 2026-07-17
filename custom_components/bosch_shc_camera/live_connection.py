@@ -1016,6 +1016,56 @@ async def try_live_connection_inner(
                     # falling through to the next candidate or returning
                     # None (bug-hunt finding on the first version of this
                     # fix, which had no such distinction).
+                    #
+                    # Also (re-)schedule LOCAL auto-renewal defensively: if
+                    # the exception happened before or during that exact
+                    # scheduling step (coordinator.replace_renewal_task,
+                    # further down in the normal flow), the working session
+                    # would otherwise silently never renew and go stale at
+                    # the next Bosch cred rotation with no observable
+                    # symptom until it does (maintenance-round bug-hunt
+                    # follow-up, 2026-07-17). replace_renewal_task() cancels
+                    # any existing task before scheduling the new one, so
+                    # calling it again here is safe even if renewal had
+                    # already been scheduled successfully before the
+                    # exception.
+                    if type_val == "LOCAL" and local_user and local_pass:
+                        try:
+                            # Reuse the CURRENT generation — do NOT bump it
+                            # again here. The normal-path code above already
+                            # incremented it once for this connection and
+                            # handed that exact value to BOTH
+                            # replace_renewal_task and (if enable_green_it)
+                            # replace_reaper_task's idle_session_reaper,
+                            # which polls "is my captured generation still
+                            # current?" to decide whether to keep running. A
+                            # second independent bump here — reachable
+                            # whenever this exception fires with
+                            # enable_green_it on — would desync the reaper's
+                            # already-captured generation from a fresh
+                            # renewal-only bump, making the reaper
+                            # self-exit ("stale generation") for a session
+                            # that was never actually superseded, silently
+                            # disabling ghost-session reaping until the next
+                            # genuine OFF→ON cycle (bug-hunt finding on the
+                            # first version of this fix, 2026-07-17). This is
+                            # a re-arm of the SAME session's renewal watcher,
+                            # not a new session — it must not mint a new
+                            # generation.
+                            current_gen = coordinator.get_session(cam_id).generation
+                            coordinator.replace_renewal_task(
+                                cam_id,
+                                coordinator.auto_renew_local_session(
+                                    cam_id, current_gen
+                                ),
+                            )
+                        except Exception as renewal_err:
+                            _LOGGER.error(
+                                "Failed to (re-)schedule LOCAL renewal for %s "
+                                "after a post-success warm-up exception: %s",
+                                cam_id[:8],
+                                renewal_err,
+                            )
                     return published_result
                 if (
                     published_result is not None
