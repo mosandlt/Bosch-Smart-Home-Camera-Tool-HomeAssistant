@@ -149,7 +149,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.10";
+const CARD_VERSION = "14.1.10.1";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -286,7 +286,7 @@ const CARD_I18N = {
     loading_refreshing: "Refreshing…",
     loading_refreshing_image: "Refreshing image…",
     loading_hint_remote: "Cloud stream — first image in ~30–45 s, then stable",
-    loading_hint_local: "LAN stream — first image in ~25–35 s",
+    loading_hint_local: "LAN stream — usually ~10–20 s, up to 35 s",
     loading_hint_connecting: "Establishing camera connection…",
     pill_snapshot_aria: "Take snapshot",
     pill_stream_title: "Live stream",
@@ -552,7 +552,7 @@ const CARD_I18N = {
     loading_refreshing: "Aktualisiere…",
     loading_refreshing_image: "Aktualisiere Bild…",
     loading_hint_remote: "Cloud-Stream — ca. 30–45 s bis erstes Bild, danach stabil",
-    loading_hint_local: "LAN-Stream — ca. 25–35 s bis erstes Bild",
+    loading_hint_local: "LAN-Stream — meist ca. 10–20 s, max. 35 s",
     loading_hint_connecting: "Verbindung zur Kamera wird aufgebaut…",
     pill_snapshot_aria: "Snapshot aufnehmen",
     pill_stream_title: "Live-Stream",
@@ -10746,8 +10746,10 @@ class BoschCameraCard extends HTMLElement {
 
   _waitForStreamReady(attempt = 0) {
     // Poll until camera entity reports "streaming" (stream_source is set).
-    // Backend needs 25-35s for PUT /connection + TLS proxy + pre-warm
-    // (outdoor camera is slower). Only then call camera/stream WS to avoid
+    // Backend needs PUT /connection + TLS proxy + pre-warm, usually ~10-20s
+    // now (encoder-readiness confirmation shortcut, v16.1.1-beta-6+), up to
+    // 25-35s worst case if that confirmation doesn't land (outdoor camera is
+    // slower). Only then call camera/stream WS to avoid
     // "does not support play stream" errors from premature WS calls.
     if (!this._waitingForStream || !this._hass) return;
 
@@ -10988,7 +10990,9 @@ class BoschCameraCard extends HTMLElement {
     } else if (!this._streamConnecting) {
       // Starting stream → show loading overlay with progressive status updates
       // Timeline: PUT /connection ~2s, TLS proxy ~0.5s, pre-warm ~3s,
-      // go2rtc RTSP connect ~5s, HLS segment generation ~10-15s, first frame ~25-35s total.
+      // go2rtc RTSP connect ~5s, HLS segment generation ~10-15s — usually
+      // ~10-20s to first frame now (encoder-readiness confirmation
+      // shortcut, v16.1.1-beta-6+), up to ~25-35s worst case.
       this._streamConnecting = true;
       this._setLoadingOverlay(true, this._streamPhaseText());
       // Keepalive ticks — each _setLoadingOverlay resets the 15s safety timeout,

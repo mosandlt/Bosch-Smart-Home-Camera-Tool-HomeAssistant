@@ -56,6 +56,7 @@ from custom_components.bosch_shc_camera import tls_proxy as _tls_proxy_mod
 from custom_components.bosch_shc_camera.tls_proxy import (
     _digest_auth,
     _set_keepalive,
+    confirm_encoder_ready,
     pre_warm_rtsp,
     rtsp_keepalive,
     start_tls_proxy,
@@ -1515,6 +1516,111 @@ class TestPreWarmRtsp:
         src = inspect.getsource(pre_warm_rtsp)
         count = src.count("await writer.wait_closed()")
         assert count >= 2
+
+
+class TestConfirmEncoderReady:
+    """Single-shot confirmation DESCRIBE used to shorten the min_total_wait
+    blind floor. Must never retry and never sleep post-success — that's the
+    whole point vs. pre_warm_rtsp."""
+
+    @pytest.mark.asyncio
+    async def test_happy_path_returns_true(self):
+        def responder(req: bytes, step: int) -> bytes | None:
+            if step == 0:
+                assert b"DESCRIBE " in req
+                return _digest_challenge(nonce="CONF1")
+            assert b"Authorization: Digest" in req
+            return _ok_response(b"v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n")
+
+        async with FakeRtsp(responder) as server:
+            ok = await confirm_encoder_ready(
+                server.port, "u", "p", "127.0.0.1", describe_timeout=2
+            )
+            assert ok is True
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_missing_nonce(self):
+        attempt_count = [0]
+
+        def responder(req: bytes, step: int) -> bytes | None:
+            attempt_count[0] += 1
+            return b"RTSP/1.0 500 Internal Server Error\r\nCSeq: 1\r\n\r\n"
+
+        async with FakeRtsp(responder) as server:
+            ok = await confirm_encoder_ready(
+                server.port, "u", "p", "127.0.0.1", describe_timeout=2
+            )
+            assert ok is False
+            assert attempt_count[0] == 1
+
+    @pytest.mark.asyncio
+    async def test_non_200_returns_false(self):
+        def responder(req: bytes, step: int) -> bytes | None:
+            if step == 0:
+                return _digest_challenge(nonce="CONF2")
+            return b"RTSP/1.0 503 Service Unavailable\r\nCSeq: 2\r\n\r\n"
+
+        async with FakeRtsp(responder) as server:
+            ok = await confirm_encoder_ready(
+                server.port, "u", "p", "127.0.0.1", describe_timeout=2
+            )
+            assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_unreachable_port_returns_false_fast(self):
+        start = time.monotonic()
+        ok = await confirm_encoder_ready(1, "u", "p", "127.0.0.1", describe_timeout=1)
+        elapsed = time.monotonic() - start
+        assert ok is False
+        assert elapsed < 3  # no retry loop — must fail fast
+
+    def test_no_post_success_sleep_param(self):
+        sig = inspect.signature(confirm_encoder_ready)
+        assert "post_success_wait" not in sig.parameters
+        assert "max_attempts" not in sig.parameters
+
+    def test_writer_closed_on_all_paths(self):
+        src = inspect.getsource(confirm_encoder_ready)
+        assert "writer = None" in src
+        assert "if writer is not None" in src
+        assert "wait_closed" in src
+
+    @pytest.mark.asyncio
+    async def test_writer_close_failure_in_finally_swallowed(self):
+        """A raising writer.close()/wait_closed() in the finally block must
+        not propagate — mirrors pre_warm_rtsp's equivalent coverage."""
+
+        async def _handle(reader, writer):
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+        srv = await asyncio.start_server(_handle, "127.0.0.1", 0)
+        proxy_port = srv.sockets[0].getsockname()[1]
+        original_open = asyncio.open_connection
+
+        async def _patched_open(host, port, **kwargs):
+            reader, writer = await original_open(host, port, **kwargs)
+
+            def _raising_close():
+                raise RuntimeError("writer.close failed")
+
+            writer.close = _raising_close
+            return reader, writer
+
+        try:
+            with patch("asyncio.open_connection", side_effect=_patched_open):
+                with patch("asyncio.wait_for", side_effect=TimeoutError()):
+                    result = await confirm_encoder_ready(
+                        proxy_port, "u", "p", "127.0.0.1", describe_timeout=1
+                    )
+        finally:
+            srv.close()
+            await srv.wait_closed()
+
+        assert result is False
 
 
 class TestRtspHelperContract:

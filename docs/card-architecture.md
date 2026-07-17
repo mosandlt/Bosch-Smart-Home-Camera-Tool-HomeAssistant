@@ -4,7 +4,7 @@ This document contains the architectural notes, section markers, and design rati
 
 **Source file:** [`src/bosch-camera-card.js`](../src/bosch-camera-card.js)
 
-> **Note:** Section markers and line numbers below were last extracted at the card's internal header-comment version v2.8.1 — an older, since-abandoned numbering scheme kept only inside that comment block for historical reference. The card structure is largely unchanged but line numbers have drifted; use `grep` on `src/bosch-camera-card.js` for exact positions. The version number that actually matters today is `CARD_VERSION` (`src/bosch-camera-card.js`, mirrored in `custom_components/bosch_shc_camera/const.py`) — see [`docs/version-history.md`](version-history.md) for the current value.
+> **Note:** Section markers and line numbers below were last extracted at the card's internal header-comment version v2.8.1 — an older, since-abandoned numbering scheme kept only inside that comment block for historical reference (the header comment itself is no longer actively maintained line-for-line; the "Changes vs X" entries stop updating even though the file keeps growing). The card structure is largely unchanged but line numbers have drifted a lot as the file has grown (now 22 top-level `// ── Section ──` markers, not 15 — see the refreshed list below); use `grep` on `src/bosch-camera-card.js` for exact positions. The version number that actually matters today is `CARD_VERSION` (`src/bosch-camera-card.js`, mirrored in `custom_components/bosch_shc_camera/const.py`) — see [`docs/version-history.md`](version-history.md) for the current value.
 
 ---
 
@@ -30,7 +30,7 @@ This document contains the architectural notes, section markers, and design rati
  *   title: Garten                             # optional
  *   # idle refresh: 60 s visible / 1800 s background (Page Visibility API)
  *
- * Version: 2.11.7  (changelog entries below are from v2.8.1 extraction)
+ * Version: 2.8.1
  *
  * Changes vs 2.7.0:
  *   - Gen2 polygon zone overlay: renders polygon zones (from GET /zones) on camera image
@@ -46,7 +46,8 @@ This document contains the architectural notes, section markers, and design rati
  * Changes vs 2.4.0:
  *   - New "Services" accordion: grid of quick-action buttons for
  *     Snapshot, Zonen lesen, Privacy-Masken, Freunde, Regel erstellen, Verbindung.
- *     Regel erstellen uses prompt() for name/start/end.
+ *     Regel erstellen uses an in-card dialog for name/start/end (was
+ *     window.prompt(), which is a silent no-op in iOS WKWebView).
  *   - Motion zone overlay now uses cloud API zones (normalized x/y/w/h 0-1)
  *     instead of broken RCP coordinates.
  *
@@ -131,7 +132,7 @@ This document contains the architectural notes, section markers, and design rati
  *
  * Changes vs 1.5.10:
  *   - Added video quality dropdown inside card (select entity):
- *     Qualität: Auto / Hoch (30 Mbps) / Niedrig (1.9 Mbps)
+ *     Quality: Auto / High (30 Mbps) / Low (1.9 Mbps)
  *     Hidden automatically when the select entity doesn't exist or is unavailable.
  *     Configure with quality_entity: select.bosch_xxx_video_quality in card YAML.
  *
@@ -164,78 +165,123 @@ This document contains the architectural notes, section markers, and design rati
 
 ## Section Markers
 
-Originally embedded as `// ── Section ──` comments in the JS file.
+Embedded as `// ── Section ──` comments in the JS file. Re-extracted 2026-07-17 (`grep -n "── .*──" src/bosch-camera-card.js`) — the file has grown from 15 to ~20 top-level markers since the v2.8.1 extraction; several sections (Theme, Day/Night mode, Auto-play gate, Fullscreen zoom/auto-hide, Card-picker suggestions, Phase 5/6 cards) didn't exist yet at that point. Line numbers below will drift again as the file keeps growing — re-run the grep above for exact current positions rather than trusting these numbers long-term. Note the raw grep also matches many one-off inline `// ── ... ──` comments that aren't real section markers (e.g. a per-locale "issue #45" translation-fix marker repeated ~13 times, or the two-space-indented WebRTC/HLS-fallback sub-markers nested inside "Live HLS video" below) — only the genuine top-level markers are listed here.
 
-**Line 190:**
+**Line 3034:**
 ```
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 ```
 
-**Line 196:**
+**Line 3098:**
 ```
 // ── Config ────────────────────────────────────────────────────────────────
 ```
 
-**Line 276:**
+**Line 3400:**
+```
+// ── Theme (iOS / Android) ─────────────────────────────────────────────────
+```
+
+**Line 3494:**
+```
+// ── Day/Night mode (Tag / Nacht) ──────────────────────────────────────────
+```
+
+**Line 3834:**
 ```
 // ── HA state updates ──────────────────────────────────────────────────────
 ```
 
-**Line 310:**
+**Line 3940:**
+```
+// ── Auto-play gate ────────────────────────────────────────────────────────
+```
+
+**Line 4196:**
 ```
 // ── Timer ─────────────────────────────────────────────────────────────────
 ```
 
-**Line 363:**
+**Line 4503:**
 ```
 // ── Full DOM render (once on setConfig) ───────────────────────────────────
 ```
 
-**Line 1516:**
+**Line 7311:**
 ```
 // ── Image lifecycle ───────────────────────────────────────────────────────
 ```
 
-**Line 1652:**
+**Line 7524:**
 ```
 // ── Image caching (localStorage — persists across iOS app restarts) ────────
 ```
 
-**Line 1696:**
+**Line 7571:**
 ```
 // ── Live HLS video ────────────────────────────────────────────────────────
 ```
 
-**Line 1791:**
-```
-// ── WebRTC (try first if go2rtc is available) ─────────────────────
-// go2rtc provides WebRTC (~2s latency vs ~12s HLS) when stream is active.
-// Falls back to HLS if WebRTC is not available or fails.
-```
-
-**Line 1813:**
-```
-// ── HLS via camera/stream (fallback) ────────────────────────────────
-```
-
-**Line 2020:**
+**Line 9112:**
 ```
 // ── Snapshot button ───────────────────────────────────────────────────────
 ```
 
-**Line 2140:**
+**Line 9254:**
 ```
 // ── State update ──────────────────────────────────────────────────────────
 ```
 
-**Line 2614:**
+**Line 10448:**
 ```
 // ── Schedules & Zones ──────────────────────────────────────────────────────
 ```
 
-**Line 2817:**
+**Line 10709:**
 ```
 // ── Helpers ───────────────────────────────────────────────────────────────
+```
+
+**Line 11083:**
+```
+// ── Auto-unmute on first user gesture ──────────────────────────────────────
+```
+
+**Line 11571:**
+```
+// ── Fullscreen digital zoom (pinch / pan / double-tap / wheel) ──────────────
+```
+
+**Line 11757:**
+```
+// ── Fullscreen controls auto-hide ────────────────────────────────────────
+```
+
+**Line 12098:**
+```
+// ── Card-picker entity suggestions (HA 2026.6+) ──────────────────────────────
+```
+
+**Line 13116:**
+```
+// ── Phase 5: NVR Timeline Card ────────────────────────────────────────────────
+```
+
+**Line 13361:**
+```
+// ── Phase 6: Multi-Cam Stacked Card ──────────────────────────────────────────
+```
+
+The WebRTC/HLS-fallback markers are nested (2-space-indented) sub-sections inside "Live HLS video" rather than separate top-level markers — and the WebRTC one's own text has changed since extraction (was "WebRTC (try first if go2rtc is available)", now "WebRTC (always attempt; HLS is the fallback)", reflecting that WebRTC is no longer conditionally gated on a go2rtc-available check but always attempted first):
+
+**Line 7908:**
+```
+    // ── WebRTC (always attempt; HLS is the fallback) ──────────────────
+```
+
+**Line 7979:**
+```
+    // ── HLS via camera/stream (fallback) ────────────────────────────────
 ```
 
 ## Design Notes & Explanations
@@ -277,20 +323,20 @@ Multi-line `//` comment blocks that explain non-obvious logic, workarounds, or d
 // well within 640 px. This avoids serving 1080p (~150 KB) to mobile.
 ```
 
-**Line 1567:**
+**Line 7399 (`_onImageLoaded()`, updated 2026-07-17 — overlay-flicker fix):**
 ```
+const stillConnecting = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
+
 // Overlay management:
 // - Cache image + awaitingFresh → keep "refreshing" overlay visible
-// - Fresh image (non-cache) → always clear overlay
+// - Fresh image (non-cache), no connect sequence in flight → clear overlay
+// - Fresh image while stillConnecting → leave the connect overlay alone;
+//   the eventual real hide is owned by clearOverlay() on video "playing"
 // - Cache image + NOT awaitingFresh → clear overlay (normal idle refresh)
 ```
+This is the CURRENT (fixed) logic — a 4-case branch, not the 3-case one previously documented here. The old 3-case version ("fresh image → always clear overlay") is what caused the bug: an incidental background/periodic snapshot fetch landing mid-connect-sequence used to unconditionally clear the overlay, producing an "overlay vanishes, then a stale/different message pops back in" flicker. `stillConnecting` deliberately includes `_streamConnecting` itself (not just `_waitingForStream`/`_startingLiveVideo`) — a first bug-hunt pass on the fix found that omitting it left a real window right after a tap (synchronous `_streamConnecting=true`, but `_waitingForStream` only flips true on the next async `_update()` pass) where a stray snapshot could still reproduce the original bug. `_onImageLoaded()` no longer ever clears `_streamConnecting`/`_connectSteps` itself — that is now exclusively owned by `clearOverlay()` (fired on the video's "playing" event) and the various stop/failure paths in `_stopLiveVideo()`.
 
-**Line 1572:**
-```
-// Cache loaded — keep spinner visible, fresh image will clear it.
-// But ensure the overlay is in "refreshing" mode (semi-transparent)
-// so the cached image is visible underneath.
-```
+**Line 7458 (`_setLoadingOverlay()`):** the anti-flicker guard was similarly broadened on 2026-07-17 — hiding the overlay (`visible=false`) is refused while `_streamConnecting || _waitingForStream || _startingLiveVideo` is true (was previously narrower, only checking `_streamConnecting`), and the same broadened check also blocks an external caller from stomping the progressive connect-timeline text with the generic default text during any of the three phases (was previously only protected during the `_streamConnecting` phase specifically).
 
 **Line 1596:**
 ```

@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.10";
+const CARD_VERSION = "14.1.10.1";
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -93,7 +93,7 @@ const CARD_I18N = {
     loading_refreshing: "Refreshing…",
     loading_refreshing_image: "Refreshing image…",
     loading_hint_remote: "Cloud stream — first image in ~30–45 s, then stable",
-    loading_hint_local: "LAN stream — first image in ~25–35 s",
+    loading_hint_local: "LAN stream — usually ~10–20 s, up to 35 s",
     loading_hint_connecting: "Establishing camera connection…",
     pill_snapshot_aria: "Take snapshot",
     pill_stream_title: "Live stream",
@@ -354,7 +354,7 @@ const CARD_I18N = {
     loading_refreshing: "Aktualisiere…",
     loading_refreshing_image: "Aktualisiere Bild…",
     loading_hint_remote: "Cloud-Stream — ca. 30–45 s bis erstes Bild, danach stabil",
-    loading_hint_local: "LAN-Stream — ca. 25–35 s bis erstes Bild",
+    loading_hint_local: "LAN-Stream — meist ca. 10–20 s, max. 35 s",
     loading_hint_connecting: "Verbindung zur Kamera wird aufgebaut…",
     pill_snapshot_aria: "Snapshot aufnehmen",
     pill_stream_title: "Live-Stream",

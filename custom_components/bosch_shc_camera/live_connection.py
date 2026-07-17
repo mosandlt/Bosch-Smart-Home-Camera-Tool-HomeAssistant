@@ -47,6 +47,9 @@ async def try_live_connection_inner(
         async_get_bosch_cloud_session as async_get_bosch_cloud_session,
     )
     from . import (
+        confirm_encoder_ready as confirm_encoder_ready,
+    )
+    from . import (
         nvr_recorder as nvr_recorder,
     )
     from . import (
@@ -753,14 +756,53 @@ async def try_live_connection_inner(
                         elapsed = time.monotonic() - put_time
                         remaining = min_wait - elapsed
                         if remaining > 0:
+                            # Try to shorten the blind floor with a second,
+                            # independent DESCRIBE a few seconds after the
+                            # first pre-warm success. A lone DESCRIBE can
+                            # succeed at the handshake/codec-negotiation
+                            # level before the encoder pipeline is actually
+                            # producing frames — that ambiguity is exactly
+                            # why min_total_wait exists as a blind floor.
+                            # Two 200 OKs spaced apart are stronger evidence
+                            # the encoder is stable. Only shortens the wait
+                            # on a confirmed True; any failure/timeout falls
+                            # back to the full unmodified floor (identical
+                            # to pre-this-change behavior, zero regression
+                            # risk). Still DESCRIBE-only, so it doesn't
+                            # consume one of the camera's ~2 concurrent
+                            # RTSP session slots.
+                            confirm_ok = False
+                            if prewarm_ok and proxy_port_val:
+                                confirm_ok = await confirm_encoder_ready(
+                                    proxy_port_val,
+                                    local_user,
+                                    local_pass,
+                                    cam_addr.split(":")[0],
+                                    describe_timeout=cfg.describe_timeout,
+                                    max_session_duration=cfg.max_session_duration,
+                                )
+                            # Re-measure elapsed AFTER the confirm call — it
+                            # spends real wall-clock time (up to
+                            # describe_timeout on a stall/failure). Reusing
+                            # the pre-call `elapsed`/`remaining` here would
+                            # silently ADD the confirm call's own duration on
+                            # top of the full floor whenever confirmation
+                            # fails, breaking the "identical to pre-change
+                            # behavior" fallback guarantee below.
+                            elapsed = time.monotonic() - put_time
+                            remaining = min_wait - elapsed
+                            if confirm_ok:
+                                remaining = min(remaining, cfg.post_warm_buffer)
                             _LOGGER.debug(
-                                "LOCAL %s: waiting %.0fs more (%.0fs elapsed, min %ds)",
+                                "LOCAL %s: waiting %.0fs more (%.0fs elapsed, min %ds%s)",
                                 cam_id[:8],
                                 remaining,
                                 elapsed,
                                 cfg.min_total_wait,
+                                ", confirmed-ready" if confirm_ok else "",
                             )
-                            await asyncio.sleep(remaining)
+                            if remaining > 0:
+                                await asyncio.sleep(remaining)
                         # Set URL — encoder should be ready now. Prefer the
                         # credential-free, stable-port viewing front-door
                         # (viewing_front_door.py) over the raw credentialed

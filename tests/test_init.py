@@ -24772,6 +24772,209 @@ class TestFreshToggleUsesListenerPushNotFullRefresh:
         coord.async_request_refresh.assert_not_called()
 
 
+class TestMinTotalWaitConfirmShortcut:
+    """Stream-start latency fix, 2026-07-17 round 2: min_total_wait is a
+    BLIND floor (`await asyncio.sleep(remaining)`) even after pre_warm_rtsp
+    already succeeded, because a single DESCRIBE can succeed at the
+    handshake level before the encoder pipeline is actually producing
+    frames. A second, independent `confirm_encoder_ready()` DESCRIBE a few
+    seconds later is stronger evidence — on a confirmed True the remaining
+    wait is capped to `post_warm_buffer` instead of the full floor; on any
+    False/exception the full floor is used unchanged (safe default)."""
+
+    async def _run(self, *, confirm_ok: bool, is_renewal: bool = False):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.0.2.149:443"],
+                "bufferingTime": 500,
+            }
+        )
+        # Long floor + short buffer so a real, un-shortcut-ed test run
+        # would take far longer than the assertion's time budget.
+        cfg = _model_cfg_sprint_lc(min_total_wait=30, post_warm_buffer=2)
+        coord = _make_coord_live(
+            entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "local"},
+            ),
+            rcp_lan_ip_cache={},
+            local_creds_cache={},
+            get_cam_lan_ip=MagicMock(return_value=None),
+            start_tls_proxy=AsyncMock(return_value=12345),
+            tls_proxy_ports={CAM_A: 12345},
+            get_model_config=MagicMock(return_value=cfg),
+        )
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch(
+                "aiohttp.ClientSession",
+                return_value=_make_session_sprint_kd(_put_resp(200, body)),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.confirm_encoder_ready",
+                new=AsyncMock(return_value=confirm_ok),
+            ) as mock_confirm,
+            patch("asyncio.sleep", new=AsyncMock()) as mock_sleep,
+        ):
+            await try_live_connection_inner(coord, CAM_A, is_renewal=is_renewal)
+        return mock_confirm, mock_sleep
+
+    @pytest.mark.asyncio
+    async def test_confirmed_ready_caps_wait_to_post_warm_buffer(self):
+        mock_confirm, mock_sleep = await self._run(confirm_ok=True)
+        mock_confirm.assert_called_once()
+        # Last sleep call is the (possibly capped) remaining-wait sleep;
+        # capped to post_warm_buffer=2 rather than the min_total_wait=30 floor.
+        final_wait = mock_sleep.call_args_list[-1].args[0]
+        assert final_wait <= 2
+
+    @pytest.mark.asyncio
+    async def test_unconfirmed_uses_full_blind_floor(self):
+        mock_confirm, mock_sleep = await self._run(confirm_ok=False)
+        mock_confirm.assert_called_once()
+        final_wait = mock_sleep.call_args_list[-1].args[0]
+        # Full floor (min_total_wait=30) minus tiny elapsed time — must be
+        # much larger than post_warm_buffer=2, proving no shortcut applied.
+        assert final_wait > 20
+
+    @pytest.mark.asyncio
+    async def test_failed_confirm_does_not_add_its_own_duration_on_top(self):
+        """Bug found by 3-agent bug-hunt (2026-07-17): elapsed/remaining were
+        computed BEFORE the confirm_encoder_ready() call, so a failed/slow
+        confirm attempt's own wall-clock cost was never subtracted — the
+        fallback wait became min_wait PLUS however long the failed confirm
+        call took, instead of the promised "identical to pre-change
+        behavior". Uses a fake shared clock: confirm_encoder_ready "costs"
+        5s and fails; total simulated elapsed time must stay close to
+        min_total_wait, not min_total_wait + 5."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        class _FakeClock:
+            def __init__(self, start: float) -> None:
+                self.now = start
+
+            def advance(self, dt: float) -> None:
+                self.now += dt
+
+            def monotonic(self) -> float:
+                return self.now
+
+        clock = _FakeClock(1000.0)
+        sleep_calls: list[float] = []
+
+        async def _fake_sleep(duration: float) -> None:
+            sleep_calls.append(duration)
+            clock.advance(duration)
+
+        async def _confirm_side_effect(*_a, **_kw):
+            clock.advance(5.0)  # simulate a slow/failing confirm DESCRIBE
+            return False
+
+        body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.0.2.149:443"],
+                "bufferingTime": 500,
+            }
+        )
+        cfg = _model_cfg_sprint_lc(min_total_wait=30, post_warm_buffer=2)
+        coord = _make_coord_live(
+            entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "local"},
+            ),
+            rcp_lan_ip_cache={},
+            local_creds_cache={},
+            get_cam_lan_ip=MagicMock(return_value=None),
+            start_tls_proxy=AsyncMock(return_value=12345),
+            tls_proxy_ports={CAM_A: 12345},
+            get_model_config=MagicMock(return_value=cfg),
+        )
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch(
+                "aiohttp.ClientSession",
+                return_value=_make_session_sprint_kd(_put_resp(200, body)),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.confirm_encoder_ready",
+                new=AsyncMock(side_effect=_confirm_side_effect),
+            ),
+            patch("asyncio.sleep", new=_fake_sleep),
+            patch("time.monotonic", new=clock.monotonic),
+        ):
+            start = clock.now
+            await try_live_connection_inner(coord, CAM_A)
+        total_elapsed = clock.now - start
+        # Fixed behavior: ~min_total_wait (30s) despite the 5s confirm cost.
+        # Buggy (pre-fix) behavior would land near 35s (30 + 5, unaccounted).
+        assert total_elapsed <= 31, (
+            f"total simulated elapsed {total_elapsed}s indicates the "
+            "confirm call's own duration was NOT subtracted from the "
+            "fallback wait (min_total_wait=30 + confirm's 5s not accounted)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_confirm_not_called_when_prewarm_already_failed(self):
+        """If pre_warm_rtsp itself failed, there's nothing to confirm —
+        confirm_encoder_ready must not be called (would be a wasted DESCRIBE
+        against an encoder that already didn't answer)."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.0.2.149:443"],
+                "bufferingTime": 500,
+            }
+        )
+        cfg = _model_cfg_sprint_lc(min_total_wait=30, post_warm_buffer=2)
+        coord = _make_coord_live(
+            entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "local"},
+            ),
+            rcp_lan_ip_cache={},
+            local_creds_cache={},
+            get_cam_lan_ip=MagicMock(return_value=None),
+            start_tls_proxy=AsyncMock(return_value=12345),
+            tls_proxy_ports={CAM_A: 12345},
+            get_model_config=MagicMock(return_value=cfg),
+        )
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch(
+                "aiohttp.ClientSession",
+                return_value=_make_session_sprint_kd(_put_resp(200, body)),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.confirm_encoder_ready",
+                new=AsyncMock(return_value=True),
+            ) as mock_confirm,
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
+            await try_live_connection_inner(coord, CAM_A, is_renewal=False)
+        mock_confirm.assert_not_called()
+
+
 # and remote_session_terminator in __init__.py.
 # Coverage targets (lines 3627-3841):
 # - Group 1: Break guards in auto_renew_local_session (stale-gen, stream-off, non-LOCAL)
@@ -28447,6 +28650,10 @@ class TestMinWaitSleepCalled:
             patch(
                 "custom_components.bosch_shc_camera.pre_warm_rtsp",
                 new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.confirm_encoder_ready",
+                new=AsyncMock(return_value=False),
             ),
         ):
             await try_live_connection_inner(coord, CAM_A)

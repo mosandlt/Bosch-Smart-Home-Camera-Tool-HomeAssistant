@@ -78,15 +78,15 @@ Patch — internal cleanup only, no user-facing change. The coordinator's ~10,00
 
 Patch — "Download Diagnostics" no longer crashes; internal cleanup continued. The "Download Diagnostics" button in Settings → Devices & Services could fail due to an internal refactor in the previous two releases leaving one piece of bookkeeping unable to report its count — found and fixed during this release's own internal review, before it shipped to most users. Also: two more per-camera bookkeeping structures used for the live-stream warm-up/session-timestamp logic are now part of the same consolidated object from v14.5.7/v14.5.8, with no change in behavior for anything else. 5662 pytest / mypy --strict / ruff / codespell clean, 100% coverage, deploy-verified on test HA.
 
-## v14.5.8 — 2026-07-09
+## v14.5.8 — 2026-07-10
 
 Patch — internal cleanup, no user-facing change. Continuation of the coordinator-cleanup work started in v14.5.7: two more per-camera session-timing dictionaries consolidated into the shared session-state object.
 
-## v14.5.7 — 2026-07-09
+## v14.5.7 — 2026-07-10
 
 Patch — internal cleanup, no user-facing change. Five near-identical copies of the same internal per-camera lock-acquisition pattern, accumulated one at a time over many releases, are now a single shared helper — groundwork for the further coordinator-cleanup work that followed in v14.5.8-v14.5.10.
 
-## v14.5.6 — 2026-07-07
+## v14.5.6 — 2026-07-10
 
 Patch — the Mini-NVR credential-rotation race fixed at its root, following up on v14.5.5's tolerance-based fix: the underlying rejection that release learned to tolerate is now prevented from happening in the first place. Also caps a genuinely broken camera credential at 5 retries instead of retrying silently forever.
 

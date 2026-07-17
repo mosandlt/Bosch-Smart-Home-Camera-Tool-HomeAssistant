@@ -65,6 +65,9 @@ from .coordinator import (
 )
 from .services import _register_services
 from .tls_proxy import (
+    confirm_encoder_ready as confirm_encoder_ready,  # re-export: mypy --no-implicit-reexport (live_connection.py imports it via `from . import`)
+)
+from .tls_proxy import (
     pre_warm_rtsp as pre_warm_rtsp,  # re-export: mypy --no-implicit-reexport (live_connection.py imports it via `from . import`)
 )
 from .tls_proxy import stop_all_proxies

@@ -189,7 +189,7 @@ This integration ships two release trains:
 
 1. **HACS → Integrations → Bosch Smart Home Camera → ⋮ → Redownload**, or open the repository's HACS page directly.
 2. Toggle **"Show beta versions"** (top right of the version list / redownload dialog).
-3. Pick the `-beta.N` version you want to test and download it.
+3. Pick the `-beta-N` version you want to test and download it.
 4. Restart Home Assistant.
 
 You can switch back to stable at any time the same way — toggle beta versions off (or leave it on and just pick the latest non-beta version), redownload, restart. Beta builds are for testing: expect the occasional rough edge, and please report back on the linked GitHub issue so the fix can be confirmed before it ships stable.
@@ -393,7 +393,7 @@ Home Assistant must be able to reach each camera's IP on the LAN. The integratio
 |---|---|---|---|
 | HA host → camera IP | **TCP/443** | Snapshots, camera REST API, RTSPS live stream (everything tunnels through one TLS connection) | **Yes** |
 | HA host → `*.boschsecurity.com` | TCP/443 | OAuth token refresh, REMOTE/cloud fallback stream, FCM push registration | Yes |
-| HA host → `fcm.googleapis.com` / `mtalk.google.com` | TCP/5228 | FCM push notifications (auto-falls-back to 30 s polling if blocked) | Optional |
+| HA host → `fcm.googleapis.com` / `mtalk.google.com` | TCP/5228 | FCM push notifications (auto-falls-back to 60 s polling if blocked) | Optional |
 | Browser → HA host | TCP/8123 | Lovelace card, HLS playlist, WebRTC signaling | Yes |
 | Browser ↔ HA host | TCP+UDP **8555** | go2rtc WebRTC signaling + media (UDP preferred, falls back to TCP) | Optional, only for WebRTC |
 
@@ -538,15 +538,17 @@ The card badge progresses `idle` → `warming_up` / `connecting` (yellow) → `s
 | Camera / mode | Typical time to first frame | Why |
 |---|---|---|
 | Any camera · **Remote (Cloud)** | **~5–10 s** | `PUT /connection REMOTE` → cloud proxy URL exposed immediately → FFmpeg opens `rtsps://proxy-NN.live.cbs.boschsecurity.com:443/...` → first HLS segment in 3–5 s. No pre-warm. |
-| **Gen1 360 Indoor** · Local | ~30–35 s | `min_total_wait = 25 s` from `PUT /connection LOCAL` before the RTSP URL is exposed (`models.py` `INDOOR`), then ~5–10 s for FFmpeg pre-buffer. |
-| **Gen2 Eyes Indoor II** · Local | ~30–35 s | Same indoor timing profile (`HOME_Eyes_Indoor`, `min_total_wait = 25 s`). |
-| **Gen1 Eyes Outdoor** · Local | ~40–45 s | Outdoor encoder is slower; `min_total_wait = 35 s` + `pre_warm_retries = 8 × 5 s` retry window (`models.py` `OUTDOOR`) + ~5–10 s FFmpeg buffer. |
-| **Gen2 Eyes Outdoor II** · Local | ~40–45 s | Same outdoor profile (`HOME_Eyes_Outdoor`). |
+| **Gen1 360 Indoor** · Local | ~30–35 s (up to `min_total_wait = 25 s` if the encoder-readiness confirmation doesn't land, ~10 s if it does) | `min_total_wait = 25 s` from `PUT /connection LOCAL` is a blind ceiling before the RTSP URL is exposed (`models.py` `INDOOR`), then ~5–10 s for FFmpeg pre-buffer — but see the confirmation-shortcut note below, which can cut this substantially. |
+| **Gen2 Eyes Indoor II** · Local | ~15–20 s typical (was ~30–35 s pre-v16.1.1-beta-6) | Same indoor timing profile (`HOME_Eyes_Indoor`, `min_total_wait = 25 s` ceiling); live-measured ~7.4 s from `PUT /connection` to a confirmed session on real hardware. |
+| **Gen1 Eyes Outdoor** · Local | ~25–30 s typical (was ~40–45 s pre-v16.1.1-beta-6) | Outdoor encoder is slower; `min_total_wait = 35 s` ceiling + `pre_warm_retries = 8 × 5 s` retry window (`models.py` `OUTDOOR`) + ~5–10 s FFmpeg buffer; live-measured ~17.7 s from `PUT /connection` to a confirmed session on real hardware. |
+| **Gen2 Eyes Outdoor II** · Local | ~15–20 s typical (was ~40–45 s pre-v16.1.1-beta-6) | Same outdoor profile (`HOME_Eyes_Outdoor`); live-measured ~10.2 s from `PUT /connection` to a confirmed session on real hardware. |
 | Any camera · **Auto** with working LAN | same as Local | Auto picks LOCAL when LAN is reachable. |
 | Any camera · **Auto**, LAN **un**reachable | **~100 s outdoor**, **~40 s indoor**, then + ~5 s for REMOTE | `pre_warm_rtsp()` tries each retry with a ~10 s TLS-handshake timeout plus `pre_warm_retry_wait` between attempts, so the worst case is `pre_warm_retries × (~10 s TLS timeout + pre_warm_retry_wait)`: outdoor `8 × (10 + 5) = ~120 s`, indoor `3 × (10 + 3) = ~39 s`. On exhaustion `_try_live_connection_inner` tears LOCAL down, sets `_stream_fell_back[cam_id]`, and `continue`s to REMOTE (v10.3.2+). Measured end-to-end on a live HA 2026.4.3: patched Gen2 Outdoor target IP to `192.0.2.1` (RFC 5737 TEST-NET) → user-visible fallback after 101 s with `WARNING: LOCAL pre-warm failed … Falling back to REMOTE.`. |
 | Any camera · Any mode, **after 2 failed 60-s watchdog ticks** | ~2 min recovery | If FFmpeg opens LOCAL cleanly but the stream goes half-dead later, `_stream_health_watchdog` saturates the error counter on the second failing tick and forces the next `try_live_connection` to REMOTE. Worst-case end-to-end recovery ~2 min (v10.3.2+). |
 
-Renewals after the initial startup take **roughly 2/3** of the `min_total_wait` (camera encoder already warm), so ~17 s indoor, ~23 s outdoor. The TLS proxy can service a re-opened session during that window without user-visible interruption (`Stream.update_source()` hot-swap).
+Renewals after the initial startup take **roughly 2/3** of the `min_total_wait` ceiling (camera encoder already warm), so up to ~17 s indoor, ~23 s outdoor if the confirmation shortcut below doesn't land.
+
+**Encoder-readiness confirmation (v16.1.1-beta-6+):** `min_total_wait` above is a blind ceiling, not a fixed wait — a single successful RTSP DESCRIBE during pre-warm only proves the RTSP/TLS session stack answered, not that the H.264 encoder is producing valid frames yet. A second, independent confirmation DESCRIBE a few seconds after the first success is much stronger evidence; when it also succeeds, the wait is cut to a short fixed buffer (2–3 s) instead of running out the full ceiling. On any confirmation failure or timeout it falls back to the exact original blind wait, unchanged — so this can only make stream starts faster or identical, never slower. Live-verified against all 4 camera model variants on real hardware: Gen2 Eyes Outdoor II 35 s → ~10.2 s, Gen2 Eyes Indoor II 25 s → ~7.4 s, Gen1 Eyes Outdoor 35 s → ~17.7 s all confirmed and shortened in testing; the Gen1 360° Indoor camera did not confirm on that particular run and correctly fell back to its full 25 s ceiling with no added latency, demonstrating the fallback path is genuinely safe rather than just faster on paper.
 
 Values are configurable per model in `custom_components/bosch_shc_camera/models.py` if you need to tune them for a slower network or a specific firmware; the defaults above are empirically measured and known-good.
 
@@ -604,15 +606,15 @@ The first coordinator tick after HA restart **skips events and slow-tier API cal
 
 ### Model-Specific Configuration
 
-Camera timing and behavior is configured per model via `CameraModelConfig`. Indoor cams keep an active 30 s heartbeat (the cred-refresh path doubles as a session keepalive), while Gen1/Gen2 outdoor cams have heartbeat disabled (`= renewal_interval`) because the Outdoor firmware rotates digest creds on every PUT and would invalidate the running RTSP session.
+Camera timing and behavior is configured per model via `CameraModelConfig`. The 360 Indoor (Gen1) keeps an active 30 s heartbeat (the cred-refresh path doubles as a session keepalive), and the Eyes Outdoor (Gen1) keeps an even more aggressive 10 s heartbeat because its firmware doesn't destructively rotate credentials on every `PUT /connection`. Both Gen2 cameras instead have the heartbeat effectively disabled (`= renewal_interval`, 3600 s) because the Gen2 firmware *does* rotate digest creds on every `PUT /connection`, which would invalidate the running RTSP session — FFmpeg's own RTSP `GET_PARAMETER` every ~15 s keeps those sessions alive without needing a heartbeat.
 
 | Parameter | 360 Indoor (Gen1) | Eyes Indoor II (Gen2) | Eyes Outdoor (Gen1) | Eyes Outdoor II (Gen2) | Purpose |
 |---|---|---|---|---|---|
-| Heartbeat interval | 30 s | 30 s | 3600 s (≈ off) | 3600 s (≈ off) | PUT /connection keepalive + cred refresh |
+| Heartbeat interval | 30 s | 3600 s (≈ off) | 10 s | 3600 s (≈ off) | PUT /connection keepalive + cred refresh |
 | Pre-warm delay | 1 s | 1 s | 2 s | 2 s | Wait before first RTSP DESCRIBE |
 | Pre-warm retries | 3 | 3 | 8 | 8 | Max DESCRIBE attempts |
 | Min total wait | 25 s | 25 s | 35 s | 35 s | Minimum time before exposing RTSP URL |
-| Renewal interval | 3500 s | 3500 s | 3600 s | 3600 s | Proactive session renewal (safety net) |
+| Renewal interval | 3500 s | 3600 s | 3500 s | 3600 s | Proactive session renewal (safety net) |
 | Max session duration | 3600 s | 3600 s | 3600 s | 3600 s | Sent in RTSP URL `maxSessionDuration=` (Bosch default hint is 60 s but cams accept 3600) |
 
 ### HLS Buffer Tuning
@@ -1245,7 +1247,7 @@ flowchart LR
     Concat --> Local
     Local --> MB[HA Media Browser]
     SMB --> MB
-    Drain -.->|state| Sensor[sensor.bosch_x_mini_nvr_status<br/>idle / recording / error]
+    Drain -.->|state| Sensor[sensor.bosch_x_mini_nvr_state<br/>idle / recording / error]
 ```
 
 
@@ -1265,10 +1267,10 @@ These entities are **disabled by default** — enable them individually in the e
 
 | Entity | Description |
 |--------|-------------|
-| `switch.bosch_{name}_mini_nvr` | Turn recording ON/OFF. Unavailable when camera is on REMOTE connection. |
-| `sensor.bosch_{name}_mini_nvr_status` | State: `idle` / `recording` / `error` |
+| `switch.bosch_{name}_mini_nvr_recording` | Turn recording ON/OFF. Unavailable when camera is on REMOTE connection. |
+| `sensor.bosch_{name}_mini_nvr_state` | State: `idle` / `recording` / `error` |
 
-`sensor.bosch_{name}_mini_nvr_status` attributes: `target`, `pending_uploads`, `failed_uploads`, `last_segment_age_s`, `preroll_segments`, `preroll_running`.
+`sensor.bosch_{name}_mini_nvr_state` attributes: `target`, `pending_uploads`, `failed_uploads`, `last_segment_age_s`, `preroll_segments`, `preroll_running`.
 
 #### Recording Quality
 
@@ -1349,7 +1351,7 @@ trigger:
 action:
   - service: switch.turn_on
     target:
-      entity_id: switch.bosch_terrasse_mini_nvr
+      entity_id: switch.bosch_terrasse_mini_nvr_recording
 ```
 
 **Alarm mode: arm all NVR switches with the alarm panel**
@@ -1366,8 +1368,8 @@ action:
   - service: switch.turn_on
     target:
       entity_id:
-        - switch.bosch_terrasse_mini_nvr
-        - switch.bosch_innenbereich_mini_nvr
+        - switch.bosch_terrasse_mini_nvr_recording
+        - switch.bosch_innenbereich_mini_nvr_recording
 ```
 
 **Disarm: stop recording when coming home**
@@ -1382,8 +1384,8 @@ action:
   - service: switch.turn_off
     target:
       entity_id:
-        - switch.bosch_terrasse_mini_nvr
-        - switch.bosch_innenbereich_mini_nvr
+        - switch.bosch_terrasse_mini_nvr_recording
+        - switch.bosch_innenbereich_mini_nvr_recording
 ```
 
 **Motion-only clip via sensor attribute** (verify pre-roll is running before sending alert)
@@ -1398,7 +1400,7 @@ trigger:
 condition:
   - condition: template
     value_template: >
-      {{ state_attr('sensor.bosch_terrasse_mini_nvr_status', 'preroll_running') == true }}
+      {{ state_attr('sensor.bosch_terrasse_mini_nvr_state', 'preroll_running') == true }}
 action:
   - service: notify.signal_kamera
     data:
@@ -1719,8 +1721,6 @@ show_last_event: false
 > **Fullscreen toggle** — the ⛶ fullscreen button now toggles: tap it once to enter fullscreen, tap it again (or the camera name button when shown) to exit. `Esc` and a tap outside the video also exit, as before.
 
 > **Fullscreen zoom** — while in fullscreen you can zoom into the picture: pinch with two fingers (touch), scroll the mouse wheel (desktop), or double-tap / double-click to toggle 2× at that spot. Drag to pan when zoomed in. Zoom resets automatically when you leave fullscreen. Outside fullscreen the gestures are left untouched so normal page scrolling/pinch still works.
-
-> **Fullscreen controls auto-hide** — the bottom pill-bar (Snapshot/Stream/⋮/Fullscreen/…) now fades out on its own after 10 seconds without any mouse movement or touch while you're in fullscreen, so it doesn't sit over the picture — any pointer movement or tap brings it right back instantly. Outside fullscreen nothing changes, controls are always visible. Set `fullscreen_auto_hide_controls: false` in the card YAML (or the matching editor toggle) to keep them permanently visible in fullscreen instead.
 
 > **Picture-in-Picture** — the ⧉ PiP button pops the live stream out into the browser's floating, always-on-top window so you can keep watching while you work in other apps. On **macOS Safari** the window floats over every app; on Chrome it stays above the browser's own windows. The floating window's title shows the camera name (instead of the page address). Start the live stream first, then tap PiP. The browser allows only **one** PiP window at a time, so while one camera is floating the PiP button on every other camera greys out automatically; tap it again to close. The window keeps playing through a stream reconnect **and while the tab sits in the background** — since v14.0.0 the card keeps the dashboard alive while a Picture-in-Picture window is open, so the floating stream no longer freezes after a few minutes in a backgrounded tab (it used to need a page reload). The button is hidden on browsers without PiP support (most iOS/Android in-app WebViews). Since v13.5.x.
 
@@ -2264,18 +2264,18 @@ Force cloudflared off QUIC onto HTTP/2 — QUIC over cellular is fragile (regula
 
 ### Recorder DB size — exclude high-frequency sensors (optional)
 
-Several diagnostic sensors change state whenever the camera reconnects (e.g. `sensor.bosch_*_stream_status`, `sensor.bosch_*_last_image_fetch`). On busy homes these can write tens of thousands of state-change rows per day to the HA recorder database. If you don't need long-term history for them, add to `configuration.yaml`:
+`sensor.bosch_*_stream_status` (idle / warming_up / connecting / streaming / streaming_remote) genuinely changes state every time a stream starts or stops — on a camera that's viewed a lot, that's real state-change history you may not want to keep long-term. If you don't need it, add to `configuration.yaml`:
 
 ```yaml
 recorder:
   exclude:
     entity_globs:
       - sensor.bosch_*_stream_status
-      - sensor.bosch_*_last_image_fetch
-      - sensor.bosch_*_fcm_last_push
 ```
 
 Existing automations and the camera card continue to work — HA still reads the current state from the in-memory state machine, only the persisted history is skipped.
+
+> Note: several other diagnostic sensors (FCM push status, cloud maintenance, schedule rules, motion zones, privacy masks, Mini-NVR state, and more) used to churn the recorder database with fast-changing *attributes* even though their actual state barely changed — that was a real bug (GitHub #39), fixed in v14.3.1 via HA's `_unrecorded_attributes` mechanism. Those sensors no longer need a manual exclude.
 
 ## Roadmap
 
@@ -2291,6 +2291,8 @@ Features investigated or intentionally parked — listed here so the direction i
 
 Latest: **v16.1.0** — see the GitHub release page for full notes:
 [**v16.1.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v16.1.0)
+
+> v16.1.1 is currently in **beta** (several beta iterations shipped so far, fixing issues found after v16.1.0) and hasn't been promoted to stable yet — see [Release Channels](#release-channels--stable-vs-beta) above if you want to try it early, or just wait for the next Friday promotion.
 
 | Version | Highlights |
 |---|---|
@@ -2443,12 +2445,12 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 | Implementation | Repo | Status |
 |---|---|---|
 | 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v16.1.0** · HA Quality Scale **Platinum** · production-ready |
-| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.6** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
-| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.8** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
-| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.6.0** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
-| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.7-alpha** · stream-url node · 4 nodes (event / snapshot / privacy / config) |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.12.1** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
+| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.8.2** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
+| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.7.1** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
+| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.4.1-alpha** · stream-url node · 4 nodes (event / snapshot / privacy / config) |
 
-Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — **v0.1.6a0** (dashboard + camera detail + settings) — community interest welcome
+Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — **v0.4.1a0** (dashboard + camera detail + settings) — community interest welcome
 
 HA stays the **reference implementation** — features land here first; the Python CLI, ioBroker Adapter and MCP Server catch up over time.
 

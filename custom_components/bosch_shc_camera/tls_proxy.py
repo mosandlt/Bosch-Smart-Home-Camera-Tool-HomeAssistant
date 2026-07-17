@@ -596,3 +596,64 @@ async def pre_warm_rtsp(
             if attempt < max_attempts:
                 await asyncio.sleep(retry_wait)
     return False
+
+
+async def confirm_encoder_ready(
+    proxy_port: int,
+    user: str,
+    password: str,
+    cam_host: str,  # kept for call-site symmetry with pre_warm_rtsp
+    describe_timeout: int = 5,
+    max_session_duration: int = 60,
+) -> bool:
+    """Single-shot DESCRIBE confirmation, no retries and no post-success sleep.
+
+    Used AFTER ``pre_warm_rtsp`` already returned True, a few seconds later,
+    as a second independent readiness sample. Two 200 OK responses spaced
+    apart are stronger evidence the encoder pipeline is stable than one —
+    a lone DESCRIBE can succeed on the handshake/codec-negotiation level
+    before the encoder is actually producing frames, which is why the
+    blind ``min_total_wait`` floor exists at all. This function never makes
+    that floor longer; the caller only shortens it on a confirmed True,
+    and falls back to the full unmodified floor on any False/exception.
+
+    Only DESCRIBE — no SETUP/PLAY — so this doesn't consume one of the
+    camera's ~2 concurrent RTSP session slots, matching ``pre_warm_rtsp``.
+    """
+    writer = None
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", proxy_port)
+        uri = (
+            f"rtsp://127.0.0.1:{proxy_port}"
+            f"/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration={max_session_duration}"
+        )
+        writer.write(
+            f"DESCRIBE {uri} RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\n\r\n".encode()
+        )
+        await writer.drain()
+        resp1 = await asyncio.wait_for(reader.read(4096), timeout=describe_timeout)
+        resp1_str = resp1.decode("utf-8", errors="replace")
+        nonce_m = re.search(r'nonce="([^"]+)"', resp1_str)
+        realm_m = re.search(r'realm="([^"]+)"', resp1_str)
+        if not (nonce_m and realm_m):
+            return False
+        nonce, realm = nonce_m.group(1), realm_m.group(1)
+        auth = _digest_auth(user, password, "DESCRIBE", uri, realm, nonce)
+        writer.write(
+            f"DESCRIBE {uri} RTSP/1.0\r\nCSeq: 2\r\nAccept: application/sdp\r\n"
+            f"Authorization: {auth}\r\n\r\n".encode()
+        )
+        await writer.drain()
+        resp2 = await asyncio.wait_for(reader.read(8192), timeout=describe_timeout)
+        resp2_str = resp2.decode("utf-8", errors="replace")
+        return "200 OK" in resp2_str
+    except Exception as exc:
+        _LOGGER.debug("Confirm-ready DESCRIBE failed on port %d: %s", proxy_port, exc)
+        return False
+    finally:
+        if writer is not None:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:  # noqa: S110 # best-effort writer close, failure non-actionable
+                pass
