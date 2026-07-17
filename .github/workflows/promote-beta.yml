@@ -174,9 +174,23 @@ jobs:
           git tag -a "$STABLE_TAG" -m "$STABLE_TAG — promoted from tested beta $BETA_TAG (automated Friday promotion)" "$NEW_SHA"
           git push origin "refs/tags/$STABLE_TAG"
 
-          # A GITHUB_TOKEN-authored push does not itself trigger another
-          # workflow's `on: push: tags:` — explicitly re-invoke release.yml
-          # the same way a manual workflow_dispatch would, so the tag still
-          # goes through the exact same required-CI gate as every other
-          # release.
+          # A GITHUB_TOKEN-authored push does not trigger ANY other
+          # workflow's `on: push` trigger -- not just release.yml's
+          # `on: push: tags:`, but also every `on: push: branches: [main]`
+          # required-CI workflow (tests/quality/validate/secret-scan).
+          # Confirmed live on 2026-07-17: the promoted commit never got its
+          # own CI run at all, so release.yml's "wait for required CI"
+          # step polled for 40 minutes and would have failed outright --
+          # had to be manually re-pointed at a later commit that happened
+          # to get real CI from an unrelated human push. Explicitly
+          # dispatch every required-CI workflow against `main` (now at
+          # $NEW_SHA) here, same fix shape as the tag/release.yml dispatch
+          # below, so the commit release.yml actually gates on has real
+          # check-runs to find.
+          for wf in tests.yml quality.yml validate.yml secret-scan.yml; do
+            gh workflow run "$wf" --repo "$GITHUB_REPOSITORY" --ref main
+          done
+
+          # Same GITHUB_TOKEN limitation applies to release.yml's own
+          # `on: push: tags:` trigger -- explicitly re-invoke it too.
           gh workflow run release.yml --repo "$GITHUB_REPOSITORY" -f tag="$STABLE_TAG"
