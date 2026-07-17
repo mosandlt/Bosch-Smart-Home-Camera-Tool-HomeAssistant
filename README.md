@@ -183,6 +183,8 @@ This integration ships two release trains:
 - **Stable** (`vX.Y.Z`, e.g. `v16.1.0`) — the default channel every install gets. Released after the full CI gate (tests, mypy --strict, quality checks, secret scan) is green and the change is documented in [CHANGELOG.md](CHANGELOG.md). At most one stable release per week.
 - **Beta** (`vX.Y.Z-beta.N`, e.g. `v16.1.1-beta.1`) — pre-release builds for testing a specific fix ahead of the next stable release, usually shipped in response to a GitHub issue so the reporter can confirm before it goes stable. Goes through the exact same CI gate as stable (tests/quality/secret-scan all still have to pass) — the only differences are that it's marked as a GitHub **pre-release** and doesn't need a full CHANGELOG.md entry yet.
 
+**Weekly promotion (beta → stable).** Every **Friday at 18:00 (Europe/Berlin)** the newest open beta is automatically promoted to a stable release, provided its required CI checks are green — see [`promote-beta.yml`](.github/workflows/promote-beta.yml). If you're testing a beta and want your feedback to count before it ships stable, report back on the linked GitHub issue before Friday.
+
 **Opting in to beta versions (HACS):**
 
 1. **HACS → Integrations → Bosch Smart Home Camera → ⋮ → Redownload**, or open the repository's HACS page directly.

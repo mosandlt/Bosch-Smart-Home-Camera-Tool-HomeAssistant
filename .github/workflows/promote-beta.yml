@@ -1,0 +1,173 @@
+name: Promote Beta to Stable
+
+# EXPLICIT, SCOPED EXCEPTION to this repo's NEVER_AUTO_PUSH policy (Thomas,
+# 2026-07-17: "kannst du den publish workflow auf freitag 18 uhr stellen...
+# voll automatisierter GitHub-Actions-Cron"). Every other release in this
+# repo requires an explicit human "push"/"neues release" trigger — this is
+# the one deliberate, narrow carve-out: every Friday at 18:00 Europe/Berlin,
+# promote the newest still-open beta prerelease straight to stable, with no
+# human review in the loop at that moment.
+#
+# Selection rule (explicit tradeoff Thomas chose after being shown the
+# alternative): always promotes the NEWEST open beta prerelease, not the
+# oldest. If a fresh same-day beta supersedes an older one that was
+# scheduled for this week's promotion, the older one's changes aren't lost —
+# they're still in the newer beta's tree (this repo bundles pending fixes
+# into the next release window, see NEXT_RELEASE_BUNDLE_EVERYTHING in
+# CLAUDE.md) — it's just promoted under the newer version number instead of
+# getting its own dedicated stable release that week.
+#
+# What "promote" means: take the exact commit the newest beta tag points
+# to, bump manifest.json's version to strip the "-beta.N" suffix, commit
+# that on top of the beta commit, advance `main` to it (fast-forward, or a
+# merge commit if `main` has moved on since — never force-discards newer
+# `main` history), tag it as the plain vX.Y.Z stable tag, and push. The tag
+# push then explicitly re-invokes release.yml via workflow_dispatch (a
+# GITHUB_TOKEN-authored push does NOT auto-trigger other tag-push workflows
+# on GitHub — see the well-known Actions loop-prevention behavior — so this
+# explicit re-invocation is required, not optional) which applies the exact
+# same required-CI gate every release goes through, tags/publishes with
+# --latest, and updates CHANGELOG-derived release notes. If that gate fails,
+# no stable release is created — the tag exists but stays unpublished,
+# exactly like any other CI-gate failure in this repo, and needs a human to
+# investigate (this workflow does not retry or notify beyond GitHub's own
+# default failed-run notification).
+#
+# No-op safely if there's no open beta prerelease, or if the target stable
+# tag already exists (idempotent against a re-run / manual workflow_dispatch
+# test).
+
+on:
+  schedule:
+    # Fridays 18:00 Europe/Berlin. Cron is UTC-only and has no DST
+    # awareness: 16:00 UTC = 18:00 CEST (summer, UTC+2) but only 17:00 CET
+    # (winter, UTC+1) — a known static-cron limitation, documented rather
+    # than worked around (the weekly cadence matters far more than the
+    # exact hour during CET months).
+    - cron: "0 16 * * 5"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Specific beta tag to promote (optional — defaults to the newest open beta prerelease)"
+        required: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  promote:
+    name: Promote newest beta prerelease to stable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Find the beta to promote
+        id: find
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+            echo "Using explicitly requested tag: $TAG"
+          else
+            TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 50 \
+              --json tagName,isPrerelease,isDraft,publishedAt \
+              --jq '[.[] | select(.isPrerelease==true and .isDraft==false)] | sort_by(.publishedAt) | last | .tagName // empty')
+          fi
+
+          if [ -z "$TAG" ]; then
+            echo "No open beta prerelease found — nothing to promote."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$TAG" != *-* ]]; then
+            echo "::error::Resolved tag '$TAG' is not a prerelease (no '-' suffix) — refusing to 'promote' an already-stable tag."
+            exit 1
+          fi
+
+          BASE="${TAG%%-*}"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "beta_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "stable_tag=$BASE" >> "$GITHUB_OUTPUT"
+          echo "Newest open beta: $TAG -> stable target: $BASE"
+
+      - name: Skip if the stable tag already exists
+        if: steps.find.outputs.found == 'true'
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STABLE_TAG: ${{ steps.find.outputs.stable_tag }}
+        run: |
+          if gh release view "$STABLE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$STABLE_TAG already exists as a release — already promoted, nothing to do."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Promote the beta commit to stable
+        if: steps.find.outputs.found == 'true' && steps.check.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BETA_TAG: ${{ steps.find.outputs.beta_tag }}
+          STABLE_TAG: ${{ steps.find.outputs.stable_tag }}
+        run: |
+          git config user.name "mosandlt"
+          git config user.email "10558666+mosandlt@users.noreply.github.com"
+
+          BETA_SHA=$(git rev-parse "$BETA_TAG^{commit}")
+          VERSION="${STABLE_TAG#v}"
+          echo "Promoting $BETA_TAG ($BETA_SHA) -> $STABLE_TAG (manifest version $VERSION)"
+
+          git checkout --detach "$BETA_SHA"
+          python3 - "$VERSION" <<'PYEOF'
+          import json, sys
+          path = "custom_components/bosch_shc_camera/manifest.json"
+          with open(path) as f:
+              data = json.load(f)
+          data["version"] = sys.argv[1]
+          with open(path, "w") as f:
+              json.dump(data, f, indent=2)
+              f.write("\n")
+          PYEOF
+
+          if git diff --quiet; then
+            NEW_SHA="$BETA_SHA"
+            echo "manifest.json already at $VERSION (no -beta suffix to strip) — tagging the beta commit as-is."
+          else
+            git add custom_components/bosch_shc_camera/manifest.json
+            git commit -m "$STABLE_TAG: promote tested beta $BETA_TAG to stable
+
+          Automated Friday promotion (promote-beta.yml). Strips the -beta.N
+          suffix from manifest.json's version; no other code changes versus
+          the tested beta commit."
+            NEW_SHA=$(git rev-parse HEAD)
+          fi
+
+          # Advance main to the promoted commit. Fast-forward if main hasn't
+          # moved since the beta shipped; otherwise merge rather than force
+          # -push, so nothing newer on main is silently discarded.
+          git fetch origin main
+          if git merge-base --is-ancestor origin/main "$NEW_SHA"; then
+            git push origin "$NEW_SHA:refs/heads/main"
+          else
+            echo "::warning::main has diverged since $BETA_TAG — merging the promoted commit onto current main instead of fast-forwarding."
+            git checkout -B main origin/main
+            git merge --no-ff -m "$STABLE_TAG: promote tested beta $BETA_TAG to stable (merge, main had diverged)" "$NEW_SHA"
+            NEW_SHA=$(git rev-parse HEAD)
+            git push origin HEAD:refs/heads/main
+          fi
+
+          git tag -a "$STABLE_TAG" -m "$STABLE_TAG — promoted from tested beta $BETA_TAG (automated Friday promotion)" "$NEW_SHA"
+          git push origin "refs/tags/$STABLE_TAG"
+
+          # A GITHUB_TOKEN-authored push does not itself trigger another
+          # workflow's `on: push: tags:` — explicitly re-invoke release.yml
+          # the same way a manual workflow_dispatch would, so the tag still
+          # goes through the exact same required-CI gate as every other
+          # release.
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" -f tag="$STABLE_TAG"
