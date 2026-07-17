@@ -5,6 +5,14 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v16.1.2] - 2026-07-17
+
+Patch — Lovelace card loading-overlay flicker fix during stream start. No breaking changes.
+
+### Fixed
+
+- **Loading overlay could vanish and reappear with a different message mid-connect** (Thomas, live report). Starting a live stream would show "Stream wird gestartet…", then the overlay would briefly disappear entirely, then "Bild wird geladen…" would flash, before the stream finally appeared. Root cause: `_onImageLoaded()` — fired by the periodic/background snapshot image loader, not just by the actual stream-connect handshake — unconditionally cleared the connect-in-progress state and hid the overlay whenever any fresh snapshot frame arrived, including incidental background fetches unrelated to the connect sequence. This silently killed the progressive connect-status text timeline and let the overlay hide/reappear with stale or default text. Fixed across 4 rounds (each independently bug-hunted): the snapshot loader no longer touches the connect-in-progress state or hides the overlay while any part of the connect sequence is still active (that responsibility now belongs exclusively to the real stream-started/stop/failure signals); a text-preserving guard was broadened to cover the whole connect sequence, not just its first phase; two remaining places that bypassed the overlay's own text/visibility logic were routed through it properly; and a narrow single-tick race right after tapping "start" (found during bug-hunting) was closed. 3 new regression tests, each verified to fail against the pre-fix code and pass against the fix. Tested across Chromium, Firefox, and WebKit (270 tests passed).
+
 ## [v16.1.1] - 2026-07-16
 
 Patch — Mini-NVR `event_buffered` post-roll capture timeout fix (GitHub #52). No breaking changes.

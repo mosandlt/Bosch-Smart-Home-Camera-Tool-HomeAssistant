@@ -161,7 +161,10 @@ def test_pull_fresh_states_includes_camera_entity(card_source: str) -> None:
     # Widened to 3400 for v13.7.1: the bootstrap firstHass block gained a
     # trigger_snapshot-service-absent fallback `_scheduleImageLoad(0)` (mobile
     # cold-start), pushing _pullFreshSwitchStates further down.
-    first_hass_body = card_source[first_hass_idx : first_hass_idx + 3400]
+    # Widened to 3700 for v16.1.2 / CARD_VERSION 14.1.9: the firstHass
+    # refresh-overlay call gained a _connectingNow guard (loading-overlay
+    # flicker fix) with an explanatory comment, pushing the offset to 3457.
+    first_hass_body = card_source[first_hass_idx : first_hass_idx + 3700]
     assert "_pullFreshSwitchStates" in first_hass_body, (
         "firstHass branch in `set hass()` must call _pullFreshSwitchStates "
         "so the initial mount has authoritative state — otherwise the "
