@@ -39,12 +39,21 @@ name: Promote Beta to Stable
 
 on:
   schedule:
-    # Fridays 18:00 Europe/Berlin. Cron is UTC-only and has no DST
-    # awareness: 16:00 UTC = 18:00 CEST (summer, UTC+2) but only 17:00 CET
+    # Fridays ~18:05 Europe/Berlin. Cron is UTC-only and has no DST
+    # awareness: 16:05 UTC = ~18:05 CEST (summer, UTC+2) but ~17:05 CET
     # (winter, UTC+1) — a known static-cron limitation, documented rather
     # than worked around (the weekly cadence matters far more than the
     # exact hour during CET months).
-    - cron: "0 16 * * 5"
+    #
+    # Deliberately offset 5 minutes past the hour, not on it: GitHub
+    # documents that scheduled workflows can be delayed under high load,
+    # "especially at the start of every hour" -- this exact run, on
+    # 2026-07-17, fired over an hour late (16:00 UTC scheduled, actually
+    # ran ~17:12 UTC), and the sibling boschshc-hass repo's identical
+    # on-the-hour cron didn't fire AT ALL that same day and needed a
+    # manual trigger. A few minutes off the hour avoids the worst of
+    # that contention.
+    - cron: "5 16 * * 5"
   workflow_dispatch:
     inputs:
       tag:
