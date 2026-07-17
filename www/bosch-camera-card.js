@@ -3261,7 +3261,8 @@ class BoschCameraCard extends HTMLElement {
     if (firstHass) {
       this._awaitingFresh = true;
       const _privacyNow = this._optimistic?.[this._entities?.privacy] !== undefined ? this._optimistic[this._entities.privacy] === "on" : this._hass?.states?.[this._entities?.privacy]?.state === "on";
-      if (this._imageLoaded && !_privacyNow) {
+      const _connectingNow = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
+      if (this._imageLoaded && !_privacyNow && !_connectingNow) {
         this._setLoadingOverlay(true, this._t("loading_refreshing"));
       }
       this._triggerFreshSnapshot();
@@ -4079,22 +4080,14 @@ class BoschCameraCard extends HTMLElement {
         this._hideAiCaption();
       }
     }
-    if (!isCache && this._streamConnecting) {
-      this._streamConnecting = false;
-      if (this._connectSteps) {
-        this._connectSteps.forEach(t => clearTimeout(t));
-        this._connectSteps = null;
-      }
-    }
+    const stillConnecting = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
     if (isCache && this._awaitingFresh) {
-      const overlay = this.shadowRoot.getElementById("loading-overlay");
-      if (overlay) {
-        overlay.classList.add("visible");
-        overlay.classList.add("refreshing");
-      }
-    } else {
+      this._setLoadingOverlay(true, this._t("loading_refreshing"));
+    } else if (!stillConnecting) {
       this._awaitingFresh = false;
       this._setLoadingOverlay(false);
+    } else {
+      this._awaitingFresh = false;
     }
     if (!isCache && !this._isStreaming()) this._cacheImage();
   }
@@ -4121,7 +4114,7 @@ class BoschCameraCard extends HTMLElement {
     if (text === undefined) text = this._t("loading_image");
     const streamStarting = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
     if (!visible && streamStarting) return;
-    if (visible && streamStarting && this._streamConnecting && text === this._t("loading_image")) return;
+    if (visible && streamStarting && text === this._t("loading_image")) return;
     const overlay = this.shadowRoot.getElementById("loading-overlay");
     const loadText = this.shadowRoot.getElementById("loading-text");
     const hintEl = this.shadowRoot.getElementById("loading-hint");
@@ -4163,13 +4156,7 @@ class BoschCameraCard extends HTMLElement {
       }
       this._imageLoaded = true;
       this._awaitingFresh = true;
-      const overlay = this.shadowRoot.getElementById("loading-overlay");
-      if (overlay && !this._isOffline) {
-        overlay.classList.add("visible");
-        overlay.classList.add("refreshing");
-      }
-      const loadText = this.shadowRoot.getElementById("loading-text");
-      if (loadText) loadText.textContent = this._t("loading_refreshing");
+      this._setLoadingOverlay(true, this._t("loading_refreshing"));
     } catch (_) {}
   }
   _cacheImage() {

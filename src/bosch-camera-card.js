@@ -3904,7 +3904,14 @@ class BoschCameraCard extends HTMLElement {
         this._optimistic?.[this._entities?.privacy] !== undefined
           ? this._optimistic[this._entities.privacy] === "on"
           : this._hass?.states?.[this._entities?.privacy]?.state === "on";
-      if (this._imageLoaded && !_privacyNow) {
+      // Never stomp the connect-phase overlay text either: a firstHass pass
+      // landing while a stream-connect is already in flight (e.g. reload/
+      // reconnect mid-warmup) must not overwrite "Stream wird gestartet…"
+      // with the generic "Aktualisiere…" — the connect timeline owns the
+      // overlay text for as long as any of these three flags is set
+      // (2026-07-17 flicker-fix follow-up, bug-hunt finding).
+      const _connectingNow = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
+      if (this._imageLoaded && !_privacyNow && !_connectingNow) {
         this._setLoadingOverlay(true, this._t("loading_refreshing"));
       }
       this._triggerFreshSnapshot();
@@ -7372,29 +7379,42 @@ class BoschCameraCard extends HTMLElement {
       }
     }
 
-    // Clear stream-connecting overlay when first real frame arrives
-    if (!isCache && this._streamConnecting) {
-      this._streamConnecting = false;
-      if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
-    }
+    // An incidental background/periodic snapshot fetch (e.g.
+    // snapshot_during_warmup, or the idle _refreshTimer poll) landing while
+    // ANY connect-sequence flag is set must not touch _streamConnecting,
+    // kill the progressive _connectSteps text timeline, or hide the
+    // overlay — that used to happen unconditionally here and produced an
+    // "overlay vanishes, then a stale/different message pops back in"
+    // flicker (Thomas, 2026-07-17). Note stillConnecting deliberately
+    // includes _streamConnecting itself, not just _waitingForStream/
+    // _startingLiveVideo — a first bug-hunt pass on this fix found that
+    // omitting it left a real window right after a tap (synchronous
+    // _streamConnecting=true, but _waitingForStream only flips true on the
+    // NEXT async _update() pass) where a stray snapshot could still
+    // reproduce the original bug. _onImageLoaded no longer ever clears
+    // _streamConnecting/_connectSteps itself — that's exclusively owned by
+    // clearOverlay() (video "playing") and the various stop/failure paths
+    // in _stopLiveVideo(), all independently verified to not depend on an
+    // image-load event to unstick.
+    const stillConnecting = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
 
     // Overlay management:
     // - Cache image + awaitingFresh → keep "refreshing" overlay visible
-    // - Fresh image (non-cache) → always clear overlay
+    // - Fresh image (non-cache), no connect sequence in flight → clear overlay
+    // - Fresh image while stillConnecting → leave the connect overlay alone;
+    //   the eventual real hide is owned by clearOverlay() on video "playing"
     // - Cache image + NOT awaitingFresh → clear overlay (normal idle refresh)
     if (isCache && this._awaitingFresh) {
       // Cache loaded — keep spinner visible, fresh image will clear it.
-      // But ensure the overlay is in "refreshing" mode (semi-transparent)
-      // so the cached image is visible underneath.
-      const overlay = this.shadowRoot.getElementById("loading-overlay");
-      if (overlay) {
-        overlay.classList.add("visible");
-        overlay.classList.add("refreshing");
-      }
-    } else {
+      // Routed through _setLoadingOverlay (not raw classList) so text and
+      // the anti-flicker guards below are never bypassed.
+      this._setLoadingOverlay(true, this._t("loading_refreshing"));
+    } else if (!stillConnecting) {
       // Fresh image arrived (or no fresh pending) — clear spinner
       this._awaitingFresh = false;
       this._setLoadingOverlay(false);
+    } else {
+      this._awaitingFresh = false;
     }
 
     // (Debug line removed 2026-05-30 — no longer rendered.)
@@ -7451,7 +7471,13 @@ class BoschCameraCard extends HTMLElement {
     // text from _toggleStream — let that timeline own the messaging.
     const streamStarting = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
     if (!visible && streamStarting) return;
-    if (visible && streamStarting && this._streamConnecting && text === this._t("loading_image")) return;
+    // Broadened from "this._streamConnecting" to the full streamStarting
+    // union (2026-07-17) — the narrower check only protected the default
+    // text during the _streamConnecting phase specifically, so a caller
+    // could still stomp the progressive connect-timeline text with the
+    // generic "Bild wird geladen…" default during _waitingForStream or
+    // _startingLiveVideo, the two phases that immediately follow it.
+    if (visible && streamStarting && text === this._t("loading_image")) return;
     const overlay  = this.shadowRoot.getElementById("loading-overlay");
     const loadText = this.shadowRoot.getElementById("loading-text");
     const hintEl   = this.shadowRoot.getElementById("loading-hint");
@@ -7511,15 +7537,11 @@ class BoschCameraCard extends HTMLElement {
       // "refreshing" overlay and trigger a snapshot fetch.
       this._awaitingFresh = true;
       // Switch from full-black spinner to semi-transparent "refreshing" overlay
-      // so the cached image is visible underneath. Never raise it while offline
-      // (the CSS :host(.cam-offline) rule also hides it, this avoids the churn).
-      const overlay = this.shadowRoot.getElementById("loading-overlay");
-      if (overlay && !this._isOffline) {
-        overlay.classList.add("visible");
-        overlay.classList.add("refreshing");
-      }
-      const loadText = this.shadowRoot.getElementById("loading-text");
-      if (loadText) loadText.textContent = this._t("loading_refreshing");
+      // so the cached image is visible underneath. Routed through
+      // _setLoadingOverlay (not raw classList, 2026-07-17) so text and the
+      // anti-flicker guards are never bypassed — it already no-ops while
+      // offline internally (visible && this._isOffline → return).
+      this._setLoadingOverlay(true, this._t("loading_refreshing"));
     } catch (_) {}
   }
 

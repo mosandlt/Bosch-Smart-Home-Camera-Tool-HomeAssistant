@@ -518,6 +518,137 @@ test("clearOverlay clears _streamConnecting before hiding the overlay (deadlock 
   expect(flagIdx, "_streamConnecting is cleared BEFORE the overlay is hidden").toBeLessThan(hideIdx);
 });
 
+// Overlay flicker during stream start (2026-07-17, Thomas: "stream wird
+// gestartet .. dann verschwindet das overlay komplett .. bild wird geladen
+// .. dann ist stream plötzlich da"): a background/periodic snapshot fetch
+// that happens to land mid-connect (e.g. snapshot_during_warmup) must not
+// prematurely clear _streamConnecting or hide the connect overlay via
+// _onImageLoaded — only clearOverlay() (fired on the video "playing" event)
+// owns the real hide. Before the fix, any fresh (non-cache) image load
+// unconditionally cleared _streamConnecting and called
+// _setLoadingOverlay(false), silently killing the progressive
+// _connectSteps text timeline and (once _waitingForStream also cleared a
+// beat later) letting the overlay hide/reappear with a different message.
+test("a fresh snapshot arriving mid-connect does not hide the overlay or clear _streamConnecting", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    // Simulate the mid-connect state: a stream start is in flight and the
+    // overlay is showing the progressive "Stream wird gestartet…" text.
+    card._imageLoaded = true;
+    card._streamConnecting = true;
+    card._waitingForStream = true;
+    card._connectSteps = [setTimeout(() => {}, 999999)]; // non-empty, must survive
+    const connectText = "Stream wird gestartet…";
+    card._setLoadingOverlay(true, connectText);
+
+    const overlay = card.shadowRoot.getElementById("loading-overlay");
+    const loadText = card.shadowRoot.getElementById("loading-text");
+    const visibleBefore = overlay.classList.contains("visible");
+    const textBefore = loadText.textContent;
+
+    // A background snapshot fetch delivers a fresh (non-cache) frame while
+    // the connect sequence is still in flight.
+    const img = card.shadowRoot.getElementById("cam-img");
+    img.src = "https://example.invalid/snapshot.jpg"; // non-"data:" → isCache=false
+    card._onImageLoaded();
+
+    const visibleAfter = overlay.classList.contains("visible");
+    const textAfter = loadText.textContent;
+    const streamConnectingAfter = card._streamConnecting;
+    const connectStepsSurvived = card._connectSteps !== null;
+
+    card._connectSteps.forEach((t) => clearTimeout(t));
+    card.remove();
+    return {
+      visibleBefore, textBefore, visibleAfter, textAfter,
+      streamConnectingAfter, connectStepsSurvived, connectText,
+    };
+  });
+  expect(r.visibleBefore, "overlay starts visible with connect text").toBe(true);
+  expect(r.textBefore, "overlay shows the connect-phase text before the snapshot lands").toBe(r.connectText);
+  expect(r.visibleAfter, "overlay stays visible after a mid-connect snapshot load").toBe(true);
+  expect(r.textAfter, "connect-phase text is not stomped by the default loading text").toBe(r.connectText);
+  expect(r.streamConnectingAfter, "_streamConnecting is not cleared while _waitingForStream is still true").toBe(true);
+  expect(r.connectStepsSurvived, "_connectSteps timeline is not killed by an incidental snapshot load").toBe(true);
+});
+
+// Same bug, narrower window (bug-hunt finding, 2026-07-17 follow-up): right
+// after a tap, _toggleStream sets _streamConnecting=true synchronously, but
+// _waitingForStream only flips true on the NEXT async _update() pass (after
+// HA pushes the switch state back over the websocket) — a real single-tick
+// window where ONLY _streamConnecting is true. The first version of the
+// overlay fix gated on `_waitingForStream || _startingLiveVideo` and missed
+// this window entirely, so a snapshot landing at exactly this moment still
+// reproduced the original flicker. This test replicates that exact narrow
+// state (unlike the test above, which sets both flags together) to prove
+// the fix's `stillConnecting` check also covers _streamConnecting itself.
+test("a fresh snapshot arriving in the single-tick window right after tap (before _waitingForStream flips) still does not hide the overlay", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    card._imageLoaded = true;
+    card._streamConnecting = true;
+    card._waitingForStream = false;
+    card._startingLiveVideo = false;
+    const connectText = "Stream wird gestartet…";
+    card._setLoadingOverlay(true, connectText);
+
+    const overlay = card.shadowRoot.getElementById("loading-overlay");
+    const loadText = card.shadowRoot.getElementById("loading-text");
+
+    const img = card.shadowRoot.getElementById("cam-img");
+    img.src = "https://example.invalid/snapshot.jpg"; // non-"data:" → isCache=false
+    card._onImageLoaded();
+
+    const visibleAfter = overlay.classList.contains("visible");
+    const textAfter = loadText.textContent;
+    const streamConnectingAfter = card._streamConnecting;
+
+    card.remove();
+    return { visibleAfter, textAfter, streamConnectingAfter, connectText };
+  });
+  expect(r.visibleAfter, "overlay stays visible in the tap-only window (before _waitingForStream flips)").toBe(true);
+  expect(r.textAfter, "connect text is not stomped in the tap-only window").toBe(r.connectText);
+  expect(r.streamConnectingAfter, "_streamConnecting survives a snapshot landing in the tap-only window").toBe(true);
+});
+
+// firstHass refresh-overlay must not stomp connect-phase text (bug-hunt
+// finding, 2026-07-17 follow-up): the `hass` setter's firstHass block calls
+// _setLoadingOverlay(true, loading_refreshing) unconditionally whenever a
+// cached image is already showing — reproducible by reloading the page (or
+// re-adding the card) while a stream is already connecting/warming, which
+// stomped "Stream wird gestartet…" with "Aktualisiere…". Source-pin (rather
+// than a full runtime firstHass simulation, which needs a prepopulated
+// localStorage cache keyed to the card's storageKey before first mount)
+// that the guard is present at the exact call site — same convention as
+// the existing "clearOverlay clears _streamConnecting before hiding"
+// ordering-pin test above.
+test("firstHass refresh-overlay call is gated on no connect-sequence in flight (source pin)", () => {
+  const marker = "if (this._imageLoaded && !_privacyNow && !_connectingNow) {";
+  const idx = CARD_SRC.indexOf(marker);
+  expect(idx, "firstHass refresh-overlay call is gated on _connectingNow").toBeGreaterThan(-1);
+  const nearby = CARD_SRC.slice(idx, idx + 200);
+  expect(nearby, "the gated call still shows the refreshing overlay when not connecting").toContain(
+    'this._setLoadingOverlay(true, this._t("loading_refreshing"))',
+  );
+  const gateDefIdx = CARD_SRC.lastIndexOf("const _connectingNow =", idx);
+  expect(gateDefIdx, "_connectingNow is defined before the gated call").toBeGreaterThan(-1);
+  expect(CARD_SRC.slice(gateDefIdx, idx)).toMatch(
+    /_connectingNow = this\._streamConnecting \|\| this\._waitingForStream \|\| this\._startingLiveVideo/,
+  );
+});
+
 // mobile fullscreen: only one card may be in the CSS-fullscreen overlay — a
 // second card entering closes the first (single-owner; part of the "closing one
 // opened another" fix).
