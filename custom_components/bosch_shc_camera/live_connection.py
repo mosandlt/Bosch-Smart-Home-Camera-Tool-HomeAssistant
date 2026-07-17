@@ -248,6 +248,12 @@ async def try_live_connection_inner(
                 # REMOTE proxy doesn't support inst=4 (returns 400).
                 # Fall back to inst=2 (balanced, ~7.5 Mbps).
                 inst = 2
+            # Tracks the dict (if any) published to `coordinator.live_connections`
+            # for THIS candidate attempt, so the `except Exception` handler below
+            # can tell whether it needs to clean up a half-published entry.
+            # Re-initialised every loop iteration — a leftover reference from a
+            # previous candidate must never be popped by this one.
+            published_result: dict[str, Any] | None = None
             try:
                 # Timeout covers only the HTTP call — pre-warm runs after.
                 async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):
@@ -540,6 +546,7 @@ async def try_live_connection_inner(
                                 # (still TLS-proxied, still works) so
                                 # streaming isn't blocked by this feature.
                     coordinator.live_connections[cam_id] = result
+                    published_result = result
                     coordinator.live_opened_at[cam_id] = time.monotonic()
 
                     # ── LOCAL encoder warm-up (model-specific) ────────
@@ -960,6 +967,72 @@ async def try_live_connection_inner(
                     type_val,
                     err,
                 )
+            except Exception as err:
+                # The LOCAL/REMOTE warm-up sequence below the PUT (TLS-proxy
+                # start, RTSP pre-warm DESCRIBE, viewing-front-door bind) can
+                # raise more than the HTTP-layer TimeoutError/ClientError
+                # caught above (e.g. OSError on a port-bind failure). Before
+                # this handler existed, such an exception propagated straight
+                # out of try_live_connection_inner, skipping every cleanup
+                # path below (the "pre-warm failed" branches, the final
+                # rtspsUrl publish, and stream_ready_event.set()) — but
+                # `coordinator.live_connections[cam_id]` had ALREADY been
+                # published earlier in this iteration with `_connection_type`
+                # set and no `rtspsUrl` yet. That half-published entry then
+                # stuck around permanently: every external gate that decides
+                # whether to (re-)establish a session — the NVR switch's
+                # async_added_to_hass restore check, recorder.py's
+                # start_recorder, is_stream_warming()'s own staleness
+                # recovery — sees a LOCAL entry that already "exists" and
+                # never re-attempts, so nothing was ever retried. This is the
+                # confirmed root cause of GitHub #51's follow-up report: a
+                # mid-run Mini-NVR recorder exit's respawn attempt waited the
+                # full stream_ready_event timeout and gave up forever, only
+                # ever recovered by a full config-entry reload (which wipes
+                # `live_connections` from scratch). Clean up exactly like the
+                # "pre-warm failed, no REMOTE fallback" branch above so the
+                # next external trigger (switch toggle, renewal, a fresh
+                # recorder respawn) starts from a clean slate instead of a
+                # half-open state, then fall through to the next candidate.
+                _LOGGER.error(
+                    "try_live_connection: unexpected error during %s warm-up "
+                    "for %s: %s",
+                    type_val,
+                    cam_id[:8],
+                    err,
+                )
+                if published_result is not None and published_result.get("rtspsUrl"):
+                    # `published_result` is the SAME mutable dict object
+                    # published to `live_connections` earlier in this
+                    # iteration, so an `rtspsUrl` key present here means
+                    # warm-up already fully succeeded — this exception came
+                    # from LATER bookkeeping (renewal-task scheduling,
+                    # reaper, RCP refresh, NVR start/stop scheduling), not
+                    # from the warm-up sequence itself. Tearing down an
+                    # already-working session over a secondary bookkeeping
+                    # failure would be strictly worse than the bug this
+                    # handler exists to fix — keep the session, surface the
+                    # error, and hand back the working result instead of
+                    # falling through to the next candidate or returning
+                    # None (bug-hunt finding on the first version of this
+                    # fix, which had no such distinction).
+                    return published_result
+                if (
+                    published_result is not None
+                    and coordinator.live_connections.get(cam_id) is published_result
+                ):
+                    coordinator.live_connections.pop(cam_id, None)
+                coordinator.stream_warming.discard(cam_id)
+                coordinator.get_session(cam_id).warming_started = float("-inf")
+                # Wake any waiter (recorder.py's start_recorder) immediately
+                # instead of letting it sit out the full timeout — safe even
+                # though nothing became "ready": the event is unconditionally
+                # re-cleared at the start of the next warm-up attempt (see
+                # session_state.py's stream_ready_event docstring), so a
+                # stale set-on-failure signal can never leak into a later,
+                # genuinely successful session.
+                coordinator.get_session(cam_id).stream_ready_event.set()
+                await coordinator.stop_tls_proxy(cam_id)
     finally:
         # Do NOT close `session` here — it is the pooled, process-wide Bosch
         # cloud session (cloud_ssl.async_get_bosch_cloud_session), shared

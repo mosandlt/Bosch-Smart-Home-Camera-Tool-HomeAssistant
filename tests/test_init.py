@@ -23352,6 +23352,157 @@ class TestLanIpCacheSyncOnLocalSuccess:
         assert coord.rcp_lan_ip_cache[CAM_A] == "192.168.1.1"
 
 
+class TestWarmUpUnexpectedExceptionCleanup:
+    """GitHub #51 follow-up (realKim-dotcom): a mid-run Mini-NVR recorder exit
+    got stuck in a permanent "TLS-proxy URL not ready" loop, only fixable by
+    a full config-entry reload.
+
+    Root cause: `coordinator.live_connections[cam_id]` is published with
+    `_connection_type="LOCAL"` (but no `rtspsUrl` yet) BEFORE the LOCAL
+    pre-warm sequence (`pre_warm_rtsp`, the viewing front-door bind, etc.)
+    runs. That sequence used to be covered only by `except TimeoutError` /
+    `except aiohttp.ClientError` — any OTHER exception (e.g. an OSError from
+    a port-bind failure) propagated straight out of
+    `try_live_connection_inner`, skipping every cleanup path and leaving the
+    half-published `live_connections[cam_id]` entry stuck forever: every
+    external gate that decides whether to (re-)establish a session (the NVR
+    switch's restore check, recorder.py's `start_recorder` wait,
+    `is_stream_warming()`'s own staleness recovery) saw a LOCAL entry that
+    already "exists" and never retried.
+
+    This test reproduces that exact shape: `pre_warm_rtsp` raises an
+    unexpected `OSError` (standing in for a TLS-proxy port-bind failure)
+    mid-warm-up. Asserts the new catch-all cleanup path runs instead of the
+    exception propagating: the half-published entry is removed, the
+    warm-up bookkeeping is reset, and any waiter (recorder.py) is woken
+    immediately via `stream_ready_event` instead of blocking for the full
+    timeout.
+    """
+
+    @pytest.mark.asyncio
+    async def test_unexpected_exception_during_local_warmup_cleans_up(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        local_body = json.dumps(
+            {
+                "user": "u-local",
+                "password": "p-local",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
+        coord = _make_coord_sprint_kd(
+            entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "local"},
+            ),
+            rcp_lan_ip_cache={},
+            local_creds_cache={},
+            get_cam_lan_ip=MagicMock(return_value=None),  # skip TCP pre-check
+            start_tls_proxy=AsyncMock(return_value=12345),
+            tls_proxy_ports={CAM_A: 12345},
+            stop_tls_proxy=AsyncMock(),
+        )
+
+        resp = _put_resp(200, local_body)
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(side_effect=OSError("port bind failed")),
+            ),
+        ):
+            # Must NOT raise — the exception must be caught and cleaned up
+            # inside try_live_connection_inner, not leak to the caller.
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is None
+        # The half-published entry must be gone, not stuck with
+        # _connection_type="LOCAL" and no rtspsUrl.
+        assert CAM_A not in coord.live_connections
+        # Warm-up bookkeeping must be reset, not left stuck.
+        assert CAM_A not in coord.stream_warming
+        session = coord.get_session(CAM_A)
+        assert session.warming_started == float("-inf")
+        # A waiter (recorder.py's start_recorder) must be woken immediately
+        # rather than blocking for the full stream_ready_event timeout.
+        assert session.stream_ready_event.is_set()
+        # The partially-started TLS proxy must not be leaked.
+        coord.stop_tls_proxy.assert_awaited_with(CAM_A)
+
+    @pytest.mark.asyncio
+    async def test_exception_after_success_keeps_the_working_session(self):
+        """Bug-hunt follow-up on the fix above: the exception can also come
+        from bookkeeping that runs AFTER warm-up already succeeded and
+        `rtspsUrl` was set (e.g. a bug in the synchronous
+        `replace_renewal_task` call) — not just from the warm-up sequence
+        itself. A pure identity check on `published_result` can't tell
+        those two cases apart, since the dict is the same mutable object
+        before and after `rtspsUrl` is added to it. Popping/tearing down
+        an already-working session over an unrelated secondary bookkeeping
+        failure would be strictly worse than the original bug (destroying
+        a healthy stream instead of merely failing to establish one), so
+        this must return the working session, not None, and must NOT
+        remove it from `live_connections`.
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        local_body = json.dumps(
+            {
+                "user": "u-local",
+                "password": "p-local",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
+        coord = _make_coord_sprint_kd(
+            entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "local"},
+            ),
+            rcp_lan_ip_cache={},
+            local_creds_cache={},
+            get_cam_lan_ip=MagicMock(return_value=None),
+            start_tls_proxy=AsyncMock(return_value=12345),
+            tls_proxy_ports={CAM_A: 12345},
+            stop_tls_proxy=AsyncMock(),
+        )
+        # Fires only AFTER rtspsUrl has already been set on `result` and
+        # published to live_connections — the exact "post-success" window
+        # the bug-hunt flagged.
+        coord.replace_renewal_task = MagicMock(
+            side_effect=RuntimeError("renewal-task bookkeeping bug")
+        )
+
+        resp = _put_resp(200, local_body)
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            # Must NOT raise, and must NOT tear down the now-working session.
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is not None, (
+            "an already-successful session must be returned, not swallowed "
+            "into a None failure by a later bookkeeping exception"
+        )
+        assert result.get("rtspsUrl"), "the returned session must be the working one"
+        assert CAM_A in coord.live_connections, (
+            "an already-working session must not be popped over an "
+            "unrelated post-success bookkeeping failure"
+        )
+        assert coord.live_connections[CAM_A] is result
+
+
 class TestPut200LocalSuccess:
     """Lines 2465-2695: LOCAL 200 response populates result, starts TLS proxy."""
 

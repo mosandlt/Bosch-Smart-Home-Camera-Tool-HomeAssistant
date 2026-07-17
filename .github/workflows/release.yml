@@ -134,6 +134,16 @@ jobs:
               /^## / { f=0 }
               f && NF { print; exit }
             ' CHANGELOG.md | sed -E 's/\*\*//g; s/^(Patch|Minor|Major)[[:space:]]+[—-]+[[:space:]]*//')
+            if [ "$IS_PRERELEASE" != "true" ]; then
+              # Stable releases always ARE the accumulated beta-1..beta-N
+              # content for this version (see promote-beta.yml) — explain
+              # the two-release-train model once, automatically, on every
+              # stable release rather than relying on someone remembering
+              # to restate it by hand each time (Thomas, 2026-07-17).
+              printf '_This release collects everything shipped as beta-1 through beta-N of v%s this week — see below for what changed._\n\n---\n\n**Two release trains:** **Beta** (`vX.Y.Z-beta.N`) ships as soon as a fix is ready, for anyone who wants updates more often. **Stable** (`vX.Y.Z`, this release) bundles that week'"'"'s betas into one release, at most once a week — see [Release Channels](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant#release-channels--stable-vs-beta) in the README. If a week has no beta, there is no stable release that week either.\n\n---\n\n' "$VERSION" > /tmp/release-notes-header.md
+              cat /tmp/release-notes-header.md /tmp/release-notes.md > /tmp/release-notes-full.md
+              mv /tmp/release-notes-full.md /tmp/release-notes.md
+            fi
           elif [ "$IS_PRERELEASE" = "true" ]; then
             # Betas are allowed to ship ahead of the changelog entry — fall
             # back to a generic note instead of failing the job. The stable
