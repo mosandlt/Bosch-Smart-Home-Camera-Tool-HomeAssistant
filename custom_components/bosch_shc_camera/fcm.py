@@ -1641,25 +1641,46 @@ async def async_send_alert(
 
     async def _notify_type(
         type_key: str, message: str, file_path: str | None = None
-    ) -> None:
-        """Send to services configured for this alert type (information/screenshot/video)."""
-        for svc in get_alert_services(coordinator, type_key):
+    ) -> bool:
+        """Send to services configured for this alert type (information/screenshot/video).
+
+        Returns True iff at least one configured service was actually called
+        (a per-service call failure still counts as "attempted"). False means
+        get_alert_services() returned an empty list — e.g. "screenshot"/
+        "video" don't fall back to alert_notify_service, so an unset
+        alert_notify_video silently means zero services here. Callers use
+        this to log "sent"/"skipped" accurately instead of always claiming
+        "sent" regardless of whether anything was actually dispatched
+        (2026-07-17, Thomas: notifications not reliably arriving — traced to
+        this exact misleading log for a camera whose alert_notify_video was
+        intentionally left unset).
+        """
+        services = get_alert_services(coordinator, type_key)
+        for svc in services:
             try:
                 domain, service = svc.split(".", 1)
                 call_data = build_notify_data(svc, message, file_path)
                 await coordinator.hass.services.async_call(domain, service, call_data)
             except Exception as err:
                 _LOGGER.warning("Alert send failed for %s (%s): %s", svc, type_key, err)
+        return bool(services)
 
     # -- Step 1: Instant text alert ----------------------------------------
     # TROUBLE_CONNECT/DISCONNECT are connectivity events — route to "system",
     # not "information", and skip snapshot/clip steps (no media for these).
     _step1_key = "system" if _is_trouble else "information"
     try:
-        await _notify_type(
+        _step1_sent = await _notify_type(
             _step1_key, f"{type_icon} {cam_name}: {type_label} ({ts_short})"
         )
-        _LOGGER.debug("Alert step 1 (text) sent via %s", _step1_key)
+        if _step1_sent:
+            _LOGGER.debug("Alert step 1 (text) sent via %s", _step1_key)
+        else:
+            _LOGGER.debug(
+                "Alert step 1 (text) skipped: no notify service configured for %s"
+                " (and alert_notify_service is also unset)",
+                _step1_key,
+            )
     except Exception as err:
         _LOGGER.warning("Alert step 1 failed: %s", err)
         return
@@ -1796,14 +1817,23 @@ async def async_send_alert(
                                     _LOGGER.debug(
                                         "AI notify-include failed: %s", _ai_err
                                     )
-                            await _notify_type(
+                            _step2_sent = await _notify_type(
                                 "screenshot",
                                 caption,
                                 snap_path,
                             )
-                            _LOGGER.debug(
-                                "Alert step 2 (screenshot) sent: %s", snap_path
-                            )
+                            if _step2_sent:
+                                _LOGGER.debug(
+                                    "Alert step 2 (screenshot) sent: %s", snap_path
+                                )
+                            else:
+                                _LOGGER.debug(
+                                    "Alert step 2 (screenshot) skipped: "
+                                    "alert_notify_screenshot is unset (no "
+                                    "fallback to alert_notify_service for this "
+                                    "step): %s",
+                                    snap_path,
+                                )
                             if not save_snapshots:
                                 files_to_cleanup.append(snap_path)
 
@@ -1993,16 +2023,26 @@ async def async_send_alert(
                                 )
                                 size_kb = len(data) // 1024
                                 vcaption = f"\U0001f3ac {cam_name} Video ({ts_short}, {size_kb} KB)"
-                                await _notify_type(
+                                _step3_sent = await _notify_type(
                                     "video",
                                     vcaption,
                                     clip_path,
                                 )
-                                _LOGGER.info(
-                                    "Alert step 3 (video) sent: %s (%d KB)",
-                                    clip_path,
-                                    size_kb,
-                                )
+                                if _step3_sent:
+                                    _LOGGER.info(
+                                        "Alert step 3 (video) sent: %s (%d KB)",
+                                        clip_path,
+                                        size_kb,
+                                    )
+                                else:
+                                    _LOGGER.info(
+                                        "Alert step 3 (video) downloaded but NOT"
+                                        " sent — alert_notify_video is unset (no"
+                                        " fallback to alert_notify_service for"
+                                        " this step): %s (%d KB)",
+                                        clip_path,
+                                        size_kb,
+                                    )
                                 if not save_snapshots:
                                     files_to_cleanup.append(clip_path)
             except Exception as err:

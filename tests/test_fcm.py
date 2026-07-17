@@ -9519,6 +9519,236 @@ class TestStep3DirectClipDetected:
                     )
 
 
+class TestAlertStepSkipLogging:
+    """Live-report 2026-07-17 (Thomas): notifications not reliably arriving
+    on his phone, traced to `alert_notify_video` (and, symmetrically,
+    `alert_notify_screenshot`) being unset in his config — "screenshot" and
+    "video" deliberately do NOT fall back to alert_notify_service
+    (get_alert_services docstring), so zero notify calls happen for that
+    step. The bug: `_notify_type`'s callers logged "sent" unconditionally
+    regardless of whether any service was actually configured/called,
+    silently lying about delivery. Fixed by having `_notify_type` report
+    whether it actually dispatched anything, and having each caller log
+    accordingly.
+    """
+
+    @pytest.mark.asyncio
+    async def test_video_skipped_logs_not_sent_when_alert_notify_video_unset(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The exact reported scenario: alert_notify_video="" while every
+        other alert_notify_* is configured. No notify.* service call must
+        happen for the video step, and the log must say so — not "sent"."""
+        from custom_components.bosch_shc_camera.fcm import async_send_alert
+
+        clip_dl_resp = MagicMock()
+        clip_dl_resp.status = 200
+        clip_dl_resp.read = AsyncMock(return_value=b"x" * 5000)
+        clip_dl_resp.headers = {"Content-Type": "video/mp4"}
+        clip_dl_resp.__aenter__ = AsyncMock(return_value=clip_dl_resp)
+        clip_dl_resp.__aexit__ = AsyncMock(return_value=None)
+        session = MagicMock()
+        session.get = MagicMock(return_value=clip_dl_resp)
+
+        hass = MagicMock()
+        hass.config.config_dir = "/tmp"
+        hass.async_add_executor_job = AsyncMock()
+        hass.services.async_call = AsyncMock()
+
+        coord = SimpleNamespace(
+            token="tok",
+            options={
+                "alert_notify_service": "notify.signalkamera",
+                "alert_notify_information": "notify.signalkamera",
+                "alert_notify_screenshot": "notify.signalkamera",
+                "alert_notify_video": "",  # unset — the reported scenario
+                "alert_save_snapshots": False,
+                "alert_delete_after_send": False,
+            },
+            data={CAM_ID: {"info": {"title": "Terrasse"}}},
+            last_event_ids={CAM_ID: "evt-001"},
+            hass=hass,
+        )
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", new=AsyncMock()),
+            patch(f"{MODULE}._write_file"),
+            caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.fcm"),
+        ):
+            await async_send_alert(
+                coord,
+                "Terrasse",
+                "MOVEMENT",
+                "2026-07-17T10:00:00",
+                image_url="",  # skip step 2, isolate step 3
+                clip_url="https://residential.cbs.boschsecurity.com/v11/events/abc/clip.mp4",
+                clip_status="Done",
+            )
+
+        # Step 1 (text) still legitimately calls notify.signalkamera via the
+        # "information" key — only the VIDEO caption (containing "Video")
+        # must never appear in any call, since that's the step under test.
+        video_calls = [
+            c
+            for c in hass.services.async_call.call_args_list
+            if c.args and len(c.args) >= 3 and "Video" in str(c.args[2])
+        ]
+        assert video_calls == [], (
+            "no notify service must be called with the video caption when "
+            "alert_notify_video is unset"
+        )
+        messages = [r.message for r in caplog.records]
+        assert any(
+            "Alert step 3 (video) downloaded but NOT sent" in m for m in messages
+        ), (
+            "log must clearly say the video was NOT sent, not the old "
+            "misleading unconditional 'sent'"
+        )
+        assert not any(m.startswith("Alert step 3 (video) sent") for m in messages), (
+            "the misleading 'sent' log must not fire when nothing was sent"
+        )
+
+    @pytest.mark.asyncio
+    async def test_video_sent_logs_sent_when_alert_notify_video_configured(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Control case: with alert_notify_video actually set, the service IS
+        called and the log correctly says "sent" — the fix must not
+        regress the working case into always saying "skipped"."""
+        from custom_components.bosch_shc_camera.fcm import async_send_alert
+
+        clip_dl_resp = MagicMock()
+        clip_dl_resp.status = 200
+        clip_dl_resp.read = AsyncMock(return_value=b"x" * 5000)
+        clip_dl_resp.headers = {"Content-Type": "video/mp4"}
+        clip_dl_resp.__aenter__ = AsyncMock(return_value=clip_dl_resp)
+        clip_dl_resp.__aexit__ = AsyncMock(return_value=None)
+        session = MagicMock()
+        session.get = MagicMock(return_value=clip_dl_resp)
+
+        hass = MagicMock()
+        hass.config.config_dir = "/tmp"
+        hass.async_add_executor_job = AsyncMock()
+        hass.services.async_call = AsyncMock()
+
+        coord = SimpleNamespace(
+            token="tok",
+            options={
+                "alert_notify_service": "notify.signalkamera",
+                "alert_notify_information": "notify.signalkamera",
+                "alert_notify_screenshot": "notify.signalkamera",
+                "alert_notify_video": "notify.signalkamera",
+                "alert_save_snapshots": False,
+                "alert_delete_after_send": False,
+            },
+            data={CAM_ID: {"info": {"title": "Terrasse"}}},
+            last_event_ids={CAM_ID: "evt-002"},
+            hass=hass,
+        )
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", new=AsyncMock()),
+            patch(f"{MODULE}._write_file"),
+            caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.fcm"),
+        ):
+            await async_send_alert(
+                coord,
+                "Terrasse",
+                "MOVEMENT",
+                "2026-07-17T10:00:00",
+                image_url="",
+                clip_url="https://residential.cbs.boschsecurity.com/v11/events/abc/clip.mp4",
+                clip_status="Done",
+            )
+
+        video_calls = [
+            c
+            for c in hass.services.async_call.call_args_list
+            if c.args[:2] == ("notify", "signalkamera")
+        ]
+        assert len(video_calls) >= 1, (
+            "video notify service must be called when configured"
+        )
+        messages = [r.message for r in caplog.records]
+        assert any(m.startswith("Alert step 3 (video) sent") for m in messages), (
+            "log must say 'sent' when the video was actually delivered"
+        )
+        assert not any("downloaded but NOT sent" in m for m in messages)
+
+    @pytest.mark.asyncio
+    async def test_screenshot_skipped_logs_not_sent_when_alert_notify_screenshot_unset(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Same class of bug, screenshot step (alert_notify_screenshot unset).
+
+        alert_notify_service is deliberately a DIFFERENT service than the
+        one under test, so step 1's legitimate fallback call to it can't be
+        confused with (or mask a bug in) the screenshot-step assertion.
+        """
+        safe_img = "https://residential.cbs.boschsecurity.com/v11/events/abc/image.jpg"
+        coord = _make_alert_coord4(
+            options={
+                "alert_notify_service": "notify.textonly",
+                "alert_notify_screenshot": "",  # unset
+            }
+        )
+
+        @asynccontextmanager
+        async def _get(url, **kw):
+            resp = MagicMock()
+            resp.status = 200
+            resp.headers = {"Content-Type": "image/jpeg"}
+            resp.read = AsyncMock(return_value=b"\xff\xd8snap")
+            yield resp
+
+        session = MagicMock()
+        session.get = _get
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock),
+            patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()),
+            patch(f"{SMB_MODULE}.sync_local_save", MagicMock()),
+            caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.fcm"),
+        ):
+            from custom_components.bosch_shc_camera.fcm import async_send_alert
+
+            await async_send_alert(
+                coord,
+                "Terrasse",
+                "MOVEMENT",
+                "2026-05-07T10:00:00.000Z",
+                safe_img,
+            )
+
+        screenshot_calls = [
+            c
+            for c in coord.hass.services.async_call.call_args_list
+            if c.args[:2] == ("notify", "signal")
+        ]
+        assert screenshot_calls == [], (
+            "no notify service must be called for the screenshot step when "
+            "alert_notify_screenshot is unset"
+        )
+        messages = [r.message for r in caplog.records]
+        assert any("Alert step 2 (screenshot) skipped" in m for m in messages), (
+            "log must say the screenshot was skipped, not the old "
+            "misleading unconditional 'sent'"
+        )
+        assert not any(m.startswith("Alert step 2 (screenshot) sent") for m in messages)
+
+
 class TestStep3ClipUnavailableMidPoll:
     """Poll returns Unavailable → stop polling immediately."""
 
