@@ -8650,6 +8650,74 @@ class TestFileCleanup:
             "alert_save_snapshots=True must not remove the snapshot file"
         )
 
+    @pytest.mark.asyncio
+    async def test_save_snapshots_false_deletes_even_when_delete_after_send_false(
+        self,
+    ):
+        """GitHub #53 regression: alert_save_snapshots=False must delete the
+        snapshot file even when alert_delete_after_send=False. Before the
+        fix, cleanup was gated on `delete_after AND files_to_cleanup`, so
+        this exact combo (both toggles OFF) silently kept every alert file
+        forever in www/bosch_alerts/ despite alert_save_snapshots's own
+        description promising deletion within seconds — reported as ~2GB of
+        accumulated files over a few weeks."""
+        safe_img = "https://residential.cbs.boschsecurity.com/v11/events/abc/image.jpg"
+        coord = _make_alert_coord4(
+            options={
+                "alert_notify_service": "notify.signal",
+                "alert_notify_screenshot": "notify.signal",
+                "alert_save_snapshots": False,
+                "alert_delete_after_send": False,
+            }
+        )
+        removed = []
+
+        async def _exec(fn, *args, **kw):
+            name = getattr(fn, "__name__", "")
+            if name == "remove":
+                removed.append(args[0] if args else "")
+            return None
+
+        coord.hass.async_add_executor_job = AsyncMock(side_effect=_exec)
+
+        @asynccontextmanager
+        async def _get(url, **kw):
+            resp = MagicMock()
+            resp.status = 200
+            resp.headers = {"Content-Type": "image/jpeg"}
+            resp.read = AsyncMock(return_value=b"\xff\xd8snap")
+            yield resp
+
+        session = MagicMock()
+        session.get = _get
+
+        async def _run():
+            with patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ):
+                with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                    with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
+                        with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
+                            from custom_components.bosch_shc_camera.fcm import (
+                                async_send_alert,
+                            )
+
+                            await async_send_alert(
+                                coord,
+                                "Terrasse",
+                                "MOVEMENT",
+                                "2026-05-07T10:00:00.000Z",
+                                safe_img,
+                            )
+
+        await _run()
+        jpg_removed = [p for p in removed if p.endswith(".jpg")]
+        assert len(jpg_removed) == 1, (
+            "alert_save_snapshots=False must delete the snapshot file "
+            "regardless of alert_delete_after_send (#53)"
+        )
+
 
 # start_fcm_push mode branches + early exits, fetch_firebase_config, push snapshot task + exception handling, on_fcm_push drop-when-not-running, send_alert notify-type/trouble-event/step2/step3 branches, SMB/local-save timeouts + toggles, cleanup OSError, event-id concurrency, stale-client creds race, periodic re-registration, force-hard-heal (from: round 8, stale-client-creds race, issue-36 delivery, sprint grab-bag)
 

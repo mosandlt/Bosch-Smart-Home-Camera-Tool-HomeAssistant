@@ -1503,7 +1503,7 @@ def build_notify_data(
     fname = os.path.basename(file_path)
     if "mobile_app" in svc:
         # HA Companion App — image URL served without auth from /config/www/
-        # Files deleted within seconds when alert_delete_after_send=True
+        # Files deleted within seconds when alert_save_snapshots=False
         notify_data: dict[str, Any] = {
             "image": f"/local/bosch_alerts/{fname}",
             "push": {"sound": "default"},  # iOS: play sound; Android ignores this key
@@ -1599,8 +1599,16 @@ async def async_send_alert(
     ):
         return  # Nothing to do (no notifications, no local save, no SMB upload)
 
+    # alert_save_snapshots is the sole authority over whether files in
+    # www/bosch_alerts/ get deleted after sending — its own description
+    # ("if OFF, files are deleted within seconds after sending") must hold
+    # unconditionally. alert_delete_after_send used to additionally gate the
+    # actual os.remove() call, so leaving it OFF (its own text: "OFF = files
+    # kept for reference") silently defeated alert_save_snapshots=OFF and
+    # let files accumulate forever in www/bosch_alerts/ (GitHub #53). It is
+    # now read only for backward-compat option-schema presence and has no
+    # effect on cleanup — deletion is decided by alert_save_snapshots alone.
     save_snapshots = opts.get("alert_save_snapshots", False)
-    delete_after = opts.get("alert_delete_after_send", True)
     ts_short = timestamp[11:19] if len(timestamp) >= 19 else timestamp
 
     # Event type → German label + emoji icon.
@@ -2160,7 +2168,10 @@ async def async_send_alert(
             _LOGGER.warning("Alert: local save failed for %s: %s", cam_name, err)
 
     # -- Cleanup local files -----------------------------------------------
-    if delete_after and files_to_cleanup:
+    # Gate solely on files_to_cleanup — a file only lands there when
+    # alert_save_snapshots is OFF (see the two `if not save_snapshots:`
+    # append sites above), so that alone already decides deletion (#53 fix).
+    if files_to_cleanup:
         await asyncio.sleep(5)  # give Signal time to read the files
         for fpath in files_to_cleanup:
             try:

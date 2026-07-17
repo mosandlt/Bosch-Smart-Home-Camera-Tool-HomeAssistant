@@ -5,6 +5,14 @@ Full release history for the Bosch Smart Home Camera HA integration.
 Newest first. The README only highlights the most recent release — for older
 versions see this file or the [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) (each release page mirrors the same notes plus downloadable assets).
 
+## [v16.1.2] - 2026-07-17
+
+Patch — `www/bosch_alerts/` files no longer accumulate forever when both alert-cleanup toggles are OFF (GitHub #53). No breaking changes.
+
+### Fixed
+
+- **Alert snapshot/clip files could accumulate indefinitely in `www/bosch_alerts/` despite `alert_save_snapshots` being OFF** ([#53](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/53), Matze89x — reported ~2GB accumulated over a few weeks). `alert_save_snapshots`'s own description promises "if OFF, files are deleted within seconds after sending", but the actual deletion was gated on a second, independent toggle, `alert_delete_after_send`, whose own description promises the opposite when OFF ("files are kept for reference"). Turning both OFF — a combination that reads as internally consistent from each option's own text — silently defeated `alert_save_snapshots`'s promise: files were queued for cleanup but the `os.remove()` call itself never ran, so every alert's JPEG/MP4 piled up forever. `alert_save_snapshots` is now the sole authority over deletion; `alert_delete_after_send` is deprecated (all 12 locale translations updated to say so) and no longer has any effect. Confirmed unrelated to SMB upload or the folder/label sorting settings, which write to a separate `download_path`/SMB share, not `www/bosch_alerts/`. New regression test reproduces the exact reported combination and confirms deletion now happens. 6326 pytest / mypy --strict / ruff / codespell clean.
+
 ## [v16.1.1] - 2026-07-16
 
 Patch — bundles fixes shipped across beta iterations (beta-1/beta-2/beta-3/beta-4/beta-5/beta-6) before going stable. No breaking changes.

@@ -142,7 +142,7 @@
               "fcm_push_mode": "Auto = FCM 推送，注册失败时自动回退至轮询。Polling = 跳过 FCM，仅使用标准 API 调用。",
               "mark_events_read": "关闭时（默认），新的运动/音频事件在 Bosch 应用中保持未读状态 — 即使 HA 已处理 — 以便应用继续将其标记为新事件。开启后，集成将在处理后把事件标记为已读（原有行为 — 适用于以 HA 为主要客户端且不希望应用显示过期\"新事件\"角标的情况）。",
               "alert_save_snapshots": "将已下载的事件图片和视频保存在 www/bosch_alerts/（HA 配置目录内）。关闭时，文件在发送后数秒内被删除。",
-              "alert_delete_after_send": "通知服务收到后从 www/bosch_alerts/ 中删除通知文件。关闭时，文件保留以供参考。",
+              "alert_delete_after_send": "已弃用 — 不再产生任何效果。www/bosch_alerts/ 中文件的删除现在仅由上方的“本地保存告警图片/视频”控制（关闭时 = 发送后数秒内删除文件）。",
               "alert_notify_service": "默认备用：当下方各类型字段为空时使用。逗号分隔。示例：notify.signal_messenger，notify.mobile_app_xxx。留空则禁用报警。",
               "alert_notify_information": "第 1 步服务 — 即时文字通知。留空 = 使用默认备用。例如：notify.signal_messenger，notify.mobile_app_xxx。",
               "alert_notify_screenshot": "第 2 步服务 — 快照图片。留空 = 跳过此步（无备用）。移动应用（mobile_app_xxx）内联接收图片；其他以文件附件形式发送。",
