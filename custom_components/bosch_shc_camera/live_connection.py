@@ -898,17 +898,31 @@ async def try_live_connection_inner(
                         coordinator.replace_renewal_task(
                             cam_id, coordinator.remote_session_terminator(cam_id, gen)
                         )
-                    # Full coordinator refresh re-evaluates ALL cameras. On a
-                    # transparent session RENEWAL nothing user-visible
-                    # changes — the stream stays up, unaffected by the
+                    # Push the freshly-updated state to entities WITHOUT a
+                    # full Bosch-cloud re-poll (stream-start latency
+                    # optimization, 2026-07-17). The two things that
+                    # actually need to be "fresh" here — the camera's
+                    # streaming state (`is_streaming`) and `stream_source()`
+                    # — both deliberately read `coordinator.live_connections`
+                    # directly, already updated above, specifically to avoid
+                    # depending on the coordinator's poll cycle (see
+                    # `camera.py::stream_source`'s own docstring: "Always
+                    # reads from live_connections ... instead of coordinator
+                    # data cache"). `async_request_refresh()` additionally
+                    # re-fetches EVERY camera's data from Bosch's cloud API
+                    # before notifying listeners — a real, avoidable network
+                    # round-trip sitting on the stream-start critical path
+                    # for state this function doesn't actually need a fresh
+                    # cloud fetch to propagate. `async_update_listeners()`
+                    # is synchronous (not a coroutine) — no async_create_task
+                    # needed, matching every other call site in this repo
+                    # (grep `coordinator.async_update_listeners()`). On a
+                    # transparent session RENEWAL, skip even this — nothing
+                    # user-visible changes on a renewal (unaffected by the
                     # rotated creds since the published front-door URL is
-                    # stable — so skip the cross-camera refresh on renewal
-                    # (the regular ≤60s tick confirms state). A fresh toggle
-                    # still refreshes so provider/state propagate now.
+                    # stable), the regular ≤60s poll tick confirms state.
                     if not is_renewal:
-                        coordinator.hass.async_create_task(
-                            coordinator.async_request_refresh()
-                        )
+                        coordinator.async_update_listeners()
                     coordinator.hass.async_create_task(
                         coordinator.check_and_recover_webrtc(cam_id)
                     )

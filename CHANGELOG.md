@@ -7,7 +7,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [v16.1.1] - 2026-07-16
 
-Patch — bundles fixes shipped across beta iterations (beta-1/beta-2/beta-3/beta-4) before going stable. No breaking changes.
+Patch — bundles fixes shipped across beta iterations (beta-1/beta-2/beta-3/beta-4/beta-5) before going stable. No breaking changes.
 
 ### Fixed
 
@@ -26,6 +26,10 @@ Patch — bundles fixes shipped across beta iterations (beta-1/beta-2/beta-3/bet
   - **Recorder: the Mini-NVR crash-respawn watchdogs (`_watch_recorder`, `_watch_preroll_health`) had no catch-all exception guard around their own respawn calls** — the same "external trigger never fires again" shape as the beta-3 fix above, just in the sibling watchdogs (ironic for `_watch_preroll_health`, which exists specifically to close that class of gap). An unexpected exception there used to kill the background watcher task silently, with no error state and no UI signal. Now caught, logged, and surfaced via `nvr_error_state` + a listener push — `_watch_preroll_health`'s existing give-up path gained the same UI-visibility fix (previously log-only).
   - **`live_connection.py`'s beta-3 fix had its own follow-up gap**: the "warm-up already succeeded, keep the session" branch never re-scheduled LOCAL auto-renewal, so a session that hit that exact path would silently never renew and go stale at the next Bosch cred rotation. Fixed to defensively re-schedule renewal — and a second bug-hunt round caught a flaw in *that* fix too: the defensive re-call minted a second, independent session-generation bump, which could desync the (opt-in, `enable_green_it`) idle-session reaper's already-captured generation and silently disable it. Fixed to reuse the current generation instead of bumping again.
   - All 6 new/updated regression tests independently verified to fail against each pre-fix code path and pass against the fix (including the two-round self-correction on the last item). 273 Playwright tests (chromium/firefox/webkit) and the full 6311-test Python suite green, 100% coverage maintained.
+
+### Changed
+
+- **Stream starts propagate to entities faster** (beta-5, Thomas: "can we somehow speed up the stream starting within the card?"). A fresh (non-renewal) stream toggle used to trigger a full Bosch-cloud re-poll of every camera (`coordinator.async_request_refresh()`) purely to notify entities that the just-opened session's state had changed — a real, avoidable network round-trip sitting on the stream-start critical path. The camera entity's `is_streaming`/`stream_source()` already deliberately read the in-memory session state directly (bypassing the coordinator's poll cache, per their own existing docstrings) specifically to avoid this exact dependency, so the cloud re-poll was never actually needed to propagate a fresh session — only a lighter, synchronous listener push was. Confirmed against Home Assistant core's own source that the removed call really does trigger real network I/O, not something already cheap/debounced. Independently bug-hunted by 3 parallel agents (checked for any other entity/sensor that might have depended on the removed cloud fetch, verified the change doesn't reorder anything relative to the other work scheduled right after it, and confirmed the swap is consistent with how every other call site in this repo already calls this method). 3 new regression tests, verified to fail against the pre-fix code and pass against the fix.
 
 ## [v16.1.0] - 2026-07-16
 

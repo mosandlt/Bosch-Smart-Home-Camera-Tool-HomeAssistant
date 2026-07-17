@@ -26,5 +26,5 @@
     "smbprotocol>=1.10.0,<2"
   ],
   "single_config_entry": true,
-  "version": "16.1.1-beta-4"
+  "version": "16.1.1-beta-5"
 }

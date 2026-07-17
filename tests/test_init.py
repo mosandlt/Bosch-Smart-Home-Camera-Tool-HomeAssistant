@@ -24699,6 +24699,79 @@ class TestGreenItReaperGate:
         coord.replace_reaper_task.assert_not_called()
 
 
+class TestFreshToggleUsesListenerPushNotFullRefresh:
+    """Stream-start latency fix, 2026-07-17: a fresh (non-renewal) stream
+    toggle used to call `coordinator.async_request_refresh()` (a full
+    Bosch-cloud re-poll of every camera) via `async_create_task`, purely to
+    propagate the just-opened session's state to entities. But the two
+    things that actually need to be fresh — `camera.py`'s `is_streaming`
+    and `stream_source()` — already deliberately read
+    `coordinator.live_connections` directly (see their own docstrings),
+    bypassing the coordinator's poll cache specifically to avoid this exact
+    dependency. The cloud re-poll was pure avoidable latency sitting on the
+    stream-start critical path. Fixed to call the synchronous
+    `coordinator.async_update_listeners()` directly instead — same effect
+    (entities re-evaluate their properties) with no network round-trip.
+    """
+
+    async def _run(self, *, is_renewal: bool = False):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.0.2.149:443"],
+                "bufferingTime": 500,
+            }
+        )
+        coord = _make_coord_live(
+            entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "local"},
+            ),
+            rcp_lan_ip_cache={},
+            local_creds_cache={},
+            get_cam_lan_ip=MagicMock(return_value=None),
+            start_tls_proxy=AsyncMock(return_value=12345),
+            tls_proxy_ports={CAM_A: 12345},
+        )
+        coord.async_update_listeners = MagicMock()
+        coord.async_request_refresh = AsyncMock()
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch(
+                "aiohttp.ClientSession",
+                return_value=_make_session_sprint_kd(_put_resp(200, body)),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            await try_live_connection_inner(coord, CAM_A, is_renewal=is_renewal)
+        return coord
+
+    @pytest.mark.asyncio
+    async def test_fresh_toggle_calls_update_listeners_synchronously(self):
+        coord = await self._run(is_renewal=False)
+        coord.async_update_listeners.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fresh_toggle_does_not_call_full_refresh(self):
+        coord = await self._run(is_renewal=False)
+        coord.async_request_refresh.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_renewal_skips_both(self):
+        """Pre-existing behavior, unchanged by this fix: a transparent
+        renewal (URL unaffected) still skips both the old refresh call and
+        the new listener push — the regular poll tick confirms state."""
+        coord = await self._run(is_renewal=True)
+        coord.async_update_listeners.assert_not_called()
+        coord.async_request_refresh.assert_not_called()
+
+
 # and remote_session_terminator in __init__.py.
 # Coverage targets (lines 3627-3841):
 # - Group 1: Break guards in auto_renew_local_session (stale-gen, stream-off, non-LOCAL)
@@ -27862,6 +27935,10 @@ def _make_coord_live(**overrides):
         remote_session_terminator=AsyncMock(return_value=None),
         refresh_rcp_state=AsyncMock(return_value=None),
         async_request_refresh=AsyncMock(return_value=None),
+        # Stream-start latency fix (2026-07-17): the fresh-toggle path calls
+        # this synchronous method directly instead of scheduling a full
+        # async_request_refresh via async_create_task.
+        async_update_listeners=MagicMock(),
         get_quality_params=MagicMock(return_value=(True, 1)),
         get_quality=MagicMock(return_value="auto"),
         get_model_config=MagicMock(return_value=_model_cfg_sprint_lc()),
