@@ -149,7 +149,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.10.1";
+const CARD_VERSION = "14.1.10.2";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -4561,10 +4561,16 @@ class BoschCameraCard extends HTMLElement {
 
         /* iOS HLS info banner — sits absolutely at the top of the camera
            area so it stays readable over the video frame, never on the
-           letterbox bars (which are pure black and gave 0 contrast). */
+           letterbox bars (which are pure black and gave 0 contrast).
+           top:54px clears the .ap-top title-pill/status-badge row (top:12px
+           + ~30px pill height + gap) so the two overlays stack instead of
+           overlapping — before this fix the banner text rendered directly
+           behind the pill/badge (z-index 5 vs 13), visible as garbled text
+           squeezed between them on mobile/remote-tunnel HLS fallback
+           (2026-07-18 Thomas report, reproduced on iOS Companion App). */
         .ios-hls-banner {
           display: none;
-          position: absolute; top: 8px; left: 8px; right: 8px;
+          position: absolute; top: 54px; left: 8px; right: 8px;
           z-index: 5;
           align-items: center; justify-content: center;
           gap: 6px; padding: 5px 10px;
@@ -6056,6 +6062,9 @@ class BoschCameraCard extends HTMLElement {
 
         /* Element-hiding toggles (issue #15): show_title:false / show_last_event:false. */
         :host(.no-title) .ap-top { display: none; }
+        /* .ap-top is gone here, so the HLS banner has nothing to clear —
+           reclaim the top:8px position instead of leaving a dead gap. */
+        :host(.no-title) .ios-hls-banner { top: 8px; }
         :host(.no-last-event) .ap-last-event { display: none !important; }
 
         :host(.apple-style.cam-offline) .ap-pill-bar { display: none; }

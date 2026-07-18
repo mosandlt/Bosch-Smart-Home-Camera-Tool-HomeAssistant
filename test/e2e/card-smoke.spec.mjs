@@ -2942,6 +2942,43 @@ test("HLS-mode banner shows for a mobile client on HLS (not just the remote-skip
   expect(mc.includes("getExternalAuth"), "detects iOS Companion via webkit bridge").toBe(true);
 });
 
+test("HLS-mode banner does not overlap the title-pill/status-badge row (2026-07-18 mobile report)", async ({ page }) => {
+  // Regression: .ios-hls-banner and .ap-top were both position:absolute at the
+  // same top offset (banner z-index 5 UNDER .ap-top's z-index 13), so the banner
+  // text rendered squeezed/hidden behind the camera-name pill and VERBINDE/LIVE
+  // badge on mobile/remote-tunnel HLS fallback — reported live on iOS Companion
+  // App screenshots. Fixed by pushing the banner below the pill row (top:54px)
+  // except when .ap-top itself is hidden (:host(.no-title)).
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "de", localize: (k) => (k === "hls_mode_banner" ? "HLS-Modus, höhere Latenz" : k), callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: { "camera.test": { state: "streaming", attributes: { friendly_name: "Innenbereich" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    card.style.width = "400px"; card.style.display = "block";
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    // Force the exact reported state: mobile client, HLS fallback, live video active.
+    card._isMobileClient = () => true;
+    card._streamTransport = "hls";
+    card._liveVideoActive = true;
+    card._update();
+    const sr = card.shadowRoot;
+    const banner = sr.getElementById("ios-hls-banner");
+    const top = sr.querySelector(".ap-top");
+    if (!banner || !top) return { error: "missing banner/ap-top" };
+    const visible = banner.classList.contains("visible");
+    const bRect = banner.getBoundingClientRect();
+    const tRect = top.getBoundingClientRect();
+    card.remove();
+    return { visible, bTop: bRect.top, bBottom: bRect.bottom, tTop: tRect.top, tBottom: tRect.bottom };
+  });
+  expect(r.error, "card renders banner + title-pill row").toBeUndefined();
+  expect(r.visible, "banner shows for mobile client on HLS with live video").toBe(true);
+  expect(r.bTop, "banner starts at/below the title-pill row's bottom edge (no overlap)").toBeGreaterThanOrEqual(r.tBottom);
+});
+
 test("_stopLiveVideo clears the dead-track watchdog timer + resets its baseline", () => {
   const start = CARD_SRC.indexOf("_stopLiveVideo() {");
   const body = CARD_SRC.slice(start, CARD_SRC.indexOf("_onSnapshotClick()", start));
