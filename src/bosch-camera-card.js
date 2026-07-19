@@ -149,7 +149,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.10.2";
+const CARD_VERSION = "14.1.11";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -489,6 +489,7 @@ const CARD_I18N = {
     notif_cam_status_header: "Camera status",
     notif_all_clear: "No Bosch cloud maintenance scheduled. All cameras reachable.",
     badge_connecting: "Connecting",
+    stream_taking_longer: "Taking longer than expected, still trying…",
     tap_to_play_label: "Tap to play",
     tap_to_play_hint: "Or enable \"Auto-play videos\" in the HA app settings",
     lan_turn_on_title: "Turn {label} on",
@@ -755,6 +756,7 @@ const CARD_I18N = {
     notif_cam_status_header: "Kamera-Status",
     notif_all_clear: "Keine Bosch-Cloud-Wartung geplant. Alle Kameras erreichbar.",
     badge_connecting: "Verbinde",
+    stream_taking_longer: "Dauert länger als erwartet, wird weiter versucht…",
     tap_to_play_label: "Zum Abspielen tippen",
     tap_to_play_hint: "Oder in den HA-App-Einstellungen „Videos automatisch abspielen“ aktivieren",
     lan_turn_on_title: "{label} einschalten",
@@ -985,6 +987,7 @@ const CARD_I18N = {
     notif_cam_status_header: "Estado de la cámara",
     notif_all_clear: "No hay mantenimiento de Bosch Cloud programado. Todas las cámaras accesibles.",
     badge_connecting: "Conectando",
+    stream_taking_longer: "Está tardando más de lo esperado, seguimos intentando…",
     tap_to_play_label: "Toca para reproducir",
     tap_to_play_hint: "O activa «Reproducir vídeos automáticamente» en los ajustes de la app de HA",
     lan_turn_on_title: "Encender {label}",
@@ -1214,6 +1217,7 @@ const CARD_I18N = {
     notif_cam_status_header: "État des caméras",
     notif_all_clear: "Aucune maintenance Bosch Cloud prévue. Toutes les caméras accessibles.",
     badge_connecting: "Connexion",
+    stream_taking_longer: "Cela prend plus de temps que prévu, nouvelle tentative…",
     tap_to_play_label: "Appuyez pour lire",
     tap_to_play_hint: "Ou activez « Lecture automatique des vidéos » dans les paramètres de l'app HA",
     lan_turn_on_title: "Activer {label}",
@@ -1443,6 +1447,7 @@ const CARD_I18N = {
     notif_cam_status_header: "Stato fotocamera",
     notif_all_clear: "Nessuna manutenzione Bosch Cloud pianificata. Tutte le fotocamere raggiungibili.",
     badge_connecting: "Connessione",
+    stream_taking_longer: "Sta richiedendo più tempo del previsto, nuovo tentativo…",
     tap_to_play_label: "Tocca per avviare",
     tap_to_play_hint: "Oppure attiva «Riproduzione automatica video» nelle impostazioni dell'app HA",
     lan_turn_on_title: "Accendi {label}",
@@ -1672,6 +1677,7 @@ const CARD_I18N = {
     notif_cam_status_header: "Camerastatus",
     notif_all_clear: "Geen Bosch Cloud-onderhoud gepland. Alle camera's bereikbaar.",
     badge_connecting: "Verbinden",
+    stream_taking_longer: "Duurt langer dan verwacht, we blijven het proberen…",
     tap_to_play_label: "Tik om af te spelen",
     tap_to_play_hint: "Of schakel “Video's automatisch afspelen” in bij de HA-app-instellingen",
     lan_turn_on_title: "{label} inschakelen",
@@ -1901,6 +1907,7 @@ const CARD_I18N = {
     notif_cam_status_header: "Status kamery",
     notif_all_clear: "Brak zaplanowanej konserwacji Bosch Cloud. Wszystkie kamery dostępne.",
     badge_connecting: "Łączenie",
+    stream_taking_longer: "Trwa to dłużej niż oczekiwano, wciąż próbujemy…",
     tap_to_play_label: "Dotknij, aby odtworzyć",
     tap_to_play_hint: "Lub włącz „Automatyczne odtwarzanie wideo” w ustawieniach aplikacji HA",
     lan_turn_on_title: "Włącz {label}",
@@ -2130,6 +2137,7 @@ const CARD_I18N = {
     notif_cam_status_header: "Estado da câmara",
     notif_all_clear: "Sem manutenção da Bosch Cloud agendada. Todas as câmaras acessíveis.",
     badge_connecting: "Ligando",
+    stream_taking_longer: "Está a demorar mais do que o esperado, a continuar a tentar…",
     tap_to_play_label: "Toque para reproduzir",
     tap_to_play_hint: "Ou ative “Reprodução automática de vídeos” nas definições da app HA",
     lan_turn_on_title: "Ligar {label}",
@@ -2359,6 +2367,7 @@ const CARD_I18N = {
     notif_cam_status_header: "Статус камеры",
     notif_all_clear: "Обслуживание Bosch Cloud не запланировано. Все камеры доступны.",
     badge_connecting: "Подключение",
+    stream_taking_longer: "Это занимает больше времени, чем ожидалось, продолжаем попытки…",
     tap_to_play_label: "Нажмите для воспроизведения",
     tap_to_play_hint: "Или включите «Автовоспроизведение видео» в настройках приложения HA",
     lan_turn_on_title: "Включить {label}",
@@ -2588,6 +2597,7 @@ const CARD_I18N = {
     notif_cam_status_header: "Статус камери",
     notif_all_clear: "Обслуговування Bosch Cloud не заплановано. Усі камери доступні.",
     badge_connecting: "Підключення",
+    stream_taking_longer: "Це триває довше, ніж очікувалося, продовжуємо спроби…",
     tap_to_play_label: "Торкніться, щоб відтворити",
     tap_to_play_hint: "Або увімкніть «Автовідтворення відео» в налаштуваннях застосунку HA",
     lan_turn_on_title: "Увімкнути {label}",
@@ -2817,6 +2827,7 @@ const CARD_I18N = {
     notif_cam_status_header: "摄像头状态",
     notif_all_clear: "未计划 Bosch Cloud 维护。所有摄像头均可达。",
     badge_connecting: "连接中",
+    stream_taking_longer: "耗时比预期长，仍在重试…",
     tap_to_play_label: "点击播放",
     tap_to_play_hint: "或在 HA 应用设置中启用“自动播放视频”",
     lan_turn_on_title: "开启{label}",
@@ -6199,7 +6210,7 @@ class BoschCameraCard extends HTMLElement {
             <div class="conn-badge hidden" id="conn-badge"></div>
             <div class="stream-badge idle" id="stream-badge">
               <div class="dot"></div>
-              <span id="stream-label">idle</span>
+              <span id="stream-label"></span>
             </div>
           </div>
         </div>
@@ -9513,7 +9524,20 @@ class BoschCameraCard extends HTMLElement {
                            : ((isStreaming || this._startingLiveVideo || sharedConnecting || (this._liveVideoActive && this._liveStreamStalled)) ? "connecting"
                            : "idle")));
     if (badge)        badge.className = "stream-badge " + streamBadgeState;
-    if (streamLabel && !isStreaming) streamLabel.textContent = streamBadgeState;
+    if (streamLabel && !isStreaming) {
+      // The legacy (non-apple-style) badge used to dump the raw internal
+      // state token ("offline"/"connecting"/"idle") straight into the DOM —
+      // not just unlocalized but not even friendly text, unlike the
+      // apple-style badge a few lines below which already maps these to
+      // "Live"/"Offline"/_t("badge_connecting"). Mirror that mapping here
+      // instead. "Live"/"Offline" stay hardcoded loanwords (same precedent
+      // as the apple badge); "idle" shows nothing, matching its hidden
+      // apple-badge counterpart. (issue #45-class follow-up, 2026-07-19)
+      streamLabel.textContent = streamBadgeState === "offline" ? "Offline"
+                               : streamBadgeState === "streaming" ? "Live"
+                               : streamBadgeState === "connecting" ? this._t("badge_connecting")
+                               : "";
+    }
 
     // Video is playing → the connecting phase is over. Force-tear-down any
     // lingering connecting overlay + keepalive timers that a lagging backend
@@ -10797,7 +10821,14 @@ class BoschCameraCard extends HTMLElement {
       // reset (B6, 2026-06-22) meant to prevent that class of bug.
       this._startingLiveVideo = false;
       if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
-      this._setLoadingOverlay(false);
+      // Briefly explain the timeout instead of silently reverting straight to
+      // idle — the expected wait (~10-35s per the comment above) was just
+      // blown 2-3x over, and giving zero feedback here left the user with no
+      // indication anything unusual happened. All flags above are already
+      // cleared, so this call is not suppressed by the streamStarting guard
+      // in _setLoadingOverlay. 2026-07-19.
+      this._setLoadingOverlay(true, this._t("stream_taking_longer"));
+      this._armTimer(() => this._setLoadingOverlay(false), 2500);
       this._startRefreshTimer();
       // Single TRACKED retry timer — never stack chains. Two _waitForStreamReady
       // chains both hitting attempt>90 would otherwise each arm an un-cancellable

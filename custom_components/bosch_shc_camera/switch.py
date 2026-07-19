@@ -487,6 +487,12 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             False means FFmpeg started and then died, which is exactly the
             failure mode reported in issue #6 (yellow → brief blue → yellow
             cycle).
+          * when no `Stream` object exists yet (nobody has ever requested
+            HLS — the common case for a WebRTC-only/mobile viewer, since
+            WebRTC never touches HA's Stream component), fall back to
+            go2rtc's own consumer count instead of assuming nobody is
+            watching (2026-07-19 fix — see `_stream_health_state`'s
+            docstring for the full rationale).
 
         On a healthy tick the watchdog clears the coordinator error counter
         and exits. On a failing tick it records a stream error, tears the
@@ -500,43 +506,111 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             live = self.coordinator.live_connections.get(cam_id, {})
             return bool(live) and live.get("_connection_type") == "LOCAL"
 
-        def _stream_health_state() -> str:
-            # Three-state classifier so we don't conflate "no consumer yet"
-            # with "stream object exists but is unhealthy". Returns:
-            #   "no_consumer" — cam_entity.stream is None (frontend never
-            #     asked for HLS, FFmpeg never started). Restarting the LOCAL
-            #     session does NOT help here; nobody is reading bytes.
-            #   "healthy"     — Stream.available is True (worker producing).
-            #   "unhealthy"   — Stream object exists but available is False
+        async def _stream_health_state() -> str:
+            # Four-state classifier so we don't conflate "no consumer at
+            # all" with "stream object exists but is unhealthy" or "a
+            # WebRTC-only viewer we have no HLS signal for". Returns:
+            #   "no_consumer"  — no HLS Stream object AND go2rtc confirms
+            #     zero consumers (WebRTC/RTSP/MSE). Nobody is watching;
+            #     restarting the LOCAL session would help nobody.
+            #   "healthy"      — Stream.available is True (worker producing).
+            #   "unhealthy"    — Stream object exists but available is False
             #     (FFmpeg started and died, or never produced first segment).
+            #   "webrtc_only"  — no HLS Stream object, but go2rtc reports an
+            #     active consumer (or is unreachable, so we can't rule one
+            #     out). WebRTC never touches HA's Stream component, so a
+            #     mobile/WebRTC-only viewer leaves cam_entity.stream at None
+            #     for the entire session — the old "no_consumer" bucket
+            #     wrongly caught this and gave up watching after the very
+            #     first tick, leaving a WebRTC-only session with zero
+            #     backend health monitoring (forum-review 2026-07-19: the
+            #     card's own client-side dead-track recovery can itself be
+            #     suppressed while the tab is hidden, so nothing else was
+            #     catching a session that died silently in the background).
             cam_entity = self.coordinator.camera_entities.get(cam_id)
             if not cam_entity:
                 return "no_consumer"
             stream = getattr(cam_entity, "stream", None)
-            if stream is None:
-                return "no_consumer"
-            return (
-                "healthy" if bool(getattr(stream, "available", False)) else "unhealthy"
-            )
+            if stream is not None:
+                return (
+                    "healthy"
+                    if bool(getattr(stream, "available", False))
+                    else "unhealthy"
+                )
+            count = await self.coordinator.go2rtc_consumer_count(cam_id)
+            # None == go2rtc unreachable, can't rule out a consumer — treat
+            # like has_active_consumer() does elsewhere: unknown ⇒ don't
+            # assume idle.
+            return "no_consumer" if count == 0 else "webrtc_only"
 
+        had_webrtc_only_consumer = False
         for idx, delay in enumerate((60, 60)):  # 60s, then another 60s → ~2 min total
             await asyncio.sleep(delay)
             if not _is_local_active():
                 return
-            state = _stream_health_state()
+            state = await _stream_health_state()
             if state == "healthy":
                 self.coordinator.record_stream_success(cam_id)
                 return
-            if state == "no_consumer":
-                # No HLS consumer asked for the stream — FFmpeg never started,
-                # so there's nothing to restart. Leaving the LOCAL session up
-                # so a future consumer (browser tab opens) gets it instantly.
+            if state == "webrtc_only":
+                # A go2rtc consumer (WebRTC/RTSP/MSE) is attached but we have
+                # no HLS-based health signal for it. Keep watching through
+                # the second tick instead of giving up now.
+                had_webrtc_only_consumer = True
+                if idx == 1:
+                    # Still a confirmed (or unconfirmed-but-not-ruled-out)
+                    # consumer at the FINAL tick too — continuity across the
+                    # full ~2 min window is decent evidence the LOCAL
+                    # producer is fine (matches has_active_consumer()'s
+                    # existing use of consumer presence as a liveness proxy
+                    # elsewhere). Clear the error counter like the "healthy"
+                    # path does — a two-tick-confirmed WebRTC viewer is a
+                    # genuine positive signal, don't leave a stale error
+                    # count from some earlier unrelated failure sitting
+                    # there to trip the threshold sooner than it should.
+                    self.coordinator.record_stream_success(cam_id)
+                    return
                 _LOGGER.debug(
-                    "Stream health watchdog: %s LOCAL session up but no HLS "
+                    "Stream health watchdog: %s LOCAL session has a go2rtc "
+                    "consumer (WebRTC/RTSP/MSE) but no HLS signal — "
+                    "continuing to watch",
+                    cam_id[:8],
+                )
+                continue
+            if state == "no_consumer" and not had_webrtc_only_consumer:
+                # Confirmed zero go2rtc consumers AND no HLS Stream object —
+                # nobody is reading bytes, restarting would help nobody.
+                _LOGGER.debug(
+                    "Stream health watchdog: %s LOCAL session up but no "
                     "consumer connected — skipping health check (frontend "
                     "card may be unmounted)",
                     cam_id[:8],
                 )
+                return
+            if state == "no_consumer" and had_webrtc_only_consumer:
+                # A go2rtc consumer was confirmed at the previous tick but is
+                # gone now, with HLS never established either. This is
+                # AMBIGUOUS — it looks identical whether the viewer simply
+                # closed the tab/app (the common case, LOCAL is perfectly
+                # fine) or the WebRTC session died silently with no
+                # client-side fallback ever kicking in (e.g. recovery logic
+                # suppressed while backgrounded). Do NOT treat this like a
+                # confirmed-unhealthy HLS session: no tear-down/reconnect,
+                # and only a single gradual error (never saturate straight
+                # to forced-REMOTE) — a first bug-hunt round on this exact
+                # branch found that forcing REMOTE here punishes the common
+                # "viewer stopped watching" case with up to 30 min of
+                # degraded/cloud-routed streaming for no reason, and could
+                # even sabotage a legitimate WebRTC→HLS client-side recovery
+                # still in flight. This just nudges the same gradual
+                # per-model error counter a real HLS failure would.
+                _LOGGER.debug(
+                    "Stream health watchdog: %s go2rtc consumer seen earlier "
+                    "but gone now, HLS never established — recording a soft "
+                    "error (ambiguous: viewer left vs. silent failure)",
+                    cam_id[:8],
+                )
+                self.coordinator.record_stream_error(cam_id)
                 return
             # On the second consecutive failure (~2 min with no healthy
             # output), escalate: saturate the error counter so the next

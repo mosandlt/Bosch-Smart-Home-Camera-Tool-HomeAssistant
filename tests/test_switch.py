@@ -3187,6 +3187,7 @@ def _make_coord_streamhealth(**overrides):
         record_stream_error=MagicMock(),
         record_stream_success=MagicMock(),
         get_model_config=lambda cid: SimpleNamespace(max_stream_errors=3),
+        go2rtc_consumer_count=AsyncMock(return_value=0),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -3240,6 +3241,96 @@ class TestHealthClassifier:
         with patch("asyncio.sleep", new=AsyncMock()):
             await BoschLiveStreamSwitch._stream_health_watchdog(sw, CAM_ID)
         coord.try_live_connection.assert_not_awaited()
+
+
+class TestWebrtcOnlyConsumer:
+    """2026-07-19: no HLS Stream object doesn't mean "nobody's watching" —
+    WebRTC never touches HA's Stream component, so a mobile/WebRTC-only
+    viewer left cam_entity.stream at None for the whole session and the
+    old "no_consumer" bucket gave up watching after the very first tick,
+    silently leaving that session with zero backend health monitoring."""
+
+    @pytest.mark.asyncio
+    async def test_confirmed_webrtc_consumer_keeps_watching_past_first_tick(self):
+        """go2rtc reports an active consumer (WebRTC) at tick 1 → don't
+        bail as no_consumer, continue to tick 2 instead of exiting early."""
+        cam_entity = SimpleNamespace(stream=None)
+        coord = _make_coord_streamhealth(
+            camera_entities={CAM_ID: cam_entity},
+            go2rtc_consumer_count=AsyncMock(return_value=1),
+        )
+        sw = _make_switch_streamhealth(coord)
+        with patch("asyncio.sleep", new=AsyncMock()):
+            await BoschLiveStreamSwitch._stream_health_watchdog(sw, CAM_ID)
+        # Consumer confirmed present at BOTH ticks → treated as a positive
+        # signal, error counter cleared like the "healthy" path, no
+        # restart/escalation.
+        coord.try_live_connection.assert_not_awaited()
+        coord.record_stream_error.assert_not_called()
+        coord.record_stream_success.assert_called_once_with(CAM_ID)
+
+    @pytest.mark.asyncio
+    async def test_go2rtc_unreachable_also_keeps_watching(self):
+        """go2rtc_consumer_count returns None (unreachable) → can't rule
+        out a consumer, same "keep watching" treatment as a confirmed one
+        (mirrors has_active_consumer()'s unknown-⇒-don't-assume-idle)."""
+        cam_entity = SimpleNamespace(stream=None)
+        coord = _make_coord_streamhealth(
+            camera_entities={CAM_ID: cam_entity},
+            go2rtc_consumer_count=AsyncMock(return_value=None),
+        )
+        sw = _make_switch_streamhealth(coord)
+        with patch("asyncio.sleep", new=AsyncMock()):
+            await BoschLiveStreamSwitch._stream_health_watchdog(sw, CAM_ID)
+        coord.try_live_connection.assert_not_awaited()
+        coord.record_stream_error.assert_not_called()
+        coord.record_stream_success.assert_called_once_with(CAM_ID)
+
+    @pytest.mark.asyncio
+    async def test_vanished_webrtc_consumer_records_soft_error_only(self):
+        """A go2rtc consumer was present at tick 1 but gone by tick 2, and
+        HLS was never established. This is AMBIGUOUS (viewer closed the tab
+        vs. a genuinely dead session) — a first bug-hunt round found that
+        treating it like a confirmed-unhealthy HLS failure (saturate +
+        tear-down + reconnect) punishes the common "viewer left" case with
+        up to ~30 min of needless forced-REMOTE. Pin the safer behavior:
+        exactly one gradual error, no tear-down, no reconnect attempt."""
+        cam_entity = SimpleNamespace(stream=None)
+        counts = [1, 0]  # present at tick 1, gone at tick 2
+
+        async def _count(cid):
+            return counts.pop(0)
+
+        coord = _make_coord_streamhealth(
+            camera_entities={CAM_ID: cam_entity},
+            go2rtc_consumer_count=AsyncMock(side_effect=_count),
+        )
+        sw = _make_switch_streamhealth(coord)
+        with patch("asyncio.sleep", new=AsyncMock()):
+            await BoschLiveStreamSwitch._stream_health_watchdog(sw, CAM_ID)
+        coord.record_stream_error.assert_called_once_with(CAM_ID)
+        # Must NOT saturate to max_stream_errors, tear down, or reconnect —
+        # that's the old (buggy) aggressive-escalation behavior.
+        assert coord.stream_error_count.get(CAM_ID, 0) != 3
+        coord.try_live_connection.assert_not_awaited()
+        coord.stop_tls_proxy.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_confirmed_zero_consumer_still_exits_silently(self):
+        """Regression: go2rtc CONFIRMS zero consumers (not unreachable,
+        not present-then-vanished) → still the original no_consumer
+        silent-exit behavior, unchanged."""
+        cam_entity = SimpleNamespace(stream=None)
+        coord = _make_coord_streamhealth(
+            camera_entities={CAM_ID: cam_entity},
+            go2rtc_consumer_count=AsyncMock(return_value=0),
+        )
+        sw = _make_switch_streamhealth(coord)
+        with patch("asyncio.sleep", new=AsyncMock()):
+            await BoschLiveStreamSwitch._stream_health_watchdog(sw, CAM_ID)
+        coord.try_live_connection.assert_not_awaited()
+        coord.record_stream_error.assert_not_called()
+        coord.record_stream_success.assert_not_called()
 
 
 class TestStreamOffShortCircuit:

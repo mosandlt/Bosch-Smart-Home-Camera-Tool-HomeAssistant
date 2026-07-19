@@ -662,14 +662,49 @@ test("_waitForStreamReady's 90s dead-end clears _startingLiveVideo (not just _wa
     const startingLiveVideoAfter = card._startingLiveVideo;
     const waitingForStreamAfter = card._waitingForStream;
     const streamConnectingAfter = card._streamConnecting;
+    // 2026-07-19: the dead-end used to silently hide the overlay with zero
+    // feedback that the expected ~10-35s wait was blown 2-3x over. It should
+    // now briefly show a distinct "taking longer than expected" message
+    // instead of jumping straight to idle.
+    const overlayTextRightAfter = card.shadowRoot.getElementById("loading-text")?.textContent;
+    const overlayVisibleRightAfter = card.shadowRoot.getElementById("loading-overlay")?.classList.contains("visible");
 
     if (card._waitForStreamRetryTimer) clearTimeout(card._waitForStreamRetryTimer);
     card.remove();
-    return { startingLiveVideoAfter, waitingForStreamAfter, streamConnectingAfter };
+    return { startingLiveVideoAfter, waitingForStreamAfter, streamConnectingAfter, overlayTextRightAfter, overlayVisibleRightAfter };
   });
   expect(r.waitingForStreamAfter, "_waitingForStream is cleared by the dead-end (pre-existing behavior)").toBe(false);
   expect(r.streamConnectingAfter, "_streamConnecting is cleared by the dead-end (pre-existing behavior)").toBe(false);
   expect(r.startingLiveVideoAfter, "_startingLiveVideo must also be cleared, or every auto-recovery gate stays defeated forever").toBe(false);
+  expect(r.overlayVisibleRightAfter, "the dead-end briefly shows a message instead of silently hiding").toBe(true);
+  expect(r.overlayTextRightAfter, "the dead-end message is the distinct 'taking longer' text, not silence").toBe("Taking longer than expected, still trying…");
+});
+
+// Companion test: the brief "taking longer than expected" message must
+// actually clear itself (not get stuck) after its short timeout.
+test("_waitForStreamReady's 90s dead-end message clears itself after a few seconds", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card._hass = {
+      states: { "camera.test": { state: "idle", attributes: {} } },
+      config: {}, language: "en", localize: () => "",
+      callService: () => {}, callWS: async () => ({}),
+    };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    card._waitingForStream = true;
+    card._waitForStreamReady(91);
+    // Wait past the message's own short auto-hide timeout.
+    await new Promise((res) => setTimeout(res, 3000));
+    const overlayVisibleAfter = card.shadowRoot.getElementById("loading-overlay")?.classList.contains("visible");
+    if (card._waitForStreamRetryTimer) clearTimeout(card._waitForStreamRetryTimer);
+    card.remove();
+    return { overlayVisibleAfter };
+  });
+  expect(r.overlayVisibleAfter, "the message does not stick around forever").toBe(false);
 });
 
 // firstHass refresh-overlay must not stomp connect-phase text (bug-hunt
@@ -2248,6 +2283,46 @@ test("stream badge is decoupled from liveness: a stalled live stream shows conne
   expect(r.stalledClass, "a frozen (stalled) stream is NOT shown as Live").not.toContain("streaming");
   expect(r.stalledClass, "a frozen stream shows the connecting badge instead").toContain("connecting");
   expect(r.clearedClass, "a fresh frame restores the streaming badge").toContain("streaming");
+});
+
+// 2026-07-19: the legacy (non-apple-style) stream-label used to dump the raw
+// internal state token ("offline"/"connecting"/"idle") straight into the DOM —
+// not just unlocalized, but not even friendly text, unlike the apple-style
+// badge a few lines below it which already mapped these to "Live"/"Offline"/
+// _t("badge_connecting"). It must now use that same friendly mapping.
+test("legacy stream-label shows friendly text, never a raw state token", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 250));
+    const label = () => card.shadowRoot.getElementById("stream-label").textContent;
+
+    // idle (default, camera off / privacy on) → empty, matching the hidden
+    // apple-badge counterpart, never the raw "idle" token.
+    card._liveVideoActive = false;
+    card._startingLiveVideo = false;
+    card._update();
+    const idleText = label();
+
+    // connecting (stream starting) → localized "Connecting" (en), never "connecting".
+    card._startingLiveVideo = true;
+    card._update();
+    const connectingText = label();
+    card._startingLiveVideo = false;
+
+    card.remove();
+    return { idleText, connectingText };
+  });
+  expect(r.idleText, "idle state shows nothing, not the raw 'idle' token").toBe("");
+  expect(r.connectingText, "connecting state shows friendly localized text").toBe("Connecting");
+  expect(r.connectingText, "connecting state never shows the raw internal token").not.toBe("connecting");
 });
 
 // Source pins for the background-tab freeze wiring (the runtime paths need a real
