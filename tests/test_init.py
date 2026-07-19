@@ -37981,6 +37981,92 @@ class TestTokenRefreshHardErrors:
         create_issue.assert_not_called()
 
 
+class TestTokenRefreshMalformedSuccess:
+    """2026-07-19 bug-hunt finding: Keycloak returning HTTP 200 with a
+    missing/empty access_token must be treated as a FAILURE, not success —
+    without this check, an empty bearer_token gets persisted,
+    _token_fail_count resets to 0, and any failure alert is cleared, so
+    every subsequent API call 401s with an empty Authorization header and
+    the >=3-failures reauth escalation can never fire (each retry hitting
+    the same malformed response resets the counter right back to 0). The
+    same `tokens.get("access_token")` guard already existed at two other
+    _do_refresh call sites in config_flow.py — this was a real
+    inconsistency, not an intentional design choice."""
+
+    @pytest.mark.asyncio
+    async def test_200_with_missing_access_token_is_treated_as_failure(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_token_refresh()
+        malformed = {"refresh_token": "rfr-should-be-ignored"}  # no access_token key
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.config_flow._do_refresh",
+                new=AsyncMock(return_value=malformed),
+            ),
+        ):
+            with pytest.raises(UpdateFailed):
+                await BoschCameraCoordinator._refresh_token_locked(coord)
+        assert coord._token_fail_count == 1
+        # Must NOT have persisted an empty bearer_token.
+        coord.hass.config_entries.async_update_entry.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_200_with_empty_string_access_token_is_treated_as_failure(self):
+        """Empty string is falsy but present as a key — must also fail,
+        not just a missing key."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_token_refresh()
+        malformed = {"access_token": "", "refresh_token": "rfr-x"}
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.config_flow._do_refresh",
+                new=AsyncMock(return_value=malformed),
+            ),
+        ):
+            with pytest.raises(UpdateFailed):
+                await BoschCameraCoordinator._refresh_token_locked(coord)
+        assert coord._token_fail_count == 1
+
+    @pytest.mark.asyncio
+    async def test_repeated_malformed_success_still_escalates_to_reauth(self):
+        """The bug this fix closes: repeated malformed-200s must NOT keep
+        resetting the failure counter back to 0 — three in a row must
+        still trigger the reauth escalation, same as three genuine
+        failures would."""
+        from homeassistant.exceptions import ConfigEntryAuthFailed
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_token_refresh()
+        malformed = {"refresh_token": "rfr-x"}
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.config_flow._do_refresh",
+                new=AsyncMock(return_value=malformed),
+            ),
+        ):
+            for _ in range(2):
+                with pytest.raises(UpdateFailed):
+                    await BoschCameraCoordinator._refresh_token_locked(coord)
+            with pytest.raises(ConfigEntryAuthFailed):
+                await BoschCameraCoordinator._refresh_token_locked(coord)
+        assert coord._token_fail_count == 3
+
+
 class TestTokenRefreshSuccess:
     @pytest.mark.asyncio
     async def test_success_persists_new_tokens(self):

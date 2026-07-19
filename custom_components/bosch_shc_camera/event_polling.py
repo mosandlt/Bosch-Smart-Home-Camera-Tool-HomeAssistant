@@ -36,16 +36,22 @@ async def _fetch_one_camera_events(
     cam_id: str,
     session: aiohttp.ClientSession,
     headers: dict[str, str],
-) -> tuple[str, list[Any], bool]:
+) -> tuple[str, list[Any], bool, bool]:
     """Fetch events for a single camera.
 
-    Returns ``(cam_id, events, ok)``. ``ok`` is True only when the cloud
-    gave a definitive answer (last_event matched the cached id, or the
-    full events list came back 200). On a transient failure ``ok`` is
-    False so the caller keeps the previously-cached events instead of
-    blanking them, and does not advance ``_last_events`` (which would
-    defer the next retry by a full poll interval — up to 300 s while FCM
-    is healthy). Mirrors the cross-version ioBroker fix.
+    Returns ``(cam_id, events, ok, skip_full_fetch)``. ``ok`` is True only
+    when the cloud gave a definitive answer (last_event matched the cached
+    id, or the full events list came back 200). On a transient failure
+    ``ok`` is False so the caller keeps the previously-cached events
+    instead of blanking them, and does not advance ``_last_events`` (which
+    would defer the next retry by a full poll interval — up to 300 s while
+    FCM is healthy). Mirrors the cross-version ioBroker fix.
+
+    ``skip_full_fetch`` tells the caller this camera's ``events`` is just a
+    SNAPSHOT of ``coordinator.cached_events`` taken at the moment
+    ``/last_event`` was checked, not freshly-fetched data — see
+    ``poll_events``'s use of it for why that distinction matters (a stale
+    clobber race against a concurrent FCM push).
     """
     events: list[Any] = []
     skip_full_fetch = False
@@ -91,7 +97,7 @@ async def _fetch_one_camera_events(
                 cam_id,
                 coordinator.err_str(err),
             )
-    return (cam_id, events, ok)
+    return (cam_id, events, ok, skip_full_fetch)
 
 
 async def poll_events(
@@ -119,11 +125,27 @@ async def poll_events(
         for ev_result in event_results:
             if isinstance(ev_result, BaseException):
                 continue
-            cid, ev_list, ev_ok = ev_result
+            cid, ev_list, ev_ok, skip_full_fetch = ev_result
             # Only overwrite the cache on a definitive fetch — a transient
             # failure must not blank a camera's events (and its
             # events-today count) until the next successful poll.
-            if ev_ok:
+            #
+            # skip_full_fetch means `ev_list` is just a SNAPSHOT of
+            # coordinator.cached_events[cid] taken back when /last_event was
+            # checked (up to 5s ago) — not fresh data. Writing it back here
+            # is then a pure no-op UNLESS a concurrent FCM push already
+            # advanced cached_events/last_event_ids to something newer
+            # during that window, in which case this "reaffirm" write would
+            # actively CLOBBER the newer data back to the stale snapshot —
+            # while last_event_ids stays at FCM's newer value, so the next
+            # dispatch pass sees a newest_id OLDER than prev_id and
+            # re-fires an already-delivered alert (bug-hunt finding,
+            # 2026-07-19). There is nothing new to persist for this camera
+            # in the skip_full_fetch case either way, so just skip the
+            # write entirely rather than risk the clobber.
+            if ev_ok and not skip_full_fetch:
                 coordinator.cached_events[cid] = ev_list
+                any_events_fetched = True
+            elif ev_ok:
                 any_events_fetched = True
     return any_events_fetched

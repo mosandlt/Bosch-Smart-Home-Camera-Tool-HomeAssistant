@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.11";
+const CARD_VERSION = "14.1.12";
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -3100,7 +3100,7 @@ class BoschCameraCard extends HTMLElement {
       try {
         video.volume = v;
       } catch (_) {}
-      video.muted = v === 0;
+      video.muted = this._isSecondaryAudio() ? true : v === 0;
       if (!video.muted && video.paused) video.play().catch(() => {});
     }
     if (this._useCardAudio()) this._cardSaveVolume(v); else this._setBackendVolume(v);
@@ -3316,6 +3316,7 @@ class BoschCameraCard extends HTMLElement {
     this._playGateActive = true;
     this._waitingForStream = false;
     this._streamConnecting = false;
+    this._startingLiveVideo = false;
     if (this._connectSteps) {
       this._connectSteps.forEach(t => clearTimeout(t));
       this._connectSteps = null;
@@ -3509,6 +3510,7 @@ class BoschCameraCard extends HTMLElement {
   }
   _resumeLiveStreamIfNeeded() {
     if (!this.isConnected || !this._hass) return;
+    if (document.visibilityState === "hidden") return;
     if (!this._isStreaming()) return;
     if (this._entities?.privacy && this._getEffectiveState(this._entities.privacy) === "on") return;
     if (!this._liveVideoActive) {
@@ -3516,7 +3518,7 @@ class BoschCameraCard extends HTMLElement {
       this._reconnectingLiveVideo = true;
       setTimeout(() => {
         this._reconnectingLiveVideo = false;
-        if (this.isConnected && this._isStreaming() && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
+        if (this.isConnected && this._isStreaming() && document.visibilityState !== "hidden" && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
           this._startLiveVideo();
         }
       }, 500);
@@ -3547,7 +3549,9 @@ class BoschCameraCard extends HTMLElement {
         this._stopLiveVideo();
         setTimeout(() => {
           this._reconnectingLiveVideo = false;
-          if (this.isConnected && this._isStreaming()) this._startLiveVideo();
+          if (this.isConnected && this._isStreaming() && document.visibilityState !== "hidden") {
+            this._startLiveVideo();
+          }
         }, 500);
       });
       return;
@@ -6534,8 +6538,8 @@ class BoschCameraCard extends HTMLElement {
       if (video) {
         this._androidAudioMuted = false;
         const unmuting = video.muted;
-        video.muted = !unmuting;
-        if (unmuting && video.paused) video.play().catch(() => {});
+        video.muted = this._isSecondaryAudio() ? true : !unmuting;
+        if (unmuting && !video.muted && video.paused) video.play().catch(() => {});
         if (this._useCardAudio()) this._cardSaveUnmuted(!video.muted);
         const b = this.shadowRoot.getElementById("btn-audio");
         if (b) b.classList.toggle("on", !video.muted);
@@ -6545,10 +6549,11 @@ class BoschCameraCard extends HTMLElement {
     }
     if (!entityId) return;
     const turningOn = video ? video.muted : this._getEffectiveState(entityId) !== "on";
+    const secondary = this._isSecondaryAudio();
     if (video) {
       this._androidAudioMuted = false;
-      video.muted = !turningOn;
-      if (turningOn && video.paused) video.play().catch(() => {});
+      video.muted = secondary ? true : !turningOn;
+      if (turningOn && !video.muted && video.paused) video.play().catch(() => {});
       const b = this.shadowRoot.getElementById("btn-audio");
       if (b) b.classList.toggle("on", !video.muted);
     }

@@ -570,7 +570,31 @@ async def _spawn_preroll_recorder_locked(
     `restart_preroll_recorder_after_finalize`) can respawn the ring without
     releasing the lock between their own stop/decision and this spawn
     (would reopen the exact race issue #44 fixed).
+
+    The lock alone only prevents two callers from racing to spawn AT THE
+    SAME instant — it does NOT prevent a double-spawn across two SEPARATE
+    lock acquisitions with a gap in between. `assemble_and_ship_motion_clip`
+    releases and re-acquires this same lock three times (finalize → an
+    unlocked live postroll capture that can run for the full configured
+    duration → concat → restart), and nothing else this function's
+    docstring assumes holds true across that whole window prevents an
+    UNRELATED trigger (heartbeat cred-rotation restart, a LOCAL session
+    renewal, a rapid switch re-toggle) from acquiring the lock in one of
+    those gaps and spawning its own ring via `start_recorder`. This
+    idempotency guard is the actual belt-and-suspenders fix: regardless of
+    which trigger pair races, never spawn a second ring writer while one is
+    still alive for this camera (bug-hunt finding, 2026-07-19 — same class
+    of bug as #44, different trigger pair not covered by that fix).
     """
+    existing = coordinator.nvr_preroll_processes.get(cam_id)
+    if existing is not None and existing.returncode is None:
+        _LOGGER.debug(
+            "NVR pre-roll spawn skipped for %s — a ring writer is already "
+            "running (pid=%s)",
+            cam_id[:8],
+            existing.pid,
+        )
+        return
     if getattr(coordinator, "nvr_shutting_down", False):
         # Config-entry unload/HA-stop is tearing this coordinator down
         # (issue #47) — refuse to spawn a new ring writer that

@@ -543,11 +543,41 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             # assume idle.
             return "no_consumer" if count == 0 else "webrtc_only"
 
+        # Track the generation of the session this watchdog instance is
+        # currently watching. Without this, a renewal/rescue mid-window
+        # (heartbeat cred rotation, a 401-rescue reconnect) that tears down
+        # this session and opens a fresh one still reports `_connection_type
+        # == "LOCAL"` via `_is_local_active()` — so this watchdog would keep
+        # ticking as if nothing happened, misattributing a still-settling
+        # new session's state to error/success counters that were meant for
+        # the OLD generation's outcome. No other code path re-spawns this
+        # watchdog after a mid-session renewal (only async_turn_on does), so
+        # simply bailing out on a generation change would leave the renewed
+        # session with NO monitoring at all — worse than the misattribution
+        # bug. Instead: re-baseline to the new generation and keep
+        # watching, resetting the "seen a consumer" tracking since that
+        # belongs to the old session's observation window, not this one.
+        # Same generation-tracking pattern as session_renewal.py's keepalive
+        # loop. (bug-hunt finding, 2026-07-19)
+        watched_generation = self.coordinator.get_session(cam_id).generation
         had_webrtc_only_consumer = False
         for idx, delay in enumerate((60, 60)):  # 60s, then another 60s → ~2 min total
             await asyncio.sleep(delay)
             if not _is_local_active():
                 return
+            current_generation = self.coordinator.get_session(cam_id).generation
+            if current_generation != watched_generation:
+                _LOGGER.debug(
+                    "Stream health watchdog: %s session renewed mid-watch "
+                    "(gen %d→%d) — re-baselining to the new session instead "
+                    "of attributing its state to the old one",
+                    cam_id[:8],
+                    watched_generation,
+                    current_generation,
+                )
+                watched_generation = current_generation
+                had_webrtc_only_consumer = False
+                continue
             state = await _stream_health_state()
             if state == "healthy":
                 self.coordinator.record_stream_success(cam_id)
@@ -617,13 +647,48 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             # try_live_connection() is forced to REMOTE regardless of the
             # per-model threshold. Single failure still follows the normal
             # gradual-escalation path via record_stream_error().
+            #
+            # Dedup against handle_stream_worker_error (stream_lifecycle.py):
+            # that handler reacts to HA's own "Error from stream worker" log
+            # line and unconditionally calls record_stream_error() on EVERY
+            # single worker crash, independent of this watchdog. Both
+            # mechanisms can observe the SAME underlying FFmpeg crash within
+            # this watchdog's narrow 2-tick post-connect window — the worker-
+            # error listener reacts near-instantly, this watchdog only polls
+            # every 60s. Without this guard the same crash could be counted
+            # twice, saturating max_stream_errors in roughly half the
+            # configured number of genuine incidents (bug-hunt finding,
+            # 2026-07-19). stream_error_at is updated by every
+            # record_stream_error() call regardless of caller — a very
+            # recent update at the moment THIS tick fires (before this tick
+            # has recorded anything itself) is a strong signal the same
+            # crash was already counted elsewhere this interval.
+            recent_external_error = (
+                time.monotonic()
+                - self.coordinator.stream_error_at.get(cam_id, float("-inf"))
+            ) < 55
             is_final = idx == 1
             if is_final:
-                cfg = self.coordinator.get_model_config(cam_id)
-                self.coordinator.stream_error_count[cam_id] = cfg.max_stream_errors
-                _LOGGER.warning(
-                    "Stream health watchdog: %s LOCAL stream still not healthy "
-                    "after ~2 min — forcing REMOTE fallback",
+                if recent_external_error:
+                    _LOGGER.debug(
+                        "Stream health watchdog: %s already recorded an "
+                        "error this interval (likely the worker-error "
+                        "listener) — skipping duplicate saturation",
+                        cam_id[:8],
+                    )
+                else:
+                    cfg = self.coordinator.get_model_config(cam_id)
+                    self.coordinator.stream_error_count[cam_id] = cfg.max_stream_errors
+                    _LOGGER.warning(
+                        "Stream health watchdog: %s LOCAL stream still not healthy "
+                        "after ~2 min — forcing REMOTE fallback",
+                        cam_id[:8],
+                    )
+            elif recent_external_error:
+                _LOGGER.debug(
+                    "Stream health watchdog: %s already recorded an error "
+                    "this interval (likely the worker-error listener) — "
+                    "skipping duplicate soft error, still restarting",
                     cam_id[:8],
                 )
             else:

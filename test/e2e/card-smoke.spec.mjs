@@ -2197,6 +2197,107 @@ test("_resumeLiveStreamIfNeeded restarts a torn-down stream only when streaming+
   expect(r.restartedWhenDetached, "never restarts on a disconnected card").toBe(0);
 });
 
+// 2026-07-19 bug-hunt finding: _resumeLiveStreamIfNeeded is called not just
+// from visibilitychange→visible but also from leavepictureinpicture /
+// webkitpresentationmodechanged→inline — neither implies the tab itself is
+// visible. Starting/restarting a stream while genuinely hidden leaves it
+// with no hidden-teardown timer ever armed (that's only armed from
+// _onVisibilityChange's hidden branch), so it would run unwatched in the
+// background indefinitely. Pin: hidden at any point (entry, or during the
+// 500ms defer via a hide→show→hide race) must suppress the restart.
+test("_resumeLiveStreamIfNeeded never starts/restarts a stream while the tab is hidden", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    const setVis = (state) => Object.defineProperty(document, "visibilityState",
+      { configurable: true, get: () => state });
+    const origDesc = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState");
+
+    // Case 1: hidden at the moment of the call (e.g. leavepictureinpicture
+    // firing while the tab is backgrounded) → must not even queue a restart.
+    let start1 = 0; card._startLiveVideo = () => { start1++; };
+    card._isStreaming = () => true;
+    card._liveVideoActive = false; card._startingLiveVideo = false; card._waitingForStream = false;
+    setVis("hidden");
+    card._resumeLiveStreamIfNeeded();
+    await new Promise((res) => setTimeout(res, 650));
+    const startedWhileHidden = start1;
+
+    // Case 2: visible at the call, but goes hidden again during the 500ms
+    // defer (rapid hide→show→hide) → the deferred restart must be suppressed.
+    let start2 = 0; card._startLiveVideo = () => { start2++; };
+    card._liveVideoActive = false; card._startingLiveVideo = false; card._waitingForStream = false;
+    setVis("visible");
+    card._resumeLiveStreamIfNeeded();
+    setVis("hidden"); // flips back within the 500ms defer window
+    await new Promise((res) => setTimeout(res, 650));
+    const startedAfterHideDuringDefer = start2;
+
+    // Control: genuinely visible throughout → restarts normally.
+    let start3 = 0; card._startLiveVideo = () => { start3++; };
+    card._liveVideoActive = false; card._startingLiveVideo = false; card._waitingForStream = false;
+    setVis("visible");
+    card._resumeLiveStreamIfNeeded();
+    await new Promise((res) => setTimeout(res, 650));
+    const startedWhileVisible = start3;
+
+    if (origDesc) Object.defineProperty(document, "visibilityState", origDesc);
+    card.remove();
+    return { startedWhileHidden, startedAfterHideDuringDefer, startedWhileVisible };
+  });
+  expect(r.startedWhileHidden, "never starts a stream while the tab is hidden at call time").toBe(0);
+  expect(r.startedAfterHideDuringDefer, "never starts a stream if the tab went hidden during the 500ms defer").toBe(0);
+  expect(r.startedWhileVisible, "still restarts normally while genuinely visible (control)").toBe(1);
+});
+
+// 2026-07-19 bug-hunt finding: _showPlayGate's own header comment says it
+// "hides the loading overlay so the spinner doesn't bleed through the gate"
+// — but it only cleared _streamConnecting/_waitingForStream, not
+// _startingLiveVideo. _setLoadingOverlay's anti-flicker guard suppresses
+// ANY hide call while any of the three connect-phase flags is still true,
+// so if a stream-stop lands while _startLiveVideo() is genuinely mid-flight
+// (still holding _startingLiveVideo=true), _showPlayGate's own hide call
+// silently no-ops — the exact "spinner bleeds through the gate" bug the
+// function exists to prevent.
+test("_showPlayGate actually hides the loading overlay even when _startingLiveVideo is still true", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    // Simulate a genuinely in-flight _startLiveVideo() call (e.g. still
+    // awaiting the WebRTC offer round trip) plus a showing connect spinner.
+    card._startingLiveVideo = true;
+    card._streamConnecting = true;
+    card._waitingForStream = true;
+    card._setLoadingOverlay(true, "Stream wird gestartet…");
+    const overlayVisibleBefore = card.shadowRoot.getElementById("loading-overlay")?.classList.contains("visible");
+
+    card._showPlayGate();
+
+    const startingLiveVideoAfter = card._startingLiveVideo;
+    const overlayVisibleAfter = card.shadowRoot.getElementById("loading-overlay")?.classList.contains("visible");
+
+    card.remove();
+    return { overlayVisibleBefore, startingLiveVideoAfter, overlayVisibleAfter };
+  });
+  expect(r.overlayVisibleBefore, "sanity: the spinner was genuinely showing before the gate").toBe(true);
+  expect(r.startingLiveVideoAfter, "_showPlayGate must also clear _startingLiveVideo").toBe(false);
+  expect(r.overlayVisibleAfter, "the connect spinner must not bleed through the play gate").toBe(false);
+});
+
 // 2026-06-22 background-tab freeze: a plain hidden (non-PiP) tab whose go2rtc
 // signaling WS times out leaves the <video> on a frozen still with paused===false,
 // which the resume path missed → "showed Live but was a standbild, only a browser
@@ -2821,6 +2922,78 @@ test("decoupled volume/mute localStorage keys are per-camera", async ({ page }) 
   expect(r.volDiffer, "two cameras have different volume keys").toBe(true);
   expect(r.muteDiffer, "two cameras have different mute keys").toBe(true);
   expect(r.volHasCam, "volume key includes the camera entity").toBe(true);
+});
+
+// 2026-07-19 bug-hunt finding: every OTHER unmute path
+// (_applyAudioPreference, _armStartUnmute, _tryStartUnmute) checks
+// _isSecondaryAudio() before allowing sound — _toggleAudio() (the audio
+// pill's own click handler) did not, so tapping the pill on a SECONDARY
+// card instance for the same camera_entity (e.g. the same camera shown on
+// an overview tile AND a detail view) directly unmuted that instance's
+// own <video>, producing two audible instances at once (echo). Pin: a
+// secondary instance's video stays muted regardless of tap direction, in
+// both the decoupled (per-card) and shared-switch audio modes.
+test("_toggleAudio never unmutes a secondary card instance for the same camera (anti-echo)", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const hass = { config: {}, language: "en", localize: () => "", callService: async () => ({}),
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+        "camera.echo": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    const mk = () => {
+      const c = document.createElement("bosch-camera-card");
+      c.setConfig({ camera_entity: "camera.echo" });
+      c.hass = hass;
+      document.body.appendChild(c);
+      return c;
+    };
+    const primary = mk();
+    const secondary = mk(); // registers second → _isSecondaryAudio() === true
+    await new Promise((res) => setTimeout(res, 250));
+
+    const rigVideo = (card) => {
+      card._liveVideoActive = true;
+      const v = card.shadowRoot.getElementById("cam-video");
+      v.muted = true; // starts muted, user taps to unmute
+      return v;
+    };
+
+    // Case 1: decoupled (per-card) audio mode.
+    secondary._audioDecoupled = () => true;
+    const vDecoupled = rigVideo(secondary);
+    secondary._toggleAudio();
+    const decoupledStaysMuted = vDecoupled.muted;
+
+    // Case 2: shared-switch audio mode.
+    secondary._audioDecoupled = () => false;
+    secondary._entities = { ...secondary._entities, audio: "switch.echo_audio" };
+    hass.states["switch.echo_audio"] = { state: "off", attributes: {} };
+    const vShared = rigVideo(secondary);
+    secondary._toggleAudio();
+    const sharedStaysMuted = vShared.muted;
+
+    // Case 3: desktop volume slider (_setVideoVolume) — a THIRD unmute path
+    // found in a follow-up bug-hunt round, missed by the first two fixes
+    // above since it's a separate control, not routed through _toggleAudio.
+    const vSlider = rigVideo(secondary);
+    secondary._setVideoVolume(0.8); // drag the slider up
+    const sliderStaysMuted = vSlider.muted;
+
+    // Control: the PRIMARY instance can genuinely unmute (not muted-forever).
+    primary._audioDecoupled = () => true;
+    const vPrimary = rigVideo(primary);
+    primary._toggleAudio();
+    const primaryUnmutes = !vPrimary.muted;
+
+    primary.remove();
+    secondary.remove();
+    return { decoupledStaysMuted, sharedStaysMuted, sliderStaysMuted, primaryUnmutes };
+  });
+  expect(r.decoupledStaysMuted, "secondary stays muted in decoupled audio mode").toBe(true);
+  expect(r.sharedStaysMuted, "secondary stays muted in shared-switch audio mode").toBe(true);
+  expect(r.sliderStaysMuted, "secondary stays muted even via the volume slider").toBe(true);
+  expect(r.primaryUnmutes, "control: the primary instance can still genuinely unmute").toBe(true);
 });
 
 // 2026-06-15: the maintenance banner gained a × dismiss button. The dismiss key is

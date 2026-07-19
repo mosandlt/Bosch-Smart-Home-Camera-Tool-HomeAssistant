@@ -3766,6 +3766,84 @@ class TestStartPrerollRecorder:
         assert CAM_ID in coord.nvr_preroll_tasks
 
 
+class TestSpawnPrerollRecorderIdempotency:
+    """2026-07-19 bug-hunt finding: `_spawn_preroll_recorder_locked`'s own
+    per-camera lock only prevents two callers racing to spawn AT THE SAME
+    instant — it does NOT prevent a double-spawn across two SEPARATE lock
+    acquisitions with a gap in between (assemble_and_ship_motion_clip
+    releases and re-acquires the lock three times with a live, unlocked
+    postroll capture in between). An unrelated trigger (heartbeat cred-
+    rotation restart, a LOCAL session renewal, a rapid switch re-toggle)
+    could spawn its own ring via start_recorder in one of those gaps, and
+    the finalize/restart bracket would then spawn a SECOND ring writer on
+    top, leaking the first — same class of bug as #44, different trigger
+    pair. Fix: never spawn while a ring writer is already alive for that
+    camera, regardless of which trigger pair races."""
+
+    @pytest.mark.asyncio
+    async def test_skips_spawn_when_a_ring_writer_is_already_alive(
+        self, tmp_path: Path
+    ):
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
+        coord.options["nvr_preroll_seconds"] = 30
+        existing_proc = _mock_proc(returncode=None)  # still running
+        coord.nvr_preroll_processes[CAM_ID] = existing_proc
+
+        with patch.object(asyncio, "create_subprocess_exec") as spawn:
+            await recorder._spawn_preroll_recorder_locked(coord, CAM_ID)
+
+        spawn.assert_not_called()
+        # The existing process must be left untouched — not replaced.
+        assert coord.nvr_preroll_processes[CAM_ID] is existing_proc
+
+    @pytest.mark.asyncio
+    async def test_spawns_when_the_registered_process_has_already_exited(
+        self, tmp_path: Path
+    ):
+        """A registered process that already exited (returncode set, e.g.
+        crashed and not yet cleaned up) must NOT block a genuine respawn —
+        this guard is specifically about an ALIVE process, not any entry."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
+        coord.options["nvr_preroll_seconds"] = 30
+        dead_proc = _mock_proc(returncode=1)  # already exited
+        coord.nvr_preroll_processes[CAM_ID] = dead_proc
+        new_proc = _mock_proc(returncode=None)
+
+        async def _spawn(*_a, **_kw):
+            return new_proc
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await recorder._spawn_preroll_recorder_locked(coord, CAM_ID)
+
+        assert coord.nvr_preroll_processes[CAM_ID] is new_proc
+
+    @pytest.mark.asyncio
+    async def test_no_prior_process_spawns_normally(self, tmp_path: Path):
+        """Control: no entry at all → the guard must not block a genuine
+        first spawn."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
+        coord.options["nvr_preroll_seconds"] = 30
+        assert CAM_ID not in coord.nvr_preroll_processes
+        proc = _mock_proc(returncode=None)
+
+        async def _spawn(*_a, **_kw):
+            return proc
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await recorder._spawn_preroll_recorder_locked(coord, CAM_ID)
+
+        assert coord.nvr_preroll_processes[CAM_ID] is proc
+
+
 class TestStopPrerollRecorder:
     """SIGKILL escalation race paths + send_signal ProcessLookupError."""
 

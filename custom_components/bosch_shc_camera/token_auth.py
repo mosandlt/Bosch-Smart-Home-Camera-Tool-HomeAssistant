@@ -259,7 +259,19 @@ class TokenAuthCoordinatorMixin:
             raise UpdateFailed(
                 f"Bosch auth server outage — will retry in {backoff}s"
             ) from err
-        if tokens:
+        # Require a real access_token, not just an HTTP 200 — Keycloak
+        # returning 200 with a missing/empty access_token (malformed
+        # response, unexpected grant-type response shape) must NOT be
+        # treated as success: without this check it persists an empty
+        # bearer_token, resets _token_fail_count to 0, and clears any
+        # failure alert — every subsequent API call then 401s with
+        # "Authorization: Bearer " (empty), and since each retry that
+        # hits the same malformed response resets the counter back to 0
+        # again, the >=3-failures reauth escalation below can never fire.
+        # Same check already exists at the other two _do_refresh call
+        # sites in config_flow.py — this was a real inconsistency, not an
+        # intentional design choice. (bug-hunt finding, 2026-07-19)
+        if tokens and tokens.get("access_token"):
             self._refreshed_token = tokens.get("access_token", "")
             new_refresh = tokens.get("refresh_token", refresh)
             self._refreshed_refresh = new_refresh

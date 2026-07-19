@@ -68,13 +68,14 @@ class TestFetchOneCameraEvents:
         )
         session = _make_session({"last_event": _make_resp(200, {"id": "evt-1"})})
 
-        _cam_id, events, ok = await _fetch_one_camera_events(
+        _cam_id, events, ok, skip_full_fetch = await _fetch_one_camera_events(
             coord, CAM_A, session, HEADERS
         )
 
         assert _cam_id == CAM_A
         assert events == [{"id": "evt-1"}]
         assert ok is True
+        assert skip_full_fetch is True
         # Only the last_event URL should have been called, not the full events URL
         assert session.get.call_count == 1
 
@@ -88,12 +89,13 @@ class TestFetchOneCameraEvents:
             }
         )
 
-        _cam_id, events, ok = await _fetch_one_camera_events(
+        _cam_id, events, ok, skip_full_fetch = await _fetch_one_camera_events(
             coord, CAM_A, session, HEADERS
         )
 
         assert events == [{"id": "evt-new"}, {"id": "evt-old"}]
         assert ok is True
+        assert skip_full_fetch is False
         assert session.get.call_count == 2
 
     @pytest.mark.asyncio
@@ -108,11 +110,12 @@ class TestFetchOneCameraEvents:
             }
         )
 
-        _cam_id, _events, ok = await _fetch_one_camera_events(
+        _cam_id, _events, ok, skip_full_fetch = await _fetch_one_camera_events(
             coord, CAM_A, session, HEADERS
         )
 
         assert ok is True
+        assert skip_full_fetch is False
         assert session.get.call_count == 2
 
     @pytest.mark.asyncio
@@ -130,12 +133,13 @@ class TestFetchOneCameraEvents:
             }
         )
 
-        _cam_id, events, ok = await _fetch_one_camera_events(
+        _cam_id, events, ok, skip_full_fetch = await _fetch_one_camera_events(
             coord, CAM_A, session, HEADERS
         )
 
         assert ok is True
         assert events == [{"id": "evt-1"}]
+        assert skip_full_fetch is False
 
     @pytest.mark.asyncio
     async def test_full_fetch_failure_returns_not_ok_empty_events(self):
@@ -153,12 +157,13 @@ class TestFetchOneCameraEvents:
             }
         )
 
-        _cam_id, events, ok = await _fetch_one_camera_events(
+        _cam_id, events, ok, skip_full_fetch = await _fetch_one_camera_events(
             coord, CAM_A, session, HEADERS
         )
 
         assert ok is False
         assert events == []
+        assert skip_full_fetch is False
 
     @pytest.mark.asyncio
     async def test_full_fetch_non_200_returns_not_ok(self):
@@ -167,12 +172,13 @@ class TestFetchOneCameraEvents:
             {"last_event": _make_resp(500), "v11/events": _make_resp(503)}
         )
 
-        _cam_id, events, ok = await _fetch_one_camera_events(
+        _cam_id, events, ok, skip_full_fetch = await _fetch_one_camera_events(
             coord, CAM_A, session, HEADERS
         )
 
         assert ok is False
         assert events == []
+        assert skip_full_fetch is False
 
 
 class TestPollEvents:
@@ -214,6 +220,54 @@ class TestPollEvents:
         assert coord.cached_events[CAM_A] == [{"id": "stale"}]
 
     @pytest.mark.asyncio
+    async def test_skip_full_fetch_does_not_clobber_a_concurrent_fcm_update(self):
+        """2026-07-19 bug-hunt finding: the skip_full_fetch path snapshots
+        coordinator.cached_events[cid] EARLY (when /last_event was
+        checked), before asyncio.gather() resolves. If an FCM push
+        concurrently advances cached_events/last_event_ids to something
+        NEWER during that multi-second gather window, poll_events must NOT
+        write the stale snapshot back — that would clobber cached_events
+        to the old list while last_event_ids stays at FCM's newer id,
+        causing the next dispatch pass to see an "older" newest_id than
+        prev_id and re-fire an already-delivered alert. Simulated here via
+        a fake _fetch_one_camera_events whose coroutine body reads a
+        snapshot, then "FCM" mutates coord state before it returns."""
+        coord = _make_coord(
+            last_event_ids={CAM_A: "evt-1"},
+            cached_events={CAM_A: [{"id": "evt-1"}]},
+        )
+
+        async def _flaky_fetch(coordinator, cam_id, session, headers):
+            # Snapshot taken "at /last_event check time" — the real
+            # skip_full_fetch path does exactly this.
+            snapshot = coordinator.cached_events.get(cam_id, [])
+            # Simulate a concurrent FCM push landing during the gather
+            # window, advancing both last_event_ids AND cached_events to
+            # something newer.
+            coordinator.last_event_ids[cam_id] = "evt-2-from-fcm"
+            coordinator.cached_events[cam_id] = [{"id": "evt-2-from-fcm"}]
+            return (cam_id, snapshot, True, True)  # ok=True, skip_full_fetch=True
+
+        import custom_components.bosch_shc_camera.event_polling as ep
+
+        original = ep._fetch_one_camera_events
+        ep._fetch_one_camera_events = _flaky_fetch
+        try:
+            result = await poll_events(
+                coord, [CAM_A], MagicMock(), HEADERS, do_events=True
+            )
+        finally:
+            ep._fetch_one_camera_events = original
+
+        # The definitive-fetch bookkeeping still advances (nothing was
+        # actually stale from THIS poll's own perspective)...
+        assert result is True
+        # ...but FCM's newer data must survive, NOT get clobbered back to
+        # the stale pre-gather snapshot.
+        assert coord.cached_events[CAM_A] == [{"id": "evt-2-from-fcm"}]
+        assert coord.last_event_ids[CAM_A] == "evt-2-from-fcm"
+
+    @pytest.mark.asyncio
     async def test_one_camera_exception_does_not_abort_others(self):
         """gather(..., return_exceptions=True) — an exception escaping one
         camera's fetch coroutine must not prevent the other camera's
@@ -234,7 +288,7 @@ class TestPollEvents:
             call_count[0] += 1
             if cam_id == CAM_A:
                 raise asyncio.CancelledError()
-            return (cam_id, [{"id": "evt-b"}], True)
+            return (cam_id, [{"id": "evt-b"}], True, False)
 
         import custom_components.bosch_shc_camera.event_polling as ep
 

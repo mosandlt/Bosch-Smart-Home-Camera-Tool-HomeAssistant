@@ -149,7 +149,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.11";
+const CARD_VERSION = "14.1.12";
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -3643,7 +3643,12 @@ class BoschCameraCard extends HTMLElement {
       // video.volume can throw / be read-only on macOS Safari private mode and
       // some Android WebViews — never let a slider drag bubble an exception.
       try { video.volume = v; } catch (_) { /* volume not settable */ }
-      video.muted = v === 0;
+      // Anti-echo guard (2026-07-19 bug-hunt finding): a THIRD unmute path
+      // missed by the _toggleAudio() fix above — dragging the desktop
+      // volume slider above 0 on a SECONDARY card instance (same
+      // camera_entity mounted twice) directly unmuted that instance's own
+      // <video>, same echo bug via a different control.
+      video.muted = this._isSecondaryAudio() ? true : v === 0;
       if (!video.muted && video.paused) video.play().catch(() => {});
     }
     // Persist to the per-browser store (decoupled) or the backend entity (synced).
@@ -4026,6 +4031,17 @@ class BoschCameraCard extends HTMLElement {
     // (_onPlayGateTap → _update) re-arms the connect from scratch.
     this._waitingForStream = false;
     this._streamConnecting = false;
+    // _startingLiveVideo must also be cleared here (2026-07-19, same bug
+    // class as _waitForStreamReady's 90s dead-end fix, 2026-07-17): if a
+    // stream-stop lands while _startLiveVideo() is still mid-flight (e.g.
+    // awaiting the WebRTC offer round trip), that abandoned call keeps this
+    // flag true until its own async chain settles. _setLoadingOverlay's
+    // anti-flicker gate suppresses ANY hide call while
+    // _streamConnecting/_waitingForStream/_startingLiveVideo is true — so
+    // the _setLoadingOverlay(false) below silently no-ops and the connect
+    // spinner bleeds through the gate exactly as this function's own header
+    // comment says it must not.
+    this._startingLiveVideo = false;
     if (this._connectSteps) { this._connectSteps.forEach(t => clearTimeout(t)); this._connectSteps = null; }
     this._setLoadingOverlay(false);
     const el = this.shadowRoot?.getElementById("auto-play-gate");
@@ -4292,6 +4308,20 @@ class BoschCameraCard extends HTMLElement {
   // says is on, never auto-starts one the user stopped. 2026-06-15.
   _resumeLiveStreamIfNeeded() {
     if (!this.isConnected || !this._hass) return;
+    // 2026-07-19: this is called not just from visibilitychange→visible but
+    // also from leavepictureinpicture / webkitpresentationmodechanged→inline
+    // (e.g. iOS ending PiP on an app-background switch) — neither of those
+    // events implies the TAB itself is visible. Without this guard, a call
+    // arriving while the tab is still hidden could start or restart a live
+    // session (video.play(), or a full _stopLiveVideo()+_startLiveVideo()
+    // reconnect) with no hidden-teardown timer ever armed for it — that
+    // timer is only armed from _onVisibilityChange()'s hidden branch, which
+    // already fired once for this hidden period and won't fire again while
+    // still hidden. The session would then run indefinitely in the
+    // background with nothing watching it, occupying a scarce per-camera
+    // Bosch session slot, until the user eventually returns or navigates
+    // away — defeating the whole point of this hidden-tab teardown design.
+    if (document.visibilityState === "hidden") return;
     if (!this._isStreaming()) return;          // backend stream switch is off → leave it
     // Never auto-(re)start live video while privacy mode is ON. Privacy is a
     // SEPARATE switch from the live-stream switch, so _isStreaming() can still
@@ -4311,7 +4341,12 @@ class BoschCameraCard extends HTMLElement {
       this._reconnectingLiveVideo = true;
       setTimeout(() => {
         this._reconnectingLiveVideo = false;
-        if (this.isConnected && this._isStreaming()
+        // Re-check visibility too, not just at function entry (2026-07-19):
+        // the tab can go hidden again within this 500ms deferral window
+        // (rapid hide→show→hide) — starting a stream at that point would hit
+        // the exact same "no hidden-teardown timer ever armed" leak this
+        // function's top-of-entry guard exists to prevent.
+        if (this.isConnected && this._isStreaming() && document.visibilityState !== "hidden"
             && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
           this._startLiveVideo();
         }
@@ -4350,7 +4385,11 @@ class BoschCameraCard extends HTMLElement {
         this._stopLiveVideo();
         setTimeout(() => {
           this._reconnectingLiveVideo = false;
-          if (this.isConnected && this._isStreaming()) this._startLiveVideo();
+          // Same hide→show→hide race guard as the other deferred restart
+          // above (2026-07-19).
+          if (this.isConnected && this._isStreaming() && document.visibilityState !== "hidden") {
+            this._startLiveVideo();
+          }
         }, 500);
       });
       return;
@@ -11091,8 +11130,16 @@ class BoschCameraCard extends HTMLElement {
       if (video) {
         this._androidAudioMuted = false;
         const unmuting = video.muted;
-        video.muted = !unmuting;
-        if (unmuting && video.paused) video.play().catch(() => {});
+        // Anti-echo guard (2026-07-19 bug-hunt finding): every OTHER unmute
+        // path (_applyAudioPreference, _armStartUnmute, _tryStartUnmute)
+        // already checks _isSecondaryAudio() before allowing sound — this
+        // one didn't, so a tap on the audio pill of a secondary instance
+        // (e.g. the same camera_entity shown twice: overview + detail view)
+        // directly unmuted THAT card's own <video>, producing two audible
+        // instances at once. A secondary instance stays muted regardless of
+        // the tap direction.
+        video.muted = this._isSecondaryAudio() ? true : !unmuting;
+        if (unmuting && !video.muted && video.paused) video.play().catch(() => {});
         if (this._useCardAudio()) this._cardSaveUnmuted(!video.muted);
         const b = this.shadowRoot.getElementById("btn-audio");
         if (b) b.classList.toggle("on", !video.muted);
@@ -11105,13 +11152,18 @@ class BoschCameraCard extends HTMLElement {
     // the autoplay policy at stream start must unmute on the first tap even
     // though the switch may already read "on"); off-stream, flip the switch.
     const turningOn = video ? video.muted : (this._getEffectiveState(entityId) !== "on");
+    // Same anti-echo guard as the decoupled branch above: a secondary
+    // instance must not actually become audible even though it still
+    // drives the shared backend switch below (so the PRIMARY instance and
+    // any automations still see the intended on/off state).
+    const secondary = this._isSecondaryAudio();
     if (video) {
       // Instant local feedback INSIDE the user gesture — the only context Chrome
       // allows a programmatic unmute without pausing the element. The stream
       // always carries the AAC track now, so this never re-opens the stream.
       this._androidAudioMuted = false;
-      video.muted = !turningOn;
-      if (turningOn && video.paused) video.play().catch(() => {});
+      video.muted = secondary ? true : !turningOn;
+      if (turningOn && !video.muted && video.paused) video.play().catch(() => {});
       const b = this.shadowRoot.getElementById("btn-audio");
       if (b) b.classList.toggle("on", !video.muted);
     }

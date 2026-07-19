@@ -3180,6 +3180,7 @@ def _make_coord_streamhealth(**overrides):
         user_intent_streams={CAM_ID},  # watchdog reconnect gate
         camera_entities={},
         stream_error_count={},
+        stream_error_at={},
         stop_tls_proxy=AsyncMock(),
         stop_viewing_front_door=AsyncMock(),
         stop_remote_viewing_front_door=AsyncMock(),
@@ -3188,6 +3189,7 @@ def _make_coord_streamhealth(**overrides):
         record_stream_success=MagicMock(),
         get_model_config=lambda cid: SimpleNamespace(max_stream_errors=3),
         go2rtc_consumer_count=AsyncMock(return_value=0),
+        get_session=lambda cid: SimpleNamespace(generation=0),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -3333,6 +3335,73 @@ class TestWebrtcOnlyConsumer:
         coord.record_stream_success.assert_not_called()
 
 
+class TestWatchdogGenerationGuard:
+    """2026-07-19 bug-hunt finding: a renewal/rescue mid-window (heartbeat
+    cred rotation, a 401-rescue reconnect) tears down the watched session
+    and opens a fresh one, but still reports _connection_type == "LOCAL" —
+    without a generation check the watchdog would keep ticking as if
+    nothing happened, misattributing the NEW (still-settling) session's
+    state to error/success counters meant for the OLD session's outcome.
+    No other code path re-spawns this watchdog after a mid-session renewal,
+    so it must re-baseline and keep watching rather than bail out."""
+
+    @pytest.mark.asyncio
+    async def test_generation_change_re_baselines_instead_of_misattributing(self):
+        """Session renews between tick 1 and tick 2 (generation bumps).
+        The watchdog must NOT evaluate tick 2's state against the OLD
+        generation's expectations — it re-baselines and skips that tick's
+        classification entirely rather than recording an error/success for
+        state that belongs to the just-renewed session."""
+        cam_entity = SimpleNamespace(stream=SimpleNamespace(available=False))
+
+        # Call 1: captured once before the loop (watched_generation) → gen 0.
+        # Call 2: tick 1's check → still gen 0 (no renewal yet).
+        # Call 3: tick 2's check → gen 1 (renewed mid-window).
+        call_count = {"n": 0}
+
+        def _get_session_seq(cid):
+            call_count["n"] += 1
+            gen = 0 if call_count["n"] <= 2 else 1
+            return SimpleNamespace(generation=gen)
+
+        # try_live_connection must repopulate live_connections (as the real
+        # method does) — otherwise _is_local_active() sees an empty dict
+        # after tick 1's teardown and the watchdog returns early, before
+        # tick 2 (and the generation check) ever runs. This exact gap left
+        # the generation re-baseline branch uncovered (CI coverage failure,
+        # caught post-push — a first version of this test never actually
+        # reached tick 2).
+        async def _restart(cid):
+            coord.live_connections[cid] = {"_connection_type": "LOCAL"}
+            return {"_connection_type": "LOCAL"}
+
+        coord = _make_coord_streamhealth(
+            camera_entities={CAM_ID: cam_entity},
+            get_session=_get_session_seq,
+            try_live_connection=AsyncMock(side_effect=_restart),
+        )
+        sw = _make_switch_streamhealth(coord)
+        with patch("asyncio.sleep", new=AsyncMock()):
+            await BoschLiveStreamSwitch._stream_health_watchdog(sw, CAM_ID)
+        # Only tick 1's genuinely-unhealthy state was ever evaluated (gradual
+        # error, not saturated) — tick 2 was skipped as a re-baseline, not
+        # evaluated as a second consecutive failure of the OLD session.
+        assert coord.record_stream_error.call_count == 1
+        assert coord.stream_error_count.get(CAM_ID, 0) != 3
+
+    @pytest.mark.asyncio
+    async def test_stable_generation_behaves_exactly_as_before(self):
+        """Control: no renewal happens (generation stays constant) → the
+        watchdog behaves exactly like the pre-fix version (regression
+        guard for the fixture default itself)."""
+        cam_entity = SimpleNamespace(stream=SimpleNamespace(available=True))
+        coord = _make_coord_streamhealth(camera_entities={CAM_ID: cam_entity})
+        sw = _make_switch_streamhealth(coord)
+        with patch("asyncio.sleep", new=AsyncMock()):
+            await BoschLiveStreamSwitch._stream_health_watchdog(sw, CAM_ID)
+        coord.record_stream_success.assert_called_once_with(CAM_ID)
+
+
 class TestStreamOffShortCircuit:
     @pytest.mark.asyncio
     async def test_user_turned_off_during_first_sleep(self):
@@ -3437,6 +3506,91 @@ class TestUnhealthyRestart:
         # One restart → REMOTE → exit (no second sleep)
         assert coord.try_live_connection.await_count == 1
         sw.async_write_ha_state.assert_called()
+
+
+class TestWatchdogWorkerErrorDedup:
+    """2026-07-19 bug-hunt finding: handle_stream_worker_error
+    (stream_lifecycle.py) reacts to HA's own "Error from stream worker" log
+    line and unconditionally calls record_stream_error() on every single
+    worker crash, independent of this watchdog. Both mechanisms can observe
+    the SAME underlying FFmpeg crash within the watchdog's 2-tick post-
+    connect window, double-counting it and saturating max_stream_errors in
+    roughly half the configured number of genuine incidents. The watchdog
+    now checks stream_error_at for a very recent update (<55s) before
+    recording its own error/saturation for this tick."""
+
+    @pytest.mark.asyncio
+    async def test_recent_external_error_skips_duplicate_soft_error(self):
+        """stream_error_at was JUST updated (simulating the worker-error
+        listener having already counted this same crash) → the watchdog's
+        first unhealthy tick must NOT call record_stream_error again, but
+        still proceeds with its own teardown/reconnect."""
+        import time as _time
+
+        cam_entity = SimpleNamespace(stream=SimpleNamespace(available=False))
+        coord = _make_coord_streamhealth(
+            camera_entities={CAM_ID: cam_entity},
+            stream_error_at={CAM_ID: _time.monotonic()},  # just recorded elsewhere
+        )
+
+        async def _restart(cid):
+            coord.live_connections[cid] = {"_connection_type": "LOCAL"}
+            return {"_connection_type": "LOCAL"}
+
+        coord.try_live_connection = AsyncMock(side_effect=_restart)
+        sw = _make_switch_streamhealth(coord)
+        with patch("asyncio.sleep", new=AsyncMock()):
+            await BoschLiveStreamSwitch._stream_health_watchdog(sw, CAM_ID)
+        coord.record_stream_error.assert_not_called()
+        # Teardown/reconnect still happens (stream stays unhealthy both
+        # ticks in this fixture) — only the counter increment is deduped.
+        assert coord.stop_tls_proxy.await_count >= 1
+        assert coord.try_live_connection.await_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_recent_external_error_skips_duplicate_saturation(self):
+        """Same dedup on the FINAL (idx==1) tick: must not saturate
+        stream_error_count a second time for the same already-counted crash."""
+        import time as _time
+
+        cam_entity = SimpleNamespace(stream=SimpleNamespace(available=False))
+        coord = _make_coord_streamhealth(
+            camera_entities={CAM_ID: cam_entity},
+            stream_error_at={CAM_ID: _time.monotonic()},
+        )
+
+        async def _restart(cid):
+            coord.live_connections[cid] = {"_connection_type": "LOCAL"}
+            return {"_connection_type": "LOCAL"}
+
+        coord.try_live_connection = AsyncMock(side_effect=_restart)
+        sw = _make_switch_streamhealth(coord)
+        with patch("asyncio.sleep", new=AsyncMock()):
+            await BoschLiveStreamSwitch._stream_health_watchdog(sw, CAM_ID)
+        assert coord.stream_error_count.get(CAM_ID, 0) != 3
+
+    @pytest.mark.asyncio
+    async def test_stale_error_timestamp_still_counts_normally(self):
+        """Regression/control: an OLD stream_error_at (>55s ago, from some
+        unrelated earlier incident) must NOT suppress the watchdog's own
+        genuine detection — dedup only applies to a truly recent overlap."""
+        import time as _time
+
+        cam_entity = SimpleNamespace(stream=SimpleNamespace(available=False))
+        coord = _make_coord_streamhealth(
+            camera_entities={CAM_ID: cam_entity},
+            stream_error_at={CAM_ID: _time.monotonic() - 300},  # 5 min old
+        )
+
+        async def _restart(cid):
+            coord.live_connections[cid] = {"_connection_type": "LOCAL"}
+            return {"_connection_type": "LOCAL"}
+
+        coord.try_live_connection = AsyncMock(side_effect=_restart)
+        sw = _make_switch_streamhealth(coord)
+        with patch("asyncio.sleep", new=AsyncMock()):
+            await BoschLiveStreamSwitch._stream_health_watchdog(sw, CAM_ID)
+        assert coord.stream_error_count.get(CAM_ID, 0) == 3
 
 
 # RTSP credential redaction — `_redact_rtsp_creds` and
@@ -4409,6 +4563,7 @@ class TestHealthWatchdogIntentCheck:
             user_intent_streams={CAM_ID},  # user initially toggled on
             camera_entities={CAM_ID: cam_entity},
             stream_error_count={},
+            stream_error_at={},
             stop_tls_proxy=AsyncMock(),
             stop_viewing_front_door=AsyncMock(),
             stop_remote_viewing_front_door=AsyncMock(),
@@ -4418,6 +4573,7 @@ class TestHealthWatchdogIntentCheck:
             get_model_config=MagicMock(
                 return_value=SimpleNamespace(max_stream_errors=3)
             ),
+            get_session=lambda cid: SimpleNamespace(generation=0),
         )
 
         # Simulate that the user toggled OFF between schedule and fire: the
@@ -4469,6 +4625,7 @@ class TestHealthWatchdogIntentCheck:
             user_intent_streams={CAM_ID},
             camera_entities={CAM_ID: cam_entity},
             stream_error_count={},
+            stream_error_at={},
             stop_tls_proxy=AsyncMock(),
             stop_viewing_front_door=AsyncMock(),
             stop_remote_viewing_front_door=AsyncMock(),
@@ -4478,6 +4635,7 @@ class TestHealthWatchdogIntentCheck:
             get_model_config=MagicMock(
                 return_value=SimpleNamespace(max_stream_errors=3)
             ),
+            get_session=lambda cid: SimpleNamespace(generation=0),
         )
 
         switch_stub = SimpleNamespace(
