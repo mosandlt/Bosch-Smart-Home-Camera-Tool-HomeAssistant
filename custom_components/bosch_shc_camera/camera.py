@@ -336,7 +336,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 image = await self.coordinator.async_fetch_live_snapshot(self._cam_id)
                 # Fallback for cameras whose REMOTE snap.jpg returns 401 (e.g. CAMERA_360):
                 # try LOCAL connection with Digest auth for a direct LAN snapshot.
-                if not image:
+                # Skip while a LOCAL live-stream pre-warm is in progress — this
+                # fallback opens its own fresh PUT /connection against the same
+                # camera, contending with pre-warm for capacity and producing
+                # the same failure class as the inline LOCAL snap fetch in
+                # _async_camera_image_impl (forum 998974/40).
+                if not image and not self.coordinator.is_stream_warming(self._cam_id):
                     image = await self.coordinator.async_fetch_live_snapshot_local(
                         self._cam_id
                     )
@@ -1101,6 +1106,20 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             if live.get("_connection_type") == "LOCAL":
                 local_user = live.get("_local_user", "")
                 local_pass = live.get("_local_password", "")
+                if self.coordinator.is_stream_warming(self._cam_id):
+                    # A concurrent HTTPS Digest snap.jpg request during
+                    # encoder pre-warm contends with the camera's own
+                    # limited onboard webserver/TLS-handshake capacity
+                    # (live_connection.py's ~2-concurrent-session note),
+                    # producing spurious "LOCAL snap via proxy failed"
+                    # warnings and adding jitter to the pre-warm retries
+                    # themselves — forum 998974/40. Serve the cached frame
+                    # instead of racing the live session.
+                    _LOGGER.debug(
+                        "%s: skipping LOCAL snap, stream pre-warming",
+                        self._display_name,
+                    )
+                    return self.cached_image or self._PLACEHOLDER_JPEG
                 if local_user and local_pass:
                     data: bytes | None = None
                     try:

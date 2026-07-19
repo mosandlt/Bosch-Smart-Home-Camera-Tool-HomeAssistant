@@ -961,6 +961,24 @@ class TestAsyncTriggerImageRefresh:
         assert cam.cached_image == b"\xff\xd8local"
 
     @pytest.mark.asyncio
+    async def test_skips_local_fallback_during_prewarm(self):
+        """Forum 998974/40: async_fetch_live_snapshot_local opens its own
+        fresh PUT /connection LOCAL, contending with an in-progress
+        pre-warm for the camera's limited capacity. While
+        is_stream_warming(cam_id) is True, this fallback must be skipped
+        (not just the inline digest fetch in _async_camera_image_impl)."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()
+        coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
+        coord.async_fetch_live_snapshot_local = AsyncMock(return_value=b"\xff\xd8local")
+        coord.is_stream_warming = lambda cam_id: True
+        cam = _make_camera(coord=coord)
+        await BoschCamera.async_trigger_image_refresh(cam, delay=0)
+        coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
+        coord.async_fetch_live_snapshot_local.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_falls_back_to_fresh_event_when_live_paths_fail(self):
         """When both REMOTE+LOCAL live snap paths return None, dig into
         fresh events as a last resort. Bosch sometimes returns a 0-byte
@@ -2275,6 +2293,58 @@ class TestAsyncCameraImageImplLocalDigest:
         ):
             out = await BoschCamera._async_camera_image_impl(cam)
         assert out == b"\xff\xd8cached"
+
+    @pytest.mark.asyncio
+    async def test_local_digest_skipped_during_prewarm(self):
+        """Forum 998974/40: LOCAL snapshot polls contend with pre-warm for the
+        camera's ~2-concurrent-RTSP-session budget, producing spurious "LOCAL
+        snap via proxy failed" warnings and adding jitter to pre-warm retries.
+        While is_stream_warming(cam_id) is True, skip the Digest fetch entirely
+        and serve cached/placeholder instead of racing the live session."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = self._local_coord()
+        coord.is_stream_warming = lambda cam_id: True
+        cam = _make_camera_impl(coord=coord, cached_image=b"\xff\xd8cached")
+        digest_mock = AsyncMock(return_value=self._digest_resp_cm(200, b"\xff\xd8new"))
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=digest_mock,
+            ),
+        ):
+            out = await BoschCamera._async_camera_image_impl(cam)
+        digest_mock.assert_not_awaited()
+        assert out == b"\xff\xd8cached"
+
+    @pytest.mark.asyncio
+    async def test_local_digest_runs_once_prewarm_clears(self):
+        """Inverse of the above: once is_stream_warming(cam_id) goes False
+        (pre-warm finished), the LOCAL Digest fetch runs normally again."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = self._local_coord()
+        coord.is_stream_warming = lambda cam_id: False
+        cam = _make_camera_impl(coord=coord)
+        img = b"\xff\xd8fresh"
+        digest_mock = AsyncMock(return_value=self._digest_resp_cm(200, img))
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=digest_mock,
+            ),
+        ):
+            out = await BoschCamera._async_camera_image_impl(cam)
+        digest_mock.assert_awaited_once()
+        assert out == img
 
 
 class TestPlaceholderTreatedAsNoCache:
@@ -5415,6 +5485,7 @@ def _make_camera_stale(cached: bytes | None):
         async_fetch_live_snapshot=AsyncMock(return_value=None),  # live FAILS
         async_fetch_live_snapshot_local=AsyncMock(return_value=None),
         async_fetch_fresh_event_snapshot=AsyncMock(return_value=_OLD_EVENT),
+        is_stream_warming=lambda cid: False,
     )
     cam = BoschCamera.__new__(BoschCamera)
     cam.coordinator = coord
