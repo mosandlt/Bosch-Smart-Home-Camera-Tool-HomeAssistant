@@ -121,7 +121,10 @@
  *   - Added video quality dropdown inside card (select entity):
  *     Quality: Auto / High (30 Mbps) / Low (1.9 Mbps)
  *     Hidden automatically when the select entity doesn't exist or is unavailable.
- *     Configure with quality_entity: select.bosch_xxx_video_quality in card YAML.
+ *     Auto-derived as select.<camera>_video_quality like every other entity
+ *     (was opt-in-only via quality_entity with no default until 2026-07-20 —
+ *     that gap meant the overview card's tiles never showed it at all).
+ *     Override with quality_entity: select.bosch_xxx_video_quality in card YAML.
  *
  * Changes vs 1.5.9:
  *   - After panning, automatically refresh snapshot after 2s (camera needs time to move)
@@ -149,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.14";
+const CARD_VERSION = "14.1.15";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -416,6 +419,7 @@ const CARD_I18N = {
     quality_auto: "Auto",
     quality_high: "High (30 Mbps)",
     quality_low: "Low (1.9 Mbps)",
+    quality_remote_fallback_hint: "Over a remote/VPN connection, \"Low\" may still use ~7.5 Mbps — Bosch's remote proxy doesn't support the 1.9 Mbps stream.",
     notif_movement: "Movement",
     notif_person: "Person",
     notif_audio: "Audio",
@@ -687,6 +691,7 @@ const CARD_I18N = {
     quality_auto: "Auto",
     quality_high: "Hoch (30 Mbps)",
     quality_low: "Niedrig (1.9 Mbps)",
+    quality_remote_fallback_hint: "Bei einer Remote-/VPN-Verbindung kann „Niedrig“ trotzdem ~7,5 Mbps verwenden — Boschs Remote-Proxy unterstützt den 1,9-Mbps-Stream nicht.",
     notif_movement: "Bewegung",
     notif_person: "Person",
     notif_audio: "Audio",
@@ -922,6 +927,7 @@ const CARD_I18N = {
     quality_auto: "Auto",
     quality_high: "Alta (30 Mbps)",
     quality_low: "Baja (1.9 Mbps)",
+    quality_remote_fallback_hint: "En una conexión remota/VPN, \"Baja\" puede seguir usando ~7,5 Mbps — el proxy remoto de Bosch no admite el flujo de 1,9 Mbps.",
     notif_movement: "Movimiento",
     notif_person: "Persona",
     notif_audio: "Audio",
@@ -1156,6 +1162,7 @@ const CARD_I18N = {
     quality_auto: "Auto",
     quality_high: "Élevée (30 Mbps)",
     quality_low: "Faible (1.9 Mbps)",
+    quality_remote_fallback_hint: "Sur une connexion distante/VPN, « Faible » peut quand même utiliser ~7,5 Mbps — le proxy distant de Bosch ne prend pas en charge le flux à 1,9 Mbps.",
     notif_movement: "Mouvement",
     notif_person: "Personne",
     notif_audio: "Audio",
@@ -1390,6 +1397,7 @@ const CARD_I18N = {
     quality_auto: "Auto",
     quality_high: "Alta (30 Mbps)",
     quality_low: "Bassa (1.9 Mbps)",
+    quality_remote_fallback_hint: "Su una connessione remota/VPN, \"Bassa\" potrebbe comunque usare ~7,5 Mbps — il proxy remoto di Bosch non supporta lo stream a 1,9 Mbps.",
     notif_movement: "Movimento",
     notif_person: "Persona",
     notif_audio: "Audio",
@@ -1624,6 +1632,7 @@ const CARD_I18N = {
     quality_auto: "Auto",
     quality_high: "Hoog (30 Mbps)",
     quality_low: "Laag (1.9 Mbps)",
+    quality_remote_fallback_hint: "Bij een externe/VPN-verbinding kan \"Laag\" nog steeds ~7,5 Mbps gebruiken — Bosch's externe proxy ondersteunt de 1,9 Mbps-stream niet.",
     notif_movement: "Beweging",
     notif_person: "Persoon",
     notif_audio: "Audio",
@@ -1858,6 +1867,7 @@ const CARD_I18N = {
     quality_auto: "Auto",
     quality_high: "Wysoka (30 Mbps)",
     quality_low: "Niska (1.9 Mbps)",
+    quality_remote_fallback_hint: "Przy zdalnym/VPN połączeniu opcja „Niska” może nadal używać ~7,5 Mbps — zdalny serwer proxy Bosch nie obsługuje strumienia 1,9 Mbps.",
     notif_movement: "Ruch",
     notif_person: "Osoba",
     notif_audio: "Audio",
@@ -2092,6 +2102,7 @@ const CARD_I18N = {
     quality_auto: "Auto",
     quality_high: "Alta (30 Mbps)",
     quality_low: "Baixa (1.9 Mbps)",
+    quality_remote_fallback_hint: "Numa ligação remota/VPN, \"Baixa\" pode continuar a usar ~7,5 Mbps — o proxy remoto da Bosch não suporta o stream de 1,9 Mbps.",
     notif_movement: "Movimento",
     notif_person: "Pessoa",
     notif_audio: "Áudio",
@@ -2326,6 +2337,7 @@ const CARD_I18N = {
     quality_auto: "Авто",
     quality_high: "Высокое (30 Мбит/с)",
     quality_low: "Низкое (1.9 Мбит/с)",
+    quality_remote_fallback_hint: "При удалённом/VPN-соединении режим «Низкое» всё равно может использовать ~7,5 Мбит/с — удалённый прокси Bosch не поддерживает поток 1,9 Мбит/с.",
     notif_movement: "Движение",
     notif_person: "Человек",
     notif_audio: "Аудио",
@@ -2560,6 +2572,7 @@ const CARD_I18N = {
     quality_auto: "Авто",
     quality_high: "Висока (30 Мбіт/с)",
     quality_low: "Низька (1.9 Мбіт/с)",
+    quality_remote_fallback_hint: "У віддаленому/VPN-з'єднанні режим «Низька» все одно може використовувати ~7,5 Мбіт/с — віддалений проксі Bosch не підтримує потік 1,9 Мбіт/с.",
     notif_movement: "Рух",
     notif_person: "Людина",
     notif_audio: "Аудіо",
@@ -2794,6 +2807,7 @@ const CARD_I18N = {
     quality_auto: "自动",
     quality_high: "高 (30 Mbps)",
     quality_low: "低 (1.9 Mbps)",
+    quality_remote_fallback_hint: "在远程/VPN 连接下，\"低\"画质可能仍使用约 7.5 Mbps —— Bosch 远程代理不支持 1.9 Mbps 的流。",
     notif_movement: "移动",
     notif_person: "人员",
     notif_audio: "音频",
@@ -3332,7 +3346,18 @@ class BoschCameraCard extends HTMLElement {
       intercom:     config.intercom_entity      || `switch.${base}_intercom`,
       speaker:      config.speaker_entity       || `number.${base}_speaker_level`,
       pan:          config.pan_entity           || `number.${base}_pan_position`,
-      quality:      config.quality_entity       || null,
+      // Auto-derived like every sibling entity (switch/audio/light/...)
+      // below — was opt-in-only via quality_entity with no default, which
+      // meant BoschCameraOverviewCard's tiles never got a Quality control
+      // at all (its child setConfig calls never pass quality_entity),
+      // silently reaching this null default. Bug-hunt 2026-07-20.
+      // quality_entity: false is a deliberate opt-out (distinct from just
+      // leaving it unset) — a plain `|| default` fallback would treat
+      // false/""/null identically to "not configured" and always fall
+      // through to the auto-derived id, leaving no way to actually hide
+      // the section (bug-hunt finding, 2026-07-20 follow-up).
+      quality:      config.quality_entity === false ? null
+                    : config.quality_entity || `select.${base}_video_quality`,
       push_status:  config.push_status_entity   || "sensor.bosch_camera_event_detection",
       status:       config.status_entity        || `sensor.${base}_status`,
       events_today: config.events_today_entity  || `sensor.${base}_events_today`,
@@ -6647,6 +6672,7 @@ class BoschCameraCard extends HTMLElement {
                 <option value="low">${this._t("quality_low")}</option>
               </select>
             </div>
+            <span class="hint quality-remote-fallback-hint" id="quality-remote-fallback-hint" style="display:none">${this._t("quality_remote_fallback_hint")}</span>
           </div>
 
           <!-- Accordion: Notification Types -->
@@ -10505,6 +10531,16 @@ class BoschCameraCard extends HTMLElement {
       qualitySection.style.display = hasQuality ? "" : "none";
       if (hasQuality && qualitySel.value !== qualityState.state) {
         qualitySel.value = qualityState.state;
+      }
+      // "Low" was picked but the backend clamped inst=4->2 for a REMOTE
+      // session (Bosch's REMOTE proxy rejects inst=4) — surface that so a
+      // remote/VPN user doesn't think they got the 1.9 Mbps stream when
+      // they're actually still on ~7.5 Mbps (select.py's
+      // get_quality_remote_fallback_active()).
+      const fallbackHint = this.shadowRoot.getElementById("quality-remote-fallback-hint");
+      if (fallbackHint) {
+        const fallbackActive = hasQuality && qualityState.attributes?.remote_fallback_active === true;
+        fallbackHint.style.display = fallbackActive ? "" : "none";
       }
     }
 

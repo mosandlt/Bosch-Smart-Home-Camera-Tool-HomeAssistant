@@ -247,6 +247,7 @@ def stub_coord_basic() -> SimpleNamespace:
         },
         get_quality=lambda cid: "auto",
         set_quality=lambda cid, q: None,
+        get_quality_remote_fallback_active=lambda cid: False,
         options={
             "fcm_push_mode": "auto",
             "stream_connection_type": "auto",
@@ -290,6 +291,31 @@ class TestVideoQualitySelectBasic:
         sel = BoschVideoQualitySelect(stub_coord_basic, CAM_ID, stub_entry)
         assert len(sel._attr_options) >= 2
         assert "auto" in sel._attr_options
+
+    def test_extra_state_attributes_empty_when_no_remote_fallback(
+        self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+
+        sel = BoschVideoQualitySelect(stub_coord_basic, CAM_ID, stub_entry)
+        assert sel.extra_state_attributes == {}
+
+    def test_extra_state_attributes_surfaces_remote_fallback(
+        self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """REMOTE proxy rejects inst=4 ('low') and the connection actually
+        used inst=2 (~7.5 Mbps) — the select entity must surface this so a
+        remote/VPN user isn't misled into thinking they got 1.9 Mbps.
+        """
+        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+
+        stub_coord_basic.get_quality = lambda cid: "low"
+        stub_coord_basic.get_quality_remote_fallback_active = lambda cid: True
+        sel = BoschVideoQualitySelect(stub_coord_basic, CAM_ID, stub_entry)
+        assert sel.extra_state_attributes == {
+            "remote_fallback_active": True,
+            "effective_bitrate_mbps": 7.5,
+        }
 
 
 @pytest.fixture

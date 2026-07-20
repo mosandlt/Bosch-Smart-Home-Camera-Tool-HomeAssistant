@@ -160,6 +160,25 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
         quality_key = self.coordinator.get_quality(self._cam_id)
         return quality_key if quality_key in QUALITY_OPTIONS else "auto"
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Surface a REMOTE-session bandwidth caveat.
+
+        Bosch's REMOTE proxy rejects inst=4 (the "low", ~1.9 Mbps stream)
+        with a 400, so try_live_connection_inner clamps it to inst=2
+        (~7.5 Mbps, same as "auto") whenever the active session is REMOTE.
+        current_option still (correctly) reports the user's stored
+        preference "low" — but without this attribute a REMOTE/VPN user has
+        no way to know they're not actually getting the lowest-bandwidth
+        stream the label promises.
+        """
+        if self.coordinator.get_quality_remote_fallback_active(self._cam_id):
+            return {
+                "remote_fallback_active": True,
+                "effective_bitrate_mbps": 7.5,
+            }
+        return {}
+
     async def async_select_option(self, option: str) -> None:
         """Handle quality selection — update coordinator preference and reconnect stream."""
         self.coordinator.set_quality(self._cam_id, option)

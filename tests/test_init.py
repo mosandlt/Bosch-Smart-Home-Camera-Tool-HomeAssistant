@@ -22797,6 +22797,7 @@ def _make_coord_sprint_kd(**overrides):
         async_request_refresh=AsyncMock(return_value=None),
         get_quality_params=MagicMock(return_value=(True, 1)),
         get_quality=MagicMock(return_value="auto"),
+        _quality_effective_inst={},
         get_model_config=MagicMock(return_value=_model_cfg()),
         # Used by replace_renewal_task
         hass=SimpleNamespace(
@@ -23432,6 +23433,11 @@ class TestWarmUpUnexpectedExceptionCleanup:
         assert session.stream_ready_event.is_set()
         # The partially-started TLS proxy must not be leaked.
         coord.stop_tls_proxy.assert_awaited_with(CAM_A)
+        # Bug-hunt finding, 2026-07-20: the PUT that succeeded before this
+        # exception fired also wrote _quality_effective_inst — must be
+        # cleaned up alongside the rest of this half-open state, not left
+        # describing an attempt that was torn down.
+        assert CAM_A not in coord._quality_effective_inst
 
     @pytest.mark.asyncio
     async def test_exception_after_success_keeps_the_working_session(self):
@@ -23718,6 +23724,51 @@ class TestPut200LocalSuccess:
         assert call_args.args[0] == CAM_A
         assert call_args.args[1] == "192.0.2.149"
         assert call_args.args[2] == 443
+
+    @pytest.mark.asyncio
+    async def test_local_200_low_quality_uses_inst_4_unclamped(self):
+        """LOCAL sessions have no REMOTE-proxy inst=4 restriction — a "low"
+        preference must reach the camera as inst=4 unmodified (unlike the
+        REMOTE case, see TestPut200RemoteSuccess's clamp test), and
+        _quality_effective_inst must record 4, not 2.
+        """
+        local_body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.0.2.149:443"],
+                "bufferingTime": 500,
+            }
+        )
+        coord = _make_coord_sprint_kd(
+            entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "local"},
+            ),
+            rcp_lan_ip_cache={},
+            local_creds_cache={},
+            get_cam_lan_ip=MagicMock(return_value=None),
+            start_tls_proxy=AsyncMock(return_value=12345),
+            tls_proxy_ports={CAM_A: 12345},
+            get_quality=MagicMock(return_value="low"),
+            get_quality_params=MagicMock(return_value=(False, 4)),
+        )
+
+        resp = _put_resp(200, local_body)
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is not None
+        assert coord._quality_effective_inst[CAM_A] == 4
 
     @pytest.mark.asyncio
     async def test_local_200_refreshes_webrtc_providers_after_prewarm(self):
@@ -24092,6 +24143,50 @@ class TestPut200RemoteSuccess:
         assert (
             result["_remote_path"]
             == "/hashXXX/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=3600"
+        )
+
+    @pytest.mark.asyncio
+    async def test_remote_200_low_quality_clamps_inst_to_2_and_records_effective(self):
+        """quality='low' (inst=4) on a REMOTE session must be clamped to
+        inst=2 (Bosch's REMOTE proxy rejects inst=4 with a 400) AND the
+        clamped value must be recorded in _quality_effective_inst so
+        BoschVideoQualitySelect.get_quality_remote_fallback_active() can
+        tell the user their "Low" pick didn't actually reach 1.9 Mbps.
+        """
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
+        coord = _make_coord_sprint_kd(
+            entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "remote"},
+            ),
+            start_tls_proxy=AsyncMock(return_value=54321),
+            get_quality=MagicMock(return_value="low"),
+            get_quality_params=MagicMock(return_value=(False, 4)),
+        )
+
+        resp = _put_resp(200, remote_body)
+        session_mock = _make_session_sprint_kd(resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is not None
+        call_kwargs = session_mock.put.call_args
+        assert call_kwargs.kwargs["json"]["highQualityVideo"] is False
+        # The PUT body has no raw `inst` field (it's folded into the URL
+        # query string on the request path, not this JSON body) — assert
+        # the effective-inst bookkeeping instead of the wire body.
+        assert coord._quality_effective_inst[CAM_A] == 2, (
+            "REMOTE must clamp inst=4->2 and record the clamped value, "
+            "not the raw 'low' preference's inst=4"
         )
 
     @pytest.mark.asyncio
@@ -28144,6 +28239,7 @@ def _make_coord_live(**overrides):
         async_update_listeners=MagicMock(),
         get_quality_params=MagicMock(return_value=(True, 1)),
         get_quality=MagicMock(return_value="auto"),
+        _quality_effective_inst={},
         get_model_config=MagicMock(return_value=_model_cfg_sprint_lc()),
         hass=SimpleNamespace(
             async_create_task=_create_task,
@@ -28599,6 +28695,65 @@ class TestLocalPrewarmFailedFallsBackToRemote:
         # stream_fell_back must be set
         assert coord.stream_fell_back.get(CAM_A) is True, (
             "stream_fell_back must be True after LOCAL pre-warm failure"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stale_quality_effective_inst_cleared_when_remote_fallback_also_fails(
+        self,
+    ):
+        """Bug-hunt finding, 2026-07-20: LOCAL's PUT succeeds (writing
+        _quality_effective_inst) but pre-warm fails, falling through to
+        REMOTE — if REMOTE then ALSO fails outright (e.g. 400), the whole
+        call returns None with no active session at all. The stale
+        LOCAL inst must not linger in _quality_effective_inst, or
+        get_quality_remote_fallback_active() could read state describing a
+        connection attempt that was cleaned up, not any real session.
+        """
+        coord = _make_coord_live(
+            stream_error_count={},
+            wifiinfo_cache={CAM_A: {"signalStrength": 80}},
+            async_local_tcp_ping=AsyncMock(return_value=True),
+            lan_tcp_reachable={},
+            rcp_lan_ip_cache={},
+            local_creds_cache={},
+            tls_proxy_ports={CAM_A: 12345},
+            start_tls_proxy=AsyncMock(return_value=12345),
+            stop_tls_proxy=AsyncMock(),
+            stop_viewing_front_door=AsyncMock(),
+            stop_remote_viewing_front_door=AsyncMock(),
+            get_quality=MagicMock(return_value="low"),
+            get_quality_params=MagicMock(return_value=(False, 4)),
+        )
+
+        local_body = json.dumps(
+            {
+                "user": "u",
+                "password": "p",
+                "urls": ["192.168.1.1:443"],
+                "bufferingTime": 500,
+            }
+        )
+        resp_local = _put_resp(200, local_body)
+        resp_remote = _put_resp(400, "bad request")  # REMOTE also fails outright
+
+        session_mock = MagicMock()
+        session_mock.close = AsyncMock()
+        session_mock.put = AsyncMock(side_effect=[resp_local, resp_remote])
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.pre_warm_rtsp",
+                new=AsyncMock(return_value=False),
+            ),
+        ):
+            result = await try_live_connection_inner(coord, CAM_A)
+
+        assert result is None, "Both candidates failed — no session must be returned"
+        assert CAM_A not in coord._quality_effective_inst, (
+            "_quality_effective_inst must not retain LOCAL's stale inst "
+            "after the whole connection attempt failed"
         )
 
 
@@ -29591,6 +29746,7 @@ def _make_coord_live_sprint_mc(**overrides):
         async_request_refresh=AsyncMock(return_value=None),
         get_quality_params=MagicMock(return_value=(True, 1)),
         get_quality=MagicMock(return_value="auto"),
+        _quality_effective_inst={},
         get_model_config=MagicMock(return_value=_model_cfg_sprint_mc()),
         hass=SimpleNamespace(
             async_create_task=_create_task,
@@ -33825,9 +33981,64 @@ class TestGetQualityParams:
         coord = self._bind(_stub_coord_round9(_quality_preference={}))
         with patch(f"{MODULE}.get_options", return_value={}):
             hq, inst = coord.get_quality_params(CAM_ID)
-        assert hq is False and inst == 2, (
-            "auto quality must return (False, 2) — balanced stream"
+            assert hq is False and inst == 2, (
+                "auto quality must return (False, 2) — balanced"
+            )
+
+
+class TestGetQualityRemoteFallbackActive:
+    """REMOTE proxy rejects inst=4 ('low') with a 400 — live_connection.py
+    clamps to inst=2, recorded in _quality_effective_inst. The select
+    entity must be able to tell this apart from a genuine 1.9 Mbps stream.
+    """
+
+    def _bind(self, coord):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord.get_quality = types.MethodType(BoschCameraCoordinator.get_quality, coord)
+        coord.get_quality_remote_fallback_active = types.MethodType(
+            BoschCameraCoordinator.get_quality_remote_fallback_active, coord
         )
+        return coord
+
+    def test_false_when_preference_is_not_low(self):
+        coord = self._bind(
+            _stub_coord_round9(
+                _quality_preference={CAM_ID: "auto"},
+                _quality_effective_inst={CAM_ID: 2},
+            )
+        )
+        assert coord.get_quality_remote_fallback_active(CAM_ID) is False
+
+    def test_false_when_low_and_effective_inst_matches(self):
+        """LOCAL session — inst=4 actually went through, no fallback."""
+        coord = self._bind(
+            _stub_coord_round9(
+                _quality_preference={CAM_ID: "low"},
+                _quality_effective_inst={CAM_ID: 4},
+            )
+        )
+        assert coord.get_quality_remote_fallback_active(CAM_ID) is False
+
+    def test_true_when_low_but_remote_clamped_to_inst2(self):
+        coord = self._bind(
+            _stub_coord_round9(
+                _quality_preference={CAM_ID: "low"},
+                _quality_effective_inst={CAM_ID: 2},
+            )
+        )
+        assert coord.get_quality_remote_fallback_active(CAM_ID) is True
+
+    def test_false_when_no_connection_attempted_yet(self):
+        """No entry in _quality_effective_inst yet (never connected) — must
+        not report a fallback that hasn't actually happened."""
+        coord = self._bind(
+            _stub_coord_round9(
+                _quality_preference={CAM_ID: "low"},
+                _quality_effective_inst={},
+            )
+        )
+        assert coord.get_quality_remote_fallback_active(CAM_ID) is False
 
 
 class TestAsyncUpdateRcpDataDelegation:

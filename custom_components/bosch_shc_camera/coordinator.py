@@ -497,6 +497,13 @@ class BoschCameraCoordinator(
         # Video quality preference — keyed by cam_id, runtime only (not persisted)
         # Values: "auto" | "high" | "low"
         self._quality_preference: dict[str, str] = {}
+        # Effective `inst` value actually sent on the last successful PUT
+        # /connection — set by live_connection.py. Needed because REMOTE
+        # sessions clamp a "low" preference's inst=4 to inst=2 (Bosch's
+        # REMOTE proxy rejects inst=4 with a 400), so the raw preference in
+        # _quality_preference can silently diverge from what's actually
+        # streaming; the select entity surfaces this via extra_state_attributes.
+        self._quality_effective_inst: dict[str, int] = {}
         # Per-camera Mini-NVR mode override — keyed by cam_id, restored from
         # RestoreEntity on startup (BoschNvrModeSelect), same in-memory
         # pattern as _quality_preference. Values: "continuous" | "event_buffered".
@@ -2676,6 +2683,7 @@ class BoschCameraCoordinator(
         "ambient_light_cache",
         "_rcp_cmd_failures",
         "_quality_preference",
+        "_quality_effective_inst",
         "_proxy_url_cache",
         "_fresh_snap_cache",
         "_ai_last_call",
@@ -4652,6 +4660,19 @@ class BoschCameraCoordinator(
         if q == "low":
             return False, 4  # low-bandwidth stream (~1.9 Mbps)
         return False, 2  # "auto" — iOS default, balanced (~7.5 Mbps)
+
+    def get_quality_remote_fallback_active(self, cam_id: str) -> bool:
+        """True if the "low" preference is set but the last successful
+        connection actually used inst=2 (~7.5 Mbps) instead of inst=4
+        (~1.9 Mbps) — i.e. a REMOTE session clamped it, since Bosch's REMOTE
+        proxy rejects inst=4. Used by BoschVideoQualitySelect to surface the
+        divergence instead of silently showing "low" while streaming ~4x
+        the bandwidth the label promises.
+        """
+        return (
+            self.get_quality(cam_id) == "low"
+            and self._quality_effective_inst.get(cam_id) == 2
+        )
 
     def get_nvr_mode(self, cam_id: str) -> str:
         """Return effective Mini-NVR mode for this camera: 'continuous' or 'event_buffered'.

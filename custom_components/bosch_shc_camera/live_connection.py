@@ -311,6 +311,11 @@ async def try_live_connection_inner(
                         type_val,
                         _redact_creds(result),
                     )
+                    # Record the inst actually sent (may have been clamped
+                    # from 4->2 above for REMOTE) so BoschVideoQualitySelect
+                    # can tell the user's preference apart from what's
+                    # actually streaming.
+                    coordinator._quality_effective_inst[cam_id] = inst
                     # Always request audio — switch.<cam>_audio is a synced
                     # card-side mute now, not a stream-track toggle (see the
                     # cred-rotation site above). 2026-06-01.
@@ -722,6 +727,14 @@ async def try_live_connection_inner(
                                 "-inf"
                             )
                             coordinator.live_connections.pop(cam_id, None)
+                            # LOCAL's PUT succeeded (that's the only place
+                            # _quality_effective_inst gets written) but the
+                            # session itself never worked — drop it so a
+                            # subsequent REMOTE candidate failure doesn't
+                            # leave this stale LOCAL inst behind with no
+                            # active session at all (same class of bug as
+                            # the post-warm-up-exception cleanup below).
+                            coordinator._quality_effective_inst.pop(cam_id, None)
                             await coordinator.stop_tls_proxy(cam_id)
                             coordinator.stream_fell_back[cam_id] = True
                             continue  # try next candidate (REMOTE)
@@ -1128,6 +1141,14 @@ async def try_live_connection_inner(
                     and coordinator.live_connections.get(cam_id) is published_result
                 ):
                     coordinator.live_connections.pop(cam_id, None)
+                # This candidate's PUT /connection succeeded (that's the only
+                # place _quality_effective_inst gets written) but never became
+                # a working session — drop the recorded inst along with the
+                # rest of this half-open state so BoschVideoQualitySelect's
+                # get_quality_remote_fallback_active() doesn't read a stale
+                # value from an attempt that was cleaned up, not the actually
+                # active session (bug-hunt finding, 2026-07-20).
+                coordinator._quality_effective_inst.pop(cam_id, None)
                 coordinator.stream_warming.discard(cam_id)
                 coordinator.get_session(cam_id).warming_started = float("-inf")
                 # Wake any waiter (recorder.py's start_recorder) immediately

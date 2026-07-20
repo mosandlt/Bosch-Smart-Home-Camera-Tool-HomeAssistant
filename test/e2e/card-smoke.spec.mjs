@@ -3083,6 +3083,99 @@ test("privacy badge: last-snapshot by default, last-event when configured", asyn
   expect(r.eventText, "privacy_stale_source:event uses the last-event prefix").toContain("Last event:");
 });
 
+// 2026-07-20: quality-selector REMOTE-fallback caveat. Bosch's REMOTE proxy
+// rejects inst=4 ("low", ~1.9 Mbps) with a 400, so a REMOTE session clamps
+// to inst=2 (~7.5 Mbps) — select.py's get_quality_remote_fallback_active()
+// surfaces this as a `remote_fallback_active` attribute on the quality
+// select entity so the card can warn the user instead of silently showing
+// "Low" while streaming ~4x the promised bandwidth.
+test("quality section shows a remote-fallback hint only when the entity attribute is set", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const mkHass = (attrs) => ({ config: {}, language: "en", localize: () => "",
+      callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+        "select.test_video_quality": { state: "low", attributes: attrs, last_updated: "2026-01-01T00:00:00Z" },
+      } });
+    const run = async (attrs) => {
+      const card = document.createElement("bosch-camera-card");
+      card.setConfig({ camera_entity: "camera.test", quality_entity: "select.test_video_quality" });
+      card.hass = mkHass(attrs);
+      document.body.appendChild(card);
+      await new Promise((res) => setTimeout(res, 250));
+      card.hass = mkHass(attrs);   // re-push so _update runs
+      const hint = card.shadowRoot.getElementById("quality-remote-fallback-hint");
+      const visible = hint ? hint.style.display !== "none" : null;
+      card.remove();
+      return visible;
+    };
+    const withFallback = await run({ remote_fallback_active: true });
+    const withoutFallback = await run({});
+    return { withFallback, withoutFallback };
+  });
+  expect(r.withFallback, "hint shown when remote_fallback_active:true").toBe(true);
+  expect(r.withoutFallback, "hint hidden when the attribute is absent").toBe(false);
+});
+
+// 2026-07-20 (Thomas, follow-up): quality_entity was opt-in-only with no
+// default (unlike every sibling entity), so BoschCameraOverviewCard's
+// child tiles never got a Quality control at all — the overview's
+// per-camera setConfig calls never pass quality_entity. Now auto-derived
+// as select.<camera>_video_quality, same pattern as switch/audio/light/etc.
+test("quality select auto-derives select.<camera>_video_quality, reaching the overview's child tiles too", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card")
+    && !!customElements.get("bosch-camera-overview-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const mkHass = () => ({ config: {}, language: "en", localize: () => "",
+      callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+        "select.test_video_quality": { state: "auto", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      } });
+
+    const single = document.createElement("bosch-camera-card");
+    single.setConfig({ camera_entity: "camera.test" });
+    const singleDerived = single._entities.quality;
+    single.remove();
+
+    const overview = document.createElement("bosch-camera-overview-card");
+    overview.setConfig({ include: ["camera.test"] });
+    overview.hass = mkHass();
+    document.body.appendChild(overview);
+    await new Promise((res) => setTimeout(res, 250));
+    const childCard = overview.shadowRoot.querySelector("bosch-camera-card");
+    const overviewChildDerived = childCard ? childCard._entities.quality : null;
+    const qualitySection = childCard ? childCard.shadowRoot.getElementById("quality-section") : null;
+    const overviewChildQualityVisible = qualitySection ? qualitySection.style.display !== "none" : null;
+    overview.remove();
+
+    return { singleDerived, overviewChildDerived, overviewChildQualityVisible };
+  });
+  expect(r.singleDerived, "single card auto-derives the quality entity id").toBe("select.test_video_quality");
+  expect(r.overviewChildDerived, "overview's child tile independently auto-derives its own quality entity id").toBe("select.test_video_quality");
+  expect(r.overviewChildQualityVisible, "overview's child tile shows the quality section once the entity exists").toBe(true);
+});
+
+// 2026-07-20 follow-up bug-hunt: a plain `config.quality_entity || default`
+// fallback has no way to opt out — "", null, and unset are all equally
+// falsy and fall through to the auto-derived id. quality_entity: false must
+// be a real, distinct "disable this section" signal.
+test("quality_entity: false opts out of the auto-derived default", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(() => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", quality_entity: false });
+    const derived = card._entities.quality;
+    card.remove();
+    return derived;
+  });
+  expect(r, "quality_entity:false must produce null, not the auto-derived default").toBe(null);
+});
+
 // ── Dead-WebRTC-track → sticky HLS fallback (2026-06-23) ───────────────────────
 // Regression for the "VERBINDE↔LIVE" flip on the iOS Companion app / cellular
 // CGNAT: a WebRTC track arrives (ontrack fires, badge "Live") but never decodes a
