@@ -149,7 +149,17 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.12";
+const CARD_VERSION = "14.1.14";
+
+// Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
+// (_webrtcConnectTimeoutMs) and by both editors' display value — so the
+// number input always shows the actual effective timeout, not a stale raw
+// out-of-range value from hand-edited YAML.
+function clampWebrtcTimeoutMsForDisplay(raw) {
+  const n = Number(raw);
+  if (raw === undefined || raw === null || !Number.isFinite(n)) return 5000;
+  return Math.min(30000, Math.max(1000, Math.round(n)));
+}
 
 // Version banner in the browser console at module load — same convention as
 // other custom cards (apexcharts-card, multiple-entity-row, …) so the
@@ -376,6 +386,10 @@ const CARD_I18N = {
     ed_h_advanced: "Advanced",
     ed_border_radius: "Corner radius (CSS, e.g. 16px)",
     ed_box_shadow: "Box shadow (CSS)",
+    ed_disable_webrtc: "Disable WebRTC (HLS only)",
+    ed_disable_webrtc_hint: "Always use HLS, skip the WebRTC connect attempt entirely — for setups where WebRTC (e.g. over a VPN) never works reliably.",
+    ed_webrtc_timeout: "WebRTC connect timeout (ms)",
+    ed_webrtc_timeout_hint: "How long to wait for WebRTC before falling back to HLS. Lower for a faster fallback on unreliable connections.",
     ed_show_motion_zones: "Show motion-zone overlay",
     ed_fs_auto_hide: "Auto-hide fullscreen controls after idle",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
@@ -643,6 +657,10 @@ const CARD_I18N = {
     ed_h_advanced: "Erweitert",
     ed_border_radius: "Eckenradius (CSS, z.B. 16px)",
     ed_box_shadow: "Schlagschatten (CSS)",
+    ed_disable_webrtc: "WebRTC deaktivieren (nur HLS)",
+    ed_disable_webrtc_hint: "Immer HLS verwenden, WebRTC-Verbindungsversuch komplett überspringen — für Setups, bei denen WebRTC (z. B. über VPN) nie zuverlässig funktioniert.",
+    ed_webrtc_timeout: "WebRTC-Verbindungs-Timeout (ms)",
+    ed_webrtc_timeout_hint: "Wie lange auf WebRTC gewartet wird, bevor auf HLS zurückgefallen wird. Niedriger für schnelleren Fallback bei unzuverlässigen Verbindungen.",
     ed_show_motion_zones: "Bewegungszonen-Overlay anzeigen",
     ed_fs_auto_hide: "Vollbild-Bedienelemente bei Inaktivität automatisch ausblenden",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
@@ -874,6 +892,10 @@ const CARD_I18N = {
     ed_h_advanced: "Avanzado",
     ed_border_radius: "Radio de esquina (CSS, p. ej. 16px)",
     ed_box_shadow: "Sombra (CSS)",
+    ed_disable_webrtc: "Desactivar WebRTC (solo HLS)",
+    ed_disable_webrtc_hint: "Usar siempre HLS, omitiendo por completo el intento de conexión WebRTC — para configuraciones donde WebRTC (p. ej. por VPN) nunca funciona de forma fiable.",
+    ed_webrtc_timeout: "Tiempo de espera de conexión WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Cuánto esperar a WebRTC antes de recurrir a HLS. Reduce el valor para un cambio más rápido en conexiones poco fiables.",
     ed_show_motion_zones: "Mostrar superposición de zonas de movimiento",
     ed_fs_auto_hide: "Ocultar automáticamente los controles de pantalla completa tras inactividad",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
@@ -1104,6 +1126,10 @@ const CARD_I18N = {
     ed_h_advanced: "Avancé",
     ed_border_radius: "Rayon des coins (CSS, p. ex. 16px)",
     ed_box_shadow: "Ombre portée (CSS)",
+    ed_disable_webrtc: "Désactiver WebRTC (HLS uniquement)",
+    ed_disable_webrtc_hint: "Toujours utiliser HLS, en ignorant complètement la tentative de connexion WebRTC — pour les configurations où WebRTC (par ex. via VPN) ne fonctionne jamais de manière fiable.",
+    ed_webrtc_timeout: "Délai de connexion WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Durée d'attente de WebRTC avant de basculer vers HLS. Réduisez pour un repli plus rapide sur les connexions peu fiables.",
     ed_show_motion_zones: "Afficher la superposition des zones de mouvement",
     ed_fs_auto_hide: "Masquer automatiquement les commandes plein écran après inactivité",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
@@ -1334,6 +1360,10 @@ const CARD_I18N = {
     ed_h_advanced: "Avanzate",
     ed_border_radius: "Raggio angoli (CSS, es. 16px)",
     ed_box_shadow: "Ombra (CSS)",
+    ed_disable_webrtc: "Disattiva WebRTC (solo HLS)",
+    ed_disable_webrtc_hint: "Usa sempre HLS, saltando completamente il tentativo di connessione WebRTC — per configurazioni in cui WebRTC (ad es. tramite VPN) non funziona mai in modo affidabile.",
+    ed_webrtc_timeout: "Timeout di connessione WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Quanto attendere WebRTC prima di passare a HLS. Riduci per un fallback più rapido su connessioni inaffidabili.",
     ed_show_motion_zones: "Mostra overlay zone di movimento",
     ed_fs_auto_hide: "Nascondi automaticamente i controlli a schermo intero dopo inattività",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
@@ -1564,6 +1594,10 @@ const CARD_I18N = {
     ed_h_advanced: "Geavanceerd",
     ed_border_radius: "Hoekradius (CSS, bijv. 16px)",
     ed_box_shadow: "Slagschaduw (CSS)",
+    ed_disable_webrtc: "WebRTC uitschakelen (alleen HLS)",
+    ed_disable_webrtc_hint: "Altijd HLS gebruiken, de WebRTC-verbindingspoging volledig overslaan — voor situaties waarin WebRTC (bijv. via VPN) nooit betrouwbaar werkt.",
+    ed_webrtc_timeout: "WebRTC-verbindingstimeout (ms)",
+    ed_webrtc_timeout_hint: "Hoe lang op WebRTC wachten voordat wordt teruggevallen op HLS. Verlaag voor een snellere terugval bij onbetrouwbare verbindingen.",
     ed_show_motion_zones: "Bewegingszone-overlay tonen",
     ed_fs_auto_hide: "Volledig scherm-bediening automatisch verbergen bij inactiviteit",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
@@ -1794,6 +1828,10 @@ const CARD_I18N = {
     ed_h_advanced: "Zaawansowane",
     ed_border_radius: "Promień zaokrąglenia (CSS, np. 16px)",
     ed_box_shadow: "Cień (CSS)",
+    ed_disable_webrtc: "Wyłącz WebRTC (tylko HLS)",
+    ed_disable_webrtc_hint: "Zawsze używaj HLS, całkowicie pomijając próbę połączenia WebRTC — dla konfiguracji, w których WebRTC (np. przez VPN) nigdy nie działa niezawodnie.",
+    ed_webrtc_timeout: "Limit czasu połączenia WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Jak długo czekać na WebRTC przed przełączeniem na HLS. Zmniejsz dla szybszego przełączenia przy niestabilnych połączeniach.",
     ed_show_motion_zones: "Pokaż nakładkę stref ruchu",
     ed_fs_auto_hide: "Automatycznie ukrywaj elementy sterujące pełnego ekranu po bezczynności",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
@@ -2024,6 +2062,10 @@ const CARD_I18N = {
     ed_h_advanced: "Avançado",
     ed_border_radius: "Raio dos cantos (CSS, ex. 16px)",
     ed_box_shadow: "Sombra (CSS)",
+    ed_disable_webrtc: "Desativar WebRTC (apenas HLS)",
+    ed_disable_webrtc_hint: "Usar sempre HLS, ignorando completamente a tentativa de ligação WebRTC — para configurações em que o WebRTC (por ex. via VPN) nunca funciona de forma fiável.",
+    ed_webrtc_timeout: "Tempo limite de ligação WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Quanto tempo esperar pelo WebRTC antes de recorrer ao HLS. Reduza para um recurso mais rápido em ligações pouco fiáveis.",
     ed_show_motion_zones: "Mostrar sobreposição de zonas de movimento",
     ed_fs_auto_hide: "Ocultar automaticamente os controlos de ecrã inteiro após inatividade",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
@@ -2254,6 +2296,10 @@ const CARD_I18N = {
     ed_h_advanced: "Дополнительно",
     ed_border_radius: "Радиус скругления (CSS, напр. 16px)",
     ed_box_shadow: "Тень (CSS)",
+    ed_disable_webrtc: "Отключить WebRTC (только HLS)",
+    ed_disable_webrtc_hint: "Всегда использовать HLS, полностью пропуская попытку подключения WebRTC — для случаев, когда WebRTC (например, через VPN) никогда не работает надёжно.",
+    ed_webrtc_timeout: "Таймаут подключения WebRTC (мс)",
+    ed_webrtc_timeout_hint: "Сколько ждать WebRTC перед переключением на HLS. Уменьшите значение для более быстрого переключения при нестабильном соединении.",
     ed_show_motion_zones: "Показывать зоны движения",
     ed_fs_auto_hide: "Автоматически скрывать элементы управления в полноэкранном режиме при бездействии",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
@@ -2484,6 +2530,10 @@ const CARD_I18N = {
     ed_h_advanced: "Додатково",
     ed_border_radius: "Радіус заокруглення (CSS, напр. 16px)",
     ed_box_shadow: "Тінь (CSS)",
+    ed_disable_webrtc: "Вимкнути WebRTC (лише HLS)",
+    ed_disable_webrtc_hint: "Завжди використовувати HLS, повністю пропускаючи спробу з'єднання WebRTC — для налаштувань, де WebRTC (наприклад, через VPN) ніколи не працює надійно.",
+    ed_webrtc_timeout: "Тайм-аут з'єднання WebRTC (мс)",
+    ed_webrtc_timeout_hint: "Скільки чекати на WebRTC перед переходом на HLS. Зменшіть значення для швидшого переходу при нестабільному з'єднанні.",
     ed_show_motion_zones: "Показувати зони руху",
     ed_fs_auto_hide: "Автоматично приховувати елементи керування на весь екран при бездіяльності",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
@@ -2714,6 +2764,10 @@ const CARD_I18N = {
     ed_h_advanced: "高级",
     ed_border_radius: "圆角半径（CSS，如 16px）",
     ed_box_shadow: "阴影（CSS）",
+    ed_disable_webrtc: "禁用 WebRTC（仅 HLS）",
+    ed_disable_webrtc_hint: "始终使用 HLS，完全跳过 WebRTC 连接尝试——适用于 WebRTC（例如通过 VPN）从不可靠工作的场景。",
+    ed_webrtc_timeout: "WebRTC 连接超时（毫秒）",
+    ed_webrtc_timeout_hint: "在回退到 HLS 之前等待 WebRTC 的时间。降低此值可在不稳定的连接上更快回退。",
     ed_show_motion_zones: "显示移动区域叠加",
     ed_fs_auto_hide: "全屏时空闲后自动隐藏控件",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
@@ -3231,6 +3285,16 @@ class BoschCameraCard extends HTMLElement {
       // the idle watcher (_wireFsAutoHide/_fsIdleTimer) is never armed at
       // all, so no background timer ticks for cards that don't want it.
       fullscreen_auto_hide_controls: config.fullscreen_auto_hide_controls !== false,
+      // WebRTC connect escape hatches (2026-07-19, forum 998974/42): some
+      // remote setups (e.g. WireGuard) never get a usable WebRTC path, so
+      // the attempt is pure wasted latency on every stream start —
+      // disable_webrtc skips it entirely. webrtc_connect_timeout_ms tunes
+      // how long to wait before falling back to HLS (see _startWebRTC's
+      // default of 5000ms and the clamping in _webrtcConnectTimeoutMs()).
+      disable_webrtc:              config.disable_webrtc === true,
+      webrtc_connect_timeout_ms:   typeof config.webrtc_connect_timeout_ms === "number"
+        ? config.webrtc_connect_timeout_ms
+        : undefined,
     };
     // Bug found by a 2026-07-13 bug-hunt agent: _syncFsAutoHide() is normally
     // only invoked from _updateFullscreenButtonState() on an actual fullscreen
@@ -3677,6 +3741,25 @@ class BoschCameraCard extends HTMLElement {
   // (audio_default on/off). The pill still toggles THIS browser's mute locally.
   _audioDecoupled() {
     return this._useCardAudio() || this._audioDefaultMode() !== "backend";
+  }
+  // 2026-07-19 (forum 998974/42): user-controllable escape hatches for the
+  // WebRTC connect attempt. Some remote setups (e.g. WireGuard) reliably
+  // never get a usable WebRTC path — for them the whole attempt is pure
+  // wasted latency on every stream start, no matter how the timeout is
+  // tuned. `disable_webrtc` skips straight to HLS, same as the existing
+  // `_preferHlsThisSession`/`_remoteSkipWebRTC` mechanisms but as an
+  // explicit, permanent user choice rather than runtime detection.
+  _disableWebRTC() {
+    return this._config?.disable_webrtc === true;
+  }
+  // `webrtc_connect_timeout_ms`: how long to wait for a track before
+  // falling back to HLS (see _startWebRTC). Validated + clamped to a sane
+  // range so a typo'd config value can't produce a 0ms/negative timeout
+  // (instant, spurious fallback) or an absurdly long one (users appear
+  // stuck on a black screen). Falls back to the default when unset,
+  // non-numeric, or out of range.
+  _webrtcConnectTimeoutMs() {
+    return clampWebrtcTimeoutMsForDisplay(this._config?.webrtc_connect_timeout_ms);
   }
   // Per-camera localStorage keys for the decoupled volume/mute prefs. Were
   // global ("bosch_card_volume"/"bosch_card_audio_on") → muting one camera
@@ -7998,7 +8081,15 @@ class BoschCameraCard extends HTMLElement {
     // ZERO frames (the dead-track watchdog tripped — iOS/CGNAT, HA-core #158178).
     // Re-attempting WebRTC just loops the same dark transport, so skip straight to
     // HLS for the rest of this mount. Reset on a fresh connectedCallback. 2026-06-23.
-    if (this._preferHlsThisSession) {
+    //
+    // disable_webrtc: an explicit, permanent user opt-out (config, not
+    // runtime detection) for setups where WebRTC never has a usable path
+    // (e.g. WireGuard) — the attempt itself is pure wasted latency on
+    // every single stream start for these users, no timeout tuning fixes
+    // that. 2026-07-19.
+    if (this._disableWebRTC()) {
+      console.debug("bosch-camera-card: disable_webrtc configured — skipping WebRTC, going straight to HLS");
+    } else if (this._preferHlsThisSession) {
       console.debug("bosch-camera-card: sticky HLS this session — skipping WebRTC, going straight to HLS");
     } else try {
       try {
@@ -8500,13 +8591,23 @@ class BoschCameraCard extends HTMLElement {
     await new Promise((resolve, reject) => {
       webrtcResolve = resolve;
       webrtcReject = reject;
-      // Same 5 s attempt for all paths. True-remote failures (CGNAT/no path)
-      // fire `iceconnectionstatechange: failed` well before 5 s, so HLS kicks
-      // in fast regardless. The 2.5 s shortcut was too aggressive: at home via
-      // an external URL (Cloudflare tunnel / Nabu Casa) ICE still finds local
-      // candidates — offer round-trip + ICE checks easily takes 2–3 s, hitting
-      // the old 2.5 s wall and forcing HLS unnecessarily. 2026-06-24.
-      const attemptMs = 5000;
+      // Default stays a flat 5 s for all paths. A remote/WireGuard user
+      // report (2026-07-19, forum 998974/42) flagged the wasted 5 s wait on
+      // every stream start for setups that never get a usable WebRTC path;
+      // a lower global default was tried but reverted (bug-hunt 2026-07-20)
+      // since a shorter timeout doesn't make ICE succeed more often — it
+      // only fails faster — while it DOES shave real margin off the
+      // documented Cloudflare-tunnel/Nabu-Casa case below. True-remote
+      // failures (CGNAT/no path) fire `iceconnectionstatechange: failed`
+      // well before 5 s regardless. The 2.5 s shortcut tried even earlier
+      // was too aggressive: at home via an external URL (Cloudflare tunnel /
+      // Nabu Casa) ICE still finds local candidates — offer round-trip +
+      // ICE checks easily takes 2–3 s, hitting the old 2.5 s wall and
+      // forcing HLS unnecessarily. The right fix for the WireGuard-style
+      // case is per-user, not a global default: `disable_webrtc` skips the
+      // attempt entirely, and `webrtc_connect_timeout_ms` tunes it, both
+      // configurable per card (see _startLiveVideo).
+      const attemptMs = this._webrtcConnectTimeoutMs();
       const timeout = setTimeout(() => reject(new Error("WebRTC: no track within " + attemptMs + "ms")), attemptMs);
       webrtcTimeout = timeout;
       // A track may already have arrived during the awaits above — the single
@@ -12161,6 +12262,12 @@ class BoschCameraCardEditor extends HTMLElement {
         <label>${this._t("ed_box_shadow")}
           <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />
         </label>
+        ${chk("disable_webrtc", this._t("ed_disable_webrtc"), false)}
+        <span class="hint">${this._t("ed_disable_webrtc_hint")}</span>
+        <label>${this._t("ed_webrtc_timeout")}
+          <input type="number" name="webrtc_connect_timeout_ms" min="1000" max="30000" step="500" value="${clampWebrtcTimeoutMsForDisplay(cfg.webrtc_connect_timeout_ms)}" />
+          <span class="hint">${this._t("ed_webrtc_timeout_hint")}</span>
+        </label>
       </div>`;
     const root = this.shadowRoot;
     const fire = (patch) => {
@@ -12184,6 +12291,11 @@ class BoschCameraCardEditor extends HTMLElement {
     root.querySelector('input[name="fullscreen_auto_hide_controls"]')?.addEventListener("change", e => fire({ fullscreen_auto_hide_controls: e.target.checked }));
     root.querySelector('input[name="border_radius"]')?.addEventListener("change", e => fire({ border_radius: e.target.value || undefined }));
     root.querySelector('input[name="box_shadow"]')?.addEventListener("change", e => fire({ box_shadow: e.target.value || undefined }));
+    root.querySelector('input[name="disable_webrtc"]')?.addEventListener("change", e => fire({ disable_webrtc: e.target.checked }));
+    root.querySelector('input[name="webrtc_connect_timeout_ms"]')?.addEventListener("change", e => {
+      const n = parseInt(e.target.value, 10);
+      fire({ webrtc_connect_timeout_ms: Number.isFinite(n) ? n : undefined });
+    });
     root.querySelector('select[name="autoplay"]').addEventListener("change", e => fire({ auto_play: e.target.value || undefined }));
   }
 }
@@ -12298,6 +12410,14 @@ class BoschCameraOverviewCard extends HTMLElement {
       pan_overlay:          ["auto", "always", "never"].includes(config.pan_overlay) ? config.pan_overlay : "auto",
       hide_redundant_privacy: config.hide_redundant_privacy !== false,
       use_card_audio_settings: config.use_card_audio_settings === true,
+      // WebRTC connect escape hatches (2026-07-19, forum 998974/42),
+      // propagated to every tile via card_defaults so the whole overview
+      // behaves the same for remote/VPN setups where the default 4s
+      // attempt either never succeeds or needs a different bound.
+      disable_webrtc: config.disable_webrtc === true,
+      webrtc_connect_timeout_ms: typeof config.webrtc_connect_timeout_ms === "number"
+        ? config.webrtc_connect_timeout_ms
+        : undefined,
       // Per-card geometry (issue #21). Applied as --bosch-card-* on the overview
       // host, which cascades into the grid cells AND the child cards (CSS custom
       // properties cross shadow boundaries). Default null = signature look.
@@ -12330,6 +12450,8 @@ class BoschCameraOverviewCard extends HTMLElement {
       pan_overlay: this._config.pan_overlay,
       hide_redundant_privacy: this._config.hide_redundant_privacy,
       use_card_audio_settings: this._config.use_card_audio_settings,
+      disable_webrtc: this._config.disable_webrtc,
+      webrtc_connect_timeout_ms: this._config.webrtc_connect_timeout_ms,
       ...this._config.card_defaults,
     };
     // Apple-style class on overview host gates the CSS that drops the
@@ -13154,6 +13276,12 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
         <label>${this._t("ed_box_shadow")}
           <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />
         </label>
+        ${chk("disable_webrtc", this._t("ed_disable_webrtc"), false)}
+        <span class="hint">${this._t("ed_disable_webrtc_hint")}</span>
+        <label>${this._t("ed_webrtc_timeout")}
+          <input type="number" name="webrtc_connect_timeout_ms" min="1000" max="30000" step="500" value="${clampWebrtcTimeoutMsForDisplay(cfg.webrtc_connect_timeout_ms)}" />
+          <span class="hint">${this._t("ed_webrtc_timeout_hint")}</span>
+        </label>
       </div>`;
     const colSel = this.shadowRoot.querySelector('select[name="columns"]');
     const minwRow = this.shadowRoot.getElementById("minw-row");
@@ -13184,6 +13312,11 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
     this.shadowRoot.querySelector('select[name="pan_overlay"]')?.addEventListener("change", e => this._fire({ ...this._config, pan_overlay: e.target.value }));
     this.shadowRoot.querySelector('input[name="border_radius"]').addEventListener("change", e => this._fire({ ...this._config, border_radius: e.target.value || undefined }));
     this.shadowRoot.querySelector('input[name="box_shadow"]').addEventListener("change", e => this._fire({ ...this._config, box_shadow: e.target.value || undefined }));
+    onChk("disable_webrtc", "disable_webrtc");
+    this.shadowRoot.querySelector('input[name="webrtc_connect_timeout_ms"]')?.addEventListener("change", e => {
+      const n = parseInt(e.target.value, 10);
+      this._fire({ ...this._config, webrtc_connect_timeout_ms: Number.isFinite(n) ? n : undefined });
+    });
     this.shadowRoot.querySelector('select[name="theme"]').addEventListener("change", e => this._fire({ ...this._config, theme: e.target.value }));
     this.shadowRoot.querySelector('select[name="modus"]').addEventListener("change", e => this._fire({ ...this._config, mode: e.target.value }));
   }

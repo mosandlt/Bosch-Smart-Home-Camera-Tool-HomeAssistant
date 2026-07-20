@@ -95,7 +95,45 @@ async def start_tls_proxy(
             server_cache.pop(cam_id, None)
             port_cache.pop(cam_id, None)
         try:
+            # Mirror stop_tls_proxy's full cleanup (close + close_clients +
+            # wait_closed), not just close() — a bare close() only stops
+            # accepting NEW connections, leaving any already-accepted
+            # clients (and their _handle_client handler tasks) running
+            # indefinitely. On real hardware this leaks sockets/tasks every
+            # time the circuit breaker trips; under pytest-asyncio's
+            # function-scoped event loop it could race the loop being
+            # closed right after the test returns, occasionally corrupting
+            # an unrelated later fixture's teardown under heavy parallel
+            # load (found via a pytest-xdist-only flake, 2026-07-19).
+            #
+            # BUT: asyncio.Server.close_clients() calls transport.close(),
+            # not .abort() — if a client's write buffer isn't already empty
+            # (realistic on the CAM→C pipe, whose idle_timeout=None
+            # deliberately tolerates sparse/bursty video data) and the peer
+            # has stopped reading, close() just marks the transport closing
+            # and waits for the buffer to drain via a writable callback that
+            # may never fire for a genuinely stalled/wedged client — exactly
+            # the condition most likely to coincide with the circuit breaker
+            # tripping in the first place. Without a bound, wait_closed()
+            # could hang forever and on_proxy_died would never fire — silently
+            # worse than the leak this was fixing, since the coordinator
+            # would never learn it needs to rebuild the session. Bounded
+            # per a bug-hunt agent's finding, 2026-07-19 (same latent gap
+            # exists in stop_tls_proxy below; not touched here to keep this
+            # fix minimal, flagged for a follow-up).
             server.close()
+            server.close_clients()
+            try:
+                async with asyncio.timeout(5):
+                    await server.wait_closed()
+            except TimeoutError:
+                _LOGGER.debug(
+                    "TLS proxy %s: wait_closed() during circuit-breaker did "
+                    "not complete within 5s (a stalled client's write buffer "
+                    "never drained) — proceeding anyway so on_proxy_died "
+                    "still fires",
+                    cam_id[:8],
+                )
         except Exception as close_exc:  # best-effort close, callback below still fires
             _LOGGER.debug(
                 "TLS proxy %s: server.close() during circuit-breaker raised — %s",
@@ -230,10 +268,14 @@ async def start_tls_proxy(
                     fail_count,
                     now - first_fail_at,
                 )
-                # Awaited inline: server.close() is non-blocking and
-                # on_proxy_died() itself only schedules a coordinator task
-                # (never awaits), so this can't stall or deadlock this
-                # handler's own cleanup.
+                # Awaited inline. _fire_on_proxy_died() now also awaits
+                # wait_closed() (bounded by its own 5s timeout, see its
+                # docstring comment) before firing on_proxy_died(), so this
+                # can add up to ~5s of latency to this handler's own
+                # cleanup in the worst case — acceptable since the circuit
+                # breaker firing at all already means the connection is
+                # dead, and the bound guarantees this handler still
+                # returns.
                 await _fire_on_proxy_died()
             return
 
@@ -314,10 +356,22 @@ async def stop_tls_proxy(
     leaves any already-accepted client (FFmpeg/go2rtc) connections open.
     `Server.wait_closed()` blocks until BOTH the server is closed AND every
     active connection has dropped, so without also actively closing those
-    connections (`close_clients()`, Python 3.13+), this would hang forever
+    connections (`close_clients()`, Python 3.13+) this would hang forever
     whenever a stream is actively connected at stop time — turning a
     routine teardown (switch off, reconfigure, config-entry unload) into a
     deadlock.
+
+    `close_clients()` reduces but does not eliminate that risk: it calls
+    `transport.close()`, not `.abort()` — a client whose write buffer
+    isn't already empty (realistic on the CAM→C pipe, whose
+    `idle_timeout=None` deliberately tolerates sparse/bursty video data)
+    only has its `connection_lost` deferred until the buffer drains, which
+    never happens if the peer has stopped reading (a genuinely stalled/
+    wedged client, exactly the state most likely at teardown time). Bounded
+    with a timeout so a stuck client can never turn a routine
+    switch-off/reconfigure/unload into an indefinite hang (bug-hunt
+    finding, 2026-07-19 — found while fixing the same gap in the
+    circuit-breaker path, see `_fire_on_proxy_died` above).
     """
     port_cache.pop(cam_id, None)
     server = server_cache.pop(cam_id, None)
@@ -325,7 +379,16 @@ async def stop_tls_proxy(
         try:
             server.close()
             server.close_clients()
-            await server.wait_closed()
+            try:
+                async with asyncio.timeout(5):
+                    await server.wait_closed()
+            except TimeoutError:
+                _LOGGER.debug(
+                    "TLS proxy for %s: wait_closed() did not complete "
+                    "within 5s (a stalled client's write buffer never "
+                    "drained) — proceeding anyway",
+                    cam_id[:8],
+                )
             _LOGGER.debug("TLS proxy for %s: server closed", cam_id[:8])
         except Exception:  # noqa: S110 — best-effort server close during stop, failure non-actionable
             pass

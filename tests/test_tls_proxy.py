@@ -386,6 +386,36 @@ class TestStartStopLifecycle:
         assert CAM_ID not in server_cache
         bad_srv.close.assert_called_once()
 
+    async def test_stop_wait_closed_hang_does_not_block_forever(self):
+        """2026-07-19 bug-hunt finding: close_clients() calls
+        transport.close(), not .abort() — a client with an unflushed write
+        buffer whose peer stopped reading never gets connection_lost fired,
+        so wait_closed() can hang forever without a bound. A stuck client
+        must never turn a routine switch-off/reconfigure/unload into an
+        indefinite hang."""
+        port_cache, server_cache = _caches()
+        stuck_srv = MagicMock()
+        stuck_srv.close = MagicMock()
+        stuck_srv.close_clients = MagicMock()
+
+        async def _hangs_forever():
+            await asyncio.sleep(3600)
+
+        stuck_srv.wait_closed = _hangs_forever
+        server_cache[CAM_ID] = stuck_srv
+        port_cache[CAM_ID] = 9999
+
+        t0 = time.monotonic()
+        await stop_tls_proxy(CAM_ID, port_cache, server_cache)
+        elapsed = time.monotonic() - t0
+
+        assert CAM_ID not in port_cache
+        assert CAM_ID not in server_cache
+        assert elapsed < 7.0, (
+            f"stop_tls_proxy took {elapsed:.1f}s — the wait_closed() "
+            f"timeout bound did not actually cap the wait"
+        )
+
     async def test_stop_all_clears_everything(self):
         port_cache, server_cache = _caches()
         ctx = ssl.create_default_context()
@@ -478,6 +508,138 @@ class TestOnProxyDiedCallback:
         )
         assert CAM_ID not in server_cache, "circuit breaker must close the server"
         assert CAM_ID not in port_cache
+
+    async def test_circuit_breaker_fully_closes_clients_before_callback(self):
+        """2026-07-19: a bare server.close() only stops accepting NEW
+        connections — it leaves already-accepted clients (and their
+        _handle_client handler tasks) running indefinitely, exactly the
+        leak stop_tls_proxy's own docstring warns about. The circuit
+        breaker must do the SAME full cleanup stop_tls_proxy does
+        (close + close_clients + wait_closed) BEFORE firing on_proxy_died,
+        not just close(). Verified by spying on the real server's methods
+        (not a mock — the actual close/close_clients/wait_closed sequence
+        matters here, a pure mock would prove nothing about ordering
+        relative to the real accepted connections)."""
+        port_cache, server_cache = _caches()
+        ctx = ssl.create_default_context()
+        called = []
+        close_order: list[str] = []
+
+        async def _always_refused(host, port, **kwargs):
+            raise ConnectionRefusedError("camera offline")
+
+        with patch.object(_tls_proxy_mod.asyncio, "open_connection", _always_refused):
+            await start_tls_proxy(
+                ctx,
+                CAM_ID,
+                "192.0.2.1",
+                443,
+                port_cache,
+                server_cache,
+                on_proxy_died=lambda: (
+                    close_order.append("callback"),
+                    called.append(True),
+                ),
+            )
+            proxy_port = port_cache[CAM_ID]
+            server = server_cache[CAM_ID]
+
+            real_close_clients = server.close_clients
+            real_wait_closed = server.wait_closed
+
+            def _spy_close_clients():
+                close_order.append("close_clients")
+                return real_close_clients()
+
+            async def _spy_wait_closed():
+                close_order.append("wait_closed")
+                return await real_wait_closed()
+
+            server.close_clients = _spy_close_clients
+            server.wait_closed = _spy_wait_closed
+
+            for _ in range(5):
+                try:
+                    await _raw_client_connect(proxy_port)
+                except OSError:
+                    break
+                await asyncio.sleep(0.02)
+
+            deadline = time.monotonic() + 2.0
+            while not called and time.monotonic() < deadline:
+                await asyncio.sleep(0.02)
+
+        assert called == [True]
+        assert "close_clients" in close_order, (
+            "circuit breaker must call close_clients(), not just close() — "
+            "otherwise already-accepted clients are left dangling"
+        )
+        assert "wait_closed" in close_order, (
+            "circuit breaker must await wait_closed() before firing the callback"
+        )
+        # wait_closed must complete BEFORE the callback fires — the whole
+        # point is the coordinator only gets notified once cleanup is done.
+        assert close_order.index("wait_closed") < close_order.index("callback"), (
+            "on_proxy_died fired before the server was fully closed"
+        )
+
+    async def test_wait_closed_hang_does_not_block_the_callback_forever(self):
+        """2026-07-19 bug-hunt finding: asyncio.Server.close_clients() calls
+        transport.close(), not .abort() — a client with an unflushed write
+        buffer whose peer stopped reading (realistic on the CAM→C pipe,
+        idle_timeout=None) never gets its connection_lost fired, so
+        wait_closed() can hang forever. Without a bound, on_proxy_died
+        would never fire and the coordinator would never learn it needs to
+        rebuild — silently worse than the leak this whole fix was closing.
+        Pin: a genuinely-hanging wait_closed() must still let the callback
+        fire, bounded by the circuit breaker's own timeout."""
+        port_cache, server_cache = _caches()
+        ctx = ssl.create_default_context()
+        called = []
+
+        async def _always_refused(host, port, **kwargs):
+            raise ConnectionRefusedError("camera offline")
+
+        with patch.object(_tls_proxy_mod.asyncio, "open_connection", _always_refused):
+            await start_tls_proxy(
+                ctx,
+                CAM_ID,
+                "192.0.2.1",
+                443,
+                port_cache,
+                server_cache,
+                on_proxy_died=lambda: called.append(True),
+            )
+            proxy_port = port_cache[CAM_ID]
+            server = server_cache[CAM_ID]
+
+            # Simulate a stalled client whose write buffer never drains —
+            # wait_closed() would otherwise never return.
+            async def _hangs_forever():
+                await asyncio.sleep(3600)
+
+            server.wait_closed = _hangs_forever
+
+            for _ in range(5):
+                try:
+                    await _raw_client_connect(proxy_port)
+                except OSError:
+                    break
+                await asyncio.sleep(0.02)
+
+            t0 = time.monotonic()
+            deadline = t0 + 8.0
+            while not called and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            elapsed = time.monotonic() - t0
+
+        assert called == [True], (
+            "on_proxy_died must still fire even if wait_closed() hangs forever"
+        )
+        assert elapsed < 7.0, (
+            f"callback took {elapsed:.1f}s — the wait_closed() timeout bound "
+            f"did not actually cap the wait"
+        )
 
     async def test_exception_in_callback_is_swallowed(self):
         port_cache, server_cache = _caches()

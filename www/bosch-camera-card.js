@@ -8,7 +8,13 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.12";
+const CARD_VERSION = "14.1.14";
+
+function clampWebrtcTimeoutMsForDisplay(raw) {
+  const n = Number(raw);
+  if (raw === undefined || raw === null || !Number.isFinite(n)) return 5e3;
+  return Math.min(3e4, Math.max(1e3, Math.round(n)));
+}
 
 console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
 
@@ -181,6 +187,10 @@ const CARD_I18N = {
     ed_h_advanced: "Advanced",
     ed_border_radius: "Corner radius (CSS, e.g. 16px)",
     ed_box_shadow: "Box shadow (CSS)",
+    ed_disable_webrtc: "Disable WebRTC (HLS only)",
+    ed_disable_webrtc_hint: "Always use HLS, skip the WebRTC connect attempt entirely — for setups where WebRTC (e.g. over a VPN) never works reliably.",
+    ed_webrtc_timeout: "WebRTC connect timeout (ms)",
+    ed_webrtc_timeout_hint: "How long to wait for WebRTC before falling back to HLS. Lower for a faster fallback on unreliable connections.",
     ed_show_motion_zones: "Show motion-zone overlay",
     ed_fs_auto_hide: "Auto-hide fullscreen controls after idle",
     accordion_notif_types: "Notification Types",
@@ -443,6 +453,10 @@ const CARD_I18N = {
     ed_h_advanced: "Erweitert",
     ed_border_radius: "Eckenradius (CSS, z.B. 16px)",
     ed_box_shadow: "Schlagschatten (CSS)",
+    ed_disable_webrtc: "WebRTC deaktivieren (nur HLS)",
+    ed_disable_webrtc_hint: "Immer HLS verwenden, WebRTC-Verbindungsversuch komplett überspringen — für Setups, bei denen WebRTC (z. B. über VPN) nie zuverlässig funktioniert.",
+    ed_webrtc_timeout: "WebRTC-Verbindungs-Timeout (ms)",
+    ed_webrtc_timeout_hint: "Wie lange auf WebRTC gewartet wird, bevor auf HLS zurückgefallen wird. Niedriger für schnelleren Fallback bei unzuverlässigen Verbindungen.",
     ed_show_motion_zones: "Bewegungszonen-Overlay anzeigen",
     ed_fs_auto_hide: "Vollbild-Bedienelemente bei Inaktivität automatisch ausblenden",
     accordion_notif_types: "Benachrichtigungs-Typen",
@@ -671,6 +685,10 @@ const CARD_I18N = {
     ed_h_advanced: "Avanzado",
     ed_border_radius: "Radio de esquina (CSS, p. ej. 16px)",
     ed_box_shadow: "Sombra (CSS)",
+    ed_disable_webrtc: "Desactivar WebRTC (solo HLS)",
+    ed_disable_webrtc_hint: "Usar siempre HLS, omitiendo por completo el intento de conexión WebRTC — para configuraciones donde WebRTC (p. ej. por VPN) nunca funciona de forma fiable.",
+    ed_webrtc_timeout: "Tiempo de espera de conexión WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Cuánto esperar a WebRTC antes de recurrir a HLS. Reduce el valor para un cambio más rápido en conexiones poco fiables.",
     ed_show_motion_zones: "Mostrar superposición de zonas de movimiento",
     ed_fs_auto_hide: "Ocultar automáticamente los controles de pantalla completa tras inactividad",
     accordion_notif_types: "Tipos de notificación",
@@ -899,6 +917,10 @@ const CARD_I18N = {
     ed_h_advanced: "Avancé",
     ed_border_radius: "Rayon des coins (CSS, p. ex. 16px)",
     ed_box_shadow: "Ombre portée (CSS)",
+    ed_disable_webrtc: "Désactiver WebRTC (HLS uniquement)",
+    ed_disable_webrtc_hint: "Toujours utiliser HLS, en ignorant complètement la tentative de connexion WebRTC — pour les configurations où WebRTC (par ex. via VPN) ne fonctionne jamais de manière fiable.",
+    ed_webrtc_timeout: "Délai de connexion WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Durée d'attente de WebRTC avant de basculer vers HLS. Réduisez pour un repli plus rapide sur les connexions peu fiables.",
     ed_show_motion_zones: "Afficher la superposition des zones de mouvement",
     ed_fs_auto_hide: "Masquer automatiquement les commandes plein écran après inactivité",
     accordion_notif_types: "Types de notification",
@@ -1127,6 +1149,10 @@ const CARD_I18N = {
     ed_h_advanced: "Avanzate",
     ed_border_radius: "Raggio angoli (CSS, es. 16px)",
     ed_box_shadow: "Ombra (CSS)",
+    ed_disable_webrtc: "Disattiva WebRTC (solo HLS)",
+    ed_disable_webrtc_hint: "Usa sempre HLS, saltando completamente il tentativo di connessione WebRTC — per configurazioni in cui WebRTC (ad es. tramite VPN) non funziona mai in modo affidabile.",
+    ed_webrtc_timeout: "Timeout di connessione WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Quanto attendere WebRTC prima di passare a HLS. Riduci per un fallback più rapido su connessioni inaffidabili.",
     ed_show_motion_zones: "Mostra overlay zone di movimento",
     ed_fs_auto_hide: "Nascondi automaticamente i controlli a schermo intero dopo inattività",
     accordion_notif_types: "Tipi di notifica",
@@ -1355,6 +1381,10 @@ const CARD_I18N = {
     ed_h_advanced: "Geavanceerd",
     ed_border_radius: "Hoekradius (CSS, bijv. 16px)",
     ed_box_shadow: "Slagschaduw (CSS)",
+    ed_disable_webrtc: "WebRTC uitschakelen (alleen HLS)",
+    ed_disable_webrtc_hint: "Altijd HLS gebruiken, de WebRTC-verbindingspoging volledig overslaan — voor situaties waarin WebRTC (bijv. via VPN) nooit betrouwbaar werkt.",
+    ed_webrtc_timeout: "WebRTC-verbindingstimeout (ms)",
+    ed_webrtc_timeout_hint: "Hoe lang op WebRTC wachten voordat wordt teruggevallen op HLS. Verlaag voor een snellere terugval bij onbetrouwbare verbindingen.",
     ed_show_motion_zones: "Bewegingszone-overlay tonen",
     ed_fs_auto_hide: "Volledig scherm-bediening automatisch verbergen bij inactiviteit",
     accordion_notif_types: "Meldingstypen",
@@ -1583,6 +1613,10 @@ const CARD_I18N = {
     ed_h_advanced: "Zaawansowane",
     ed_border_radius: "Promień zaokrąglenia (CSS, np. 16px)",
     ed_box_shadow: "Cień (CSS)",
+    ed_disable_webrtc: "Wyłącz WebRTC (tylko HLS)",
+    ed_disable_webrtc_hint: "Zawsze używaj HLS, całkowicie pomijając próbę połączenia WebRTC — dla konfiguracji, w których WebRTC (np. przez VPN) nigdy nie działa niezawodnie.",
+    ed_webrtc_timeout: "Limit czasu połączenia WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Jak długo czekać na WebRTC przed przełączeniem na HLS. Zmniejsz dla szybszego przełączenia przy niestabilnych połączeniach.",
     ed_show_motion_zones: "Pokaż nakładkę stref ruchu",
     ed_fs_auto_hide: "Automatycznie ukrywaj elementy sterujące pełnego ekranu po bezczynności",
     accordion_notif_types: "Typy powiadomień",
@@ -1811,6 +1845,10 @@ const CARD_I18N = {
     ed_h_advanced: "Avançado",
     ed_border_radius: "Raio dos cantos (CSS, ex. 16px)",
     ed_box_shadow: "Sombra (CSS)",
+    ed_disable_webrtc: "Desativar WebRTC (apenas HLS)",
+    ed_disable_webrtc_hint: "Usar sempre HLS, ignorando completamente a tentativa de ligação WebRTC — para configurações em que o WebRTC (por ex. via VPN) nunca funciona de forma fiável.",
+    ed_webrtc_timeout: "Tempo limite de ligação WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Quanto tempo esperar pelo WebRTC antes de recorrer ao HLS. Reduza para um recurso mais rápido em ligações pouco fiáveis.",
     ed_show_motion_zones: "Mostrar sobreposição de zonas de movimento",
     ed_fs_auto_hide: "Ocultar automaticamente os controlos de ecrã inteiro após inatividade",
     accordion_notif_types: "Tipos de notificação",
@@ -2039,6 +2077,10 @@ const CARD_I18N = {
     ed_h_advanced: "Дополнительно",
     ed_border_radius: "Радиус скругления (CSS, напр. 16px)",
     ed_box_shadow: "Тень (CSS)",
+    ed_disable_webrtc: "Отключить WebRTC (только HLS)",
+    ed_disable_webrtc_hint: "Всегда использовать HLS, полностью пропуская попытку подключения WebRTC — для случаев, когда WebRTC (например, через VPN) никогда не работает надёжно.",
+    ed_webrtc_timeout: "Таймаут подключения WebRTC (мс)",
+    ed_webrtc_timeout_hint: "Сколько ждать WebRTC перед переключением на HLS. Уменьшите значение для более быстрого переключения при нестабильном соединении.",
     ed_show_motion_zones: "Показывать зоны движения",
     ed_fs_auto_hide: "Автоматически скрывать элементы управления в полноэкранном режиме при бездействии",
     accordion_notif_types: "Типы уведомлений",
@@ -2267,6 +2309,10 @@ const CARD_I18N = {
     ed_h_advanced: "Додатково",
     ed_border_radius: "Радіус заокруглення (CSS, напр. 16px)",
     ed_box_shadow: "Тінь (CSS)",
+    ed_disable_webrtc: "Вимкнути WebRTC (лише HLS)",
+    ed_disable_webrtc_hint: "Завжди використовувати HLS, повністю пропускаючи спробу з'єднання WebRTC — для налаштувань, де WebRTC (наприклад, через VPN) ніколи не працює надійно.",
+    ed_webrtc_timeout: "Тайм-аут з'єднання WebRTC (мс)",
+    ed_webrtc_timeout_hint: "Скільки чекати на WebRTC перед переходом на HLS. Зменшіть значення для швидшого переходу при нестабільному з'єднанні.",
     ed_show_motion_zones: "Показувати зони руху",
     ed_fs_auto_hide: "Автоматично приховувати елементи керування на весь екран при бездіяльності",
     accordion_notif_types: "Типи сповіщень",
@@ -2495,6 +2541,10 @@ const CARD_I18N = {
     ed_h_advanced: "高级",
     ed_border_radius: "圆角半径（CSS，如 16px）",
     ed_box_shadow: "阴影（CSS）",
+    ed_disable_webrtc: "禁用 WebRTC（仅 HLS）",
+    ed_disable_webrtc_hint: "始终使用 HLS，完全跳过 WebRTC 连接尝试——适用于 WebRTC（例如通过 VPN）从不可靠工作的场景。",
+    ed_webrtc_timeout: "WebRTC 连接超时（毫秒）",
+    ed_webrtc_timeout_hint: "在回退到 HLS 之前等待 WebRTC 的时间。降低此值可在不稳定的连接上更快回退。",
     ed_show_motion_zones: "显示移动区域叠加",
     ed_fs_auto_hide: "全屏时空闲后自动隐藏控件",
     accordion_notif_types: "通知类型",
@@ -2847,7 +2897,9 @@ class BoschCameraCard extends HTMLElement {
       ai_description_overlay: config.ai_description_overlay !== false,
       ai_description_in_privacy: config.ai_description_in_privacy !== false,
       ai_description_overlay_timeout: config.ai_description_overlay_timeout === undefined ? 12 : Number(config.ai_description_overlay_timeout),
-      fullscreen_auto_hide_controls: config.fullscreen_auto_hide_controls !== false
+      fullscreen_auto_hide_controls: config.fullscreen_auto_hide_controls !== false,
+      disable_webrtc: config.disable_webrtc === true,
+      webrtc_connect_timeout_ms: typeof config.webrtc_connect_timeout_ms === "number" ? config.webrtc_connect_timeout_ms : undefined
     };
     if (this._inFullscreen && this._inFullscreen()) this._syncFsAutoHide(true);
     const newStorageKey = `bosch_cam_${config.camera_entity}`;
@@ -3115,6 +3167,12 @@ class BoschCameraCard extends HTMLElement {
   }
   _audioDecoupled() {
     return this._useCardAudio() || this._audioDefaultMode() !== "backend";
+  }
+  _disableWebRTC() {
+    return this._config?.disable_webrtc === true;
+  }
+  _webrtcConnectTimeoutMs() {
+    return clampWebrtcTimeoutMsForDisplay(this._config?.webrtc_connect_timeout_ms);
   }
   _cardVolKey() {
     return `bosch_card_volume_${this._entities?.camera || ""}`;
@@ -4352,7 +4410,9 @@ class BoschCameraCard extends HTMLElement {
     if (this._remoteSkipWebRTC) {
       console.debug("bosch-camera-card: remote endpoint — short WebRTC attempt, HLS fallback if it doesn't connect fast");
     }
-    if (this._preferHlsThisSession) {
+    if (this._disableWebRTC()) {
+      console.debug("bosch-camera-card: disable_webrtc configured — skipping WebRTC, going straight to HLS");
+    } else if (this._preferHlsThisSession) {
       console.debug("bosch-camera-card: sticky HLS this session — skipping WebRTC, going straight to HLS");
     } else try {
       try {
@@ -4712,7 +4772,7 @@ class BoschCameraCard extends HTMLElement {
     await new Promise((resolve, reject) => {
       webrtcResolve = resolve;
       webrtcReject = reject;
-      const attemptMs = 5e3;
+      const attemptMs = this._webrtcConnectTimeoutMs();
       const timeout = setTimeout(() => reject(new Error("WebRTC: no track within " + attemptMs + "ms")), attemptMs);
       webrtcTimeout = timeout;
       if (video.srcObject === remoteStream) {
@@ -7205,7 +7265,7 @@ class BoschCameraCardEditor extends HTMLElement {
     cams.sort();
     const sel = (label, name, val, opts) => `\n      <label>${label}\n        <select name="${name}">\n          ${opts.map(([v, l]) => `<option value="${v}" ${val === v ? "selected" : ""}>${l}</option>`).join("")}\n        </select>\n      </label>`;
     const chk = (key, label, def) => `\n      <label class="inline">\n        <input type="checkbox" name="${key}" ${cfg[key] ?? def ? "checked" : ""} />\n        <span>${label}</span>\n      </label>`;
-    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .row { display: flex; flex-direction: column; gap: 14px; padding: 18px; }\n        label {\n          font-size: 14px; color: var(--primary-text-color);\n          display: flex; flex-direction: column; gap: 4px;\n        }\n        label.inline { flex-direction: row; align-items: center; gap: 10px; }\n        select, input[type="text"] {\n          padding: 9px 10px; border-radius: 6px;\n          border: 1px solid var(--divider-color, rgba(120,120,128,.2));\n          background: var(--card-background-color, #fff);\n          color: var(--primary-text-color, #1c1c1e);\n          font: inherit; font-size: 14px;\n        }\n        select:focus, input:focus { outline: 2px solid #0a84ff; outline-offset: 1px; }\n        input[type="checkbox"] { width: 18px; height: 18px; accent-color: #0a84ff; }\n        .hint {\n          font-size: 12px; color: var(--secondary-text-color, #6c6c70);\n          margin-top: 2px;\n        }\n        h4 {\n          margin: 12px 0 0; font-size: 11px; font-weight: 700;\n          letter-spacing: .08em; text-transform: uppercase;\n          color: var(--secondary-text-color, #6c6c70);\n        }\n        .help {\n          font-size: 12px;\n          color: var(--secondary-text-color, #6c6c70);\n          background: var(--secondary-background-color, rgba(120,120,128,.08));\n          padding: 8px 10px; border-radius: 6px;\n        }\n      </style>\n      <div class="row">\n        ${cams.length === 0 ? `\n          <div class="help">${this._t("ed_no_cams")}</div>\n        ` : ""}\n        <label>${this._t("ed_cam_entity")}\n          <select name="camera_entity">\n            ${cams.length ? cams.map(id => `<option value="${id}" ${cfg.camera_entity === id ? "selected" : ""}>${id}</option>`).join("") : `<option value="${cfg.camera_entity || ""}" selected>${cfg.camera_entity || this._t("ed_not_set")}</option>`}\n          </select>\n          <span class="hint">${this._t("ed_cam_entity_hint")}</span>\n        </label>\n        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt_single")}</small>\n          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_single")}" />\n        </label>\n\n        <h4>${this._t("ed_h_design")}</h4>\n        ${chk("apple_style", this._t("ed_apple_style"), true)}\n        ${sel(this._t("ed_theme"), "theme", cfg.theme || "ios", [ [ "auto", this._t("ed_theme_auto") ], [ "ios", this._t("ed_theme_ios") ], [ "android", this._t("ed_theme_android") ] ])}\n        ${sel(this._t("ed_mode"), "modus", cfg.mode || "auto", [ [ "auto", this._t("ed_mode_auto") ], [ "day", this._t("ed_mode_day") ], [ "night", this._t("ed_mode_night") ] ])}\n        ${chk("minimal", this._t("ed_minimal_single"), false)}\n        ${chk("compact", this._t("ed_compact_single"), false)}\n        ${chk("show_title", this._t("ed_show_title"), true)}\n        ${chk("show_last_event", this._t("ed_show_last_event"), true)}\n        ${chk("show_audio", this._t("ed_show_audio"), true)}\n        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}\n        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}\n        ${sel(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [ [ "auto", this._t("ed_pan_overlay_auto") ], [ "always", this._t("ed_pan_overlay_always") ], [ "never", this._t("ed_pan_overlay_never") ] ])}\n\n        <h4>${this._t("ed_h_autoplay")}</h4>\n        ${sel(this._t("ed_h_autoplay"), "autoplay", cfg.auto_play || "", [ [ "", this._t("ed_autoplay_default") ], [ "lan", this._t("ed_autoplay_lan") ], [ "always", this._t("ed_autoplay_always") ], [ "never", this._t("ed_autoplay_never") ] ])}\n        <span class="hint">${this._t("ed_autoplay_hint")}</span>\n\n        <h4>${this._t("ed_h_advanced")}</h4>\n        ${chk("show_motion_zones", this._t("ed_show_motion_zones"), false)}\n        ${chk("fullscreen_auto_hide_controls", this._t("ed_fs_auto_hide"), true)}\n        <label>${this._t("ed_border_radius")}\n          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />\n        </label>\n        <label>${this._t("ed_box_shadow")}\n          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />\n        </label>\n      </div>`;
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .row { display: flex; flex-direction: column; gap: 14px; padding: 18px; }\n        label {\n          font-size: 14px; color: var(--primary-text-color);\n          display: flex; flex-direction: column; gap: 4px;\n        }\n        label.inline { flex-direction: row; align-items: center; gap: 10px; }\n        select, input[type="text"] {\n          padding: 9px 10px; border-radius: 6px;\n          border: 1px solid var(--divider-color, rgba(120,120,128,.2));\n          background: var(--card-background-color, #fff);\n          color: var(--primary-text-color, #1c1c1e);\n          font: inherit; font-size: 14px;\n        }\n        select:focus, input:focus { outline: 2px solid #0a84ff; outline-offset: 1px; }\n        input[type="checkbox"] { width: 18px; height: 18px; accent-color: #0a84ff; }\n        .hint {\n          font-size: 12px; color: var(--secondary-text-color, #6c6c70);\n          margin-top: 2px;\n        }\n        h4 {\n          margin: 12px 0 0; font-size: 11px; font-weight: 700;\n          letter-spacing: .08em; text-transform: uppercase;\n          color: var(--secondary-text-color, #6c6c70);\n        }\n        .help {\n          font-size: 12px;\n          color: var(--secondary-text-color, #6c6c70);\n          background: var(--secondary-background-color, rgba(120,120,128,.08));\n          padding: 8px 10px; border-radius: 6px;\n        }\n      </style>\n      <div class="row">\n        ${cams.length === 0 ? `\n          <div class="help">${this._t("ed_no_cams")}</div>\n        ` : ""}\n        <label>${this._t("ed_cam_entity")}\n          <select name="camera_entity">\n            ${cams.length ? cams.map(id => `<option value="${id}" ${cfg.camera_entity === id ? "selected" : ""}>${id}</option>`).join("") : `<option value="${cfg.camera_entity || ""}" selected>${cfg.camera_entity || this._t("ed_not_set")}</option>`}\n          </select>\n          <span class="hint">${this._t("ed_cam_entity_hint")}</span>\n        </label>\n        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt_single")}</small>\n          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_single")}" />\n        </label>\n\n        <h4>${this._t("ed_h_design")}</h4>\n        ${chk("apple_style", this._t("ed_apple_style"), true)}\n        ${sel(this._t("ed_theme"), "theme", cfg.theme || "ios", [ [ "auto", this._t("ed_theme_auto") ], [ "ios", this._t("ed_theme_ios") ], [ "android", this._t("ed_theme_android") ] ])}\n        ${sel(this._t("ed_mode"), "modus", cfg.mode || "auto", [ [ "auto", this._t("ed_mode_auto") ], [ "day", this._t("ed_mode_day") ], [ "night", this._t("ed_mode_night") ] ])}\n        ${chk("minimal", this._t("ed_minimal_single"), false)}\n        ${chk("compact", this._t("ed_compact_single"), false)}\n        ${chk("show_title", this._t("ed_show_title"), true)}\n        ${chk("show_last_event", this._t("ed_show_last_event"), true)}\n        ${chk("show_audio", this._t("ed_show_audio"), true)}\n        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}\n        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}\n        ${sel(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [ [ "auto", this._t("ed_pan_overlay_auto") ], [ "always", this._t("ed_pan_overlay_always") ], [ "never", this._t("ed_pan_overlay_never") ] ])}\n\n        <h4>${this._t("ed_h_autoplay")}</h4>\n        ${sel(this._t("ed_h_autoplay"), "autoplay", cfg.auto_play || "", [ [ "", this._t("ed_autoplay_default") ], [ "lan", this._t("ed_autoplay_lan") ], [ "always", this._t("ed_autoplay_always") ], [ "never", this._t("ed_autoplay_never") ] ])}\n        <span class="hint">${this._t("ed_autoplay_hint")}</span>\n\n        <h4>${this._t("ed_h_advanced")}</h4>\n        ${chk("show_motion_zones", this._t("ed_show_motion_zones"), false)}\n        ${chk("fullscreen_auto_hide_controls", this._t("ed_fs_auto_hide"), true)}\n        <label>${this._t("ed_border_radius")}\n          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />\n        </label>\n        <label>${this._t("ed_box_shadow")}\n          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />\n        </label>\n        ${chk("disable_webrtc", this._t("ed_disable_webrtc"), false)}\n        <span class="hint">${this._t("ed_disable_webrtc_hint")}</span>\n        <label>${this._t("ed_webrtc_timeout")}\n          <input type="number" name="webrtc_connect_timeout_ms" min="1000" max="30000" step="500" value="${clampWebrtcTimeoutMsForDisplay(cfg.webrtc_connect_timeout_ms)}" />\n          <span class="hint">${this._t("ed_webrtc_timeout_hint")}</span>\n        </label>\n      </div>`;
     const root = this.shadowRoot;
     const fire = patch => {
       this._config = {
@@ -7271,6 +7331,15 @@ class BoschCameraCardEditor extends HTMLElement {
     root.querySelector('input[name="box_shadow"]')?.addEventListener("change", e => fire({
       box_shadow: e.target.value || undefined
     }));
+    root.querySelector('input[name="disable_webrtc"]')?.addEventListener("change", e => fire({
+      disable_webrtc: e.target.checked
+    }));
+    root.querySelector('input[name="webrtc_connect_timeout_ms"]')?.addEventListener("change", e => {
+      const n = parseInt(e.target.value, 10);
+      fire({
+        webrtc_connect_timeout_ms: Number.isFinite(n) ? n : undefined
+      });
+    });
     root.querySelector('select[name="autoplay"]').addEventListener("change", e => fire({
       auto_play: e.target.value || undefined
     }));
@@ -7337,6 +7406,8 @@ class BoschCameraOverviewCard extends HTMLElement {
       pan_overlay: [ "auto", "always", "never" ].includes(config.pan_overlay) ? config.pan_overlay : "auto",
       hide_redundant_privacy: config.hide_redundant_privacy !== false,
       use_card_audio_settings: config.use_card_audio_settings === true,
+      disable_webrtc: config.disable_webrtc === true,
+      webrtc_connect_timeout_ms: typeof config.webrtc_connect_timeout_ms === "number" ? config.webrtc_connect_timeout_ms : undefined,
       border_radius: typeof config.border_radius === "string" ? config.border_radius : null,
       box_shadow: typeof config.box_shadow === "string" ? config.box_shadow : null,
       overrides: config.overrides && typeof config.overrides === "object" ? config.overrides : {},
@@ -7361,6 +7432,8 @@ class BoschCameraOverviewCard extends HTMLElement {
       pan_overlay: this._config.pan_overlay,
       hide_redundant_privacy: this._config.hide_redundant_privacy,
       use_card_audio_settings: this._config.use_card_audio_settings,
+      disable_webrtc: this._config.disable_webrtc,
+      webrtc_connect_timeout_ms: this._config.webrtc_connect_timeout_ms,
       ...this._config.card_defaults
     };
     this.classList.toggle("apple-style", this._config.apple_style);
@@ -7791,7 +7864,7 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
     const minWpx = parseInt(minW) || 650;
     const seldd = (label, name, val, opts) => `\n      <label>${label}\n        <select name="${name}">\n          ${opts.map(([v, l]) => `<option value="${v}" ${val === v ? "selected" : ""}>${l}</option>`).join("")}\n        </select>\n      </label>`;
     const chk = (key, label, def) => `\n      <label class="inline">\n        <input type="checkbox" name="${key}" ${cfg[key] ?? def ? "checked" : ""} />\n        <span>${label}</span>\n      </label>`;
-    this.shadowRoot.innerHTML = `\n      <style>\n        .row{display:flex;flex-direction:column;gap:12px;padding:16px}\n        label{font-size:14px;color:var(--primary-text-color);display:flex;flex-direction:column;gap:4px}\n        label.inline{flex-direction:row;align-items:center;gap:10px}\n        select,input[type="text"],input[type="number"]{padding:8px;border-radius:4px;border:1px solid var(--divider-color);\n          background:var(--card-background-color);color:var(--primary-text-color);font-size:14px}\n        input[type="checkbox"]{width:18px;height:18px;accent-color:#0a84ff}\n        .hint{font-size:12px;color:var(--secondary-text-color)}\n        h4{margin:12px 0 0;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--secondary-text-color)}\n        [hidden]{display:none}\n      </style>\n      <div class="row">\n        <label>${this._t("ed_columns")}\n          <select name="columns">\n            <option value="auto" ${sel("auto")}>${this._t("ed_columns_auto")}</option>\n            <option value="1" ${sel(1)}>${this._t("ed_columns_1")}</option>\n            <option value="2" ${sel(2)}>2</option>\n            <option value="3" ${sel(3)}>3</option>\n            <option value="4" ${sel(4)}>4</option>\n          </select>\n        </label>\n        <label id="minw-row" ${isAuto ? "" : "hidden"}>${this._t("ed_breakpoint")}\n          <input type="number" name="min_width" value="${minWpx}" min="200" max="900" step="10" />\n          <span class="hint">${this._t("ed_breakpoint_hint")}</span>\n        </label>\n        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt")}</small>\n          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_overview")}" />\n        </label>\n\n        <h4>${this._t("ed_h_display")}</h4>\n        ${chk("online_offline_view", this._t("ed_show_offline"), true)}\n        ${chk("use_bosch_sort", this._t("ed_bosch_sort"), false)}\n\n        <h4>${this._t("ed_h_design_all")}</h4>\n        ${chk("apple_style", this._t("ed_apple_style"), true)}\n        ${seldd(this._t("ed_theme"), "theme", cfg.theme || "ios", [ [ "auto", this._t("ed_theme_auto") ], [ "ios", this._t("ed_theme_ios") ], [ "android", this._t("ed_theme_android") ] ])}\n        ${seldd(this._t("ed_mode"), "modus", cfg.mode || "auto", [ [ "auto", this._t("ed_mode_auto") ], [ "day", this._t("ed_mode_day") ], [ "night", this._t("ed_mode_night") ] ])}\n        ${chk("compact", this._t("ed_compact_overview"), false)}\n        ${chk("minimal", this._t("ed_minimal_overview"), true)}\n        ${chk("show_title", this._t("ed_show_title"), true)}\n        ${chk("show_last_event", this._t("ed_show_last_event"), true)}\n        ${chk("show_audio", this._t("ed_show_audio"), true)}\n        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}\n        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}\n        ${seldd(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [ [ "auto", this._t("ed_pan_overlay_auto") ], [ "always", this._t("ed_pan_overlay_always") ], [ "never", this._t("ed_pan_overlay_never") ] ])}\n\n        <h4>${this._t("ed_h_advanced")}</h4>\n        <label>${this._t("ed_border_radius")}\n          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />\n        </label>\n        <label>${this._t("ed_box_shadow")}\n          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />\n        </label>\n      </div>`;
+    this.shadowRoot.innerHTML = `\n      <style>\n        .row{display:flex;flex-direction:column;gap:12px;padding:16px}\n        label{font-size:14px;color:var(--primary-text-color);display:flex;flex-direction:column;gap:4px}\n        label.inline{flex-direction:row;align-items:center;gap:10px}\n        select,input[type="text"],input[type="number"]{padding:8px;border-radius:4px;border:1px solid var(--divider-color);\n          background:var(--card-background-color);color:var(--primary-text-color);font-size:14px}\n        input[type="checkbox"]{width:18px;height:18px;accent-color:#0a84ff}\n        .hint{font-size:12px;color:var(--secondary-text-color)}\n        h4{margin:12px 0 0;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--secondary-text-color)}\n        [hidden]{display:none}\n      </style>\n      <div class="row">\n        <label>${this._t("ed_columns")}\n          <select name="columns">\n            <option value="auto" ${sel("auto")}>${this._t("ed_columns_auto")}</option>\n            <option value="1" ${sel(1)}>${this._t("ed_columns_1")}</option>\n            <option value="2" ${sel(2)}>2</option>\n            <option value="3" ${sel(3)}>3</option>\n            <option value="4" ${sel(4)}>4</option>\n          </select>\n        </label>\n        <label id="minw-row" ${isAuto ? "" : "hidden"}>${this._t("ed_breakpoint")}\n          <input type="number" name="min_width" value="${minWpx}" min="200" max="900" step="10" />\n          <span class="hint">${this._t("ed_breakpoint_hint")}</span>\n        </label>\n        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt")}</small>\n          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_overview")}" />\n        </label>\n\n        <h4>${this._t("ed_h_display")}</h4>\n        ${chk("online_offline_view", this._t("ed_show_offline"), true)}\n        ${chk("use_bosch_sort", this._t("ed_bosch_sort"), false)}\n\n        <h4>${this._t("ed_h_design_all")}</h4>\n        ${chk("apple_style", this._t("ed_apple_style"), true)}\n        ${seldd(this._t("ed_theme"), "theme", cfg.theme || "ios", [ [ "auto", this._t("ed_theme_auto") ], [ "ios", this._t("ed_theme_ios") ], [ "android", this._t("ed_theme_android") ] ])}\n        ${seldd(this._t("ed_mode"), "modus", cfg.mode || "auto", [ [ "auto", this._t("ed_mode_auto") ], [ "day", this._t("ed_mode_day") ], [ "night", this._t("ed_mode_night") ] ])}\n        ${chk("compact", this._t("ed_compact_overview"), false)}\n        ${chk("minimal", this._t("ed_minimal_overview"), true)}\n        ${chk("show_title", this._t("ed_show_title"), true)}\n        ${chk("show_last_event", this._t("ed_show_last_event"), true)}\n        ${chk("show_audio", this._t("ed_show_audio"), true)}\n        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}\n        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}\n        ${seldd(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [ [ "auto", this._t("ed_pan_overlay_auto") ], [ "always", this._t("ed_pan_overlay_always") ], [ "never", this._t("ed_pan_overlay_never") ] ])}\n\n        <h4>${this._t("ed_h_advanced")}</h4>\n        <label>${this._t("ed_border_radius")}\n          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />\n        </label>\n        <label>${this._t("ed_box_shadow")}\n          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />\n        </label>\n        ${chk("disable_webrtc", this._t("ed_disable_webrtc"), false)}\n        <span class="hint">${this._t("ed_disable_webrtc_hint")}</span>\n        <label>${this._t("ed_webrtc_timeout")}\n          <input type="number" name="webrtc_connect_timeout_ms" min="1000" max="30000" step="500" value="${clampWebrtcTimeoutMsForDisplay(cfg.webrtc_connect_timeout_ms)}" />\n          <span class="hint">${this._t("ed_webrtc_timeout_hint")}</span>\n        </label>\n      </div>`;
     const colSel = this.shadowRoot.querySelector('select[name="columns"]');
     const minwRow = this.shadowRoot.getElementById("minw-row");
     colSel.addEventListener("change", e => {
@@ -7841,6 +7914,14 @@ class BoschCameraOverviewCardEditor extends HTMLElement {
       ...this._config,
       box_shadow: e.target.value || undefined
     }));
+    onChk("disable_webrtc", "disable_webrtc");
+    this.shadowRoot.querySelector('input[name="webrtc_connect_timeout_ms"]')?.addEventListener("change", e => {
+      const n = parseInt(e.target.value, 10);
+      this._fire({
+        ...this._config,
+        webrtc_connect_timeout_ms: Number.isFinite(n) ? n : undefined
+      });
+    });
     this.shadowRoot.querySelector('select[name="theme"]').addEventListener("change", e => this._fire({
       ...this._config,
       theme: e.target.value

@@ -5,7 +5,7 @@ DOMAIN = "bosch_shc_camera"
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "14.1.12"
+CARD_VERSION = "14.1.14"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 # Delivery-death detection (issue #36). When the periodic /v11/events poll finds

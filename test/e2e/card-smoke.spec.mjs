@@ -3090,6 +3090,189 @@ test("privacy badge: last-snapshot by default, last-event when configured", asyn
 // never reached, banner never shown (HA-core #158178). The dead-track watchdog
 // (getStats framesDecoded + bytesReceived) must escalate to a STICKY HLS fallback.
 
+// 2026-07-19 (forum 998974/42): user-controllable WebRTC connect escape
+// hatches — disable_webrtc (skip the attempt entirely, always HLS) and
+// webrtc_connect_timeout_ms (tune how long to wait before falling back),
+// for setups (e.g. WireGuard) where the default 4s attempt is either
+// never going to succeed or needs a different bound. Both card-level
+// config helpers first, then the _startLiveVideo gate ordering, then the
+// two editors (single-card + overview) and the overview's card_defaults
+// propagation.
+
+test("_disableWebRTC/_webrtcConnectTimeoutMs config helpers", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const mk = (config) => {
+      const c = document.createElement("bosch-camera-card");
+      c.setConfig({ camera_entity: "camera.test", ...config });
+      return c;
+    };
+    const defaultOff = mk({});
+    const explicitOn = mk({ disable_webrtc: true });
+    const explicitOff = mk({ disable_webrtc: false });
+
+    const defaultTimeout = mk({});
+    const customTimeout = mk({ webrtc_connect_timeout_ms: 8000 });
+    const tooLow = mk({ webrtc_connect_timeout_ms: 10 });        // must clamp up to 1000
+    const tooHigh = mk({ webrtc_connect_timeout_ms: 999999 });   // must clamp down to 30000
+    const nonNumeric = mk({ webrtc_connect_timeout_ms: "not-a-number" });
+    const zero = mk({ webrtc_connect_timeout_ms: 0 });           // falsy but a real configured value
+
+    return {
+      defaultOff: defaultOff._disableWebRTC(),
+      explicitOn: explicitOn._disableWebRTC(),
+      explicitOff: explicitOff._disableWebRTC(),
+      defaultTimeout: defaultTimeout._webrtcConnectTimeoutMs(),
+      customTimeout: customTimeout._webrtcConnectTimeoutMs(),
+      tooLow: tooLow._webrtcConnectTimeoutMs(),
+      tooHigh: tooHigh._webrtcConnectTimeoutMs(),
+      nonNumeric: nonNumeric._webrtcConnectTimeoutMs(),
+      zero: zero._webrtcConnectTimeoutMs(),
+    };
+  });
+  expect(r.defaultOff, "default is disabled=false (WebRTC attempted)").toBe(false);
+  expect(r.explicitOn, "disable_webrtc:true is respected").toBe(true);
+  expect(r.explicitOff, "disable_webrtc:false is respected").toBe(false);
+  expect(r.defaultTimeout, "default timeout stays the flat 5000ms (a 4000ms default was tried and reverted after bug-hunt review)").toBe(5000);
+  expect(r.customTimeout, "a valid custom timeout is used as-is").toBe(8000);
+  expect(r.tooLow, "a too-low value clamps up to the 1000ms floor").toBe(1000);
+  expect(r.tooHigh, "a too-high value clamps down to the 30000ms ceiling").toBe(30000);
+  expect(r.nonNumeric, "a non-numeric value falls back to the 5000ms default").toBe(5000);
+  expect(r.zero, "an explicit 0 is still clamped to the 1000ms floor, not treated as unset").toBe(1000);
+});
+
+test("_startLiveVideo skips WebRTC entirely when disable_webrtc is configured", () => {
+  const start = CARD_SRC.indexOf("async _startLiveVideo(");
+  expect(start, "_startLiveVideo exists").toBeGreaterThan(-1);
+  const body = CARD_SRC.slice(start, CARD_SRC.indexOf("async _startWebRTC(", start));
+  const disableIdx = body.indexOf("if (this._disableWebRTC()) {");
+  const stickyIdx = body.indexOf("if (this._preferHlsThisSession) {");
+  const webrtcIdx = body.indexOf("await this._startWebRTC(");
+  expect(disableIdx, "disable_webrtc gate present").toBeGreaterThan(-1);
+  expect(stickyIdx, "sticky-HLS gate still present").toBeGreaterThan(-1);
+  expect(webrtcIdx, "WebRTC attempt present").toBeGreaterThan(-1);
+  // Both gates must come before the WebRTC attempt, disable_webrtc first
+  // (an explicit user opt-out should short-circuit before the sticky
+  // runtime-detected flag is even checked).
+  expect(disableIdx, "disable_webrtc gate precedes the sticky-HLS gate").toBeLessThan(stickyIdx);
+  expect(stickyIdx, "sticky-HLS gate precedes the WebRTC attempt").toBeLessThan(webrtcIdx);
+});
+
+test("_startWebRTC uses the configurable timeout, not a hardcoded 5000", () => {
+  const start = CARD_SRC.indexOf("async _startWebRTC(");
+  expect(start, "_startWebRTC exists").toBeGreaterThan(-1);
+  const body = CARD_SRC.slice(start, start + 11000);
+  expect(body.includes("const attemptMs = this._webrtcConnectTimeoutMs();"),
+    "attemptMs is sourced from the configurable helper").toBe(true);
+  expect(body.includes("const attemptMs = 5000;"),
+    "the old hardcoded 5000ms literal is gone").toBe(false);
+});
+
+test("single-card editor exposes disable_webrtc + webrtc_connect_timeout_ms and writes correct config", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card-editor"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const editor = document.createElement("bosch-camera-card-editor");
+    editor.hass = { config: {}, language: "en", localize: () => "", states: {} };
+    editor.setConfig({ camera_entity: "camera.test" });
+    document.body.appendChild(editor);
+    await new Promise((res) => setTimeout(res, 100));
+
+    let lastConfig = null;
+    editor.addEventListener("config-changed", (e) => { lastConfig = e.detail.config; });
+
+    const chk = editor.shadowRoot.querySelector('input[name="disable_webrtc"]');
+    const num = editor.shadowRoot.querySelector('input[name="webrtc_connect_timeout_ms"]');
+    const hasFields = !!chk && !!num;
+    const numDefaultValue = num ? Number(num.value) : null;
+
+    chk.checked = true;
+    chk.dispatchEvent(new Event("change"));
+    const afterCheckbox = lastConfig ? { ...lastConfig } : null;
+
+    num.value = "3000";
+    num.dispatchEvent(new Event("change"));
+    const afterNumber = lastConfig ? { ...lastConfig } : null;
+
+    editor.remove();
+    return { hasFields, numDefaultValue, afterCheckbox, afterNumber };
+  });
+  expect(r.hasFields, "editor renders both new fields").toBe(true);
+  expect(r.numDefaultValue, "number field defaults to 5000").toBe(5000);
+  expect(r.afterCheckbox?.disable_webrtc, "checkbox toggle fires disable_webrtc:true").toBe(true);
+  expect(r.afterNumber?.webrtc_connect_timeout_ms, "number input fires the parsed integer").toBe(3000);
+});
+
+test("editors display the clamped webrtc_connect_timeout_ms value, not a stale out-of-range raw value", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card-editor")
+    && !!customElements.get("bosch-camera-overview-card-editor"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const single = document.createElement("bosch-camera-card-editor");
+    single.hass = { config: {}, language: "en", localize: () => "", states: {} };
+    single.setConfig({ camera_entity: "camera.test", webrtc_connect_timeout_ms: 500 });
+    document.body.appendChild(single);
+    await new Promise((res) => setTimeout(res, 100));
+    const singleValue = Number(single.shadowRoot.querySelector('input[name="webrtc_connect_timeout_ms"]').value);
+    single.remove();
+
+    const overview = document.createElement("bosch-camera-overview-card-editor");
+    overview.hass = { config: {}, language: "en", localize: () => "", states: {} };
+    overview.setConfig({ entities: ["camera.test"], webrtc_connect_timeout_ms: 999999 });
+    document.body.appendChild(overview);
+    await new Promise((res) => setTimeout(res, 100));
+    const overviewValue = Number(overview.shadowRoot.querySelector('input[name="webrtc_connect_timeout_ms"]').value);
+    overview.remove();
+
+    return { singleValue, overviewValue };
+  });
+  expect(r.singleValue, "single-card editor shows the clamped 1000ms floor, not the raw 500").toBe(1000);
+  expect(r.overviewValue, "overview editor shows the clamped 30000ms ceiling, not the raw 999999").toBe(30000);
+});
+
+test("overview editor exposes disable_webrtc + webrtc_connect_timeout_ms and propagates via card_defaults", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-overview-card-editor")
+    && !!customElements.get("bosch-camera-overview-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const editor = document.createElement("bosch-camera-overview-card-editor");
+    editor.hass = { config: {}, language: "en", localize: () => "", states: {} };
+    editor.setConfig({});
+    document.body.appendChild(editor);
+    await new Promise((res) => setTimeout(res, 100));
+
+    let lastConfig = null;
+    editor.addEventListener("config-changed", (e) => { lastConfig = e.detail.config; });
+
+    const chk = editor.shadowRoot.querySelector('input[name="disable_webrtc"]');
+    const num = editor.shadowRoot.querySelector('input[name="webrtc_connect_timeout_ms"]');
+    const hasFields = !!chk && !!num;
+
+    chk.checked = true;
+    chk.dispatchEvent(new Event("change"));
+    num.value = "6000";
+    num.dispatchEvent(new Event("change"));
+    editor.remove();
+
+    // Feed the resulting config into the actual overview card and confirm
+    // it lands in card_defaults (what every child <bosch-camera-card>
+    // tile actually receives via setConfig).
+    const overview = document.createElement("bosch-camera-overview-card");
+    overview.setConfig(lastConfig || {});
+    const propagated = {
+      disable_webrtc: overview._config.card_defaults.disable_webrtc,
+      webrtc_connect_timeout_ms: overview._config.card_defaults.webrtc_connect_timeout_ms,
+    };
+    overview.remove();
+
+    return { hasFields, propagated };
+  });
+  expect(r.hasFields, "overview editor renders both new fields").toBe(true);
+  expect(r.propagated.disable_webrtc, "disable_webrtc propagates into card_defaults").toBe(true);
+  expect(r.propagated.webrtc_connect_timeout_ms, "webrtc_connect_timeout_ms propagates into card_defaults").toBe(6000);
+});
+
 test("dead-track watchdog: _startLiveVideo skips WebRTC when sticky HLS is set", () => {
   const start = CARD_SRC.indexOf("async _startLiveVideo(");
   expect(start, "_startLiveVideo exists").toBeGreaterThan(-1);
