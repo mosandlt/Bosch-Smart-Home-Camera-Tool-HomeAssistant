@@ -24,7 +24,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import BoschCameraCoordinator
-from .const import CONF_ENABLE_PTZ_CONTROLS, DOMAIN
+from .const import CONF_ENABLE_PTZ_CONTROLS, DOMAIN, STREAM_START_SKIPPED
 from .guards import _is_gen2_indoor, _warn_if_privacy_on
 
 _LOGGER = logging.getLogger(__name__)
@@ -194,7 +194,22 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
         if live.get("rtspsUrl") or live.get("proxyUrl"):
             try:
                 new_live = await self.coordinator.try_live_connection(self._cam_id)
-                if new_live:
+                # try_live_connection returns the STREAM_START_SKIPPED
+                # sentinel (not a real result dict, not None) when a
+                # concurrent start for this camera was already in flight
+                # (heartbeat renewal, another card, a play_stream race) —
+                # every other call site in the codebase (camera.py,
+                # switch.py) guards against this. This one didn't: a bare
+                # `if new_live:` treats the sentinel as truthy (it's a real
+                # object, not falsy) and overwrites
+                # coordinator.data[cam_id]["live"] with the sentinel itself
+                # instead of a URL dict, corrupting live-session state for
+                # every other consumer that calls .get() on it — live-
+                # reproduced 2026-07-20 (Thomas: quality switch had no
+                # effect, then the live view degraded to snapshot-only
+                # polling). The in-flight start already publishes its own
+                # session; there's nothing to apply here.
+                if new_live is not STREAM_START_SKIPPED and new_live:
                     self.coordinator.data[self._cam_id]["live"] = new_live
             except Exception:  # noqa: S110 # best-effort live-URL reconnect on quality change, failure non-actionable
                 pass

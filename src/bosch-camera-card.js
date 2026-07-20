@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.15";
+const CARD_VERSION = "14.1.16";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -5240,7 +5240,8 @@ class BoschCameraCard extends HTMLElement {
         :host(.minimal) .accordion,
         :host(.minimal) .pan-row,
         :host(.minimal) .pan-slider-row,
-        :host(.minimal) .automation-row { display: none; }
+        :host(.minimal) .automation-row,
+        :host(.minimal) .quality-section { display: none; }
         :host(.minimal.overflow-open) .info-row { display: flex; }
         :host(.minimal.overflow-open) .switch-rows { display: flex; padding: 0 12px 12px; }
         :host(.minimal.overflow-open) .switch-rows > .sw-row { display: flex; }
@@ -5248,6 +5249,15 @@ class BoschCameraCard extends HTMLElement {
         :host(.minimal.overflow-open) .pan-row,
         :host(.minimal.overflow-open) .pan-slider-row,
         :host(.minimal.overflow-open) .automation-row { display: block; }
+        /* Quality auto-appears on every card now (2026-07-20) — in minimal
+           mode (overview tiles default) it must stay behind the ⋮ menu like
+           every other secondary control, not sit as its own always-visible
+           row (Thomas, live screenshot 2026-07-20: it was showing inline on
+           the overview grid). Only reveal it in the overflow tray when the
+           section itself is actually populated (hasQuality, tracked via
+           this JS-driven style.display rather than the CSS "display:none"
+           default) — same guard the JS toggle in _update() already applies. */
+        :host(.minimal.overflow-open) .quality-section:not([style*="display: none"]) { display: block; }
         :host(.minimal.overflow-open) .pan-row { display: flex; }
         .btn svg { width: 16px; height: 16px; flex-shrink: 0; }
         .btn-spinner {
@@ -11500,10 +11510,29 @@ class BoschCameraCard extends HTMLElement {
     }
   }
 
-  _onQualityChange(option) {
+  async _onQualityChange(option) {
     const entityId = this._entities.quality;
     if (!entityId || !this._hass) return;
-    this._callService("select", "select_option", { entity_id: entityId, option });
+    // select.py's async_select_option updates the backend's live_connections
+    // URL/inst and, for an active LOCAL session, calls Stream.update_source()
+    // — enough for the HLS path to pick up the new bitrate on its own. But
+    // go2rtc dedups WebRTC stream registrations by exact URL string, so an
+    // already-connected WebRTC viewer's PeerConnection just keeps decoding
+    // the OLD stream until it renegotiates; nothing does that automatically.
+    // Live-reported 2026-07-20 (Thomas: "quality switch changes nothing on
+    // my livestream" — watching Terrasse over LOCAL WebRTC). Await the
+    // service call (select.py awaits the reconnect before returning, so the
+    // backend URL is already updated by the time this resolves), then force
+    // a stop+restart of THIS card's live view so _startLiveVideo() sends a
+    // fresh camera/webrtc/offer against the new quality. HLS path restarts
+    // too — redundant with the backend's own update_source() but harmless.
+    try {
+      await this._hass.callService("select", "select_option", { entity_id: entityId, option });
+    } catch (err) {
+      console.warn("bosch-camera-card:", "select", "select_option", err);
+      return;
+    }
+    if (this._liveVideoActive) this._scheduleLiveRecovery("quality changed");
   }
 
   _setOptimistic(entityId, state) {

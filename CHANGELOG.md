@@ -7,7 +7,11 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [v16.1.2] - 2026-07-17
 
-Patch — bundles fixes shipped across beta iterations (beta-1/beta-2/beta-3/beta-4/beta-5/beta-6/beta-7) before going stable. No breaking changes.
+Patch — bundles fixes shipped across beta iterations (beta-1/beta-2/beta-3/beta-4/beta-5/beta-6/beta-7/beta-8) before going stable. No breaking changes.
+
+### Fixed
+
+- **Quality selector: reconnect could silently no-op or corrupt live-session state, and the section broke the overview's minimal/glanceable layout** (beta-8, live-reported by Thomas within minutes of beta-7 going out — "quality switch changes nothing on my livestream", then "my livestream is broken, I only see a picture every 2 seconds"). Root cause: `BoschVideoQualitySelect.async_select_option` calls `coordinator.try_live_connection()` to reconnect with the new quality, but didn't guard against the `STREAM_START_SKIPPED` sentinel that every OTHER call site (`camera.py`, `switch.py`) already checks for — returned when a concurrent start for the same camera is already in flight (e.g. a heartbeat renewal racing the user's quality change). A bare `if new_live:` treats the sentinel as a valid result (it's a real object, not falsy) and overwrites `coordinator.data[cam_id]["live"]` with the sentinel itself instead of a URL dict, corrupting live-session state for every other consumer that calls `.get()` on it — matching both symptoms (no visible change, then a broken stream once HA's own Stream worker hit the resulting bad state and logged "Stream ended; no additional packets"). Fixed to match the established pattern. Separately, even on a clean reconnect, go2rtc dedups WebRTC stream registrations by exact URL string, so an already-connected WebRTC viewer's PeerConnection kept decoding the OLD-quality stream — `_onQualityChange` now awaits the service call, then forces a stop+restart of the card's own live view so a fresh WebRTC offer picks up the new quality. Also: the Quality section (auto-appearing since beta-7) showed as its own always-visible row even on minimal/overview-tile cards, breaking the "controls behind ⋮, glanceable grid" design every other secondary control follows (Thomas, live screenshot) — now hidden in minimal mode and revealed in the overflow tray alongside everything else. 3 new e2e tests + 1 new pytest regression test, full suite green (6358 pytest, 100.00% coverage, 324/324 e2e across chromium/firefox/webkit).
 
 ### Added
 

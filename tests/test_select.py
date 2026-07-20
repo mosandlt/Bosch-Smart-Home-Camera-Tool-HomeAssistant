@@ -1308,6 +1308,34 @@ class TestVideoQualitySelectDeviceInfoAndRestore:
         await sel.async_select_option("low")  # must not raise
         sel.async_write_ha_state.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_async_select_option_ignores_stream_start_skipped_sentinel(self):
+        """Live-reproduced bug, 2026-07-20 (Thomas: quality switch had no
+        visible effect, then the live view degraded to snapshot-only
+        polling). try_live_connection returns the STREAM_START_SKIPPED
+        sentinel (not a real result dict, not None, and not falsy) when a
+        concurrent start for this camera was already in flight — every
+        other call site (camera.py, switch.py) checks `is
+        STREAM_START_SKIPPED` before using the result. This one didn't: a
+        bare `if new_live:` treated the sentinel as a valid result and
+        overwrote coordinator.data[cam_id]["live"] with the sentinel
+        object itself instead of a URL dict, corrupting live-session state
+        for every other consumer that calls .get() on it.
+        """
+        from custom_components.bosch_shc_camera.const import STREAM_START_SKIPPED
+
+        coord = _stub_coord_platform()
+        original_live = {"rtspsUrl": "rtsps://old"}
+        coord.data[CAM_ID]["live"] = original_live
+        coord.set_quality = MagicMock()
+        coord.try_live_connection = AsyncMock(return_value=STREAM_START_SKIPPED)
+        sel = self._make(coord)
+        await sel.async_select_option("low")
+        assert coord.data[CAM_ID]["live"] is original_live, (
+            "the sentinel must never overwrite coordinator.data[cam_id]['live']"
+        )
+        assert coord.data[CAM_ID]["live"].get("rtspsUrl") == "rtsps://old"
+
 
 class TestMotionSensitivitySelectWrite:
     def _make(self, coord=None, put_return=True):

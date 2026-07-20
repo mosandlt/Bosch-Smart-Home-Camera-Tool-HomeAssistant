@@ -3176,6 +3176,87 @@ test("quality_entity: false opts out of the auto-derived default", async ({ page
   expect(r, "quality_entity:false must produce null, not the auto-derived default").toBe(null);
 });
 
+// 2026-07-20 follow-up (Thomas, live screenshot of the overview grid): the
+// auto-appearing Quality section showed as its own always-visible row on
+// minimal (overview-tile) cards, breaking the "glanceable grid, controls
+// behind ⋮" design every other secondary control already follows.
+test("quality section stays behind the ⋮ menu in minimal mode, like other secondary controls", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const mkHass = () => ({ config: {}, language: "en", localize: () => "",
+      callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+        "select.test_video_quality": { state: "auto", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+      } });
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", minimal: true });
+    card.hass = mkHass();
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 250));
+    card.hass = mkHass();
+
+    const section = card.shadowRoot.getElementById("quality-section");
+    const visibleClosed = section ? getComputedStyle(section).display !== "none" : null;
+    card.classList.add("overflow-open");
+    const visibleOpen = section ? getComputedStyle(section).display !== "none" : null;
+    card.remove();
+    return { visibleClosed, visibleOpen };
+  });
+  expect(r.visibleClosed, "quality section is hidden in minimal mode until ⋮ is opened").toBe(false);
+  expect(r.visibleOpen, "quality section reveals in the overflow tray, same as other secondary controls").toBe(true);
+});
+
+// 2026-07-20 follow-up (Thomas, live report: "quality switch changes nothing
+// on my livestream"). select.py's reconnect updates the backend's LOCAL
+// RTSP/HLS source (Stream.update_source), but go2rtc dedups WebRTC stream
+// registrations by exact URL string — an already-connected WebRTC viewer's
+// PeerConnection just keeps decoding the OLD-quality stream until it
+// renegotiates, which nothing did automatically. _onQualityChange must await
+// the service call, then force a stop+restart of the card's own live view
+// so a fresh WebRTC offer picks up the new quality.
+test("_onQualityChange restarts the live view after the quality service call resolves", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", quality_entity: "select.test_video_quality" });
+    let resolveCall;
+    const callPromise = new Promise((res) => { resolveCall = res; });
+    let calledWith = null;
+    card._hass = {
+      callService: (domain, service, data) => {
+        calledWith = { domain, service, data };
+        return callPromise;
+      },
+    };
+    let recoveryCalledBeforeResolve = false;
+    let recoveryCalledAfterResolve = false;
+    card._liveVideoActive = true;
+    card._scheduleLiveRecovery = (reason) => {
+      if (calledWith && !resolved) recoveryCalledBeforeResolve = true;
+      else recoveryCalledAfterResolve = true;
+    };
+    let resolved = false;
+    const changePromise = card._onQualityChange("low");
+    // Give the microtask queue a tick — recovery must NOT fire yet, the
+    // service call promise hasn't resolved.
+    await Promise.resolve();
+    const firedTooEarly = recoveryCalledBeforeResolve;
+    resolved = true;
+    resolveCall();
+    await changePromise;
+    card.remove();
+    return { calledWith, firedTooEarly, recoveryCalledAfterResolve };
+  });
+  expect(r.calledWith?.domain).toBe("select");
+  expect(r.calledWith?.service).toBe("select_option");
+  expect(r.calledWith?.data).toEqual({ entity_id: "select.test_video_quality", option: "low" });
+  expect(r.firedTooEarly, "recovery must not fire before the service call resolves").toBe(false);
+  expect(r.recoveryCalledAfterResolve, "recovery must fire once the backend reconnect completes").toBe(true);
+});
+
 // ── Dead-WebRTC-track → sticky HLS fallback (2026-06-23) ───────────────────────
 // Regression for the "VERBINDE↔LIVE" flip on the iOS Companion app / cellular
 // CGNAT: a WebRTC track arrives (ontrack fires, badge "Live") but never decodes a
