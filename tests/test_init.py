@@ -7074,6 +7074,7 @@ def _make_coord_firmware_install(
     return SimpleNamespace(
         firmware_cache={CAM_ID: dict(firmware)} if firmware is not None else {},
         firmware_set_at={},
+        _firmware_install_locks={},
         async_put_camera=AsyncMock(return_value=True),
     )
 
@@ -7182,6 +7183,46 @@ class TestAsyncInstallFirmware:
 
         assert "updating" not in coord.firmware_cache[CAM_ID]
         assert CAM_ID not in coord.firmware_set_at
+
+    @pytest.mark.asyncio
+    async def test_concurrent_calls_serialize_and_only_one_puts(self):
+        """Bug-hunt finding, 2026-07-20: update.py's Install button and
+        repairs.py's Fix action call this same method — without a lock, a
+        double-click or a race between the two could both read
+        updating=False before either await completes and sets it, sending
+        two overlapping install PUTs to Bosch's cloud for the same camera.
+        The per-camera asyncio.Lock must serialize them so only the first
+        actually PUTs; the second sees updating=True (set by the first
+        under the same lock) and raises instead.
+        """
+        from homeassistant.exceptions import HomeAssistantError
+
+        coord = _make_coord_firmware_install(
+            {"current": "9.40.102", "upToDate": False, "update": "9.40.104"}
+        )
+        # A slow PUT so the second call's attempt to acquire the lock is
+        # guaranteed to still be blocked when the first one is in flight.
+        put_started = asyncio.Event()
+        put_release = asyncio.Event()
+
+        async def _slow_put(*_args, **_kwargs):
+            put_started.set()
+            await put_release.wait()
+            return True
+
+        coord.async_put_camera = AsyncMock(side_effect=_slow_put)
+
+        first = asyncio.ensure_future(_call(coord))
+        await put_started.wait()
+        second = asyncio.ensure_future(_call(coord))
+        await asyncio.sleep(0)  # let `second` block on the lock
+
+        put_release.set()
+        await first
+        with pytest.raises(HomeAssistantError, match="already in progress"):
+            await second
+
+        coord.async_put_camera.assert_awaited_once()
 
 
 # Regression tests for Repairs issue when a camera firmware update is available.

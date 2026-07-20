@@ -1663,6 +1663,80 @@ class TestSmbCleanupScandirException:
         fake_smb.remove.assert_not_called()
 
 
+class TestSyncSmbCleanupNvrSubtreeExcluded:
+    """Bug-hunt 2026-07-20: Mini-NVR recordings live at
+    {smb_base_path}/{nvr_smb_subpath}/... — squarely inside the tree this
+    generic retention walk covers. That subtree has its OWN independent
+    daily job (_sync_nvr_cleanup_smb) with its OWN nvr_retention_days
+    setting. Without excluding it here, a user with smb_retention_days <
+    nvr_retention_days (a reasonable, UI-exposed combination) gets their
+    NVR recordings silently deleted early by the wrong retention policy.
+    """
+
+    def test_nvr_subdir_and_its_contents_are_never_touched(self):
+        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+
+        coord = _coord(
+            {
+                "smb_server": "192.168.1.1",
+                "smb_share": "SHARE",
+                "smb_retention_days": 1,  # short — would delete an old NVR file too
+                "smb_base_path": "Bosch",
+                "nvr_smb_subpath": "NVR",
+            }
+        )
+
+        old_stat = MagicMock()
+        old_stat.st_mtime = time.time() - 5 * 86400  # 5 days old — past retention
+
+        nvr_dir = MagicMock()
+        nvr_dir.name = "NVR"
+        nvr_dir.is_dir.return_value = True
+
+        cloud_event_file = MagicMock()
+        cloud_event_file.name = "old_cloud_event.jpg"
+        cloud_event_file.is_dir.return_value = False
+
+        nvr_clip_file = MagicMock()
+        nvr_clip_file.name = "old_nvr_clip.mp4"
+        nvr_clip_file.is_dir.return_value = False
+
+        def _scandir(path):
+            # Root listing: the NVR dir + one regular old cloud-event file.
+            if path.endswith("\\Bosch"):
+                return [nvr_dir, cloud_event_file]
+            # Anything under NVR must never be listed by this walk.
+            if "\\NVR" in path:
+                return [nvr_clip_file]
+            return []
+
+        fake_smb = _fake_smb()
+        fake_smb.register_session = MagicMock()
+        fake_smb.scandir.side_effect = _scandir
+        fake_smb.stat.side_effect = None
+        fake_smb.stat.return_value = old_stat
+
+        with patch.dict(sys.modules, {"smbclient": fake_smb}):
+            with patch(f"{MODULE}.socket"):
+                sync_smb_cleanup(coord)
+
+        deleted_names = {
+            c.args[0].rsplit("\\", 1)[-1] for c in fake_smb.remove.call_args_list
+        }
+        assert "old_cloud_event.jpg" in deleted_names, (
+            "the non-NVR old file must still be cleaned up normally"
+        )
+        assert "old_nvr_clip.mp4" not in deleted_names, (
+            "an NVR-subtree file must NEVER be deleted by this generic walk — "
+            "that's _sync_nvr_cleanup_smb's job with its own retention setting"
+        )
+        # The NVR dir itself must never even be scanned into.
+        scanned_paths = [c.args[0] for c in fake_smb.scandir.call_args_list]
+        assert not any(p.endswith("\\NVR") for p in scanned_paths), (
+            "the NVR subdirectory must be skipped entirely, not just its contents"
+        )
+
+
 # ── feature area: FTP pure helpers (_ftp_exists / _ftp_makedirs / _ftp_connect) ──
 
 

@@ -1152,6 +1152,20 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
 
                 return self.async_create_entry(title="", data=merged)
 
+        if errors and user_input is not None:
+            # Bug-hunt 2026-07-20: the schema below is built entirely from
+            # `opts` (the PERSISTED values) — without this, a single
+            # invalid field (frigate_bind_host/frigate_ip_allowlist/
+            # webhook_url) discarded every other edit in the same
+            # submission when the form was redisplayed with the error,
+            # across all ~50 fields/9 sections. Merge what the user just
+            # typed on top of the persisted values so the redisplayed form
+            # shows their edits, not stale saved state — same intent as
+            # add_suggested_values_to_schema (used by the AI subentry
+            # flows below), just via this method's own opts-driven schema
+            # construction instead.
+            opts.update(user_input)
+
         has_refresh = bool(self._config_entry.data.get("refresh_token", ""))
 
         # Build per-section voluptuous schemas. The schema for each block is

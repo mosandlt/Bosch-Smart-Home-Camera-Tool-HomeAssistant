@@ -2462,10 +2462,27 @@ def _sync_nvr_cleanup_local(coordinator: BoschCameraCoordinator) -> None:
                     deleted += 1
                 except OSError as err:
                     _LOGGER.debug("NVR cleanup: cannot remove %s: %s", full, err)
-    # Second pass: prune empty date folders (but never the camera dir or
-    # base_path itself).
+    # Second pass: prune empty date folders (but never the camera dir,
+    # base_path itself, or anything under the _staging tree).
+    #
+    # Bug-hunt 2026-07-20: this walk used to cover the ENTIRE base_path,
+    # which includes _staging/{cam}/{date}/ — start_recorder deliberately
+    # pre-creates TODAY's and TOMORROW's staging date-dir on start because
+    # ffmpeg's `-strftime_mkdir 1` is unreliable on some bundled builds
+    # (confirmed rc=254 "Failed to open segment" on HA 2026-05-08, see
+    # start_recorder's own comment). Tomorrow's dir is empty by
+    # construction and stays empty until midnight rollover — this daily
+    # cleanup runs on essentially the same cadence as that pre-creation,
+    # so it would almost always find tomorrow's staging date-dir still
+    # empty and delete it, silently undoing the exact workaround it exists
+    # for: at midnight, ffmpeg's own -strftime_mkdir then fails again on
+    # affected builds, dropping that segment (the recurring gap this was
+    # meant to prevent).
+    staging_root = os.path.join(base_path, _STAGING_DIRNAME)
     for root, _dirs, _files in os.walk(base_path, topdown=False):
         if root == base_path:
+            continue
+        if root == staging_root or root.startswith(staging_root + os.sep):
             continue
         try:
             if not os.listdir(root):

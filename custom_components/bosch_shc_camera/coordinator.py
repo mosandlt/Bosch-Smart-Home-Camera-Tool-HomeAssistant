@@ -661,6 +661,14 @@ class BoschCameraCoordinator(
         self.integration_version = _INTEGRATION_VERSION
         # Firmware update status cache — keyed by cam_id, from GET /firmware
         self.firmware_cache: dict[str, dict[str, Any]] = {}
+        # Per-camera lock serializing async_install_firmware()'s
+        # check-then-PUT-then-set sequence. Bug-hunt 2026-07-20: without
+        # this, the Update entity's Install button and the Repairs "Fix"
+        # action (both call the same method) could race — both read
+        # firmware_cache[cam_id]["updating"] as False before either await
+        # completes and sets it, sending two overlapping install PUTs to
+        # Bosch's cloud for the same camera.
+        self._firmware_install_locks: dict[str, asyncio.Lock] = {}
         # SMB maintenance — last run timestamps (monotonic)
         self.last_smb_cleanup: float = float(
             "-inf"
@@ -2142,22 +2150,30 @@ class BoschCameraCoordinator(
         UpdateCameraFirmware — {"id": <update field>} to the same URL this
         integration already GETs for status).
         """
-        fw: dict[str, Any] = self.firmware_cache.get(cam_id, {})
-        if fw.get("updating"):
-            raise HomeAssistantError("Firmware install is already in progress")
-        target = fw.get("update")
-        if not target:
-            raise HomeAssistantError(
-                "No firmware update is currently available to install"
-            )
-        ok = await self.async_put_camera(cam_id, "firmware", {"id": target})
-        if not ok:
-            raise HomeAssistantError(
-                f"Bosch cloud rejected the firmware install request for {target}"
-            )
-        fw["updating"] = True
-        self.firmware_cache[cam_id] = fw
-        self.firmware_set_at[cam_id] = time.monotonic()
+        # Serializes the check-then-PUT-then-set sequence below across BOTH
+        # call sites (update.py's Install button, repairs.py's Fix action) —
+        # without this, a double-click or a race between the two could send
+        # two overlapping install PUTs (bug-hunt 2026-07-20). The write-lock
+        # timestamp set at the end guards against a LATER poll reverting the
+        # optimistic state, not this — it's set only after the first PUT
+        # already succeeded, so it can't prevent a second concurrent caller.
+        async with get_or_create_lock(self._firmware_install_locks, cam_id):
+            fw: dict[str, Any] = self.firmware_cache.get(cam_id, {})
+            if fw.get("updating"):
+                raise HomeAssistantError("Firmware install is already in progress")
+            target = fw.get("update")
+            if not target:
+                raise HomeAssistantError(
+                    "No firmware update is currently available to install"
+                )
+            ok = await self.async_put_camera(cam_id, "firmware", {"id": target})
+            if not ok:
+                raise HomeAssistantError(
+                    f"Bosch cloud rejected the firmware install request for {target}"
+                )
+            fw["updating"] = True
+            self.firmware_cache[cam_id] = fw
+            self.firmware_set_at[cam_id] = time.monotonic()
 
     async def async_soft_reset_camera(self, cam_id: str) -> None:
         """Reboot the camera (soft reset).
@@ -2696,6 +2712,7 @@ class BoschCameraCoordinator(
         "privacy_sound_cache",
         "commissioned_cache",
         "firmware_cache",
+        "_firmware_install_locks",
         "session_stale",
         "timestamp_cache",
         "ledlights_cache",

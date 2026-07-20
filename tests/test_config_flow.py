@@ -3351,6 +3351,49 @@ async def test_options_flow_invalid_webhook_url_sets_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_flow_validation_error_preserves_other_edits() -> None:
+    """Bug-hunt 2026-07-20: a single invalid field (frigate_bind_host here)
+    must not discard every OTHER edit in the same submission. Before the
+    fix, the redisplayed form's schema was built entirely from the
+    PERSISTED opts dict — so a user who changed scan_interval 60->120 in
+    the same submission that also had a typo in frigate_bind_host would
+    see scan_interval silently revert to 60 on the error redisplay, losing
+    every edit across all ~50 fields, not just the invalid one.
+    """
+    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+
+    entry = _make_entry(options={"scan_interval": 60})
+    flow = BoschCameraOptionsFlow(entry)
+    captured: dict[str, object] = {}
+    flow.async_show_form = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda **kw: (
+            captured.update(
+                {"errors": kw.get("errors", {}), "schema": kw.get("data_schema")}
+            )
+            or {"type": "form"}
+        )
+    )
+
+    await flow.async_step_init(
+        user_input={
+            "scan_interval": 120,  # a genuine, valid edit in the same submission
+            "frigate_bind_host": "not_an_ip",  # the actual invalid field
+        }
+    )
+
+    assert captured["errors"].get("frigate_bind_host") == "invalid_ip_address"
+    serialized = _serialize_like_frontend(captured["schema"])
+    polling_section = next(item for item in serialized if item.get("name") == "polling")
+    scan_interval_field = next(
+        f for f in polling_section["schema"] if f.get("name") == "scan_interval"
+    )
+    assert scan_interval_field["default"] == 120, (
+        "the user's valid scan_interval edit must survive the redisplay "
+        f"triggered by the UNRELATED frigate_bind_host error, got: {scan_interval_field}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_options_flow_valid_webhook_url_variants_no_error() -> None:
     """Both http:// and https:// prefixes are accepted (local-network webhook
     receivers commonly run plain http, matching CLAUDE.md LOCAL_OVER_REMOTE)."""

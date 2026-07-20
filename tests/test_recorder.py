@@ -8567,3 +8567,48 @@ class TestStartRecorderEventBufferedPushesUpdate:
             await recorder.start_recorder(coord, CAM_ID_SHORT)
 
         coord.async_update_listeners.assert_not_called()
+
+
+class TestSyncNvrCleanupLocalStagingExclusion:
+    """Bug-hunt 2026-07-20: the empty-dir prune pass used to walk the
+    ENTIRE base_path, including _staging/{cam}/{date}/ — start_recorder
+    deliberately pre-creates TODAY's and TOMORROW's staging date-dir on
+    start because ffmpeg's -strftime_mkdir is unreliable on some bundled
+    builds (rc=254 "Failed to open segment"). Tomorrow's dir is empty by
+    construction and stays empty until midnight rollover, so this daily
+    cleanup (same cadence as the pre-creation) would almost always delete
+    it, silently undoing the exact workaround it exists for.
+    """
+
+    def test_empty_tomorrow_staging_dir_survives_cleanup(self, tmp_path: Path):
+        base = tmp_path / "nvr"
+        staging_tomorrow = base / "_staging" / "Terrasse" / "2026-07-21"
+        staging_tomorrow.mkdir(parents=True)
+
+        # A genuinely old, non-staging file must still be cleaned up
+        # normally, and its now-empty parent dir pruned as before.
+        old_dir = base / "Terrasse" / "2026-07-01"
+        old_dir.mkdir(parents=True)
+        old_file = old_dir / "10-00.mp4"
+        old_file.write_bytes(b"x")
+        old_mtime = time.time() - 10 * 86400
+        os.utime(old_file, (old_mtime, old_mtime))
+
+        coord = SimpleNamespace(
+            options={
+                "nvr_base_path": str(base),
+                "nvr_retention_days": 3,
+            }
+        )
+
+        recorder._sync_nvr_cleanup_local(coord)
+
+        assert staging_tomorrow.is_dir(), (
+            "the pre-created, still-empty tomorrow staging dir must survive "
+            "the daily cleanup — deleting it reintroduces the midnight-"
+            "rollover rc=254 bug the pre-creation exists to prevent"
+        )
+        assert not old_file.exists(), "the genuinely old file must still be deleted"
+        assert not old_dir.exists(), (
+            "the now-empty non-staging date dir must still be pruned as before"
+        )

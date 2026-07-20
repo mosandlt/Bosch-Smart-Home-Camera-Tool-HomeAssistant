@@ -251,6 +251,70 @@ async def test_supervisor_hard_heal_reason_soft_streak(
     assert not any("no persisted credentials" in msg for msg in hard_heal_logs)
 
 
+async def test_supervisor_hard_heal_resets_failures_not_just_soft_streak(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Bug-hunt 2026-07-20: a hard-heal purge+re-registration is exactly the
+    fix for a credential-related failure, but only soft_streak was ever
+    reset — failures (the backoff-delay counter) stayed at whatever it had
+    climbed to. If the freshly re-registered listener then fails again for
+    an unrelated reason (not credentials), the supervisor computed its
+    retry delay off the STALE, still-elevated failures value instead of
+    starting fresh — contradicting this module's own docstring ("resets to
+    0 after a successful push arrived").
+
+    Sequence: two ordinary soft failures (failures=2, soft_streak=2) →
+    soft_streak hits the (patched) hard-heal threshold → hard-heal purge
+    resets soft_streak (and, with the fix, failures) → the listener start
+    inside that SAME iteration also fails. The "attempt #%d" log line
+    must show #1 (fresh count), not #3 (stale pre-heal count + 1).
+    """
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    coord = _make_supervisor_coord_with_lock(
+        {"fcm_credentials": {"gcm": "x"}}, force_hard=False
+    )
+
+    with (
+        patch.object(fcm, "FCM_SUPERVISOR_SOFT_HEAL_MAX", 2),
+        patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+        patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+        patch("asyncio.sleep", new=AsyncMock()),
+        patch.object(
+            fcm,
+            "_async_start_fcm_push_locked",
+            new=AsyncMock(side_effect=[False, False, False, asyncio.CancelledError]),
+        ),
+        caplog.at_level("INFO", logger=MODULE),
+    ):
+        task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert task.done()
+    hard_heal_logs = [
+        r.getMessage() for r in caplog.records if "hard-heal" in r.getMessage()
+    ]
+    assert any("soft-restarts without a push" in msg for msg in hard_heal_logs), (
+        "hard-heal must have fired via the soft_streak threshold"
+    )
+    attempt_logs = [
+        r.getMessage()
+        for r in caplog.records
+        if "start failed — retry" in r.getMessage()
+    ]
+    assert len(attempt_logs) == 3, attempt_logs
+    assert "attempt #1" in attempt_logs[0]
+    assert "attempt #2" in attempt_logs[1]
+    assert "attempt #1" in attempt_logs[2], (
+        f"failures must reset to 0 on hard-heal, not stay stale — got: {attempt_logs[2]!r}"
+    )
+
+
 async def test_supervisor_hard_heal_reason_creds_staleness(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

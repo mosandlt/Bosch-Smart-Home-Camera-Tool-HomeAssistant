@@ -595,6 +595,16 @@ def sync_smb_cleanup(coordinator: BoschCameraCoordinator) -> None:
     password = opts.get("smb_password", "")
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip()
     retention_days = int(opts.get("smb_retention_days", 180))
+    # Mini-NVR recordings live at {base_path}/{nvr_smb_subpath}/... (see
+    # recorder.py's _upload_smb / _sync_nvr_cleanup_smb) — squarely inside
+    # the tree this walk covers. That subtree has its OWN independent daily
+    # retention job with its own nvr_retention_days setting. Bug-hunt
+    # 2026-07-20: without this exclusion, a user who sets smb_retention_days
+    # shorter than nvr_retention_days (a reasonable, UI-exposed combination
+    # — e.g. fast cloud-event-snapshot cleanup but longer NVR retention)
+    # gets their NVR recordings silently deleted early by the WRONG
+    # retention policy, contradicting their explicit nvr_retention_days.
+    nvr_sub = (opts.get("nvr_smb_subpath") or "NVR").strip()
 
     if (
         not opts.get("enable_smb_upload")
@@ -604,41 +614,54 @@ def sync_smb_cleanup(coordinator: BoschCameraCoordinator) -> None:
     ):
         return
 
-    try:
-        socket.setdefaulttimeout(10)
+    # Held for the entire register_session()+walk span (see
+    # _SOCKET_TIMEOUT_LOCK docstring) — socket.setdefaulttimeout() is
+    # process-global; without this, a concurrent sync_smb_upload/other
+    # cleanup call's `finally: setdefaulttimeout(None)` could fire mid-walk
+    # here, stripping this call's timeout protection and leaving the
+    # (many blocking scandir/stat/remove calls) walk below unbounded — a
+    # network blip or unresponsive share could then hang the executor
+    # thread indefinitely. Bug-hunt 2026-07-20 (this call was missing the
+    # lock sync_smb_upload already uses for the identical pattern).
+    with _SOCKET_TIMEOUT_LOCK:
         try:
-            register_session(server, username=username, password=password)
-        finally:
-            socket.setdefaulttimeout(None)
-    except Exception as err:
-        _LOGGER.warning("SMB cleanup: session to %s failed: %s", server, err)
-        return
-
-    cutoff = time.time() - retention_days * 86400
-    root = f"\\\\{server}\\{share}\\{base_path}"
-    deleted = 0
-
-    def _walk_and_delete(path: str) -> None:
-        nonlocal deleted
-        try:
-            entries = list(scandir(path))
-        except Exception:
+            socket.setdefaulttimeout(10)
+            try:
+                register_session(server, username=username, password=password)
+            finally:
+                socket.setdefaulttimeout(None)
+        except Exception as err:
+            _LOGGER.warning("SMB cleanup: session to %s failed: %s", server, err)
             return
-        for entry in entries:
-            full = f"{path}\\{entry.name}"
-            if entry.is_dir():
-                _walk_and_delete(full)
-            else:
-                try:
-                    st = smb_stat(full)
-                    if st.st_mtime < cutoff:
-                        remove(full)
-                        deleted += 1
-                        _LOGGER.debug("SMB cleanup: deleted %s", entry.name)
-                except Exception as err:
-                    _LOGGER.debug("SMB cleanup: error on %s: %s", entry.name, err)
 
-    _walk_and_delete(root)
+        cutoff = time.time() - retention_days * 86400
+        root = f"\\\\{server}\\{share}\\{base_path}"
+        nvr_dir_name = nvr_sub.replace("/", "\\").split("\\")[0] if nvr_sub else ""
+        deleted = 0
+
+        def _walk_and_delete(path: str, *, is_root: bool) -> None:
+            nonlocal deleted
+            try:
+                entries = list(scandir(path))
+            except Exception:
+                return
+            for entry in entries:
+                if is_root and nvr_dir_name and entry.name == nvr_dir_name:
+                    continue
+                full = f"{path}\\{entry.name}"
+                if entry.is_dir():
+                    _walk_and_delete(full, is_root=False)
+                else:
+                    try:
+                        st = smb_stat(full)
+                        if st.st_mtime < cutoff:
+                            remove(full)
+                            deleted += 1
+                            _LOGGER.debug("SMB cleanup: deleted %s", entry.name)
+                    except Exception as err:
+                        _LOGGER.debug("SMB cleanup: error on %s: %s", entry.name, err)
+
+        _walk_and_delete(root, is_root=True)
     if deleted:
         _LOGGER.info(
             "SMB cleanup: deleted %d file(s) older than %d days from %s",

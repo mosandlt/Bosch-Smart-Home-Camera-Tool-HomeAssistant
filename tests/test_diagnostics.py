@@ -45,6 +45,8 @@ def test_to_redact_covers_all_known_secrets() -> None:
         "frigate_token",
         "frigate_basic_user",
         "frigate_ip_allowlist",
+        # Event-webhook delivery URL (bug-hunt 2026-07-20)
+        "webhook_url",
         # Stream URLs containing session creds
         "rtsps_url",
         "rtspsUrl",
@@ -479,3 +481,35 @@ async def test_options_redaction_strips_frigate_credentials(
     assert redacted_opts["frigate_token"] == "**REDACTED**"
     assert redacted_opts["frigate_basic_user"] == "**REDACTED**"
     assert redacted_opts["frigate_ip_allowlist"] == "**REDACTED**"
+
+
+async def test_options_redaction_strips_webhook_url(hass: HomeAssistant) -> None:
+    """Regression (bug-hunt 2026-07-20, same class as frigate_token above):
+    webhook_url (event-webhook delivery, opt-in) can embed a secret token
+    in the URL path itself (Slack/Discord incoming-webhooks, ntfy topics,
+    HA long-lived-token webhooks) — leaked verbatim without this entry.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={
+            "webhook_url": "https://hooks.example.com/services/T00/B00/super-secret-token",
+        },
+    )
+    entry.add_to_hass(hass)
+    entry.runtime_data = type(
+        "Stub",
+        (),
+        {
+            "data": {},
+            "last_update_success": True,
+            "fcm_running": False,
+            "fcm_healthy": True,
+            "auth_outage_count": 0,
+            "update_interval": None,
+        },
+    )()
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    redacted_opts = diag["entry"]["options"]
+    assert redacted_opts["webhook_url"] == "**REDACTED**"

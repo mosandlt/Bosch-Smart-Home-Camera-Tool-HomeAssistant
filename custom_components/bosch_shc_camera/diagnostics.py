@@ -64,6 +64,11 @@ TO_REDACT = {
     "frigate_token",
     "frigate_basic_user",
     "frigate_ip_allowlist",
+    # Event-webhook delivery URL (bug-hunt 2026-07-20, same class as the
+    # frigate_token gap above): third-party push endpoints (Slack/Discord
+    # incoming-webhooks, ntfy topics, HA long-lived-token webhooks) embed a
+    # secret token in the URL path itself — leaked verbatim without this.
+    "webhook_url",
     # Stream / RTSP URLs (contain proxy session credentials)
     "rtspsUrl",
     "rtsps_url",

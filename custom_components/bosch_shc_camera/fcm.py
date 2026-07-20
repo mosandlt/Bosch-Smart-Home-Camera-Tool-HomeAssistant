@@ -932,6 +932,20 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                     )
                 reset_fcm_creds_staleness_counter()
                 soft_streak = 0
+                # Bug-hunt 2026-07-20: a hard-heal purge+re-registration is
+                # exactly the fix for a credential-related failure, but only
+                # soft_streak was ever reset here — failures (the backoff-
+                # delay counter) stayed at whatever it had climbed to,
+                # contradicting this module's own docstring ("resets to 0
+                # after a successful push arrived"). If the freshly
+                # re-registered listener then dies again for an unrelated
+                # reason (a WAN blip, not credentials) before any push has
+                # arrived — plausible whenever real camera events are
+                # infrequent — the supervisor computed its retry delay off
+                # the stale, still-elevated failures value and could wait up
+                # to 30 minutes, even though the actual root cause had just
+                # been fixed.
+                failures = 0
             except asyncio.CancelledError:
                 raise
             except Exception:
