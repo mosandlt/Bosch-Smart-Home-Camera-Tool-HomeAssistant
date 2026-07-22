@@ -595,6 +595,24 @@ async def _spawn_preroll_recorder_locked(
             existing.pid,
         )
         return
+    if coordinator.get_nvr_mode(cam_id) != "event_buffered":
+        # GitHub #54 bug-hunt finding: `_start_recorder_locked` no longer
+        # spawns the ring in continuous mode, but this function has two
+        # OTHER callers that don't go through that gate —
+        # `_watch_preroll_health`'s crash-respawn (after its
+        # `_RESPAWN_DELAY_SECONDS` sleep) and
+        # `restart_preroll_recorder_after_finalize` (after a possibly
+        # long-running postroll capture) — either of which can fire after
+        # the camera's mode already flipped to `continuous` mid-wait,
+        # resurrecting exactly the "second full-bandwidth ffmpeg consumer"
+        # the #54 fix eliminated, just via a race instead of
+        # unconditionally. Re-check the mode here, the single choke point
+        # both callers share with the normal path.
+        _LOGGER.debug(
+            "NVR pre-roll spawn skipped for %s — mode is not event_buffered",
+            cam_id[:8],
+        )
+        return
     if getattr(coordinator, "nvr_shutting_down", False):
         # Config-entry unload/HA-stop is tearing this coordinator down
         # (issue #47) — refuse to spawn a new ring writer that
@@ -1757,10 +1775,19 @@ async def _start_recorder_locked(
     coordinator.bg_tasks.add(task)
     task.add_done_callback(coordinator.bg_tasks.discard)
 
-    # Start pre-roll buffer if configured (nvr_preroll_seconds > 0).
-    preroll_secs = int(opts.get("nvr_preroll_seconds") or 0)
-    if preroll_secs > 0:
-        await _spawn_preroll_recorder_locked(coordinator, cam_id)
+    # Do NOT also run the pre-roll ring while the continuous recorder is
+    # active for this camera (GitHub #54, realKim-dotcom): the ring's
+    # output is only ever consumed by motion-clip assembly, which is gated
+    # to `event_buffered` mode (see the early-return above) — the
+    # continuous recorder already captures everything, so a concurrently
+    # running ring is a second full-bandwidth ffmpeg consumer whose output
+    # nothing reads. On a bandwidth-constrained link the reporter measured
+    # this second session actively degrading the continuous recorder's own
+    # footage. `stop_recorder`'s leading call above already stopped any
+    # ring left over from a prior `event_buffered` stint; mode flipping
+    # back to `event_buffered` re-triggers `start_recorder` (switch.py /
+    # select.py) which respawns it fresh — an accepted pre-roll-refill
+    # gap the reporter explicitly asked to trade for this.
 
 
 async def stop_recorder(

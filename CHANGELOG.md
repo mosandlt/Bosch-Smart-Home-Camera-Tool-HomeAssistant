@@ -7,7 +7,11 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [v16.1.2] - 2026-07-17
 
-Patch — bundles fixes shipped across beta iterations (beta-1/beta-2/beta-3/beta-4/beta-5/beta-6/beta-7/beta-8/beta-9) before going stable. No breaking changes.
+Patch — bundles fixes shipped across beta iterations (beta-1/beta-2/beta-3/beta-4/beta-5/beta-6/beta-7/beta-8/beta-9/beta-10) before going stable. No breaking changes.
+
+### Changed
+
+- **Pre-roll ring no longer runs while a camera's Mini-NVR mode is `continuous`** (beta-10, GitHub #54, realKim-dotcom — reported and measured on a bandwidth-constrained WiFi link). Previously, `_start_recorder_locked` spawned the pre-roll ring buffer unconditionally alongside the continuous recorder — but the ring's output is only ever consumed by motion-clip assembly, which is gated to `event_buffered` mode, so on a `continuous`-mode camera the ring was a second full-bandwidth ffmpeg consumer whose output nothing ever read. The reporter measured this actively degrading footage during motion events specifically (ffprobe timestamp gaps, `RTP: PT=23: bad cseq`, occasional full session collapse) — the burst of concurrent consumer spawns at event time overloads a constrained link, damaging exactly the footage the pipeline exists to capture. The ring now only runs in `event_buffered` mode; switching a camera's Mini-NVR mode back to `event_buffered` re-spawns it fresh (an accepted pre-roll-refill gap the reporter explicitly asked to trade for undamaged footage). THREE_PER_ISSUE_PER_CHANGE bug-hunt (3 agents) found one real race the initial fix missed: the ring's own crash-respawn watcher (`_watch_preroll_health`) and `restart_preroll_recorder_after_finalize` (used by motion-clip assembly) didn't re-check the camera's mode before respawning, so a mode switch to `continuous` racing a ring crash/finalize could still resurrect the ring — fixed by moving the mode gate into `_spawn_preroll_recorder_locked` itself, the single choke point all three callers share. Also closed a doc gap the bug-hunt surfaced: `nvr_preroll_seconds`'s description (strings.json, all 12 locales, README) didn't mention the `event_buffered`-only gating, unlike its sibling `nvr_postroll_seconds`. 2 new/updated pytest regression tests, 6365 pytest / mypy --strict / ruff / codespell clean, deploy-verified on test HA (clean restart, 0 `bosch_shc_camera` exceptions).
 
 ### Fixed
 

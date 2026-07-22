@@ -1289,6 +1289,7 @@ Set `nvr_preroll_seconds` to a value between 1 and 60 to keep a RAM-based ring b
 - Default path: `/dev/shm/bosch_nvr_cache` — inside the HA container namespace, not visible via SSH
 - Change to `/config/bosch_nvr_preroll` if you want the cache on shared storage
 - On FCM motion push, the cached segments are prepended to the recorded clip automatically
+- Only takes effect when the camera's Mini-NVR mode select is set to `event_buffered` — the ring is suspended while the mode is `continuous`, since the continuous recorder already captures everything and nothing consumes the ring's output in that mode (a second ffmpeg session per camera would only add load for no benefit)
 
 Set to `0` (default) to disable pre-roll.
 

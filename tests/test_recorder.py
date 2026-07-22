@@ -3316,6 +3316,7 @@ class TestNvrShutdownRace:
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
+        coord._nvr_mode_preference[cam_id] = "event_buffered"
         coord.nvr_shutting_down = True
 
         with patch("asyncio.create_subprocess_exec") as spawn_mock:
@@ -3410,6 +3411,7 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
+        coord._nvr_mode_preference[cam_id] = "event_buffered"
 
         mock_proc = MagicMock()
         mock_proc.returncode = None
@@ -3495,6 +3497,7 @@ class TestStartPrerollRecorderSerialization:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
 
         active = 0
         max_active = 0
@@ -3530,6 +3533,7 @@ class TestStartPrerollRecorderSerialization:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
 
         procs: list[MagicMock] = []
 
@@ -3565,6 +3569,7 @@ class TestStartPrerollRecorder:
         coord = _make_lifecycle_coord(conn_type="REMOTE", base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
             await recorder.start_preroll_recorder(coord, CAM_ID)
         spawn.assert_not_called()
@@ -3578,6 +3583,7 @@ class TestStartPrerollRecorder:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
         coord.live_connections[CAM_ID]["rtspsUrl"] = ""
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
             await recorder.start_preroll_recorder(coord, CAM_ID)
@@ -3593,6 +3599,7 @@ class TestStartPrerollRecorder:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
         proc = _mock_proc(returncode=None)
 
         async def _spawn(*_args, **_kwargs):
@@ -3635,6 +3642,7 @@ class TestStartPrerollRecorder:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
         proc = _mock_proc(returncode=None)
 
         async def _spawn(*_args, **_kwargs):
@@ -3665,6 +3673,7 @@ class TestStartPrerollRecorder:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
         with patch.object(
             asyncio,
             "create_subprocess_exec",
@@ -3686,6 +3695,7 @@ class TestStartPrerollRecorder:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
         with patch.object(
             asyncio,
             "create_subprocess_exec",
@@ -3705,6 +3715,7 @@ class TestStartPrerollRecorder:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
 
         async def _bad_executor(fn, *args, **kwargs):
             if fn is os.makedirs:
@@ -3726,6 +3737,7 @@ class TestStartPrerollRecorder:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
         proc = _mock_proc(returncode=None)
 
         async def _spawn(*a, **kw):
@@ -3750,6 +3762,7 @@ class TestStartPrerollRecorder:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
         # Remove the attribute to trigger the hasattr branch
         del coord.nvr_preroll_tasks
 
@@ -3811,6 +3824,7 @@ class TestSpawnPrerollRecorderIdempotency:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
         dead_proc = _mock_proc(returncode=1)  # already exited
         coord.nvr_preroll_processes[CAM_ID] = dead_proc
         new_proc = _mock_proc(returncode=None)
@@ -3832,6 +3846,7 @@ class TestSpawnPrerollRecorderIdempotency:
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
         coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
         assert CAM_ID not in coord.nvr_preroll_processes
         proc = _mock_proc(returncode=None)
 
@@ -4821,6 +4836,7 @@ class TestWatchPrerollRecorder:
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
+        coord._nvr_mode_preference[cam_id] = "event_buffered"
 
         mock_proc = MagicMock()
         mock_proc.returncode = None
@@ -5121,7 +5137,10 @@ class TestPrerollWiring(unittest.TestCase):
     that /dev/shm/bosch_nvr_cache/ was never created despite preroll_seconds=30."""
 
     def test_start_recorder_calls_preroll_when_seconds_gt_zero(self):
-        """start_recorder must call start_preroll_recorder when nvr_preroll_seconds > 0."""
+        """start_recorder must call start_preroll_recorder when
+        nvr_preroll_seconds > 0 AND mode is 'event_buffered' — the ring's
+        output is only ever consumed by event_buffered's motion-clip
+        assembly (GitHub #54)."""
         import custom_components.bosch_shc_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
@@ -5132,6 +5151,7 @@ class TestPrerollWiring(unittest.TestCase):
                 "nvr_quality": "auto",
                 "nvr_preroll_seconds": 30,
                 "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",
+                "nvr_event_only": True,
             },
         )
 
@@ -5157,6 +5177,57 @@ class TestPrerollWiring(unittest.TestCase):
 
         asyncio.get_event_loop().run_until_complete(_run())
         assert cam_id in started_preroll, "start_preroll_recorder was not called"
+
+    def test_start_recorder_skips_preroll_in_continuous_mode(self):
+        """GitHub #54 (realKim-dotcom): while mode is 'continuous', the
+        main ffmpeg recorder already captures everything the ring would —
+        and motion-clip assembly (the ring's only consumer) is gated to
+        'event_buffered'. Spawning the ring here is a second full-bandwidth
+        ffmpeg consumer whose output nothing ever reads; on a
+        bandwidth-constrained WiFi link the reporter measured this actively
+        degrading the continuous recorder's own footage during the event
+        burst. The ring must NOT spawn here even with
+        nvr_preroll_seconds > 0."""
+        import custom_components.bosch_shc_camera.recorder as recorder
+
+        cam_id = CAM_ID_SHORT
+        coord = _make_phase_coord(
+            cam_id=cam_id,
+            opts={
+                "nvr_base_path": "/config/bosch_nvr",
+                "nvr_quality": "auto",
+                "nvr_preroll_seconds": 30,
+                "nvr_preroll_cache_dir": "/dev/shm/bosch_nvr_cache",
+                "nvr_event_only": False,  # global default: continuous
+            },
+        )
+
+        started_preroll = []
+
+        async def fake_start_preroll(c, cid):
+            started_preroll.append(cid)
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = None
+        mock_proc.wait = AsyncMock(return_value=0)
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.read = AsyncMock(return_value=b"")
+
+        async def _run():
+            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+                with patch.object(
+                    recorder,
+                    "_spawn_preroll_recorder_locked",
+                    side_effect=fake_start_preroll,
+                ):
+                    await recorder.start_recorder(coord, cam_id)
+
+        asyncio.get_event_loop().run_until_complete(_run())
+        assert cam_id in coord.nvr_processes, "continuous recorder must still spawn"
+        assert started_preroll == [], (
+            "pre-roll ring must NOT spawn while mode is continuous — its "
+            "output is never consumed and it only doubles bandwidth load"
+        )
 
     def test_start_recorder_skips_preroll_when_seconds_zero(self):
         """start_recorder must NOT call start_preroll_recorder when nvr_preroll_seconds=0."""
