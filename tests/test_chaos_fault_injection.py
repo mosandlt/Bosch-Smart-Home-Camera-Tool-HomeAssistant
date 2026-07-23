@@ -359,11 +359,17 @@ class TestCloudApiFaultInjectionCameraList:
         return session
 
     async def test_timeout_raises_update_failed_not_raw_exception(self):
+        """`fetch_camera_list` retries a bare timeout once (real delay —
+        `VIDEO_INPUTS_RETRY_DELAY_SEC` — patched out here so this stays a
+        fast unit test) before letting it propagate as `UpdateFailed`."""
         coord = _make_coord()
         session = self._broken_camera_list_session(
             TimeoutError("chaos: cam-list timeout")
         )
-        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
+        with (
+            patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
             with pytest.raises(UpdateFailed):
                 await asyncio.wait_for(
                     BoschCameraCoordinator._async_update_data(coord), timeout=5.0
@@ -393,7 +399,10 @@ class TestCloudApiFaultInjectionCameraList:
         ]
         for exc in faults:
             session = self._broken_camera_list_session(exc)
-            with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
+            with (
+                patch(_PATCH_SESSION, new=AsyncMock(return_value=session)),
+                patch("asyncio.sleep", new=AsyncMock()),
+            ):
                 with pytest.raises(UpdateFailed):
                     await asyncio.wait_for(
                         BoschCameraCoordinator._async_update_data(coord), timeout=5.0

@@ -88,6 +88,17 @@ STREAM_START_SKIPPED = _StreamStartSkipped()
 TIMEOUT_SNAP = 10  # GET on signed image / imageUrl
 TIMEOUT_PUT_CONNECTION = 10  # PUT /v11/video_inputs/{id}/connection
 
+# GET /v11/video_inputs (camera_list.py) — first call of every coordinator
+# tick, gating everything else that tick. A bare timeout here used to fail
+# the WHOLE tick immediately (community report, forum thread, 2026-07-23: a
+# brief Bosch-cloud blip caused two consecutive failed ticks, self-recovered
+# on the third) — one quick in-tick retry absorbs a momentary hiccup instead
+# of costing users a full failed update + stale/offline-looking cameras over
+# what a few seconds' grace would have covered. A persistent outage still
+# fails after the retry, same as before.
+TIMEOUT_VIDEO_INPUTS = 15.0
+VIDEO_INPUTS_RETRY_DELAY_SEC = 3.0
+
 # issue #47: AUTO-mode TCP pre-check chicken-and-egg breaker. When the
 # camera's cached LAN IP is stale (DHCP re-lease after a mesh flap/reboot),
 # every pre-check ping against it fails forever, which would otherwise skip

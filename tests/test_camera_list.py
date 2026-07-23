@@ -73,6 +73,78 @@ class TestFetchCameraListHappyPath:
         coord.ensure_valid_token.assert_not_called()
 
 
+def _make_timeout_cm():
+    """A `session.get(...)` context manager whose `__aenter__` raises
+    `TimeoutError` — simulates a bare connect/read timeout distinct from
+    any HTTP response."""
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(side_effect=TimeoutError("simulated timeout"))
+    cm.__aexit__ = AsyncMock(return_value=None)
+    return cm
+
+
+class TestFetchCameraListTimeoutRetry:
+    """A bare timeout on `GET /v11/video_inputs` gets one quick retry before
+    failing the whole tick over it (2026-07-23 community report: a brief
+    Bosch-cloud blip failed two consecutive ticks)."""
+
+    @pytest.mark.asyncio
+    async def test_timeout_then_success_recovers_without_raising(self, monkeypatch):
+        sleeps: list[float] = []
+
+        async def _fake_sleep(seconds):
+            sleeps.append(seconds)
+
+        monkeypatch.setattr("asyncio.sleep", _fake_sleep)
+        coord = _make_coord()
+        session = _make_session(_make_timeout_cm(), _make_resp(200, [{"id": CAM_A}]))
+
+        cams, token, _headers = await fetch_camera_list(
+            coord, session, HEADERS, "old-token"
+        )
+
+        assert cams == [{"id": CAM_A}]
+        assert token == "old-token"
+        assert session.get.call_count == 2
+        from custom_components.bosch_shc_camera.const import (
+            VIDEO_INPUTS_RETRY_DELAY_SEC,
+        )
+
+        assert sleeps == [VIDEO_INPUTS_RETRY_DELAY_SEC]
+
+    @pytest.mark.asyncio
+    async def test_timeout_twice_raises_after_exactly_one_retry(self, monkeypatch):
+        sleeps: list[float] = []
+
+        async def _fake_sleep(seconds):
+            sleeps.append(seconds)
+
+        monkeypatch.setattr("asyncio.sleep", _fake_sleep)
+        coord = _make_coord()
+        session = _make_session(_make_timeout_cm(), _make_timeout_cm())
+
+        with pytest.raises(TimeoutError):
+            await fetch_camera_list(coord, session, HEADERS, "old-token")
+
+        # Exactly 2 attempts (1 retry), not more — a persistent outage must
+        # still fail promptly, not loop.
+        assert session.get.call_count == 2
+        assert len(sleeps) == 1
+
+    @pytest.mark.asyncio
+    async def test_non_timeout_error_status_is_not_retried(self):
+        """A definitive HTTP error (not a bare timeout) must fail
+        immediately — the retry is only for a connection that never
+        completed at all."""
+        coord = _make_coord()
+        session = _make_session(_make_resp(500))
+
+        with pytest.raises(UpdateFailed, match="HTTP 500"):
+            await fetch_camera_list(coord, session, HEADERS, "old-token")
+
+        assert session.get.call_count == 1
+
+
 class TestFetchCameraListNon200:
     @pytest.mark.asyncio
     async def test_500_raises_update_failed_and_kicks_maint_and_outage_ping(self):

@@ -30,7 +30,11 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from .const import CLOUD_API
+from .const import (
+    CLOUD_API,
+    TIMEOUT_VIDEO_INPUTS,
+    VIDEO_INPUTS_RETRY_DELAY_SEC,
+)
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator
@@ -56,41 +60,64 @@ async def fetch_camera_list(
     # self._cloud_api in __init__).
     cloud_api = getattr(coordinator, "_cloud_api", CLOUD_API)
 
-    async with asyncio.timeout(15):
-        async with session.get(
-            f"{cloud_api}/v11/video_inputs", headers=headers
-        ) as resp:
-            if resp.status == 401:
-                _LOGGER.info("Token expired (401) — attempting silent renewal")
-                _LOGGER.debug(
-                    "video_inputs 401 body against %s (diagnostic, no token "
-                    "material): %s",
-                    cloud_api,
-                    (await resp.text())[:300],
-                )
-                token = await coordinator.ensure_valid_token(token)
-                headers = {
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/json",
-                }
-            elif resp.status != 200:
-                # Cloud 5xx often coincides with announced maintenance —
-                # kick off a background fetch of the community RSS so
-                # the UI can show a specific reason instead of generic
-                # "unavailable". Rate-limited inside the helper.
-                # getattr handles stub coordinators in tests.
-                _maint = getattr(coordinator, "_async_refresh_maintenance", None)
-                if _maint is not None:
-                    coordinator.hass.async_create_task(_maint(reactive=True))
-                # And kick a LAN-ping sweep so the switch/light entities
-                # have a fresh reachability signal even though the
-                # cloud-driven status loop won't run this tick.
-                _outage_ping = getattr(coordinator, "async_outage_ping_all", None)
-                if _outage_ping is not None:
-                    coordinator.hass.async_create_task(_outage_ping())
-                raise UpdateFailed(f"Camera list returned HTTP {resp.status}")
-            else:
-                cam_list = await resp.json()
+    # One quick retry on a bare timeout (connect/read never completed within
+    # TIMEOUT_VIDEO_INPUTS at all) before failing the whole tick over it —
+    # see const.py's TIMEOUT_VIDEO_INPUTS docstring for the report that
+    # prompted this. Does NOT apply to a real HTTP error status (401/5xx
+    # etc.) — those are a definitive response, not a hiccup, and already
+    # have their own defined handling below.
+    for _attempt in range(2):
+        try:
+            async with asyncio.timeout(TIMEOUT_VIDEO_INPUTS):
+                async with session.get(
+                    f"{cloud_api}/v11/video_inputs", headers=headers
+                ) as resp:
+                    if resp.status == 401:
+                        _LOGGER.info("Token expired (401) — attempting silent renewal")
+                        _LOGGER.debug(
+                            "video_inputs 401 body against %s (diagnostic, no "
+                            "token material): %s",
+                            cloud_api,
+                            (await resp.text())[:300],
+                        )
+                        token = await coordinator.ensure_valid_token(token)
+                        headers = {
+                            "Authorization": f"Bearer {token}",
+                            "Accept": "application/json",
+                        }
+                    elif resp.status != 200:
+                        # Cloud 5xx often coincides with announced maintenance —
+                        # kick off a background fetch of the community RSS so
+                        # the UI can show a specific reason instead of generic
+                        # "unavailable". Rate-limited inside the helper.
+                        # getattr handles stub coordinators in tests.
+                        _maint = getattr(
+                            coordinator, "_async_refresh_maintenance", None
+                        )
+                        if _maint is not None:
+                            coordinator.hass.async_create_task(_maint(reactive=True))
+                        # And kick a LAN-ping sweep so the switch/light entities
+                        # have a fresh reachability signal even though the
+                        # cloud-driven status loop won't run this tick.
+                        _outage_ping = getattr(
+                            coordinator, "async_outage_ping_all", None
+                        )
+                        if _outage_ping is not None:
+                            coordinator.hass.async_create_task(_outage_ping())
+                        raise UpdateFailed(f"Camera list returned HTTP {resp.status}")
+                    else:
+                        cam_list = await resp.json()
+            break
+        except TimeoutError:
+            if _attempt == 1:
+                raise
+            _LOGGER.debug(
+                "video_inputs timed out against %s (attempt 1/2) — "
+                "retrying once after %.0fs before failing the tick",
+                cloud_api,
+                VIDEO_INPUTS_RETRY_DELAY_SEC,
+            )
+            await asyncio.sleep(VIDEO_INPUTS_RETRY_DELAY_SEC)
 
     # Retry after renewal if we got a 401
     if resp.status == 401:
