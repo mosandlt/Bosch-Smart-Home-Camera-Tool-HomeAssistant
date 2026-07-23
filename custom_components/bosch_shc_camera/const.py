@@ -105,16 +105,6 @@ TIMEOUT_RECORDER_GRACE = 20.0
 TIMEOUT_RECORDER_KILL_WAIT = 2.0
 TIMEOUT_RECORDER_STDERR_DRAIN = 1.0
 TIMEOUT_RECORDER_FFMPEG_INIT = 30.0
-# Extra grace on top of nvr_postroll_seconds when waiting for the postroll
-# capture ffmpeg to exit on its own -t deadline (RTSP handshake + flush).
-# A fixed 10s on top of the raw duration was too thin for a *cold* RTSP
-# session competing with the pre-roll ring/continuous recorder on a
-# jittery or slow-warming stream (GitHub #52) — the multiplier scales the
-# budget with the configured post-roll length so long windows get
-# proportionally more slack, while the fixed grace still covers the
-# connection handshake regardless of duration.
-TIMEOUT_RECORDER_POSTROLL_GRACE = 10.0
-TIMEOUT_RECORDER_POSTROLL_MULTIPLIER = 1.5
 
 # tls_proxy.py — TCP connect to camera + RTSP pre-warm DESCRIBE response wait.
 TIMEOUT_TLS_PROXY_CONNECT = 10

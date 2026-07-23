@@ -1861,14 +1861,15 @@ class TestCreateMotionClipExtraSegments:
             return real_unlink(path, *a, **kw)
 
         with tempfile.TemporaryDirectory() as d:
-            # GitHub #51: staging hardlinks every listed pre-roll segment,
-            # so these must be real files — extra_segments (the post-roll
-            # capture) is deliberately NOT staged (it's already a private,
-            # single-use file untouched by the ring), so it keeps its
-            # literal path unchanged in the concat list.
+            # GitHub #51/#54 follow-up: staging hardlinks every listed
+            # segment — pre-roll AND extra_segments alike (the post-roll
+            # tail is now read straight out of the live ring directory, so
+            # it needs the exact same prune-race protection) — so all of
+            # these must be real files.
             pre0 = os.path.join(d, "pre0.mp4")
             pre1 = os.path.join(d, "pre1.mp4")
-            for p in (pre0, pre1):
+            post0 = os.path.join(d, "post0.mp4")
+            for p in (pre0, pre1, post0):
                 with open(p, "wb") as f:
                     f.write(b"x" * 2048)
 
@@ -1888,18 +1889,18 @@ class TestCreateMotionClipExtraSegments:
 
                 coord.hass.async_add_executor_job = _exec_job
                 result = await recorder.create_motion_clip(
-                    coord, cam_id, output, extra_segments=["/tmp/post0.mp4"]
+                    coord, cam_id, output, extra_segments=[post0]
                 )
 
         assert result is True
         lines = captured_concat["content"].splitlines()
-        # First two entries are the STAGED hardlink paths (not the original
-        # pre0.mp4/pre1.mp4 names) — GitHub #51's whole point is that the
-        # concat demuxer opens stable, private copies, not the originals.
+        # All three entries are the STAGED hardlink paths (not the original
+        # names) — GitHub #51's whole point is that the concat demuxer
+        # opens stable, private copies, not the originals.
         assert len(lines) == 3
         assert lines[0].endswith("pre0.mp4'") and "/_stage/" in lines[0]
         assert lines[1].endswith("pre1.mp4'") and "/_stage/" in lines[1]
-        assert lines[2] == "file '/tmp/post0.mp4'"
+        assert lines[2].endswith("post0.mp4'") and "/_stage/" in lines[2]
 
     @pytest.mark.asyncio
     async def test_extra_segments_only_no_preroll(self):
@@ -1920,13 +1921,16 @@ class TestCreateMotionClipExtraSegments:
             tempfile.TemporaryDirectory() as d,
         ):
             output = os.path.join(d, "motion.mp4")
+            post0 = os.path.join(d, "post0.mp4")
+            with open(post0, "wb") as f:
+                f.write(b"x" * 2048)
 
             async def _exec_job(fn, *args):
                 return fn(*args) if args else fn()
 
             coord.hass.async_add_executor_job = _exec_job
             result = await recorder.create_motion_clip(
-                coord, cam_id, output, extra_segments=["/tmp/post0.mp4"]
+                coord, cam_id, output, extra_segments=[post0]
             )
 
         assert result is True
@@ -7698,231 +7702,19 @@ class TestNvrStateChangePushesImmediateUpdate:
 # Phase 5 — post-roll capture + event→clip assembly (issue #43)
 
 
-class TestBuildPostrollCaptureArgs:
-    """Pin `_build_postroll_capture_args` ffmpeg argv shape."""
-
-    def test_has_fixed_duration_flag(self):
-        args = recorder._build_postroll_capture_args(
-            "rtsp://127.0.0.1:9000/x", "/tmp/post.mp4", 15
-        )
-        assert "-t" in args
-        assert args[args.index("-t") + 1] == "15"
-
-    def test_copy_no_transcode(self):
-        args = recorder._build_postroll_capture_args(
-            "rtsp://127.0.0.1:9000/x", "/tmp/post.mp4", 15
-        )
-        assert "-c" in args
-        assert args[args.index("-c") + 1] == "copy"
-
-    def test_output_path_is_last_arg(self):
-        args = recorder._build_postroll_capture_args(
-            "rtsp://127.0.0.1:9000/x", "/tmp/post.mp4", 15
-        )
-        assert args[-1] == "/tmp/post.mp4"
-
-    def test_rtsp_url_present(self):
-        args = recorder._build_postroll_capture_args(
-            "rtsp://127.0.0.1:9000/x", "/tmp/post.mp4", 15
-        )
-        assert "-i" in args
-        assert args[args.index("-i") + 1] == "rtsp://127.0.0.1:9000/x"
-
-    def test_tcp_transport_forced(self):
-        args = recorder._build_postroll_capture_args(
-            "rtsp://127.0.0.1:9000/x", "/tmp/post.mp4", 15
-        )
-        assert "-rtsp_transport" in args
-        assert args[args.index("-rtsp_transport") + 1] == "tcp"
-
-
-class TestCapturePostroll:
-    """`_capture_postroll` — best-effort single-shot live capture."""
-
-    @pytest.mark.asyncio
-    async def test_not_local_returns_false(self):
-        coord = SimpleNamespace(
-            live_connections={CAM_ID: {"_connection_type": "REMOTE"}}
-        )
-        result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_no_rtsp_url_returns_false(self):
-        coord = SimpleNamespace(
-            live_connections={CAM_ID: {"_connection_type": "LOCAL", "rtspsUrl": ""}}
-        )
-        result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_ffmpeg_not_found_returns_false(self):
-        coord = SimpleNamespace(
-            live_connections={
-                CAM_ID: {
-                    "_connection_type": "LOCAL",
-                    "rtspsUrl": "rtsp://127.0.0.1:9000/x",
-                }
-            }
-        )
-        with patch(
-            "asyncio.create_subprocess_exec",
-            side_effect=FileNotFoundError("ffmpeg"),
-        ):
-            result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_oserror_on_spawn_returns_false(self):
-        """Generic OSError (e.g. EAGAIN fork-limit) during spawn → False."""
-        coord = SimpleNamespace(
-            live_connections={
-                CAM_ID: {
-                    "_connection_type": "LOCAL",
-                    "rtspsUrl": "rtsp://127.0.0.1:9000/x",
-                }
-            }
-        )
-        with patch(
-            "asyncio.create_subprocess_exec",
-            side_effect=OSError("EAGAIN"),
-        ):
-            result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_timeout_kills_and_returns_false(self):
-        coord = SimpleNamespace(
-            live_connections={
-                CAM_ID: {
-                    "_connection_type": "LOCAL",
-                    "rtspsUrl": "rtsp://127.0.0.1:9000/x",
-                }
-            }
-        )
-        proc = MagicMock()
-        proc.kill = MagicMock()
-
-        async def _hang():
-            await asyncio.sleep(9999)
-
-        proc.communicate = _hang
-
-        with (
-            patch("asyncio.create_subprocess_exec", return_value=proc),
-            patch("asyncio.wait_for", side_effect=TimeoutError),
-        ):
-            result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
-        assert result is False
-        proc.kill.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_timeout_kill_process_lookup_error_swallowed(self):
-        """proc.kill() raising ProcessLookupError (already dead) after a
-        communicate() timeout must not propagate."""
-        coord = SimpleNamespace(
-            live_connections={
-                CAM_ID: {
-                    "_connection_type": "LOCAL",
-                    "rtspsUrl": "rtsp://127.0.0.1:9000/x",
-                }
-            }
-        )
-        proc = MagicMock()
-        proc.kill = MagicMock(side_effect=ProcessLookupError())
-
-        async def _hang():
-            await asyncio.sleep(9999)
-
-        proc.communicate = _hang
-
-        with (
-            patch("asyncio.create_subprocess_exec", return_value=proc),
-            patch("asyncio.wait_for", side_effect=TimeoutError),
-        ):
-            result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
-        assert result is False
-        proc.kill.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_rc_nonzero_returns_false(self):
-        coord = SimpleNamespace(
-            live_connections={
-                CAM_ID: {
-                    "_connection_type": "LOCAL",
-                    "rtspsUrl": "rtsp://127.0.0.1:9000/x",
-                }
-            }
-        )
-        proc = MagicMock()
-        proc.communicate = AsyncMock(return_value=(b"", b"error"))
-        proc.returncode = 1
-
-        with patch("asyncio.create_subprocess_exec", return_value=proc):
-            result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_success_returns_true(self):
-        coord = SimpleNamespace(
-            live_connections={
-                CAM_ID: {
-                    "_connection_type": "LOCAL",
-                    "rtspsUrl": "rtsp://127.0.0.1:9000/x",
-                }
-            }
-        )
-        proc = MagicMock()
-        proc.communicate = AsyncMock(return_value=(b"", b""))
-        proc.returncode = 0
-
-        with patch("asyncio.create_subprocess_exec", return_value=proc):
-            result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 10)
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_timeout_scales_with_duration(self):
-        """GitHub #52: a bare `duration_secs + 10s` budget was too thin for
-        a *cold* RTSP handshake competing with the ring/continuous
-        recorder on a jittery or slow-warming stream — the wait_for
-        deadline must scale with duration_secs (multiplier), not just add
-        a fixed grace, so longer post-roll windows get proportionally more
-        slack instead of being guillotined at duration+10 regardless of
-        length."""
-        coord = SimpleNamespace(
-            live_connections={
-                CAM_ID: {
-                    "_connection_type": "LOCAL",
-                    "rtspsUrl": "rtsp://127.0.0.1:9000/x",
-                }
-            }
-        )
-        proc = MagicMock()
-        proc.communicate = AsyncMock(return_value=(b"", b""))
-        proc.returncode = 0
-
-        captured: dict[str, float] = {}
-
-        async def _fake_wait_for(coro, timeout):
-            captured["timeout"] = timeout
-            return await coro
-
-        with (
-            patch("asyncio.create_subprocess_exec", return_value=proc),
-            patch("asyncio.wait_for", side_effect=_fake_wait_for),
-        ):
-            result = await recorder._capture_postroll(coord, CAM_ID, "/tmp/out.mp4", 30)
-        assert result is True
-        expected = (
-            30 * recorder.TIMEOUT_RECORDER_POSTROLL_MULTIPLIER
-            + recorder.TIMEOUT_RECORDER_POSTROLL_GRACE
-        )
-        assert captured["timeout"] == pytest.approx(expected)
-        # Pin the actual numbers too — a formula that's technically
-        # "proportional" but landed back at the old too-thin budget would
-        # still reproduce #52.
-        assert captured["timeout"] == pytest.approx(55.0)
-        assert captured["timeout"] > 30 + 10.0  # strictly more than the old budget
+def _write_ring_segment(
+    cache_dir: str, cam_title: str, hhmmss: str, mtime: float, *, size: int = 2048
+) -> str:
+    """Write a fake pre-roll ring segment file with an explicit mtime —
+    simulates the ring writer producing a new segment during a test's fake
+    `asyncio.sleep`."""
+    cam_dir = recorder._preroll_dir(cache_dir, cam_title)
+    os.makedirs(cam_dir, exist_ok=True)
+    path = os.path.join(cam_dir, f"{hhmmss}.mp4")
+    with open(path, "wb") as f:
+        f.write(b"x" * size)
+    os.utime(path, (mtime, mtime))
+    return path
 
 
 def _make_assembly_coord(
@@ -7931,8 +7723,14 @@ def _make_assembly_coord(
     postroll_seconds: int = 0,
     finalize_ring_on_event: bool = False,
     event_clip_enabled: bool = True,
+    ring_running: bool = True,
 ):
-    """Stub coordinator for `assemble_and_ship_motion_clip` tests."""
+    """Stub coordinator for `assemble_and_ship_motion_clip` tests.
+
+    ``ring_running`` (GitHub #54 follow-up): the post-roll tail is now
+    derived from the pre-roll ring's own `nvr_preroll_processes` entry —
+    False simulates `nvr_preroll_seconds=0` (no ring spawned at all).
+    """
 
     async def _run_executor(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -7955,6 +7753,7 @@ def _make_assembly_coord(
         _nvr_clip_assembly_locks={},
         _nvr_event_clip_enabled={CAM_ID: event_clip_enabled},
         _nvr_recorder_locks={},
+        nvr_preroll_processes=({CAM_ID: MagicMock()} if ring_running else {}),
     )
     coord.hass = SimpleNamespace(async_add_executor_job=_run_executor)
 
@@ -7999,63 +7798,12 @@ class TestAssembleAndShipMotionClip:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_postroll_temp_dir_makedirs_oserror_falls_back_to_preroll_only(
-        self, tmp_path: Path
-    ):
-        """Cannot create the postroll temp dir (e.g. permission denied) —
-        must not abort the whole assembly, just skip the postroll capture
-        and ship a pre-roll-only clip."""
-        coord = _make_assembly_coord(tmp_path, postroll_seconds=5)
-
-        mock_proc = MagicMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-        mock_proc.returncode = 0
-
-        _real_makedirs = os.makedirs
-        # Precise prefix match on the actual postroll cache path — a bare
-        # substring check on "_postroll_tmp" would be fragile against
-        # pytest's auto-generated tmp_path (which embeds the test name).
-        postroll_root = str(tmp_path / "cache" / "_postroll_tmp")
-
-        def _makedirs(path, *args, **kwargs):
-            if path.startswith(postroll_root):
-                raise OSError("permission denied")
-            return _real_makedirs(path, *args, **kwargs)
-
-        with (
-            patch.object(
-                recorder,
-                "list_preroll_files",
-                return_value=[str(tmp_path / "pre0.mp4")],
-            ),
-            patch("os.makedirs", side_effect=_makedirs),
-            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
-        ):
-            (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
-            result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
-
-        assert result is True
-
-    @pytest.mark.asyncio
     async def test_staging_dir_makedirs_oserror_returns_false(self, tmp_path: Path):
-        """Cannot create the staging dest dir — must return False and clean
-        up any postroll temp file already captured, rather than leaving it
-        behind or crashing."""
+        """Cannot create the staging dest dir — must return False rather
+        than leaving a partial clip behind or crashing."""
         coord = _make_assembly_coord(tmp_path, postroll_seconds=5)
-        captured_paths: list[str] = []
-
-        async def _fake_capture_postroll(_coord, _cam_id, output_path, _secs):
-            captured_paths.append(output_path)
-            with open(output_path, "wb") as f:
-                f.write(b"x" * 2048)
-            return True
 
         _real_makedirs = os.makedirs
-        # Precise prefix match on the actual staging base path — NOT a bare
-        # substring check, since pytest's auto-generated tmp_path for THIS
-        # test already contains "_staging" (from the test's own name),
-        # which would false-positive-match the unrelated postroll temp dir
-        # too and defeat the "postroll still succeeds" half of this test.
         staging_root = str(tmp_path / "nvr")
 
         def _makedirs(path, *args, **kwargs):
@@ -8063,18 +7811,17 @@ class TestAssembleAndShipMotionClip:
                 raise OSError("disk full")
             return _real_makedirs(path, *args, **kwargs)
 
+        async def _fake_sleep(_seconds):
+            return None
+
         with (
             patch.object(recorder, "list_preroll_files", return_value=[]),
-            patch.object(
-                recorder, "_capture_postroll", side_effect=_fake_capture_postroll
-            ),
+            patch("asyncio.sleep", side_effect=_fake_sleep),
             patch("os.makedirs", side_effect=_makedirs),
         ):
             result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
 
         assert result is False
-        assert len(captured_paths) == 1
-        assert not os.path.exists(captured_paths[0])
 
     @pytest.mark.asyncio
     async def test_preroll_only_writes_into_staging_tree(self, tmp_path: Path):
@@ -8120,87 +7867,31 @@ class TestAssembleAndShipMotionClip:
         assert files[0].endswith("_motion.mp4")
 
     @pytest.mark.asyncio
-    async def test_postroll_capture_appended_and_cleaned_up(self, tmp_path: Path):
-        """postroll_seconds>0 + successful capture: clip ships, and the
-        intermediate postroll capture temp file is removed afterward
-        (must not linger in the tmpfs cache dir)."""
+    async def test_postroll_segments_appended_after_preroll(self, tmp_path: Path):
+        """postroll_seconds>0 + the ring keeps running through the wait
+        (GitHub #54 follow-up): new ring segments written after the event
+        are appended, in order, after the pre-roll segments — no separate
+        capture file, no second RTSP session."""
         coord = _make_assembly_coord(tmp_path, postroll_seconds=5)
-        captured_tmp_paths: list[str] = []
+        cache_dir = str(tmp_path / "cache")
+        event_time = time.time()
+        seen_paths: dict[str, list[str]] = {}
 
-        async def _fake_capture_postroll(_coord, _cam_id, output_path, _secs):
-            captured_tmp_paths.append(output_path)
-            with open(output_path, "wb") as f:
-                f.write(b"x" * 2048)
-            return True
+        def _fake_create_motion_clip_args(preroll_paths, output_path):
+            seen_paths["paths"] = list(preroll_paths)
+            return ["ffmpeg", "-y", output_path]
 
-        mock_proc = MagicMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-        mock_proc.returncode = 0
-
-        with (
-            patch.object(recorder, "list_preroll_files", return_value=[]),
-            patch.object(
-                recorder, "_capture_postroll", side_effect=_fake_capture_postroll
-            ),
-            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
-        ):
-            result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
-
-        assert result is True
-        assert len(captured_tmp_paths) == 1
-        assert not os.path.exists(captured_tmp_paths[0])
-
-    @pytest.mark.asyncio
-    async def test_postroll_temp_file_not_in_preroll_ring_dir(self, tmp_path: Path):
-        """Regression (bug-hunt finding, issue #43 follow-up): the postroll
-        capture temp file must NOT be written into `_preroll_dir()` — that
-        directory is scanned wholesale (no filename filter) by
-        `list_preroll_files`, so writing there made the postroll capture
-        get picked up as an extra pre-roll segment and concatenated into
-        the clip TWICE."""
-        coord = _make_assembly_coord(tmp_path, postroll_seconds=5)
-        captured_paths: list[str] = []
-
-        async def _fake_capture_postroll(_coord, _cam_id, output_path, _secs):
-            captured_paths.append(output_path)
-            with open(output_path, "wb") as f:
-                f.write(b"x" * 2048)
-            return True
-
-        mock_proc = MagicMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-        mock_proc.returncode = 0
-
-        with (
-            patch.object(recorder, "list_preroll_files", return_value=[]),
-            patch.object(
-                recorder, "_capture_postroll", side_effect=_fake_capture_postroll
-            ),
-            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
-        ):
-            result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
-
-        assert result is True
-        assert len(captured_paths) == 1
-        preroll_ring_dir = recorder._preroll_dir(str(tmp_path / "cache"), CAM_TITLE)
-        assert not captured_paths[0].startswith(preroll_ring_dir + os.sep)
-
-    @pytest.mark.asyncio
-    async def test_failed_postroll_capture_partial_file_cleaned_up(
-        self, tmp_path: Path
-    ):
-        """Regression (bug-hunt finding, issue #43 follow-up): if
-        `_capture_postroll` writes a partial file before returning False
-        (e.g. ffmpeg exits non-zero after a truncated write), that partial
-        file must still be unlinked — not leaked into the tmpfs cache."""
-        coord = _make_assembly_coord(tmp_path, postroll_seconds=5)
-        captured_paths: list[str] = []
-
-        async def _fake_capture_postroll_fails(_coord, _cam_id, output_path, _secs):
-            captured_paths.append(output_path)
-            with open(output_path, "wb") as f:
-                f.write(b"partial")
-            return False
+        async def _fake_sleep(seconds):
+            assert seconds == 5 + recorder._PREROLL_SEGMENT_SECONDS
+            _write_ring_segment(
+                cache_dir, CAM_TITLE, "120010", event_time + 1, size=2048
+            )
+            # A second, newest segment simulates the ring's currently-
+            # writing file — dropped by the same "always drop newest" rule
+            # list_preroll_files() uses, so it must NOT show up below.
+            _write_ring_segment(
+                cache_dir, CAM_TITLE, "120020", event_time + 2, size=2048
+            )
 
         mock_proc = MagicMock()
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
@@ -8212,27 +7903,34 @@ class TestAssembleAndShipMotionClip:
                 "list_preroll_files",
                 return_value=[str(tmp_path / "pre0.mp4")],
             ),
+            patch(
+                "custom_components.bosch_shc_camera.recorder.time.time",
+                return_value=event_time,
+            ),
+            patch("asyncio.sleep", side_effect=_fake_sleep),
             patch.object(
                 recorder,
-                "_capture_postroll",
-                side_effect=_fake_capture_postroll_fails,
+                "create_motion_clip_args",
+                side_effect=_fake_create_motion_clip_args,
             ),
             patch("asyncio.create_subprocess_exec", return_value=mock_proc),
         ):
             (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
             result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
 
-        assert result is True  # pre-roll-only clip still ships
-        assert len(captured_paths) == 1
-        assert not os.path.exists(captured_paths[0])
+        assert result is True
+        # pre0.mp4 (staged) then exactly ONE post-roll segment (the newer,
+        # still-being-written one is excluded).
+        assert len(seen_paths["paths"]) == 2
+        assert seen_paths["paths"][0].endswith("pre0.mp4")
+        assert seen_paths["paths"][1].endswith("120010.mp4")
 
     @pytest.mark.asyncio
-    async def test_postroll_capture_fails_falls_back_to_preroll_only(
-        self, tmp_path: Path
-    ):
-        """`_capture_postroll` returning False must not abort the clip —
-        the assembly still ships with pre-roll segments alone."""
-        coord = _make_assembly_coord(tmp_path, postroll_seconds=5)
+    async def test_postroll_ring_not_running_skips_postroll(self, tmp_path: Path):
+        """nvr_postroll_seconds>0 but nvr_preroll_seconds=0 (no ring
+        spawned): there's nothing to derive a tail from — skip post-roll
+        and ship pre-roll-only, without ever waiting."""
+        coord = _make_assembly_coord(tmp_path, postroll_seconds=5, ring_running=False)
 
         mock_proc = MagicMock()
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
@@ -8244,7 +7942,38 @@ class TestAssembleAndShipMotionClip:
                 "list_preroll_files",
                 return_value=[str(tmp_path / "pre0.mp4")],
             ),
-            patch.object(recorder, "_capture_postroll", return_value=False),
+            patch("asyncio.sleep") as mock_sleep,
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
+            result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
+
+        assert result is True
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_postroll_no_new_segment_falls_back_to_preroll_only(
+        self, tmp_path: Path
+    ):
+        """The ring is running but produces no new segment within the wait
+        window (e.g. the LOCAL session dropped) — must not abort the clip,
+        just ship pre-roll segments alone."""
+        coord = _make_assembly_coord(tmp_path, postroll_seconds=5)
+
+        async def _fake_sleep(_seconds):
+            return None  # no new ring segment appears
+
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc.returncode = 0
+
+        with (
+            patch.object(
+                recorder,
+                "list_preroll_files",
+                return_value=[str(tmp_path / "pre0.mp4")],
+            ),
+            patch("asyncio.sleep", side_effect=_fake_sleep),
             patch("asyncio.create_subprocess_exec", return_value=mock_proc),
         ):
             (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
@@ -8338,27 +8067,35 @@ class TestAssembleAndShipMotionClip:
     ):
         """nvr_finalize_ring_on_event=True: the ring-stopped segment list
         from stop_and_finalize_preroll_recorder is used DIRECTLY (bypassing
-        list_preroll_files entirely — GitHub #50), with any postroll
-        capture still appended after. The ring is restarted only AFTER the
-        clip is built."""
+        list_preroll_files entirely — GitHub #50), with the ring-derived
+        post-roll tail still appended after (GitHub #54 follow-up). Unlike
+        the pre-#54 cold-capture design, the ring is restarted BEFORE the
+        post-roll wait (so it's actually recording through it), not after
+        the clip is built — exactly once, not twice."""
         coord = _make_assembly_coord(
             tmp_path, postroll_seconds=5, finalize_ring_on_event=True
         )
+        cache_dir = str(tmp_path / "cache")
         stable_segments = [str(tmp_path / "pre0.mp4"), str(tmp_path / "pre1.mp4")]
         for p in stable_segments:
             with open(p, "wb") as f:
                 f.write(b"x" * 2048)
 
+        event_time = time.time()
         seen_paths: dict[str, list[str]] = {}
-
-        async def _fake_capture_postroll(_coord, _cam_id, output_path, _secs):
-            with open(output_path, "wb") as f:
-                f.write(b"x" * 2048)
-            return True
 
         def _fake_create_motion_clip_args(preroll_paths, output_path):
             seen_paths["paths"] = list(preroll_paths)
             return ["ffmpeg", "-y", output_path]
+
+        restart_before_sleep: list[bool] = []
+
+        async def _fake_sleep(_seconds):
+            # The ring must already have been restarted by the time we get
+            # here — this is the whole point of GitHub #54's reordering.
+            restart_before_sleep.append(mock_restart.await_count == 1)
+            _write_ring_segment(cache_dir, CAM_TITLE, "120010", event_time + 1)
+            _write_ring_segment(cache_dir, CAM_TITLE, "120020", event_time + 2)
 
         mock_proc = MagicMock()
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
@@ -8376,9 +8113,11 @@ class TestAssembleAndShipMotionClip:
                 "restart_preroll_recorder_after_finalize",
                 new=AsyncMock(),
             ) as mock_restart,
-            patch.object(
-                recorder, "_capture_postroll", side_effect=_fake_capture_postroll
+            patch(
+                "custom_components.bosch_shc_camera.recorder.time.time",
+                return_value=event_time,
             ),
+            patch("asyncio.sleep", side_effect=_fake_sleep),
             patch.object(
                 recorder,
                 "create_motion_clip_args",
@@ -8396,6 +8135,7 @@ class TestAssembleAndShipMotionClip:
         # paths actually opened by ffmpeg differ from the originals — that's
         # the point, not a regression).
         mock_list_preroll_files.assert_not_called()
+        assert restart_before_sleep == [True]
         assert len(seen_paths["paths"]) == 3
         assert seen_paths["paths"][0].endswith("pre0.mp4") and (
             "/_stage/" in seen_paths["paths"][0]
@@ -8403,8 +8143,15 @@ class TestAssembleAndShipMotionClip:
         assert seen_paths["paths"][1].endswith("pre1.mp4") and (
             "/_stage/" in seen_paths["paths"][1]
         )
-        # postroll (3rd) comes after the finalized segments.
-        # Ring restart happens (only) after the clip was built.
+        # post-roll (3rd) comes after the finalized pre-roll segments, and
+        # (GitHub #54 follow-up) is staged into the same hardlink dir too —
+        # it's now read straight out of the live ring, exposed to the same
+        # prune race the pre-roll segments already were.
+        assert seen_paths["paths"][2].endswith("120010.mp4") and (
+            "/_stage/" in seen_paths["paths"][2]
+        )
+        # Restarted exactly once (before the wait) — not a second time in
+        # the `finally` block.
         mock_restart.assert_awaited_once_with(coord, CAM_ID)
 
     @pytest.mark.asyncio
