@@ -38,6 +38,7 @@ from .const import (
     TIMEOUT_RECORDER_FFMPEG_INIT,
     TIMEOUT_RECORDER_GRACE,
     TIMEOUT_RECORDER_KILL_WAIT,
+    TIMEOUT_RECORDER_SEGMENT_PROBE,
     TIMEOUT_RECORDER_STDERR_DRAIN,
 )
 from .smb import _safe_name
@@ -964,6 +965,61 @@ def list_preroll_files(coordinator: BoschCameraCoordinator, cam_id: str) -> list
     return paths[:-1] if paths else paths
 
 
+async def _newest_segment_is_finalized(path: str) -> bool:
+    """Return True if `path` already has a readable duration (moov atom
+    finalized), i.e. ffmpeg has already rotated past it rather than still
+    writing it.
+
+    GitHub #54 follow-up idea (realKim-dotcom): the post-roll scan always
+    dropped the newest ring segment on the assumption it might still be
+    mid-write (issue #43's original corruption bug — concatenating a
+    moov-less file produces a broken clip). That's only true while ffmpeg
+    hasn't rotated past it yet. A *timing* heuristic (e.g. "mtime is a few
+    seconds old") would reintroduce exactly that risk on a slow/buffered
+    write, so this proves finalization the same way `-movflags +faststart`
+    itself requires: only a container ffprobe can actually parse (moov atom
+    present at the front) reports a duration — a still-open segment has no
+    moov atom yet and ffprobe fails. False (probe failure, timeout, ffprobe
+    missing) always falls back to the pre-existing drop-newest behavior.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            path,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except (FileNotFoundError, OSError):
+        return False
+    try:
+        stdout_bytes, _ = await asyncio.wait_for(
+            proc.communicate(), timeout=TIMEOUT_RECORDER_SEGMENT_PROBE
+        )
+    except TimeoutError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=TIMEOUT_RECORDER_KILL_WAIT)
+        except TimeoutError:
+            pass
+        return False
+    if proc.returncode != 0:
+        return False
+    try:
+        return float(stdout_bytes.strip()) > 0
+    except ValueError:
+        return False
+
+
 def create_motion_clip_args(preroll_paths: list[str], output_path: str) -> list[str]:
     """Return ffmpeg argv to concat preroll_paths into one MP4 clip."""
     # Build concat list in memory via pipe — use -f concat -safe 0
@@ -1355,7 +1411,16 @@ async def assemble_and_ship_motion_clip(
                 segs = await coordinator.hass.async_add_executor_job(
                     _list_preroll_segments, cam_dir
                 )
-                usable = segs[:-1] if segs else segs
+                # GitHub #54 follow-up (realKim-dotcom): only drop the
+                # newest segment if it's not yet provably finalized — see
+                # `_newest_segment_is_finalized`'s docstring. Proven-closed
+                # segments are kept, pushing the tail closer to
+                # postroll_secs + _PREROLL_SEGMENT_SECONDS instead of always
+                # paying for one discarded segment.
+                if segs and await _newest_segment_is_finalized(segs[-1][0]):
+                    usable = segs
+                else:
+                    usable = segs[:-1] if segs else segs
                 extra_segments = [
                     path for path, mtime in usable if mtime > event_wall_time
                 ]

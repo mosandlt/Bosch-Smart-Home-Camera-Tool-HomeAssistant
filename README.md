@@ -2066,6 +2066,7 @@ Repeat the per-camera grid for each camera you have. The view uses the standard 
 - Home Assistant 2026.7.1+ (see `hacs.json` for the current minimum — it moves forward as the integration adopts newer HA-core APIs)
 - Python packages: `firebase-messaging`, `bosch-shc-camera-client`, `smbprotocol` (all auto-installed via the manifest — no manual `pip install` needed). `smbprotocol` powers SMB/NAS upload and NAS media browsing; if its install ever fails on your platform the integration still sets up and works, with a Repairs issue explaining what's missing.
 - For live video: go2rtc (built into HA) or ffplay/mpv
+- Mini-NVR requires `ffmpeg` on PATH; `ffprobe` (usually bundled alongside it) is optional — if absent, post-roll clips are just slightly shorter (one ring segment less), no other feature is affected
 
 ---
 

@@ -7926,6 +7926,77 @@ class TestAssembleAndShipMotionClip:
         assert seen_paths["paths"][1].endswith("120010.mp4")
 
     @pytest.mark.asyncio
+    async def test_postroll_includes_provably_finalized_newest_segment(
+        self, tmp_path: Path
+    ):
+        """GitHub #54 follow-up (realKim-dotcom): if the newest ring segment
+        is provably finalized (ffprobe can read a duration — moov atom
+        already written), it must be included in the post-roll tail instead
+        of always being dropped."""
+        coord = _make_assembly_coord(tmp_path, postroll_seconds=5)
+        cache_dir = str(tmp_path / "cache")
+        event_time = time.time()
+        seen_paths: dict[str, list[str]] = {}
+
+        def _fake_create_motion_clip_args(preroll_paths, output_path):
+            seen_paths["paths"] = list(preroll_paths)
+            return ["ffmpeg", "-y", output_path]
+
+        async def _fake_sleep(seconds):
+            assert seconds == 5 + recorder._PREROLL_SEGMENT_SECONDS
+            _write_ring_segment(
+                cache_dir, CAM_TITLE, "120010", event_time + 1, size=2048
+            )
+            # Ring already rotated past this one too — a real ffprobe would
+            # find a valid moov atom on it, unlike the mid-write case in
+            # test_postroll_segments_appended_after_preroll above.
+            _write_ring_segment(
+                cache_dir, CAM_TITLE, "120020", event_time + 2, size=2048
+            )
+
+        ffmpeg_proc = MagicMock()
+        ffmpeg_proc.communicate = AsyncMock(return_value=(b"", b""))
+        ffmpeg_proc.returncode = 0
+
+        ffprobe_proc = MagicMock()
+        ffprobe_proc.communicate = AsyncMock(return_value=(b"9.98\n", b""))
+        ffprobe_proc.returncode = 0
+
+        async def _fake_subprocess_exec(*args, **_kwargs):
+            if args and args[0] == "ffprobe":
+                return ffprobe_proc
+            return ffmpeg_proc
+
+        with (
+            patch.object(
+                recorder,
+                "list_preroll_files",
+                return_value=[str(tmp_path / "pre0.mp4")],
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.recorder.time.time",
+                return_value=event_time,
+            ),
+            patch("asyncio.sleep", side_effect=_fake_sleep),
+            patch.object(
+                recorder,
+                "create_motion_clip_args",
+                side_effect=_fake_create_motion_clip_args,
+            ),
+            patch("asyncio.create_subprocess_exec", side_effect=_fake_subprocess_exec),
+        ):
+            (tmp_path / "pre0.mp4").write_bytes(b"x" * 2048)
+            result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
+
+        assert result is True
+        # pre0.mp4 (staged) then BOTH post-roll segments — the newest one
+        # is kept because ffprobe proved it's already finalized.
+        assert len(seen_paths["paths"]) == 3
+        assert seen_paths["paths"][0].endswith("pre0.mp4")
+        assert seen_paths["paths"][1].endswith("120010.mp4")
+        assert seen_paths["paths"][2].endswith("120020.mp4")
+
+    @pytest.mark.asyncio
     async def test_postroll_ring_not_running_skips_postroll(self, tmp_path: Path):
         """nvr_postroll_seconds>0 but nvr_preroll_seconds=0 (no ring
         spawned): there's nothing to derive a tail from — skip post-roll
@@ -8222,6 +8293,137 @@ class TestAssembleAndShipMotionClip:
                 await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
 
         mock_restart.assert_awaited_once_with(coord, CAM_ID)
+
+
+class TestNewestSegmentIsFinalized:
+    """GitHub #54 follow-up (realKim-dotcom): `_newest_segment_is_finalized`
+    must only report True on an actual proven-readable container, and fall
+    back to False (→ drop-newest, the pre-existing safe behavior) on every
+    failure/ambiguous mode — never risk shipping a moov-less segment."""
+
+    @pytest.mark.asyncio
+    async def test_valid_duration_returns_true(self):
+        proc = MagicMock()
+        proc.communicate = AsyncMock(return_value=(b"9.98\n", b""))
+        proc.returncode = 0
+        with patch("asyncio.create_subprocess_exec", return_value=proc):
+            assert await recorder._newest_segment_is_finalized("/x/seg.mp4") is True
+
+    @pytest.mark.asyncio
+    async def test_nonzero_returncode_returns_false(self):
+        """ffprobe failing to parse (no moov atom yet) must be treated as
+        still-mid-write, matching the pre-existing drop-newest default."""
+        proc = MagicMock()
+        proc.communicate = AsyncMock(return_value=(b"", b"moov atom not found"))
+        proc.returncode = 1
+        with patch("asyncio.create_subprocess_exec", return_value=proc):
+            assert await recorder._newest_segment_is_finalized("/x/seg.mp4") is False
+
+    @pytest.mark.asyncio
+    async def test_unparseable_stdout_returns_false(self):
+        proc = MagicMock()
+        proc.communicate = AsyncMock(return_value=(b"N/A\n", b""))
+        proc.returncode = 0
+        with patch("asyncio.create_subprocess_exec", return_value=proc):
+            assert await recorder._newest_segment_is_finalized("/x/seg.mp4") is False
+
+    @pytest.mark.asyncio
+    async def test_zero_duration_returns_false(self):
+        proc = MagicMock()
+        proc.communicate = AsyncMock(return_value=(b"0.0\n", b""))
+        proc.returncode = 0
+        with patch("asyncio.create_subprocess_exec", return_value=proc):
+            assert await recorder._newest_segment_is_finalized("/x/seg.mp4") is False
+
+    @pytest.mark.asyncio
+    async def test_ffprobe_not_found_returns_false(self):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=FileNotFoundError("ffprobe"),
+        ):
+            assert await recorder._newest_segment_is_finalized("/x/seg.mp4") is False
+
+    @pytest.mark.asyncio
+    async def test_spawn_oserror_returns_false(self):
+        with patch("asyncio.create_subprocess_exec", side_effect=OSError("no procs")):
+            assert await recorder._newest_segment_is_finalized("/x/seg.mp4") is False
+
+    @pytest.mark.asyncio
+    async def test_timeout_kills_process_and_returns_false(self):
+        """After a kill on timeout, the process must also be reaped
+        (`proc.wait()`) — matching `stop_preroll_recorder`'s established
+        kill+wait pattern — so a probe timeout never leaves a zombie
+        child process behind."""
+        proc = MagicMock()
+
+        async def _hang():
+            await asyncio.sleep(999)
+
+        proc.communicate = AsyncMock(side_effect=_hang)
+        proc.kill = MagicMock()
+        proc.wait = AsyncMock(return_value=None)
+        with (
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+            patch(
+                "custom_components.bosch_shc_camera.recorder."
+                "TIMEOUT_RECORDER_SEGMENT_PROBE",
+                0.01,
+            ),
+        ):
+            assert await recorder._newest_segment_is_finalized("/x/seg.mp4") is False
+        proc.kill.assert_called_once()
+        proc.wait.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_kill_on_already_dead_process_is_swallowed(self):
+        """proc.kill() on a process that already exited between the timeout
+        firing and the kill call raises ProcessLookupError — must not
+        propagate."""
+        proc = MagicMock()
+
+        async def _hang():
+            await asyncio.sleep(999)
+
+        proc.communicate = AsyncMock(side_effect=_hang)
+        proc.kill = MagicMock(side_effect=ProcessLookupError)
+        proc.wait = AsyncMock(return_value=None)
+        with (
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+            patch(
+                "custom_components.bosch_shc_camera.recorder."
+                "TIMEOUT_RECORDER_SEGMENT_PROBE",
+                0.01,
+            ),
+        ):
+            assert await recorder._newest_segment_is_finalized("/x/seg.mp4") is False
+
+    @pytest.mark.asyncio
+    async def test_wait_after_kill_also_times_out_is_swallowed(self):
+        """A killed process that still doesn't reap within
+        TIMEOUT_RECORDER_KILL_WAIT (e.g. stuck in uninterruptible I/O) must
+        not raise — matching `stop_preroll_recorder`'s best-effort reap."""
+        proc = MagicMock()
+
+        async def _hang():
+            await asyncio.sleep(999)
+
+        proc.communicate = AsyncMock(side_effect=_hang)
+        proc.kill = MagicMock()
+        proc.wait = AsyncMock(side_effect=_hang)
+        with (
+            patch("asyncio.create_subprocess_exec", return_value=proc),
+            patch(
+                "custom_components.bosch_shc_camera.recorder."
+                "TIMEOUT_RECORDER_SEGMENT_PROBE",
+                0.01,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.recorder."
+                "TIMEOUT_RECORDER_KILL_WAIT",
+                0.01,
+            ),
+        ):
+            assert await recorder._newest_segment_is_finalized("/x/seg.mp4") is False
 
 
 class TestStopPrerollRecorderCachePrune:
