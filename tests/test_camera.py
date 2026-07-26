@@ -36,6 +36,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.bosch_shc_camera.const import (
+    JPEG_SIZE_FULL,
+    JPEG_SIZE_MEDIUM,
+    JPEG_SIZE_THUMB,
+)
+
 if TYPE_CHECKING:
     from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -595,8 +601,6 @@ def _make_camera(coord=None, entry=None, **camera_overrides):
     cam._refresh_inflight = (
         False  # synchronous in-flight guard (replaces _refresh_lock)
     )
-    cam._local_snap_warmup_task = None
-    cam._local_snap_warmup_last = float("-inf")
     cam._model = "HOME_Eyes_Outdoor"
     cam._model_name = "Eyes Outdoor"
     cam.hw_version = "HOME_Eyes_Outdoor"
@@ -735,42 +739,6 @@ class TestLifecycleHooks:
         ):
             await BoschCamera.async_will_remove_from_hass(cam)
         assert CAM_ID not in coord.camera_entities
-
-    @pytest.mark.asyncio
-    async def test_will_remove_cancels_pending_local_snap_warmup_task(self):
-        """GitHub #55: a still-pending background warm-up task must be
-        cancelled on entity removal, not left to run past it."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        coord = _make_coord()
-        cam = _make_camera(coord=coord)
-        pending_task = MagicMock()
-        pending_task.done.return_value = False
-        cam._local_snap_warmup_task = pending_task
-        with patch(
-            "custom_components.bosch_shc_camera.camera.CoordinatorEntity.async_will_remove_from_hass",
-            new=AsyncMock(),
-        ):
-            await BoschCamera.async_will_remove_from_hass(cam)
-        pending_task.cancel.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_will_remove_does_not_cancel_finished_warmup_task(self):
-        """An already-finished warm-up task must not be cancelled — nothing
-        to interrupt, and cancelling a done Task is harmless but pointless."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        coord = _make_coord()
-        cam = _make_camera(coord=coord)
-        finished_task = MagicMock()
-        finished_task.done.return_value = True
-        cam._local_snap_warmup_task = finished_task
-        with patch(
-            "custom_components.bosch_shc_camera.camera.CoordinatorEntity.async_will_remove_from_hass",
-            new=AsyncMock(),
-        ):
-            await BoschCamera.async_will_remove_from_hass(cam)
-        finished_task.cancel.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_will_remove_when_not_registered_no_crash(self):
@@ -2096,8 +2064,6 @@ def _make_camera_impl(coord=None, **camera_overrides):
     cam._force_image_refresh = False
     cam.last_image_fetch = 0.0
     cam._was_streaming = False
-    cam._local_snap_warmup_task = None
-    cam._local_snap_warmup_last = float("-inf")
     cam._model = "X"
     cam._model_name = "X"
     cam.hw_version = "X"
@@ -2106,9 +2072,6 @@ def _make_camera_impl(coord=None, **camera_overrides):
     cam.async_write_ha_state = MagicMock()
     cam.hass = SimpleNamespace(
         async_create_task=MagicMock(side_effect=lambda c: (c.close(), MagicMock())[1]),
-        async_create_background_task=MagicMock(
-            side_effect=lambda c, name: (c.close(), MagicMock())[1]
-        ),
         async_add_executor_job=AsyncMock(),
     )
     for k, v in camera_overrides.items():
@@ -2388,198 +2351,6 @@ class TestAsyncCameraImageImplLocalDigest:
             out = await BoschCamera._async_camera_image_impl(cam)
         digest_mock.assert_awaited_once()
         assert out == img
-
-
-class TestLocalSnapWarmup:
-    """GitHub #55: a real TimeoutError on the inline LOCAL Digest fetch
-    schedules a background warm-up (rate-limited), but a ValueError/
-    ClientError (not a timing issue) must not. Scheduling failures must
-    never break the caller's own cached/placeholder fallback."""
-
-    def _local_coord(self):
-        return _make_coord_impl(
-            live_connections={
-                CAM_ID: {
-                    "_connection_type": "LOCAL",
-                    "proxyUrl": "https://192.0.2.1/snap.jpg",
-                    "_local_user": "cbs-1",
-                    "_local_password": "p",
-                },
-            }
-        )
-
-    @pytest.mark.asyncio
-    async def test_timeout_schedules_warmup_task(self):
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = _make_camera_impl(
-            coord=self._local_coord(), cached_image=b"\xff\xd8cached"
-        )
-        with (
-            patch(
-                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
-                new=AsyncMock(return_value=MagicMock()),
-            ),
-            patch(
-                "custom_components.bosch_shc_camera.camera.async_digest_request",
-                new=AsyncMock(side_effect=TimeoutError()),
-            ),
-        ):
-            out = await BoschCamera._async_camera_image_impl(cam)
-
-        assert out == b"\xff\xd8cached"
-        cam.hass.async_create_background_task.assert_called_once()
-        assert cam._local_snap_warmup_task is not None
-        assert cam._local_snap_warmup_last > float("-inf")
-
-    @pytest.mark.asyncio
-    async def test_client_error_does_not_schedule_warmup(self):
-        """A ClientError (not a timing issue) must not trigger a warm-up retry."""
-        import aiohttp
-
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = _make_camera_impl(
-            coord=self._local_coord(), cached_image=b"\xff\xd8cached"
-        )
-        with (
-            patch(
-                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
-                new=AsyncMock(return_value=MagicMock()),
-            ),
-            patch(
-                "custom_components.bosch_shc_camera.camera.async_digest_request",
-                new=AsyncMock(side_effect=aiohttp.ClientError("network error")),
-            ),
-        ):
-            await BoschCamera._async_camera_image_impl(cam)
-
-        cam.hass.async_create_background_task.assert_not_called()
-        assert cam._local_snap_warmup_task is None
-
-    @pytest.mark.asyncio
-    async def test_second_timeout_within_rate_limit_skips_reschedule(self):
-        """A second timeout inside LOCAL_SNAP_WARMUP_MIN_INTERVAL_SEC must not
-        schedule a second concurrent warm-up attempt."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = _make_camera_impl(
-            coord=self._local_coord(), cached_image=b"\xff\xd8cached"
-        )
-        with (
-            patch(
-                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
-                new=AsyncMock(return_value=MagicMock()),
-            ),
-            patch(
-                "custom_components.bosch_shc_camera.camera.async_digest_request",
-                new=AsyncMock(side_effect=TimeoutError()),
-            ),
-        ):
-            await BoschCamera._async_camera_image_impl(cam)
-            await BoschCamera._async_camera_image_impl(cam)
-
-        cam.hass.async_create_background_task.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_still_pending_task_skips_reschedule_even_past_rate_limit(self):
-        """A still-running warm-up task must block a reschedule even once the
-        rate-limit window itself has elapsed — two overlapping warm-ups would
-        double the concurrent-handshake load on an already-struggling camera."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = _make_camera_impl(coord=self._local_coord())
-        cam._local_snap_warmup_last = time.monotonic() - 3600  # long past the limit
-        pending_task = MagicMock()
-        pending_task.done.return_value = False
-        cam._local_snap_warmup_task = pending_task
-
-        cam._maybe_warm_local_snap_connection(
-            MagicMock(), "https://192.0.2.1/snap.jpg", "cbs-1", "p"
-        )
-
-        cam.hass.async_create_background_task.assert_not_called()
-        assert cam._local_snap_warmup_task is pending_task
-
-    @pytest.mark.asyncio
-    async def test_scheduling_exception_does_not_break_fallback(self):
-        """If hass.async_create_background_task itself raises (e.g. during
-        shutdown), _async_camera_image_impl must still return its normal
-        cached/placeholder fallback, not propagate the scheduling error."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = _make_camera_impl(
-            coord=self._local_coord(), cached_image=b"\xff\xd8cached"
-        )
-        cam.hass.async_create_background_task = MagicMock(
-            side_effect=RuntimeError("hass shutting down")
-        )
-        with (
-            patch(
-                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
-                new=AsyncMock(return_value=MagicMock()),
-            ),
-            patch(
-                "custom_components.bosch_shc_camera.camera.async_digest_request",
-                new=AsyncMock(side_effect=TimeoutError()),
-            ),
-        ):
-            out = await BoschCamera._async_camera_image_impl(cam)
-
-        assert out == b"\xff\xd8cached"
-        assert cam._local_snap_warmup_task is None
-
-    @pytest.mark.asyncio
-    async def test_warmup_coroutine_success_updates_cached_image(self):
-        """_async_warm_local_snap_connection itself, on a successful fetch,
-        updates cached_image and writes ha state."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = _make_camera_impl(coord=self._local_coord())
-        img = b"\xff\xd8warmed"
-        cm = self._digest_resp_cm_helper(200, img, "image/jpeg")
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=AsyncMock(return_value=cm),
-        ):
-            await BoschCamera._async_warm_local_snap_connection(
-                cam, MagicMock(), "https://192.0.2.1/snap.jpg", "cbs-1", "p"
-            )
-
-        assert cam.cached_image == img
-        cam.async_write_ha_state.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_warmup_coroutine_timeout_is_silent(self):
-        """_async_warm_local_snap_connection swallows its own timeout —
-        it's best-effort, nothing depends on its result."""
-        from custom_components.bosch_shc_camera.camera import BoschCamera
-
-        cam = _make_camera_impl(
-            coord=self._local_coord(), cached_image=b"\xff\xd8untouched"
-        )
-        with patch(
-            "custom_components.bosch_shc_camera.camera.async_digest_request",
-            new=AsyncMock(side_effect=TimeoutError()),
-        ):
-            await BoschCamera._async_warm_local_snap_connection(
-                cam, MagicMock(), "https://192.0.2.1/snap.jpg", "cbs-1", "p"
-            )
-
-        assert cam.cached_image == b"\xff\xd8untouched"
-
-    @staticmethod
-    def _digest_resp_cm_helper(
-        status: int, body: bytes = b"", content_type: str = "image/jpeg"
-    ):
-        resp = MagicMock()
-        resp.status = status
-        resp.headers = {"Content-Type": content_type}
-        resp.read = AsyncMock(return_value=body)
-        cm = MagicMock()
-        cm.__aenter__ = AsyncMock(return_value=resp)
-        cm.__aexit__ = AsyncMock(return_value=None)
-        return cm
 
 
 class TestPlaceholderTreatedAsNoCache:
@@ -4387,7 +4158,7 @@ class TestIdleCameraCloudSnapshot:
 
             out = await BoschCamera._async_camera_image_impl(cam)
 
-        coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
+        coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID, jpeg_size=None)
         assert out == b"\xff\xd8snap", (
             "must return snapshot from async_fetch_live_snapshot"
         )
@@ -4430,7 +4201,9 @@ class TestIdleCameraCloudSnapshot:
 
             out = await BoschCamera._async_camera_image_impl(cam, width=320)
 
-        coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
+        coord.async_fetch_live_snapshot.assert_awaited_once_with(
+            CAM_ID, jpeg_size=JPEG_SIZE_THUMB
+        )
         assert out == b"\xff\xd8snap", (
             "must fall to async_fetch_live_snapshot when RCP fails"
         )
@@ -4451,7 +4224,9 @@ class TestIdleCameraCloudSnapshot:
 
             out = await BoschCamera._async_camera_image_impl(cam)
 
-        coord.async_fetch_live_snapshot_local.assert_awaited_once_with(CAM_ID)
+        coord.async_fetch_live_snapshot_local.assert_awaited_once_with(
+            CAM_ID, jpeg_size=None
+        )
         assert out == b"\xff\xd8local", (
             "must use LOCAL fallback when REMOTE snap returns None"
         )
@@ -4475,7 +4250,7 @@ class TestIdleCameraCloudSnapshot:
 
             out = await BoschCamera._async_camera_image_impl(cam)
 
-        coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
+        coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID, jpeg_size=None)
         assert out == b"\xff\xd8fresh", "must return fresh bytes when cache is stale"
         assert cam.cached_image == b"\xff\xd8fresh", (
             "must update cache with fresh bytes"
@@ -5094,6 +4869,142 @@ class TestLocalSnapViaProxy:
         (
             digest_mock.assert_not_called(),
             "async_digest_request must not be called when no LOCAL creds",
+        )
+
+
+class TestSnapshotJpegSizeFromRequestedWidth:
+    """snap.jpg must be requested at the size the caller actually needs.
+
+    Every call site used to hardcode JpegSize=1206 (~500 KB) even for the
+    Lovelace card, which asks HA for width=315 (~65 KB at JpegSize=320). On a
+    constrained link the full-res body alone can outlast HA's 10 s
+    CAMERA_IMAGE_TIMEOUT, so the preview fails and a stale frame is served.
+    Callers that persist or analyse the frame pass no width and must keep the
+    full-resolution URL byte-for-byte.
+    """
+
+    @staticmethod
+    async def _digest_url_for(width: int | None) -> str:
+        """Run the tier-1 LOCAL snap and return the URL it fetched."""
+        coord = _local_live_conn()
+        cam = _make_camera_r7(coord=coord)
+        digest_mock = AsyncMock(return_value=_digest_cm(200, b"\xff\xd8local"))
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=digest_mock,
+            ),
+        ):
+            from custom_components.bosch_shc_camera.camera import BoschCamera
+
+            await BoschCamera._async_camera_image_impl(cam, width=width)
+        return str(digest_mock.await_args.args[2])
+
+    @pytest.mark.asyncio
+    async def test_card_width_shrinks_local_snap_to_thumbnail(self):
+        """width=315 (what the card requests) → JpegSize=320, not 1206."""
+        url = await self._digest_url_for(315)
+        assert f"JpegSize={JPEG_SIZE_THUMB}" in url, (
+            "a thumbnail-sized request must not pull the full-res frame"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_width_leaves_local_snap_url_untouched(self):
+        """No width (persisting/background callers) → URL unchanged."""
+        url = await self._digest_url_for(None)
+        assert url == LOCAL_SNAP_URL, "full-res callers must keep their URL as-is"
+        assert "JpegSize" not in url
+
+    @pytest.mark.parametrize(
+        ("width", "expected"),
+        [
+            (None, None),  # no width requested → keep full resolution
+            (0, None),  # defensive: nonsense width → keep full resolution
+            (-1, None),
+            (315, JPEG_SIZE_THUMB),  # the Lovelace card's actual request
+            (JPEG_SIZE_THUMB, JPEG_SIZE_THUMB),  # boundary
+            (321, JPEG_SIZE_MEDIUM),
+            (JPEG_SIZE_MEDIUM, JPEG_SIZE_MEDIUM),  # boundary
+            (JPEG_SIZE_MEDIUM + 1, None),  # bigger than a preview → full res
+            (1920, None),
+        ],
+    )
+    def test_jpeg_size_for_width_mapping(self, width, expected):
+        """The width → JpegSize mapping, including both boundaries."""
+        from custom_components.bosch_shc_camera.const import jpeg_size_for_width
+
+        assert jpeg_size_for_width(width) == expected
+
+    @pytest.mark.parametrize(
+        ("url", "size", "expected"),
+        [
+            # rewrite an existing parameter
+            (
+                f"https://host/snap.jpg?JpegSize={JPEG_SIZE_FULL}",
+                JPEG_SIZE_THUMB,
+                f"https://host/snap.jpg?JpegSize={JPEG_SIZE_THUMB}",
+            ),
+            # append when the URL has none (LOCAL proxyUrl form)
+            (
+                "https://host/snap.jpg",
+                JPEG_SIZE_THUMB,
+                f"https://host/snap.jpg?JpegSize={JPEG_SIZE_THUMB}",
+            ),
+            # append alongside an unrelated parameter
+            (
+                "https://host/snap.jpg?foo=1",
+                JPEG_SIZE_MEDIUM,
+                f"https://host/snap.jpg?foo=1&JpegSize={JPEG_SIZE_MEDIUM}",
+            ),
+            # size=None → untouched, so full-res callers are byte-identical
+            (
+                f"https://host/snap.jpg?JpegSize={JPEG_SIZE_FULL}",
+                None,
+                f"https://host/snap.jpg?JpegSize={JPEG_SIZE_FULL}",
+            ),
+            ("", JPEG_SIZE_THUMB, ""),
+        ],
+    )
+    def test_with_jpeg_size_rewrites_url(self, url, size, expected):
+        """with_jpeg_size sets/appends JpegSize and no-ops on None."""
+        from custom_components.bosch_shc_camera.const import with_jpeg_size
+
+        assert with_jpeg_size(url, size) == expected
+
+
+class TestLocalSnapInlineBudget:
+    """The inline LOCAL snap budget must fit under HA's CAMERA_IMAGE_TIMEOUT
+    while still exceeding a Gen1 camera's cold cost.
+
+    The LOCAL branch returns straight after this attempt (it deliberately skips
+    the aiohttp fallback below it, which would only 401 without the Digest auth
+    just tried), so nothing else runs inside HA's 10 s ceiling. The previous
+    bare 6 s sat *below* these cameras' measured cold cost — TLS handshake
+    2.5-6.9 s, ~7.05 s end to end — and because a handshake killed by the
+    timeout is never pooled, such a camera never reaches the warm state where
+    6 s would have been enough. Regression guard for both ends of that range.
+    """
+
+    def test_budget_is_under_ha_camera_image_timeout(self):
+        from homeassistant.components.camera import CAMERA_IMAGE_TIMEOUT
+
+        from custom_components.bosch_shc_camera.camera import LOCAL_SNAP_TIMEOUT
+
+        assert LOCAL_SNAP_TIMEOUT < CAMERA_IMAGE_TIMEOUT, (
+            "an inline snap that outlives HA's timeout is cancelled mid-flight "
+            "and served to the card as a 500 body"
+        )
+
+    def test_budget_covers_a_cold_gen1_handshake(self):
+        from custom_components.bosch_shc_camera.camera import LOCAL_SNAP_TIMEOUT
+
+        assert LOCAL_SNAP_TIMEOUT >= 7.1, (
+            "a budget below the cold handshake+transfer cost can never succeed "
+            "from cold, and cold is the only state a timed-out camera reaches"
         )
 
 

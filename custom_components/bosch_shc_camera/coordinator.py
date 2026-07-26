@@ -44,6 +44,7 @@ from .const import (
     CLOUD_API,
     DEFAULT_OPTIONS,
     DOMAIN,
+    JPEG_SIZE_FULL,
     RCP_099E_PROBE_FAILURE_MEMO_SEC,
     SHC_MAX_FAILS,
     SHC_RETRY_INTERVAL,
@@ -3211,12 +3212,20 @@ class BoschCameraCoordinator(
             _LOGGER.debug("NVR cleanup background task error: %s", err)
 
     # ── go2rtc integration ────────────────────────────────────────────────────
-    async def async_fetch_live_snapshot(self, cam_id: str) -> bytes | None:
+    async def async_fetch_live_snapshot(
+        self, cam_id: str, jpeg_size: int | None = None
+    ) -> bytes | None:
         """Open a temporary REMOTE live connection to fetch a fresh snap.jpg.
 
         Does NOT register the connection in live_connections — the live stream
         switch stays OFF. Used by background image refresh so cameras always
         show a current image rather than a (possibly expired) event snapshot.
+
+        ``jpeg_size`` overrides snap.jpg's resolution for callers that only need
+        a preview (see const.jpeg_size_for_width). The default of ``None`` keeps
+        JPEG_SIZE_FULL, so the background refresh, the image.* entity and the
+        AI-analysis fetch — everything that persists or analyses the frame —
+        are unaffected.
 
         Proxy URL caching: PUT /connection takes ~1.5s. The resulting proxy lease
         lasts ~60s. We cache urls[0] for 50s and skip PUT /connection on warm
@@ -3228,10 +3237,14 @@ class BoschCameraCoordinator(
         """
         lock = get_or_create_lock(self._snapshot_fetch_locks, cam_id)
         async with lock:
-            return await self._async_fetch_live_snapshot_impl(cam_id)
+            return await self._async_fetch_live_snapshot_impl(cam_id, jpeg_size)
 
-    async def _async_fetch_live_snapshot_impl(self, cam_id: str) -> bytes | None:
+    async def _async_fetch_live_snapshot_impl(
+        self, cam_id: str, jpeg_size: int | None = None
+    ) -> bytes | None:
         import json as _json
+
+        snap_jpeg_size = jpeg_size or JPEG_SIZE_FULL
 
         token = self.token
         if not token:
@@ -3388,7 +3401,7 @@ class BoschCameraCoordinator(
                         cam_id,
                     )
 
-                proxy_url = f"https://{url_entry}/snap.jpg?JpegSize=1206"
+                proxy_url = f"https://{url_entry}/snap.jpg?JpegSize={snap_jpeg_size}"
                 async with asyncio.timeout(TIMEOUT_SNAP):
                     async with session.get(proxy_url) as snap_resp:
                         ct = snap_resp.headers.get("Content-Type", "")
@@ -3402,7 +3415,7 @@ class BoschCameraCoordinator(
                             url_entry2 = await _get_proxy_url_entry()
                             if not url_entry2:
                                 return None
-                            proxy_url2 = f"https://{url_entry2}/snap.jpg?JpegSize=1206"
+                            proxy_url2 = f"https://{url_entry2}/snap.jpg?JpegSize={snap_jpeg_size}"
                             async with asyncio.timeout(TIMEOUT_SNAP):
                                 async with session.get(proxy_url2) as snap_resp2:
                                     ct2 = snap_resp2.headers.get("Content-Type", "")
@@ -3846,7 +3859,9 @@ class BoschCameraCoordinator(
 
             return None
 
-    async def async_fetch_live_snapshot_local(self, cam_id: str) -> bytes | None:
+    async def async_fetch_live_snapshot_local(
+        self, cam_id: str, jpeg_size: int | None = None
+    ) -> bytes | None:
         """Fetch a live snapshot via LOCAL connection using HTTP Digest auth.
 
         For cameras like CAMERA_360 whose REMOTE snap.jpg returns 401,
@@ -3854,6 +3869,9 @@ class BoschCameraCoordinator(
         snap.jpg directly from the camera's LAN IP.
 
         Uses auth_utils.async_digest_request (aiohttp) for non-blocking Digest auth.
+
+        ``jpeg_size`` behaves as in async_fetch_live_snapshot: ``None`` keeps
+        the full-resolution frame the persisting callers expect.
         """
         token = self.token
         if not token:
@@ -3917,7 +3935,9 @@ class BoschCameraCoordinator(
             return None
 
         camera_host = urls[0]  # e.g. "192.168.x.x:443"
-        snap_url = f"https://{camera_host}/snap.jpg?JpegSize=1206"
+        snap_url = (
+            f"https://{camera_host}/snap.jpg?JpegSize={jpeg_size or JPEG_SIZE_FULL}"
+        )
 
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
