@@ -54,6 +54,8 @@ from .const import (
     AUTO_PLAY_DEFAULT_VALUES,
     DOMAIN,
     LIVE_SESSION_TTL,
+    LOCAL_SNAP_WARMUP_MIN_INTERVAL_SEC,
+    LOCAL_SNAP_WARMUP_TIMEOUT_SEC,
     STREAM_START_SKIPPED,
     TIMEOUT_SNAP,
 )
@@ -183,6 +185,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         )  # monotonic timestamp of last *failed* fetch; separate so successes always update the cache window
         self._refresh_inflight: bool = False  # synchronous guard: set before first yield, cleared in finally  # prevents concurrent async_trigger_image_refresh (replaces locked()+async-with race)
         self._was_streaming: bool = False
+        # GitHub #55: background LOCAL-snap TLS warm-up (see
+        # _async_warm_local_snap_connection). Rate-limited via the timestamp;
+        # the task handle lets async_will_remove_from_hass cancel a pending
+        # attempt instead of leaking it past entity removal.
+        self._local_snap_warmup_task: asyncio.Task[None] | None = None
+        self._local_snap_warmup_last: float = float("-inf")  # SENTINEL_RULE
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
         title = info.get("title", cam_id)
@@ -233,6 +241,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     async def async_will_remove_from_hass(self) -> None:
         """Called when entity is removed — unregister from coordinator."""
         self.coordinator.camera_entities.pop(self._cam_id, None)
+        # Best-effort — cancellation only lands at the warm-up task's next
+        # suspension point, so a task already past its last `await` (about to
+        # write cached_image/call async_write_ha_state synchronously) can
+        # still complete after this. Accepted: a state write to a
+        # soon-removed entity, not a crash.
+        if self._local_snap_warmup_task and not self._local_snap_warmup_task.done():
+            self._local_snap_warmup_task.cancel()
         await super().async_will_remove_from_hass()
 
     def _handle_coordinator_update(self) -> None:
@@ -1004,6 +1019,97 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             jpeg = await self.hass.async_add_executor_job(_rotate_jpeg_180, jpeg)
         return jpeg
 
+    def _maybe_warm_local_snap_connection(
+        self,
+        session: aiohttp.ClientSession,
+        proxy_url: str,
+        local_user: str,
+        local_pass: str,
+    ) -> None:
+        """Schedule a rate-limited background LOCAL-snap TLS warm-up.
+
+        GitHub #55: synchronous guard (set before any `await`) mirrors
+        `async_trigger_image_refresh`'s `_refresh_inflight` pattern — a second
+        concurrent caller within the same rate-limit window must not also
+        schedule a warm-up, which would double the concurrent-handshake load
+        on a camera already struggling to complete one.
+        """
+        now = time.monotonic()
+        if now - self._local_snap_warmup_last < LOCAL_SNAP_WARMUP_MIN_INTERVAL_SEC:
+            return
+        if self._local_snap_warmup_task and not self._local_snap_warmup_task.done():
+            return
+        self._local_snap_warmup_last = now
+        coro = self._async_warm_local_snap_connection(
+            session, proxy_url, local_user, local_pass
+        )
+        try:
+            # This is best-effort scheduling only — if hass rejects new
+            # background tasks (e.g. mid-shutdown), the caller (the LOCAL
+            # snap TimeoutError handler) must still fall through to its own
+            # cached_image/placeholder return, not propagate an exception
+            # from here and lose that fallback.
+            self._local_snap_warmup_task = self.hass.async_create_background_task(
+                coro, f"bosch_shc_camera_local_snap_warmup_{self._cam_id[:8]}"
+            )
+        except Exception as err:  # must never break the caller's own fallback
+            coro.close()
+            _LOGGER.debug(
+                "%s: could not schedule LOCAL snap warm-up: %s",
+                self._display_name,
+                err,
+            )
+
+    async def _async_warm_local_snap_connection(
+        self,
+        session: aiohttp.ClientSession,
+        proxy_url: str,
+        local_user: str,
+        local_pass: str,
+    ) -> None:
+        """Best-effort background Digest handshake to prime the connection pool.
+
+        GitHub #55: the inline LOCAL snap.jpg request is capped at 6s to stay
+        under HA's outer ``CAMERA_IMAGE_TIMEOUT`` — but on cameras whose TLS
+        handshake alone runs 2.5-6.9s, that cap kills the handshake before
+        aiohttp's connection pool ever gets a completed connection to reuse,
+        so every subsequent inline request starts cold and hits the same
+        wall. This runs on the same shared session (`auth_utils.async_digest_
+        request` calls `session.request()` directly, so a completed request
+        here pools a connection the next inline request to the same host can
+        reuse). On success this also opportunistically updates cached_image
+        with the frame it fetched, since the round trip already paid for it.
+        Silent no-op on any failure — the inline path already has its own
+        cached/placeholder fallback regardless of this task's outcome.
+        """
+        try:
+            async with asyncio.timeout(LOCAL_SNAP_WARMUP_TIMEOUT_SEC):
+                async with await async_digest_request(
+                    session,
+                    "GET",
+                    proxy_url,
+                    local_user,
+                    local_pass,
+                    timeout=LOCAL_SNAP_WARMUP_TIMEOUT_SEC,
+                    ssl=False,
+                ) as resp:
+                    if resp.status == 200 and "image" in resp.headers.get(
+                        "Content-Type", ""
+                    ):
+                        data = await resp.read()
+                        if data:
+                            self.cached_image = data
+                            self.last_image_fetch = time.monotonic()
+                            self.async_write_ha_state()
+                            _LOGGER.debug(
+                                "%s: LOCAL snap warm-up succeeded — %d bytes, "
+                                "connection now pooled for future requests",
+                                self._display_name,
+                                len(data),
+                            )
+        except (TimeoutError, aiohttp.ClientError, ValueError) as err:
+            _LOGGER.debug("%s: LOCAL snap warm-up failed: %s", self._display_name, err)
+
     async def _async_camera_image_impl(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
@@ -1151,6 +1257,15 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         # from auth_utils.async_digest_request — forum 998974/15.
                         _LOGGER.debug("LOCAL snap via proxy failed: %s", err)
                         data = None
+                        if isinstance(err, TimeoutError):
+                            # GitHub #55: only a real timeout indicates the
+                            # "TLS handshake killed before completion" pattern
+                            # a warm-up can fix — a ValueError (malformed auth
+                            # header) or a connection-level ClientError won't
+                            # be helped by a slower retry of the same thing.
+                            self._maybe_warm_local_snap_connection(
+                                session, proxy_url, local_user, local_pass
+                            )
                     if data:
                         self.cached_image = data
                         self.last_image_fetch = time.monotonic()

@@ -44,10 +44,12 @@ from .const import (
     CLOUD_API,
     DEFAULT_OPTIONS,
     DOMAIN,
+    RCP_099E_PROBE_FAILURE_MEMO_SEC,
     SHC_MAX_FAILS,
     SHC_RETRY_INTERVAL,
     STREAM_START_SKIPPED,
     TIMEOUT_PUT_CONNECTION,
+    TIMEOUT_RCP_099E_PROBE,
     TIMEOUT_SNAP,
 )
 from .event_dispatch import build_data_and_dispatch
@@ -527,6 +529,14 @@ class BoschCameraCoordinator(
         # Proxy URL cache — keyed by cam_id, value (urls[0], expires_monotonic)
         # Proxy leases last ~60s; cache for 50s to skip PUT /connection on warm refreshes
         self._proxy_url_cache: dict[str, tuple[str, float]] = {}
+        # GitHub #56: cam_id → monotonic timestamp until which the RCP 0x099e
+        # thumbnail probe is skipped, after it timed out/failed/errored. A
+        # camera that can never satisfy 0x099e (observed on some Gen1 units)
+        # would otherwise pay the probe's full 2-8s cost on every single
+        # snapshot fetch, forever, starving the snap.jpg leg's timeout budget.
+        # Re-probed hourly so a firmware update can re-enable the fast path;
+        # cleared immediately on any success.
+        self._rcp_099e_probe_failed_until: dict[str, float] = {}
         # Per-camera lock serializing async_fetch_live_snapshot calls.
         # Prevents duplicate PUT /connection when first-load + proactive refresh
         # overlap, or when a user rapid-triggers snapshots.
@@ -2701,6 +2711,7 @@ class BoschCameraCoordinator(
         "_quality_preference",
         "_quality_effective_inst",
         "_proxy_url_cache",
+        "_rcp_099e_probe_failed_until",
         "_fresh_snap_cache",
         "_ai_last_call",
         "_ai_analysis_last_call",
@@ -3317,25 +3328,50 @@ class BoschCameraCoordinator(
                     "HOME_Eyes_Outdoor",
                 )
                 parts = url_entry.split("/", 1)
-                if len(parts) == 2 and not hw_gen2:
+                probe_failed_until = self._rcp_099e_probe_failed_until.get(
+                    cam_id, float("-inf")
+                )
+                probe_memoized_failed = time.monotonic() < probe_failed_until
+                if len(parts) == 2 and not hw_gen2 and not probe_memoized_failed:
                     proxy_host_rcp, proxy_hash_rcp = parts[0], parts[1]
                     rcp_base = f"https://{proxy_host_rcp}/{proxy_hash_rcp}/rcp.xml"
                     try:
-                        session_id = await self.get_cached_rcp_session(
-                            proxy_host_rcp, proxy_hash_rcp
+                        # GitHub #56: hard-cap the probe — on cameras where it
+                        # always fails (observed 2-8s per attempt, no timeout
+                        # of its own), an unbudgeted probe starved the
+                        # snap.jpg leg below of the time it needed to succeed.
+                        async with asyncio.timeout(TIMEOUT_RCP_099E_PROBE):
+                            session_id = await self.get_cached_rcp_session(
+                                proxy_host_rcp, proxy_hash_rcp
+                            )
+                            raw = (
+                                await self.rcp_read(rcp_base, "0x099e", session_id)
+                                if session_id
+                                else None
+                            )
+                        if raw and raw[:2] == b"\xff\xd8":
+                            _LOGGER.debug(
+                                "fetch_live_snapshot: RCP 0x099e → %d bytes (320×180 JPEG) for %s",
+                                len(raw),
+                                cam_id,
+                            )
+                            self._rcp_099e_probe_failed_until.pop(cam_id, None)
+                            return raw
+                        _LOGGER.debug(
+                            "fetch_live_snapshot: RCP 0x099e unavailable for %s — using snap.jpg",
+                            cam_id,
                         )
                         if session_id:
-                            raw = await self.rcp_read(rcp_base, "0x099e", session_id)
-                            if raw and raw[:2] == b"\xff\xd8":
-                                _LOGGER.debug(
-                                    "fetch_live_snapshot: RCP 0x099e → %d bytes (320×180 JPEG) for %s",
-                                    len(raw),
-                                    cam_id,
-                                )
-                                return raw
-                            _LOGGER.debug(
-                                "fetch_live_snapshot: RCP 0x099e unavailable for %s — using snap.jpg",
-                                cam_id,
+                            # Only memoize when we actually got a session and
+                            # read a real (non-JPEG) response — a genuine
+                            # signal this camera can't satisfy 0x099e. A
+                            # missing session_id can be a transient
+                            # session-acquisition hiccup (e.g. concurrent
+                            # LOCAL-session contention) unrelated to hardware
+                            # capability, so it must not disable the fast
+                            # path for a full hour on a one-off blip.
+                            self._rcp_099e_probe_failed_until[cam_id] = (
+                                time.monotonic() + RCP_099E_PROBE_FAILURE_MEMO_SEC
                             )
                     except Exception as _rcp_err:
                         _LOGGER.debug(
@@ -3343,6 +3379,14 @@ class BoschCameraCoordinator(
                             cam_id,
                             _rcp_err,
                         )
+                        self._rcp_099e_probe_failed_until[cam_id] = (
+                            time.monotonic() + RCP_099E_PROBE_FAILURE_MEMO_SEC
+                        )
+                elif len(parts) == 2 and not hw_gen2 and probe_memoized_failed:
+                    _LOGGER.debug(
+                        "fetch_live_snapshot: RCP 0x099e memoized-failed for %s — skipping probe, using snap.jpg",
+                        cam_id,
+                    )
 
                 proxy_url = f"https://{url_entry}/snap.jpg?JpegSize=1206"
                 async with asyncio.timeout(TIMEOUT_SNAP):

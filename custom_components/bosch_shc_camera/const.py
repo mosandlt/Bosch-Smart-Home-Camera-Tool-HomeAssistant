@@ -87,6 +87,20 @@ STREAM_START_SKIPPED = _StreamStartSkipped()
 # inconsistent (CLI 5/15s vs. integration 10s).
 TIMEOUT_SNAP = 10  # GET on signed image / imageUrl
 TIMEOUT_PUT_CONNECTION = 10  # PUT /v11/video_inputs/{id}/connection
+TIMEOUT_RCP_099E_PROBE = 2.5  # RCP 0x099e thumbnail probe (GitHub #56 — must not eat the snap.jpg leg's budget)
+RCP_099E_PROBE_FAILURE_MEMO_SEC = (
+    3600  # skip the probe for this long per-cam_id after a failure/timeout
+)
+
+# GitHub #55: LOCAL snap.jpg's inline Digest request is capped at 6s to stay
+# under HA's outer 10s CAMERA_IMAGE_TIMEOUT — too tight for cameras whose TLS
+# handshake alone runs 2.5-6.9s, and a handshake killed mid-flight never gets
+# pooled, so every request starts cold and hits the same wall. On a timeout,
+# a background attempt gets this much more generous budget to complete the
+# handshake once and leave a warm pooled connection for subsequent inline
+# requests, rate-limited so a persistently-slow camera isn't hammered.
+LOCAL_SNAP_WARMUP_TIMEOUT_SEC = 25.0
+LOCAL_SNAP_WARMUP_MIN_INTERVAL_SEC = 30.0
 
 # GET /v11/video_inputs (camera_list.py) — first call of every coordinator
 # tick, gating everything else that tick. A bare timeout here used to fail

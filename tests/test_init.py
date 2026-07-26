@@ -16943,6 +16943,7 @@ def _make_coord_sprint_j2(**overrides):
         nvr_processes={},
         nvr_user_intent={},
         _proxy_url_cache={},
+        _rcp_099e_probe_failed_until={},
         _snapshot_fetch_locks={},
         shc_state_cache={},
         token="tok-A",
@@ -29880,6 +29881,7 @@ def _make_snapshot_coord(**overrides):
     base = dict(
         token="tok-A",
         _proxy_url_cache={},
+        _rcp_099e_probe_failed_until={},
         _snapshot_fetch_locks={},
         shc_state_cache={},
         get_quality_params=MagicMock(return_value=(True, {})),
@@ -29994,6 +29996,179 @@ class TestFetchLiveSnapshotRcpException:
         assert result == b"\xff\xd8snap", (
             "Must fall through to snap.jpg when rcp_read raises"
         )
+
+
+class TestFetchLiveSnapshotRcpProbeBudget:
+    """GitHub #56: RCP 0x099e probe must not starve the snap.jpg leg's budget.
+
+    Pins: the probe is capped by TIMEOUT_RCP_099E_PROBE (2.5s, independent of
+    the snap.jpg leg's own TIMEOUT_SNAP budget), a failed/timed-out probe is
+    memoized per-cam_id for RCP_099E_PROBE_FAILURE_MEMO_SEC so a camera that
+    can never satisfy 0x099e stops paying its cost on every fetch, and a
+    memoized failure clears immediately on the next success.
+    """
+
+    def _snap_ok_session(self):
+        snap_resp = MagicMock()
+        snap_resp.status = 200
+        snap_resp.headers = {"Content-Type": "image/jpeg"}
+        snap_resp.read = AsyncMock(return_value=b"\xff\xd8snap")
+        snap_resp.__aenter__ = AsyncMock(return_value=snap_resp)
+        snap_resp.__aexit__ = AsyncMock(return_value=None)
+
+        session_mock = MagicMock()
+        session_mock.__aenter__ = AsyncMock(return_value=session_mock)
+        session_mock.__aexit__ = AsyncMock(return_value=None)
+        session_mock.get = MagicMock(return_value=snap_resp)
+        session_mock.put = MagicMock()
+        return session_mock
+
+    @pytest.mark.asyncio
+    async def test_slow_probe_times_out_falls_through_and_memoizes(self):
+        """Probe that never returns within TIMEOUT_RCP_099E_PROBE → TimeoutError caught, snap.jpg used, memo set."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        async def _never_returns(*_a, **_kw):
+            await asyncio.sleep(3600)  # far longer than TIMEOUT_RCP_099E_PROBE
+
+        coord = _make_snapshot_coord(
+            _proxy_url_cache={
+                CAM_A: (
+                    "proxy-01.example.com:42090/testhash",
+                    time_mod.monotonic() + 50,
+                )
+            },
+            get_cached_rcp_session=AsyncMock(return_value="sess-123"),
+            rcp_read=_never_returns,
+        )
+
+        session_mock = self._snap_ok_session()
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.coordinator.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
+        ):
+            result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
+                coord, CAM_A
+            )
+
+        assert result == b"\xff\xd8snap", (
+            "A hung probe must not consume the snap.jpg leg's own budget"
+        )
+        assert CAM_A in coord._rcp_099e_probe_failed_until, (
+            "A timed-out probe must be memoized so future fetches skip it"
+        )
+        assert coord._rcp_099e_probe_failed_until[CAM_A] > time_mod.monotonic(), (
+            "Memo expiry must be in the future"
+        )
+
+    @pytest.mark.asyncio
+    async def test_memoized_failure_skips_probe_entirely(self):
+        """A still-active memo means get_cached_rcp_session is never even called."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        get_session = AsyncMock(return_value="sess-123")
+        coord = _make_snapshot_coord(
+            _proxy_url_cache={
+                CAM_A: (
+                    "proxy-01.example.com:42090/testhash",
+                    time_mod.monotonic() + 50,
+                )
+            },
+            _rcp_099e_probe_failed_until={CAM_A: time_mod.monotonic() + 1800},
+            get_cached_rcp_session=get_session,
+        )
+
+        session_mock = self._snap_ok_session()
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.coordinator.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
+        ):
+            result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
+                coord, CAM_A
+            )
+
+        get_session.assert_not_awaited()
+        assert result == b"\xff\xd8snap"
+
+    @pytest.mark.asyncio
+    async def test_success_clears_stale_memo(self):
+        """A memo from a past (already-expired) failure is cleared on the next success."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_snapshot_coord(
+            _proxy_url_cache={
+                CAM_A: (
+                    "proxy-01.example.com:42090/testhash",
+                    time_mod.monotonic() + 50,
+                )
+            },
+            # Expired memo — probe must still run and, on success, remove it.
+            _rcp_099e_probe_failed_until={CAM_A: time_mod.monotonic() - 1},
+            get_cached_rcp_session=AsyncMock(return_value="sess-123"),
+            rcp_read=AsyncMock(return_value=b"\xff\xd8\xff\xe0" + b"\x00" * 20),
+        )
+
+        session_mock = self._snap_ok_session()
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.coordinator.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
+        ):
+            result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
+                coord, CAM_A
+            )
+
+        assert result == b"\xff\xd8\xff\xe0" + b"\x00" * 20
+        assert CAM_A not in coord._rcp_099e_probe_failed_until, (
+            "A successful probe must clear any memo entry for this camera"
+        )
+
+    @pytest.mark.asyncio
+    async def test_non_jpeg_response_memoizes_failure(self):
+        """A completed-but-non-JPEG probe response also counts as a failure to memoize."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_snapshot_coord(
+            _proxy_url_cache={
+                CAM_A: (
+                    "proxy-01.example.com:42090/testhash",
+                    time_mod.monotonic() + 50,
+                )
+            },
+            get_cached_rcp_session=AsyncMock(return_value="sess-123"),
+            rcp_read=AsyncMock(return_value=b"\x00\x01\x02"),  # not JPEG
+        )
+
+        session_mock = self._snap_ok_session()
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.coordinator.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
+        ):
+            result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
+                coord, CAM_A
+            )
+
+        assert result == b"\xff\xd8snap"
+        assert CAM_A in coord._rcp_099e_probe_failed_until
 
 
 class TestFetchLiveSnapshot404RetryReturnsNone:
@@ -31534,6 +31709,7 @@ def _stub_coord(**kwargs):
         hass=hass,
         entry=SimpleNamespace(entry_id="01ENTRY"),
         _proxy_url_cache={},
+        _rcp_099e_probe_failed_until={},
         shc_state_cache={},
         rcp_session_cache={},
         rcp_session_locks={},
@@ -35567,6 +35743,7 @@ class TestFetchLiveSnapshotEmptyBodyPrivacyOn:
                         time.monotonic() + 30,
                     )
                 },
+                _rcp_099e_probe_failed_until={},
                 shc_state_cache={},
                 rcp_session_cache={},
                 live_connections={},
@@ -35637,6 +35814,7 @@ class TestFetchLiveSnapshotEmptyBodyPrivacyOn:
                         time.monotonic() + 30,
                     )
                 },
+                _rcp_099e_probe_failed_until={},
                 shc_state_cache={},
                 rcp_session_cache={},
                 live_connections={},
