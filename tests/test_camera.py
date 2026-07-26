@@ -36,6 +36,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.bosch_shc_camera.const import (
+    JPEG_SIZE_FULL,
+    JPEG_SIZE_MEDIUM,
+    JPEG_SIZE_THUMB,
+)
+
 if TYPE_CHECKING:
     from custom_components.bosch_shc_camera.camera import BoschCamera
 
@@ -4152,7 +4158,7 @@ class TestIdleCameraCloudSnapshot:
 
             out = await BoschCamera._async_camera_image_impl(cam)
 
-        coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
+        coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID, jpeg_size=None)
         assert out == b"\xff\xd8snap", (
             "must return snapshot from async_fetch_live_snapshot"
         )
@@ -4195,7 +4201,9 @@ class TestIdleCameraCloudSnapshot:
 
             out = await BoschCamera._async_camera_image_impl(cam, width=320)
 
-        coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
+        coord.async_fetch_live_snapshot.assert_awaited_once_with(
+            CAM_ID, jpeg_size=JPEG_SIZE_THUMB
+        )
         assert out == b"\xff\xd8snap", (
             "must fall to async_fetch_live_snapshot when RCP fails"
         )
@@ -4216,7 +4224,9 @@ class TestIdleCameraCloudSnapshot:
 
             out = await BoschCamera._async_camera_image_impl(cam)
 
-        coord.async_fetch_live_snapshot_local.assert_awaited_once_with(CAM_ID)
+        coord.async_fetch_live_snapshot_local.assert_awaited_once_with(
+            CAM_ID, jpeg_size=None
+        )
         assert out == b"\xff\xd8local", (
             "must use LOCAL fallback when REMOTE snap returns None"
         )
@@ -4240,7 +4250,7 @@ class TestIdleCameraCloudSnapshot:
 
             out = await BoschCamera._async_camera_image_impl(cam)
 
-        coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID)
+        coord.async_fetch_live_snapshot.assert_awaited_once_with(CAM_ID, jpeg_size=None)
         assert out == b"\xff\xd8fresh", "must return fresh bytes when cache is stale"
         assert cam.cached_image == b"\xff\xd8fresh", (
             "must update cache with fresh bytes"
@@ -4859,6 +4869,142 @@ class TestLocalSnapViaProxy:
         (
             digest_mock.assert_not_called(),
             "async_digest_request must not be called when no LOCAL creds",
+        )
+
+
+class TestSnapshotJpegSizeFromRequestedWidth:
+    """snap.jpg must be requested at the size the caller actually needs.
+
+    Every call site used to hardcode JpegSize=1206 (~500 KB) even for the
+    Lovelace card, which asks HA for width=315 (~65 KB at JpegSize=320). On a
+    constrained link the full-res body alone can outlast HA's 10 s
+    CAMERA_IMAGE_TIMEOUT, so the preview fails and a stale frame is served.
+    Callers that persist or analyse the frame pass no width and must keep the
+    full-resolution URL byte-for-byte.
+    """
+
+    @staticmethod
+    async def _digest_url_for(width: int | None) -> str:
+        """Run the tier-1 LOCAL snap and return the URL it fetched."""
+        coord = _local_live_conn()
+        cam = _make_camera_r7(coord=coord)
+        digest_mock = AsyncMock(return_value=_digest_cm(200, b"\xff\xd8local"))
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=digest_mock,
+            ),
+        ):
+            from custom_components.bosch_shc_camera.camera import BoschCamera
+
+            await BoschCamera._async_camera_image_impl(cam, width=width)
+        return str(digest_mock.await_args.args[2])
+
+    @pytest.mark.asyncio
+    async def test_card_width_shrinks_local_snap_to_thumbnail(self):
+        """width=315 (what the card requests) → JpegSize=320, not 1206."""
+        url = await self._digest_url_for(315)
+        assert f"JpegSize={JPEG_SIZE_THUMB}" in url, (
+            "a thumbnail-sized request must not pull the full-res frame"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_width_leaves_local_snap_url_untouched(self):
+        """No width (persisting/background callers) → URL unchanged."""
+        url = await self._digest_url_for(None)
+        assert url == LOCAL_SNAP_URL, "full-res callers must keep their URL as-is"
+        assert "JpegSize" not in url
+
+    @pytest.mark.parametrize(
+        ("width", "expected"),
+        [
+            (None, None),  # no width requested → keep full resolution
+            (0, None),  # defensive: nonsense width → keep full resolution
+            (-1, None),
+            (315, JPEG_SIZE_THUMB),  # the Lovelace card's actual request
+            (JPEG_SIZE_THUMB, JPEG_SIZE_THUMB),  # boundary
+            (321, JPEG_SIZE_MEDIUM),
+            (JPEG_SIZE_MEDIUM, JPEG_SIZE_MEDIUM),  # boundary
+            (JPEG_SIZE_MEDIUM + 1, None),  # bigger than a preview → full res
+            (1920, None),
+        ],
+    )
+    def test_jpeg_size_for_width_mapping(self, width, expected):
+        """The width → JpegSize mapping, including both boundaries."""
+        from custom_components.bosch_shc_camera.const import jpeg_size_for_width
+
+        assert jpeg_size_for_width(width) == expected
+
+    @pytest.mark.parametrize(
+        ("url", "size", "expected"),
+        [
+            # rewrite an existing parameter
+            (
+                f"https://host/snap.jpg?JpegSize={JPEG_SIZE_FULL}",
+                JPEG_SIZE_THUMB,
+                f"https://host/snap.jpg?JpegSize={JPEG_SIZE_THUMB}",
+            ),
+            # append when the URL has none (LOCAL proxyUrl form)
+            (
+                "https://host/snap.jpg",
+                JPEG_SIZE_THUMB,
+                f"https://host/snap.jpg?JpegSize={JPEG_SIZE_THUMB}",
+            ),
+            # append alongside an unrelated parameter
+            (
+                "https://host/snap.jpg?foo=1",
+                JPEG_SIZE_MEDIUM,
+                f"https://host/snap.jpg?foo=1&JpegSize={JPEG_SIZE_MEDIUM}",
+            ),
+            # size=None → untouched, so full-res callers are byte-identical
+            (
+                f"https://host/snap.jpg?JpegSize={JPEG_SIZE_FULL}",
+                None,
+                f"https://host/snap.jpg?JpegSize={JPEG_SIZE_FULL}",
+            ),
+            ("", JPEG_SIZE_THUMB, ""),
+        ],
+    )
+    def test_with_jpeg_size_rewrites_url(self, url, size, expected):
+        """with_jpeg_size sets/appends JpegSize and no-ops on None."""
+        from custom_components.bosch_shc_camera.const import with_jpeg_size
+
+        assert with_jpeg_size(url, size) == expected
+
+
+class TestLocalSnapInlineBudget:
+    """The inline LOCAL snap budget must fit under HA's CAMERA_IMAGE_TIMEOUT
+    while still exceeding a Gen1 camera's cold cost.
+
+    The LOCAL branch returns straight after this attempt (it deliberately skips
+    the aiohttp fallback below it, which would only 401 without the Digest auth
+    just tried), so nothing else runs inside HA's 10 s ceiling. The previous
+    bare 6 s sat *below* these cameras' measured cold cost — TLS handshake
+    2.5-6.9 s, ~7.05 s end to end — and because a handshake killed by the
+    timeout is never pooled, such a camera never reaches the warm state where
+    6 s would have been enough. Regression guard for both ends of that range.
+    """
+
+    def test_budget_is_under_ha_camera_image_timeout(self):
+        from homeassistant.components.camera import CAMERA_IMAGE_TIMEOUT
+
+        from custom_components.bosch_shc_camera.camera import LOCAL_SNAP_TIMEOUT
+
+        assert LOCAL_SNAP_TIMEOUT < CAMERA_IMAGE_TIMEOUT, (
+            "an inline snap that outlives HA's timeout is cancelled mid-flight "
+            "and served to the card as a 500 body"
+        )
+
+    def test_budget_covers_a_cold_gen1_handshake(self):
+        from custom_components.bosch_shc_camera.camera import LOCAL_SNAP_TIMEOUT
+
+        assert LOCAL_SNAP_TIMEOUT >= 7.1, (
+            "a budget below the cold handshake+transfer cost can never succeed "
+            "from cold, and cold is the only state a timed-out camera reaches"
         )
 
 

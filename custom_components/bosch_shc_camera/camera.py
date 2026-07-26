@@ -53,9 +53,13 @@ from .cloud_ssl import async_get_bosch_cloud_session
 from .const import (
     AUTO_PLAY_DEFAULT_VALUES,
     DOMAIN,
+    JPEG_SIZE_FULL,
+    JPEG_SIZE_MEDIUM,
     LIVE_SESSION_TTL,
     STREAM_START_SKIPPED,
     TIMEOUT_SNAP,
+    jpeg_size_for_width,
+    with_jpeg_size,
 )
 from .mjpeg_snapshot import fetch_mjpeg_snapshot
 from .models import (
@@ -80,13 +84,30 @@ IDLE_FRAME_INTERVAL = (
     60  # seconds — how often HA's camera proxy calls async_camera_image
 )
 
+# Budget for the inline LOCAL Digest snap.jpg in tier 1 (see call site). This
+# branch returns immediately after the attempt — it deliberately skips the
+# aiohttp fallback below it, because a LOCAL proxyUrl needs the Digest auth
+# that was just tried — so the only ceiling that applies is HA's
+# CAMERA_IMAGE_TIMEOUT (10 s). 8.5 s keeps ~1.5 s of margin under it.
+#
+# It used to be a bare 6 s, which is *below* what a Gen1 camera costs from
+# cold: the TLS handshake alone measures 2.5-6.9 s (the TCP connect under it is
+# 10-500 ms), and a cold snap.jpg round-trip measured 7.05 s end to end. A
+# budget above the warm cost but below the cold cost can never succeed from
+# cold — and since a handshake killed by the timeout is never pooled, cold is
+# the only state such a camera ever reaches, so it failed 100% of the time
+# rather than occasionally. Warm, over a pooled connection, the same fetch
+# takes 0.05-0.79 s.
+LOCAL_SNAP_TIMEOUT = 8.5
+
 # Worst-case cumulative time budget of the 5-tier snapshot fallback cascade in
 # _async_camera_image_impl, if every tier is attempted and every tier times
-# out: tier1 LOCAL live-proxy snap (6s) OR REMOTE live-proxy snap + one renew
-# retry (10s + 10s), tier2b LOCAL outage snap.jpg (12s), tier4 latest-event
-# snapshot (10s, capped from 20s — see call site). Logged at DEBUG for
-# visibility into how long a single async_camera_image() call can bind the
-# event loop before falling back to the cached image/placeholder.
+# out: tier1 LOCAL live-proxy snap (LOCAL_SNAP_TIMEOUT, which returns straight
+# away) OR REMOTE live-proxy snap + one renew retry (10s + 10s), tier2b LOCAL
+# outage snap.jpg (12s), tier4 latest-event snapshot (10s, capped from 20s —
+# see call site). Logged at DEBUG for visibility into how long a single
+# async_camera_image() call can bind the event loop before falling back to the
+# cached image/placeholder.
 SNAPSHOT_FALLBACK_MAX_BUDGET_SEC = 10 + 10 + 12 + 10
 
 
@@ -1047,7 +1068,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         token = self._token
         headers_bearer = {"Authorization": f"Bearer {token}", "Accept": "*/*"}
         # True when card requests a mobile/thumbnail-sized image
-        prefer_small = width is not None and width <= 640
+        prefer_small = width is not None and width <= JPEG_SIZE_MEDIUM
+        # snap.jpg resolution for this request: JPEG_SIZE_THUMB/_MEDIUM for a
+        # card-sized request, None (= keep full resolution) otherwise. Only the
+        # snapshot fetches on this request path get it — the background refresh
+        # and the image.* entity call the coordinator without a width and so
+        # keep JPEG_SIZE_FULL for the persisted snapshot.
+        req_jpeg_size = jpeg_size_for_width(width)
         _LOGGER.debug(
             "%s: snapshot fallback chain start (worst-case budget %ds)",
             self._display_name,
@@ -1100,7 +1127,10 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
 
         # ── 1. Cloud proxy live snapshot (active live-stream session) ─────────
         live = self.coordinator.live_connections.get(self._cam_id, {})
-        proxy_url = live.get("proxyUrl", "")
+        # The session's proxyUrl is built once, before any caller's width is
+        # known, so it carries JPEG_SIZE_FULL. Scale it down per request when
+        # the card only needs a thumbnail; unchanged when no width was asked for.
+        proxy_url = with_jpeg_size(live.get("proxyUrl", ""), req_jpeg_size)
         if proxy_url:
             # LOCAL connection: snap.jpg requires HTTP Digest auth
             if live.get("_connection_type") == "LOCAL":
@@ -1123,16 +1153,20 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 if local_user and local_pass:
                     data: bytes | None = None
                     try:
-                        # Tightened from 12 s to 6 s: HA's CameraImageView wraps
-                        # async_camera_image() with CAMERA_IMAGE_TIMEOUT (10 s);
-                        # 12 s + 10 s aiohttp fallback below = >22 s, well over
-                        # HA's outer timeout. HA cancels mid-flight → image=None
-                        # → HomeAssistantError → 26-byte "500: Internal Server
+                        # LOCAL_SNAP_TIMEOUT, not the 12 s used elsewhere: HA's
+                        # CameraImageView wraps async_camera_image() with
+                        # CAMERA_IMAGE_TIMEOUT (10 s), and overrunning it means
+                        # HA cancels mid-flight → image=None →
+                        # HomeAssistantError → 26-byte "500: Internal Server
                         # Error" body rendered as a brown placeholder on the
-                        # camera card. 6 s is enough for a healthy LAN Digest
-                        # round-trip; if it fails, return cached/placeholder
-                        # immediately rather than racing HA's outer timeout.
-                        async with asyncio.timeout(6):
+                        # camera card. Nothing else runs after this attempt on
+                        # the LOCAL branch (see the comment below the fetch), so
+                        # 8.5 s is the largest budget that still leaves margin
+                        # under HA's ceiling — and a Gen1 camera needs about
+                        # 7 s from cold. If it does fail, return
+                        # cached/placeholder immediately rather than racing HA's
+                        # outer timeout.
+                        async with asyncio.timeout(LOCAL_SNAP_TIMEOUT):
                             async with await async_digest_request(
                                 session,
                                 "GET",
@@ -1232,7 +1266,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                             self._display_name,
                         )
                     elif new_live:
-                        new_proxy_url = new_live.get("proxyUrl", "")
+                        new_proxy_url = with_jpeg_size(
+                            new_live.get("proxyUrl", ""), req_jpeg_size
+                        )
                         if new_proxy_url:
                             try:
                                 async with asyncio.timeout(10):
@@ -1310,12 +1346,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         )
                         return rcp_img
                 fresh: bytes | None = await self.coordinator.async_fetch_live_snapshot(
-                    self._cam_id
+                    self._cam_id, jpeg_size=req_jpeg_size
                 )
                 if not fresh:
                     # REMOTE snap.jpg returns 401 on CAMERA_360 — try LOCAL Digest fallback
                     fresh = await self.coordinator.async_fetch_live_snapshot_local(
-                        self._cam_id
+                        self._cam_id, jpeg_size=req_jpeg_size
                     )
                 if fresh:
                     self.cached_image = fresh
@@ -1351,12 +1387,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         self.last_image_fetch = now
                         return rcp_img
                 fresh2: bytes | None = await self.coordinator.async_fetch_live_snapshot(
-                    self._cam_id
+                    self._cam_id, jpeg_size=req_jpeg_size
                 )
                 if not fresh2:
                     # REMOTE snap.jpg returns 401 on CAMERA_360 — try LOCAL Digest fallback
                     fresh2 = await self.coordinator.async_fetch_live_snapshot_local(
-                        self._cam_id
+                        self._cam_id, jpeg_size=req_jpeg_size
                     )
                 if fresh2:
                     self.cached_image = fresh2
@@ -1392,7 +1428,10 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             host = creds.get("host", "")
             port = creds.get("port", 443)
             if local_user and local_pass and host:
-                snap_url = f"https://{host}:{port}/snap.jpg?JpegSize=1206"
+                snap_url = with_jpeg_size(
+                    f"https://{host}:{port}/snap.jpg?JpegSize={JPEG_SIZE_FULL}",
+                    req_jpeg_size,
+                )
                 outage_data: bytes | None = None
                 try:
                     async with asyncio.timeout(12):
