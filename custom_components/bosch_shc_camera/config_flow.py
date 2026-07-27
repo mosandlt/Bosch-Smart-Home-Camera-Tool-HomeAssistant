@@ -437,10 +437,9 @@ class BoschOAuth2Implementation(AbstractOAuth2Implementation):  # type: ignore[m
             },
         ) as resp:
             if resp.status >= 400:
-                body = await resp.text()
-                _LOGGER.error(
-                    "Token exchange failed: HTTP %d — %s", resp.status, body[:200]
-                )
+                # Do not log the response body — Keycloak error responses can
+                # echo token material back in the payload (see token_auth.py).
+                _LOGGER.error("Token exchange failed: HTTP %d", resp.status)
             resp.raise_for_status()
             return await resp.json()  # type: ignore[no-any-return]
 
@@ -511,11 +510,9 @@ async def _exchange_code(
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()  # type: ignore[no-any-return]
-                _LOGGER.warning(
-                    "Token exchange HTTP %d: %s",
-                    resp.status,
-                    (await resp.text())[:200],
-                )
+                # Do not log the response body — Keycloak error responses can
+                # echo token material back in the payload (see token_auth.py).
+                _LOGGER.warning("Token exchange failed: HTTP %d", resp.status)
     except (TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.warning("Token exchange error: %s", err)
     return None
@@ -582,16 +579,12 @@ async def _do_refresh(session: Any, refresh_token: str) -> dict[str, Any] | None
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()  # type: ignore[no-any-return]
-                body = (await resp.text())[:300]
-                _LOGGER.warning(
-                    "Token refresh HTTP %d — Keycloak response: %s",
-                    resp.status,
-                    body,
-                )
+                # Do not log or embed the response body in an exception message —
+                # Keycloak error responses can echo token material back in the
+                # payload (see token_auth.py).
+                _LOGGER.warning("Token refresh failed: HTTP %d", resp.status)
                 if resp.status in (400, 401):
-                    raise RefreshTokenInvalidError(
-                        f"Keycloak HTTP {resp.status}: {body}"
-                    )
+                    raise RefreshTokenInvalidError(f"Keycloak HTTP {resp.status}")
                 if 500 <= resp.status < 600:
                     raise AuthServerOutageError(f"Bosch Keycloak HTTP {resp.status}")
     except (TimeoutError, aiohttp.ClientError) as err:

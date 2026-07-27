@@ -260,6 +260,35 @@ class TestMetadata:
         stub_coord.last_update_success = False
         assert cam.available is False
 
+    @pytest.mark.parametrize(
+        "cam_status",
+        ["OFFLINE", "UPDATING", "SESSION_LIMIT"],
+    )
+    def test_available_false_when_this_camera_unreachable_despite_successful_poll(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace, cam_status: str
+    ):
+        """A successful account-level coordinator update does not mean every
+        camera is reachable — bug-hunt 2026-07-27 (Copilot review, ported from
+        the Core PR minimal cut): `available` previously returned True for
+        ANY camera the moment `coordinator.last_update_success` was True,
+        even when this specific camera's own cached status was OFFLINE/
+        UPDATING/SESSION_LIMIT, serving stale imagery as if it were live."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        stub_coord.data[CAM_ID]["status"] = cam_status
+        cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
+        assert stub_coord.last_update_success is True
+        assert cam.available is False
+
+    def test_available_true_when_this_camera_online(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        stub_coord.data[CAM_ID]["status"] = "ONLINE"
+        cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
+        assert cam.available is True
+
     def test_device_info_has_mac_connection(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
@@ -2659,6 +2688,53 @@ class TestPlaceholderTreatedAsNoCache:
         assert remote.call_count == 1, (
             "REMOTE fetch must run once, not on every request"
         )
+
+
+class TestStaleCacheRefreshBudget:
+    """Bug-hunt 2026-07-27 (Copilot review, ported from the Core PR minimal
+    cut): the stale-cache refresh path (real cached image already held,
+    just older than CLOUD_SNAP_CACHE_TTL) always awaited the full RCP+
+    REMOTE+LOCAL fallback chain with no internal timeout — on a slow/outage
+    chain this can exceed HA's own outer CAMERA_IMAGE_TIMEOUT (10s), so the
+    whole async_camera_image() call gets cancelled and nothing is served,
+    even though a perfectly good cached frame was sitting right there. Fix:
+    bound the refresh attempt with an internal timeout and fall back to the
+    cached frame on TimeoutError."""
+
+    @pytest.mark.asyncio
+    async def test_slow_refresh_falls_back_to_cached_image(self):
+        from custom_components.bosch_shc_camera import camera as camera_module
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        cached = b"\xff\xd8\xff\xe0cached-real-image"
+
+        async def _hangs_past_budget(*args, **kwargs):
+            await asyncio.sleep(1)
+            return b"\xff\xd8should-never-be-returned"
+
+        coord = _make_coord_impl(
+            live_connections={},
+            async_fetch_live_snapshot=AsyncMock(side_effect=_hangs_past_budget),
+            async_fetch_live_snapshot_local=AsyncMock(return_value=None),
+        )
+        cam = _make_camera_impl(
+            coord=coord,
+            cached_image=cached,
+            last_image_fetch=time.monotonic() - 100,  # stale (TTL is 30s)
+        )
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch.object(camera_module, "REFRESH_ON_STALE_CACHE_BUDGET_SEC", 0.01),
+        ):
+            out = await BoschCamera._async_camera_image_impl(cam)
+        assert out == cached, (
+            "must fall back to the cached frame once the internal budget "
+            "expires, not hang until HA's own outer timeout cancels the call"
+        )
+        assert cam.cached_image == cached  # not overwritten with the late result
 
 
 class TestSupportedFeaturesOfflineGate:

@@ -117,6 +117,14 @@ LOCAL_SNAP_TIMEOUT = 8.5
 # cached image/placeholder.
 SNAPSHOT_FALLBACK_MAX_BUDGET_SEC = 10 + 10 + 12 + 10
 
+# Budget for the stale-cache refresh-and-fall-back-to-cached-image path in
+# _async_camera_image_impl — must stay under HA core's own CAMERA_IMAGE_TIMEOUT
+# (10s, homeassistant/components/camera/const.py) so a slow/failing RCP+REMOTE
+# +LOCAL chain still leaves time to return the cached frame instead of the
+# whole call being cancelled and serving nothing (bug-hunt 2026-07-27, ported
+# from the Core PR minimal cut).
+REFRESH_ON_STALE_CACHE_BUDGET_SEC = 8
+
 
 def _rotate_jpeg_180(jpeg_bytes: bytes) -> bytes:
     """Rotate a JPEG image by 180° using PIL. Sync — call via executor.
@@ -590,7 +598,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         if is_updating is not None and is_updating(self._cam_id):
             return False
         if self.coordinator.last_update_success:
-            return True
+            # A successful account-level coordinator update does not mean
+            # every camera is reachable — check this camera's own cached
+            # status too, otherwise an OFFLINE/UPDATING/SESSION_LIMIT camera
+            # stays marked available and serves stale imagery as if live
+            # (bug-hunt 2026-07-27, ported from the Core PR minimal cut).
+            cam_status = str(self._cam_data.get("status", "UNKNOWN")).upper()
+            return cam_status not in ("OFFLINE", "UPDATING", "SESSION_LIMIT")
         # Cloud poll failed. Inside a KNOWN active Bosch maintenance window the
         # cloud flaps for minutes (Connect refused → ~3 min → recover) while the
         # LOCAL datapath (TLS proxy + RTSP) keeps serving frames. Keep a
@@ -1503,20 +1517,37 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     self._display_name,
                     int(cache_age),
                 )
-                if prefer_small:
-                    rcp_img = await self._async_rcp_thumbnail()
-                    if rcp_img:
-                        self.cached_image = rcp_img
-                        self.last_image_fetch = now
-                        return rcp_img
-                fresh2: bytes | None = await self.coordinator.async_fetch_live_snapshot(
-                    self._cam_id, jpeg_size=req_jpeg_size
-                )
-                if not fresh2:
-                    # REMOTE snap.jpg returns 401 on CAMERA_360 — try LOCAL Digest fallback
-                    fresh2 = await self.coordinator.async_fetch_live_snapshot_local(
-                        self._cam_id, jpeg_size=req_jpeg_size
+                # Bounded well under HA's own CAMERA_IMAGE_TIMEOUT (10s) — we
+                # already hold a real cached image here, so on a slow/outage
+                # RCP+REMOTE+LOCAL chain we must fall back to it before HA's
+                # outer timeout cancels this call entirely and serves nothing.
+                fresh2: bytes | None = None
+                try:
+                    async with asyncio.timeout(REFRESH_ON_STALE_CACHE_BUDGET_SEC):
+                        if prefer_small:
+                            rcp_img = await self._async_rcp_thumbnail()
+                            if rcp_img:
+                                self.cached_image = rcp_img
+                                self.last_image_fetch = now
+                                return rcp_img
+                        fresh2 = await self.coordinator.async_fetch_live_snapshot(
+                            self._cam_id, jpeg_size=req_jpeg_size
+                        )
+                        if not fresh2:
+                            # REMOTE snap.jpg returns 401 on CAMERA_360 — try LOCAL Digest fallback
+                            fresh2 = (
+                                await self.coordinator.async_fetch_live_snapshot_local(
+                                    self._cam_id, jpeg_size=req_jpeg_size
+                                )
+                            )
+                except TimeoutError:
+                    _LOGGER.debug(
+                        "%s: fresh fetch exceeded %ds budget — returning cached (%ds old)",
+                        self._display_name,
+                        REFRESH_ON_STALE_CACHE_BUDGET_SEC,
+                        int(cache_age),
                     )
+                    return self.cached_image
                 if fresh2:
                     self.cached_image = fresh2
                     self.last_image_fetch = now
