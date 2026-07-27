@@ -1095,17 +1095,20 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     ) -> None:
         """Best-effort background Digest handshake to prime the connection pool.
 
-        GitHub #55: the inline LOCAL snap.jpg request is capped at 6s to stay
-        under HA's outer ``CAMERA_IMAGE_TIMEOUT`` — but on cameras whose TLS
-        handshake alone runs 2.5-6.9s, that cap kills the handshake before
-        aiohttp's connection pool ever gets a completed connection to reuse,
-        so every subsequent inline request starts cold and hits the same
-        wall. This runs on the same shared session (`auth_utils.async_digest_
-        request` calls `session.request()` directly, so a completed request
-        here pools a connection the next inline request to the same host can
-        reuse). On success this also opportunistically updates cached_image
-        with the frame it fetched, since the round trip already paid for it.
-        Silent no-op on any failure — the inline path already has its own
+        GitHub #55: the inline LOCAL snap.jpg request is capped at
+        ``LOCAL_SNAP_TIMEOUT`` (8.5s) to stay under HA's outer
+        ``CAMERA_IMAGE_TIMEOUT`` — but on cameras whose TLS handshake alone
+        runs 2.5-6.9s, a timeout still fires often enough that the handshake
+        never completes, and a killed handshake never gets pooled, so every
+        subsequent inline request starts cold and hits the same wall. Raising
+        the cap (see GitHub #57) only fixes request 1 — it does nothing for
+        requests 2..N without something priming the pool. This runs on the
+        same shared session (`auth_utils.async_digest_request` calls
+        `session.request()` directly, so a completed request here pools a
+        connection the next inline request to the same host can reuse). On
+        success this also opportunistically updates cached_image with the
+        frame it fetched, since the round trip already paid for it. Silent
+        no-op on any failure — the inline path already has its own
         cached/placeholder fallback regardless of this task's outcome.
         """
         try:
