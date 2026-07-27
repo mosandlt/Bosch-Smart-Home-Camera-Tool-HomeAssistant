@@ -382,6 +382,27 @@ class TestDoRefresh:
             await _do_refresh(session, "valid_token")
 
     @pytest.mark.asyncio
+    async def test_429_raises_auth_server_outage(self):
+        """HTTP 429 (rate limited) is transient, not a confirmed-invalid token.
+
+        Backported from the Core PR's Copilot review round 6, 2026-07-27 —
+        a prior version let 429 fall through to a bare None return, which
+        the caller (token_auth.py) could still count toward the
+        invalid-grant/reauth escalation, same class of bug as an
+        unclassified timeout.
+        """
+        from custom_components.bosch_shc_camera.config_flow import (
+            AuthServerOutageError,
+            _do_refresh,
+        )
+
+        session = MagicMock()
+        session.post = MagicMock(return_value=_mock_resp(429, text="Too Many Requests"))
+
+        with pytest.raises(AuthServerOutageError):
+            await _do_refresh(session, "valid_token")
+
+    @pytest.mark.asyncio
     async def test_timeout_raises(self):
         """Network timeout → raised, not swallowed.
 
@@ -941,6 +962,54 @@ class TestCameraAccessVerification:
             AsyncMock(return_value=session),
         ):
             assert await flow._async_verify_camera_access("tok") is False
+
+    async def _verify_with_status(self, status: int) -> bool | None:
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschCameraConfigFlow,
+        )
+
+        session = MagicMock()
+        resp = MagicMock()
+        resp.status = status
+        resp.__aenter__ = AsyncMock(return_value=resp)
+        resp.__aexit__ = AsyncMock(return_value=None)
+        session.get = MagicMock(return_value=resp)
+
+        flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
+        flow.hass = MagicMock()
+
+        with patch(
+            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            AsyncMock(return_value=session),
+        ):
+            return await flow._async_verify_camera_access("tok")
+
+    @pytest.mark.asyncio
+    async def test_verify_returns_none_on_429(self) -> None:
+        """A rate-limit response is inconclusive, not a denial — the caller
+        must abort with retry semantics (cannot_connect), not
+        camera_access_denied (backported from the Core PR's Copilot review
+        round 6, 2026-07-27)."""
+        assert await self._verify_with_status(429) is None
+
+    @pytest.mark.asyncio
+    async def test_verify_returns_none_on_5xx(self) -> None:
+        """A Bosch-side outage is inconclusive, same as 429 (see above)."""
+        assert await self._verify_with_status(503) is None
+
+    @pytest.mark.asyncio
+    async def test_camera_access_transient_aborts_with_cannot_connect(self) -> None:
+        """async_oauth_create_entry must route a None verification result to
+        cannot_connect, distinct from a definitive camera_access_denied."""
+        flow = self._make_flow()
+        flow._async_verify_camera_access = AsyncMock(return_value=None)
+
+        result = await flow.async_oauth_create_entry(
+            {"token": {"access_token": "at1", "refresh_token": "rt1"}}
+        )
+
+        assert result == {"type": "abort", "reason": "cannot_connect"}
+        flow.async_create_entry.assert_not_called()
 
 
 class TestOptionsFlowStructure:

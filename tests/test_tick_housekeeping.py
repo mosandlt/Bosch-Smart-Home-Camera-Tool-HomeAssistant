@@ -266,6 +266,23 @@ class TestHwVersionPersistence:
         coord = _make_coord(hw_version={CAM_A: "CAMERA_360"})
         await run_housekeeping(coord, {}, {}, NOW, False)  # must not raise
 
+    @pytest.mark.asyncio
+    async def test_saves_empty_snapshot_after_last_camera_removed(self):
+        """cleanup_stale_devices() clears hw_version when the account's last
+        camera is removed — that empty snapshot must still be saved, or the
+        removed camera's hardware version is reloaded from .storage after a
+        restart (backported from the Core PR's Copilot review round 6,
+        2026-07-27 — a prior version's `and coordinator.hw_version`
+        truthiness guard skipped this save entirely)."""
+        store = MagicMock()
+        coord = _make_coord(
+            hw_version={},
+            hw_version_store=store,
+            hw_version_snapshot={CAM_A: "CAMERA_360"},
+        )
+        await run_housekeeping(coord, {}, {}, NOW, False)
+        store.async_save.assert_called_once_with({})
+
 
 class TestLocalCredsPersistence:
     @pytest.mark.asyncio

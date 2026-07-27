@@ -310,7 +310,6 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
     assert coord._token_alert_sent is False
     assert coord._token_fail_count == 0
     assert coord.auth_outage_count == 0
-    assert coord._auth_outage_alert_sent is False
     assert coord._auth_outage_next_retry_ts == float(
         "-inf"
     )  # SENTINEL_RULE: never 0.0 for monotonic
@@ -32200,6 +32199,25 @@ class TestFetchFreshEventSnapshot:
         assert result is not None and result[:2] == b"\xff\xd8"
 
     @pytest.mark.asyncio
+    async def test_image_fetch_disallows_redirects(self):
+        """`_is_safe_bosch_url` only validates img_url itself — aiohttp
+        follows redirects by default, so a validated URL could still
+        redirect to an arbitrary internal host. The image GET must pass
+        `allow_redirects=False` (backported from the Core PR's Copilot
+        review round 6, 2026-07-27 — same fix already applied to
+        camera.py's equivalent event-snapshot fetch)."""
+        coord = self._bind(_stub_coord())
+        img_url = "https://events.cbs.boschsecurity.com/snap/img123.jpg"
+        events_cm = _resp_cm_round7(200, text=f'[{{"imageUrl": "{img_url}"}}]')
+        img_cm = _resp_cm_round7(200, body=b"\xff\xd8\xff\xe0" + b"\x00" * 50)
+        session = MagicMock()
+        session.get = MagicMock(side_effect=[events_cm, img_cm])
+        with patch(self._PATCH, new=AsyncMock(return_value=session)):
+            await coord.async_fetch_fresh_event_snapshot(CAM_ID)
+        _, img_call_kwargs = session.get.call_args_list[1]
+        assert img_call_kwargs.get("allow_redirects") is False
+
+    @pytest.mark.asyncio
     async def test_image_fetch_empty_body_tries_next_event(self):
         """img fetch returns 200 but empty body → skip, return None (no more events)."""
         coord = self._bind(_stub_coord())
@@ -38156,7 +38174,6 @@ def _make_coord_token_refresh(**overrides):
         _refreshed_refresh=None,
         auth_outage_count=0,
         _auth_outage_next_retry_ts=float("-inf"),  # SENTINEL_RULE
-        _auth_outage_alert_sent=False,
         _token_fail_count=0,
         _token_timeout_fail_count=0,
         _token_alert_sent=False,
@@ -38389,46 +38406,20 @@ class TestTokenRefreshHardErrors:
         assert 590 < diff < 610
 
     @pytest.mark.asyncio
-    async def test_auth_server_outage_creates_repair_issue_after_3(self):
-        """After 3 consecutive outages, surface a repair-issue so the
-        user sees a clear explanation under Settings → Repairs."""
+    async def test_auth_server_outage_never_creates_repair_issue(self):
+        """auth_server_outage must NOT surface a Repairs issue, even after
+        many consecutive outages — the issue's own text would tell the
+        user "no action needed"/"retrying automatically", which violates
+        HA's Repairs-issue design constraint (an issue must be
+        user-actionable); the existing WARNING log is sufficient
+        (backported from the Core PR's Copilot review round 6, 2026-07-27
+        — a prior version created this issue after 3 outages)."""
         from homeassistant.helpers.update_coordinator import UpdateFailed
 
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
         from custom_components.bosch_shc_camera.config_flow import AuthServerOutageError
 
-        coord = _make_coord_token_refresh(auth_outage_count=2)  # next is #3
-        with (
-            patch(
-                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
-                new=AsyncMock(return_value=MagicMock()),
-            ),
-            patch(
-                "custom_components.bosch_shc_camera.config_flow._do_refresh",
-                new=AsyncMock(side_effect=AuthServerOutageError("503")),
-            ),
-            patch(
-                "custom_components.bosch_shc_camera.ir.async_create_issue",
-            ) as create_issue,
-        ):
-            with pytest.raises(UpdateFailed):
-                await BoschCameraCoordinator._refresh_token_locked(coord)
-        create_issue.assert_called_once()
-        assert coord._auth_outage_alert_sent is True
-
-    @pytest.mark.asyncio
-    async def test_repair_issue_only_created_once(self):
-        """If `_auth_outage_alert_sent` is already True, don't re-create
-        the same issue on every subsequent outage tick."""
-        from homeassistant.helpers.update_coordinator import UpdateFailed
-
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-        from custom_components.bosch_shc_camera.config_flow import AuthServerOutageError
-
-        coord = _make_coord_token_refresh(
-            auth_outage_count=5,
-            _auth_outage_alert_sent=True,
-        )
+        coord = _make_coord_token_refresh(auth_outage_count=5)  # well past #3
         with (
             patch(
                 "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
@@ -38584,13 +38575,15 @@ class TestTokenRefreshSuccess:
     @pytest.mark.asyncio
     async def test_success_clears_outage_state(self):
         """A successful refresh after prior outages clears the outage
-        counter + cooldown + dismisses the repair issue."""
+        counter + cooldown. No Repairs issue to dismiss anymore — the
+        auth_server_outage issue was removed entirely (backported from
+        the Core PR's Copilot review round 6, 2026-07-27; see
+        `test_auth_server_outage_never_creates_repair_issue`)."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_token_refresh(
             auth_outage_count=4,
             _auth_outage_next_retry_ts=time.monotonic() - 10,  # cooldown expired
-            _auth_outage_alert_sent=True,
         )
         new_tokens = {"access_token": "tok-NEW", "refresh_token": "rfr-NEW"}
         with (
@@ -38602,17 +38595,12 @@ class TestTokenRefreshSuccess:
                 "custom_components.bosch_shc_camera.config_flow._do_refresh",
                 new=AsyncMock(return_value=new_tokens),
             ),
-            patch(
-                "custom_components.bosch_shc_camera.ir.async_delete_issue",
-            ) as del_issue,
         ):
             await BoschCameraCoordinator._refresh_token_locked(coord)
         assert coord.auth_outage_count == 0
         assert coord._auth_outage_next_retry_ts == float(
             "-inf"
         )  # SENTINEL_RULE: reset to -inf, not 0.0
-        assert coord._auth_outage_alert_sent is False
-        assert del_issue.called
 
     @pytest.mark.asyncio
     async def test_success_clears_token_alert(self):

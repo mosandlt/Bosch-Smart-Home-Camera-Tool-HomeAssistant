@@ -744,7 +744,6 @@ def _make_coord_token_chaos(**overrides):
         _refreshed_refresh=None,
         auth_outage_count=0,
         _auth_outage_next_retry_ts=float("-inf"),  # SENTINEL_RULE: never 0.0
-        _auth_outage_alert_sent=False,
         _token_fail_count=0,
         _token_timeout_fail_count=0,
         _token_alert_sent=False,

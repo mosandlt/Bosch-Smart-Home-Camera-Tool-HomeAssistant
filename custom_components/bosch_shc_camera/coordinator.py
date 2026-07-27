@@ -732,7 +732,6 @@ class BoschCameraCoordinator(
         # 5xx from Keycloak = Bosch infrastructure problem, NOT user/config issue:
         # no reauth trigger, no escalation, just back off and retry.
         self.auth_outage_count: int = 0  # consecutive 5xx responses
-        self._auth_outage_alert_sent: bool = False
         self._auth_outage_next_retry_ts: float = float("-inf")  # monotonic time gate
         # Cached LOCAL Digest credentials per camera — survives live-connection
         # teardown. Populated on every successful PUT /connection LOCAL and used
@@ -3911,8 +3910,15 @@ class BoschCameraCoordinator(
                         continue
                     try:
                         async with asyncio.timeout(20):
+                            # allow_redirects=False: _is_safe_bosch_url only
+                            # validates img_url itself — aiohttp follows
+                            # redirects by default, so a validated URL could
+                            # still redirect to an arbitrary internal host
+                            # (backported from the Core PR's Copilot review
+                            # round 6, 2026-07-27 — same fix already applied
+                            # to camera.py's equivalent event-snapshot fetch).
                             async with session.get(
-                                img_url, headers=img_headers
+                                img_url, headers=img_headers, allow_redirects=False
                             ) as snap_resp:
                                 if snap_resp.status == 200:
                                     evdata: bytes = await snap_resp.read()
