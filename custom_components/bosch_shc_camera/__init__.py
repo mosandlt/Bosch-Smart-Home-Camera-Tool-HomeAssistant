@@ -948,8 +948,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ", ".join(sorted(c[:8] for c in cam_ids)),
             )
             # Kick an immediate LAN ping so the LAN-reachable sensors and
-            # switch fallbacks have a useful state right away.
-            hass.async_create_task(coordinator.async_outage_ping_all())
+            # switch fallbacks have a useful state right away. Tracked (not
+            # a bare hass.async_create_task) so a removal/reload immediately
+            # after this degraded setup cancels and awaits it instead of
+            # leaving it running against an already-torn-down coordinator
+            # (backported from the Core PR's Copilot review round 10,
+            # 2026-07-27).
+            coordinator.spawn_tracked(
+                coordinator.async_outage_ping_all(),
+                name="bosch_shc_camera_startup_ping",
+            )
         else:
             # Truly first-time install with no registry → preserve the original
             # behaviour and bail out so HA shows the standard setup-failed UI.

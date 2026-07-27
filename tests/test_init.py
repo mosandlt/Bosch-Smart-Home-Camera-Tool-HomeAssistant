@@ -981,6 +981,12 @@ def _make_coord_stub_setup_lan_fallback(camera_ids, *, first_refresh_raises=None
     coord.async_outage_ping_all = AsyncMock(return_value=None)
     coord.async_start_fcm_push = AsyncMock(return_value=None)
     coord.async_load_ai_budget = AsyncMock(return_value=None)
+
+    def _spawn_tracked_close(coro, **_kwargs):
+        coro.close()  # never actually scheduled in this stub, avoid a leaked-coroutine warning
+        return MagicMock()
+
+    coord.spawn_tracked = MagicMock(side_effect=_spawn_tracked_close)
     return coord
 
 
@@ -1066,8 +1072,13 @@ class TestCloudDegradedStartup:
         # last_update_success flipped to False (L5231)
         assert coord_stub.last_update_success is False
         # outage ping scheduled (L5242) — verify the helper was called and
-        # its coroutine handed to async_create_task.
+        # its coroutine handed to spawn_tracked (not a bare
+        # hass.async_create_task — backported from the Core PR's Copilot
+        # review round 10, 2026-07-27).
         coord_stub.async_outage_ping_all.assert_called_once()
+        coord_stub.spawn_tracked.assert_called_once()
+        _, spawn_kwargs = coord_stub.spawn_tracked.call_args
+        assert spawn_kwargs["name"] == "bosch_shc_camera_startup_ping"
 
     @pytest.mark.asyncio
     async def test_empty_registry_reraises_config_entry_not_ready(self):
@@ -30834,20 +30845,34 @@ class TestPersistMethods:
         coord.hass.async_create_task.assert_not_called()
 
     def test_persist_cloud_outage_with_store(self) -> None:
-        """_persist_cloud_outage_flag: store set → async_create_task called. Pins L2722-2725."""
+        """_persist_cloud_outage_flag: store set → spawn_tracked called (tracked, not a bare hass.async_create_task).
+
+        Pins L2722-2725 (backported from the Core PR's Copilot review
+        round 10, 2026-07-27 — an untracked save could still complete
+        after config-entry removal deletes the Store, recreating
+        integration-owned state on disk after removal).
+        """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         store = MagicMock()
         store.async_save = AsyncMock()
 
+        def _spawn_tracked_close(coro, **_kwargs):
+            coro.close()  # never actually scheduled here, avoid a leaked-coroutine warning
+            return MagicMock()
+
         coord = SimpleNamespace(
             hass=MagicMock(),
             cloud_outage_notified=True,
             cloud_alert_store=store,
+            spawn_tracked=MagicMock(side_effect=_spawn_tracked_close),
         )
         BoschCameraCoordinator._persist_cloud_outage_flag(coord)  # type: ignore[arg-type]
 
-        coord.hass.async_create_task.assert_called_once()
+        coord.spawn_tracked.assert_called_once()
+        _, call_kwargs = coord.spawn_tracked.call_args
+        assert call_kwargs["name"] == "bosch_shc_camera_persist_cloud_outage_flag"
+        store.async_save.assert_called_once_with({"outage_notified": True})
 
     def test_persist_cloud_outage_no_store(self) -> None:
         """_persist_cloud_outage_flag: store=None → early return."""
@@ -30856,11 +30881,12 @@ class TestPersistMethods:
         coord = SimpleNamespace(
             hass=MagicMock(),
             cloud_outage_notified=False,
+            spawn_tracked=MagicMock(),
             # no cloud_alert_store attribute
         )
         BoschCameraCoordinator._persist_cloud_outage_flag(coord)  # type: ignore[arg-type]
 
-        coord.hass.async_create_task.assert_not_called()
+        coord.spawn_tracked.assert_not_called()
 
 
 @pytest.mark.asyncio

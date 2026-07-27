@@ -2455,8 +2455,15 @@ class BoschCameraCoordinator(
         store = getattr(self, "cloud_alert_store", None)
         if store is None:
             return
-        self.hass.async_create_task(
-            store.async_save({"outage_notified": bool(self.cloud_outage_notified)})
+        # Tracked (not a bare hass.async_create_task) — an untracked save
+        # can still complete after config-entry removal deletes the Store,
+        # recreating integration-owned state on disk after removal and
+        # bypassing the teardown behavior spawn_tracked() documents
+        # (backported from the Core PR's Copilot review round 10,
+        # 2026-07-27).
+        self.spawn_tracked(
+            store.async_save({"outage_notified": bool(self.cloud_outage_notified)}),
+            name="bosch_shc_camera_persist_cloud_outage_flag",
         )
 
     async def _async_maybe_announce_camera_status(
