@@ -31156,6 +31156,58 @@ class TestSetupEntryPersistedStores:
         assert cached["host"] == "192.0.2.149"
         assert cached["port"] == 443
 
+    async def test_local_creds_reject_unsafe_host(self) -> None:
+        """A poisoned/stale persisted LOCAL Digest cred entry must not be loaded.
+
+        The fresh-creds path (coordinator.py's fetch_live_snapshot_local)
+        only ever caches a host validated by `_is_safe_local_camera_host`.
+        This restore path previously read arbitrary host/port straight out
+        of HA's `.storage` JSON with no such check — a stale or
+        previously-poisoned entry would bypass validation and let the
+        outage-fallback snap fetch (camera.py's `_async_local_outage_snap`)
+        send authenticated Digest credentials to an arbitrary host (Copilot
+        review round 13, backported from the Core PR).
+        """
+        from custom_components.bosch_shc_camera import async_setup_entry
+
+        creds_payload = {
+            CAM_A.lower(): {
+                "user": "cbs-DEADBEEF",
+                "password": "s3cr3t",
+                "host": "8.8.8.8",  # public IP — not a physical camera's LAN address
+                "port": 443,
+            },
+        }
+
+        store_factory = _MultiStore_sprint_md(
+            {
+                "_maint_notified": None,
+                "_cloud_alert_state": None,
+                "_lan_ips": None,
+                "_hw_versions": None,
+                "_local_creds": creds_payload,
+            }
+        )
+
+        hass = _make_hass_sprint_md()
+        entry = _make_entry_sprint_md()
+        coord_stub = _make_coord_stub_sprint_md([CAM_A])
+        coord_stub.data = {CAM_A: {"info": {"title": "Terrasse"}}}
+
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        assert CAM_A not in coord_stub.local_creds_cache
+
     async def test_hw_version_recovered_from_device_registry(self) -> None:
         """Device registry: device with matching MODELS display_name → hw_version recovered.
         Pins L5431-5439 (including the _LOGGER.info at L5438-5439)."""

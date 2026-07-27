@@ -1324,18 +1324,40 @@ class TestMotionDetectionToggle:
         )
 
     @pytest.mark.asyncio
-    async def test_enable_defaults_to_high_when_no_settings(self):
-        """When motion_settings returns empty (cam not yet refreshed),
-        default sensitivity to HIGH so the PUT doesn't drop the field."""
+    async def test_enable_raises_when_no_settings(self):
+        """When motion_settings returns empty (cam not yet refreshed), fail
+        loudly instead of inventing a sensitivity.
+
+        Silently defaulting to HIGH before the coordinator's slow tier has
+        ever fetched motion settings (e.g. right after startup while the
+        camera was offline) would reset a real LOW/MEDIUM setting the
+        first time the PUT actually lands (Copilot review round 13,
+        backported from the Core PR).
+        """
+        from homeassistant.exceptions import HomeAssistantError
+
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         coord = _make_coord()
         coord.motion_settings = lambda cid: {}
         cam = _make_camera(coord=coord)
-        await BoschCamera.async_enable_motion_detection(cam)
-        payload = coord.async_put_camera.await_args[0][2]
-        assert payload["motionAlarmConfiguration"] == "HIGH"
-        assert payload["enabled"] is True
+        with pytest.raises(HomeAssistantError):
+            await BoschCamera.async_enable_motion_detection(cam)
+        coord.async_put_camera.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_disable_raises_when_no_settings(self):
+        """See test_enable_raises_when_no_settings above."""
+        from homeassistant.exceptions import HomeAssistantError
+
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()
+        coord.motion_settings = lambda cid: {}
+        cam = _make_camera(coord=coord)
+        with pytest.raises(HomeAssistantError):
+            await BoschCamera.async_disable_motion_detection(cam)
+        coord.async_put_camera.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_enable_triggers_coordinator_refresh(self):
@@ -1350,6 +1372,10 @@ class TestMotionDetectionToggle:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         coord = _make_coord()
+        coord.motion_settings = lambda cid: {
+            "enabled": False,
+            "motionAlarmConfiguration": "MEDIUM",
+        }
         cam = _make_camera(coord=coord)
         await BoschCamera.async_enable_motion_detection(cam)
         coord.spawn_tracked.assert_called_once()
@@ -1362,6 +1388,10 @@ class TestMotionDetectionToggle:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         coord = _make_coord()
+        coord.motion_settings = lambda cid: {
+            "enabled": True,
+            "motionAlarmConfiguration": "MEDIUM",
+        }
         cam = _make_camera(coord=coord)
         await BoschCamera.async_disable_motion_detection(cam)
         coord.spawn_tracked.assert_called_once()
@@ -1377,6 +1407,10 @@ class TestMotionDetectionToggle:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         coord = _make_coord()
+        coord.motion_settings = lambda cid: {
+            "enabled": False,
+            "motionAlarmConfiguration": "MEDIUM",
+        }
         coord.async_put_camera = AsyncMock(return_value=False)
         cam = _make_camera(coord=coord)
         with pytest.raises(HomeAssistantError):
@@ -1391,6 +1425,10 @@ class TestMotionDetectionToggle:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         coord = _make_coord()
+        coord.motion_settings = lambda cid: {
+            "enabled": True,
+            "motionAlarmConfiguration": "MEDIUM",
+        }
         coord.async_put_camera = AsyncMock(return_value=False)
         cam = _make_camera(coord=coord)
         with pytest.raises(HomeAssistantError):
