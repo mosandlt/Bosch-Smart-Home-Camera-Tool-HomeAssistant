@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import shutil
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant
@@ -90,6 +91,11 @@ def _sync_save(hass: HomeAssistant, cam_id: str, jpeg: bytes) -> None:
     final = snap_dir / f"{cam_id}.jpg"
     tmp = snap_dir / f"{cam_id}.jpg.tmp"
     tmp.write_bytes(jpeg)
+    # write_bytes() honors the process umask, which can leave a persisted
+    # camera image world-readable — restrict to owner-only, matching HA's
+    # own private Store convention (backported from the Core PR's Copilot
+    # review round 5, 2026-07-27).
+    tmp.chmod(0o600)
     try:
         tmp.replace(final)
     except Exception:
@@ -165,3 +171,18 @@ async def load_snapshot(hass: HomeAssistant, cam_id: str) -> bytes | None:
     """
     cam_id = _validate_cam_id(cam_id)
     return await hass.async_add_executor_job(_sync_load, hass, cam_id)  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
+
+
+def _sync_remove_all(hass: HomeAssistant) -> None:
+    """Blocking: delete the entire persisted-snapshot directory, if present."""
+    shutil.rmtree(_storage_dir(hass), ignore_errors=True)
+
+
+async def async_remove_all_snapshots(hass: HomeAssistant) -> None:
+    """Delete every persisted snapshot (config-entry removal).
+
+    Called from `async_remove_entry` — otherwise every camera's persisted
+    JPEG remains on disk indefinitely after the integration is removed
+    (backported from the Core PR's Copilot review round 5, 2026-07-27).
+    """
+    await hass.async_add_executor_job(_sync_remove_all, hass)

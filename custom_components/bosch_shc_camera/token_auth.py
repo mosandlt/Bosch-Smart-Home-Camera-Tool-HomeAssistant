@@ -22,12 +22,36 @@ import asyncio
 import logging
 from typing import Any
 
+import aiohttp
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def _do_refresh_attempt(
+    session: Any, refresh: str
+) -> tuple[dict[str, Any] | None, bool]:
+    """Run one `_do_refresh` attempt, classifying a network-layer failure.
+
+    Returns ``(tokens, was_transient)`` — `was_transient` is True when the
+    attempt failed via `TimeoutError`/`aiohttp.ClientError` (proves nothing
+    about the refresh token's validity), False otherwise (either success,
+    or an ambiguous-but-real Keycloak HTTP response). Factored out of
+    `_refresh_token_locked` to keep that method's cyclomatic complexity
+    under the repo's C901 limit (backported from the Core PR's Copilot
+    review round 5, 2026-07-27).
+    """
+    from .config_flow import _do_refresh
+
+    try:
+        tokens = await _do_refresh(session, refresh)
+    except (TimeoutError, aiohttp.ClientError) as err:
+        _LOGGER.debug("Token refresh attempt network error (transient): %s", err)
+        return None, True
+    return tokens, False
 
 
 class TokenAuthCoordinatorMixin:
@@ -111,6 +135,60 @@ class TokenAuthCoordinatorMixin:
         async with self._token_refresh_lock:
             return await self._refresh_token_locked(observed_token)  # type: ignore[no-any-return]  # self: Any (mixin) — real type is str
 
+    async def _handle_successful_refresh(
+        self: Any, tokens: dict[str, Any], refresh: str
+    ) -> str:
+        """Persist a successful refresh's tokens and reset all failure tracking.
+
+        Factored out of `_refresh_token_locked` to keep that method's
+        cyclomatic complexity under the repo's C901 limit (backported from
+        the Core PR's Copilot review round 5, 2026-07-27).
+        """
+        from . import ir as ir  # type: ignore[attr-defined]
+
+        self._refreshed_token = tokens.get("access_token", "")
+        new_refresh = tokens.get("refresh_token", refresh)
+        self._refreshed_refresh = new_refresh
+        _LOGGER.info("Bearer token renewed silently via refresh_token")
+        # Always persist both tokens to config entry so they survive reloads/restarts.
+        # Previously only saved when refresh_token changed — but Keycloak offline_access
+        # keeps the same refresh_token, so the new bearer_token was never persisted.
+        new_data = dict(self.entry.data)
+        needs_update = False
+        if new_refresh != self.entry.data.get("refresh_token", ""):
+            new_data["refresh_token"] = new_refresh
+            needs_update = True
+        if self._refreshed_token != self.entry.data.get("bearer_token", ""):
+            new_data["bearer_token"] = self._refreshed_token
+            needs_update = True
+        if needs_update:
+            self.hass.config_entries.async_update_entry(self.entry, data=new_data)
+            _LOGGER.debug("Persisted refreshed tokens to config entry")
+        # Schedule next proactive refresh before this token expires
+        self.schedule_token_refresh()
+        # Reset failure tracking on success
+        if self._token_fail_count > 0:
+            _LOGGER.info(
+                "Token refresh recovered after %d failures", self._token_fail_count
+            )
+        self._token_fail_count = 0
+        self._token_timeout_fail_count = 0
+        if self._token_alert_sent:
+            self._token_alert_sent = False
+            ir.async_delete_issue(self.hass, DOMAIN, "token_expired")
+        # Clear auth-server outage state + dismiss the outage notification
+        if self.auth_outage_count > 0:
+            _LOGGER.info(
+                "Bosch auth server recovered after %d outage cycles",
+                self.auth_outage_count,
+            )
+            self.auth_outage_count = 0
+            self._auth_outage_next_retry_ts = float("-inf")
+            if self._auth_outage_alert_sent:
+                self._auth_outage_alert_sent = False
+                ir.async_delete_issue(self.hass, DOMAIN, "auth_server_outage")
+        return self._refreshed_token  # type: ignore[no-any-return]
+
     async def _refresh_token_locked(
         self: Any, observed_token: str | None = None
     ) -> str:
@@ -126,11 +204,7 @@ class TokenAuthCoordinatorMixin:
         # only recognizes identical-name re-export at the source; the alias
         # is intentional and correct at runtime.
         from . import ir as ir  # type: ignore[attr-defined]
-        from .config_flow import (
-            AuthServerOutageError,
-            RefreshTokenInvalidError,
-            _do_refresh,
-        )
+        from .config_flow import AuthServerOutageError, RefreshTokenInvalidError
 
         # Another caller may have just refreshed the token while we were
         # waiting on the lock — if so, skip the POST entirely. Prefer
@@ -186,10 +260,20 @@ class TokenAuthCoordinatorMixin:
         # attempts were already spent, and stays correct even if
         # `_do_refresh`'s own timeout is ever changed or removed upstream.
         tokens = None
+        # True when the LAST attempt failed via a caught network-layer
+        # exception (not an ambiguous-but-real HTTP response) — gates the
+        # bottom fallback path below so 3 consecutive network/DNS failures
+        # never count toward the invalid-grant/reauth escalation either
+        # (backported from the Core PR's Copilot review round 5, 2026-07-27).
+        last_attempt_was_transient = False
         try:
             async with asyncio.timeout(15):
                 for attempt in range(3):
-                    tokens = await _do_refresh(session, refresh)
+                    tokens, last_attempt_was_transient = await _do_refresh_attempt(
+                        session, refresh
+                    )
+                    if last_attempt_was_transient:
+                        self._token_timeout_fail_count += 1
                     if tokens:
                         break
                     if attempt < 2:
@@ -272,48 +356,15 @@ class TokenAuthCoordinatorMixin:
         # sites in config_flow.py — this was a real inconsistency, not an
         # intentional design choice. (bug-hunt finding, 2026-07-19)
         if tokens and tokens.get("access_token"):
-            self._refreshed_token = tokens.get("access_token", "")
-            new_refresh = tokens.get("refresh_token", refresh)
-            self._refreshed_refresh = new_refresh
-            _LOGGER.info("Bearer token renewed silently via refresh_token")
-            # Always persist both tokens to config entry so they survive reloads/restarts.
-            # Previously only saved when refresh_token changed — but Keycloak offline_access
-            # keeps the same refresh_token, so the new bearer_token was never persisted.
-            new_data = dict(self.entry.data)
-            needs_update = False
-            if new_refresh != self.entry.data.get("refresh_token", ""):
-                new_data["refresh_token"] = new_refresh
-                needs_update = True
-            if self._refreshed_token != self.entry.data.get("bearer_token", ""):
-                new_data["bearer_token"] = self._refreshed_token
-                needs_update = True
-            if needs_update:
-                self.hass.config_entries.async_update_entry(self.entry, data=new_data)
-                _LOGGER.debug("Persisted refreshed tokens to config entry")
-            # Schedule next proactive refresh before this token expires
-            self.schedule_token_refresh()
-            # Reset failure tracking on success
-            if self._token_fail_count > 0:
-                _LOGGER.info(
-                    "Token refresh recovered after %d failures", self._token_fail_count
-                )
-            self._token_fail_count = 0
-            self._token_timeout_fail_count = 0
-            if self._token_alert_sent:
-                self._token_alert_sent = False
-                ir.async_delete_issue(self.hass, DOMAIN, "token_expired")
-            # Clear auth-server outage state + dismiss the outage notification
-            if self.auth_outage_count > 0:
-                _LOGGER.info(
-                    "Bosch auth server recovered after %d outage cycles",
-                    self.auth_outage_count,
-                )
-                self.auth_outage_count = 0
-                self._auth_outage_next_retry_ts = float("-inf")
-                if self._auth_outage_alert_sent:
-                    self._auth_outage_alert_sent = False
-                    ir.async_delete_issue(self.hass, DOMAIN, "auth_server_outage")
-            return self._refreshed_token  # type: ignore[no-any-return]
+            return await self._handle_successful_refresh(  # type: ignore[no-any-return]  # self: Any (mixin) — real type is str
+                tokens, refresh
+            )
+        if last_attempt_was_transient:
+            # All 3 attempts failed via a network-layer exception, not an
+            # ambiguous-but-real Keycloak response — stay transient, never
+            # touch the reauth-escalation counter (backported from the
+            # Core PR's Copilot review round 5, 2026-07-27).
+            raise UpdateFailed("Token refresh failed — network error, will retry")
         self._token_fail_count += 1
         _LOGGER.warning(
             "Silent token renewal failed (attempt %d)", self._token_fail_count

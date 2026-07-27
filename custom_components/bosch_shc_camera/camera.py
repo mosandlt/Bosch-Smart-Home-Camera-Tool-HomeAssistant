@@ -1733,7 +1733,14 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # request could still bind up to 20s of event-loop time on a
                 # discarded fetch. 10s matches the other proxy-fetch tiers.
                 async with asyncio.timeout(10):
-                    async with session.get(img_url, headers=headers_bearer) as resp:
+                    # allow_redirects=False: _is_safe_bosch_url only
+                    # validates img_url itself — aiohttp follows redirects
+                    # by default, so a validated URL could still redirect
+                    # to an arbitrary internal host (backported from the
+                    # Core PR's Copilot review round 5, 2026-07-27).
+                    async with session.get(
+                        img_url, headers=headers_bearer, allow_redirects=False
+                    ) as resp:
                         if resp.status == 200:
                             self.cached_image = await resp.read()
                             self.last_image_fetch = time.monotonic()

@@ -29922,7 +29922,7 @@ class TestFetchLiveSnapshotRcpUnavailable:
             # Pre-populate cache so PUT /connection is skipped
             _proxy_url_cache={
                 CAM_A: (
-                    "proxy-01.example.com:42090/testhash",
+                    "proxy-01.live.cbs.boschsecurity.com:42090/testhash",
                     time_mod.monotonic() + 50,
                 )
             },
@@ -29973,7 +29973,7 @@ class TestFetchLiveSnapshotRcpException:
         coord = _make_snapshot_coord(
             _proxy_url_cache={
                 CAM_A: (
-                    "proxy-01.example.com:42090/testhash",
+                    "proxy-01.live.cbs.boschsecurity.com:42090/testhash",
                     time_mod.monotonic() + 50,
                 )
             },
@@ -30047,7 +30047,7 @@ class TestFetchLiveSnapshotRcpProbeBudget:
         coord = _make_snapshot_coord(
             _proxy_url_cache={
                 CAM_A: (
-                    "proxy-01.example.com:42090/testhash",
+                    "proxy-01.live.cbs.boschsecurity.com:42090/testhash",
                     time_mod.monotonic() + 50,
                 )
             },
@@ -30088,7 +30088,7 @@ class TestFetchLiveSnapshotRcpProbeBudget:
         coord = _make_snapshot_coord(
             _proxy_url_cache={
                 CAM_A: (
-                    "proxy-01.example.com:42090/testhash",
+                    "proxy-01.live.cbs.boschsecurity.com:42090/testhash",
                     time_mod.monotonic() + 50,
                 )
             },
@@ -30121,7 +30121,7 @@ class TestFetchLiveSnapshotRcpProbeBudget:
         coord = _make_snapshot_coord(
             _proxy_url_cache={
                 CAM_A: (
-                    "proxy-01.example.com:42090/testhash",
+                    "proxy-01.live.cbs.boschsecurity.com:42090/testhash",
                     time_mod.monotonic() + 50,
                 )
             },
@@ -30158,7 +30158,7 @@ class TestFetchLiveSnapshotRcpProbeBudget:
         coord = _make_snapshot_coord(
             _proxy_url_cache={
                 CAM_A: (
-                    "proxy-01.example.com:42090/testhash",
+                    "proxy-01.live.cbs.boschsecurity.com:42090/testhash",
                     time_mod.monotonic() + 50,
                 )
             },
@@ -30195,7 +30195,7 @@ class TestFetchLiveSnapshot404RetryReturnsNone:
         coord = _make_snapshot_coord(
             _proxy_url_cache={
                 CAM_A: (
-                    "proxy-01.example.com:42090/testhash",
+                    "proxy-01.live.cbs.boschsecurity.com:42090/testhash",
                     time_mod.monotonic() + 50,
                 )
             },
@@ -30246,7 +30246,7 @@ class TestFetchLiveSnapshot404RetryReturnsNone:
         coord = _make_snapshot_coord(
             _proxy_url_cache={
                 CAM_A: (
-                    "proxy-01.example.com:42090/testhash",
+                    "proxy-01.live.cbs.boschsecurity.com:42090/testhash",
                     time_mod.monotonic() + 50,
                 )
             },
@@ -30364,8 +30364,10 @@ class _MultiStore_sprint_md:
         self._payloads = payloads
         self.stores: dict[str, _FakeStore_sprint_md] = {}
 
-    def __call__(self, hass: Any, *, version: int, key: str) -> _FakeStore_sprint_md:
-        """Called as Store(hass, version=1, key=...)."""
+    def __call__(
+        self, hass: Any, *, version: int, key: str, private: bool = False
+    ) -> _FakeStore_sprint_md:
+        """Called as Store(hass, version=1, key=..., private=...)."""
         for suffix, payload in self._payloads.items():
             if key.endswith(suffix):
                 store = _FakeStore_sprint_md(payload)
@@ -35334,7 +35336,7 @@ class TestStartTlsProxyOnLoopIsStopping:
 CAM_ID_coverage_gaps_v13 = "00000000-0000-0000-0000-000000000001"
 
 
-PROXY_URL_coverage_gaps_v13 = "proxy-12345.bosch.example.com"
+PROXY_URL_coverage_gaps_v13 = "proxy-12345.live.cbs.boschsecurity.com"
 
 
 class TestFcmWatchdogStableWindowReset:
@@ -38167,7 +38169,19 @@ def _make_coord_token_refresh(**overrides):
         debug=False,
     )
     base.update(overrides)
-    return SimpleNamespace(**base)
+    stub = SimpleNamespace(**base)
+    # SimpleNamespace has no MRO to TokenAuthCoordinatorMixin, so
+    # `self._handle_successful_refresh(...)` inside `_refresh_token_locked`
+    # would otherwise AttributeError — bind the real method onto the stub
+    # (backported from the Core PR's Copilot review round 5, 2026-07-27).
+    from custom_components.bosch_shc_camera.token_auth import (
+        TokenAuthCoordinatorMixin,
+    )
+
+    stub._handle_successful_refresh = types.MethodType(
+        TokenAuthCoordinatorMixin._handle_successful_refresh, stub
+    )
+    return stub
 
 
 class TestTokenRefreshEarlyReturns:

@@ -382,22 +382,28 @@ class TestDoRefresh:
             await _do_refresh(session, "valid_token")
 
     @pytest.mark.asyncio
-    async def test_timeout_returns_none(self):
-        """Network timeout → None (transient; caller may retry)."""
+    async def test_timeout_raises(self):
+        """Network timeout → raised, not swallowed.
+
+        The caller (token_auth.py's `_do_refresh_attempt`) classifies this
+        as a transient network-layer failure and retries without counting
+        it toward the invalid-grant/reauth escalation — `_do_refresh` no
+        longer catches it itself (backported from the Core PR's Copilot
+        review round 5, 2026-07-27 — a prior version swallowed this into a
+        bare None return, indistinguishable from an ambiguous HTTP
+        response, so repeated timeouts still incremented _token_fail_count).
+        """
         from custom_components.bosch_shc_camera.config_flow import _do_refresh
 
         session = MagicMock()
         session.post = MagicMock(side_effect=TimeoutError())
 
-        result = await _do_refresh(session, "token")
-        assert result is None, (
-            "_do_refresh must return None on TimeoutError — caller decides retry; "
-            "raising would trigger reauth flow unnecessarily"
-        )
+        with pytest.raises(TimeoutError):
+            await _do_refresh(session, "token")
 
     @pytest.mark.asyncio
-    async def test_client_error_returns_none(self):
-        """aiohttp.ClientError → None (transient network error; caller may retry)."""
+    async def test_client_error_raises(self):
+        """aiohttp.ClientError → raised, not swallowed (see test_timeout_raises)."""
         import aiohttp
 
         from custom_components.bosch_shc_camera.config_flow import _do_refresh
@@ -405,8 +411,8 @@ class TestDoRefresh:
         session = MagicMock()
         session.post = MagicMock(side_effect=aiohttp.ClientError("connection refused"))
 
-        result = await _do_refresh(session, "token")
-        assert result is None
+        with pytest.raises(aiohttp.ClientError):
+            await _do_refresh(session, "token")
 
     @pytest.mark.asyncio
     async def test_402_returns_none(self):

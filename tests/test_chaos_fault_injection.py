@@ -767,6 +767,12 @@ def _make_coord_token_chaos(**overrides):
     ns._refresh_token_locked = __import__("types").MethodType(
         BoschCameraCoordinator._refresh_token_locked, ns
     )
+    # `_refresh_token_locked` internally calls `self._handle_successful_refresh`
+    # on a real success — bind that too (backported from the Core PR's
+    # Copilot review round 5, 2026-07-27).
+    ns._handle_successful_refresh = __import__("types").MethodType(
+        BoschCameraCoordinator._handle_successful_refresh, ns
+    )
     return ns
 
 

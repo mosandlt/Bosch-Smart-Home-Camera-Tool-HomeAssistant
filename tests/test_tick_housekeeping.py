@@ -223,6 +223,11 @@ class TestLanIpPersistence:
 
     @pytest.mark.asyncio
     async def test_empty_ip_values_filtered_out(self):
+        """An empty-string IP is filtered out, but the resulting empty
+        snapshot must still be saved if it differs from the previous one
+        (`None` here) — no truthiness guard on the snapshot itself
+        (backported from the Core PR's Copilot review round 5,
+        2026-07-27)."""
         store = MagicMock()
         coord = _make_coord(
             rcp_lan_ip_cache={CAM_A: ""},
@@ -230,7 +235,7 @@ class TestLanIpPersistence:
             lan_ips_snapshot=None,
         )
         await run_housekeeping(coord, {}, {}, NOW, False)
-        store.async_save.assert_not_called()
+        store.async_save.assert_called_once_with({})
 
 
 class TestHwVersionPersistence:
