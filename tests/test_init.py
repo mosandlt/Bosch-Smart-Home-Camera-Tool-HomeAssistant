@@ -34226,6 +34226,45 @@ class TestAsyncPutCamera_round9:
         assert call_count[0] == 2, "PUT must be called twice (initial + retry)"
 
     @pytest.mark.asyncio
+    async def test_http_401_then_201_on_retry_returns_true(self):
+        """HTTP 401 → refresh token → retry PUT → True on 201 too.
+
+        The retry must accept the same status set as the initial attempt
+        (200/201/204) — it's the identical write, retried after a token
+        refresh, not a different semantic operation (backported from the
+        Core PR's Copilot review round 9, 2026-07-27)."""
+        coord = self._bind(_stub_coord_round9())
+        coord.ensure_valid_token = AsyncMock(return_value="new-tok")
+
+        first_resp = MagicMock()
+        first_resp.status = 401
+        retry_resp = MagicMock()
+        retry_resp.status = 201
+
+        call_count = [0]
+
+        def _put_cm(*args, **kwargs):
+            call_count[0] += 1
+            cm = MagicMock()
+            if call_count[0] == 1:
+                cm.__aenter__ = AsyncMock(return_value=first_resp)
+            else:
+                cm.__aenter__ = AsyncMock(return_value=retry_resp)
+            cm.__aexit__ = AsyncMock(return_value=None)
+            return cm
+
+        session = MagicMock()
+        session.put = MagicMock(side_effect=_put_cm)
+
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            result = await coord.async_put_camera(CAM_ID, "privacy", {})
+
+        assert result is True, "After 401+refresh, a 201 retry must also return True"
+
+    @pytest.mark.asyncio
     async def test_http_401_refresh_fails_returns_false(self):
         """HTTP 401 → token refresh raises → returns False without crash."""
         coord = self._bind(_stub_coord_round9())
