@@ -15063,6 +15063,23 @@ class TestLocalTcpPing:
             conn.assert_awaited_once()
             assert conn.await_args[0][0] == "192.0.2.21"
 
+    @pytest.mark.asyncio
+    async def test_public_ip_rejected_before_connect(self):
+        """rcp_lan_ip_cache is populated from cloud-proxied RCP data and
+        restored unvalidated from storage — unlike local_creds_cache,
+        whose host is validated at every write site. A public/unsafe
+        address must never reach asyncio.open_connection (Copilot review
+        round 14, backported from the Core PR).
+        """
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_async_methods(rcp_lan_ip_cache={CAM_A: "8.8.8.8"})
+        _bind_method(coord, "get_cam_lan_ip")
+        with patch("asyncio.open_connection") as conn:
+            ok = await BoschCameraCoordinator.async_local_tcp_ping(coord, CAM_A)
+        assert ok is False
+        conn.assert_not_called()
+
 
 class TestTokenRefreshSchedule:
     """The proactive token refresh — fires 5 minutes before JWT exp.
@@ -31208,6 +31225,55 @@ class TestSetupEntryPersistedStores:
         assert result is True
         assert CAM_A not in coord_stub.local_creds_cache
 
+    async def test_local_creds_skip_malformed_port(self) -> None:
+        """A corrupted/legacy port value must discard only that one record.
+
+        `int(_payload.get("port", 443))` previously raised uncaught for a
+        malformed value (e.g. a legacy `null` or `"not-a-port"`), which
+        failed the entire config-entry setup — no cameras loaded — instead
+        of just discarding the one bad credential record (Copilot review
+        round 14, backported from the Core PR).
+        """
+        from custom_components.bosch_shc_camera import async_setup_entry
+
+        creds_payload = {
+            CAM_A.lower(): {
+                "user": "cbs-DEADBEEF",
+                "password": "s3cr3t",
+                "host": "192.168.1.50",
+                "port": "not-a-port",
+            },
+        }
+
+        store_factory = _MultiStore_sprint_md(
+            {
+                "_maint_notified": None,
+                "_cloud_alert_state": None,
+                "_lan_ips": None,
+                "_hw_versions": None,
+                "_local_creds": creds_payload,
+            }
+        )
+
+        hass = _make_hass_sprint_md()
+        entry = _make_entry_sprint_md()
+        coord_stub = _make_coord_stub_sprint_md([CAM_A])
+        coord_stub.data = {CAM_A: {"info": {"title": "Terrasse"}}}
+
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        assert CAM_A not in coord_stub.local_creds_cache
+
     async def test_hw_version_recovered_from_device_registry(self) -> None:
         """Device registry: device with matching MODELS display_name → hw_version recovered.
         Pins L5431-5439 (including the _LOGGER.info at L5438-5439)."""
@@ -38524,7 +38590,7 @@ class TestFetchLiveSnapshotLocalValueError:
         lan_session = MagicMock()
         with (
             patch(
-                "custom_components.bosch_shc_camera.aiohttp.ClientSession",
+                "custom_components.bosch_shc_camera.coordinator.async_bosch_cloud_session_cm",
                 return_value=session_cm,
             ),
             patch(
