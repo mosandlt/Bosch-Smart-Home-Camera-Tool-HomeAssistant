@@ -310,7 +310,7 @@
         "default": "mdi:cellphone-arrow-down"
       },
       "stream_mode": {
-        "default": "mdi:home-network"
+        "default": "mdi:swap-horizontal"
       },
       "detection_mode": {
         "default": "mdi:shield-home-outline"
@@ -332,7 +332,7 @@
     },
     "button": {
       "refresh_snapshot": {
-        "default": "mdi:camera-refresh"
+        "default": "mdi:camera-retake"
       },
       "soft_reset": {
         "default": "mdi:restart"
