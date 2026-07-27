@@ -381,6 +381,28 @@ class TestExtraStateAttributes:
         assert "last_event" in attrs
         assert "event_type" in attrs
 
+    def test_last_event_preserves_timezone_offset(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """GitHub #34 regression: a naive [:19] slice discards the +02:00/Z
+        offset, re-labelling a local time as UTC and showing events +2h off.
+        `last_event` must go through `parse_bosch_timestamp` instead."""
+        stub_coord.data[CAM_ID]["events"] = [
+            {
+                "id": "e1",
+                "timestamp": "2026-07-27T12:00:00+02:00",
+                "eventType": "MOVEMENT",
+            },
+        ]
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        cam = BoschCamera(stub_coord, CAM_ID, stub_entry)
+        attrs = cam.extra_state_attributes
+        # parse_bosch_timestamp normalizes to UTC — the correct instant is
+        # 10:00 UTC (12:00+02:00), NOT 12:00 UTC (what a naive [:19] slice
+        # re-labelled as UTC would have produced — the GitHub #34 bug).
+        assert attrs["last_event"] == "2026-07-27T10:00:00+00:00"
+
 
 def _make_maintenance(state: str = "active", *, camera_relevant: bool = True):
     """Duck-typed MaintenanceWindow: `available` only reads `.state()` and
@@ -632,6 +654,7 @@ def _make_camera(coord=None, entry=None, **camera_overrides):
     )
     cam._local_snap_warmup_task = None
     cam._local_snap_warmup_last = float("-inf")
+    cam._image_refresh_task = None
     cam._model = "HOME_Eyes_Outdoor"
     cam._model_name = "Eyes Outdoor"
     cam.hw_version = "HOME_Eyes_Outdoor"
@@ -800,6 +823,43 @@ class TestLifecycleHooks:
         finished_task = MagicMock()
         finished_task.done.return_value = True
         cam._local_snap_warmup_task = finished_task
+        with patch(
+            "custom_components.bosch_shc_camera.camera.CoordinatorEntity.async_will_remove_from_hass",
+            new=AsyncMock(),
+        ):
+            await BoschCamera.async_will_remove_from_hass(cam)
+        finished_task.cancel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_will_remove_cancels_pending_image_refresh_task(self):
+        """A still-pending background image-refresh task (startup/stream-stop/
+        proactive trigger) must be cancelled on entity removal — otherwise it
+        keeps running against an already-removed entity (bug-hunt 2026-07-27,
+        backported from Core PR review)."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()
+        cam = _make_camera(coord=coord)
+        pending_task = MagicMock()
+        pending_task.done.return_value = False
+        cam._image_refresh_task = pending_task
+        with patch(
+            "custom_components.bosch_shc_camera.camera.CoordinatorEntity.async_will_remove_from_hass",
+            new=AsyncMock(),
+        ):
+            await BoschCamera.async_will_remove_from_hass(cam)
+        pending_task.cancel.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_will_remove_does_not_cancel_finished_image_refresh_task(self):
+        """An already-finished image-refresh task must not be cancelled."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()
+        cam = _make_camera(coord=coord)
+        finished_task = MagicMock()
+        finished_task.done.return_value = True
+        cam._image_refresh_task = finished_task
         with patch(
             "custom_components.bosch_shc_camera.camera.CoordinatorEntity.async_will_remove_from_hass",
             new=AsyncMock(),
@@ -2133,6 +2193,7 @@ def _make_camera_impl(coord=None, **camera_overrides):
     cam._was_streaming = False
     cam._local_snap_warmup_task = None
     cam._local_snap_warmup_last = float("-inf")
+    cam._image_refresh_task = None
     cam._model = "X"
     cam._model_name = "X"
     cam.hw_version = "X"
@@ -2735,6 +2796,85 @@ class TestStaleCacheRefreshBudget:
             "expires, not hang until HA's own outer timeout cancels the call"
         )
         assert cam.cached_image == cached  # not overwritten with the late result
+
+
+class TestPrivacyModePlaceholder:
+    """Bug-hunt 2026-07-27 (Copilot review, ported from the Core PR): privacy
+    mode ON must short-circuit `_async_camera_image_impl` to None so the
+    public wrapper serves the placeholder — not fall through every fetch
+    tier to `cached_image`, which would keep serving the last REAL scene
+    from before privacy was enabled indefinitely."""
+
+    @pytest.mark.asyncio
+    async def test_privacy_on_returns_none_instead_of_stale_cached_frame(self):
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        real_frame_before_privacy = b"\xff\xd8\xff\xe0a-real-scene"
+        coord = _make_coord_impl(shc_state_cache={CAM_ID: {"privacy_mode": True}})
+        cam = _make_camera_impl(
+            coord=coord,
+            cached_image=real_frame_before_privacy,
+            last_image_fetch=time.monotonic(),  # fresh — would normally short-circuit to cached_image
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
+        ):
+            out = await BoschCamera._async_camera_image_impl(cam)
+        assert out is None
+
+    @pytest.mark.asyncio
+    async def test_privacy_off_serves_cached_frame_normally(self):
+        """Sanity check: the guard only fires while privacy is actually ON."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        real_frame = b"\xff\xd8\xff\xe0a-real-scene"
+        coord = _make_coord_impl(shc_state_cache={CAM_ID: {"privacy_mode": False}})
+        cam = _make_camera_impl(
+            coord=coord,
+            cached_image=real_frame,
+            last_image_fetch=time.monotonic(),
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
+        ):
+            out = await BoschCamera._async_camera_image_impl(cam)
+        assert out == real_frame
+
+
+class TestWidthSpecificFetchDoesNotPoisonCache:
+    """Bug-hunt 2026-07-27 (Copilot review, ported from the Core PR): a
+    thumbnail (width=N) request must not overwrite the shared full-
+    resolution `cached_image` — otherwise a subsequent full-res request
+    within CLOUD_SNAP_CACHE_TTL is served the undersized thumbnail from
+    cache instead of fetching fresh."""
+
+    @pytest.mark.asyncio
+    async def test_stale_cache_width_specific_fetch_does_not_poison_cache(self):
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        full_res_frame = b"\xff\xd8\xff\xe0full-resolution-frame"
+        thumbnail = b"\xff\xd8\xff\xe0undersized-thumbnail"
+        coord = _make_coord_impl(
+            live_connections={},
+            async_fetch_live_snapshot=AsyncMock(return_value=thumbnail),
+            async_fetch_live_snapshot_local=AsyncMock(return_value=None),
+        )
+        cam = _make_camera_impl(
+            coord=coord,
+            cached_image=full_res_frame,
+            last_image_fetch=time.monotonic() - 100,  # stale (TTL is 30s)
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
+        ):
+            out = await BoschCamera._async_camera_image_impl(cam, width=200)
+        assert out == thumbnail
+        assert cam.cached_image == full_res_frame, (
+            "a width-specific fetch must never overwrite the shared full-res cache"
+        )
 
 
 class TestSupportedFeaturesOfflineGate:
