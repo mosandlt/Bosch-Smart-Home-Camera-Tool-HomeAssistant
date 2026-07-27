@@ -31999,9 +31999,12 @@ def _stub_coord(**kwargs):
     coord.rcp_read = AsyncMock(return_value=None)
     coord._rcp_session = AsyncMock(return_value="0xABCDEF01")
     coord._invalidate_rcp_session = MagicMock()
-    # Sync MagicMock (not AsyncMock): the impl schedules its result via
-    # hass.async_create_task; an AsyncMock would leave an un-awaited coroutine.
-    coord.async_request_refresh = MagicMock(return_value=MagicMock())
+    coord.async_request_refresh = AsyncMock()
+    # Close the coroutine handed to spawn_tracked instead of scheduling it,
+    # so the mock doesn't leak an un-awaited-coroutine RuntimeWarning (the
+    # impl routes the privacy-drift refresh through spawn_tracked, not a
+    # bare hass.async_create_task — Copilot review round 12).
+    coord.spawn_tracked = MagicMock(side_effect=lambda coro, **_kw: coro.close())
     # cleanup_stale_devices now calls _purge_cam_id (Runde 2 P1 #1) — this
     # stub deliberately carries only a handful of per-cam dicts, not the
     # full ~120-attribute set _purge_cam_id sweeps, so mock it out here.
@@ -36213,9 +36216,12 @@ class TestFetchLiveSnapshotEmptyBodyPrivacyOn:
         # bare MagicMock hass returns a non-awaitable MagicMock for that
         # call, so give it a real synchronous-executor stand-in.
         coord.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *a: fn(*a))
-        # Sync MagicMock so calling it does NOT create an un-awaited coroutine
-        # (the impl schedules the result via hass.async_create_task).
-        coord.async_request_refresh = MagicMock(return_value=MagicMock())
+        coord.async_request_refresh = AsyncMock()
+        # Close the coroutine handed to spawn_tracked instead of scheduling
+        # it, so the mock doesn't leak an un-awaited-coroutine RuntimeWarning
+        # (the impl routes the refresh through spawn_tracked, not a bare
+        # hass.async_create_task — Copilot review round 12).
+        coord.spawn_tracked = MagicMock(side_effect=lambda coro, **_kw: coro.close())
 
         snap_resp = self._resp_cm(200, body=b"", headers={"Content-Type": "image/jpeg"})
 
@@ -36239,7 +36245,9 @@ class TestFetchLiveSnapshotEmptyBodyPrivacyOn:
             "state drift (empty body + HA privacy OFF) must actually request a "
             "coordinator refresh, not only log 'Forcing refresh'"
         )
-        coord.hass.async_create_task.assert_called()
+        coord.spawn_tracked.assert_called_once()
+        _, call_kwargs = coord.spawn_tracked.call_args
+        assert call_kwargs["name"] == "bosch_shc_camera_privacy_drift_refresh"
 
 
 class TestFetchRcpLanDenied:

@@ -599,7 +599,14 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             "motion", {}
         ).update({"enabled": True, "motionAlarmConfiguration": sensitivity})
         self.coordinator.motion_set_at[self._cam_id] = time.monotonic()
-        self.hass.async_create_task(self.coordinator.async_request_refresh())
+        # Tracked (not a bare hass.async_create_task) — otherwise this can
+        # outlive config-entry unload and keep running against an
+        # already-torn-down coordinator (Copilot review round 12, backported
+        # from the Core PR).
+        self.coordinator.spawn_tracked(
+            self.coordinator.async_request_refresh(),
+            name="bosch_shc_camera_motion_enable_refresh",
+        )
 
     async def async_disable_motion_detection(self, **kwargs: Any) -> None:
         """Disable motion detection via standard HA camera service."""
@@ -621,7 +628,11 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             "motion", {}
         ).update({"enabled": False, "motionAlarmConfiguration": sensitivity})
         self.coordinator.motion_set_at[self._cam_id] = time.monotonic()
-        self.hass.async_create_task(self.coordinator.async_request_refresh())
+        # Tracked — see async_enable_motion_detection above.
+        self.coordinator.spawn_tracked(
+            self.coordinator.async_request_refresh(),
+            name="bosch_shc_camera_motion_disable_refresh",
+        )
 
     @property
     def frame_interval(self) -> float:

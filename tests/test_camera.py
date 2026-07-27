@@ -614,6 +614,10 @@ def _make_coord(**overrides):
         async_fetch_fresh_event_snapshot=AsyncMock(return_value=None),
         async_put_camera=AsyncMock(return_value=True),
         motion_set_at={},
+        # Close the coroutine instead of scheduling it, so tests that don't
+        # care about tracked-task scheduling don't leak an
+        # un-awaited-coroutine RuntimeWarning.
+        spawn_tracked=MagicMock(side_effect=lambda coro, **_kw: coro.close()),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -1295,10 +1299,6 @@ class TestMotionDetectionToggle:
             "motionAlarmConfiguration": "MEDIUM",
         }
         cam = _make_camera(coord=coord)
-        # Make hass.async_create_task close the coro to avoid leak warnings
-        cam.hass.async_create_task = MagicMock(
-            side_effect=lambda c: (c.close(), MagicMock())[1]
-        )
         await BoschCamera.async_enable_motion_detection(cam)
         coord.async_put_camera.assert_awaited_once_with(
             CAM_ID,
@@ -1316,9 +1316,6 @@ class TestMotionDetectionToggle:
             "motionAlarmConfiguration": "LOW",
         }
         cam = _make_camera(coord=coord)
-        cam.hass.async_create_task = MagicMock(
-            side_effect=lambda c: (c.close(), MagicMock())[1]
-        )
         await BoschCamera.async_disable_motion_detection(cam)
         coord.async_put_camera.assert_awaited_once_with(
             CAM_ID,
@@ -1335,9 +1332,6 @@ class TestMotionDetectionToggle:
         coord = _make_coord()
         coord.motion_settings = lambda cid: {}
         cam = _make_camera(coord=coord)
-        cam.hass.async_create_task = MagicMock(
-            side_effect=lambda c: (c.close(), MagicMock())[1]
-        )
         await BoschCamera.async_enable_motion_detection(cam)
         payload = coord.async_put_camera.await_args[0][2]
         assert payload["motionAlarmConfiguration"] == "HIGH"
@@ -1346,16 +1340,33 @@ class TestMotionDetectionToggle:
     @pytest.mark.asyncio
     async def test_enable_triggers_coordinator_refresh(self):
         """After PUT, fire a coordinator refresh in background so the
-        `motion_detection_enabled` property reflects the new state."""
+        `motion_detection_enabled` property reflects the new state.
+
+        Tracked via `coordinator.spawn_tracked` (not a bare
+        `hass.async_create_task`) — otherwise this can outlive config-entry
+        unload and keep running against an already-torn-down coordinator
+        (Copilot review round 12, backported from the Core PR).
+        """
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         coord = _make_coord()
         cam = _make_camera(coord=coord)
-        cam.hass.async_create_task = MagicMock(
-            side_effect=lambda c: (c.close(), MagicMock())[1]
-        )
         await BoschCamera.async_enable_motion_detection(cam)
-        cam.hass.async_create_task.assert_called_once()
+        coord.spawn_tracked.assert_called_once()
+        _, call_kwargs = coord.spawn_tracked.call_args
+        assert call_kwargs["name"] == "bosch_shc_camera_motion_enable_refresh"
+
+    @pytest.mark.asyncio
+    async def test_disable_triggers_coordinator_refresh(self):
+        """See test_enable_triggers_coordinator_refresh above."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()
+        cam = _make_camera(coord=coord)
+        await BoschCamera.async_disable_motion_detection(cam)
+        coord.spawn_tracked.assert_called_once()
+        _, call_kwargs = coord.spawn_tracked.call_args
+        assert call_kwargs["name"] == "bosch_shc_camera_motion_disable_refresh"
 
     @pytest.mark.asyncio
     async def test_enable_raises_when_put_fails(self):
