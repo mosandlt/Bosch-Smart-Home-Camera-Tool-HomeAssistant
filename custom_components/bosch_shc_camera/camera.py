@@ -312,8 +312,17 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         """Detect streaming → idle transitions and trigger background 30-min refresh."""
         is_now_streaming = self.is_streaming
 
-        # Stream just stopped → grab a fresh event snapshot immediately
-        if self._was_streaming and not is_now_streaming:
+        # Stream just stopped → grab a fresh event snapshot immediately.
+        # Also skip while a refresh is already in flight: `_refresh_inflight`
+        # makes a concurrent call exit almost immediately without doing any
+        # work, so unconditionally replacing `_image_refresh_task` here would
+        # overwrite the reference to the real, still-running task with that
+        # fast-exiting duplicate — `async_will_remove_from_hass` cancels
+        # whatever `_image_refresh_task` currently points at, so entity
+        # removal during a long fetch would cancel the harmless duplicate
+        # and leave the real network task running uncancelled (backported
+        # from the Core PR's Copilot review round 7, 2026-07-27).
+        if self._was_streaming and not is_now_streaming and not self._refresh_inflight:
             self._image_refresh_task = self.hass.async_create_task(
                 self.async_trigger_image_refresh(delay=2)
             )
@@ -328,7 +337,10 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     self._entry.options.get("snapshot_interval", IMAGE_REFRESH_INTERVAL)
                 )
             )
-            if now - self.last_image_fetch >= proactive_interval:
+            if (
+                now - self.last_image_fetch >= proactive_interval
+                and not self._refresh_inflight
+            ):
                 self._image_refresh_task = self.hass.async_create_task(
                     self.async_trigger_image_refresh(delay=0)
                 )

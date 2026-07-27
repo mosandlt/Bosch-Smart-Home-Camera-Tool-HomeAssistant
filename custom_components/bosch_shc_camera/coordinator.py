@@ -12,6 +12,7 @@ fcm, shc, rcp, smb, etc.).
 """
 
 import asyncio
+import ipaddress
 import logging
 import ssl
 import threading
@@ -218,6 +219,33 @@ def _parse_safe_rcp_proxy_url(url_entry: str, cam_id: str) -> tuple[str, str] | 
         )
         return None
     return parts[0], parts[1]
+
+
+def _is_safe_local_camera_host(host_and_port: str) -> bool:
+    """Validate a Bosch-issued LOCAL camera ``host:port`` before use.
+
+    Unlike the RCP proxy host (validated against a Bosch-domain allowlist,
+    since that value legitimately points at Bosch's own cloud
+    infrastructure), a LOCAL session's host is expected to be the physical
+    camera's own private LAN address. Accepting an arbitrary/public host
+    here would let a compromised or malicious PUT /connection response
+    redirect the snapshot request — made with TLS verification disabled —
+    to an arbitrary host, and that same host is cached for later outage
+    fallback, extending the exposure window (backported from the Core
+    PR's Copilot review round 7, 2026-07-27). Link-local addresses are
+    explicitly excluded even though Python's `is_private` counts them as
+    private — 169.254.169.254 is the well-known cloud-metadata SSRF
+    target, and a physical camera's LOCAL address is never link-local in
+    practice.
+    """
+    host, _, port_str = host_and_port.partition(":")
+    if not port_str.isdigit() or not 1 <= int(port_str) <= 65535:
+        return False
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return addr.is_private and not addr.is_link_local
 
 
 def _parse_onvif_scopes(raw: bytes) -> dict[str, Any]:
@@ -4020,6 +4048,13 @@ class BoschCameraCoordinator(
             return None
 
         camera_host = urls[0]  # e.g. "192.168.x.x:443"
+        if not _is_safe_local_camera_host(camera_host):
+            _LOGGER.warning(
+                "Rejected unsafe/malformed LOCAL camera host for %s: %s",
+                cam_id,
+                camera_host[:60],
+            )
+            return None
         snap_url = (
             f"https://{camera_host}/snap.jpg?JpegSize={jpeg_size or JPEG_SIZE_FULL}"
         )

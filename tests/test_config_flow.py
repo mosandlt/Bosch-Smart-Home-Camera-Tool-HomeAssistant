@@ -29,6 +29,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 import voluptuous_serialize
 from homeassistant import config_entries
@@ -925,9 +926,14 @@ class TestCameraAccessVerification:
         flow.async_create_entry.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_verify_returns_true_on_timeout(self) -> None:
-        """A transient network error during setup must not block it — only
-        a definitive rejection does."""
+    async def test_verify_returns_none_on_timeout(self) -> None:
+        """A network-layer timeout is inconclusive, same as a 429/5xx response.
+
+        A prior version returned True unconditionally here, but that was
+        inconsistent with the 429/5xx handling and weakened the Bronze
+        test-before-configure guarantee this check exists to provide
+        (backported from the Core PR's Copilot review round 7, 2026-07-27).
+        """
         from custom_components.bosch_shc_camera.config_flow import (
             BoschCameraConfigFlow,
         )
@@ -939,7 +945,23 @@ class TestCameraAccessVerification:
             "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
             AsyncMock(side_effect=TimeoutError()),
         ):
-            assert await flow._async_verify_camera_access("tok") is True
+            assert await flow._async_verify_camera_access("tok") is None
+
+    @pytest.mark.asyncio
+    async def test_verify_returns_none_on_client_error(self) -> None:
+        """A network-layer connection error is inconclusive, same as a timeout."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschCameraConfigFlow,
+        )
+
+        flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
+        flow.hass = MagicMock()
+
+        with patch(
+            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            AsyncMock(side_effect=aiohttp.ClientError("connection reset")),
+        ):
+            assert await flow._async_verify_camera_access("tok") is None
 
     @pytest.mark.asyncio
     async def test_verify_returns_false_on_401(self) -> None:

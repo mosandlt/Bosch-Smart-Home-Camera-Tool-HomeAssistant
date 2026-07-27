@@ -10252,6 +10252,63 @@ class TestParseSafeRcpProxyUrl:
         assert _parse_safe_rcp_proxy_url("evil.com/somehash", "cam-1") is None
 
 
+class TestIsSafeLocalCameraHost:
+    """`_is_safe_local_camera_host` validates a Bosch-issued LOCAL camera
+    host:port is a private LAN address before it's used to build a
+    TLS-verification-disabled snapshot request and cached for outage
+    fallback (backported from the Core PR's Copilot review round 7,
+    2026-07-27)."""
+
+    def test_accepts_private_lan_address(self) -> None:
+        from custom_components.bosch_shc_camera.coordinator import (
+            _is_safe_local_camera_host,
+        )
+
+        assert _is_safe_local_camera_host("192.168.1.100:443") is True
+
+    def test_rejects_public_address(self) -> None:
+        """A malicious/compromised PUT /connection response must not
+        redirect the credential-bearing snapshot fetch to an arbitrary
+        host (SSRF guard)."""
+        from custom_components.bosch_shc_camera.coordinator import (
+            _is_safe_local_camera_host,
+        )
+
+        assert _is_safe_local_camera_host("8.8.8.8:443") is False
+
+    def test_rejects_hostname(self) -> None:
+        """Only IP literals are valid for a LOCAL camera's own LAN address."""
+        from custom_components.bosch_shc_camera.coordinator import (
+            _is_safe_local_camera_host,
+        )
+
+        assert _is_safe_local_camera_host("evil.example.com:443") is False
+
+    def test_rejects_missing_port(self) -> None:
+        from custom_components.bosch_shc_camera.coordinator import (
+            _is_safe_local_camera_host,
+        )
+
+        assert _is_safe_local_camera_host("192.168.1.100") is False
+
+    def test_rejects_out_of_range_port(self) -> None:
+        from custom_components.bosch_shc_camera.coordinator import (
+            _is_safe_local_camera_host,
+        )
+
+        assert _is_safe_local_camera_host("192.168.1.100:70000") is False
+
+    def test_rejects_link_local_metadata_address(self) -> None:
+        """169.254.169.254 is the well-known cloud-metadata SSRF target —
+        excluded explicitly even though Python's `ipaddress.is_private`
+        counts link-local as private."""
+        from custom_components.bosch_shc_camera.coordinator import (
+            _is_safe_local_camera_host,
+        )
+
+        assert _is_safe_local_camera_host("169.254.169.254:443") is False
+
+
 class TestRedactCreds:
     """`_redact_creds` redacts ephemeral Bosch Digest passwords for logs."""
 
@@ -17131,6 +17188,44 @@ class TestFetchDigestClosure:
                 coord, CAM_A
             )
         assert result == img_bytes
+
+    @pytest.mark.asyncio
+    async def test_unsafe_local_camera_host_returns_none(self):
+        """A public/malformed host in the PUT /connection response must be
+        rejected before use — SSRF guard (backported from the Core PR's
+        Copilot review round 7, 2026-07-27)."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        put_resp = MagicMock()
+        put_resp.status = 200
+        put_resp.__aenter__ = AsyncMock(return_value=put_resp)
+        put_resp.__aexit__ = AsyncMock(return_value=None)
+        put_resp.text = AsyncMock(
+            return_value='{"user":"u","password":"p","urls":["8.8.8.8:443"]}'
+        )
+        session_mock = MagicMock()
+        session_mock.__aenter__ = AsyncMock(return_value=session_mock)
+        session_mock.__aexit__ = AsyncMock(return_value=None)
+        session_mock.put = MagicMock(return_value=put_resp)
+        client_session = MagicMock()
+
+        coord = _make_coord_sprint_j2()
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.coordinator.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
+            patch(
+                "homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                return_value=client_session,
+            ),
+        ):
+            result = await BoschCameraCoordinator.async_fetch_live_snapshot_local(
+                coord, CAM_A
+            )
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_non_200_returns_none(self):

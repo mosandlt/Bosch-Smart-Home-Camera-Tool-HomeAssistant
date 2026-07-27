@@ -1018,6 +1018,45 @@ class TestHandleCoordinatorUpdate:
         assert tasks == []
         assert cam._was_streaming is True
 
+    def test_streaming_to_idle_skips_refresh_while_inflight(self):
+        """A refresh already in flight must not spawn a duplicate task.
+
+        `_refresh_inflight` makes a concurrent call exit almost immediately
+        without doing any work — unconditionally spawning a new task here
+        and overwriting `_image_refresh_task` with that fast-exiting
+        duplicate would let `async_will_remove_from_hass` cancel the
+        duplicate instead of the real, still-running network task
+        (backported from the Core PR's Copilot review round 7,
+        2026-07-27)."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()  # live_connections empty → not streaming
+        cam = _make_camera(coord=coord, _was_streaming=True, _refresh_inflight=True)
+        tasks = self._create_task_collector(cam)
+        with patch(
+            "custom_components.bosch_shc_camera.camera.CoordinatorEntity._handle_coordinator_update",
+        ):
+            BoschCamera._handle_coordinator_update(cam)
+        assert tasks == []
+
+    def test_idle_to_idle_after_interval_skips_refresh_while_inflight(self):
+        """Same guard on the proactive-refresh-interval path."""
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()
+        cam = _make_camera(
+            coord=coord,
+            _was_streaming=False,
+            last_image_fetch=time.monotonic() - 2000,  # > 1800s
+            _refresh_inflight=True,
+        )
+        tasks = self._create_task_collector(cam)
+        with patch(
+            "custom_components.bosch_shc_camera.camera.CoordinatorEntity._handle_coordinator_update",
+        ):
+            BoschCamera._handle_coordinator_update(cam)
+        assert tasks == []
+
     def test_custom_snapshot_interval_respected(self):
         """User-set `snapshot_interval` option must override default 1800s."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
