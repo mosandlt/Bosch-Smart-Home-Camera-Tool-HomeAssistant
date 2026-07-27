@@ -577,10 +577,15 @@ async def test_cloud_api_override_present_replaces_default_and_warns(
     This is an advanced diagnostic escape hatch (never pre-filled with any
     host by the config/options flow) — the WARNING makes an accidentally-left
     -on override loud and visible instead of silently changing behaviour.
+    Must be a real Bosch domain — re-validated at coordinator init (not
+    just config-flow input time) against the same allowlist as image/video
+    URLs, since every request built from `_cloud_api` attaches the real
+    bearer token (backported from the Core PR's Copilot review round 11,
+    2026-07-27).
     """
     from custom_components.bosch_shc_camera import CLOUD_API
 
-    override = "https://custom-backend.example.invalid"
+    override = "https://custom-backend.boschsecurity.com"
     entry = _make_entry(
         hass,
         data={
@@ -594,6 +599,30 @@ async def test_cloud_api_override_present_replaces_default_and_warns(
     assert coord._cloud_api == override
     assert coord._cloud_api != CLOUD_API
     assert any("diagnostic camera-API override" in r.message for r in caplog.records)
+
+
+async def test_unsafe_cloud_api_override_is_rejected(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A cloud_api_override that isn't a recognized Bosch domain is
+    ignored, falling back to the default camera API — every request built
+    from `_cloud_api` attaches the real bearer token, so an unvalidated
+    override could exfiltrate it to an arbitrary host (backported from
+    the Core PR's Copilot review round 11, 2026-07-27)."""
+    from custom_components.bosch_shc_camera import CLOUD_API
+
+    entry = _make_entry(
+        hass,
+        data={
+            "bearer_token": "test_bearer_token",
+            "refresh_token": "test_refresh_token",
+            "cloud_api_override": "https://evil.example.com",
+        },
+    )
+    with caplog.at_level("WARNING", logger="custom_components.bosch_shc_camera"):
+        coord = BoschCameraCoordinator(hass, entry)
+    assert coord._cloud_api == CLOUD_API
+    assert any("not a recognized Bosch domain" in r.message for r in caplog.records)
 
 
 # `async_setup_entry` go2rtc auto-create + v8.0.2 entity-enable migration.

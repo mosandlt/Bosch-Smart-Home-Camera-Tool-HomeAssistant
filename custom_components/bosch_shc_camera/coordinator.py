@@ -346,6 +346,19 @@ class BoschCameraCoordinator(
         # camera-API base URL in to test whether their account is registered
         # there instead of production (2026-07-06 SebastianHarder investigation).
         cloud_api_override = entry.data.get("cloud_api_override", "")
+        # Re-validated here (not just at config-flow input time) against the
+        # same Bosch-domain allowlist as image/video URLs — every request
+        # built from `self._cloud_api` attaches the real bearer token, so a
+        # stale/tampered entry.data value could otherwise exfiltrate it to
+        # an arbitrary host (backported from the Core PR's Copilot review
+        # round 11, 2026-07-27).
+        if cloud_api_override and not _is_safe_bosch_url(cloud_api_override):
+            _LOGGER.warning(
+                "Ignoring cloud_api_override %s — not a recognized Bosch "
+                "domain, falling back to the default camera API",
+                cloud_api_override,
+            )
+            cloud_api_override = ""
         self._cloud_api = cloud_api_override or CLOUD_API
         if cloud_api_override:
             _LOGGER.warning(

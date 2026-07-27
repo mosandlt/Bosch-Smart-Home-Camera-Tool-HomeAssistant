@@ -45,11 +45,16 @@ def _make_coord(**overrides):
         coro.close()
         return MagicMock()
 
+    def _spawn_tracked(coro, **kwargs):
+        coro.close()  # never actually scheduled in this stub, avoid a leaked-coroutine warning
+        return MagicMock()
+
     base = dict(
         hass=SimpleNamespace(async_create_task=MagicMock(side_effect=_create_task)),
         ensure_valid_token=AsyncMock(return_value="fresh-token"),
         _async_refresh_maintenance=AsyncMock(),
         async_outage_ping_all=AsyncMock(),
+        spawn_tracked=MagicMock(side_effect=_spawn_tracked),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -149,6 +154,11 @@ class TestFetchCameraListTimeoutRetry:
 class TestFetchCameraListNon200:
     @pytest.mark.asyncio
     async def test_500_raises_update_failed_and_kicks_maint_and_outage_ping(self):
+        """The outage ping must be scheduled via spawn_tracked, not a bare
+        hass.async_create_task — otherwise it can survive config-entry
+        unload and keep running against a torn-down coordinator
+        (backported from the Core PR's Copilot review round 11,
+        2026-07-27)."""
         coord = _make_coord()
         session = _make_session(_make_resp(500))
 
@@ -157,6 +167,9 @@ class TestFetchCameraListNon200:
 
         coord._async_refresh_maintenance.assert_called_once_with(reactive=True)
         coord.async_outage_ping_all.assert_called_once_with()
+        coord.spawn_tracked.assert_called_once()
+        _, spawn_kwargs = coord.spawn_tracked.call_args
+        assert spawn_kwargs["name"] == "bosch_shc_camera_camera_list_outage_ping"
 
     @pytest.mark.asyncio
     async def test_missing_hooks_are_a_noop(self):
