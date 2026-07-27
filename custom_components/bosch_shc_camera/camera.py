@@ -1601,7 +1601,14 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # don't re-run the slow RCP+REMOTE+LOCAL chain on every proxy request;
                 # retry after CLOUD_SNAP_CACHE_TTL. Mirrors the stale branch below.
                 # Falls through to 2b / cached / event-snapshot fallback.
-                self.last_image_fetch = now
+                # Only a full-resolution fetch may advance the SHARED
+                # timestamp — a failed width=N (thumbnail) request must not
+                # suppress a following full-resolution request for the rest
+                # of the TTL window, since the shared cache was never
+                # actually refreshed (backported from the Core PR's
+                # Copilot review round 8, 2026-07-27).
+                if req_jpeg_size is None:
+                    self.last_image_fetch = now
             elif cache_stale:
                 cache_age = now - self.last_image_fetch
                 # Always fetch fresh synchronously when cache is stale.
@@ -1655,8 +1662,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         self.cached_image = fresh2
                         self.last_image_fetch = now
                     return fresh2
-                # Both REMOTE + LOCAL failed — advance timestamp so next tick retries instead of looping
-                self.last_image_fetch = now
+                # Both REMOTE + LOCAL failed — advance timestamp so next tick retries instead of looping.
+                # Only a full-resolution fetch may advance the shared
+                # timestamp — see the tier-1a comment above (backported
+                # from the Core PR's Copilot review round 8, 2026-07-27).
+                if req_jpeg_size is None:
+                    self.last_image_fetch = now
                 _LOGGER.debug(
                     "%s: fresh fetch failed — returning cached (%ds old)",
                     self._display_name,

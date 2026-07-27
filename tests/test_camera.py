@@ -4906,6 +4906,65 @@ class TestIdleCameraCloudSnapshot:
             "must return stale cached image when both fetches fail"
         )
 
+    @pytest.mark.asyncio
+    async def test_no_cache_width_specific_fetch_failure_does_not_suppress_full_res_retry(
+        self,
+    ):
+        """A failed width=N (thumbnail) fetch must not advance the shared
+        `last_image_fetch` timestamp — otherwise a following full-resolution
+        request within the cache TTL would see the cache as fresh and skip
+        retrying, even though the shared cache was never actually
+        refreshed (backported from the Core PR's Copilot review round 8,
+        2026-07-27)."""
+        coord = _make_coord_r6()
+        coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
+        coord.async_fetch_live_snapshot_local = AsyncMock(return_value=None)
+        before = cam_last_fetch = time.monotonic() - 86400.0
+        cam = _make_camera_r6(coord=coord, last_image_fetch=before)
+        cam._async_rcp_thumbnail = AsyncMock(return_value=None)
+
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
+        ):
+            from custom_components.bosch_shc_camera.camera import BoschCamera
+
+            await BoschCamera._async_camera_image_impl(cam, width=200)
+
+        assert cam.last_image_fetch == cam_last_fetch, (
+            "req_jpeg_size is not None (width=200) → must NOT advance the "
+            "shared timestamp on failure"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stale_cache_width_specific_fetch_failure_does_not_suppress_full_res_retry(
+        self,
+    ):
+        """Same guard as above, through the stale-but-already-cached branch."""
+        coord = _make_coord_r6()
+        coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
+        coord.async_fetch_live_snapshot_local = AsyncMock(return_value=None)
+        before = time.monotonic() - 60
+        cam = _make_camera_r6(
+            coord=coord,
+            cached_image=b"\xff\xd8old",
+            last_image_fetch=before,
+        )
+        cam._async_rcp_thumbnail = AsyncMock(return_value=None)
+
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
+        ):
+            from custom_components.bosch_shc_camera.camera import BoschCamera
+
+            await BoschCamera._async_camera_image_impl(cam, width=200)
+
+        assert cam.last_image_fetch == before, (
+            "req_jpeg_size is not None (width=200) → must NOT advance the "
+            "shared timestamp on failure"
+        )
+
 
 class TestEventSnapshotLastResort:
     """When all other methods fail, try event imageUrl.
