@@ -799,6 +799,7 @@ class TestAsyncOauthCreateEntryStructure:
         )
         flow.hass.config_entries.async_update_entry = MagicMock()
         flow.hass.config_entries.async_schedule_reload = MagicMock()
+        flow._async_verify_camera_access = AsyncMock(return_value=True)
         return flow
 
     @pytest.mark.asyncio
@@ -848,6 +849,92 @@ class TestAsyncOauthCreateEntryStructure:
         flow.async_create_entry.assert_not_called()
         flow.hass.config_entries.async_schedule_reload.assert_called_once()
         assert result == {"type": "abort", "reason": "reconfigure_successful"}
+
+
+class TestCameraAccessVerification:
+    """A successful OAuth exchange only proves SingleKey ID login succeeded —
+    Bosch's camera API can still reject the fresh token for an account whose
+    camera registration never completed. async_oauth_create_entry must abort
+    before creating/updating an entry in that case (backported from the Core
+    PR's Copilot review round 4, 2026-07-27)."""
+
+    def _make_flow(self, source="user"):
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschCameraConfigFlow,
+        )
+
+        flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
+        flow.hass = MagicMock()
+        flow.context = {"source": source}
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+        flow.async_abort = MagicMock(
+            side_effect=lambda reason: {"type": "abort", "reason": reason}
+        )
+        flow.hass.config_entries.async_update_entry = MagicMock()
+        flow.hass.config_entries.async_schedule_reload = MagicMock()
+        return flow
+
+    @pytest.mark.asyncio
+    async def test_denied_access_aborts_before_creating_entry(self) -> None:
+        flow = self._make_flow()
+        flow._async_verify_camera_access = AsyncMock(return_value=False)
+
+        result = await flow.async_oauth_create_entry(
+            {"token": {"access_token": "at1", "refresh_token": "rt1"}}
+        )
+
+        assert result == {"type": "abort", "reason": "camera_access_denied"}
+        flow.async_create_entry.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_allowed_access_proceeds_to_create_entry(self) -> None:
+        flow = self._make_flow()
+        flow._async_verify_camera_access = AsyncMock(return_value=True)
+
+        await flow.async_oauth_create_entry(
+            {"token": {"access_token": "at1", "refresh_token": "rt1"}}
+        )
+
+        flow.async_create_entry.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_verify_returns_true_on_timeout(self) -> None:
+        """A transient network error during setup must not block it — only
+        a definitive rejection does."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschCameraConfigFlow,
+        )
+
+        flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
+        flow.hass = MagicMock()
+
+        with patch(
+            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            AsyncMock(side_effect=TimeoutError()),
+        ):
+            assert await flow._async_verify_camera_access("tok") is True
+
+    @pytest.mark.asyncio
+    async def test_verify_returns_false_on_401(self) -> None:
+        session = MagicMock()
+        resp = MagicMock()
+        resp.status = 401
+        resp.__aenter__ = AsyncMock(return_value=resp)
+        resp.__aexit__ = AsyncMock(return_value=None)
+        session.get = MagicMock(return_value=resp)
+
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschCameraConfigFlow,
+        )
+
+        flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
+        flow.hass = MagicMock()
+
+        with patch(
+            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            AsyncMock(return_value=session),
+        ):
+            assert await flow._async_verify_camera_access("tok") is False
 
 
 class TestOptionsFlowStructure:
@@ -1143,6 +1230,7 @@ class TestConfigFlowSteps:
         flow._get_reauth_entry = MagicMock(return_value=MagicMock())
         flow._get_reconfigure_entry = MagicMock(return_value=MagicMock())
         flow.hass.config_entries.async_update_entry = MagicMock()
+        flow._async_verify_camera_access = AsyncMock(return_value=True)
         return flow
 
     def test_logger_property_returns_module_logger(self):

@@ -38156,6 +38156,7 @@ def _make_coord_token_refresh(**overrides):
         _auth_outage_next_retry_ts=float("-inf"),  # SENTINEL_RULE
         _auth_outage_alert_sent=False,
         _token_fail_count=0,
+        _token_timeout_fail_count=0,
         _token_alert_sent=False,
         _token_still_valid=lambda min_remaining=60: False,
         schedule_token_refresh=MagicMock(),
@@ -38607,6 +38608,7 @@ class TestTokenRefreshSuccess:
 
         coord = _make_coord_token_refresh(
             _token_fail_count=2,
+            _token_timeout_fail_count=4,
             _token_alert_sent=True,
         )
         with (
@@ -38624,6 +38626,7 @@ class TestTokenRefreshSuccess:
         ):
             await BoschCameraCoordinator._refresh_token_locked(coord)
         assert coord._token_fail_count == 0
+        assert coord._token_timeout_fail_count == 0
         assert coord._token_alert_sent is False
         del_issue.assert_called()
 
@@ -38760,14 +38763,19 @@ class TestTokenRefreshTimeout:
         # worst case the loop could previously run unbounded to.
         assert elapsed < 2
         assert "timed out" in str(exc.value).lower()
-        assert coord._token_fail_count == 1
+        # A timeout must NEVER touch the reauth-escalation counter — only
+        # its own dedicated counter (backported from the Core PR's Copilot
+        # review round 4, 2026-07-27).
+        assert coord._token_fail_count == 0
+        assert coord._token_timeout_fail_count == 1
 
     @pytest.mark.asyncio
-    async def test_repeated_timeouts_trigger_reauth_after_3(self):
-        """Timeouts count toward the same fail-count escalation as any
-        other transient failure — the 3rd consecutive one triggers reauth,
-        same as 3 consecutive None-returns."""
-        from homeassistant.exceptions import ConfigEntryAuthFailed
+    async def test_repeated_timeouts_never_trigger_reauth(self):
+        """Timeouts must stay transient no matter how many times they
+        repeat — a timeout proves nothing about the refresh token's
+        validity, unlike a genuine invalid-grant rejection (backported
+        from the Core PR's Copilot review round 4, 2026-07-27)."""
+        from homeassistant.helpers.update_coordinator import UpdateFailed
 
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
@@ -38792,10 +38800,11 @@ class TestTokenRefreshTimeout:
             ),
             patch("asyncio.timeout", new=_short_timeout),
         ):
-            coord = _make_coord_token_refresh(_token_fail_count=2)
-            with pytest.raises(ConfigEntryAuthFailed):
+            coord = _make_coord_token_refresh(_token_timeout_fail_count=2)
+            with pytest.raises(UpdateFailed):
                 await BoschCameraCoordinator._refresh_token_locked(coord)
-        assert coord._token_fail_count == 3
+        assert coord._token_timeout_fail_count == 3
+        assert coord._token_fail_count == 0
 
 
 class TestTokenFailureAlertHelper:
