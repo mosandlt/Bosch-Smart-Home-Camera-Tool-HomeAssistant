@@ -150,10 +150,15 @@ class TestStaleDeviceCleanup:
         coord.cleanup_stale_devices.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_stale_cleanup_skipped_when_data_empty(self):
+    async def test_stale_cleanup_runs_for_definitive_empty_camera_list(self):
+        """The account's last camera being removed (data == {}) must still
+        run cleanup — fetch_camera_list already raises on any fetch failure
+        before housekeeping ever runs, so an empty `data` here is a genuine
+        zero-camera account, not a glitch (backported from the Core PR's
+        Copilot review round 3, 2026-07-27)."""
         coord = _make_coord()
         await run_housekeeping(coord, {}, {}, NOW, False)
-        coord.cleanup_stale_devices.assert_not_called()
+        coord.cleanup_stale_devices.assert_called_once_with(set())
 
 
 class TestAvailabilityNotifier:
@@ -301,6 +306,11 @@ class TestLocalCredsPersistence:
 
     @pytest.mark.asyncio
     async def test_incomplete_entry_filtered_out(self):
+        """An incomplete entry (missing password/host) is filtered out of
+        the snapshot, but the resulting empty snapshot must still be saved
+        if it differs from the previous one (`None` here) — no truthiness
+        guard on the snapshot itself (backported from the Core PR's
+        Copilot review round 3, 2026-07-27)."""
         store = MagicMock()
         coord = _make_coord(
             local_creds_cache={CAM_A: {"user": "admin"}},  # missing password/host
@@ -308,7 +318,25 @@ class TestLocalCredsPersistence:
             local_creds_snapshot=None,
         )
         await run_housekeeping(coord, {}, {}, NOW, False)
-        store.async_save.assert_not_called()
+        store.async_save.assert_called_once_with({})
+
+    @pytest.mark.asyncio
+    async def test_persists_empty_snapshot_when_last_camera_removed(self):
+        """Clearing the last camera's LOCAL creds must still persist the
+        now-empty snapshot — otherwise a deleted camera's Digest credentials
+        remain in `.storage` indefinitely (backported from the Core PR's
+        Copilot review round 3, 2026-07-27)."""
+        store = MagicMock()
+        coord = _make_coord(
+            local_creds_cache={},
+            local_creds_store=store,
+            local_creds_snapshot={
+                CAM_A: {"user": "admin", "password": "secret", "host": "192.0.2.1"}
+            },
+        )
+        await run_housekeeping(coord, {}, {}, NOW, False)
+        store.async_save.assert_called_once_with({})
+        assert coord.local_creds_snapshot == {}
 
     @pytest.mark.asyncio
     async def test_skips_save_when_unchanged(self):

@@ -28,6 +28,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .const import (
@@ -167,9 +168,20 @@ async def fetch_camera_list(
                             "camera-account registration step. If no such screen appears, "
                             "contact Bosch support."
                         )
-                    raise UpdateFailed(
-                        "Token expired and renewal failed — go to Settings → Integrations → "
-                        "Bosch Smart Home Camera → Configure → Force new browser login"
+                    # A genuinely renewed-then-still-rejected token means
+                    # re-authentication is required — ConfigEntryAuthFailed
+                    # (not UpdateFailed) so HA also starts the native reauth
+                    # flow automatically instead of retrying this
+                    # non-transient condition forever. The manual "Configure
+                    # → Force new browser login" path still exists in this
+                    # build too, so it stays mentioned as an alternative
+                    # (backported from the Core PR's Copilot review round 3,
+                    # 2026-07-27 — Core's own build has no manual relogin
+                    # option, so its message differs slightly).
+                    raise ConfigEntryAuthFailed(
+                        "Token expired and renewal failed — re-authenticate via the "
+                        "reauth prompt, or go to Settings → Integrations → Bosch "
+                        "Smart Home Camera → Configure → Force new browser login"
                     )
                 if resp2.status != 200:
                     raise UpdateFailed(f"Camera list returned HTTP {resp2.status}")

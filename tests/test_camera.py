@@ -613,6 +613,7 @@ def _make_coord(**overrides):
         async_fetch_live_snapshot_local=AsyncMock(return_value=None),
         async_fetch_fresh_event_snapshot=AsyncMock(return_value=None),
         async_put_camera=AsyncMock(return_value=True),
+        motion_set_at={},
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -1154,8 +1155,12 @@ class TestAsyncTriggerImageRefresh:
     @pytest.mark.asyncio
     async def test_quick_event_seed_when_only_placeholder(self):
         """First-mount path: cached_image is the 1×1 placeholder (the state
-        set by __init__ before any real frame has arrived). Use async_camera_image
-        to grab a quick event snapshot so the card has something within 1 s.
+        set by __init__ before any real frame has arrived). Calls the
+        coordinator's event-snapshot fetcher directly (NOT
+        async_camera_image(), which would run the same live REMOTE/LOCAL/RCP
+        cascade the slow path below runs again immediately after — backported
+        from the Core PR's Copilot review round 3, 2026-07-27) to grab a
+        quick event snapshot so the card has something within 1 s.
 
         Note: the guard uses identity check ``is self._PLACEHOLDER_JPEG``, not
         a None/falsy check — must pass the actual placeholder instance.
@@ -1165,12 +1170,11 @@ class TestAsyncTriggerImageRefresh:
         coord = _make_coord()
         coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
         coord.async_fetch_live_snapshot_local = AsyncMock(return_value=None)
-        coord.async_fetch_fresh_event_snapshot = AsyncMock(return_value=None)
+        coord.async_fetch_fresh_event_snapshot = AsyncMock(return_value=b"\xff\xd8seed")
         # Set cached_image to the real placeholder so the identity check triggers
         cam = _make_camera(coord=coord, cached_image=BoschCamera._PLACEHOLDER_JPEG)
-        cam.async_camera_image = AsyncMock(return_value=b"\xff\xd8seed")
         await BoschCamera.async_trigger_image_refresh(cam, delay=0)
-        cam.async_camera_image.assert_awaited_once()
+        coord.async_fetch_fresh_event_snapshot.assert_awaited_once_with(CAM_ID)
         assert cam.cached_image == b"\xff\xd8seed"
 
     @pytest.mark.asyncio

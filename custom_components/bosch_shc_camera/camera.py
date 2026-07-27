@@ -395,7 +395,15 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             # (not self.cached_image checked `not bytes`, but placeholder is
             # truthy — use identity check).
             if self.cached_image is self._PLACEHOLDER_JPEG:
-                quick = await self.async_camera_image()
+                # Call the event-snapshot fetcher directly rather than
+                # async_camera_image() — that already runs the full live
+                # REMOTE/LOCAL/RCP cascade, and the slow path below runs it
+                # again immediately after, doubling the connection/snapshot
+                # requests on every cold start (backported from the Core
+                # PR's Copilot review round 3, 2026-07-27).
+                quick = await self.coordinator.async_fetch_fresh_event_snapshot(
+                    self._cam_id
+                )
                 if quick and quick is not self._PLACEHOLDER_JPEG:
                     self.cached_image = quick
                     self.last_image_fetch = time.monotonic()
@@ -561,11 +569,24 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         sensitivity = (
             settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
         )
-        await self.coordinator.async_put_camera(
+        success = await self.coordinator.async_put_camera(
             self._cam_id,
             "motion",
             {"enabled": True, "motionAlarmConfiguration": sensitivity},
         )
+        if not success:
+            raise HomeAssistantError(
+                f"{self._display_name}: failed to enable motion detection"
+            )
+        # Optimistic cache update + write-lock timestamp — motion is only
+        # ever re-fetched by the slow tier, so without this,
+        # motion_detection_enabled would read stale data for minutes after
+        # this service call succeeded (backported from the Core PR's
+        # Copilot review round 3, 2026-07-27).
+        self.coordinator.data.setdefault(self._cam_id, {}).setdefault(
+            "motion", {}
+        ).update({"enabled": True, "motionAlarmConfiguration": sensitivity})
+        self.coordinator.motion_set_at[self._cam_id] = time.monotonic()
         self.hass.async_create_task(self.coordinator.async_request_refresh())
 
     async def async_disable_motion_detection(self, **kwargs: Any) -> None:
@@ -574,11 +595,20 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         sensitivity = (
             settings.get("motionAlarmConfiguration", "HIGH") if settings else "HIGH"
         )
-        await self.coordinator.async_put_camera(
+        success = await self.coordinator.async_put_camera(
             self._cam_id,
             "motion",
             {"enabled": False, "motionAlarmConfiguration": sensitivity},
         )
+        if not success:
+            raise HomeAssistantError(
+                f"{self._display_name}: failed to disable motion detection"
+            )
+        # See async_enable_motion_detection above.
+        self.coordinator.data.setdefault(self._cam_id, {}).setdefault(
+            "motion", {}
+        ).update({"enabled": False, "motionAlarmConfiguration": sensitivity})
+        self.coordinator.motion_set_at[self._cam_id] = time.monotonic()
         self.hass.async_create_task(self.coordinator.async_request_refresh())
 
     @property

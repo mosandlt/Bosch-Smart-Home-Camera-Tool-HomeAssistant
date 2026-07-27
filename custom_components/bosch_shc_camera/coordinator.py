@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -1668,7 +1668,13 @@ class BoschCameraCoordinator(
 
         token = self.token
         if not token and not self.refresh_token:
-            raise UpdateFailed("Not authenticated — re-add the integration to log in")
+            # No token at all is not a transient condition UpdateFailed would
+            # imply (endless SETUP_RETRY) — it means re-authentication is
+            # required, so start the reauth flow instead (backported from
+            # the Core PR's Copilot review round 3, 2026-07-27).
+            raise ConfigEntryAuthFailed(
+                "Not authenticated — re-add the integration to log in"
+            )
 
         opts = self.options
         now = time.monotonic()
@@ -3345,7 +3351,17 @@ class BoschCameraCoordinator(
                     cam_id, float("-inf")
                 )
                 probe_memoized_failed = time.monotonic() < probe_failed_until
-                if len(parts) == 2 and not hw_gen2 and not probe_memoized_failed:
+                # RCP 0x099e only ever returns a fixed 320×180 JPEG — must
+                # never be used to satisfy a full-resolution request (the
+                # default jpeg_size=None), or camera.py would cache this
+                # thumbnail as the shared full-res frame (backported from
+                # the Core PR's Copilot review round 3, 2026-07-27).
+                if (
+                    jpeg_size is not None
+                    and len(parts) == 2
+                    and not hw_gen2
+                    and not probe_memoized_failed
+                ):
                     proxy_host_rcp, proxy_hash_rcp = parts[0], parts[1]
                     rcp_base = f"https://{proxy_host_rcp}/{proxy_hash_rcp}/rcp.xml"
                     try:
@@ -3938,6 +3954,21 @@ class BoschCameraCoordinator(
         snap_url = (
             f"https://{camera_host}/snap.jpg?JpegSize={jpeg_size or JPEG_SIZE_FULL}"
         )
+
+        # This snapshot-fallback-specific PUT /connection LOCAL is a
+        # separate credential issuance from the streaming LOCAL-session
+        # paths (live_connection.py/session_renewal.py) — cache these too,
+        # or a cloud outage right after using only this fallback (never a
+        # live stream) leaves local_creds_cache empty (backported from the
+        # Core PR's Copilot review round 3, 2026-07-27).
+        _host, _, _port_str = camera_host.partition(":")
+        self.local_creds_cache[cam_id.upper()] = {
+            "user": user,
+            "password": password,
+            "host": _host,
+            "port": int(_port_str) if _port_str.isdigit() else 443,
+            "ts": time.monotonic(),
+        }
 
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
 

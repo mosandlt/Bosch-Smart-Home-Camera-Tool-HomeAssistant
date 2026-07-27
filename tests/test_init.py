@@ -43,7 +43,11 @@ import aiohttp
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    ServiceValidationError,
+)
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -16946,6 +16950,7 @@ def _make_coord_sprint_j2(**overrides):
         _rcp_099e_probe_failed_until={},
         _snapshot_fetch_locks={},
         shc_state_cache={},
+        local_creds_cache={},
         token="tok-A",
         hass=SimpleNamespace(
             async_add_executor_job=AsyncMock(),
@@ -19504,16 +19509,19 @@ _PATCH_SESSION = "custom_components.bosch_shc_camera.async_get_bosch_cloud_sessi
 
 
 class TestNoTokenGuard:
-    """Lines 1312-1315: raise UpdateFailed when both token and refresh_token are falsy.
+    """Lines 1312-1315: raise ConfigEntryAuthFailed when both token and refresh_token are falsy.
 
     The coordinator checks `self.token` then `self.refresh_token` (a property
     that reads from _entry.data).  When BOTH are empty/None the method must
-    raise UpdateFailed immediately without touching the session.
+    raise ConfigEntryAuthFailed (not UpdateFailed) immediately without
+    touching the session, so HA starts the native reauth flow instead of
+    retrying this non-transient condition forever (backported from the Core
+    PR's Copilot review round 3, 2026-07-27).
     """
 
     @pytest.mark.asyncio
     async def test_no_token_no_refresh_raises_update_failed(self):
-        """Both token and refresh_token falsy → UpdateFailed raised before session."""
+        """Both token and refresh_token falsy → ConfigEntryAuthFailed raised before session."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         # refresh_token is a @property on the real class but a plain attr on our stub.
@@ -19521,7 +19529,7 @@ class TestNoTokenGuard:
         coord = _make_coord_sprint_ka(token=None, refresh_token="")
 
         with (
-            pytest.raises(UpdateFailed, match="Not authenticated"),
+            pytest.raises(ConfigEntryAuthFailed, match="Not authenticated"),
             patch(_PATCH_SESSION, new_callable=AsyncMock) as mock_sess,
         ):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -20035,11 +20043,16 @@ class TestDiagnosticCloudApiOverride:
 
 
 class TestCameraList401DoubleFailure:
-    """Lines 1388-1392: both calls return 401 → UpdateFailed with 'Token expired'."""
+    """Lines 1388-1392: both calls return 401 → ConfigEntryAuthFailed with 'Token expired'.
+
+    ConfigEntryAuthFailed (not UpdateFailed) so HA starts the native reauth
+    flow instead of retrying this non-transient condition forever
+    (backported from the Core PR's Copilot review round 3, 2026-07-27).
+    """
 
     @pytest.mark.asyncio
     async def test_401_retry_401_raises_update_failed(self):
-        """Both video_inputs calls return 401 → UpdateFailed containing 'Token expired'."""
+        """Both video_inputs calls return 401 → ConfigEntryAuthFailed containing 'Token expired'."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_sprint_ka()
@@ -20057,7 +20070,7 @@ class TestCameraList401DoubleFailure:
         session_mock.get = MagicMock(side_effect=_get)
 
         with (
-            pytest.raises(UpdateFailed, match="Token expired"),
+            pytest.raises(ConfigEntryAuthFailed, match="Token expired"),
             patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -20099,7 +20112,7 @@ class TestCameraList401DoubleFailure:
 
         with (
             caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
-            pytest.raises(UpdateFailed, match="Token expired"),
+            pytest.raises(ConfigEntryAuthFailed, match="Token expired"),
             patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -30053,7 +30066,7 @@ class TestFetchLiveSnapshotRcpProbeBudget:
             ),
         ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
-                coord, CAM_A
+                coord, CAM_A, 320
             )
 
         assert result == b"\xff\xd8snap", (
@@ -30094,7 +30107,7 @@ class TestFetchLiveSnapshotRcpProbeBudget:
             ),
         ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
-                coord, CAM_A
+                coord, CAM_A, 320
             )
 
         get_session.assert_not_awaited()
@@ -30129,7 +30142,7 @@ class TestFetchLiveSnapshotRcpProbeBudget:
             ),
         ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
-                coord, CAM_A
+                coord, CAM_A, 320
             )
 
         assert result == b"\xff\xd8\xff\xe0" + b"\x00" * 20
@@ -30164,7 +30177,7 @@ class TestFetchLiveSnapshotRcpProbeBudget:
             ),
         ):
             result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
-                coord, CAM_A
+                coord, CAM_A, 320
             )
 
         assert result == b"\xff\xd8snap"
@@ -31716,6 +31729,7 @@ def _stub_coord(**kwargs):
         live_connections={},
         _fresh_snap_cache={},
         _fresh_snap_locks={},
+        local_creds_cache={},
         data={},  # needed by _async_fetch_live_snapshot_impl for privacy cross-check
     )
     coord.get_quality_params = MagicMock(return_value=(True, 0))
@@ -31984,7 +31998,13 @@ class TestFetchLiveSnapshotImpl:
 
     @pytest.mark.asyncio
     async def test_rcp_jpeg_returned_directly(self):
-        """RCP 0x099e returns a JPEG → snap.jpg fetch is skipped."""
+        """RCP 0x099e returns a JPEG → snap.jpg fetch is skipped.
+
+        Only requested for a thumbnail-sized fetch (jpeg_size not None) —
+        RCP 0x099e is a fixed 320x180 JPEG and must never satisfy a
+        full-resolution request (backported from the Core PR's Copilot
+        review round 3, 2026-07-27).
+        """
         coord = self._bind(
             _stub_coord(
                 _proxy_url_cache={CAM_ID: (PROXY_URL, time.monotonic() + 30)},
@@ -32001,7 +32021,7 @@ class TestFetchLiveSnapshotImpl:
                 new=AsyncMock(return_value=False),
             ),
         ):
-            result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
+            result = await coord._async_fetch_live_snapshot_impl(CAM_ID, 320)
         session.get.assert_not_called()
         assert result is not None and result[:2] == b"\xff\xd8"
 
@@ -38071,6 +38091,7 @@ class TestFetchLiveSnapshotLocalValueError:
         coord.entry = SimpleNamespace(data={"bearer_token": "tok"}, options={})
         coord.get_quality_params = MagicMock(return_value=("720p", "low"))
         coord.hass = SimpleNamespace(data={})
+        coord.local_creds_cache = {}
 
         put_cm = self._put_resp_cm(
             200,
