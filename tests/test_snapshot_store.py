@@ -442,3 +442,57 @@ async def test_privacy_mode_skips_save(tmp_path: Path) -> None:
     assert saved_calls == [], (
         "save_snapshot must not be called while privacy mode is ON"
     )
+
+
+@pytest.mark.asyncio
+async def test_sync_remove_all_deletes_storage_dir(tmp_path: Path) -> None:
+    """`_sync_remove_all` deletes the whole snapshots directory tree."""
+    from custom_components.bosch_shc_camera.snapshot_store import (
+        _storage_dir,
+        _sync_remove_all,
+        save_snapshot,
+    )
+
+    hass = _make_hass(tmp_path)
+    await save_snapshot(hass, VALID_CAM_ID, VALID_JPEG)
+    snap_dir = _storage_dir(hass)
+    assert snap_dir.exists()
+
+    _sync_remove_all(hass)
+
+    assert not snap_dir.exists()
+
+
+def test_sync_remove_all_missing_dir_does_not_raise(tmp_path: Path) -> None:
+    """`ignore_errors=True` semantics — no snapshots directory ever created
+    (e.g. config entry removed before any snapshot was ever saved) must not
+    raise."""
+    from custom_components.bosch_shc_camera.snapshot_store import (
+        _storage_dir,
+        _sync_remove_all,
+    )
+
+    hass = _make_hass(tmp_path)
+    snap_dir = _storage_dir(hass)
+    assert not snap_dir.exists()
+
+    _sync_remove_all(hass)  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_async_remove_all_snapshots_delegates_to_executor(
+    tmp_path: Path,
+) -> None:
+    """`async_remove_all_snapshots` runs `_sync_remove_all` via
+    `hass.async_add_executor_job` (config-entry-removal cleanup hook)."""
+    from custom_components.bosch_shc_camera.snapshot_store import (
+        _sync_remove_all,
+        async_remove_all_snapshots,
+    )
+
+    hass = SimpleNamespace()
+    hass.async_add_executor_job = AsyncMock()
+
+    await async_remove_all_snapshots(hass)
+
+    hass.async_add_executor_job.assert_awaited_once_with(_sync_remove_all, hass)

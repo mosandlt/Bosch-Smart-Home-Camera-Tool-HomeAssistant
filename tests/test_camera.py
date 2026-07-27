@@ -1318,6 +1318,34 @@ class TestMotionDetectionToggle:
         await BoschCamera.async_enable_motion_detection(cam)
         cam.hass.async_create_task.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_enable_raises_when_put_fails(self):
+        """async_put_camera returning False must raise HomeAssistantError,
+        not silently proceed to the optimistic cache update."""
+        from homeassistant.exceptions import HomeAssistantError
+
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()
+        coord.async_put_camera = AsyncMock(return_value=False)
+        cam = _make_camera(coord=coord)
+        with pytest.raises(HomeAssistantError):
+            await BoschCamera.async_enable_motion_detection(cam)
+
+    @pytest.mark.asyncio
+    async def test_disable_raises_when_put_fails(self):
+        """async_put_camera returning False must raise HomeAssistantError,
+        not silently proceed to the optimistic cache update."""
+        from homeassistant.exceptions import HomeAssistantError
+
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        coord = _make_coord()
+        coord.async_put_camera = AsyncMock(return_value=False)
+        cam = _make_camera(coord=coord)
+        with pytest.raises(HomeAssistantError):
+            await BoschCamera.async_disable_motion_detection(cam)
+
 
 class TestStreamSourceEdgeCasesAsync:
     """Additional stream_source cases beyond TestStreamSourceTransport."""
@@ -4641,6 +4669,30 @@ class TestIdleCameraCloudSnapshot:
         assert out == b"\xff\xd8rcp-small", "must return RCP thumbnail on prefer_small"
 
     @pytest.mark.asyncio
+    async def test_no_cache_width_zero_rcp_success_updates_shared_cache(self):
+        """width=0 is the one real case where prefer_small is True (0 <= 640)
+        but jpeg_size_for_width(0) returns None (width <= 0 guard) — so the
+        RCP thumbnail IS allowed to poison the shared full-res cache here,
+        unlike every width>0 thumbnail request."""
+        coord = _make_coord_r6()
+        cam = _make_camera_r6(coord=coord)
+        cam._async_rcp_thumbnail = AsyncMock(return_value=b"\xff\xd8rcp-w0")
+
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
+        ):
+            from custom_components.bosch_shc_camera.camera import BoschCamera
+
+            out = await BoschCamera._async_camera_image_impl(cam, width=0)
+
+        cam._async_rcp_thumbnail.assert_awaited_once()
+        assert out == b"\xff\xd8rcp-w0"
+        assert cam.cached_image == b"\xff\xd8rcp-w0", (
+            "req_jpeg_size is None (width=0) → the shared cache IS updated"
+        )
+
+    @pytest.mark.asyncio
     async def test_no_cache_prefer_small_rcp_fails_falls_to_snap(self):
         """prefer_small + RCP returns None → fall through to async_fetch_live_snapshot."""
         coord = _make_coord_r6()
@@ -4733,6 +4785,33 @@ class TestIdleCameraCloudSnapshot:
         cam._async_rcp_thumbnail.assert_awaited_once()
         assert out == b"\xff\xd8rcp-fresh", (
             "stale cache + prefer_small must use RCP fresh"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stale_cache_width_zero_rcp_success_updates_shared_cache(self):
+        """Same width=0 edge case as the no-cache test above, but through the
+        'cache stale, refresh synchronously' branch (req_jpeg_size is None →
+        the shared cache IS updated by the RCP thumbnail)."""
+        coord = _make_coord_r6()
+        cam = _make_camera_r6(
+            coord=coord,
+            cached_image=b"\xff\xd8stale",
+            last_image_fetch=time.monotonic() - 60,
+        )
+        cam._async_rcp_thumbnail = AsyncMock(return_value=b"\xff\xd8rcp-w0-fresh")
+
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
+        ):
+            from custom_components.bosch_shc_camera.camera import BoschCamera
+
+            out = await BoschCamera._async_camera_image_impl(cam, width=0)
+
+        cam._async_rcp_thumbnail.assert_awaited_once()
+        assert out == b"\xff\xd8rcp-w0-fresh"
+        assert cam.cached_image == b"\xff\xd8rcp-w0-fresh", (
+            "req_jpeg_size is None (width=0) → the shared cache IS updated"
         )
 
     @pytest.mark.asyncio

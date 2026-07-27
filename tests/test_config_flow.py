@@ -998,6 +998,11 @@ class TestCameraAccessVerification:
         assert await self._verify_with_status(503) is None
 
     @pytest.mark.asyncio
+    async def test_verify_returns_true_on_200(self) -> None:
+        """A 200 response means the token can actually reach the camera API."""
+        assert await self._verify_with_status(200) is True
+
+    @pytest.mark.asyncio
     async def test_camera_access_transient_aborts_with_cannot_connect(self) -> None:
         """async_oauth_create_entry must route a None verification result to
         cannot_connect, distinct from a definitive camera_access_denied."""

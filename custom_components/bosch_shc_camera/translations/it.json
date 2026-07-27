@@ -55,7 +55,9 @@
       "reconfigure_successful": "Riconfigurazione riuscita — l'integrazione Bosch Smart Home Camera è stata aggiornata con un nuovo token. Tutte le entità, automazioni e opzioni sono state preservate.",
       "missing_credentials": "Nessuna credenziale applicativa Bosch SingleKey ID registrata. Riavviare Home Assistant e riprovare — se il problema persiste, segnalare un problema.",
       "missing_configuration": "L'integrazione Bosch Smart Home Camera non è configurata correttamente per OAuth. Riavviare Home Assistant e riprovare — se il problema persiste, segnalare un problema.",
-      "oauth_implementation_unavailable": "Il metodo di accesso selezionato non è più disponibile. Ricominciare da capo."
+      "oauth_implementation_unavailable": "Il metodo di accesso selezionato non è più disponibile. Ricominciare da capo.",
+      "camera_access_denied": "L'accesso è riuscito, ma Bosch ha negato l'accesso all'API della fotocamera per questo account. Questo di solito significa che la registrazione della fotocamera dell'account non è mai stata completata. Apri l'app ufficiale Bosch Smart Camera e completa eventuali schermate di registrazione o termini di servizio mostrate, quindi riprova.",
+      "cannot_connect": "L'accesso è riuscito, ma l'API della fotocamera Bosch non è temporaneamente disponibile (limitazione della frequenza o interruzione del server). Riprova tra qualche minuto."
     }
   },
   "options": {

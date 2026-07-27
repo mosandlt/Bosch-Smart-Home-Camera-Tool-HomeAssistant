@@ -55,7 +55,9 @@
       "reconfigure_successful": "Ponowna konfiguracja zakończona sukcesem — integracja Bosch Smart Home Camera została zaktualizowana z nowym tokenem. Wszystkie encje, automatyzacje i opcje są zachowane.",
       "missing_credentials": "Nie zarejestrowano poświadczenia aplikacji Bosch SingleKey ID. Uruchom ponownie Home Assistant i spróbuj ponownie — jeśli problem się powtarza, zgłoś błąd.",
       "missing_configuration": "Integracja Bosch Smart Home Camera nie jest poprawnie skonfigurowana dla OAuth. Uruchom ponownie Home Assistant i spróbuj ponownie — jeśli problem się powtarza, zgłoś błąd.",
-      "oauth_implementation_unavailable": "Wybrana metoda logowania nie jest już dostępna. Rozpocznij od nowa."
+      "oauth_implementation_unavailable": "Wybrana metoda logowania nie jest już dostępna. Rozpocznij od nowa.",
+      "camera_access_denied": "Logowanie powiodło się, ale Bosch odmówił dostępu do API kamery dla tego konta. Zwykle oznacza to, że rejestracja kamery dla tego konta nigdy nie została ukończona. Otwórz oficjalną aplikację Bosch Smart Camera i ukończ ekrany rejestracji lub warunków korzystania z usługi, które się pojawią, a następnie spróbuj ponownie.",
+      "cannot_connect": "Logowanie powiodło się, ale API kamery Bosch jest tymczasowo niedostępne (ograniczenie liczby żądań lub awaria serwera). Spróbuj ponownie za kilka minut."
     }
   },
   "options": {

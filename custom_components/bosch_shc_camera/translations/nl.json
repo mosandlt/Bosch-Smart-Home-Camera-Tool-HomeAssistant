@@ -55,7 +55,9 @@
       "reconfigure_successful": "Herconfiguratie geslaagd — de Bosch Smart Home Camera-integratie is bijgewerkt met een nieuw token. Alle entiteiten, automatiseringen en opties zijn behouden.",
       "missing_credentials": "Er is geen Bosch SingleKey ID-applicatiereferentie geregistreerd. Herstart Home Assistant en probeer het opnieuw — als dit blijft gebeuren, meld dan een issue.",
       "missing_configuration": "De Bosch Smart Home Camera-integratie is niet correct ingesteld voor OAuth. Herstart Home Assistant en probeer het opnieuw — als dit blijft gebeuren, meld dan een issue.",
-      "oauth_implementation_unavailable": "De gekozen aanmeldmethode is niet meer beschikbaar. Begin opnieuw."
+      "oauth_implementation_unavailable": "De gekozen aanmeldmethode is niet meer beschikbaar. Begin opnieuw.",
+      "camera_access_denied": "Aanmelden is gelukt, maar Bosch heeft de toegang tot de camera-API voor dit account geweigerd. Dit betekent meestal dat de cameraregistratie van het account nooit is voltooid. Open de officiële Bosch Smart Camera-app en voltooi eventuele registratie- of gebruiksvoorwaardenschermen die worden getoond, en probeer het dan opnieuw.",
+      "cannot_connect": "Aanmelden is gelukt, maar de camera-API van Bosch is tijdelijk niet beschikbaar (snelheidsbeperking of serverstoring). Probeer het over een paar minuten opnieuw."
     }
   },
   "options": {

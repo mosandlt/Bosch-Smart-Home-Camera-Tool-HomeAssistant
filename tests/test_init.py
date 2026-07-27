@@ -10214,6 +10214,44 @@ class TestSSRFGuard:
         assert _is_safe_bosch_url("https://xbosch.com/x") is False
 
 
+class TestParseSafeRcpProxyUrl:
+    """`_parse_safe_rcp_proxy_url` splits a Bosch `urls[0]` proxy entry into
+    (host, hash), validated against the same SSRF allowlist as
+    `_is_safe_bosch_host` — never hands back an unvalidated host."""
+
+    def test_valid_entry_returns_host_hash_tuple(self) -> None:
+        from custom_components.bosch_shc_camera.coordinator import (
+            _parse_safe_rcp_proxy_url,
+        )
+
+        result = _parse_safe_rcp_proxy_url(
+            "proxy-01.live.cbs.boschsecurity.com:42090/somehash", "cam-1"
+        )
+        assert result == ("proxy-01.live.cbs.boschsecurity.com:42090", "somehash")
+
+    def test_missing_slash_returns_none(self) -> None:
+        """A malformed entry with no `/` separator can't be split into host+hash."""
+        from custom_components.bosch_shc_camera.coordinator import (
+            _parse_safe_rcp_proxy_url,
+        )
+
+        assert (
+            _parse_safe_rcp_proxy_url(
+                "proxy-01.live.cbs.boschsecurity.com42090somehash", "cam-1"
+            )
+            is None
+        )
+
+    def test_unsafe_host_returns_none(self) -> None:
+        """A host outside the Bosch allowlist must be rejected, not handed
+        back to the caller for a request URL (SSRF guard)."""
+        from custom_components.bosch_shc_camera.coordinator import (
+            _parse_safe_rcp_proxy_url,
+        )
+
+        assert _parse_safe_rcp_proxy_url("evil.com/somehash", "cam-1") is None
+
+
 class TestRedactCreds:
     """`_redact_creds` redacts ephemeral Bosch Digest passwords for logs."""
 
@@ -30307,6 +30345,79 @@ class TestFetchLiveSnapshot404RetryReturnsNone:
             "Must return None when second proxy snap.jpg returns empty body"
         )
 
+    @pytest.mark.asyncio
+    async def test_snap_404_retry_second_proxy_also_404_returns_none(self):
+        """snap.jpg 404 → retry with a fresh (safe-host) proxy URL → retry
+        itself also 404s → falls through to the bare `return None` after the
+        retry block, instead of the empty-200-body sibling above."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_snapshot_coord(
+            _proxy_url_cache={
+                CAM_A: (
+                    "proxy-01.live.cbs.boschsecurity.com:42090/testhash",
+                    time_mod.monotonic() + 50,
+                )
+            },
+            get_cached_rcp_session=AsyncMock(return_value=None),
+        )
+
+        snap_404_resp = MagicMock()
+        snap_404_resp.status = 404
+        snap_404_resp.headers = {"Content-Type": "text/plain"}
+        snap_404_resp.read = AsyncMock(return_value=b"")
+        snap_404_resp.__aenter__ = AsyncMock(return_value=snap_404_resp)
+        snap_404_resp.__aexit__ = AsyncMock(return_value=None)
+
+        # Second snap.jpg call → also 404 (retried proxy lease is bad too)
+        snap_404_resp2 = MagicMock()
+        snap_404_resp2.status = 404
+        snap_404_resp2.headers = {"Content-Type": "text/plain"}
+        snap_404_resp2.read = AsyncMock(return_value=b"")
+        snap_404_resp2.__aenter__ = AsyncMock(return_value=snap_404_resp2)
+        snap_404_resp2.__aexit__ = AsyncMock(return_value=None)
+
+        # PUT /connection → fresh, allowlisted proxy host
+        put_body = json.dumps(
+            {"urls": ["proxy-02.live.cbs.boschsecurity.com:42090/newhash"]}
+        )
+        put_resp_fresh = MagicMock()
+        put_resp_fresh.status = 200
+        put_resp_fresh.text = AsyncMock(return_value=put_body)
+        put_resp_fresh.__aenter__ = AsyncMock(return_value=put_resp_fresh)
+        put_resp_fresh.__aexit__ = AsyncMock(return_value=None)
+
+        get_call_count = [0]
+
+        def _get_side_effect(url, **kwargs):
+            get_call_count[0] += 1
+            if get_call_count[0] == 1:
+                return snap_404_resp
+            return snap_404_resp2
+
+        session_mock = MagicMock()
+        session_mock.__aenter__ = AsyncMock(return_value=session_mock)
+        session_mock.__aexit__ = AsyncMock(return_value=None)
+        session_mock.get = MagicMock(side_effect=_get_side_effect)
+        session_mock.put = MagicMock(return_value=put_resp_fresh)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+            patch(
+                "custom_components.bosch_shc_camera.coordinator.async_bosch_cloud_session_cm",
+                return_value=session_mock,
+            ),
+        ):
+            result = await BoschCameraCoordinator._async_fetch_live_snapshot_impl(
+                coord, CAM_A
+            )
+
+        assert result is None, (
+            "Must return None when the retried proxy URL's snap.jpg also fails"
+        )
+        assert get_call_count[0] == 2, "must have retried snap.jpg exactly once"
+
 
 # __init__.py
 # 2523-2527   hw_version_store persist path in coordinator update
@@ -33529,6 +33640,44 @@ class TestAsyncUnloadEntry:
             result = await async_unload_entry(hass, entry)
         mock_cancel.assert_not_awaited()
         assert result is True
+
+
+class TestAsyncRemoveEntry:
+    """`async_remove_entry` deletes every integration-owned on-disk file on
+    full config-entry removal — must not run on a reload/unload, only here
+    (backported from the Core PR's Copilot review round 5, 2026-07-27)."""
+
+    @pytest.mark.asyncio
+    async def test_removes_all_four_stores_and_snapshots(self):
+        from custom_components.bosch_shc_camera import DOMAIN, async_remove_entry
+
+        hass = MagicMock()
+        entry = MagicMock()
+        removed_keys: list[str] = []
+
+        class _FakeStore:
+            def __init__(self, hass, *, version, key, private=False):
+                self._key = key
+
+            async def async_remove(self):
+                removed_keys.append(self._key)
+
+        with (
+            patch(f"{MODULE}.Store", _FakeStore),
+            patch(
+                f"{MODULE}.snapshot_store.async_remove_all_snapshots",
+                new=AsyncMock(),
+            ) as mock_remove_snapshots,
+        ):
+            await async_remove_entry(hass, entry)
+
+        assert removed_keys == [
+            f"{DOMAIN}_cloud_alert_state",
+            f"{DOMAIN}_lan_ips",
+            f"{DOMAIN}_hw_versions",
+            f"{DOMAIN}_local_creds",
+        ]
+        mock_remove_snapshots.assert_awaited_once_with(hass)
 
 
 class TestAsyncOptionsUpdated:
@@ -38712,6 +38861,72 @@ class TestTokenRefreshTransientRetry:
             with pytest.raises(ConfigEntryAuthFailed):
                 await BoschCameraCoordinator._refresh_token_locked(coord)
         assert coord._token_fail_count == 3
+
+
+class TestTokenRefreshDirectNetworkError:
+    """`_do_refresh_attempt` (token_auth.py) classifies a network-layer
+    exception raised DIRECTLY by `_do_refresh` (not a hang past the outer
+    `asyncio.timeout`) as transient. Letting all 3 attempts fail this way
+    and run to natural completion (no outer timeout firing) must raise
+    UpdateFailed with the 'network error' message and only increment
+    `_token_timeout_fail_count`, never `_token_fail_count` (reauth
+    escalation must stay untouched)."""
+
+    @pytest.mark.asyncio
+    async def test_direct_timeout_error_all_three_attempts_raises_network_error(self):
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.config_flow._do_refresh",
+                new=AsyncMock(side_effect=TimeoutError()),
+            ),
+            patch(
+                "asyncio.sleep",
+                new=AsyncMock(),
+            ),
+        ):
+            coord = _make_coord_token_refresh()
+            with pytest.raises(UpdateFailed) as exc:
+                await BoschCameraCoordinator._refresh_token_locked(coord)
+        assert "network error" in str(exc.value).lower()
+        assert coord._token_timeout_fail_count == 3
+        assert coord._token_fail_count == 0
+
+    @pytest.mark.asyncio
+    async def test_direct_client_error_all_three_attempts_raises_network_error(self):
+        """Same as above but via `aiohttp.ClientError` instead of TimeoutError
+        — both are caught by `_do_refresh_attempt`'s own except clause."""
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.config_flow._do_refresh",
+                new=AsyncMock(side_effect=aiohttp.ClientError("connection reset")),
+            ),
+            patch(
+                "asyncio.sleep",
+                new=AsyncMock(),
+            ),
+        ):
+            coord = _make_coord_token_refresh()
+            with pytest.raises(UpdateFailed) as exc:
+                await BoschCameraCoordinator._refresh_token_locked(coord)
+        assert "network error" in str(exc.value).lower()
+        assert coord._token_timeout_fail_count == 3
+        assert coord._token_fail_count == 0
 
 
 class TestTokenRefreshTimeout:
