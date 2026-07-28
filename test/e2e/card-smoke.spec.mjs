@@ -3931,3 +3931,77 @@ test("a genuine camera_entity change still re-registers the audio group", async 
   expect(result.onCameraTwo, "re-pointed to camera.two (already has a primary) → becomes secondary there")
     .toEqual({ secondary: true, secondaryLive: true, registeredEntity: "camera.two" });
 });
+
+// Thomas (2026-07-28, live report): a single camera going HA-`unavailable`
+// showed a misleading "Bosch Cloud token invalid — sign in again" banner,
+// as if the WHOLE integration's auth had failed — even though sibling
+// cameras were working fine on the same login. The auth-overlay's
+// `isIntegrationDown` check treated ANY unavailable camera as a global
+// token failure, which is only one of many possible per-camera-unavailable
+// causes. This overlay had never actually been exercised for an
+// unavailable camera inside the overview grid before the same-day fix that
+// made _discover() keep such cameras (see the "keeps its real card" test
+// above) — so the bad assumption was never visible until then. Now an
+// unavailable camera just gets the plain "Offline" treatment (also
+// suppressing the privacy-placeholder, per the existing cam-offline CSS
+// exclusivity rules), and the auth/re-login banner is reserved for a
+// genuinely wrong/missing camera_entity.
+test("an unavailable camera shows the neutral offline overlay, not a misleading auth/re-login banner", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const mkHass = (camState) => ({
+      states: {
+        "camera.test": { state: camState, attributes: camState === "unavailable" ? {} : { friendly_name: "Test" }, last_updated: "2026-01-01T00:00:00Z" },
+      },
+      config: { internal_url: "http://localhost:4321" },
+      language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+    });
+
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = mkHass("unavailable");
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+
+    const root = card.shadowRoot;
+    const offlineVisible = root.getElementById("offline-overlay")?.classList.contains("visible");
+    const authVisible = root.getElementById("auth-overlay")?.classList.contains("visible");
+    const privacyVisible = getComputedStyle(root.getElementById("privacy-placeholder")).display !== "none";
+    const camOfflineClass = card.classList.contains("cam-offline");
+
+    card.remove();
+    return { offlineVisible, authVisible, privacyVisible, camOfflineClass };
+  });
+  expect(r.camOfflineClass, "cam-offline class applied for an unavailable camera").toBe(true);
+  expect(r.offlineVisible, "offline overlay shows for an unavailable camera").toBe(true);
+  expect(r.authVisible, "auth/re-login overlay must NOT show — this isn't necessarily an auth failure").toBe(false);
+  expect(r.privacyVisible, "privacy-placeholder is hidden while the offline overlay is up (single source of truth)").toBe(false);
+});
+
+test("a missing camera_entity (wrong/removed entity id) still shows the auth overlay's 'fix your config' message", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.does_not_exist", apple_style: true });
+    card.hass = {
+      states: {},
+      config: { internal_url: "http://localhost:4321" },
+      language: "en", localize: () => "", callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+    };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+
+    const root = card.shadowRoot;
+    const authVisible = root.getElementById("auth-overlay")?.classList.contains("visible");
+    const offlineVisible = root.getElementById("offline-overlay")?.classList.contains("visible");
+    const reauthBtnHidden = root.getElementById("auth-reauth-btn")?.style.display === "none";
+
+    card.remove();
+    return { authVisible, offlineVisible, reauthBtnHidden };
+  });
+  expect(r.authVisible, "a missing entity still shows the auth overlay").toBe(true);
+  expect(r.offlineVisible, "offline overlay must not also show").toBe(false);
+  expect(r.reauthBtnHidden, "re-login button hidden — it can't fix a wrong entity id").toBe(true);
+});

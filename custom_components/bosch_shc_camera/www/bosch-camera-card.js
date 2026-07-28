@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.19";
+const CARD_VERSION = "14.1.20";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
@@ -5385,26 +5385,20 @@ class BoschCameraCard extends HTMLElement {
     }
     const camState = hass.states[ents.camera]?.state;
     const entityMissing = !(ents.camera in hass.states);
-    const isIntegrationDown = camState === "unavailable";
     const authOverlay = this.shadowRoot.getElementById("auth-overlay");
     const _authTitle = this.shadowRoot.getElementById("auth-title");
     const _authSub = this.shadowRoot.getElementById("auth-subtitle");
     const _authBtn = this.shadowRoot.getElementById("auth-reauth-btn");
     if (authOverlay) {
-      authOverlay.classList.toggle("visible", isIntegrationDown || entityMissing);
+      authOverlay.classList.toggle("visible", entityMissing);
       if (entityMissing) {
         if (_authTitle) _authTitle.textContent = this._t("cam_missing_title");
         if (_authSub) _authSub.textContent = this._t("cam_missing_sub");
         if (_authBtn) _authBtn.style.display = "none";
-      } else {
-        if (_authTitle) _authTitle.textContent = this._t("auth_expired_title");
-        if (_authSub) _authSub.textContent = this._t("auth_expired_sub");
-        if (_authBtn) _authBtn.textContent = this._t("auth_reauth_btn");
-        if (_authBtn) _authBtn.style.display = "";
       }
     }
     const offlineOverlay = this.shadowRoot.getElementById("offline-overlay");
-    const isOffline = !isIntegrationDown && !entityMissing && statusState === "OFFLINE";
+    const isOffline = !entityMissing && (statusState === "OFFLINE" || camState === "unavailable");
     if (offlineOverlay) {
       offlineOverlay.classList.toggle("visible", isOffline);
       if (isOffline) {

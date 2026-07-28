@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.19";
+const CARD_VERSION = "14.1.20";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -9548,45 +9548,40 @@ class BoschCameraCard extends HTMLElement {
       infoBuf.textContent = (typeof bufMs === "number" && bufMs > 0) ? `${bufMs} ms` : "—";
     }
 
-    // Auth/integration overlay — camera entity is `unavailable` when the
-    // Bosch integration's coordinator fails (typically: refresh token rejected
-    // by Keycloak after long sessions or server-side rotation). The overlay
-    // covers offline-overlay (z-index 9 vs 8) so the user sees the actionable
-    // re-login banner instead of a generic "offline" state.
+    // Auth overlay — reserved for entityMissing only (the configured
+    // camera_entity doesn't exist at all: typo / removed / renamed entity;
+    // re-login can't fix a wrong entity id, so the card must say so
+    // explicitly). A camera entity going `unavailable` used to ALSO show
+    // this "re-login" banner, assuming that always meant a rejected Bosch
+    // Cloud token — but a single camera can go unavailable for plenty of
+    // per-camera reasons that have nothing to do with auth (confirmed live,
+    // 2026-07-28: this card had never actually been rendered for an
+    // unavailable camera inside the overview before, so this bad
+    // assumption was never exercised until tonight's grid-inclusion fix
+    // exposed it). `unavailable` is now just another offline case below —
+    // simpler and doesn't guess a specific, possibly-wrong cause.
     const camState = hass.states[ents.camera]?.state;
-    // Distinguish two failure modes that previously both showed the misleading
-    // "re-login" auth overlay:
-    //   • entityMissing  — the configured camera_entity does not exist at all
-    //     (typo / removed / renamed entity). Re-login won't help; tell the user
-    //     to fix the card's camera_entity. (RkcCorian/Thomas, 2026-06-01)
-    //   • isIntegrationDown — the entity exists but is `unavailable` (coordinator
-    //     auth failure / token rejected). Re-login IS the fix.
     const entityMissing = !(ents.camera in hass.states);
-    const isIntegrationDown = camState === "unavailable";
     const authOverlay = this.shadowRoot.getElementById("auth-overlay");
     const _authTitle = this.shadowRoot.getElementById("auth-title");
     const _authSub   = this.shadowRoot.getElementById("auth-subtitle");
     const _authBtn   = this.shadowRoot.getElementById("auth-reauth-btn");
     if (authOverlay) {
-      authOverlay.classList.toggle("visible", isIntegrationDown || entityMissing);
+      authOverlay.classList.toggle("visible", entityMissing);
       if (entityMissing) {
         if (_authTitle) _authTitle.textContent = this._t("cam_missing_title");
         if (_authSub)   _authSub.textContent   = this._t("cam_missing_sub");
         if (_authBtn)   _authBtn.style.display  = "none";  // re-login can't fix a wrong entity id
-      } else {
-        // Real token-expiry case (the common one) — was left rendering the
-        // template's static hard-coded German text forever, since only the
-        // entityMissing branch above ever went through _t(). (issue #45 follow-up)
-        if (_authTitle) _authTitle.textContent = this._t("auth_expired_title");
-        if (_authSub)   _authSub.textContent   = this._t("auth_expired_sub");
-        if (_authBtn)   _authBtn.textContent   = this._t("auth_reauth_btn");
-        if (_authBtn)   _authBtn.style.display  = "";
       }
     }
 
-    // Offline overlay (suppressed while auth-overlay is up to avoid double overlay)
+    // Offline overlay — single source of truth for "this camera isn't
+    // usable right now": Bosch-reported OFFLINE status, OR the camera
+    // entity itself gone `unavailable` (any reason, not just auth). Both
+    // cases now get the same neutral "Offline" treatment instead of
+    // guessing at a cause via a separate overlay — see comment above.
     const offlineOverlay = this.shadowRoot.getElementById("offline-overlay");
-    const isOffline = !isIntegrationDown && !entityMissing && statusState === "OFFLINE";
+    const isOffline = !entityMissing && (statusState === "OFFLINE" || camState === "unavailable");
     if (offlineOverlay) {
       offlineOverlay.classList.toggle("visible", isOffline);
       if (isOffline) {
