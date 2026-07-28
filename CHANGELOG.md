@@ -40,6 +40,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 - **A corrupted or legacy persisted-credential `port` value could fail the entire config-entry setup**, leaving every camera unloaded, instead of discarding just that one bad record.
 - **A cached LAN IP used for the fast TCP-reachability pre-check could point at an arbitrary, non-LAN address.** That cache is populated from cloud-proxied RCP data and restored unvalidated from storage — unlike the LOCAL-credentials cache, which is validated at every write site — so it had no equivalent guard before a raw TCP connection attempt. It's now required to be a private LAN address too.
 - **The LOCAL-session-bootstrap snapshot fetch opened a fresh connector and TLS handshake on every call** instead of reusing the pooled Bosch cloud session the rest of the integration already shares, adding avoidable latency to every fallback attempt for cameras (e.g. `CAMERA_360`) whose REMOTE snapshot is rejected.
+- **The overview card's LAN-fallback tiles (shown for a camera that's unavailable/cloud-degraded but still reachable on LAN) rendered in their own narrower grid above the main camera grid**, so an offline camera always appeared first and at a different width than the online ones — breaking the card's own tier-based sort order (live → privacy → offline). LAN-fallback tiles now share the main grid's column width and render after it. CARD_VERSION 14.1.16 → 14.1.17.
 
 ## [v16.1.2] - 2026-07-17
 

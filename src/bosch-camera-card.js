@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.16";
+const CARD_VERSION = "14.1.17";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -12550,7 +12550,7 @@ class BoschCameraOverviewCard extends HTMLElement {
           font-size: 12px; font-weight: 400;
           color: var(--secondary-text-color);
         }
-        .bco-grid {
+        .bco-grid, .bco-lan-tiles {
           display: grid;
           gap: ${this._config.gap};
           grid-template-columns: ${
@@ -12560,7 +12560,7 @@ class BoschCameraOverviewCard extends HTMLElement {
           };
         }
         @media (max-width: 640px) {
-          .bco-grid { grid-template-columns: 1fr !important; }
+          .bco-grid, .bco-lan-tiles { grid-template-columns: 1fr !important; }
         }
         /* Phones in landscape (e.g. iPhone Pro Max ≈ 932 × 430) are wider
            than 640px but the viewport height collapses below ~500px — at
@@ -12570,10 +12570,10 @@ class BoschCameraOverviewCard extends HTMLElement {
              - landscape with very short viewport (any device).
            Desktop browsers resized narrow keep their multi-column layout. */
         @media (pointer: coarse) and (max-width: 1024px) {
-          .bco-grid { grid-template-columns: 1fr !important; }
+          .bco-grid, .bco-lan-tiles { grid-template-columns: 1fr !important; }
         }
         @media (orientation: landscape) and (max-height: 500px) {
-          .bco-grid { grid-template-columns: 1fr !important; }
+          .bco-grid, .bco-lan-tiles { grid-template-columns: 1fr !important; }
         }
         .bco-cell {
           min-width: 0;
@@ -12699,12 +12699,11 @@ class BoschCameraOverviewCard extends HTMLElement {
           text-decoration: underline;
           font-size: 12px;
         }
-        .bco-lan-tiles {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          gap: 8px;
-          margin-bottom: 10px;
-        }
+        /* Column width/gap now shared with .bco-grid above — LAN-fallback
+           tiles render at the same size as the regular camera tiles and are
+           sorted after them (see the template's slot order + the
+           "we had a sort rule" tier convention: live -> privacy -> offline). */
+        #bco-lan-tiles-slot:not(:empty) { margin-top: 10px; }
         .bco-lan-tile {
           display: flex;
           flex-direction: column;
@@ -12770,8 +12769,8 @@ class BoschCameraOverviewCard extends HTMLElement {
             <span class="bco-count" id="bco-count"></span>
           </div>` : ""}
         <div id="bco-banner-slot"></div>
-        <div id="bco-lan-tiles-slot"></div>
         <div class="bco-grid" id="bco-grid"></div>
+        <div id="bco-lan-tiles-slot"></div>
       </div>
     `;
     this._grid = this.shadowRoot.getElementById("bco-grid");

@@ -3159,6 +3159,57 @@ test("quality select auto-derives select.<camera>_video_quality, reaching the ov
   expect(r.overviewChildQualityVisible, "overview's child tile shows the quality section once the entity exists").toBe(true);
 });
 
+// Thomas (2026-07-28): LAN-fallback tiles (shown when a Bosch camera is
+// unavailable/cloud-degraded but reachable on LAN) used to render in their
+// own narrower grid ABOVE the main tier-sorted camera grid, so an offline
+// camera always appeared first and at a different width than the online
+// ones — breaking the existing "sort rule" (tier 0 live -> 1 privacy -> 2
+// offline). The LAN-tiles slot now shares .bco-grid's column track and
+// renders after it in the DOM.
+test("LAN-fallback tiles share the main grid's width and render after it", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-overview-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const mkHass = () => ({ config: {}, language: "en", localize: () => "",
+      callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.bosch_terrasse": { entity_id: "camera.bosch_terrasse", state: "idle", attributes: {
+          brand: "Bosch", status: "ONLINE", friendly_name: "Terrasse",
+        }, last_updated: "2026-01-01T00:00:00Z" },
+        // HA strips attributes for an unavailable entity — no brand/status,
+        // so _discover() skips it and only the LAN-fallback panel shows it.
+        "camera.bosch_eingang": { entity_id: "camera.bosch_eingang", state: "unavailable", attributes: {},
+          last_updated: "2026-01-01T00:00:00Z" },
+        "binary_sensor.bosch_eingang_lan_reachable": { entity_id: "binary_sensor.bosch_eingang_lan_reachable", state: "off", attributes: {
+          friendly_name: "Eingang LAN",
+        }, last_updated: "2026-01-01T00:00:00Z" },
+      } });
+
+    const overview = document.createElement("bosch-camera-overview-card");
+    overview.setConfig({ include: ["camera.bosch_terrasse", "camera.bosch_eingang"] });
+    overview.hass = mkHass();
+    document.body.appendChild(overview);
+    await new Promise((res) => setTimeout(res, 250));
+
+    const root = overview.shadowRoot;
+    const wrap = root.querySelector(".bco-wrap");
+    const grid = root.getElementById("bco-grid");
+    const lanSlot = root.getElementById("bco-lan-tiles-slot");
+    const children = [...wrap.children];
+    const gridIndex = children.indexOf(grid);
+    const lanIndex = children.indexOf(lanSlot);
+    const lanTileCount = lanSlot.querySelectorAll(".bco-lan-tile").length;
+    const gridColumnsMatch =
+      getComputedStyle(grid).gridTemplateColumns === getComputedStyle(lanSlot.firstElementChild).gridTemplateColumns;
+
+    overview.remove();
+    return { gridIndex, lanIndex, lanTileCount, gridColumnsMatch };
+  });
+  expect(r.lanTileCount, "the offline camera got a LAN-fallback tile").toBe(1);
+  expect(r.gridIndex, "main grid must come before the LAN-tiles slot").toBeLessThan(r.lanIndex);
+  expect(r.gridColumnsMatch, "LAN tiles must use the same column track as the main grid").toBe(true);
+});
+
 // 2026-07-20 follow-up bug-hunt: a plain `config.quality_entity || default`
 // fallback has no way to opt out — "", null, and unset are all equally
 // falsy and fall through to the auto-derived id. quality_entity: false must
