@@ -464,9 +464,8 @@ async def test_sync_remove_all_deletes_storage_dir(tmp_path: Path) -> None:
 
 
 def test_sync_remove_all_missing_dir_does_not_raise(tmp_path: Path) -> None:
-    """`ignore_errors=True` semantics — no snapshots directory ever created
-    (e.g. config entry removed before any snapshot was ever saved) must not
-    raise."""
+    """A missing snapshots directory (e.g. config entry removed before any
+    snapshot was ever saved) is the ONE tolerated case — must not raise."""
     from custom_components.bosch_shc_camera.snapshot_store import (
         _storage_dir,
         _sync_remove_all,
@@ -477,6 +476,32 @@ def test_sync_remove_all_missing_dir_does_not_raise(tmp_path: Path) -> None:
     assert not snap_dir.exists()
 
     _sync_remove_all(hass)  # must not raise
+
+
+def test_sync_remove_all_propagates_real_oserror(tmp_path: Path) -> None:
+    """A genuine filesystem/permission error during removal must NOT be swallowed.
+
+    Regression backported from the Core PR's Copilot review round 15
+    (2026-07-28): `_sync_remove_all` used to call
+    `shutil.rmtree(..., ignore_errors=True)`, which reports success even
+    when permission or filesystem errors leave every persisted JPEG on
+    disk. Only a missing directory (see the test above) may be tolerated;
+    every other OSError must propagate so `async_remove_all_snapshots`'s
+    caller (`async_remove_entry`) sees the failure.
+    """
+    from custom_components.bosch_shc_camera.snapshot_store import (
+        _storage_dir,
+        _sync_remove_all,
+    )
+
+    hass = _make_hass(tmp_path)
+    _storage_dir(hass).mkdir(parents=True, exist_ok=True)
+
+    with (
+        patch("shutil.rmtree", side_effect=PermissionError("denied")),
+        pytest.raises(PermissionError, match="denied"),
+    ):
+        _sync_remove_all(hass)
 
 
 @pytest.mark.asyncio

@@ -5822,6 +5822,51 @@ class TestLocalOutageSnapFallback:
         assert cam.cached_image == img_bytes, "outage snap must cache image"
 
     @pytest.mark.asyncio
+    async def test_outage_snap_thumbnail_request_does_not_poison_shared_cache(self):
+        """A width=N (thumbnail) outage snap returns its bytes but must not update the shared full-res cache.
+
+        Regression backported from the HA-core PR's Copilot review round 15
+        (2026-07-28): this outage-fallback block sets `self.cached_image`/
+        `self.last_image_fetch` inline, unlike the earlier tier-1/tier-2
+        fetch paths (bug-hunt 2026-07-27) which already guard those writes
+        on `req_jpeg_size is None` — a thumbnail-sized outage snap would
+        otherwise poison the shared cache and suppress the next
+        full-resolution request until CLOUD_SNAP_CACHE_TTL elapses.
+        """
+        # cam.cached_image/last_image_fetch stay at _make_camera_r7's defaults
+        # (None / 0.0, i.e. "nothing cached yet") — this is the same
+        # precondition test_outage_snap_success_returns_image uses, and is
+        # required to reach section 2b at all: an already-truthy
+        # cached_image instead takes the earlier `elif cache_stale:` branch,
+        # which returns self.cached_image directly on a REMOTE+LOCAL failure
+        # without ever falling through to the digest-based outage path.
+        coord = self._outage_coord()
+        cam = _make_camera_r7(coord=coord)
+        thumb_bytes = b"\xff\xd8thumbnail-outage-frame"
+
+        cm = _digest_cm(200, thumb_bytes, "image/jpeg")
+        session = MagicMock()
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.camera.async_digest_request",
+                new=AsyncMock(return_value=cm),
+            ),
+        ):
+            from custom_components.bosch_shc_camera.camera import BoschCamera
+
+            result = await BoschCamera._async_camera_image_impl(cam, width=320)
+
+        assert result == thumb_bytes
+        assert cam.cached_image is None, (
+            "a thumbnail outage snap must not overwrite the shared full-res cache"
+        )
+        assert cam.last_image_fetch == 0.0
+
+    @pytest.mark.asyncio
     async def test_outage_snap_timeout_falls_to_placeholder(self):
         """asyncio.TimeoutError during outage snap → placeholder returned."""
         coord = self._outage_coord()

@@ -48,8 +48,24 @@ class TestDispatchUpdateFailed:
     async def test_fires_cloud_down_alert(self):
         coord = _make_coord()
         await dispatch_update_failed(coord)
-        coord.hass.async_create_task.assert_called_once()
+        # Also fires the outage ping now (backported from the Core PR's
+        # Copilot review round 15, 2026-07-28) — see test_fires_outage_ping.
+        assert coord.hass.async_create_task.call_count == 2
         coord._async_maybe_announce_cloud_state.assert_called_once_with(False)
+
+    @pytest.mark.asyncio
+    async def test_fires_outage_ping(self):
+        """A generic UpdateFailed also refreshes LAN reachability, not just TimeoutError.
+
+        Regression backported from the Core PR's Copilot review round 15
+        (2026-07-28): only the TimeoutError path pinged LAN reachability,
+        so switch/light `available` and `binary_sensor.*_lan_reachable`
+        could stay stale for the whole outage when the tick instead failed
+        via a generic UpdateFailed.
+        """
+        coord = _make_coord()
+        await dispatch_update_failed(coord)
+        coord.async_outage_ping_all.assert_called_once_with()
 
     @pytest.mark.asyncio
     async def test_missing_announce_method_is_a_noop(self):
@@ -57,6 +73,7 @@ class TestDispatchUpdateFailed:
         (getattr(..., None) guard) must not crash."""
         coord = _make_coord()
         del coord._async_maybe_announce_cloud_state
+        del coord.async_outage_ping_all
         await dispatch_update_failed(coord)
         coord.hass.async_create_task.assert_not_called()
 
@@ -108,9 +125,23 @@ class TestDispatchClientError:
         coord._async_maybe_announce_cloud_state.assert_called_once_with(False)
 
     @pytest.mark.asyncio
+    async def test_fires_outage_ping(self):
+        """A network-level ClientError also refreshes LAN reachability.
+
+        Regression backported from the Core PR's Copilot review round 15
+        (2026-07-28): a network error talking to Bosch's cloud is at least
+        as strong an "outage" signal as a bare timeout, but only the
+        TimeoutError path pinged LAN reachability.
+        """
+        coord = _make_coord()
+        await dispatch_client_error(coord, aiohttp.ClientError("connreset"))
+        coord.async_outage_ping_all.assert_called_once_with()
+
+    @pytest.mark.asyncio
     async def test_missing_announce_method_is_a_noop(self):
         coord = _make_coord()
         del coord._async_maybe_announce_cloud_state
+        del coord.async_outage_ping_all
         result = await dispatch_client_error(coord, aiohttp.ClientError("x"))
         assert isinstance(result, UpdateFailed)
         coord.hass.async_create_task.assert_not_called()

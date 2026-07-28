@@ -33912,6 +33912,31 @@ class TestAsyncUnloadEntry:
         mock_cancel.assert_not_awaited()
         assert result is True
 
+    @pytest.mark.asyncio
+    async def test_failed_platform_unload_skips_task_cancellation(self):
+        """A False return from async_unload_platforms must NOT cancel coordinator tasks.
+
+        Regression backported from the Core PR's Copilot review round 15
+        (2026-07-28): the config entry stays LOADED when platform unload
+        fails, so cancelling the coordinator's timers/background tasks
+        anyway would leave a loaded integration whose entities never
+        update again. Platforms must be unloaded FIRST, and tasks
+        cancelled ONLY on success.
+        """
+        from custom_components.bosch_shc_camera import async_unload_entry
+
+        coord = MagicMock()
+        entry = MagicMock()
+        entry.runtime_data = coord
+        hass = MagicMock()
+        hass.config_entries.async_unload_platforms = AsyncMock(return_value=False)
+        with patch(
+            f"{MODULE}._async_cancel_coordinator_tasks", AsyncMock()
+        ) as mock_cancel:
+            result = await async_unload_entry(hass, entry)
+        mock_cancel.assert_not_awaited()
+        assert result is False
+
 
 class TestAsyncRemoveEntry:
     """`async_remove_entry` deletes every integration-owned on-disk file on
@@ -38138,7 +38163,18 @@ class TestCloudFiveHundredTriggers:
     async def test_503_camera_list_kicks_reactive_maint_and_outage_ping(self):
         """A 503 on `/v11/video_inputs` triggers `_async_refresh_maintenance
         (reactive=True)` + `async_outage_ping_all()` before `UpdateFailed`
-        propagates. Pins L1647, L1653."""
+        propagates. Pins L1647, L1653.
+
+        `async_outage_ping_all` now fires TWICE for this exact scenario: once
+        inline in `fetch_camera_list`'s own non-200 handling, and once more
+        from the outer `except UpdateFailed:` dispatch (backported from the
+        Core PR's Copilot review round 15, 2026-07-28 — the outer UpdateFailed
+        and ClientError paths previously never refreshed LAN reachability at
+        all, unlike the TimeoutError path). The 30s internal throttle in the
+        real `async_outage_ping_all` makes the second call a cheap no-op in
+        production; this stub double-counts because it isn't the real
+        implementation.
+        """
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _coord_with_tail_hooks()
@@ -38155,7 +38191,7 @@ class TestCloudFiveHundredTriggers:
             await BoschCameraCoordinator._async_update_data(coord)
 
         coord._async_refresh_maintenance.assert_called_with(reactive=True)
-        coord.async_outage_ping_all.assert_called_once()
+        assert coord.async_outage_ping_all.call_count == 2
 
 
 class TestOuterExceptBranches:

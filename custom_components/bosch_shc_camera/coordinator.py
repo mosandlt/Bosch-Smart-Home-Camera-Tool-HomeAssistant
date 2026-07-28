@@ -1668,7 +1668,10 @@ class BoschCameraCoordinator(
     async def async_outage_ping_all(self) -> None:
         """Ping every known camera concurrently during a cloud outage.
 
-        Called from the UpdateFailed paths in `_async_update_data`. Throttled
+        Called from all three outer failure paths in `_async_update_data`
+        (`UpdateFailed`/`TimeoutError`/`aiohttp.ClientError`, via
+        tick_failure.py's dispatch_* helpers — backported from the Core
+        PR's Copilot review round 15, 2026-07-28). Throttled
         to once per 30 s so a flapping cloud does not hammer the LAN. Result
         feeds `lan_tcp_reachable`, which the switch/light entity
         `available` checks and the card LAN-tile renderer consult.
