@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.17";
+const CARD_VERSION = "14.1.18";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -12419,6 +12419,11 @@ class BoschCameraOverviewCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._cards     = new Map();   // entity_id -> <bosch-camera-card>
     this._lastSig   = "";          // discovery signature, avoids needless re-sort
+    this._lastKnownNames = new Map();  // entity_id -> last-seen friendly_name,
+                                        // so a camera that goes unavailable
+                                        // (HA strips attributes.friendly_name)
+                                        // still shows its real name instead of
+                                        // falling back to the raw entity_id.
     this._config    = null;
     this._hass      = null;
     this._rendered  = false;
@@ -13004,7 +13009,15 @@ class BoschCameraOverviewCard extends HTMLElement {
       const s = states[eid];
       if (!s) continue;
       const a = s.attributes || {};
-      if (!explicit && a.brand !== "Bosch") continue;
+      // HA strips ALL attributes (including `brand`) once an entity goes
+      // truly unavailable, which used to drop a genuinely-offline Bosch
+      // camera out of the grid entirely — it only ever got the bare,
+      // image-less _renderLanTiles() panel, never a real card with its own
+      // cached-frame + offline-overlay treatment. Every entity this
+      // integration creates is named "Bosch <camera>" (same convention
+      // _renderLanTiles() already relies on for its own unavailable-camera
+      // detection below), so fall back to the entity_id when brand is gone.
+      if (!explicit && a.brand !== "Bosch" && !eid.startsWith("camera.bosch_")) continue;
       const status = String(a.status || "").toUpperCase();
       const online = status === "ONLINE";
       const base   = eid.replace(/^camera\./, "");
@@ -13019,9 +13032,10 @@ class BoschCameraOverviewCard extends HTMLElement {
       const tier = !online ? 2 : (privacyOn ? 1 : 0);
       const rawPrio = a.bosch_priority;
       const priority = (typeof rawPrio === "number" && isFinite(rawPrio)) ? rawPrio : null;
+      if (a.friendly_name) this._lastKnownNames.set(eid, a.friendly_name);
       list.push({
         entity_id: eid,
-        name:   a.friendly_name || eid,
+        name:   a.friendly_name || this._lastKnownNames.get(eid) || eid,
         online,
         privacyOn,
         streamingOn,

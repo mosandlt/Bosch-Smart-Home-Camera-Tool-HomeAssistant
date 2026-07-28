@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.17";
+const CARD_VERSION = "14.1.18";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
@@ -7402,6 +7402,7 @@ class BoschCameraOverviewCard extends HTMLElement {
     });
     this._cards = new Map;
     this._lastSig = "";
+    this._lastKnownNames = new Map;
     this._config = null;
     this._hass = null;
     this._rendered = false;
@@ -7688,7 +7689,7 @@ class BoschCameraOverviewCard extends HTMLElement {
       const s = states[eid];
       if (!s) continue;
       const a = s.attributes || {};
-      if (!explicit && a.brand !== "Bosch") continue;
+      if (!explicit && a.brand !== "Bosch" && !eid.startsWith("camera.bosch_")) continue;
       const status = String(a.status || "").toUpperCase();
       const online = status === "ONLINE";
       const base = eid.replace(/^camera\./, "");
@@ -7699,9 +7700,10 @@ class BoschCameraOverviewCard extends HTMLElement {
       const tier = !online ? 2 : privacyOn ? 1 : 0;
       const rawPrio = a.bosch_priority;
       const priority = typeof rawPrio === "number" && isFinite(rawPrio) ? rawPrio : null;
+      if (a.friendly_name) this._lastKnownNames.set(eid, a.friendly_name);
       list.push({
         entity_id: eid,
-        name: a.friendly_name || eid,
+        name: a.friendly_name || this._lastKnownNames.get(eid) || eid,
         online: online,
         privacyOn: privacyOn,
         streamingOn: streamingOn,

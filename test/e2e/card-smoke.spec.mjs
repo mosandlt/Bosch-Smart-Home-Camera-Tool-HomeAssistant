@@ -3210,6 +3210,70 @@ test("LAN-fallback tiles share the main grid's width and render after it", async
   expect(r.gridColumnsMatch, "LAN tiles must use the same column track as the main grid").toBe(true);
 });
 
+// Thomas (2026-07-28 follow-up): without an explicit `include:` list (the
+// real-world default — the dashboard's own card config never sets one),
+// _discover() dropped a camera the moment it went truly HA-unavailable: HA
+// strips attributes.brand along with everything else, so the brand==="Bosch"
+// filter silently excluded it from the main grid forever — it only ever got
+// the bare, image-less LAN-fallback tile, never a real <bosch-camera-card>
+// with its own cached-frame + offline-overlay treatment. Every entity this
+// integration creates is named camera.bosch_*, so that's now an accepted
+// fallback for the brand check (mirrors the same convention
+// _renderLanTiles() already uses for its own unavailable-camera detection).
+test("a camera going unavailable keeps its real card (with cached image) instead of being dropped", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-overview-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const mkHass = (eingangState) => ({ config: {}, language: "en", localize: () => "",
+      callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.bosch_terrasse": { entity_id: "camera.bosch_terrasse", state: "idle", attributes: {
+          brand: "Bosch", status: "ONLINE", friendly_name: "Terrasse",
+        }, last_updated: "2026-01-01T00:00:00Z" },
+        "camera.bosch_eingang": eingangState,
+      } });
+
+    const overview = document.createElement("bosch-camera-overview-card");
+    // No `include:` — matches the real dashboard's default config, which
+    // relies entirely on the brand==="Bosch" attribute to find cameras.
+    overview.setConfig({});
+    overview.hass = mkHass({
+      entity_id: "camera.bosch_eingang", state: "idle",
+      attributes: { brand: "Bosch", status: "ONLINE", friendly_name: "Bosch Eingang" },
+      last_updated: "2026-01-01T00:00:00Z",
+    });
+    document.body.appendChild(overview);
+    await new Promise((res) => setTimeout(res, 250));
+
+    const root = overview.shadowRoot;
+    const findEingangCell = () => [...root.querySelectorAll(".bco-cell")]
+      .find((cell) => cell._innerCard?._config?.camera_entity === "camera.bosch_eingang");
+    const beforeCell = findEingangCell();
+    const beforeTier = beforeCell ? beforeCell.dataset.tier : null;
+    const beforeTitle = beforeCell ? beforeCell._innerCard._config.title : null;
+
+    // Camera drops offline — HA strips ALL attributes (including brand)
+    // once an entity is genuinely unavailable.
+    overview.hass = mkHass({
+      entity_id: "camera.bosch_eingang", state: "unavailable", attributes: {},
+      last_updated: "2026-01-01T00:00:01Z",
+    });
+    await new Promise((res) => setTimeout(res, 50));
+
+    const afterCell = findEingangCell();
+    const afterTier = afterCell ? afterCell.dataset.tier : null;
+    const sameCellReused = beforeCell === afterCell;
+
+    overview.remove();
+    return { beforeTier, beforeTitle, afterTier, cellSurvived: !!afterCell, sameCellReused };
+  });
+  expect(r.beforeTier, "camera starts online, tier 0").toBe("0");
+  expect(r.beforeTitle, "card title derived from the friendly name").toBe("Eingang");
+  expect(r.cellSurvived, "the card must NOT be pruned once the camera goes unavailable").toBe(true);
+  expect(r.afterTier, "an offline camera moves to tier 2, it is not removed").toBe("2");
+  expect(r.sameCellReused, "the existing cell/card DOM node is reused, not destroyed+recreated (keeps any cached image visible)").toBe(true);
+});
+
 // 2026-07-20 follow-up bug-hunt: a plain `config.quality_entity || default`
 // fallback has no way to opt out — "", null, and unset are all equally
 // falsy and fall through to the auto-derived id. quality_entity: false must
