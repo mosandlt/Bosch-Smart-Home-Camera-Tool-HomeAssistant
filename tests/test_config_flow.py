@@ -644,6 +644,39 @@ def _make_mock_cm(status: int, json_data: dict, raise_for_status=None):
     return cm
 
 
+def _make_hanging_cm():
+    """Build an async context-manager mock whose __aenter__ never returns."""
+
+    async def _hang(*_args, **_kwargs):
+        await asyncio.sleep(100)
+
+    cm = MagicMock()
+    cm.__aenter__ = _hang
+    cm.__aexit__ = AsyncMock(return_value=None)
+    return cm
+
+
+def _spy_timeout(calls: list):
+    """Return an asyncio.timeout stand-in recording the requested delay.
+
+    Records the delay the caller asked for (to assert it matches the
+    established budget) but substitutes a tiny real timeout underneath, so
+    a stalled session.post() still raises promptly instead of the test
+    hanging for the real budget. Captures the *real* asyncio.timeout before
+    this factory is installed as the patch target — config_flow's asyncio
+    is the same module object this test file's own `import asyncio` refers
+    to, so calling asyncio.timeout from inside the factory after patching
+    would recurse into the mock itself.
+    """
+    real_timeout = asyncio.timeout
+
+    def _factory(delay):
+        calls.append(delay)
+        return real_timeout(0.01)
+
+    return _factory
+
+
 class TestAsyncResolveExternalData:
     @pytest.mark.asyncio
     async def test_exchanges_code_for_tokens(self):
@@ -698,6 +731,35 @@ class TestAsyncResolveExternalData:
                     }
                 )
 
+    @pytest.mark.asyncio
+    async def test_bounded_by_15s_timeout(self):
+        """The authorization-code exchange must be bounded by the same 15s
+        budget as _do_refresh's identical Keycloak /token POST, instead of
+        falling back to aiohttp's 300s default — a stalled Keycloak endpoint
+        must raise instead of stalling the whole config flow (Core PR
+        #176545 Copilot review round 16, backported)."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschOAuth2Implementation,
+        )
+
+        impl = BoschOAuth2Implementation(MagicMock())
+        impl._last_verifier = "v"
+        mock_session = MagicMock()
+        mock_session.post.return_value = _make_hanging_cm()
+        calls: list[float] = []
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=mock_session),
+            ),
+            patch(f"{MODULE}.asyncio.timeout", side_effect=_spy_timeout(calls)),
+            pytest.raises(asyncio.TimeoutError),
+        ):
+            await impl.async_resolve_external_data(
+                {"code": "c", "state": {"redirect_uri": "https://r"}}
+            )
+        assert calls == [15]
+
 
 class TestAsyncRefreshToken:
     @pytest.mark.asyncio
@@ -737,6 +799,30 @@ class TestAsyncRefreshToken:
         ):
             with pytest.raises(aiohttp.ClientResponseError):
                 await impl._async_refresh_token({"refresh_token": "rt"})
+
+    @pytest.mark.asyncio
+    async def test_bounded_by_15s_timeout(self):
+        """The token-refresh POST must likewise be bounded by the 15s
+        budget instead of aiohttp's 300s default (Core PR #176545 Copilot
+        review round 16, backported)."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschOAuth2Implementation,
+        )
+
+        impl = BoschOAuth2Implementation(MagicMock())
+        mock_session = MagicMock()
+        mock_session.post.return_value = _make_hanging_cm()
+        calls: list[float] = []
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=mock_session),
+            ),
+            patch(f"{MODULE}.asyncio.timeout", side_effect=_spy_timeout(calls)),
+            pytest.raises(asyncio.TimeoutError),
+        ):
+            await impl._async_refresh_token({"refresh_token": "rt"})
+        assert calls == [15]
 
 
 # _exchange_code — initial code→token exchange (manual login + relogin paste)
