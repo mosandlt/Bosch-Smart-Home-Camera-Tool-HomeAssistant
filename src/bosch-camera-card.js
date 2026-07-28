@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.18";
+const CARD_VERSION = "14.1.19";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -12791,16 +12791,20 @@ class BoschCameraOverviewCard extends HTMLElement {
     }[c]));
   }
 
-  _renderLanTiles() {
+  _renderLanTiles(coveredEntityIds = new Set()) {
     // Per-camera "what still works locally" panel — shown when one or more
     // Bosch cameras are unavailable (typical during a cloud 5xx outage) AND
     // at least one of them is reachable on LAN (or has an unknown LAN state
     // we still want to surface). Tiles disappear automatically once the
-    // cloud is back and cards render normally.
+    // cloud is back and cards render normally. `coveredEntityIds` excludes
+    // any camera the main grid already shows as a real card — otherwise
+    // the same offline camera renders twice (a real card with its cached
+    // image, plus this bare tile).
     if (!this._lanTilesSlot) return;
     const states = this._hass?.states || {};
     const unavailableBosch = Object.keys(states).filter(
-      (eid) => eid.startsWith("camera.bosch_") && states[eid]?.state === "unavailable",
+      (eid) => eid.startsWith("camera.bosch_") && states[eid]?.state === "unavailable"
+        && !coveredEntityIds.has(eid),
     );
     if (unavailableBosch.length === 0) {
       if (this._lanTilesSlot.firstChild) this._lanTilesSlot.innerHTML = "";
@@ -13076,14 +13080,23 @@ class BoschCameraOverviewCard extends HTMLElement {
     // it stays visible whether the user runs online_offline_view=true (offline
     // tiles shown) or =false (filtered down to an empty grid).
     this._renderMaintenanceBanner();
-    // Local-fallback tiles — shown when one or more Bosch cameras are
-    // unavailable AND we have a LAN reachability signal. Lets the user
-    // toggle privacy / light directly via the LAN even though the cloud is
-    // down. Self-clears once cards render normally again.
-    this._renderLanTiles();
-
-    let cams = this._discover();
+    const discovered = this._discover();
+    let cams = discovered;
     if (!this._config.online_offline_view) cams = cams.filter((c) => c.online);
+
+    // Local-fallback tiles — shown when a Bosch camera is unavailable AND
+    // we have a LAN reachability signal, but is NOT already covered by a
+    // real card above (an explicit include: list can name a camera the
+    // main grid won't show at all — that's the only case this panel is
+    // still useful for). Since _discover() itself now keeps an unavailable
+    // camera.bosch_* camera whenever it isn't explicitly excluded, skipping
+    // already-covered entities here avoids showing the exact same offline
+    // camera twice — once as a real card with its cached image, once as
+    // the bare LAN-tile (found via live E2E testing, 2026-07-28). Uses the
+    // unfiltered `discovered` set (not `cams`) so online_offline_view=false
+    // doesn't make a Bosch camera reappear via the LAN-tile panel just
+    // because its card is hidden from the main grid.
+    this._renderLanTiles(new Set(discovered.map((c) => c.entity_id)));
 
     const sig = cams.map((c) => `${c.entity_id}:${c.tier}:${c.streamingOn ? "S" : ""}`).join("|");
     // Re-render also when the grid is empty (no cards, no empty-state) — this

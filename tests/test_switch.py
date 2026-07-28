@@ -2555,6 +2555,72 @@ class TestAmbientLightCacheUpdate:
         assert sw._is_on is None  # not set either
 
     @pytest.mark.asyncio
+    async def test_put_failure_logs_warning(self, caplog):
+        """A failed PUT must be logged, not silently swallowed.
+
+        Found via live E2E testing (2026-07-28): unlike every sibling
+        switch in this file (motion light logs a warning on GET/PUT
+        failure; several others route through _warn_write_failed()), this
+        one previously returned/fell through with zero logging on both
+        the GET-non-200 and PUT-non-2xx paths — a camera that doesn't
+        support ambient lighting left `is_on` stuck at "unknown" forever
+        with no indication anywhere why.
+        """
+        existing = {"ambientLightEnabled": False}
+        coord = _ambient_coord(ambient_lighting_cache={})
+        sw = BoschAmbientLightSwitch(coord, CAM_ID, _stub_entry())
+        _bind_hass(sw)
+
+        get_resp = _resp_cm(200, json_data=existing)
+        put_resp = _resp_cm(500)
+        session = MagicMock()
+        session.get = MagicMock(return_value=get_resp)
+        session.put = MagicMock(return_value=put_resp)
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                AsyncMock(return_value=session),
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            await sw._set_ambient_light(True)
+
+        assert any(
+            "Ambient light" in r.message and "failed on all paths" in r.message
+            for r in caplog.records
+        ), "PUT failure must be logged via _warn_write_failed, not silently swallowed"
+
+    @pytest.mark.asyncio
+    async def test_get_failure_logs_warning_and_skips_put(self, caplog):
+        """A camera that rejects the GET (e.g. feature unsupported) must
+        log the HTTP status, not return silently — same bug class as
+        test_put_failure_logs_warning above, but on the GET path."""
+        coord = _ambient_coord(ambient_lighting_cache={})
+        sw = BoschAmbientLightSwitch(coord, CAM_ID, _stub_entry())
+        _bind_hass(sw)
+
+        get_resp = _resp_cm(442)  # Bosch's "not supported by this hardware" status
+        session = MagicMock()
+        session.get = MagicMock(return_value=get_resp)
+        session.put = MagicMock()
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                AsyncMock(return_value=session),
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            await sw._set_ambient_light(True)
+
+        session.put.assert_not_called()
+        assert any("Ambient light GET HTTP 442" in r.message for r in caplog.records), (
+            "GET failure must be logged with the HTTP status, not silently swallowed"
+        )
+        assert coord.ambient_lighting_cache.get(CAM_ID) is None
+
+    @pytest.mark.asyncio
     async def test_is_on_prefers_cache_over_is_on_field(self):
         """is_on must return the cache value, not the stale _is_on field."""
         # Cache says True, _is_on will be set to True; then simulate a poll that

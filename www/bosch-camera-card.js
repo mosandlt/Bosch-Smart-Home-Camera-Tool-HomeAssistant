@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.18";
+const CARD_VERSION = "14.1.19";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
@@ -7490,10 +7490,10 @@ class BoschCameraOverviewCard extends HTMLElement {
       "'": "&#39;"
     }[c]));
   }
-  _renderLanTiles() {
+  _renderLanTiles(coveredEntityIds = new Set) {
     if (!this._lanTilesSlot) return;
     const states = this._hass?.states || {};
-    const unavailableBosch = Object.keys(states).filter(eid => eid.startsWith("camera.bosch_") && states[eid]?.state === "unavailable");
+    const unavailableBosch = Object.keys(states).filter(eid => eid.startsWith("camera.bosch_") && states[eid]?.state === "unavailable" && !coveredEntityIds.has(eid));
     if (unavailableBosch.length === 0) {
       if (this._lanTilesSlot.firstChild) this._lanTilesSlot.innerHTML = "";
       this._lanTilesSlot.dataset.sig = "";
@@ -7731,9 +7731,10 @@ class BoschCameraOverviewCard extends HTMLElement {
     if (!this._hass || !this._config) return;
     if (!this._rendered) this._renderShell();
     this._renderMaintenanceBanner();
-    this._renderLanTiles();
-    let cams = this._discover();
+    const discovered = this._discover();
+    let cams = discovered;
     if (!this._config.online_offline_view) cams = cams.filter(c => c.online);
+    this._renderLanTiles(new Set(discovered.map(c => c.entity_id)));
     const sig = cams.map(c => `${c.entity_id}:${c.tier}:${c.streamingOn ? "S" : ""}`).join("|");
     const gridEmpty = this._grid && this._grid.children.length === 0;
     const needsReorder = sig !== this._lastSig || gridEmpty;

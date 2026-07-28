@@ -3176,8 +3176,12 @@ test("LAN-fallback tiles share the main grid's width and render after it", async
         "camera.bosch_terrasse": { entity_id: "camera.bosch_terrasse", state: "idle", attributes: {
           brand: "Bosch", status: "ONLINE", friendly_name: "Terrasse",
         }, last_updated: "2026-01-01T00:00:00Z" },
-        // HA strips attributes for an unavailable entity — no brand/status,
-        // so _discover() skips it and only the LAN-fallback panel shows it.
+        // Not named in `include:` below, so _discover() never surfaces it
+        // as a real card — the LAN-fallback panel is the only place this
+        // camera can show up, which is exactly what this test wants to
+        // exercise (an explicit include list is the one remaining case
+        // the LAN-fallback panel is still useful for, per the 2026-07-28
+        // de-dup fix below).
         "camera.bosch_eingang": { entity_id: "camera.bosch_eingang", state: "unavailable", attributes: {},
           last_updated: "2026-01-01T00:00:00Z" },
         "binary_sensor.bosch_eingang_lan_reachable": { entity_id: "binary_sensor.bosch_eingang_lan_reachable", state: "off", attributes: {
@@ -3186,7 +3190,7 @@ test("LAN-fallback tiles share the main grid's width and render after it", async
       } });
 
     const overview = document.createElement("bosch-camera-overview-card");
-    overview.setConfig({ include: ["camera.bosch_terrasse", "camera.bosch_eingang"] });
+    overview.setConfig({ include: ["camera.bosch_terrasse"] });
     overview.hass = mkHass();
     document.body.appendChild(overview);
     await new Promise((res) => setTimeout(res, 250));
@@ -3272,6 +3276,48 @@ test("a camera going unavailable keeps its real card (with cached image) instead
   expect(r.cellSurvived, "the card must NOT be pruned once the camera goes unavailable").toBe(true);
   expect(r.afterTier, "an offline camera moves to tier 2, it is not removed").toBe("2");
   expect(r.sameCellReused, "the existing cell/card DOM node is reused, not destroyed+recreated (keeps any cached image visible)").toBe(true);
+});
+
+// Thomas (2026-07-28, live report right after the fix above shipped): an
+// unavailable camera now showed up TWICE — once as a real card in the main
+// grid (the fix above), and AGAIN as the bare LAN-fallback tile, since
+// _renderLanTiles() had no idea the main grid already covered it. Without
+// an explicit include: list this now affects every offline camera, since
+// _discover() itself always keeps a camera.bosch_* entity.
+test("an unavailable camera does not also get a duplicate LAN-fallback tile", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-overview-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const mkHass = () => ({ config: {}, language: "en", localize: () => "",
+      callService: () => {}, callApi: async () => ({}), callWS: async () => ({}),
+      states: {
+        "camera.bosch_terrasse": { entity_id: "camera.bosch_terrasse", state: "idle", attributes: {
+          brand: "Bosch", status: "ONLINE", friendly_name: "Terrasse",
+        }, last_updated: "2026-01-01T00:00:00Z" },
+        "camera.bosch_eingang": { entity_id: "camera.bosch_eingang", state: "unavailable", attributes: {},
+          last_updated: "2026-01-01T00:00:00Z" },
+        "binary_sensor.bosch_eingang_lan_reachable": { entity_id: "binary_sensor.bosch_eingang_lan_reachable", state: "off", attributes: {
+          friendly_name: "Eingang LAN",
+        }, last_updated: "2026-01-01T00:00:00Z" },
+      } });
+
+    const overview = document.createElement("bosch-camera-overview-card");
+    // No `include:` — the real dashboard's default config.
+    overview.setConfig({});
+    overview.hass = mkHass();
+    document.body.appendChild(overview);
+    await new Promise((res) => setTimeout(res, 250));
+
+    const root = overview.shadowRoot;
+    const realCardCount = [...root.querySelectorAll(".bco-cell")]
+      .filter((cell) => cell._innerCard?._config?.camera_entity === "camera.bosch_eingang").length;
+    const lanTileCount = root.getElementById("bco-lan-tiles-slot").querySelectorAll(".bco-lan-tile").length;
+
+    overview.remove();
+    return { realCardCount, lanTileCount };
+  });
+  expect(r.realCardCount, "the offline camera gets exactly one real card").toBe(1);
+  expect(r.lanTileCount, "and NOT also a LAN-fallback tile — that would be a duplicate").toBe(0);
 });
 
 // 2026-07-20 follow-up bug-hunt: a plain `config.quality_entity || default`

@@ -1805,10 +1805,23 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
             "Content-Type": "application/json",
         }
         url = f"https://residential.cbs.boschsecurity.com/v11/video_inputs/{self._cam_id}/lighting/ambient"
+        desired_label = "ON" if enabled else "OFF"
         try:
             async with asyncio.timeout(10):
                 async with session.get(url, headers=headers) as resp:
                     if resp.status != 200:
+                        # Was a completely silent return — a camera that
+                        # doesn't support ambient lighting (or any other GET
+                        # failure) left `is_on` stuck at "unknown" forever
+                        # with zero indication why (found via live E2E
+                        # testing, 2026-07-28). Sibling switches
+                        # (motion light, _warn_write_failed users) all log
+                        # on failure — this one didn't.
+                        _LOGGER.warning(
+                            "Ambient light GET HTTP %d for %s",
+                            resp.status,
+                            self._cam_id[:8],
+                        )
                         return
                     data = await resp.json()
             data["ambientLightEnabled"] = enabled
@@ -1817,6 +1830,8 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
                     if resp.status in (200, 201, 204):
                         self._is_on = enabled
                         self.coordinator.ambient_lighting_cache[self._cam_id] = data
+                    else:
+                        self._warn_write_failed("Ambient light", desired_label)
         except Exception:
             _LOGGER.exception("Ambient light error for %s", self._cam_id[:8])
         self.async_write_ha_state()
