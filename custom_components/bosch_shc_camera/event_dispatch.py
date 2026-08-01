@@ -15,6 +15,8 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.util import dt as dt_util
+
 from .const import FCM_DELIVERY_DEAD_AFTER_SEC
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
@@ -180,6 +182,28 @@ async def build_data_and_dispatch(
                     if "PERSON" in event_tags and event_type == "MOVEMENT":
                         event_type = "PERSON"
                     cam_name = cam.get("title", cam_id)
+                    # Diagnostic only (GitHub timing question 2026-07-31): logs
+                    # Bosch's own event timestamp alongside our local wall-clock
+                    # receipt time, so a Bosch-cloud-side delay (movement/person
+                    # events issued close together after server-side AI
+                    # analysis) can be distinguished from an integration-side
+                    # one by comparing bosch_ts across consecutive events. Also
+                    # logs the next-newest event's own timestamp when present —
+                    # if Bosch batches a MOVEMENT+PERSON pair into the same
+                    # /v11/events response, only events[0] gets dispatched
+                    # here, so without this, one half of the pair we want to
+                    # compare would never appear in the log at all.
+                    _prev_event = events[1] if len(events) > 1 else None
+                    _LOGGER.debug(
+                        "Polling event timing: %s event for %s (id=%s, bosch_ts=%s, "
+                        "received_at=%s, prev_event_bosch_ts=%s)",
+                        event_type,
+                        cam_name,
+                        newest_id,
+                        newest_event.get("timestamp", ""),
+                        dt_util.utcnow().isoformat(),
+                        _prev_event.get("timestamp", "") if _prev_event else "n/a",
+                    )
                     event_payload = {
                         "camera_id": cam_id,
                         "camera_name": cam_name,

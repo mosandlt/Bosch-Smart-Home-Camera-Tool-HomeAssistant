@@ -7,6 +7,18 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v16.1.4] - 2026-08-01
+
+Patch — diagnostic logging only, no behavior change.
+
+### Added
+
+- **DEBUG-level diagnostic logging for movement/person FCM event timing.** A user reported that movement and person Signal push notifications arrive at nearly the same wall-clock time, even though motion detection should be much faster than person detection. Investigation found no batching/debounce bug in the integration's own dispatch code (`async_handle_fcm_push`/`build_data_and_dispatch` fire each event independently, with no artificial delay) — the working theory is that the simultaneity originates at Bosch's cloud side (person-detection AI analysis runs on the movement-triggered clip, and both FCM pushes go out once that analysis finishes), but this couldn't be confirmed without real payload timestamps. New DEBUG log lines record Bosch's own event timestamp alongside the local wall-clock receipt time, plus the previous event's own timestamp when Bosch batches two events into a single poll response, so the theory can be confirmed or refuted from real logs on the next event. No dispatch/notification behavior changed.
+
+## [v16.1.3] - 2026-07-31
+
+Patch — bundles fixes shipped across beta iterations (beta-1 through beta-16) before going stable. No breaking changes.
+
 ### Security
 
 - **The LOCAL Digest-credential store and persisted snapshot JPEGs are now written with owner-only permissions.** The `.storage` file holding every camera's LOCAL Digest username/password was written with `Store`'s default mode (world-readable); it now passes `private=True`, matching HA's own credential-store convention. Persisted camera snapshot JPEGs are now `chmod 0600` after write for the same reason — `Path.write_bytes()` honors the process umask and could otherwise leave a camera image world-readable.

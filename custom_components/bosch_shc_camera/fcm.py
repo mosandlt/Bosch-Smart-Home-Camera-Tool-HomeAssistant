@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlparse
 
 import aiohttp
+from homeassistant.util import dt as dt_util
 
 from .cloud_ssl import async_get_bosch_cloud_session
 from .recorder import assemble_and_ship_motion_clip, should_record
@@ -1228,6 +1229,31 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
                 # Confirmed 2026-04-11 via /v11/events on Terrasse: 15x tags=['PERSON'].
                 if "PERSON" in event_tags and event_type == "MOVEMENT":
                     event_type = "PERSON"
+
+                # Diagnostic only (GitHub timing question 2026-07-31): logs
+                # Bosch's own event timestamp alongside our local wall-clock
+                # receipt time, so a Bosch-cloud-side delay (movement/person
+                # events issued close together after server-side AI analysis)
+                # can be distinguished from an integration-side one by
+                # comparing bosch_ts across consecutive events for a camera.
+                # Full (not truncated) id, so a line here can be correlated
+                # with the equivalent line in event_dispatch.py. Also logs
+                # the next-newest event's own timestamp when present — if
+                # Bosch batches a MOVEMENT+PERSON pair into the same
+                # /v11/events response, only events[0] gets dispatched here,
+                # so without this, one half of the pair we want to compare
+                # would never appear in the log at all.
+                _prev_event = events[1] if len(events) > 1 else None
+                _LOGGER.debug(
+                    "FCM push timing: %s event for %s (id=%s, bosch_ts=%s, "
+                    "received_at=%s, prev_event_bosch_ts=%s)",
+                    event_type,
+                    cam_name,
+                    newest_id,
+                    newest_event.get("timestamp", ""),
+                    dt_util.utcnow().isoformat(),
+                    _prev_event.get("timestamp", "") if _prev_event else "n/a",
+                )
 
                 _LOGGER.info(
                     "FCM push -> new %s event for %s (id=%s, tags=%s)",

@@ -6936,6 +6936,86 @@ class TestAsyncHandleFcmPushNewEvent:
         )
 
     @pytest.mark.asyncio
+    async def test_new_event_logs_bosch_ts_and_received_at(self, caplog):
+        """Diagnostic log (2026-07-31 FCM timing question) must carry
+        Bosch's own event timestamp plus our local receipt time, so a
+        cloud-side vs. integration-side delay can be told apart from logs.
+        """
+        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
+        events = _one_event3("new-id", "PERSON")
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
+                with caplog.at_level(logging.DEBUG):
+                    await async_handle_fcm_push(coord)
+        matching = [r for r in caplog.records if "FCM push timing" in r.message]
+        assert len(matching) == 1
+        assert "id=new-id" in matching[0].message, matching[0].message
+        assert "bosch_ts=2026-05-07T10:00:00Z" in matching[0].message
+        assert "prev_event_bosch_ts=n/a" in matching[0].message, matching[0].message
+        # `received_at=` alone would also be satisfied by an empty/garbage
+        # value — the whole point of this diagnostic is that the local
+        # receipt time is a parseable, timezone-aware ISO timestamp that can
+        # be diffed against bosch_ts, so assert exactly that.
+        import re
+        from datetime import datetime
+
+        m = re.search(r"received_at=([^,)]+)", matching[0].message)
+        assert m is not None, matching[0].message
+        received_at = datetime.fromisoformat(m.group(1))
+        assert received_at.tzinfo is not None, m.group(1)
+
+    @pytest.mark.asyncio
+    async def test_new_event_logs_prev_event_bosch_ts_when_batched(self, caplog):
+        """If Bosch delivers a MOVEMENT+PERSON pair in the same
+        /v11/events response, only events[0] gets dispatched — the log
+        must still surface events[1]'s own timestamp, or the exact pair
+        this diagnostic exists to compare would never appear together.
+        """
+        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+
+        coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
+        events = [
+            {
+                "id": "new-id",
+                "eventType": "PERSON",
+                "eventTags": [],
+                "timestamp": "bosch-ts-2",
+                "imageUrl": "",
+                "videoClipUrl": "",
+                "videoClipUploadStatus": "",
+            },
+            {
+                "id": "prev-id",
+                "eventType": "MOVEMENT",
+                "eventTags": [],
+                "timestamp": "bosch-ts-1",
+                "imageUrl": "",
+                "videoClipUrl": "",
+                "videoClipUploadStatus": "",
+            },
+        ]
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm_push(200, json_data=events))
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            with patch(f"{MODULE}.async_send_alert", new_callable=AsyncMock):
+                with caplog.at_level(logging.DEBUG):
+                    await async_handle_fcm_push(coord)
+        matching = [r for r in caplog.records if "FCM push timing" in r.message]
+        assert len(matching) == 1
+        assert "bosch_ts=bosch-ts-2" in matching[0].message
+        assert "prev_event_bosch_ts=bosch-ts-1" in matching[0].message
+
+    @pytest.mark.asyncio
     async def test_new_event_creates_alert_task(self):
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 

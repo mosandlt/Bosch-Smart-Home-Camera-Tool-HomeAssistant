@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -181,6 +182,61 @@ class TestNewEventDispatch:
         )
         await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)
         assert coord.hass.bus.async_fire.call_args[0][0] == "bosch_shc_camera_person"
+
+    @pytest.mark.asyncio
+    async def test_new_event_logs_bosch_ts_and_received_at(self, caplog):
+        """Diagnostic log (2026-07-31 FCM timing question) must carry
+        Bosch's own event timestamp plus our local receipt time, so a
+        cloud-side vs. integration-side delay can be told apart from logs.
+        """
+        coord = _make_coord(
+            cached_events={
+                CAM_A: [
+                    {"id": "ev2", "eventType": "MOVEMENT", "timestamp": "bosch-ts-1"}
+                ]
+            },
+            last_event_ids={CAM_A: "ev1"},
+        )
+        with caplog.at_level(logging.DEBUG):
+            await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)
+        matching = [r for r in caplog.records if "Polling event timing" in r.message]
+        assert len(matching) == 1
+        assert "bosch_ts=bosch-ts-1" in matching[0].message
+        assert "prev_event_bosch_ts=n/a" in matching[0].message, matching[0].message
+        # `received_at=` alone would also be satisfied by an empty/garbage
+        # value — the whole point of this diagnostic is that the local
+        # receipt time is a parseable, timezone-aware ISO timestamp that can
+        # be diffed against bosch_ts, so assert exactly that.
+        import re
+        from datetime import datetime
+
+        m = re.search(r"received_at=([^,)]+)", matching[0].message)
+        assert m is not None, matching[0].message
+        received_at = datetime.fromisoformat(m.group(1))
+        assert received_at.tzinfo is not None, m.group(1)
+
+    @pytest.mark.asyncio
+    async def test_new_event_logs_prev_event_bosch_ts_when_batched(self, caplog):
+        """If Bosch delivers a MOVEMENT+PERSON pair in the same
+        /v11/events response, only events[0] gets dispatched — the log
+        must still surface events[1]'s own timestamp, or the exact pair
+        this diagnostic exists to compare would never appear together.
+        """
+        coord = _make_coord(
+            cached_events={
+                CAM_A: [
+                    {"id": "ev3", "eventType": "PERSON", "timestamp": "bosch-ts-2"},
+                    {"id": "ev2", "eventType": "MOVEMENT", "timestamp": "bosch-ts-1"},
+                ]
+            },
+            last_event_ids={CAM_A: "ev1"},
+        )
+        with caplog.at_level(logging.DEBUG):
+            await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)
+        matching = [r for r in caplog.records if "Polling event timing" in r.message]
+        assert len(matching) == 1
+        assert "bosch_ts=bosch-ts-2" in matching[0].message
+        assert "prev_event_bosch_ts=bosch-ts-1" in matching[0].message
 
     @pytest.mark.asyncio
     async def test_unknown_event_type_fires_no_bus_event(self):
