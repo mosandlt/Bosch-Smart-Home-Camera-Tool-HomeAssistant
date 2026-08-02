@@ -7,6 +7,15 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v16.1.5] - 2026-08-02
+
+Patch — one-time WARNING log when a camera's Mini-NVR mode is "Event
+Buffered (Preroll)" but the global "Preroll seconds" option is still 0.
+
+### Fixed
+
+- **A camera set to "Event Buffered (Preroll)" Mini-NVR mode could silently never start recording, with zero log output** (GitHub [#64](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/64), Lawyer82). Mini-NVR mode is chosen per camera, but the pre-roll ring's duration (`nvr_preroll_seconds`) is a single global integration option, defaulting to 0 — a user can pick "Event Buffered (Preroll)" for a camera without ever touching that separate option. `_start_recorder_locked` correctly no-ops in that case (there is nothing useful a 0-second ring could record), but did so completely silently: no log line, `/dev/shm/bosch_nvr_cache` never created, motion events still detected and shown in the activity log as normal — indistinguishable from a real bug. This is a configuration gap, not a functional defect (continuous mode is unaffected and works as designed), but the integration now logs a one-time WARNING per camera pointing at the exact option to change, instead of staying silent.
+
 ## [v16.1.4] - 2026-08-01
 
 Patch — diagnostic logging only, no behavior change.
