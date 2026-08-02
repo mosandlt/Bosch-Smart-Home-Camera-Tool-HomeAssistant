@@ -309,6 +309,7 @@ class CameraSessionState:
     notif_disabled_logged: bool = False
     fw_update_alerted: bool = False
     slow_tier_deferred: bool = False
+    nvr_preroll_zero_warned: bool = False
     # ── Slice 2: per-cam caches without cross-camera access ─────────────
     # All default to the `_UNSET` sentinel (see `_Unset` above) — matches
     # the `cam_id not in old_dict` semantics of the dicts they replace.

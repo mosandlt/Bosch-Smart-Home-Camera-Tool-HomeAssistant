@@ -1641,12 +1641,30 @@ async def _start_recorder_locked(
     if coordinator.get_nvr_mode(cam_id) == "event_buffered":
         preroll_secs = int(opts.get("nvr_preroll_seconds") or 0)
         if preroll_secs > 0:
+            coordinator._nvr_preroll_zero_warned.discard(cam_id)
             await _spawn_preroll_recorder_locked(coordinator, cam_id)
             # Push an immediate entity update so `mini_nvr_state`'s
             # preroll_running/preroll_segments attributes reflect reality the
             # instant the ring spawns, instead of waiting for the next
             # coordinator tick (issue #43 follow-up, realKim-dotcom).
             coordinator.async_update_listeners()
+        elif cam_id not in coordinator._nvr_preroll_zero_warned:
+            # GitHub #64: mode is per-camera, but the seconds knob is a
+            # single global option — a user can pick "Event Buffered
+            # (Preroll)" without ever touching it, leaving it at its 0
+            # default. Nothing else in this path logs anything, so the
+            # ring silently never spawns and /dev/shm/bosch_nvr_cache stays
+            # empty forever with zero signal. One-time WARN per camera
+            # (cleared above once the option is set >0) instead of every
+            # stream-up/session-renewal call to this function.
+            _LOGGER.warning(
+                "Mini-NVR mode for %s is 'Event Buffered (Preroll)' but the "
+                "global 'Preroll seconds' option is 0 — the pre-roll ring "
+                "will never start. Set nvr_preroll_seconds > 0 in the "
+                "integration's Options to fix this.",
+                cam_id[:8],
+            )
+            coordinator._nvr_preroll_zero_warned.add(cam_id)
         return
 
     base_path = (opts.get("nvr_base_path") or DEFAULT_BASE_PATH).strip()

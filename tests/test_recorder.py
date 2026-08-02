@@ -889,6 +889,7 @@ def _make_phase_coord(opts=None, cam_title="Terrasse", cam_id=CAM_ID_SHORT):
         nvr_error_state={},
         nvr_auth_retry_count={},
         _nvr_recorder_locks={},
+        _nvr_preroll_zero_warned=set(),
         hass=MagicMock(),
         async_update_listeners=MagicMock(),
     )
@@ -2641,6 +2642,7 @@ class TestStartRecorder:
             hass=SimpleNamespace(async_add_executor_job=AsyncMock()),
             async_update_listeners=MagicMock(),
             _sessions={},
+            _nvr_preroll_zero_warned=set(),
         )
         coord.get_session = lambda cid: get_or_create_session(coord._sessions, cid)
         coord._nvr_recorder_locks = {}
@@ -8548,6 +8550,7 @@ class TestStartRecorderEventBufferedPushesUpdate:
         coord.get_nvr_recorder_lock = lambda cid: coord._nvr_recorder_locks.setdefault(
             cid, asyncio.Lock()
         )
+        coord._nvr_preroll_zero_warned = set()
 
         with (
             patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)),
@@ -8582,11 +8585,104 @@ class TestStartRecorderEventBufferedPushesUpdate:
         coord.get_nvr_recorder_lock = lambda cid: coord._nvr_recorder_locks.setdefault(
             cid, asyncio.Lock()
         )
+        coord._nvr_preroll_zero_warned = set()
 
         with patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)):
             await recorder.start_recorder(coord, CAM_ID_SHORT)
 
         coord.async_update_listeners.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_preroll_seconds_zero_logs_warning_once(self):
+        """GitHub #64 (Lawyer82): mode='event_buffered' with the global
+        nvr_preroll_seconds still at its 0 default must WARN once per camera
+        instead of silently never spawning the ring — and must not repeat
+        the WARN on a second call (e.g. a session renewal) while the
+        condition is unchanged. Also proves the flag is genuinely
+        per-camera, not a global/shared one — a second camera in the
+        SAME coordinator hitting the identical condition must still get
+        its own WARN."""
+        cam_a, cam_b = CAM_ID_SHORT, "BBBBBBBB"
+        coord = SimpleNamespace(
+            live_connections={
+                cam_a: {
+                    "_connection_type": "LOCAL",
+                    "rtspsUrl": "rtsp://127.0.0.1:5000/cam",
+                },
+                cam_b: {
+                    "_connection_type": "LOCAL",
+                    "rtspsUrl": "rtsp://127.0.0.1:5001/cam",
+                },
+            },
+            options={"nvr_preroll_seconds": 0},
+            data={
+                cam_a: {"info": {"title": "Terrasse"}},
+                cam_b: {"info": {"title": "Garten"}},
+            },
+            hass=SimpleNamespace(async_add_executor_job=AsyncMock()),
+            async_update_listeners=MagicMock(),
+        )
+        coord.get_nvr_mode = lambda cid: "event_buffered"
+        coord._nvr_recorder_locks = {}
+        coord.get_nvr_recorder_lock = lambda cid: coord._nvr_recorder_locks.setdefault(
+            cid, asyncio.Lock()
+        )
+        coord._nvr_preroll_zero_warned = set()
+
+        with (
+            patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)),
+            patch.object(recorder._LOGGER, "warning") as mock_warn,
+        ):
+            await recorder.start_recorder(coord, cam_a)
+            await recorder.start_recorder(coord, cam_a)
+            await recorder.start_recorder(coord, cam_b)
+
+        assert mock_warn.call_count == 2, (
+            "WARN must fire exactly once PER CAMERA, not once globally and "
+            "not on every start_recorder call for an already-warned camera"
+        )
+        assert cam_a in coord._nvr_preroll_zero_warned
+        assert cam_b in coord._nvr_preroll_zero_warned
+
+    @pytest.mark.asyncio
+    async def test_preroll_seconds_zero_warning_clears_when_set_positive(self):
+        """Once nvr_preroll_seconds is fixed (>0), the one-time WARN flag
+        must clear so it can re-fire if the option is ever reset to 0
+        again."""
+        coord = SimpleNamespace(
+            live_connections={
+                CAM_ID_SHORT: {
+                    "_connection_type": "LOCAL",
+                    "rtspsUrl": "rtsp://127.0.0.1:5000/cam",
+                }
+            },
+            options={"nvr_preroll_seconds": 0},
+            data={CAM_ID_SHORT: {"info": {"title": "Terrasse"}}},
+            hass=SimpleNamespace(async_add_executor_job=AsyncMock()),
+            async_update_listeners=MagicMock(),
+        )
+        coord.get_nvr_mode = lambda cid: "event_buffered"
+        coord._nvr_recorder_locks = {}
+        coord.get_nvr_recorder_lock = lambda cid: coord._nvr_recorder_locks.setdefault(
+            cid, asyncio.Lock()
+        )
+        coord._nvr_preroll_zero_warned = set()
+
+        with patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)):
+            await recorder.start_recorder(coord, CAM_ID_SHORT)
+        assert CAM_ID_SHORT in coord._nvr_preroll_zero_warned
+
+        coord.options["nvr_preroll_seconds"] = 30
+        with (
+            patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)),
+            patch.object(
+                recorder,
+                "_spawn_preroll_recorder_locked",
+                new=AsyncMock(return_value=None),
+            ),
+        ):
+            await recorder.start_recorder(coord, CAM_ID_SHORT)
+        assert CAM_ID_SHORT not in coord._nvr_preroll_zero_warned
 
 
 class TestSyncNvrCleanupLocalStagingExclusion:

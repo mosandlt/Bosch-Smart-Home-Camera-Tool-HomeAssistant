@@ -910,6 +910,13 @@ class BoschCameraCoordinator(
         # logged. Cleared once the update installs (upToDate flips back to True)
         # so the INFO re-fires for the next update.
         self._fw_update_alerted = BoolFieldView(self._sessions, "fw_update_alerted")
+        # Tracks cam_ids for which a "event_buffered mode but preroll seconds
+        # is 0" WARN has been logged (GitHub #64 — the ring silently never
+        # spawns in this case). Cleared once nvr_preroll_seconds is set > 0
+        # so the WARN re-fires if it's ever reset back to 0.
+        self._nvr_preroll_zero_warned = BoolFieldView(
+            self._sessions, "nvr_preroll_zero_warned"
+        )
         self.privacy_set_at = FloatFieldView(
             self._sessions, "privacy_set_at"
         )  # privacy write timestamp
@@ -2911,7 +2918,8 @@ class BoschCameraCoordinator(
     #       timestamp_set_at / ledlights_set_at / arming_set_at /
     #       intrusion_config_set_at / audio_detection_set_at / motion_set_at /
     #       alarm_settings_set_at / lighting_options_set_at / firmware_set_at /
-    #       slow_tier_deferred / _notif_disabled_logged / _fw_update_alerted —
+    #       slow_tier_deferred / _notif_disabled_logged / _fw_update_alerted /
+    #       _nvr_preroll_zero_warned —
     #       thin FloatFieldView/BoolFieldView facades over _sessions (Session-
     #       State-Facade Slice 1, see session_state.py); purging _sessions
     #       purges these automatically, and they are no longer `dict`/`set`
