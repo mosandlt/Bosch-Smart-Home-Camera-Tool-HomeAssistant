@@ -262,12 +262,70 @@ class BoschNvrModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):  # typ
         self._attr_entity_category = EntityCategory.CONFIG
 
     async def async_added_to_hass(self) -> None:
-        """Restore the last NVR mode override after HA restart."""
+        """Restore the last NVR mode override after HA restart.
+
+        GitHub #64: `const.py`'s ALL_PLATFORMS lists "switch" before
+        "select", and `async_forward_entry_setups` forwards every platform
+        concurrently — so `BoschNvrRecordingSwitch.async_added_to_hass`
+        (switch.py) can already have fired `coordinator.start_recorder()`
+        as a background task before this restore lands. When that happens,
+        `get_nvr_mode()` had no per-camera override yet and fell back to
+        the global `nvr_event_only` option (default False → "continuous"),
+        so the recorder silently started in the WRONG mode: no gate
+        rejects anything, so nothing is logged, and the camera is stuck
+        recording continuously forever even though the mode select and
+        HA diagnostics correctly show "event_buffered". Detect that exact
+        mismatch here and restart into the just-restored mode so a bad
+        scheduling order self-corrects instead of sticking silently.
+
+        Bug-hunt finding: a plain (unlocked) read of nvr_processes /
+        nvr_preroll_processes right after set_nvr_mode() only narrows the
+        race instead of closing it — `_start_recorder_locked` reads the
+        mode long before it publishes the spawned process into either
+        dict, so a switch-task spawn still in flight at that exact moment
+        (mode already read as stale, dict not yet populated) would still
+        be invisible here. `nvr_recorder.start_recorder` serializes its
+        ENTIRE stop+spawn body on `get_nvr_recorder_lock` (GitHub #49), so
+        acquiring that same lock before reading the dicts guarantees any
+        in-flight spawn has either fully published its process or not yet
+        read the mode at all — closing the window instead of shrinking it.
+        The actual restart call must run OUTSIDE that lock (it acquires
+        the same, non-reentrant, lock itself) and is fired via
+        spawn_tracked rather than awaited directly, since start_recorder
+        can block on stream_ready_event for up to ~35s on slower models
+        (min_total_wait) and a direct await here would stall select
+        platform setup for that long — switch.py's own restore-triggered
+        start already avoids this the same way.
+        """
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
         if last_state and last_state.state in NVR_MODE_OPTIONS:
             self.coordinator.set_nvr_mode(self._cam_id, last_state.state)
             _LOGGER.debug("Restored NVR mode %s for %s", last_state.state, self._cam_id)
+            async with self.coordinator.get_nvr_recorder_lock(self._cam_id):
+                running_wrong_mode = (
+                    last_state.state == "event_buffered"
+                    and self._cam_id in self.coordinator.nvr_processes
+                ) or (
+                    last_state.state == "continuous"
+                    and self._cam_id in self.coordinator.nvr_preroll_processes
+                )
+            if running_wrong_mode:
+                # "attempting" not "restarting": start_recorder's own gate
+                # (LOCAL-only/camera-online) can still silently no-op this —
+                # it logs its own WARNING/DEBUG when that happens, so this
+                # line must not claim an outcome it can't guarantee.
+                _LOGGER.info(
+                    "NVR recorder for %s started in the wrong mode during "
+                    "HA startup (platform-restore race, GitHub #64) — "
+                    "attempting to restart into '%s'",
+                    self._cam_id[:8],
+                    last_state.state,
+                )
+                self.coordinator.spawn_tracked(
+                    self.coordinator.start_recorder(self._cam_id),
+                    name=f"bosch_nvr_mode_correct_{self._cam_id[:8]}",
+                )
 
     @property
     def device_info(self) -> dict[str, Any]:

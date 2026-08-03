@@ -318,6 +318,17 @@ class TestVideoQualitySelectBasic:
         }
 
 
+class _NullAsyncLock:
+    """No-op async context manager standing in for asyncio.Lock in tests
+    that don't need real cross-task exclusion."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
 @pytest.fixture
 def stub_coord_nvr_mode() -> SimpleNamespace:
     calls = {}
@@ -328,7 +339,11 @@ def stub_coord_nvr_mode() -> SimpleNamespace:
     def _set_nvr_mode(cid, mode):
         calls[cid] = mode
 
-    return SimpleNamespace(
+    def _create_task(coro, **kwargs):
+        coro.close()
+        return MagicMock()
+
+    coord = SimpleNamespace(
         data={
             CAM_ID: {
                 "info": {"title": "Terrasse", "hardwareVersion": "HOME_Eyes_Outdoor"},
@@ -337,11 +352,17 @@ def stub_coord_nvr_mode() -> SimpleNamespace:
         },
         get_nvr_mode=_get_nvr_mode,
         set_nvr_mode=_set_nvr_mode,
+        get_nvr_recorder_lock=lambda cid: _NullAsyncLock(),
         options={"enable_nvr": True},
         nvr_processes={},
         nvr_preroll_processes={},
         start_recorder=AsyncMock(),
+        hass=SimpleNamespace(async_create_task=MagicMock(side_effect=_create_task)),
     )
+    coord.spawn_tracked = lambda coro, **kwargs: coord.hass.async_create_task(
+        coro, **kwargs
+    )
+    return coord
 
 
 class TestNvrModeSelectBasic:
@@ -475,6 +496,166 @@ class TestNvrModeSelectBasic:
         ):
             await sel.async_added_to_hass()
         assert stub_coord_nvr_mode.get_nvr_mode(CAM_ID) == "event_buffered"
+
+    @pytest.mark.asyncio
+    async def test_restore_restarts_recorder_started_in_wrong_mode(
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """GitHub #64: switch.py's own async_added_to_hass can race ahead of
+        this restore (ALL_PLATFORMS lists "switch" before "select", and
+        platforms are forwarded concurrently) and start the recorder before
+        the per-camera override lands — falling back to the global
+        nvr_event_only default ("continuous"). Simulate that: a continuous
+        recorder is already running for CAM_ID when the saved override
+        turns out to be "event_buffered" — the restore must detect the
+        mismatch and restart into the correct mode.
+        """
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        stub_coord_nvr_mode.nvr_processes[CAM_ID] = MagicMock()  # continuous running
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        last = MagicMock()
+        last.state = "event_buffered"
+        with (
+            patch(
+                "homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
+                AsyncMock(),
+            ),
+            patch.object(sel, "async_get_last_state", AsyncMock(return_value=last)),
+        ):
+            await sel.async_added_to_hass()
+        assert stub_coord_nvr_mode.get_nvr_mode(CAM_ID) == "event_buffered"
+        # Fire-and-forget via spawn_tracked/hass.async_create_task, not a
+        # direct await — a blocking await here would stall select-platform
+        # setup for up to ~35s (min_total_wait) while start_recorder waits
+        # on stream_ready_event. start_recorder is CALLED (args captured)
+        # but its coroutine is handed to async_create_task, not awaited
+        # synchronously by this entity.
+        stub_coord_nvr_mode.start_recorder.assert_called_once_with(CAM_ID)
+        stub_coord_nvr_mode.start_recorder.assert_not_awaited()
+        stub_coord_nvr_mode.hass.async_create_task.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_restore_restarts_recorder_started_in_wrong_mode_reverse(
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """Mirror case: a preroll ring is already running but the restored
+        override is "continuous" — must also restart."""
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        stub_coord_nvr_mode.nvr_preroll_processes[CAM_ID] = MagicMock()
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        last = MagicMock()
+        last.state = "continuous"
+        with (
+            patch(
+                "homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
+                AsyncMock(),
+            ),
+            patch.object(sel, "async_get_last_state", AsyncMock(return_value=last)),
+        ):
+            await sel.async_added_to_hass()
+        assert stub_coord_nvr_mode.get_nvr_mode(CAM_ID) == "continuous"
+        stub_coord_nvr_mode.start_recorder.assert_called_once_with(CAM_ID)
+        stub_coord_nvr_mode.start_recorder.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_restore_no_restart_when_mode_already_matches(
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """No race occurred — the running recorder already matches the
+        restored mode — must NOT restart (would needlessly interrupt an
+        already-healthy recorder/ring on every HA restart)."""
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        stub_coord_nvr_mode.nvr_preroll_processes[CAM_ID] = MagicMock()
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        last = MagicMock()
+        last.state = "event_buffered"
+        with (
+            patch(
+                "homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
+                AsyncMock(),
+            ),
+            patch.object(sel, "async_get_last_state", AsyncMock(return_value=last)),
+        ):
+            await sel.async_added_to_hass()
+        stub_coord_nvr_mode.start_recorder.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_restore_no_restart_when_no_recorder_running(
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """No recorder active at all yet (normal case, no race) — must not
+        call start_recorder from the restore path; the switch's own restore
+        or the LOCAL-stream-up hook is responsible for the first start."""
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        last = MagicMock()
+        last.state = "event_buffered"
+        with (
+            patch(
+                "homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
+                AsyncMock(),
+            ),
+            patch.object(sel, "async_get_last_state", AsyncMock(return_value=last)),
+        ):
+            await sel.async_added_to_hass()
+        stub_coord_nvr_mode.start_recorder.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_restore_detection_serialized_on_recorder_lock(
+        self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """Bug-hunt finding: a plain unlocked dict read only narrows GitHub
+        #64's race instead of closing it — `_start_recorder_locked` reads
+        the mode long before it publishes the process into
+        nvr_processes/nvr_preroll_processes, so a switch-task spawn still
+        mid-flight at read time would otherwise be invisible here. Simulate
+        a concurrent in-flight spawn holding `get_nvr_recorder_lock`: the
+        restore's detection must block on that real lock and only read the
+        dicts after the concurrent spawn releases it (and has published its
+        process) — proving detection is serialized, not an instantaneous
+        peek.
+        """
+        import asyncio
+
+        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+
+        real_lock = asyncio.Lock()
+        stub_coord_nvr_mode.get_nvr_recorder_lock = lambda cid: real_lock
+
+        async def _concurrent_spawn_in_flight():
+            async with real_lock:
+                # Mode was read as "continuous" (stale) before select's
+                # restore landed; the process only gets published here,
+                # partway through the locked spawn body — exactly the
+                # in-flight window the unlocked version missed.
+                await asyncio.sleep(0)
+                stub_coord_nvr_mode.nvr_processes[CAM_ID] = MagicMock()
+
+        sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
+        last = MagicMock()
+        last.state = "event_buffered"
+
+        async with real_lock:
+            concurrent_task = asyncio.ensure_future(_concurrent_spawn_in_flight())
+            await asyncio.sleep(0)  # let it block on the held lock
+            assert CAM_ID not in stub_coord_nvr_mode.nvr_processes
+
+        with (
+            patch(
+                "homeassistant.helpers.update_coordinator.CoordinatorEntity.async_added_to_hass",
+                AsyncMock(),
+            ),
+            patch.object(sel, "async_get_last_state", AsyncMock(return_value=last)),
+        ):
+            await sel.async_added_to_hass()
+        await concurrent_task
+
+        assert CAM_ID in stub_coord_nvr_mode.nvr_processes
+        stub_coord_nvr_mode.start_recorder.assert_called_once_with(CAM_ID)
 
     @pytest.mark.asyncio
     async def test_restore_state_ignores_invalid_saved_option(
