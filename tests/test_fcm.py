@@ -1795,6 +1795,87 @@ class TestPatchedListenBody:
 
         assert slept == [1], "Must sleep 1s while RESETTING"
 
+    @pytest.mark.asyncio
+    async def test_undecryptable_message_skipped_not_terminated(self):
+        """Regression test for GitHub issue #65.
+
+        Upstream firebase_messaging's _handle_message() can raise
+        binascii.Error("Incorrect padding") (a ValueError subclass) when a push
+        message's crypto-key/salt header arrives without base64 padding
+        (RFC 8291-valid, see sdb9696/firebase-messaging#40). One bad message
+        must be skipped, not terminate the whole FcmPushClient.
+        """
+        import binascii
+
+        instance = self._make_instance()
+
+        terminate_calls = []
+        instance._terminate = lambda: terminate_calls.append(1)
+
+        warn_calls = []
+        instance._log_warn_with_limit = lambda *a, **k: warn_calls.append((a, k))
+
+        handled = []
+
+        async def _handle_message(msg):
+            handled.append(msg)
+            if len(handled) == 1:
+                raise binascii.Error("Incorrect padding")
+            instance.do_listen = False
+
+        instance._handle_message = _handle_message
+
+        call_count = [0]
+
+        async def _recv():
+            call_count[0] += 1
+            return {"msg": call_count[0]}
+
+        instance._receive_msg = _recv
+
+        await instance._listen()
+
+        assert len(handled) == 2, (
+            "Must continue receiving messages after a decode failure"
+        )
+        assert not terminate_calls, (
+            "A single undecryptable message must not terminate FcmPushClient"
+        )
+        assert warn_calls, (
+            "Must log via the rate-limited path (message is redelivered on "
+            "every reconnect since it's never acked) instead of an unbounded "
+            "warning"
+        )
+
+    @pytest.mark.asyncio
+    async def test_corrupt_credentials_value_error_still_terminates(self):
+        """A plain ValueError (e.g. corrupt stored FCM credentials) must NOT be
+        caught by the binascii.Error-only skip — it needs the supervisor's
+        hard-heal (credential purge + re-registration), not a silent per-message
+        skip that would mask a client-wide fault forever.
+        """
+        instance = self._make_instance()
+
+        terminate_calls = []
+        instance._terminate = lambda: terminate_calls.append(1)
+
+        async def _handle_message(msg):
+            raise ValueError("Could not deserialize key data")
+
+        instance._handle_message = _handle_message
+
+        async def _recv():
+            return {"msg": 1}
+
+        instance._receive_msg = _recv
+
+        await instance._listen()
+
+        assert terminate_calls, (
+            "A non-binascii ValueError must still terminate FcmPushClient "
+            "so the supervisor's hard-heal can run"
+        )
+
 
 def _make_register_coord(data: dict | None = None) -> SimpleNamespace:
     """Minimal coordinator stub for register_fcm_with_bosch tests."""

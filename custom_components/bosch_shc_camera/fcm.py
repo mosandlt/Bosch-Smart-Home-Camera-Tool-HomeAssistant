@@ -14,6 +14,7 @@ Handles:
 from __future__ import annotations
 
 import asyncio
+import binascii
 import logging
 import os
 import ssl
@@ -337,7 +338,33 @@ class _QuietFcmPushClient:
                             if self.run_state == FcmPushClientRunState.RESETTING:  # type: ignore[has-type]  # external FcmPushClient attr (untyped base)
                                 await asyncio.sleep(1)
                             elif msg := await self._receive_msg():
-                                await self._handle_message(msg)
+                                try:
+                                    await self._handle_message(msg)
+                                except binascii.Error as decode_ex:
+                                    # FIX for issue #65 / upstream
+                                    # sdb9696/firebase-messaging#40+#37 (unmerged):
+                                    # a push message's crypto-key/salt headers can
+                                    # legitimately arrive without base64 padding
+                                    # (RFC 8291-valid); _decrypt_raw_data() decodes
+                                    # them raw and raises binascii.Error. Skip just
+                                    # this message instead of letting it hit the
+                                    # broad `except Exception` below, which would
+                                    # terminate the whole FcmPushClient over one
+                                    # undecryptable message. Deliberately narrower
+                                    # than ValueError: _decrypt_raw_data() also
+                                    # raises plain ValueError from corrupt *stored*
+                                    # credentials (load_der_private_key/http_decrypt)
+                                    # — a client-wide fault that must still hit the
+                                    # broad except below to trigger the supervisor's
+                                    # hard-heal (credential purge + re-registration),
+                                    # not be masked as a one-off bad message.
+                                    # Google MCS redelivers this message on every
+                                    # reconnect (never acked), so rate-limit like the
+                                    # OSError path above instead of a raw warning.
+                                    self._log_warn_with_limit(
+                                        "Skipping undecryptable FCM push message: %s",
+                                        decode_ex,
+                                    )
 
                         except (OSError, EOFError) as osex:
                             # FIX for issue #33: advance state to RESETTING here,
