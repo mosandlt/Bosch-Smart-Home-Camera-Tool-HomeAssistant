@@ -643,6 +643,10 @@ MODULE = "custom_components.bosch_shc_camera"
 # patching them under MODULE would silently no-op (attribute exists on
 # neither __init__.py nor gets consulted at call time).
 COORD_MODULE = "custom_components.bosch_shc_camera.coordinator"
+# smb_available/smb_dependent_features lifecycle-check callers live in
+# repairs.py (style-audit relocation, 2026-08-04) — coordinator.py no
+# longer imports these names at all, so patching COORD_MODULE would no-op.
+REPAIRS_MODULE = "custom_components.bosch_shc_camera.repairs"
 
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
@@ -4310,7 +4314,17 @@ def _session_with_get(get_handler):
 class TestGo2rtcConsumerCount:
     def _coord(self):
         return SimpleNamespace(
-            camera_entities={CAM: SimpleNamespace(entity_id="camera.bosch_test")}
+            camera_entities={CAM: SimpleNamespace(entity_id="camera.bosch_test")},
+            hass=MagicMock(),
+        )
+
+    def _patch_session(self, get_fn):
+        # go2rtc_client._get_go2rtc_session now builds its session via HA's
+        # aiohttp_client.async_create_clientsession (inject-websession gap,
+        # closed 2026-08-04) rather than a bare aiohttp.ClientSession().
+        return patch(
+            f"{MODULE}.go2rtc_client.aiohttp_client.async_create_clientsession",
+            return_value=_session_with_get(get_fn),
         )
 
     @pytest.mark.asyncio
@@ -4322,7 +4336,7 @@ class TestGo2rtcConsumerCount:
                 json=AsyncMock(return_value={"consumers": [{}, {}, {}]}),
             )
 
-        with patch("aiohttp.ClientSession", return_value=_session_with_get(_get)):
+        with self._patch_session(_get):
             n = await BoschCameraCoordinator.go2rtc_consumer_count(self._coord(), CAM)
         assert n == 3
 
@@ -4332,7 +4346,7 @@ class TestGo2rtcConsumerCount:
         async def _get(*a, **kw):
             yield SimpleNamespace(status=200, json=AsyncMock(return_value={}))
 
-        with patch("aiohttp.ClientSession", return_value=_session_with_get(_get)):
+        with self._patch_session(_get):
             n = await BoschCameraCoordinator.go2rtc_consumer_count(self._coord(), CAM)
         assert n == 0
 
@@ -4350,7 +4364,7 @@ class TestGo2rtcConsumerCount:
                     status=200, json=AsyncMock(return_value={"consumers": [{}]})
                 )
 
-        with patch("aiohttp.ClientSession", return_value=_session_with_get(_get)):
+        with self._patch_session(_get):
             n = await BoschCameraCoordinator.go2rtc_consumer_count(self._coord(), CAM)
         assert n == 1
         assert calls["n"] == 2  # second endpoint was tried
@@ -4364,7 +4378,7 @@ class TestGo2rtcConsumerCount:
             raise aiohttp.ClientError("connection refused")
             yield  # pragma: no cover
 
-        with patch("aiohttp.ClientSession", return_value=_session_with_get(_get)):
+        with self._patch_session(_get):
             n = await BoschCameraCoordinator.go2rtc_consumer_count(self._coord(), CAM)
         assert n is None
 
@@ -4379,8 +4393,8 @@ class TestGo2rtcConsumerCount:
                 status=200, json=AsyncMock(return_value={"consumers": []})
             )
 
-        coord = SimpleNamespace(camera_entities={})
-        with patch("aiohttp.ClientSession", return_value=_session_with_get(_get)):
+        coord = SimpleNamespace(camera_entities={}, hass=MagicMock())
+        with self._patch_session(_get):
             n = await BoschCameraCoordinator.go2rtc_consumer_count(coord, CAM)
         assert n == 0
         assert captured["params"]["src"] == f"bosch_shc_cam_{CAM.lower()}"
@@ -5995,6 +6009,15 @@ class TestUnregisterGo2rtcStream:
         session.__aexit__ = AsyncMock(return_value=False)
         return session
 
+    def _patch_session(self, **kw):
+        # go2rtc_client._get_go2rtc_session now builds its session via HA's
+        # aiohttp_client.async_create_clientsession (inject-websession gap,
+        # closed 2026-08-04) rather than a bare aiohttp.ClientSession().
+        return patch(
+            f"{MODULE}.go2rtc_client.aiohttp_client.async_create_clientsession",
+            **kw,
+        )
+
     @pytest.mark.asyncio
     async def test_uses_entity_id_for_delete(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
@@ -6003,7 +6026,7 @@ class TestUnregisterGo2rtcStream:
         coord = _make_coord_go2rtc(camera_entities={CAM_A: cam_entity})
         captured = {}
         session = self._make_session_for_unregister(capture=captured)
-        with patch("aiohttp.ClientSession", return_value=session):
+        with self._patch_session(return_value=session):
             await BoschCameraCoordinator.unregister_go2rtc_stream(coord, CAM_A)
         assert captured["params"]["name"] == "camera.bosch_terrasse"
 
@@ -6013,10 +6036,7 @@ class TestUnregisterGo2rtcStream:
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = _make_coord_go2rtc()
-        with patch(
-            "aiohttp.ClientSession",
-            side_effect=aiohttp_client_error,
-        ):
+        with self._patch_session(side_effect=aiohttp_client_error):
             # Must NOT raise
             await BoschCameraCoordinator.unregister_go2rtc_stream(coord, CAM_A)
 
@@ -6028,7 +6048,7 @@ class TestUnregisterGo2rtcStream:
         coord = _make_coord_go2rtc(camera_entities={})
         captured = {}
         session = self._make_session_for_unregister(capture=captured)
-        with patch("aiohttp.ClientSession", return_value=session):
+        with self._patch_session(return_value=session):
             await BoschCameraCoordinator.unregister_go2rtc_stream(coord, CAM_A)
         assert captured["params"]["name"] == f"bosch_shc_cam_{CAM_A.lower()}"
 
@@ -6056,7 +6076,7 @@ class TestUnregisterGo2rtcStream:
         session.delete = _delete
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=False)
-        with patch("aiohttp.ClientSession", return_value=session):
+        with self._patch_session(return_value=session):
             await BoschCameraCoordinator.unregister_go2rtc_stream(coord, CAM_A)
 
         assert len(urls) == 2, (
@@ -7147,7 +7167,7 @@ class TestAsyncInstallFirmware:
 
         coord = _make_coord_firmware_install({"current": "9.40.104", "upToDate": True})
 
-        with pytest.raises(HomeAssistantError, match="No firmware update"):
+        with pytest.raises(HomeAssistantError, match="firmware_no_update_available"):
             await _call(coord)
 
         coord.async_put_camera.assert_not_awaited()
@@ -7158,7 +7178,7 @@ class TestAsyncInstallFirmware:
 
         coord = _make_coord_firmware_install(None)
 
-        with pytest.raises(HomeAssistantError, match="No firmware update"):
+        with pytest.raises(HomeAssistantError, match="firmware_no_update_available"):
             await _call(coord)
 
         coord.async_put_camera.assert_not_awaited()
@@ -7179,7 +7199,7 @@ class TestAsyncInstallFirmware:
             }
         )
 
-        with pytest.raises(HomeAssistantError, match="already in progress"):
+        with pytest.raises(HomeAssistantError, match="firmware_install_in_progress"):
             await _call(coord)
 
         coord.async_put_camera.assert_not_awaited()
@@ -7262,7 +7282,7 @@ class TestAsyncInstallFirmware:
 
         put_release.set()
         await first
-        with pytest.raises(HomeAssistantError, match="already in progress"):
+        with pytest.raises(HomeAssistantError, match="firmware_install_in_progress"):
             await second
 
         coord.async_put_camera.assert_awaited_once()
@@ -12816,8 +12836,17 @@ async def _setup_and_get_handlers(
     entry: MagicMock,
     coord_stub: MagicMock,
 ) -> tuple[dict[str, Any], dict[str, list[Any]]]:
-    """Run async_setup_entry, capture service handlers and bus listeners."""
+    """Run async_setup_entry, capture service handlers and bus listeners.
+
+    describe_snapshot/analyze_camera_ai/send_event_webhook are registered by
+    services.py's `_register_services` — called from `async_setup` in real HA,
+    not `async_setup_entry` (action-setup quality-scale rule, fixed 2026-08-04).
+    Call it here too so `registered_handlers` still picks them up, mirroring
+    HA's real component lifecycle (async_setup always runs before any
+    async_setup_entry for the same domain).
+    """
     from custom_components.bosch_shc_camera import async_setup_entry
+    from custom_components.bosch_shc_camera.services import _register_services
 
     store_factory = _make_store_factory()
     registered_handlers: dict[str, Any] = {}
@@ -12843,6 +12872,7 @@ async def _setup_and_get_handlers(
         ),
         patch(f"{MODULE}.async_get_clientsession", return_value=MagicMock()),
     ):
+        _register_services(hass)
         await async_setup_entry(hass, entry)
 
     return registered_handlers, bus_listeners
@@ -13937,7 +13967,9 @@ class TestSendEventWebhookInvalidScheme:
 
         session_mock = MagicMock()
         session_mock.post = MagicMock()
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session_mock):
+        with patch(
+            f"{MODULE}.services.async_get_clientsession", return_value=session_mock
+        ):
             await handler(_make_call({"event_type": "MOVEMENT"}))
 
         session_mock.post.assert_not_called()
@@ -13962,7 +13994,9 @@ class TestSendEventWebhookInvalidScheme:
         assert handler is not None
 
         session_mock = MagicMock()
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session_mock):
+        with patch(
+            f"{MODULE}.services.async_get_clientsession", return_value=session_mock
+        ):
             await handler(_make_call({"event_type": "INTRUSION"}))
 
         session_mock.post.assert_not_called()
@@ -13993,7 +14027,9 @@ class TestSendEventWebhookInvalidScheme:
         cm_mock.__aexit__ = AsyncMock(return_value=False)
         session_mock = MagicMock()
         session_mock.post = MagicMock(return_value=cm_mock)
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session_mock):
+        with patch(
+            f"{MODULE}.services.async_get_clientsession", return_value=session_mock
+        ):
             await handler(_make_call({"event_type": "AUDIO_ALARM"}))
 
         session_mock.post.assert_called_once()
@@ -14018,7 +14054,9 @@ class TestSendEventWebhookInvalidScheme:
         assert handler is not None
 
         session_mock = MagicMock()
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session_mock):
+        with patch(
+            f"{MODULE}.services.async_get_clientsession", return_value=session_mock
+        ):
             await handler(_make_call({"event_type": "MOVEMENT"}))
 
         session_mock.post.assert_not_called()
@@ -14043,7 +14081,9 @@ class TestSendEventWebhookInvalidScheme:
         assert handler is not None
 
         session_mock = MagicMock()
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session_mock):
+        with patch(
+            f"{MODULE}.services.async_get_clientsession", return_value=session_mock
+        ):
             await handler(_make_call({"event_type": "MOVEMENT"}))
 
         session_mock.post.assert_not_called()
@@ -14068,7 +14108,9 @@ class TestSendEventWebhookInvalidScheme:
         assert handler is not None
 
         session_mock = MagicMock()
-        with patch(f"{MODULE}.async_get_clientsession", return_value=session_mock):
+        with patch(
+            f"{MODULE}.services.async_get_clientsession", return_value=session_mock
+        ):
             await handler(_make_call({"event_type": "MOVEMENT"}))
 
         session_mock.post.assert_not_called()
@@ -18485,7 +18527,7 @@ class TestCancelCoordinatorTasksExceptions:
 
         go2rtc_session = MagicMock()
         go2rtc_session.closed = False
-        go2rtc_session.close = AsyncMock()
+        go2rtc_session.detach = MagicMock()
         coord = _make_cancel_coord(go2rtc_session=go2rtc_session)
 
         with (
@@ -18495,18 +18537,17 @@ class TestCancelCoordinatorTasksExceptions:
         ):
             await _async_cancel_coordinator_tasks(coord)
 
-        go2rtc_session.close.assert_awaited_once()
+        go2rtc_session.detach.assert_called_once()
         assert coord.go2rtc_session is None
 
     @pytest.mark.asyncio
     async def test_go2rtc_session_already_closed_not_double_closed(self):
-        """An already-closed go2rtc session must not be closed again — avoids
-        a spurious double-close (aiohttp warns/raises on some versions)."""
+        """An already-closed go2rtc session must not be detached again."""
         from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
 
         go2rtc_session = MagicMock()
         go2rtc_session.closed = True
-        go2rtc_session.close = AsyncMock()
+        go2rtc_session.detach = MagicMock()
         coord = _make_cancel_coord(go2rtc_session=go2rtc_session)
 
         with (
@@ -18516,20 +18557,22 @@ class TestCancelCoordinatorTasksExceptions:
         ):
             await _async_cancel_coordinator_tasks(coord)
 
-        go2rtc_session.close.assert_not_awaited()
+        go2rtc_session.detach.assert_not_called()
         assert coord.go2rtc_session is None
 
     @pytest.mark.asyncio
     async def test_go2rtc_session_close_exception_swallowed(self):
-        """A go2rtc session that raises on close() (e.g. connector already
-        torn down) must not abort the rest of teardown — the exception is
-        caught and debug-logged, and the coordinator's bookkeeping
-        (attribute cleared, teardown-done flag set) still completes."""
+        """A go2rtc session that raises on detach() (defensive — aiohttp's
+        detach() itself never raises, but the surrounding code must not
+        abort the rest of teardown if something unexpected happens) must
+        not abort the rest of teardown — the exception is caught and
+        debug-logged, and the coordinator's bookkeeping (attribute cleared,
+        teardown-done flag set) still completes."""
         from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
 
         go2rtc_session = MagicMock()
         go2rtc_session.closed = False
-        go2rtc_session.close = AsyncMock(side_effect=RuntimeError("already closing"))
+        go2rtc_session.detach = MagicMock(side_effect=RuntimeError("already closing"))
         coord = _make_cancel_coord(go2rtc_session=go2rtc_session)
 
         with (
@@ -18539,7 +18582,7 @@ class TestCancelCoordinatorTasksExceptions:
         ):
             await _async_cancel_coordinator_tasks(coord)  # must not raise
 
-        go2rtc_session.close.assert_awaited_once()
+        go2rtc_session.detach.assert_called_once()
         assert coord.go2rtc_session is None
         assert coord.go2rtc_teardown_done is True
 
@@ -18552,6 +18595,104 @@ class TestCancelCoordinatorTasksExceptions:
         from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
 
         coord = _make_cancel_coord()  # no go2rtc_session attribute at all
+
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
+            await _async_cancel_coordinator_tasks(coord)  # must not raise
+
+
+class TestShcSessionTeardown:
+    """inject-websession gap (closed 2026-08-04): shc.py's async_shc_request
+    now reuses a persistent aiohttp.ClientSession (paired with the existing
+    persistent TCPConnector) across calls instead of opening a fresh one
+    per request. Since this session is privately owned (mutual-TLS to the
+    LAN SHC, not HA's shared connector), teardown must actually close()
+    both the session and the connector — unlike the go2rtc session above,
+    which must only ever detach()."""
+
+    @pytest.mark.asyncio
+    async def test_shc_session_and_connector_closed_on_teardown(self):
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        shc_session = MagicMock()
+        shc_session.closed = False
+        shc_session.close = AsyncMock()
+        shc_connector = MagicMock()
+        shc_connector.closed = False
+        shc_connector.close = AsyncMock()
+        coord = _make_cancel_coord(shc_session=shc_session, shc_connector=shc_connector)
+
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
+            await _async_cancel_coordinator_tasks(coord)
+
+        shc_session.close.assert_awaited_once()
+        shc_connector.close.assert_awaited_once()
+        assert coord.shc_session is None
+        assert coord.shc_connector is None
+
+    @pytest.mark.asyncio
+    async def test_shc_session_already_closed_not_double_closed(self):
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        shc_session = MagicMock()
+        shc_session.closed = True
+        shc_session.close = AsyncMock()
+        shc_connector = MagicMock()
+        shc_connector.closed = True
+        shc_connector.close = AsyncMock()
+        coord = _make_cancel_coord(shc_session=shc_session, shc_connector=shc_connector)
+
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
+            await _async_cancel_coordinator_tasks(coord)
+
+        shc_session.close.assert_not_awaited()
+        shc_connector.close.assert_not_awaited()
+        assert coord.shc_session is None
+        assert coord.shc_connector is None
+
+    @pytest.mark.asyncio
+    async def test_shc_session_and_connector_close_exceptions_swallowed(self):
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        shc_session = MagicMock()
+        shc_session.closed = False
+        shc_session.close = AsyncMock(side_effect=RuntimeError("session boom"))
+        shc_connector = MagicMock()
+        shc_connector.closed = False
+        shc_connector.close = AsyncMock(side_effect=RuntimeError("connector boom"))
+        coord = _make_cancel_coord(shc_session=shc_session, shc_connector=shc_connector)
+
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies"),
+            patch("asyncio.gather", AsyncMock(return_value=[])),
+        ):
+            await _async_cancel_coordinator_tasks(coord)  # must not raise
+
+        shc_session.close.assert_awaited_once()
+        shc_connector.close.assert_awaited_once()
+        assert coord.shc_session is None
+        assert coord.shc_connector is None
+
+    @pytest.mark.asyncio
+    async def test_no_shc_session_teardown_is_noop(self):
+        """SimpleNamespace test doubles predating this attribute, or a
+        coordinator that never called async_shc_request, must tear down
+        cleanly via the `getattr` guard, no AttributeError."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        coord = _make_cancel_coord()  # no shc_session/shc_connector attrs
 
         with (
             patch(f"{MODULE}.nvr_recorder.stop_all", AsyncMock()),
@@ -18575,11 +18716,14 @@ class TestGo2rtcSessionPooling:
     @pytest.mark.asyncio
     async def test_consumer_count_reuses_session_across_two_calls(self):
         """Two go2rtc_consumer_count calls on the same coordinator must
-        create at most ONE aiohttp.ClientSession — not one per call."""
+        create at most ONE session (via HA's
+        `aiohttp_client.async_create_clientsession` — inject-websession gap,
+        closed 2026-08-04) — not one per call."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
         coord = SimpleNamespace(
-            camera_entities={CAM: SimpleNamespace(entity_id="camera.bosch_test")}
+            camera_entities={CAM: SimpleNamespace(entity_id="camera.bosch_test")},
+            hass=MagicMock(),
         )
 
         @asynccontextmanager
@@ -18598,12 +18742,15 @@ class TestGo2rtcSessionPooling:
             created.append(1)
             return session_mock
 
-        with patch("aiohttp.ClientSession", side_effect=_fake_session_ctor):
+        with patch(
+            f"{MODULE}.go2rtc_client.aiohttp_client.async_create_clientsession",
+            side_effect=_fake_session_ctor,
+        ):
             await BoschCameraCoordinator.go2rtc_consumer_count(coord, CAM)
             await BoschCameraCoordinator.go2rtc_consumer_count(coord, CAM)
 
         assert len(created) == 1, (
-            f"Expected exactly 1 pooled aiohttp.ClientSession across 2 calls, "
+            f"Expected exactly 1 pooled go2rtc session across 2 calls, "
             f"got {len(created)} — go2rtc session pooling regressed"
         )
         assert coord.go2rtc_session is session_mock
@@ -18639,12 +18786,15 @@ class TestGo2rtcSessionPooling:
             created.append(1)
             return session_mock
 
-        with patch("aiohttp.ClientSession", side_effect=_fake_session_ctor):
+        with patch(
+            f"{MODULE}.go2rtc_client.aiohttp_client.async_create_clientsession",
+            side_effect=_fake_session_ctor,
+        ):
             await BoschCameraCoordinator.go2rtc_consumer_count(coord, CAM)
             await BoschCameraCoordinator.unregister_go2rtc_stream(coord, CAM)
 
         assert len(created) == 1, (
-            f"Expected exactly 1 pooled aiohttp.ClientSession shared between "
+            f"Expected exactly 1 pooled go2rtc session shared between "
             f"consumer-count+unregister, got {len(created)}"
         )
         assert coord.go2rtc_session is session_mock
@@ -19796,7 +19946,7 @@ class TestNoTokenGuard:
         coord = _make_coord_sprint_ka(token=None, refresh_token="")
 
         with (
-            pytest.raises(ConfigEntryAuthFailed, match="Not authenticated"),
+            pytest.raises(ConfigEntryAuthFailed, match="not_authenticated"),
             patch(_PATCH_SESSION, new_callable=AsyncMock) as mock_sess,
         ):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -20337,7 +20487,7 @@ class TestCameraList401DoubleFailure:
         session_mock.get = MagicMock(side_effect=_get)
 
         with (
-            pytest.raises(ConfigEntryAuthFailed, match="Token expired"),
+            pytest.raises(ConfigEntryAuthFailed, match="token_expired_renewal_failed"),
             patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -20379,7 +20529,7 @@ class TestCameraList401DoubleFailure:
 
         with (
             caplog.at_level(logging.DEBUG, logger="custom_components.bosch_shc_camera"),
-            pytest.raises(ConfigEntryAuthFailed, match="Token expired"),
+            pytest.raises(ConfigEntryAuthFailed, match="token_expired_renewal_failed"),
             patch(_PATCH_SESSION, new=AsyncMock(return_value=session_mock)),
         ):
             await BoschCameraCoordinator._async_update_data(coord)
@@ -31918,6 +32068,7 @@ class TestSetupEntrySendEventWebhookService:
     ) -> tuple[Any, MagicMock]:
         """Run async_setup_entry + invoke service handler, keep patches active throughout."""
         from custom_components.bosch_shc_camera import async_setup_entry
+        from custom_components.bosch_shc_camera.services import _register_services
 
         store_factory = _MultiStore_sprint_md(
             {
@@ -31964,8 +32115,9 @@ class TestSetupEntrySendEventWebhookService:
                 "homeassistant.helpers.entity_registry.async_get",
                 return_value=_make_ent_reg(),
             ),
-            patch(f"{MODULE}.async_get_clientsession", return_value=session),
+            patch(f"{MODULE}.services.async_get_clientsession", return_value=session),
         ):
+            _register_services(hass)
             await async_setup_entry(hass, entry)
             handler = captured_handler[0] if captured_handler else None
             call = SimpleNamespace(data=service_call_data)
@@ -31981,6 +32133,7 @@ class TestSetupEntrySendEventWebhookService:
             CONF_ENABLE_WEBHOOK_DELIVERY,
             CONF_WEBHOOK_URL,
         )
+        from custom_components.bosch_shc_camera.services import _register_services
 
         store_factory = _MultiStore_sprint_md(
             {
@@ -32011,6 +32164,7 @@ class TestSetupEntrySendEventWebhookService:
                 return_value=_make_ent_reg(),
             ),
         ):
+            _register_services(hass)
             await async_setup_entry(hass, entry)
 
         calls = [
@@ -32338,10 +32492,6 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -32354,10 +32504,6 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -32379,10 +32525,6 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is not None and result[:2] == b"\xff\xd8"
@@ -32402,10 +32544,6 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -32425,10 +32563,6 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -32448,10 +32582,6 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         session.put.assert_not_called()
@@ -32477,10 +32607,6 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID, 320)
         session.get.assert_not_called()
@@ -32505,10 +32631,6 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         session.get.assert_called()
@@ -32545,10 +32667,6 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is not None and result[:2] == b"\xff\xd8"
@@ -32561,10 +32679,6 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -32577,10 +32691,6 @@ class TestFetchLiveSnapshotImpl:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord._async_fetch_live_snapshot_impl(CAM_ID)
         assert result is None
@@ -32841,10 +32951,6 @@ class TestFetchLiveSnapshotLocal:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
@@ -32857,10 +32963,6 @@ class TestFetchLiveSnapshotLocal:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
@@ -32878,10 +32980,6 @@ class TestFetchLiveSnapshotLocal:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
@@ -32898,10 +32996,6 @@ class TestFetchLiveSnapshotLocal:
         with (
             patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
             patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
         ):
             result = await coord.async_fetch_live_snapshot_local(CAM_ID)
         assert result is None
@@ -33171,14 +33265,10 @@ class TestCoordRcpSession:
         coord = self._bind(_stub_coord())
         step1 = _resp_cm_round7(200, text="<sessionid>0x12345678</sessionid>")
         step2 = _resp_cm_round7(200)
-        connector, session = self._make_session(step1, step2)
-        with (
-            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
-            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
+        _connector, session = self._make_session(step1, step2)
+        with patch(
+            f"{COORD_MODULE}.async_bosch_cloud_session_cm",
+            return_value=session,
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result == "0x12345678"
@@ -33186,14 +33276,10 @@ class TestCoordRcpSession:
     @pytest.mark.asyncio
     async def test_step1_non200_returns_none(self):
         coord = self._bind(_stub_coord())
-        connector, session = self._make_session(_resp_cm_round7(403))
-        with (
-            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
-            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
+        _connector, session = self._make_session(_resp_cm_round7(403))
+        with patch(
+            f"{COORD_MODULE}.async_bosch_cloud_session_cm",
+            return_value=session,
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result is None
@@ -33201,16 +33287,12 @@ class TestCoordRcpSession:
     @pytest.mark.asyncio
     async def test_no_sessionid_in_response_returns_none(self):
         coord = self._bind(_stub_coord())
-        connector, session = self._make_session(
+        _connector, session = self._make_session(
             _resp_cm_round7(200, text="<result>ok</result>")
         )
-        with (
-            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
-            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
+        with patch(
+            f"{COORD_MODULE}.async_bosch_cloud_session_cm",
+            return_value=session,
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result is None
@@ -33218,15 +33300,11 @@ class TestCoordRcpSession:
     @pytest.mark.asyncio
     async def test_step1_timeout_returns_none(self):
         coord = self._bind(_stub_coord())
-        connector, session = _aiohttp_mocks()
+        _connector, session = _aiohttp_mocks()
         session.get = MagicMock(return_value=_timeout_cm())
-        with (
-            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
-            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
+        with patch(
+            f"{COORD_MODULE}.async_bosch_cloud_session_cm",
+            return_value=session,
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result is None
@@ -33236,15 +33314,11 @@ class TestCoordRcpSession:
         """Step2 (ACK) timeout is non-fatal — session_id already extracted."""
         coord = self._bind(_stub_coord())
         step1 = _resp_cm_round7(200, text="<sessionid>0xABCDEF01</sessionid>")
-        connector, session = _aiohttp_mocks()
+        _connector, session = _aiohttp_mocks()
         session.get = MagicMock(side_effect=[step1, _timeout_cm()])
-        with (
-            patch(f"{MODULE}.aiohttp.TCPConnector", return_value=connector),
-            patch(f"{MODULE}.aiohttp.ClientSession", return_value=session),
-            patch(
-                f"{COORD_MODULE}.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
+        with patch(
+            f"{COORD_MODULE}.async_bosch_cloud_session_cm",
+            return_value=session,
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
         assert result == "0xABCDEF01"
@@ -36684,6 +36758,7 @@ class TestSendEventWebhookNoLoadedEntries:
     async def test_no_entries_logs_warning_and_returns(self):
         """async_loaded_entries returns [] → warning + return (lines 6342-6343)."""
         from custom_components.bosch_shc_camera import async_setup_entry
+        from custom_components.bosch_shc_camera.services import _register_services
 
         store_factory = _MultiStore_sprint_md(
             {
@@ -36728,6 +36803,7 @@ class TestSendEventWebhookNoLoadedEntries:
                 new=AsyncMock(return_value=MagicMock()),
             ),
         ):
+            _register_services(hass)
             await async_setup_entry(hass, entry)
 
         assert captured_handler, "Service handler must be registered"
@@ -36735,7 +36811,7 @@ class TestSendEventWebhookNoLoadedEntries:
 
         logged_warnings = []
 
-        with patch(f"{MODULE}._LOGGER") as mock_log:
+        with patch(f"{MODULE}.services._LOGGER") as mock_log:
             mock_log.warning.side_effect = lambda *a, **k: logged_warnings.append(a)
             call = SimpleNamespace(data={"event_type": "MOVEMENT", "entity_id": ""})
             await handler(call)
@@ -38708,10 +38784,6 @@ class TestFetchLiveSnapshotLocalValueError:
                 return_value=session_cm,
             ),
             patch(
-                "custom_components.bosch_shc_camera.coordinator.async_get_bosch_cloud_ssl_context",
-                new=AsyncMock(return_value=False),
-            ),
-            patch(
                 "homeassistant.helpers.aiohttp_client.async_get_clientsession",
                 return_value=lan_session,
             ),
@@ -38868,7 +38940,7 @@ class TestTokenRefreshEarlyReturns:
         )
         with pytest.raises(ConfigEntryAuthFailed) as exc:
             await BoschCameraCoordinator._refresh_token_locked(coord)
-        assert "re-authentication" in str(exc.value).lower()
+        assert "no_refresh_token" in str(exc.value)
 
 
 class TestTokenRefreshHardErrors:
@@ -38896,7 +38968,7 @@ class TestTokenRefreshHardErrors:
         ):
             with pytest.raises(ConfigEntryAuthFailed) as exc:
                 await BoschCameraCoordinator._refresh_token_locked(coord)
-            assert "Reconfigure" in str(exc.value)
+            assert "refresh_token_invalid" in str(exc.value)
 
     @pytest.mark.asyncio
     async def test_auth_server_outage_backs_off_60s(self):
@@ -40551,7 +40623,7 @@ class TestSmbUnavailableRepairs:
     """Pin every mode: smb-upload-only, nvr-smb-only, both, neither, ftp/local
     targets (which don't need smbprotocol at all), and smbprotocol present."""
 
-    @patch(f"{COORD_MODULE}.smb_available", return_value=False)
+    @patch(f"{REPAIRS_MODULE}.smb_available", return_value=False)
     @patch(f"{MODULE}.ir")
     def test_smb_upload_enabled_and_unavailable_creates_issue(
         self, mock_ir: MagicMock, _mock_available: MagicMock
@@ -40573,7 +40645,7 @@ class TestSmbUnavailableRepairs:
         )
         mock_ir.async_delete_issue.assert_not_called()
 
-    @patch(f"{COORD_MODULE}.smb_available", return_value=False)
+    @patch(f"{REPAIRS_MODULE}.smb_available", return_value=False)
     @patch(f"{MODULE}.ir")
     def test_nvr_smb_target_enabled_and_unavailable_creates_issue(
         self, mock_ir: MagicMock, _mock_available: MagicMock
@@ -40587,7 +40659,7 @@ class TestSmbUnavailableRepairs:
         _, kwargs = mock_ir.async_create_issue.call_args
         assert kwargs["translation_placeholders"]["features"] == "Mini-NVR SMB storage"
 
-    @patch(f"{COORD_MODULE}.smb_available", return_value=False)
+    @patch(f"{REPAIRS_MODULE}.smb_available", return_value=False)
     @patch(f"{MODULE}.ir")
     def test_both_features_enabled_combines_placeholder(
         self, mock_ir: MagicMock, _mock_available: MagicMock
@@ -40608,7 +40680,7 @@ class TestSmbUnavailableRepairs:
             == "SMB event upload + Mini-NVR SMB storage"
         )
 
-    @patch(f"{COORD_MODULE}.smb_available", return_value=True)
+    @patch(f"{REPAIRS_MODULE}.smb_available", return_value=True)
     @patch(f"{MODULE}.ir")
     def test_smb_available_deletes_issue_even_if_configured(
         self, mock_ir: MagicMock, _mock_available: MagicMock
@@ -40624,7 +40696,7 @@ class TestSmbUnavailableRepairs:
         )
         mock_ir.async_create_issue.assert_not_called()
 
-    @patch(f"{COORD_MODULE}.smb_available", return_value=False)
+    @patch(f"{REPAIRS_MODULE}.smb_available", return_value=False)
     @patch(f"{MODULE}.ir")
     def test_neither_feature_enabled_deletes_issue(
         self, mock_ir: MagicMock, _mock_available: MagicMock
@@ -40638,7 +40710,7 @@ class TestSmbUnavailableRepairs:
         )
         mock_ir.async_create_issue.assert_not_called()
 
-    @patch(f"{COORD_MODULE}.smb_available", return_value=False)
+    @patch(f"{REPAIRS_MODULE}.smb_available", return_value=False)
     @patch(f"{MODULE}.ir")
     def test_ftp_upload_protocol_does_not_need_smbprotocol(
         self, mock_ir: MagicMock, _mock_available: MagicMock
@@ -40652,7 +40724,7 @@ class TestSmbUnavailableRepairs:
         mock_ir.async_create_issue.assert_not_called()
         mock_ir.async_delete_issue.assert_called_once()
 
-    @patch(f"{COORD_MODULE}.smb_available", return_value=False)
+    @patch(f"{REPAIRS_MODULE}.smb_available", return_value=False)
     @patch(f"{MODULE}.ir")
     def test_nvr_local_target_does_not_need_smbprotocol(
         self, mock_ir: MagicMock, _mock_available: MagicMock
@@ -40666,7 +40738,7 @@ class TestSmbUnavailableRepairs:
         mock_ir.async_create_issue.assert_not_called()
         mock_ir.async_delete_issue.assert_called_once()
 
-    @patch(f"{COORD_MODULE}.smb_available", return_value=False)
+    @patch(f"{REPAIRS_MODULE}.smb_available", return_value=False)
     @patch(f"{MODULE}.ir")
     def test_nvr_ftp_target_does_not_need_smbprotocol(
         self, mock_ir: MagicMock, _mock_available: MagicMock
@@ -40681,7 +40753,7 @@ class TestSmbUnavailableRepairs:
         mock_ir.async_create_issue.assert_not_called()
         mock_ir.async_delete_issue.assert_called_once()
 
-    @patch(f"{COORD_MODULE}.smb_available", return_value=False)
+    @patch(f"{REPAIRS_MODULE}.smb_available", return_value=False)
     @patch(f"{MODULE}.ir")
     def test_mixed_case_smb_values_still_match(
         self, mock_ir: MagicMock, _mock_available: MagicMock
@@ -40706,7 +40778,7 @@ class TestSmbUnavailableRepairs:
             == "SMB event upload + Mini-NVR SMB storage"
         )
 
-    @patch(f"{COORD_MODULE}.smb_available", return_value=False)
+    @patch(f"{REPAIRS_MODULE}.smb_available", return_value=False)
     @patch(f"{MODULE}.ir")
     def test_warn_logged_once_then_not_again(
         self,
@@ -40733,17 +40805,17 @@ class TestSmbUnavailableRepairs:
             {"enable_smb_upload": True, "upload_protocol": "smb"}
         )
         with (
-            patch(f"{COORD_MODULE}.smb_available", return_value=False),
+            patch(f"{REPAIRS_MODULE}.smb_available", return_value=False),
             caplog.at_level(logging.WARNING, logger=MODULE),
         ):
             _call_smb_unavailable(coord)  # warn #1, logged=True
 
-        with patch(f"{COORD_MODULE}.smb_available", return_value=True):
+        with patch(f"{REPAIRS_MODULE}.smb_available", return_value=True):
             _call_smb_unavailable(coord)  # clears issue, resets logged=False
         assert coord._smb_unavailable_logged is False
 
         with (
-            patch(f"{COORD_MODULE}.smb_available", return_value=False),
+            patch(f"{REPAIRS_MODULE}.smb_available", return_value=False),
             caplog.at_level(logging.WARNING, logger=MODULE),
         ):
             _call_smb_unavailable(coord)  # warn #2

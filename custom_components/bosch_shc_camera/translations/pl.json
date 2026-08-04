@@ -966,6 +966,51 @@
     },
     "ai_task_unavailable": {
       "message": "Usługa AI Task niedostępna lub nieudana: {error}"
+    },
+    "stream_blocked_privacy_mode": {
+      "message": "{camera}: strumień niedostępny — tryb prywatności jest WŁĄCZONY"
+    },
+    "stream_start_blocked_privacy_mode": {
+      "message": "Nie można uruchomić strumienia dla {camera} — tryb prywatności jest aktywny. Najpierw wyłącz tryb prywatności."
+    },
+    "motion_sensitivity_unknown": {
+      "message": "{camera}: czułość wykrywania ruchu nie jest jeszcze znana — spróbuj ponownie, gdy integracja zakończy pierwszą aktualizację"
+    },
+    "motion_detection_enable_failed": {
+      "message": "{camera}: nie udało się włączyć wykrywania ruchu"
+    },
+    "motion_detection_disable_failed": {
+      "message": "{camera}: nie udało się wyłączyć wykrywania ruchu"
+    },
+    "firmware_install_in_progress": {
+      "message": "Instalacja firmware jest już w toku"
+    },
+    "firmware_no_update_available": {
+      "message": "Obecnie brak dostępnej aktualizacji firmware do instalacji"
+    },
+    "firmware_install_rejected": {
+      "message": "Chmura Bosch odrzuciła żądanie instalacji firmware dla {target}"
+    },
+    "soft_reset_rejected": {
+      "message": "Chmura Bosch odrzuciła żądanie soft-reset (ponowne uruchomienie)"
+    },
+    "hard_reset_rejected": {
+      "message": "Chmura Bosch odrzuciła żądanie hard-reset (przywrócenie ustawień fabrycznych)"
+    },
+    "not_authenticated": {
+      "message": "Nie uwierzytelniono — dodaj integrację ponownie, aby się zalogować"
+    },
+    "token_expired_renewal_failed": {
+      "message": "Token wygasł, a odnowienie nie powiodło się — uwierzytelnij się ponownie za pomocą monitu reauth lub przejdź do Ustawienia → Integracje → Bosch Smart Home Camera → Konfiguruj → Wymuś nowe logowanie w przeglądarce"
+    },
+    "no_refresh_token": {
+      "message": "Brak refresh tokena — wymagane ponowne uwierzytelnienie"
+    },
+    "refresh_token_invalid": {
+      "message": "Nieprawidłowy refresh token — uwierzytelnij się ponownie za pomocą przycisku **Reconfigure** na karcie integracji."
+    },
+    "token_refresh_failed_repeatedly": {
+      "message": "Odnawianie tokena wielokrotnie się nie powiodło — uwierzytelnij się ponownie za pomocą przycisku **Reconfigure** na karcie integracji."
     }
   },
   "issues": {

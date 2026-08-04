@@ -980,6 +980,51 @@
     },
     "ai_task_unavailable": {
       "message": "AI Task service unavailable or failed: {error}"
+    },
+    "stream_blocked_privacy_mode": {
+      "message": "{camera}: stream unavailable — privacy mode is ON"
+    },
+    "stream_start_blocked_privacy_mode": {
+      "message": "Cannot start stream for {camera} — privacy mode is active. Turn off privacy mode first."
+    },
+    "motion_sensitivity_unknown": {
+      "message": "{camera}: motion sensitivity not yet known — try again once the integration has finished its first update"
+    },
+    "motion_detection_enable_failed": {
+      "message": "{camera}: failed to enable motion detection"
+    },
+    "motion_detection_disable_failed": {
+      "message": "{camera}: failed to disable motion detection"
+    },
+    "firmware_install_in_progress": {
+      "message": "Firmware install is already in progress"
+    },
+    "firmware_no_update_available": {
+      "message": "No firmware update is currently available to install"
+    },
+    "firmware_install_rejected": {
+      "message": "Bosch cloud rejected the firmware install request for {target}"
+    },
+    "soft_reset_rejected": {
+      "message": "Bosch cloud rejected the soft-reset (restart) request"
+    },
+    "hard_reset_rejected": {
+      "message": "Bosch cloud rejected the hard-reset (factory reset) request"
+    },
+    "not_authenticated": {
+      "message": "Not authenticated — re-add the integration to log in"
+    },
+    "token_expired_renewal_failed": {
+      "message": "Token expired and renewal failed — re-authenticate via the reauth prompt, or go to Settings → Integrations → Bosch Smart Home Camera → Configure → Force new browser login"
+    },
+    "no_refresh_token": {
+      "message": "No refresh token — re-authentication required"
+    },
+    "refresh_token_invalid": {
+      "message": "Refresh token invalid — please re-authenticate via the Reconfigure button on the integration card."
+    },
+    "token_refresh_failed_repeatedly": {
+      "message": "Token refresh failed repeatedly — please re-authenticate via the Reconfigure button on the integration card."
     }
   },
   "issues": {

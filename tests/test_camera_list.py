@@ -204,7 +204,7 @@ class TestFetchCameraList401Retry:
         coord = _make_coord()
         session = _make_session(_make_resp(401), _make_resp(401, text_data="{}"))
 
-        with pytest.raises(ConfigEntryAuthFailed, match="Force new browser login"):
+        with pytest.raises(ConfigEntryAuthFailed, match="token_expired_renewal_failed"):
             await fetch_camera_list(coord, session, HEADERS, "old-token")
 
     @pytest.mark.asyncio
@@ -242,7 +242,7 @@ class TestFetchCameraList401Retry:
             _make_resp(401), _make_resp(401, text_data="not json {{{")
         )
 
-        with pytest.raises(ConfigEntryAuthFailed, match="Force new browser login"):
+        with pytest.raises(ConfigEntryAuthFailed, match="token_expired_renewal_failed"):
             await fetch_camera_list(coord, session, HEADERS, "old-token")
 
     @pytest.mark.asyncio

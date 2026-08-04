@@ -966,6 +966,51 @@
     },
     "ai_task_unavailable": {
       "message": "Сервис AI Task недоступен или завершился с ошибкой: {error}"
+    },
+    "stream_blocked_privacy_mode": {
+      "message": "{camera}: поток недоступен — режим конфиденциальности ВКЛЮЧЁН"
+    },
+    "stream_start_blocked_privacy_mode": {
+      "message": "Невозможно запустить поток для {camera} — режим конфиденциальности активен. Сначала отключите режим конфиденциальности."
+    },
+    "motion_sensitivity_unknown": {
+      "message": "{camera}: чувствительность движения пока неизвестна — повторите попытку после завершения первого обновления интеграции"
+    },
+    "motion_detection_enable_failed": {
+      "message": "{camera}: не удалось включить обнаружение движения"
+    },
+    "motion_detection_disable_failed": {
+      "message": "{camera}: не удалось отключить обнаружение движения"
+    },
+    "firmware_install_in_progress": {
+      "message": "Установка прошивки уже выполняется"
+    },
+    "firmware_no_update_available": {
+      "message": "В настоящее время нет доступного обновления прошивки для установки"
+    },
+    "firmware_install_rejected": {
+      "message": "Облако Bosch отклонило запрос на установку прошивки для {target}"
+    },
+    "soft_reset_rejected": {
+      "message": "Облако Bosch отклонило запрос на soft-reset (перезагрузку)"
+    },
+    "hard_reset_rejected": {
+      "message": "Облако Bosch отклонило запрос на hard-reset (сброс до заводских настроек)"
+    },
+    "not_authenticated": {
+      "message": "Не выполнена аутентификация — добавьте интеграцию заново, чтобы войти"
+    },
+    "token_expired_renewal_failed": {
+      "message": "Токен истёк, обновление не удалось — выполните повторную аутентификацию через запрос reauth или перейдите в Настройки → Интеграции → Bosch Smart Home Camera → Настроить → Принудительный новый вход через браузер"
+    },
+    "no_refresh_token": {
+      "message": "Нет refresh token — требуется повторная аутентификация"
+    },
+    "refresh_token_invalid": {
+      "message": "Refresh token недействителен — выполните повторную аутентификацию с помощью кнопки **Reconfigure** на карточке интеграции."
+    },
+    "token_refresh_failed_repeatedly": {
+      "message": "Обновление токена неоднократно завершалось неудачей — выполните повторную аутентификацию с помощью кнопки **Reconfigure** на карточке интеграции."
     }
   },
   "issues": {

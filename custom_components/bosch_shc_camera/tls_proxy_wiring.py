@@ -24,6 +24,12 @@ threads) — the proxy's `on_proxy_died` callback fires from a coroutine
 already running on the HA event loop, so the old thread->event-loop
 `call_soon_threadsafe` hop is no longer needed; the callback below just
 schedules the rebuild task directly.
+
+The low-level `tls_proxy.py` module itself was extracted into the
+`bosch_shc_camera_client` PyPI library (HA-Core-submission client-library
+extraction, task #tls_proxy) — it had zero HA/coordinator coupling to
+begin with, so this was a pure move. This wiring module still imports its
+`start_tls_proxy`/`stop_tls_proxy` free functions from there.
 """
 
 from __future__ import annotations
@@ -34,7 +40,7 @@ import ssl
 import time
 from typing import TYPE_CHECKING
 
-from .tls_proxy import start_tls_proxy, stop_tls_proxy
+from bosch_shc_camera_client.tls_proxy import start_tls_proxy, stop_tls_proxy
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator

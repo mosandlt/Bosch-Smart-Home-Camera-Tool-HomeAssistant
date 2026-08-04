@@ -647,6 +647,92 @@ class TestHlsAccessTracking:
         assert len(cf._HLS_ACCESS) <= cf._HLS_ACCESS_MAX
 
 
+class TestHlsEvictionRaised:
+    """`_HLS_ACCESS_MAX` raised to 256; active token skipped during eviction.
+
+    Ported from the former `tests/test_tls_proxy.py` (2026-08
+    HA-Core-submission client-library extraction: `tls_proxy.py` moved to
+    the `bosch_shc_camera_client` PyPI library along with its own tests;
+    this eviction fix historically landed in the same bug-hunt round as
+    several tls_proxy fixes and its regression tests were grouped in that
+    file — entirely unaffected by the extraction, so it moved here instead,
+    next to `TestHlsAccessTracking`/`TestNoteHlsAccessGaps` above which
+    already cover the same `_note_hls_access` mechanism from other angles.
+    """
+
+    def _cf(self):
+        import custom_components.bosch_shc_camera.cf_unbuffer as cf
+
+        cf._HLS_ACCESS.clear()
+        return cf
+
+    def test_cap_raised_to_256(self):
+        from custom_components.bosch_shc_camera.cf_unbuffer import _HLS_ACCESS_MAX
+
+        assert _HLS_ACCESS_MAX == 256
+
+    def test_active_window_constant_in_source(self):
+        from pathlib import Path
+
+        unbuf_src = (
+            Path(__file__).parent.parent
+            / "custom_components"
+            / "bosch_shc_camera"
+            / "cf_unbuffer.py"
+        ).read_text()
+        assert "_HLS_ACTIVE_WINDOW" in unbuf_src
+
+    def test_prune_still_caps_at_max(self):
+        cf = self._cf()
+        for i in range(cf._HLS_ACCESS_MAX + 20):
+            with patch.object(cf.time, "monotonic", return_value=float(i)):
+                cf._note_hls_access(
+                    SimpleNamespace(path=f"/api/hls/tok{i}/playlist.m3u8")
+                )
+        assert len(cf._HLS_ACCESS) <= cf._HLS_ACCESS_MAX
+
+    def test_recently_active_token_not_evicted(self):
+        cf = self._cf()
+        for i in range(cf._HLS_ACCESS_MAX):
+            with patch.object(cf.time, "monotonic", return_value=float(i)):
+                cf._note_hls_access(
+                    SimpleNamespace(path=f"/api/hls/old{i}/playlist.m3u8")
+                )
+
+        oldest_token = "old0"
+        assert oldest_token in cf._HLS_ACCESS
+
+        recent_now = float(cf._HLS_ACCESS_MAX) + 1.0
+        cf._HLS_ACCESS[oldest_token] = recent_now - 5.0
+
+        with patch.object(cf.time, "monotonic", return_value=recent_now):
+            cf._note_hls_access(
+                SimpleNamespace(path="/api/hls/new_overflow/playlist.m3u8")
+            )
+
+        assert oldest_token in cf._HLS_ACCESS
+
+    def test_stale_token_evicted_when_active_present(self):
+        cf = self._cf()
+
+        cf._HLS_ACCESS["stale_tok"] = 1.0
+        cf._HLS_ACCESS["recent_tok"] = 999.0
+
+        for i in range(cf._HLS_ACCESS_MAX - 2):
+            cf._HLS_ACCESS[f"mid{i}"] = float(50 + i)
+
+        assert len(cf._HLS_ACCESS) == cf._HLS_ACCESS_MAX
+
+        recent_now = 1010.0
+        with patch.object(cf.time, "monotonic", return_value=recent_now):
+            cf._note_hls_access(
+                SimpleNamespace(path="/api/hls/overflow_tok/playlist.m3u8")
+            )
+
+        assert "stale_tok" not in cf._HLS_ACCESS
+        assert len(cf._HLS_ACCESS) <= cf._HLS_ACCESS_MAX
+
+
 class TestNoteHlsAccessGaps:
     """Empty-token guard and second-oldest eviction branch in _note_hls_access."""
 

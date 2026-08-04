@@ -7,6 +7,53 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v16.1.6] - 2026-08-05
+
+Patch — a Home Assistant integration-quality audit (Bronze through Platinum
+tiers, verified against the actual code rather than self-reported) found
+and fixed 6 real gaps, plus an internal architecture cleanup that shrinks
+the integration's own tree by roughly 3,600 lines with no behavior change
+outside the items listed below.
+
+### Added
+
+- **A camera added to the Bosch account after Home Assistant is already
+  running now gets its entities automatically** instead of requiring a
+  manual integration reload. Applies across all 11 entity platforms
+  (camera, sensor, binary_sensor, switch, light, number, select, button,
+  text, image, update).
+- **A camera removed from the Bosch account is now automatically cleaned
+  up** — its device and all entities are removed from the registry on the
+  next coordinator tick, instead of lingering indefinitely.
+
+### Fixed
+
+- Three services (`describe_snapshot`, `analyze_camera_ai`,
+  `send_event_webhook`) were registered too late in Home Assistant's setup
+  sequence to be schema-validated when the integration wasn't loaded; moved
+  to the correct setup phase.
+- A handful of entity icons were hardcoded in Python instead of coming from
+  `icons.json`, and some internal error messages weren't fully translatable.
+  Both now follow the standard Home Assistant pattern.
+- Three internal HTTP call sites (a local-camera mutual-TLS request, the
+  Bosch cloud-proxy RCP handshake, and the go2rtc registration client) were
+  opening a fresh network connection on every single call instead of
+  reusing a managed session — fixed, with connection pooling/lifecycle now
+  matching how Home Assistant expects integrations to manage HTTP sessions.
+
+### Changed
+
+- Internal-only: the TLS-proxy module used to bridge camera RTSP/TLS
+  connections for local streaming was moved out of the integration into
+  the companion `bosch-shc-camera-client` library (bumped to v0.5.5), and
+  several coordinator-only responsibilities (Repairs-issue lifecycle,
+  firmware-install/reset device actions, status/outage notifications) were
+  split into their own modules instead of living directly on the data
+  coordinator. Both changes are pure internal restructuring — no behavior
+  difference for any camera, stream, or entity. Verified via full test
+  suite (100% coverage, 0 regressions) plus independent adversarial review
+  of every change before merge.
+
 ## [v16.1.5] - 2026-08-02
 
 Patch — Mini-NVR "Event Buffered (Preroll)" mode-mismatch fixes, an FCM

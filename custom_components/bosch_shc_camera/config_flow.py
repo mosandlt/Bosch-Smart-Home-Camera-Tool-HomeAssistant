@@ -43,8 +43,7 @@ application_credentials:
   first-time install's `auto_login` step reaches `AbstractOAuth2FlowHandler.
   async_step_pick_implementation` with STILL zero client credentials
   registered, which aborts the flow with `missing_credentials`/
-  `missing_configuration` instead of proceeding to OAuth (caught by the
-  THREE_PER_ISSUE_PER_CHANGE bug-hunt during this port — see git history).
+  `missing_configuration` instead of proceeding to OAuth.
   `async_import_client_credential` is idempotent (no-ops if the credential ID
   already exists), so calling it from both places is safe.
 
@@ -428,8 +427,7 @@ class BoschOAuth2Implementation(AbstractOAuth2Implementation):  # type: ignore[m
         # Same 15s budget as _do_refresh's identical Keycloak /token POST —
         # without it this shared session falls back to aiohttp's 300s
         # default, so an unavailable Keycloak endpoint could stall the
-        # config flow for five minutes instead of failing fast (Core PR
-        # #176545 Copilot review round 16).
+        # config flow for five minutes instead of failing fast.
         async with asyncio.timeout(15):
             async with session.post(
                 f"{KEYCLOAK_BASE}/token",
@@ -574,15 +572,11 @@ async def _do_refresh(session: Any, refresh_token: str) -> dict[str, Any] | None
     Raises TimeoutError/aiohttp.ClientError on a transient network-layer
     failure (timeout, DNS, connection reset) — the caller must retry without
     counting this toward the invalid-grant/reauth escalation, since it
-    proves nothing about the refresh token's own validity (backported from
-    the Core PR's Copilot review round 5, 2026-07-27 — a prior version
-    swallowed these into a plain None return, indistinguishable from an
-    ambiguous HTTP response).
+    proves nothing about the refresh token's own validity.
     Raises RefreshTokenInvalidError on 400/401 (invalid_grant) — caller should
     trigger the reauth flow, retrying is pointless.
     Raises AuthServerOutageError on 429 (rate limited) or 5xx — Bosch server
-    is down or throttling us, retry later but do NOT trigger reauth
-    (backported from the Core PR's Copilot review round 6, 2026-07-27).
+    is down or throttling us, retry later but do NOT trigger reauth.
     """
     async with asyncio.timeout(15):
         async with session.post(
@@ -604,8 +598,7 @@ async def _do_refresh(session: Any, refresh_token: str) -> dict[str, Any] | None
                 raise RefreshTokenInvalidError(f"Keycloak HTTP {resp.status}")
             # HTTP 429 (rate limited) is routed through the same
             # transient/backoff path as a 5xx outage — it says nothing about
-            # the refresh token's validity (backported from the Core PR's
-            # Copilot review round 6, 2026-07-27).
+            # the refresh token's validity.
             if resp.status == 429 or 500 <= resp.status < 600:
                 raise AuthServerOutageError(f"Bosch Keycloak HTTP {resp.status}")
     return None
@@ -638,8 +631,7 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
         multi-hop redirect chain combined with the my.home-assistant.io relay
         (which tracks "last visited instance" client-side rather than being
         tied to this flow's tab) can strand the automatic flow in the wrong
-        tab/webview — reported for the HA Companion App and desktop Safari
-        alike (Bosch community PM from SebastianHarder, 2026-07-05).
+        tab/webview — reported for both the HA Companion App and desktop Safari.
 
         NOTE: this used to call `async_register_implementation()` here on
         every flow start. That registered a SECOND, differently-keyed
@@ -745,10 +737,10 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
                     # Advanced diagnostic escape hatch only — NEVER pre-filled with
                     # any specific host. Lets a single account test whether it
                     # authorizes against a different, Bosch-confirmed camera-API
-                    # base URL instead of the production default (see 2026-07-06
-                    # SebastianHarder investigation: sh:authorization.failed can
-                    # mean the account is registered on a different backend
-                    # environment than the one this integration talks to).
+                    # base URL instead of the production default: an
+                    # sh:authorization.failed response can mean the account is
+                    # registered on a different backend environment than the
+                    # one this integration talks to.
                     if cloud_api_override:
                         new_data["cloud_api_override"] = cloud_api_override.rstrip("/")
                     if self.source == config_entries.SOURCE_REAUTH:
@@ -832,15 +824,13 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
         this account can reach the camera API, only that this one request
         didn't land, so it must not be accepted as "verified" (an
         unverified entry could immediately fail its first coordinator
-        refresh) — the caller aborts with retry semantics instead
-        (backported from the Core PR's Copilot review rounds 6-7,
-        2026-07-27). A prior version returned True unconditionally on a
-        timeout/network error, reasoning that forcing the user to redo the
-        whole OAuth login for a one-off local network blip would be poor
-        UX — but that's inconsistent with the 429/5xx handling (both are
-        equally "this one request didn't land") and weakens the Bronze
-        test-before-configure guarantee this check exists to provide; both
-        now abort with the same retry-later semantics instead.
+        refresh) — the caller aborts with retry semantics instead. Treating
+        a timeout/network error as unconditionally successful (forcing the
+        user to redo the whole OAuth login only for a one-off local network
+        blip) would be inconsistent with the 429/5xx handling — both are
+        equally "this one request didn't land" — and would weaken the
+        Bronze test-before-configure guarantee this check exists to provide;
+        both cases abort with the same retry-later semantics instead.
         """
         try:
             session = await async_get_bosch_cloud_session(self.hass)
@@ -1226,7 +1216,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 return self.async_create_entry(title="", data=merged)
 
         if errors and user_input is not None:
-            # Bug-hunt 2026-07-20: the schema below is built entirely from
+            # The schema below is built entirely from
             # `opts` (the PERSISTED values) — without this, a single
             # invalid field (frigate_bind_host/frigate_ip_allowlist/
             # webhook_url) discarded every other edit in the same
@@ -1760,10 +1750,10 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     # ``vol.Any(None, <selector>)`` — it emits ``allow_none:
                     # true`` so the frontend submits ``null`` (not ``""``) when
                     # the picker is cleared, and the validator then accepts both
-                    # None and a valid entity. The previous ``vol.Any("",
-                    # EntitySelector(...))`` ("" first, no None) did NOT match
-                    # that shape → "Unable to convert schema: Any(...)" → the
-                    # options dialog 500'd on open (issue #35). suggested_value
+                    # None and a valid entity. A ``vol.Any("", EntitySelector(...))``
+                    # shape ("" first, no None) does NOT match that contract →
+                    # "Unable to convert schema: Any(...)" → the options
+                    # dialog 500s on open. suggested_value
                     # must be the value or None (never "") so an unset field
                     # round-trips through the nullable contract.
                     vol.Optional(
@@ -1830,7 +1820,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     # malformed value by disabling the time gate, so format
                     # validation lives there rather than in the schema — a
                     # vol.Any/vol.All wrapper here would break frontend schema
-                    # serialization and 500 the options dialog (issue #35).
+                    # serialization and 500 the options dialog.
                     vol.Optional(
                         CONF_AI_ACTIVE_TIME_START,
                         description={
@@ -1876,7 +1866,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                         default=bool(opts.get(CONF_AI_ANALYSIS_ENABLED, False)),
                     ): bool,
                     # Nullable entity picker — same ``vol.Any(None, <selector>)``
-                    # shape as CONF_AI_TASK_ENTITY above (issue #35: a bare
+                    # shape as CONF_AI_TASK_ENTITY above: a bare
                     # ``vol.Any("", ...)`` 500s the options dialog because HA's
                     # frontend serializer only accepts ``vol.Any(None, ...)``,
                     # which it renders with ``allow_none: true`` and submits

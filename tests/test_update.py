@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -215,9 +215,14 @@ class TestSetupEntry:
             },
             firmware_cache={},
             last_update_success=True,
+            async_add_listener=MagicMock(return_value=MagicMock()),
         )
         entry = SimpleNamespace(
-            entry_id="01ENTRY", data={}, options={}, runtime_data=coord
+            entry_id="01ENTRY",
+            data={},
+            options={},
+            runtime_data=coord,
+            async_on_unload=MagicMock(),
         )
         captured: list = []
 
@@ -234,9 +239,18 @@ class TestSetupEntry:
     async def test_setup_entry_empty_data_yields_no_entities(self):
         from custom_components.bosch_shc_camera.update import async_setup_entry
 
-        coord = SimpleNamespace(data={}, firmware_cache={}, last_update_success=True)
+        coord = SimpleNamespace(
+            data={},
+            firmware_cache={},
+            last_update_success=True,
+            async_add_listener=MagicMock(return_value=MagicMock()),
+        )
         entry = SimpleNamespace(
-            entry_id="01ENTRY", data={}, options={}, runtime_data=coord
+            entry_id="01ENTRY",
+            data={},
+            options={},
+            runtime_data=coord,
+            async_on_unload=MagicMock(),
         )
         captured: list = []
         await async_setup_entry(
@@ -245,6 +259,58 @@ class TestSetupEntry:
             async_add_entities=lambda e, update_before_add=False: captured.extend(e),
         )
         assert captured == []
+
+    @pytest.mark.asyncio
+    async def test_new_camera_gets_entity_added_dynamically(self):
+        from custom_components.bosch_shc_camera.update import (
+            BoschFirmwareUpdate,
+            async_setup_entry,
+        )
+
+        coord = SimpleNamespace(
+            data={
+                CAM_ID: {
+                    "info": {
+                        "title": "Terrasse",
+                        "hardwareVersion": "HOME_Eyes_Outdoor",
+                    }
+                },
+            },
+            firmware_cache={},
+            last_update_success=True,
+            async_add_listener=MagicMock(return_value=MagicMock()),
+        )
+        entry = SimpleNamespace(
+            entry_id="01ENTRY",
+            data={},
+            options={},
+            runtime_data=coord,
+            async_on_unload=MagicMock(),
+        )
+        captured: list = []
+
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e, update_before_add=False: captured.extend(e),
+        )
+
+        assert len(captured) == 1
+        coord.async_add_listener.assert_called_once()
+        entry.async_on_unload.assert_called_once()
+
+        listener = coord.async_add_listener.call_args[0][0]
+
+        coord.data["22222222-OTHER"] = {
+            "info": {"title": "Innen", "hardwareVersion": "CAMERA_360"}
+        }
+        listener()
+
+        assert len(captured) == 2
+        assert all(isinstance(e, BoschFirmwareUpdate) for e in captured)
+
+        listener()
+        assert len(captured) == 2
 
 
 class TestAsyncInstall:

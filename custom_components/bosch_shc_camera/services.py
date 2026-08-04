@@ -1,12 +1,12 @@
 """HA service registrations (trigger_snapshot, rules, motion zones, privacy masks,
-camera sharing, event migration/deletion, …).
+camera sharing, event migration/deletion, AI snapshot description/analysis,
+webhook test delivery, …).
 
-Extracted from __init__.py's _register_services — a single ~1300-line function
-holding ~20 independent, low-coupling service handlers purely for registration.
-Each handler only closes over `hass` (no coordinator/self capture) and looks up
-the active config entry's coordinator per-call via
-`hass.config_entries.async_loaded_entries(DOMAIN)`, so this was a mechanical
-move with no behavior change.
+Registered from `async_setup` (not `async_setup_entry`) to satisfy HA's
+`action-setup` quality-scale rule — service schemas must validate even with no
+config entry loaded. Each handler closes over only `hass` (no coordinator/self
+capture) and looks up the active config entry's coordinator per-call via
+`hass.config_entries.async_loaded_entries(DOMAIN)`.
 """
 
 from __future__ import annotations
@@ -15,11 +15,21 @@ import asyncio
 import logging
 import time
 from datetime import UTC
+from typing import Any
 
-from homeassistant.core import HomeAssistant, ServiceCall
+import aiohttp
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN
+from . import ai_analysis
+from .const import (
+    CONF_AI_ANALYSIS_ENABLED,
+    CONF_ENABLE_WEBHOOK_DELIVERY,
+    CONF_WEBHOOK_URL,
+    DOMAIN,
+)
+from .coordinator import get_options
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1126,8 +1136,7 @@ def _register_services(hass: HomeAssistant) -> None:
                                 # (slow_tier.py) — without this, a slow-tier poll
                                 # landing before the next rotation completes can
                                 # serve get_lighting_schedule stale pre-write data
-                                # for up to a full poll interval (bug-hunt finding,
-                                # 3-agent verification 2026-07-11).
+                                # for up to a full poll interval.
                                 coord.lighting_options_cache[cam_id] = data
                                 coord.lighting_options_set_at[cam_id] = time.monotonic()
                                 await coord.async_request_refresh()
@@ -1425,6 +1434,329 @@ def _register_services(hass: HomeAssistant) -> None:
                     ) from err
                 break
 
+    # describe_snapshot service — ask HA ai_task to describe a camera snapshot
+    async def handle_describe_snapshot(call: ServiceCall) -> dict[str, Any]:
+        """Ask HA's ai_task to describe the current camera snapshot."""
+        import datetime as _dt_mod
+
+        camera_id: str = call.data.get("camera_id", "").strip()
+        entity_id_arg: str = call.data.get("entity_id", "").strip()
+        instructions: str = call.data.get("instructions", "").strip()
+        ai_task_entity_arg: str = call.data.get("ai_task_entity", "").strip()
+
+        if not camera_id and not entity_id_arg:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id or entity_id"},
+            )
+
+        loaded = list(hass.config_entries.async_loaded_entries(DOMAIN))
+        if not loaded:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unexpected_error",
+                translation_placeholders={
+                    "action": "describe_snapshot",
+                    "error": "no loaded entries",
+                },
+            )
+        resolved_entity_id: str = ""
+        resolved_cam_id: str = ""
+        coord: Any = None
+        cur_opts: dict[str, Any] = {}
+        for entry_inst in loaded:
+            _coord = entry_inst.runtime_data
+            if not _coord:
+                continue
+            if camera_id:
+                cam_entity = getattr(_coord, "camera_entities", {}).get(camera_id)
+                if cam_entity:
+                    coord = _coord
+                    cur_opts = get_options(entry_inst)
+                    resolved_entity_id = cam_entity.entity_id
+                    resolved_cam_id = camera_id
+                    break
+            elif entity_id_arg:
+                for cid, cent in getattr(_coord, "camera_entities", {}).items():
+                    if cent.entity_id == entity_id_arg:
+                        coord = _coord
+                        cur_opts = get_options(entry_inst)
+                        resolved_entity_id = entity_id_arg
+                        resolved_cam_id = cid
+                        break
+                if coord:
+                    break
+        if coord is None:
+            # Fallback to first available coordinator for options
+            for _fb_entry in loaded:
+                if _fb_entry.runtime_data:
+                    coord = _fb_entry.runtime_data
+                    cur_opts = get_options(_fb_entry)
+                    break
+        if coord is None:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unexpected_error",
+                translation_placeholders={
+                    "action": "describe_snapshot",
+                    "error": "no active coordinator",
+                },
+            )
+
+        # Privacy guard: do not analyze a blank/privacy frame via the manual service
+        if resolved_cam_id and coord.shc_state_cache.get(resolved_cam_id, {}).get(
+            "privacy_mode"
+        ):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="privacy_active",
+            )
+
+        if not resolved_entity_id:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="not_found",
+                translation_placeholders={
+                    "kind": "camera entity",
+                    "id": camera_id or entity_id_arg,
+                },
+            )
+
+        prompt = instructions or cur_opts.get(
+            "ai_describe_prompt",
+            "Du bist eine Überwachungskamera-Assistenz. Melde NUR"
+            " sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise"
+            " sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere,"
+            " Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die"
+            " Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne"
+            " KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und"
+            " Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes"
+            " erkennbar ist, sage das kurz, z. B.: Keine"
+            " sicherheitsrelevanten Beobachtungen.",
+        )
+        # Language resolution: per-call override → option → fallback "Deutsch"
+        language: str = (
+            call.data.get("language", "").strip()
+            or (cur_opts.get("ai_describe_language") or "").strip()
+            or "Deutsch"
+        )
+        # Append bilingual language directive so the model replies in the chosen
+        # language regardless of its training defaults.
+        full_instructions: str = f"{prompt}\n\nRespond only in {language}. Antworte ausschließlich auf {language}."
+        ai_task_entity_used: str = (
+            ai_task_entity_arg or (cur_opts.get("ai_task_entity") or "").strip()
+        )
+
+        ai_call_data: dict[str, Any] = {
+            "task_name": "Bosch camera snapshot",
+            "instructions": full_instructions,
+            "attachments": [
+                {
+                    "media_content_id": f"media-source://camera/{resolved_entity_id}",
+                    "media_content_type": "image/jpeg",
+                }
+            ],
+        }
+        if ai_task_entity_used:
+            ai_call_data["entity_id"] = ai_task_entity_used
+
+        # Count this manual call as in-flight so a concurrent AUTO describe
+        # (whose budget gate reads ``used + ai_in_flight``) sees the work and
+        # does not push the daily total over the cap. Service-path itself has no
+        # budget gate (manual = always allowed), but it must stay visible.
+        _track_in_flight = hasattr(coord, "ai_in_flight")
+        if _track_in_flight:
+            coord.ai_in_flight += 1
+        try:
+            async with asyncio.timeout(20):
+                resp = await hass.services.async_call(
+                    "ai_task",
+                    "generate_data",
+                    ai_call_data,
+                    blocking=True,
+                    return_response=True,
+                )
+        except TimeoutError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="ai_task_unavailable",
+                translation_placeholders={"error": "timed out (20s)"},
+            ) from err
+        except Exception as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="ai_task_unavailable",
+                translation_placeholders={"error": str(err)},
+            ) from err
+        finally:
+            if _track_in_flight:
+                coord.ai_in_flight -= 1
+
+        text: str = (
+            str(resp.get("data", "")) if isinstance(resp, dict) else str(resp or "")
+        ).strip()
+        if not text:
+            return {"description": ""}
+        if resolved_cam_id:
+            coord.ai_record_call(resolved_cam_id)
+        generated_at = _dt_mod.datetime.now(_dt_mod.UTC).isoformat()
+        if resolved_cam_id and resolved_cam_id in coord.data:
+            coord.data[resolved_cam_id]["ai_description"] = {
+                "text": text,
+                "generated_at": generated_at,
+                "ai_task_entity": ai_task_entity_used or "default",
+            }
+            coord.async_set_updated_data(coord.data)
+        hass.bus.async_fire(
+            "bosch_shc_camera_ai_description",
+            {
+                "camera_id": resolved_cam_id,
+                "entity_id": resolved_entity_id,
+                "description": text,
+                "generated_at": generated_at,
+            },
+        )
+        return {"description": text}
+
+    # analyze_camera_ai service — on-demand structured AI Camera Analysis
+    # (ai_analysis.py). Mirrors describe_snapshot's camera_id/entity_id
+    # resolution shape, but delegates the actual AI call + persistence/
+    # routing to ai_analysis.async_generate_ai_analysis(force=True) instead
+    # of duplicating that logic here.
+    async def handle_analyze_camera_ai(call: ServiceCall) -> dict[str, Any]:
+        """Manually trigger a structured AI Camera Analysis for one camera.
+
+        `force=True` bypasses the per-camera cooldown and the on/away
+        window gate but still counts toward the feature's own daily
+        budget — same manual-service convention as `describe_snapshot`.
+        Returns `{"triggered": False}` (no exception) when the analysis
+        ran but produced a "nothing notable" (score <= 0) result, matching
+        `async_generate_ai_analysis`'s own never-raises contract.
+        """
+        camera_id: str = call.data.get("camera_id", "").strip()
+        entity_id_arg: str = call.data.get("entity_id", "").strip()
+
+        if not camera_id and not entity_id_arg:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="argument_required",
+                translation_placeholders={"argument": "camera_id or entity_id"},
+            )
+
+        loaded = list(hass.config_entries.async_loaded_entries(DOMAIN))
+        if not loaded:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unexpected_error",
+                translation_placeholders={
+                    "action": "analyze_camera_ai",
+                    "error": "no loaded entries",
+                },
+            )
+
+        resolved_cam_id: str = ""
+        coord: Any = None
+        for entry_inst in loaded:
+            _coord = entry_inst.runtime_data
+            if not _coord:
+                continue
+            if camera_id:
+                cam_entity = getattr(_coord, "camera_entities", {}).get(camera_id)
+                if cam_entity:
+                    coord = _coord
+                    resolved_cam_id = camera_id
+                    break
+            elif entity_id_arg:
+                for cid, cent in getattr(_coord, "camera_entities", {}).items():
+                    if cent.entity_id == entity_id_arg:
+                        coord = _coord
+                        resolved_cam_id = cid
+                        break
+                if coord:
+                    break
+
+        if coord is None or not resolved_cam_id:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="not_found",
+                translation_placeholders={
+                    "kind": "camera entity",
+                    "id": camera_id or entity_id_arg,
+                },
+            )
+
+        # force=True bypasses cooldown/window but NOT the master option /
+        # per-camera switch — without this check, a manual trigger against a
+        # disabled camera would return the byte-identical {"triggered": False}
+        # as a genuine "AI scored <=0" result, with no way for the caller to
+        # tell them apart. Surface the reason instead.
+        ai_opts_call = get_options(coord.entry)
+        if not ai_opts_call.get(CONF_AI_ANALYSIS_ENABLED, False):
+            return {"triggered": False, "reason": "ai_analysis_disabled"}
+        if not ai_analysis.per_camera_analysis_enabled(coord, resolved_cam_id):
+            return {"triggered": False, "reason": "camera_disabled"}
+
+        result = await ai_analysis.async_generate_ai_analysis(
+            coord, resolved_cam_id, force=True
+        )
+        if result is None:
+            return {"triggered": False, "reason": "nothing_notable"}
+        return {"triggered": True, **result}
+
+    # send_event_webhook service — test/manual trigger
+    # Uses live-entry iteration so the handler always reads the current options
+    # even after an integration reload — no stale closure over a setup-time entry.
+    async def handle_send_event_webhook(call: ServiceCall) -> None:
+        """Manually fire a webhook POST for testing."""
+        import datetime as _dt
+
+        loaded = list(hass.config_entries.async_loaded_entries(DOMAIN))
+        if not loaded:
+            _LOGGER.warning(
+                "send_event_webhook: no loaded entries for domain %s", DOMAIN
+            )
+            return
+        cur_opts = get_options(loaded[0])
+        if not cur_opts.get(CONF_ENABLE_WEBHOOK_DELIVERY, False):
+            _LOGGER.warning(
+                "send_event_webhook: webhook delivery is disabled in options"
+            )
+            return
+        url = cur_opts.get(CONF_WEBHOOK_URL, "").strip()
+        if not url:
+            _LOGGER.warning("send_event_webhook: webhook_url is not configured")
+            return
+        if not url.lower().startswith(("http://", "https://")):
+            _LOGGER.warning(
+                "send_event_webhook: webhook_url %r has invalid scheme — only http/https allowed",
+                url[:50],
+            )
+            return
+        event_type_val: str = call.data.get("event_type", "MOVEMENT")
+        entity_id_val: str = call.data.get("entity_id", "")
+        # Resolve camera name from entity_id if given
+        cam_name = entity_id_val
+        if entity_id_val:
+            state = hass.states.get(entity_id_val)
+            if state:
+                cam_name = state.attributes.get("friendly_name", entity_id_val)
+        payload: dict[str, Any] = {
+            "event_type": event_type_val,
+            "camera": cam_name,
+            "camera_id": "",
+            "timestamp": _dt.datetime.now(_dt.UTC).isoformat().replace("+00:00", "Z"),
+            "extra": {"source": "manual"},
+        }
+        session = async_get_clientsession(hass)
+        try:
+            async with session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                _LOGGER.info("send_event_webhook: POST %s → HTTP %d", url, resp.status)
+        except aiohttp.ClientError as err:
+            _LOGGER.error("send_event_webhook: POST failed: %s", err)
+
     async def handle_migrate_flat_events(call: ServiceCall) -> None:
         """Move flat event files (camera/file) into date hierarchy (camera/year/month/day/file)."""
         import re as _re
@@ -1642,3 +1974,21 @@ def _register_services(hass: HomeAssistant) -> None:
         )
     if not hass.services.has_service(DOMAIN, "delete_event"):
         hass.services.async_register(DOMAIN, "delete_event", handle_delete_event)
+    if not hass.services.has_service(DOMAIN, "describe_snapshot"):
+        hass.services.async_register(
+            DOMAIN,
+            "describe_snapshot",
+            handle_describe_snapshot,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+    if not hass.services.has_service(DOMAIN, "analyze_camera_ai"):
+        hass.services.async_register(
+            DOMAIN,
+            "analyze_camera_ai",
+            handle_analyze_camera_ai,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+    if not hass.services.has_service(DOMAIN, "send_event_webhook"):
+        hass.services.async_register(
+            DOMAIN, "send_event_webhook", handle_send_event_webhook
+        )

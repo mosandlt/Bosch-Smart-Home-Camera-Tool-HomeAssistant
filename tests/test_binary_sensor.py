@@ -94,6 +94,7 @@ def _make_coord(events: list | None = None) -> SimpleNamespace:
                 "events": events or [],
             }
         },
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
 
 
@@ -555,9 +556,16 @@ class TestSetupEntry:
                     },
                     "events": [],
                 }
-            }
+            },
+            async_add_listener=MagicMock(return_value=MagicMock()),
         )
-        entry = SimpleNamespace(entry_id="01E", data={}, options={}, runtime_data=coord)
+        entry = SimpleNamespace(
+            entry_id="01E",
+            data={},
+            options={},
+            runtime_data=coord,
+            async_on_unload=MagicMock(),
+        )
         captured: list = []
         await async_setup_entry(
             hass=None,
@@ -596,9 +604,16 @@ class TestSetupEntry:
                     },
                     "events": [],
                 }
-            }
+            },
+            async_add_listener=MagicMock(return_value=MagicMock()),
         )
-        entry = SimpleNamespace(entry_id="01E", data={}, options={}, runtime_data=coord)
+        entry = SimpleNamespace(
+            entry_id="01E",
+            data={},
+            options={},
+            runtime_data=coord,
+            async_on_unload=MagicMock(),
+        )
         captured: list = []
         await async_setup_entry(
             hass=None,
@@ -614,14 +629,75 @@ class TestSetupEntry:
     async def test_empty_coordinator_yields_no_entities(self):
         from custom_components.bosch_shc_camera.binary_sensor import async_setup_entry
 
-        coord = SimpleNamespace(data={})
-        entry = SimpleNamespace(entry_id="01E", data={}, options={}, runtime_data=coord)
+        coord = SimpleNamespace(
+            data={}, async_add_listener=MagicMock(return_value=MagicMock())
+        )
+        entry = SimpleNamespace(
+            entry_id="01E",
+            data={},
+            options={},
+            runtime_data=coord,
+            async_on_unload=MagicMock(),
+        )
         captured: list = []
         await async_setup_entry(
             hass=None,
             config_entry=entry,
             async_add_entities=lambda e, update_before_add=False: captured.extend(e),
         )
+        assert captured == []
+
+    @pytest.mark.asyncio
+    async def test_new_camera_gets_entities_added_dynamically(self):
+        """Quality-Scale Gold `dynamic-devices`."""
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschMotionBinarySensor,
+            async_setup_entry,
+        )
+
+        coord = SimpleNamespace(
+            data={
+                CAM_ID: {
+                    "info": {
+                        "title": "Terrasse",
+                        "hardwareVersion": "HOME_Eyes_Outdoor",
+                        "featureSupport": {"sound": False},
+                    },
+                    "events": [],
+                }
+            },
+            async_add_listener=MagicMock(return_value=MagicMock()),
+        )
+        entry = SimpleNamespace(
+            entry_id="01E",
+            data={},
+            options={},
+            runtime_data=coord,
+            async_on_unload=MagicMock(),
+        )
+        captured: list = []
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e, update_before_add=False: captured.extend(e),
+        )
+        coord.async_add_listener.assert_called_once()
+        entry.async_on_unload.assert_called_once()
+        listener = coord.async_add_listener.call_args[0][0]
+
+        captured.clear()
+        coord.data["NEW-CAM"] = {
+            "info": {"hardwareVersion": "HOME_Eyes_Outdoor", "featureSupport": {}},
+            "events": [],
+        }
+        listener()
+        assert any(
+            isinstance(e, BoschMotionBinarySensor) and e._cam_id == "NEW-CAM"
+            for e in captured
+        )
+
+        captured.clear()
+        listener()
         assert captured == []
 
 
@@ -868,9 +944,14 @@ class TestBinarySensorSetupEntry:
                 }
             },
             options={"enable_binary_sensors": True},
+            async_add_listener=MagicMock(return_value=MagicMock()),
         )
         entry = SimpleNamespace(
-            runtime_data=coord, entry_id="01TEST", data={}, options={}
+            runtime_data=coord,
+            entry_id="01TEST",
+            data={},
+            options={},
+            async_on_unload=MagicMock(),
         )
         added: list = []
         asyncio.run(async_setup_entry(None, entry, lambda e, **kw: added.extend(e)))
@@ -902,9 +983,14 @@ class TestBinarySensorSetupEntry:
                 }
             },
             options={},
+            async_add_listener=MagicMock(return_value=MagicMock()),
         )
         entry = SimpleNamespace(
-            runtime_data=coord, entry_id="01TEST2", data={}, options={}
+            runtime_data=coord,
+            entry_id="01TEST2",
+            data={},
+            options={},
+            async_on_unload=MagicMock(),
         )
         added: list = []
         asyncio.run(async_setup_entry(None, entry, lambda e, **kw: added.extend(e)))
@@ -1889,6 +1975,7 @@ class TestAiRecentAlertBinarySensorSetupGating:
             data={},
             options={CONF_AI_ANALYSIS_ENABLED: True},
             runtime_data=coord,
+            async_on_unload=MagicMock(),
         )
         added: list[Any] = []
         with patch(
@@ -1914,6 +2001,7 @@ class TestAiRecentAlertBinarySensorSetupGating:
             data={},
             options={CONF_AI_ANALYSIS_ENABLED: False},
             runtime_data=coord,
+            async_on_unload=MagicMock(),
         )
         added: list[Any] = []
         with patch(

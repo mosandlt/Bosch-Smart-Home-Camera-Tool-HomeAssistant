@@ -618,6 +618,10 @@ def _make_coord(**overrides):
         # care about tracked-task scheduling don't leak an
         # un-awaited-coroutine RuntimeWarning.
         spawn_tracked=MagicMock(side_effect=lambda coro, **_kw: coro.close()),
+        # dynamic-devices (Quality-Scale Gold): async_setup_entry registers
+        # a coordinator listener via this. Returns an unsubscribe callback,
+        # matching the real DataUpdateCoordinator contract.
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -628,6 +632,9 @@ def _make_entry(**overrides):
         entry_id="01ENTRY",
         data={"bearer_token": "fake-token"},
         options={"snapshot_interval": 1800},
+        # dynamic-devices: async_setup_entry wires the listener unsubscribe
+        # callback through this.
+        async_on_unload=MagicMock(),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -737,6 +744,59 @@ class TestAsyncSetupEntry:
         async_add.assert_called_once()
         entities = async_add.call_args[0][0]
         assert entities == []
+
+    @pytest.mark.asyncio
+    async def test_registers_dynamic_camera_listener(self):
+        """Quality-Scale Gold `dynamic-devices`: async_setup_entry must
+        register a coordinator listener (via async_on_unload) so a camera
+        added to the account after HA startup gets an entity without a
+        reload."""
+        from custom_components.bosch_shc_camera.camera import async_setup_entry
+
+        coord = _make_coord()
+        entry = _make_entry(options={})
+        entry.runtime_data = coord
+        async_add = MagicMock()
+        await async_setup_entry(MagicMock(), entry, async_add)
+
+        coord.async_add_listener.assert_called_once()
+        entry.async_on_unload.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_new_camera_gets_entity_added_dynamically(self):
+        """The registered listener adds a BoschCamera for a cam_id that
+        appears in coordinator.data AFTER the initial setup pass."""
+        from custom_components.bosch_shc_camera.camera import (
+            BoschCamera,
+            async_setup_entry,
+        )
+
+        coord = _make_coord()
+        entry = _make_entry(options={})
+        entry.runtime_data = coord
+        async_add = MagicMock()
+        await async_setup_entry(MagicMock(), entry, async_add)
+        async_add.assert_called_once()
+        assert len(async_add.call_args[0][0]) == 1
+
+        # Capture the registered listener callback.
+        listener = coord.async_add_listener.call_args[0][0]
+
+        # A second camera now appears in the coordinator's data.
+        coord.data["NEW-CAM-ID"] = {"info": {"title": "Neue Kamera"}}
+        async_add.reset_mock()
+        listener()
+
+        async_add.assert_called_once()
+        new_entities = async_add.call_args[0][0]
+        assert len(new_entities) == 1
+        assert isinstance(new_entities[0], BoschCamera)
+        assert new_entities[0]._cam_id == "NEW-CAM-ID"
+
+        # A second listener invocation with no new cam_ids must be a no-op.
+        async_add.reset_mock()
+        listener()
+        async_add.assert_not_called()
 
 
 class TestLifecycleHooks:
@@ -6695,7 +6755,7 @@ class TestAsyncCreateStreamPrivacy:
         stub_coord_webrtc.shc_state_cache[CAM_ID_WEBRTC] = {"privacy_mode": True}
         stub_coord_webrtc.live_connections = {}  # no active session
 
-        with pytest.raises(HomeAssistantError, match="privacy mode"):
+        with pytest.raises(HomeAssistantError, match="stream_blocked_privacy_mode"):
             await camera_webrtc.async_create_stream()
 
     @pytest.mark.asyncio
@@ -6973,7 +7033,7 @@ async def test_webrtc_offer_privacy_mode_blocks_auto_open():
     cam._display_name = "Bosch Innenbereich"
 
     send_message = MagicMock()
-    with pytest.raises(HomeAssistantError, match="privacy mode"):
+    with pytest.raises(HomeAssistantError, match="stream_blocked_privacy_mode"):
         await cam.async_handle_async_webrtc_offer(
             "sdp-offer", "session-1", send_message
         )
@@ -7475,7 +7535,8 @@ def test_bosch_camera_unique_id_unchanged():
 
 # Section: privacy TOCTOU guard + async_create_stream STREAM_START_SKIPPED
 # handling (relocated from tests/test_stream_modules_coverage.py — the
-# tls_proxy.py sibling lives in tests/test_tls_proxy.py)
+# tls_proxy.py sibling's own tests now live in the bosch_shc_camera_client
+# PyPI library, 2026-08 extraction)
 
 
 def _stub_coord_camera_toctou(
@@ -7653,7 +7714,7 @@ class TestAsyncCreateStreamSkipped:
         )
         cam = self._make_camera(coord)
 
-        with pytest.raises(HomeAssistantError, match="privacy mode is ON"):
+        with pytest.raises(HomeAssistantError, match="stream_blocked_privacy_mode"):
             await cam.async_create_stream()
 
         coord.try_live_connection.assert_not_awaited()

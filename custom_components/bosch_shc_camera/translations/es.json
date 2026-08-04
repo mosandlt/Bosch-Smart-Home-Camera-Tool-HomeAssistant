@@ -966,6 +966,51 @@
     },
     "ai_task_unavailable": {
       "message": "Servicio de tarea de IA no disponible o con error: {error}"
+    },
+    "stream_blocked_privacy_mode": {
+      "message": "{camera}: transmisión no disponible — el modo de privacidad está activado"
+    },
+    "stream_start_blocked_privacy_mode": {
+      "message": "No se puede iniciar la transmisión de {camera} — el modo de privacidad está activo. Desactive primero el modo de privacidad."
+    },
+    "motion_sensitivity_unknown": {
+      "message": "{camera}: la sensibilidad de movimiento aún no se conoce — inténtelo de nuevo cuando la integración haya completado su primera actualización"
+    },
+    "motion_detection_enable_failed": {
+      "message": "{camera}: no se pudo activar la detección de movimiento"
+    },
+    "motion_detection_disable_failed": {
+      "message": "{camera}: no se pudo desactivar la detección de movimiento"
+    },
+    "firmware_install_in_progress": {
+      "message": "Ya hay una instalación de firmware en curso"
+    },
+    "firmware_no_update_available": {
+      "message": "Actualmente no hay ninguna actualización de firmware disponible para instalar"
+    },
+    "firmware_install_rejected": {
+      "message": "La nube de Bosch rechazó la solicitud de instalación de firmware para {target}"
+    },
+    "soft_reset_rejected": {
+      "message": "La nube de Bosch rechazó la solicitud de soft-reset (reinicio)"
+    },
+    "hard_reset_rejected": {
+      "message": "La nube de Bosch rechazó la solicitud de hard-reset (restablecimiento de fábrica)"
+    },
+    "not_authenticated": {
+      "message": "No autenticado — vuelva a añadir la integración para iniciar sesión"
+    },
+    "token_expired_renewal_failed": {
+      "message": "El token ha caducado y la renovación ha fallado — vuelva a autenticarse mediante el aviso de reautenticación, o vaya a Configuración → Integraciones → Bosch Smart Home Camera → Configurar → Forzar nuevo inicio de sesión en el navegador"
+    },
+    "no_refresh_token": {
+      "message": "No hay refresh token — se requiere volver a autenticarse"
+    },
+    "refresh_token_invalid": {
+      "message": "Refresh token no válido — vuelva a autenticarse mediante el botón **Reconfigurar** en la tarjeta de la integración."
+    },
+    "token_refresh_failed_repeatedly": {
+      "message": "La renovación del token ha fallado repetidamente — vuelva a autenticarse mediante el botón **Reconfigurar** en la tarjeta de la integración."
     }
   },
   "issues": {

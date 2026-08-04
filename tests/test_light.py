@@ -1359,6 +1359,7 @@ def _stub_coord_setup(**overrides):
         last_update_success=True,
         token="tok-A",
         async_update_listeners=MagicMock(),
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -1388,7 +1389,9 @@ class TestLightAsyncSetupEntry:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschTopLedLight" in entity_classes, (
@@ -1414,7 +1417,9 @@ class TestLightAsyncSetupEntry:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         assert added == [], "No light entities must be registered for Gen1 camera"
 
@@ -1432,7 +1437,9 @@ class TestLightAsyncSetupEntry:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         assert added == [], "No light entities when featureSupport.light=False"
 
@@ -1453,7 +1460,9 @@ class TestLightAsyncSetupEntry:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert entity_classes == [], (
@@ -1477,7 +1486,9 @@ class TestLightAsyncSetupEntry:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         assert [type(e).__name__ for e in added] == []
 
@@ -1502,7 +1513,9 @@ class TestLightAsyncSetupEntry:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         assert set(type(e).__name__ for e in added) == {
             "BoschTopLedLight",
@@ -1512,6 +1525,66 @@ class TestLightAsyncSetupEntry:
             "REGRESSION: hw_version fallback from persistent store no longer "
             "feeds the light entity setup. Outdoor II loses its light entities "
             "during cloud-degraded cold starts."
+        )
+
+    def test_new_camera_gets_entities_added_dynamically(self):
+        """Quality-Scale Gold `dynamic-devices`: a camera added to
+        `coordinator.data` AFTER the initial `async_setup_entry` pass must
+        get its light entities added automatically via the registered
+        coordinator-update listener, with no duplicate/no-op re-adds on a
+        tick that introduces no new cameras."""
+        from custom_components.bosch_shc_camera.light import async_setup_entry
+
+        coord = _stub_coord_setup()
+        coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Outdoor"
+        coord.data[CAM_ID]["info"]["featureSupport"]["light"] = True
+        added: list[object] = []
+
+        def _fake_add(entities, **kw):
+            added.extend(entities)
+
+        import asyncio
+
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
+        asyncio.run(async_setup_entry(None, entry, _fake_add))
+
+        coord.async_add_listener.assert_called_once()
+        entry.async_on_unload.assert_called_once()
+        assert len(added) == 3  # initial camera's 3 light entities
+
+        listener = coord.async_add_listener.call_args[0][0]
+
+        new_cam_id = "new-cam-002"
+        coord.data[new_cam_id] = {
+            "info": {
+                "title": "Neue Kamera",
+                "hardwareVersion": "HOME_Eyes_Outdoor",
+                "firmwareVersion": "9.40.25",
+                "macAddress": "aa:bb:cc:dd:ee:02",
+                "featureSupport": {"light": True},
+            },
+            "status": "ONLINE",
+            "events": [],
+        }
+
+        listener()
+
+        new_entity_classes = {type(e).__name__ for e in added[3:]}
+        assert new_entity_classes == {
+            "BoschTopLedLight",
+            "BoschBottomLedLight",
+            "BoschFrontLight",
+        }, (
+            f"New camera's light entities not added dynamically. Got {new_entity_classes}."
+        )
+        assert len(added) == 6
+
+        # A second tick with no new cameras must be a no-op (no duplicates).
+        listener()
+        assert len(added) == 6, (
+            "Listener must not re-add entities for already-known cameras"
         )
 
 

@@ -37,7 +37,7 @@ def _event_is_today_local(ts_str: str | None) -> bool:
     """True if a Bosch event timestamp falls on today's *local* calendar date.
 
     Buckets by the local date of the event's true instant (offset honored),
-    not by a naive string prefix — see time_utils / issue #34. A Bosch
+    not by a naive string prefix — see time_utils. A Bosch
     timestamp already carries the local offset, so its instant maps to the
     correct local day even across the UTC midnight boundary.
     """
@@ -51,6 +51,7 @@ def _event_is_today_local(ts_str: str | None) -> bool:
 
 from . import BoschCameraCoordinator, get_options
 from .const import CONF_AI_ANALYSIS_ENABLED, CONF_ENABLE_AI_DESCRIPTION, DOMAIN
+from .dynamic_devices import register_dynamic_camera_listener
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,41 +73,47 @@ async def async_setup_entry(
 
     coordinator = config_entry.runtime_data
 
-    entities = []
-    for cam_id in coordinator.data:
-        entities.extend(
-            [
-                BoschCameraStatusSensor(coordinator, cam_id, config_entry),
-                BoschCameraLastEventSensor(coordinator, cam_id, config_entry),
-                BoschCameraEventsTodaySensor(coordinator, cam_id, config_entry),
-                BoschWifiSignalSensor(coordinator, cam_id, config_entry),
-                BoschFirmwareVersionSensor(coordinator, cam_id, config_entry),
-                BoschAmbientLightSensor(coordinator, cam_id, config_entry),
-                BoschClockOffsetSensor(coordinator, cam_id, config_entry),
-                BoschMotionSensitivitySensor(coordinator, cam_id, config_entry),
-                BoschLastEventTypeSensor(coordinator, cam_id, config_entry),
-                BoschMovementEventsTodaySensor(coordinator, cam_id, config_entry),
-                BoschAudioEventsTodaySensor(coordinator, cam_id, config_entry),
-                BoschUnreadEventsCountSensor(coordinator, cam_id, config_entry),
-                BoschStreamStatusSensor(coordinator, cam_id, config_entry),
-            ]
-        )
+    def _build_entities_for_cam(cam_id: str) -> list[Any]:
+        """Every per-camera sensor entity — the SAME logic used for the
+        initial setup pass and the dynamic-add listener (Quality-Scale
+        Gold `dynamic-devices`). Deliberately excludes the account-level
+        entities below (FCM push status / cloud maintenance / feature
+        flags) — those are one-per-integration, not one-per-camera, and
+        must only ever be added once during the initial pass.
+        """
+        cam_entities: list[Any] = [
+            BoschCameraStatusSensor(coordinator, cam_id, config_entry),
+            BoschCameraLastEventSensor(coordinator, cam_id, config_entry),
+            BoschCameraEventsTodaySensor(coordinator, cam_id, config_entry),
+            BoschWifiSignalSensor(coordinator, cam_id, config_entry),
+            BoschFirmwareVersionSensor(coordinator, cam_id, config_entry),
+            BoschAmbientLightSensor(coordinator, cam_id, config_entry),
+            BoschClockOffsetSensor(coordinator, cam_id, config_entry),
+            BoschMotionSensitivitySensor(coordinator, cam_id, config_entry),
+            BoschLastEventTypeSensor(coordinator, cam_id, config_entry),
+            BoschMovementEventsTodaySensor(coordinator, cam_id, config_entry),
+            BoschAudioEventsTodaySensor(coordinator, cam_id, config_entry),
+            BoschUnreadEventsCountSensor(coordinator, cam_id, config_entry),
+            BoschStreamStatusSensor(coordinator, cam_id, config_entry),
+        ]
         # LED Dimmer via RCP — only for cameras with a physical light (featureSupport.light)
-        cam_info = coordinator.data[cam_id].get("info", {})
+        cam_info = coordinator.data.get(cam_id, {}).get("info", {})
         has_light = cam_info.get("featureSupport", {}).get("light", False)
         if has_light:
-            entities.append(BoschLedDimmerSensor(coordinator, cam_id, config_entry))
+            cam_entities.append(BoschLedDimmerSensor(coordinator, cam_id, config_entry))
         # Commissioned status (diagnostic, disabled by default)
-        entities.append(BoschCommissionedSensor(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschCommissionedSensor(coordinator, cam_id, config_entry))
         # Cloud rules count (diagnostic, disabled by default)
-        entities.append(BoschRulesCountSensor(coordinator, cam_id, config_entry))
-        # Phase 2 RCP sensors (diagnostic, disabled by default)
-        entities.append(BoschAlarmCatalogSensor(coordinator, cam_id, config_entry))
-        entities.append(BoschMotionZonesSensor(coordinator, cam_id, config_entry))
-        entities.append(BoschPrivateAreasSensor(coordinator, cam_id, config_entry))
-        entities.append(BoschTlsCertSensor(coordinator, cam_id, config_entry))
-        entities.append(BoschNetworkServicesSensor(coordinator, cam_id, config_entry))
-        entities.append(BoschIvaCatalogSensor(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschRulesCountSensor(coordinator, cam_id, config_entry))
+        # RCP deep-dive sensors (diagnostic, disabled by default)
+        cam_entities.append(BoschAlarmCatalogSensor(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschMotionZonesSensor(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschPrivateAreasSensor(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschTlsCertSensor(coordinator, cam_id, config_entry))
+        cam_entities.append(
+            BoschNetworkServicesSensor(coordinator, cam_id, config_entry)
+        )
+        cam_entities.append(BoschIvaCatalogSensor(coordinator, cam_id, config_entry))
         # Gen2-only sensors
         from .models import get_model_config as _gmc_setup
 
@@ -114,16 +121,51 @@ async def async_setup_entry(
         if _gmc_setup(hw_setup).generation >= 2:
             # Ambient-light schedule is Outdoor-only (Indoor II has no RGB lights)
             if hw_setup not in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
-                entities.append(
+                cam_entities.append(
                     BoschAmbientLightScheduleSensor(coordinator, cam_id, config_entry)
                 )
         # Gen2 Indoor II — alarm state sensor
         if hw_setup in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
-            entities.append(BoschAlarmStateSensor(coordinator, cam_id, config_entry))
+            cam_entities.append(
+                BoschAlarmStateSensor(coordinator, cam_id, config_entry)
+            )
         # F4: ONVIF scopes sensor (LAN, disabled by default)
-        entities.append(BoschOnvifScopesSensor(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschOnvifScopesSensor(coordinator, cam_id, config_entry))
         # F6: RCP protocol version sensor (LAN, disabled by default)
-        entities.append(BoschRcpVersionSensor(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschRcpVersionSensor(coordinator, cam_id, config_entry))
+        # Mini-NVR diagnostic sensor — disabled by default. One per camera.
+        if opts.get("enable_nvr", False):
+            cam_entities.append(BoschNvrStateSensor(coordinator, cam_id, config_entry))
+        # AI Snapshot Description sensor — only when option is enabled
+        if opts.get(CONF_ENABLE_AI_DESCRIPTION, False):
+            cam_entities.append(
+                BoschCameraAiDescriptionSensor(coordinator, cam_id, config_entry)
+            )
+        # AI Camera Analysis sensors — only when the master option is enabled
+        if opts.get(CONF_AI_ANALYSIS_ENABLED, False):
+            cam_entities.append(
+                BoschAiAlertScoreSensor(coordinator, cam_id, config_entry)
+            )
+            cam_entities.append(
+                BoschAiAlerts24hSensor(coordinator, cam_id, config_entry)
+            )
+        # External stream URL sensors (main + sub). Per-camera, always
+        # registered so the BoschExternalStreamSwitch can toggle their
+        # value without dynamic entity (re-)registration. Disabled in
+        # entity registry by default; surfaced only when the user enables
+        # them for a specific camera.
+        cam_entities.append(BoschStreamUrlSensor(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschStreamUrlSubSensor(coordinator, cam_id, config_entry))
+        cam_entities.append(
+            BoschFrigateUrlHighSensor(coordinator, cam_id, config_entry)
+        )
+        cam_entities.append(BoschFrigateUrlLowSensor(coordinator, cam_id, config_entry))
+        return cam_entities
+
+    known_cam_ids: set[str] = set(coordinator.data)
+    entities: list[Any] = []
+    for cam_id in known_cam_ids:
+        entities.extend(_build_entities_for_cam(cam_id))
     # Integration-level sensor: FCM push status (one per integration, not per camera)
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
@@ -140,34 +182,19 @@ async def async_setup_entry(
         entities.append(
             BoschCloudFeatureFlagsSensor(coordinator, first_cam_id, config_entry)
         )
-    # Mini-NVR diagnostic sensor — surfaces drain-watcher state per camera so
-    # users can answer "is recording reaching the target?". Disabled by
-    # default; enable via the entity registry. One per camera.
-    if opts.get("enable_nvr", False):
-        for cam_id in coordinator.data:
-            entities.append(BoschNvrStateSensor(coordinator, cam_id, config_entry))
-    # AI Snapshot Description sensor — only when option is enabled
-    if opts.get(CONF_ENABLE_AI_DESCRIPTION, False):
-        for cam_id in coordinator.data:
-            entities.append(
-                BoschCameraAiDescriptionSensor(coordinator, cam_id, config_entry)
-            )
-    # AI Camera Analysis sensors — only when the master option is enabled
-    # (sibling to the AI Snapshot Description gate above).
-    if opts.get(CONF_AI_ANALYSIS_ENABLED, False):
-        for cam_id in coordinator.data:
-            entities.append(BoschAiAlertScoreSensor(coordinator, cam_id, config_entry))
-            entities.append(BoschAiAlerts24hSensor(coordinator, cam_id, config_entry))
-    # External stream URL sensors (main + sub). Per-camera, always registered
-    # so the BoschExternalStreamSwitch can toggle their value without dynamic
-    # entity (re-)registration. Disabled in entity registry by default;
-    # surfaced only when the user enables them for a specific camera.
-    for cam_id in coordinator.data:
-        entities.append(BoschStreamUrlSensor(coordinator, cam_id, config_entry))
-        entities.append(BoschStreamUrlSubSensor(coordinator, cam_id, config_entry))
-        entities.append(BoschFrigateUrlHighSensor(coordinator, cam_id, config_entry))
-        entities.append(BoschFrigateUrlLowSensor(coordinator, cam_id, config_entry))
     async_add_entities(entities, update_before_add=False)
+
+    # Quality-Scale Gold `dynamic-devices`: a camera added to the Bosch
+    # account after HA startup gets its per-camera sensors added
+    # automatically on the next coordinator tick, instead of requiring an
+    # integration reload. Account-level entities (FCM push status / cloud
+    # maintenance / feature flags, added above) are deliberately NOT part
+    # of `_build_entities_for_cam` and so never get re-added here.
+    config_entry.async_on_unload(
+        register_dynamic_camera_listener(
+            coordinator, known_cam_ids, async_add_entities, _build_entities_for_cam
+        )
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -947,7 +974,7 @@ class BoschRulesCountSensor(_BoschSensorBase):
         }
 
 
-# ── Phase 2: RCP Deep Dive Sensors ──────────────────────────────────────────
+# ── RCP Deep Dive Sensors ───────────────────────────────────────────────────
 
 
 class BoschAlarmCatalogSensor(_BoschSensorBase):
@@ -1023,15 +1050,14 @@ class BoschMotionZonesSensor(_BoschSensorBase):
 
     @property
     def native_value(self) -> int | None:
-        # Regression (bug-hunt 2026-07-03): unlike every sibling diagnostic
-        # sensor in this file (BoschRulesCountSensor, BoschAlarmCatalogSensor,
-        # etc.), this previously defaulted every cache lookup to `[]` and
-        # returned `len([])` == 0 even before any of the 3 sources had ever
-        # been fetched — reporting a confirmed "0 zones" state (with the
-        # misleading "No motion zones configured" attribute note) instead of
-        # unknown/unavailable during the window before the first successful
-        # fetch, or on a camera where it never succeeds. Distinguish
-        # "not yet fetched" (None) from "fetched, zero zones" ([]) per source.
+        # Unlike every sibling diagnostic sensor in this file
+        # (BoschRulesCountSensor, BoschAlarmCatalogSensor, etc.), a naive
+        # `[]` default for every cache lookup would report a confirmed
+        # "0 zones" state (with the misleading "No motion zones configured"
+        # attribute note) instead of unknown/unavailable during the window
+        # before the first successful fetch, or on a camera where it never
+        # succeeds. Distinguish "not yet fetched" (None) from "fetched,
+        # zero zones" ([]) per source.
         gen2_zones = self.coordinator.gen2_zones_cache.get(self._cam_id)
         cloud_zones = self.coordinator.cloud_zones_cache.get(self._cam_id)
         zones = self.coordinator.rcp_motion_zones_cache.get(self._cam_id)
@@ -1240,10 +1266,10 @@ class BoschPrivateAreasSensor(_BoschSensorBase):
 
     @property
     def native_value(self) -> int | None:
-        # Regression (bug-hunt 2026-07-03): see BoschMotionZonesSensor —
-        # this defaulted both cache lookups to `[]` and returned a
-        # confirmed "0 masks" (with a misleading "no masks configured"
-        # attribute note) even before either source had ever been fetched.
+        # See BoschMotionZonesSensor above — a naive `[]` default for both
+        # cache lookups would return a confirmed "0 masks" (with a
+        # misleading "no masks configured" attribute note) even before
+        # either source had ever been fetched.
         gen2_areas = self.coordinator.gen2_private_areas_cache.get(self._cam_id)
         cloud_masks = self.coordinator.cloud_privacy_masks_cache.get(self._cam_id)
         if gen2_areas is None and cloud_masks is None:
@@ -1379,7 +1405,7 @@ class BoschAmbientLightScheduleSensor(_BoschSensorBase):
 class BoschAlarmStateSensor(_BoschSensorBase):
     """Sensor: alarm state (Gen2 Indoor II only).
 
-    Actual API response (confirmed 2026-04-11):
+    Actual API response (confirmed live):
         GET /v11/video_inputs/{id}/alarmStatus
         → {"alarmType": "NONE" | ..., "intrusionSystem": "INACTIVE" | "ACTIVE" | ...}
 
@@ -1728,7 +1754,6 @@ class _BoschStreamUrlSensorBase(_BoschSensorBase):
     """
 
     _attr_entity_registry_enabled_default = False
-    _attr_icon = "mdi:link-variant"
     _inst: int = 1
 
     @property
@@ -1798,7 +1823,6 @@ class _BoschFrigateUrlSensorBase(_BoschSensorBase):
     """
 
     _attr_entity_registry_enabled_default = False
-    _attr_icon = "mdi:cctv"
     _quality: str = "high"
 
     @property

@@ -389,9 +389,12 @@ def _make_cloud_state_coord(
     coord._CLOUD_OUTAGE_NOTIFY_AFTER_S = 60.0
     coord.maintenance_cache = maintenance
     coord.hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
-    coord._async_dispatch_cloud_alert = (
-        BoschCameraCoordinator._async_dispatch_cloud_alert.__get__(coord)
-    )
+    # No `_async_dispatch_cloud_alert` binding needed here (style audit,
+    # 2026-08-04): the actual notify-dispatch logic moved to
+    # announcements._dispatch_cloud_alert, a module-private free function
+    # that announcements.maybe_announce_cloud_state calls directly — it
+    # is no longer reached via a `coordinator._async_dispatch_cloud_alert`
+    # attribute at all, so this stub doesn't need to provide one.
     return coord
 
 

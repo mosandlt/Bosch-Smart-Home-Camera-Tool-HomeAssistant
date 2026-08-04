@@ -27,6 +27,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .base import _BoschEntityBase
+from .dynamic_devices import register_dynamic_camera_listener
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,10 +40,22 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator = config_entry.runtime_data
-    entities = []
-    for cam_id in coordinator.data:
-        entities.append(BoschFirmwareUpdate(coordinator, cam_id, config_entry))
+
+    def _build_entities_for_cam(cam_id: str) -> list[Any]:
+        return [BoschFirmwareUpdate(coordinator, cam_id, config_entry)]
+
+    known_cam_ids: set[str] = set(coordinator.data)
+    entities: list[Any] = []
+    for cam_id in known_cam_ids:
+        entities.extend(_build_entities_for_cam(cam_id))
     async_add_entities(entities, update_before_add=False)
+
+    # Quality-Scale Gold `dynamic-devices`.
+    config_entry.async_on_unload(
+        register_dynamic_camera_listener(
+            coordinator, known_cam_ids, async_add_entities, _build_entities_for_cam
+        )
+    )
 
 
 class BoschFirmwareUpdate(_BoschEntityBase, UpdateEntity):  # type: ignore[misc]

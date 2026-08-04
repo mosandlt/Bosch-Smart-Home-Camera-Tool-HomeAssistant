@@ -966,6 +966,51 @@
     },
     "ai_task_unavailable": {
       "message": "AI Task 服务不可用或失败：{error}"
+    },
+    "stream_blocked_privacy_mode": {
+      "message": "{camera}：隐私模式已开启 — 视频流不可用"
+    },
+    "stream_start_blocked_privacy_mode": {
+      "message": "无法为 {camera} 启动视频流 — 隐私模式已激活。请先关闭隐私模式。"
+    },
+    "motion_sensitivity_unknown": {
+      "message": "{camera}：移动检测灵敏度尚未知晓 — 请在集成完成首次更新后重试"
+    },
+    "motion_detection_enable_failed": {
+      "message": "{camera}：启用移动检测失败"
+    },
+    "motion_detection_disable_failed": {
+      "message": "{camera}：禁用移动检测失败"
+    },
+    "firmware_install_in_progress": {
+      "message": "固件安装已在进行中"
+    },
+    "firmware_no_update_available": {
+      "message": "当前没有可安装的固件更新"
+    },
+    "firmware_install_rejected": {
+      "message": "Bosch 云拒绝了针对 {target} 的固件安装请求"
+    },
+    "soft_reset_rejected": {
+      "message": "Bosch 云拒绝了软重启（soft-reset）请求"
+    },
+    "hard_reset_rejected": {
+      "message": "Bosch 云拒绝了硬重置（恢复出厂设置）请求"
+    },
+    "not_authenticated": {
+      "message": "未通过身份验证 — 请重新添加集成以登录"
+    },
+    "token_expired_renewal_failed": {
+      "message": "令牌已过期且续期失败 — 请通过重新身份验证提示重新登录，或前往 设置 → 集成 → Bosch Smart Home Camera → 配置 → 强制重新通过浏览器登录"
+    },
+    "no_refresh_token": {
+      "message": "没有 refresh token — 需要重新进行身份验证"
+    },
+    "refresh_token_invalid": {
+      "message": "Refresh token 无效 — 请通过集成卡片上的**重新配置**按钮重新进行身份验证。"
+    },
+    "token_refresh_failed_repeatedly": {
+      "message": "令牌续期多次失败 — 请通过集成卡片上的**重新配置**按钮重新进行身份验证。"
     }
   },
   "issues": {

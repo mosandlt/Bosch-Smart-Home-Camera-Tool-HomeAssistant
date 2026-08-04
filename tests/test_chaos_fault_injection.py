@@ -50,11 +50,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+from bosch_shc_camera_client import tls_proxy as _tls_proxy_mod
+from bosch_shc_camera_client.tls_proxy import start_tls_proxy, stop_tls_proxy
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.bosch_shc_camera import BoschCameraCoordinator
-from custom_components.bosch_shc_camera import tls_proxy as _tls_proxy_mod
 from custom_components.bosch_shc_camera.go2rtc_client import (
     unregister_go2rtc_stream,
 )
@@ -62,13 +63,12 @@ from custom_components.bosch_shc_camera.session_state import (
     BoolFieldView,
     CacheFieldView,
 )
-from custom_components.bosch_shc_camera.tls_proxy import start_tls_proxy, stop_tls_proxy
 
 # Captured BEFORE any patch.object() call below replaces
 # `asyncio.open_connection` — `_tls_proxy_mod.asyncio` is the same module
 # object as the global `asyncio`, so patching it patches this name too.
 # Calling the (unpatched) real function through this reference avoids
-# infinite recursion. (Same pattern as tests/test_tls_proxy.py.)
+# infinite recursion. (Same pattern as bosch_shc_camera_client's own test_tls_proxy.py.)
 _real_open_connection = asyncio.open_connection
 
 
@@ -556,7 +556,7 @@ class TestTlsProxyHardResetRecovery:
 
     tls_proxy.py is asyncio-native (`asyncio.start_server`, no daemon
     threads) as of the 2026-07 HA-Core-submission rewrite — these tests
-    drive the real proxy the same way tests/test_tls_proxy.py does:
+    drive the real proxy the same way bosch_shc_camera_client's own tests/test_tls_proxy.py does:
     `asyncio.open_connection` is patched to skip the TLS handshake (no
     real cert for the fake-camera loopback server), while INBOUND client
     connections use raw, unpatched `socket.create_connection` so the

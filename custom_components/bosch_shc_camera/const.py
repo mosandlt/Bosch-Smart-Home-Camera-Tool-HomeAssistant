@@ -181,9 +181,6 @@ TIMEOUT_RECORDER_STDERR_DRAIN = 1.0
 TIMEOUT_RECORDER_FFMPEG_INIT = 30.0
 TIMEOUT_RECORDER_SEGMENT_PROBE = 5.0
 
-# tls_proxy.py — TCP connect to camera + RTSP pre-warm DESCRIBE response wait.
-TIMEOUT_TLS_PROXY_CONNECT = 10
-TIMEOUT_TLS_PROXY_RTSP_READ = 5
 
 # SHC local-API fallback retry policy. Used by shc.py's circuit breaker
 # (offline mode). Centralized so the values are not buried as instance

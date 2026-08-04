@@ -53,6 +53,7 @@ def _make_coordinator(cam_id: str = CAM_ID) -> Any:
         },
         camera_entities={},
         image_entities={},
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
 
 
@@ -103,6 +104,7 @@ async def test_image_entity_not_created_when_snapshots_disabled(
     entry = SimpleNamespace(
         runtime_data=coordinator,
         options={"enable_snapshots": False},
+        async_on_unload=MagicMock(),
     )
 
     added: list[Any] = []
@@ -135,6 +137,7 @@ async def test_image_entity_created_when_snapshots_enabled(
     entry = SimpleNamespace(
         runtime_data=coordinator,
         options={"enable_snapshots": True},
+        async_on_unload=MagicMock(),
     )
 
     added: list[Any] = []
@@ -525,6 +528,7 @@ async def test_ai_alert_image_not_created_when_ai_analysis_disabled(
     entry = SimpleNamespace(
         runtime_data=coordinator,
         options={"enable_snapshots": False, "ai_analysis_enabled": False},
+        async_on_unload=MagicMock(),
     )
     added: list[Any] = []
     hass = _make_hass(tmp_path)
@@ -553,6 +557,7 @@ async def test_ai_alert_image_created_when_ai_analysis_enabled(
     entry = SimpleNamespace(
         runtime_data=coordinator,
         options={"enable_snapshots": False, "ai_analysis_enabled": True},
+        async_on_unload=MagicMock(),
     )
     added: list[Any] = []
     hass = _make_hass(tmp_path)
@@ -571,6 +576,84 @@ async def test_ai_alert_image_created_when_ai_analysis_enabled(
 
     assert len(added) == 1
     assert isinstance(added[0], BoschAiLatestAlertImage)
+
+
+CAM_ID_2 = "22222222-2222-2222-2222-222222222222"
+
+
+@pytest.mark.asyncio
+async def test_new_camera_gets_entities_added_dynamically(tmp_path: Path) -> None:
+    """Quality-Scale Gold `dynamic-devices`: a camera that appears in
+    coordinator.data AFTER the initial async_setup_entry pass (e.g. added to
+    the Bosch account while HA is already running) must get its image
+    entities added automatically via the registered coordinator listener —
+    no integration reload required.
+    """
+    from custom_components.bosch_shc_camera.image import (
+        BoschCameraLastSnapshotImage,
+        async_setup_entry,
+    )
+
+    coordinator = _make_coordinator()
+    entry = SimpleNamespace(
+        runtime_data=coordinator,
+        options={"enable_snapshots": True},
+        async_on_unload=MagicMock(),
+    )
+    added: list[Any] = []
+    hass = _make_hass(tmp_path)
+
+    with (
+        patch(
+            "custom_components.bosch_shc_camera.image.get_options",
+            return_value={"enable_snapshots": True},
+        ),
+        patch(
+            "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+            lambda self, h, verify_ssl=False: None,
+        ),
+    ):
+        await async_setup_entry(
+            hass, entry, lambda entities, **kw: added.extend(entities)
+        )
+
+    coordinator.async_add_listener.assert_called_once()
+    entry.async_on_unload.assert_called_once()
+    assert len(added) == 1
+
+    listener = coordinator.async_add_listener.call_args[0][0]
+
+    # A second camera shows up in coordinator.data — matches the existing
+    # camera-fixture shape used by _make_coordinator.
+    coordinator.data[CAM_ID_2] = {
+        "info": {
+            "title": "Garten",
+            "hardwareVersion": "HOME_Eyes_Outdoor",
+            "firmwareVersion": "9.40.25",
+            "macAddress": "aa:bb:cc:dd:ee:02",
+        },
+        "events": [],
+        "live": {},
+    }
+
+    with patch(
+        "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+        lambda self, h, verify_ssl=False: None,
+    ):
+        listener()
+
+    assert len(added) == 2
+    assert isinstance(added[1], BoschCameraLastSnapshotImage)
+    assert added[1]._cam_id == CAM_ID_2
+
+    # No-op: calling again with no new cameras must not add anything.
+    with patch(
+        "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+        lambda self, h, verify_ssl=False: None,
+    ):
+        listener()
+
+    assert len(added) == 2
 
 
 class TestAiLatestAlertImageAsyncImage:

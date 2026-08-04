@@ -25,6 +25,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import BoschCameraCoordinator
 from .const import CONF_ENABLE_PTZ_CONTROLS, DOMAIN, STREAM_START_SKIPPED
+from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _is_gen2_indoor, _warn_if_privacy_on
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,35 +71,54 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: BoschCameraCoordinator = config_entry.runtime_data
-    entities = []
-    for cam_id in coordinator.data:
-        entities.append(BoschVideoQualitySelect(coordinator, cam_id, config_entry))
-        entities.append(BoschMotionSensitivitySelect(coordinator, cam_id, config_entry))
+
+    def _build_entities_for_cam(cam_id: str) -> list[Any]:
+        cam_entities: list[Any] = [
+            BoschVideoQualitySelect(coordinator, cam_id, config_entry),
+            BoschMotionSensitivitySelect(coordinator, cam_id, config_entry),
+        ]
         # Gen2-only: detection mode select
-        cam_info = coordinator.data[cam_id].get("info", {})
+        cam_info = coordinator.data.get(cam_id, {}).get("info", {})
         hw = cam_info.get("hardwareVersion", "CAMERA")
         from .models import get_model_config
 
         if get_model_config(hw).generation >= 2:
-            entities.append(BoschDetectionModeSelect(coordinator, cam_id, config_entry))
+            cam_entities.append(
+                BoschDetectionModeSelect(coordinator, cam_id, config_entry)
+            )
         # PTZ preset select — only for cameras with panLimit > 0 (CAMERA_360 indoor)
         # AND opt-in via options. Default off so non-PTZ users see no extra entity.
         pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
         ptz_enabled = config_entry.options.get(CONF_ENABLE_PTZ_CONTROLS, False)
         if pan_limit and ptz_enabled:
-            entities.append(
+            cam_entities.append(
                 BoschPanPresetSelect(coordinator, cam_id, config_entry, pan_limit)
             )
         # Per-camera Mini-NVR mode override (GitHub #43) — only relevant once
         # Mini-NVR itself is enabled (same gate as BoschNvrRecordingSwitch).
         if config_entry.options.get("enable_nvr", False):
-            entities.append(BoschNvrModeSelect(coordinator, cam_id, config_entry))
-    # Integration-level selects (one per integration, not per camera)
+            cam_entities.append(BoschNvrModeSelect(coordinator, cam_id, config_entry))
+        return cam_entities
+
+    known_cam_ids: set[str] = set(coordinator.data)
+    entities: list[Any] = []
+    for cam_id in known_cam_ids:
+        entities.extend(_build_entities_for_cam(cam_id))
+    # Integration-level selects (one per integration, not per camera) — NOT
+    # part of `_build_entities_for_cam`, so the dynamic-add listener below
+    # never re-creates them for a newly-discovered camera.
     first_cam_id = next(iter(coordinator.data), None)
     if first_cam_id:
         entities.append(BoschFcmPushModeSelect(coordinator, first_cam_id, config_entry))
         entities.append(BoschStreamModeSelect(coordinator, first_cam_id, config_entry))
     async_add_entities(entities)
+
+    # Quality-Scale Gold `dynamic-devices`.
+    config_entry.async_on_unload(
+        register_dynamic_camera_listener(
+            coordinator, known_cam_ids, async_add_entities, _build_entities_for_cam
+        )
+    )
 
 
 class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  # type: ignore[misc]

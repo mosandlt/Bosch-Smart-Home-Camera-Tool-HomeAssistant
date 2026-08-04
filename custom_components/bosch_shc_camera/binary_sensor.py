@@ -41,6 +41,7 @@ from .const import (
     MOTION_ACTIVE_WINDOW_MAX,
     MOTION_ACTIVE_WINDOW_MIN,
 )
+from .dynamic_devices import register_dynamic_camera_listener
 from .time_utils import parse_bosch_timestamp
 
 _LOGGER = logging.getLogger(__name__)
@@ -63,28 +64,39 @@ async def async_setup_entry(
     """Set up binary sensor entities for each camera."""
     coordinator: BoschCameraCoordinator = config_entry.runtime_data
     opts = get_options(config_entry)
-    entities = []
-    for cam_id in coordinator.data:
-        cam_info = coordinator.data[cam_id].get("info", {})
+
+    def _build_entities_for_cam(cam_id: str) -> list[Any]:
+        cam_info = coordinator.data.get(cam_id, {}).get("info", {})
         has_sound = cam_info.get("featureSupport", {}).get("sound", False)
-        entities.append(BoschMotionBinarySensor(coordinator, cam_id, config_entry))
-        entities.append(
-            BoschPersonDetectedBinarySensor(coordinator, cam_id, config_entry)
-        )
-        entities.append(
-            BoschLanReachableBinarySensor(coordinator, cam_id, config_entry)
-        )
+        cam_entities: list[Any] = [
+            BoschMotionBinarySensor(coordinator, cam_id, config_entry),
+            BoschPersonDetectedBinarySensor(coordinator, cam_id, config_entry),
+            BoschLanReachableBinarySensor(coordinator, cam_id, config_entry),
+        ]
         if has_sound:
-            entities.append(
+            cam_entities.append(
                 BoschAudioAlarmBinarySensor(coordinator, cam_id, config_entry)
             )
         # AI Camera Analysis — only when the master option is enabled (same
         # gate as the sensor.py AI-analysis sensors).
         if opts.get(CONF_AI_ANALYSIS_ENABLED, False):
-            entities.append(
+            cam_entities.append(
                 BoschAiRecentAlertBinarySensor(coordinator, cam_id, config_entry)
             )
+        return cam_entities
+
+    known_cam_ids: set[str] = set(coordinator.data)
+    entities: list[Any] = []
+    for cam_id in known_cam_ids:
+        entities.extend(_build_entities_for_cam(cam_id))
     async_add_entities(entities, update_before_add=False)
+
+    # Quality-Scale Gold `dynamic-devices`.
+    config_entry.async_on_unload(
+        register_dynamic_camera_listener(
+            coordinator, known_cam_ids, async_add_entities, _build_entities_for_cam
+        )
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

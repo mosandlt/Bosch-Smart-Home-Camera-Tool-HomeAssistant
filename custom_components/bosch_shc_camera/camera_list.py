@@ -33,6 +33,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from .const import (
     CLOUD_API,
+    DOMAIN,
     TIMEOUT_VIDEO_INPUTS,
     VIDEO_INPUTS_RETRY_DELAY_SEC,
 )
@@ -189,9 +190,8 @@ async def fetch_camera_list(
                     # 2026-07-27 — Core's own build has no manual relogin
                     # option, so its message differs slightly).
                     raise ConfigEntryAuthFailed(
-                        "Token expired and renewal failed — re-authenticate via the "
-                        "reauth prompt, or go to Settings → Integrations → Bosch "
-                        "Smart Home Camera → Configure → Force new browser login"
+                        translation_domain=DOMAIN,
+                        translation_key="token_expired_renewal_failed",
                     )
                 if resp2.status != 200:
                     raise UpdateFailed(f"Camera list returned HTTP {resp2.status}")

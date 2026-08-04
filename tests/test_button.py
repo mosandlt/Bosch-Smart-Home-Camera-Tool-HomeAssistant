@@ -45,12 +45,15 @@ def stub_coord() -> SimpleNamespace:
         camera_entities={},
         async_request_refresh=AsyncMock(),
         async_put_camera=AsyncMock(return_value=True),
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
 
 
 @pytest.fixture
 def stub_entry() -> SimpleNamespace:
-    return SimpleNamespace(entry_id="01ENTRY", data={}, options={})
+    return SimpleNamespace(
+        entry_id="01ENTRY", data={}, options={}, async_on_unload=MagicMock()
+    )
 
 
 # ── BoschRefreshSnapshotButton ──────────────────────────────────────────
@@ -273,7 +276,7 @@ class TestAsyncSoftResetCamera:
 
         coord = _make_coord()
         coord.async_put_camera.return_value = False
-        with pytest.raises(HomeAssistantError, match="soft-reset"):
+        with pytest.raises(HomeAssistantError, match="soft_reset_rejected"):
             await BoschCameraCoordinator.async_soft_reset_camera(coord, CAM_ID)  # type: ignore[arg-type]
 
 
@@ -294,7 +297,7 @@ class TestAsyncHardResetCamera:
 
         coord = _make_coord()
         coord.async_put_camera.return_value = False
-        with pytest.raises(HomeAssistantError, match="hard-reset"):
+        with pytest.raises(HomeAssistantError, match="hard_reset_rejected"):
             await BoschCameraCoordinator.async_hard_reset_camera(coord, CAM_ID)  # type: ignore[arg-type]
 
 

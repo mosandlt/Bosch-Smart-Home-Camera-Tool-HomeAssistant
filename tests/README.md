@@ -47,7 +47,7 @@ pytest tests/test_init_sprint_kc.py -v
 | `test_number_*.py` | number entities — audio threshold, lens elevation, mic level, etc. |
 | `test_media_source*.py` | LocalBackend, SmbBackend, NvrBackend, _browse tree, _FILE_RE |
 | `test_smb*.py` | sync_local_save, SMB upload/cleanup/disk-check, FTP upload/cleanup |
-| `test_tls_proxy*.py` | TLS proxy daemon threads, circuit breaker, pipe relay |
+| (TLS proxy — daemon threads, circuit breaker, pipe relay) | moved to the `bosch_shc_camera_client` PyPI library's own test suite (2026-08 extraction — `tls_proxy.py` had zero HA/coordinator coupling) |
 | `test_init_sprint_*.py` | coordinator methods: _async_update_data, _try_live_connection_inner, _auto_renew_local_session, token refresh, go2rtc, RCP cache |
 | `test_fcm*.py` | FCM push handling, dedup, alerts, send_alert step1/step2 |
 | `test_rcp*.py` | RCP session, XML parsing, all type codes |

@@ -132,6 +132,12 @@
       },
       "external_stream": {
         "default": "mdi:share-variant-outline"
+      },
+      "frigate_high": {
+        "default": "mdi:cctv"
+      },
+      "frigate_low": {
+        "default": "mdi:cctv"
       }
     },
     "sensor": {
@@ -244,6 +250,18 @@
       },
       "cloud_feature_flags": {
         "default": "mdi:flag-checkered"
+      },
+      "stream_url": {
+        "default": "mdi:link-variant"
+      },
+      "stream_url_sub": {
+        "default": "mdi:link-variant"
+      },
+      "frigate_url_high": {
+        "default": "mdi:cctv"
+      },
+      "frigate_url_low": {
+        "default": "mdi:cctv"
       }
     },
     "number": {

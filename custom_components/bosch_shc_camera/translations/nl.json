@@ -966,6 +966,51 @@
     },
     "ai_task_unavailable": {
       "message": "AI Task-dienst niet beschikbaar of mislukt: {error}"
+    },
+    "stream_blocked_privacy_mode": {
+      "message": "{camera}: stream niet beschikbaar — privacymodus is AAN"
+    },
+    "stream_start_blocked_privacy_mode": {
+      "message": "Kan stream voor {camera} niet starten — privacymodus is actief. Schakel eerst de privacymodus uit."
+    },
+    "motion_sensitivity_unknown": {
+      "message": "{camera}: bewegingsgevoeligheid nog niet bekend — probeer het opnieuw zodra de integratie de eerste update heeft voltooid"
+    },
+    "motion_detection_enable_failed": {
+      "message": "{camera}: bewegingsdetectie kon niet worden ingeschakeld"
+    },
+    "motion_detection_disable_failed": {
+      "message": "{camera}: bewegingsdetectie kon niet worden uitgeschakeld"
+    },
+    "firmware_install_in_progress": {
+      "message": "Er is al een firmware-installatie bezig"
+    },
+    "firmware_no_update_available": {
+      "message": "Er is momenteel geen firmware-update beschikbaar om te installeren"
+    },
+    "firmware_install_rejected": {
+      "message": "Bosch cloud heeft het firmware-installatieverzoek voor {target} geweigerd"
+    },
+    "soft_reset_rejected": {
+      "message": "Bosch cloud heeft het soft-reset-verzoek (herstart) geweigerd"
+    },
+    "hard_reset_rejected": {
+      "message": "Bosch cloud heeft het hard-reset-verzoek (fabrieksreset) geweigerd"
+    },
+    "not_authenticated": {
+      "message": "Niet geauthenticeerd — voeg de integratie opnieuw toe om in te loggen"
+    },
+    "token_expired_renewal_failed": {
+      "message": "Token verlopen en vernieuwing mislukt — verifieer opnieuw via de reauth-melding, of ga naar Instellingen → Integraties → Bosch Smart Home Camera → Configureren → Nieuwe browserlogin forceren"
+    },
+    "no_refresh_token": {
+      "message": "Geen refresh token — opnieuw verifiëren vereist"
+    },
+    "refresh_token_invalid": {
+      "message": "Refresh token ongeldig — verifieer opnieuw via de knop **Opnieuw configureren** op de integratiekaart."
+    },
+    "token_refresh_failed_repeatedly": {
+      "message": "Token-vernieuwing herhaaldelijk mislukt — verifieer opnieuw via de knop **Opnieuw configureren** op de integratiekaart."
     }
   },
   "issues": {

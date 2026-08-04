@@ -53,6 +53,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import BoschCameraCoordinator, get_options
 from .cloud_ssl import async_get_bosch_cloud_session
 from .const import DOMAIN, STREAM_START_SKIPPED
+from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _INDOOR_HW, _get_cam_lock, _is_gen2_indoor, _warn_if_privacy_on
 from .session_state import FloatFieldView
 
@@ -144,8 +145,7 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
         switch must keep running its later steps — so a total failure
         across every fallback path is otherwise invisible: `is_on` still
         reflects the last cached state and the UI just reverts with zero
-        explanation (live report 2026-07-07, privacy mode; same discard
-        pattern existed here too).
+        explanation.
         """
         _LOGGER.warning(
             "%s toggle for %s (%s) failed on all paths — state unchanged",
@@ -191,31 +191,41 @@ async def async_setup_entry(
     opts = get_options(config_entry)
 
     coordinator = config_entry.runtime_data
-    entities = []
-    for cam_id in coordinator.data:
-        cam_info = coordinator.data[cam_id].get("info", {})
-        entities.append(BoschLiveStreamSwitch(coordinator, cam_id, config_entry))
-        entities.append(BoschAudioSwitch(coordinator, cam_id, config_entry))
-        # Privacy mode — always available via cloud API (no SHC needed)
-        entities.append(BoschPrivacyModeSwitch(coordinator, cam_id, config_entry))
+
+    def _build_entities_for_cam(cam_id: str) -> list[Any]:
+        cam_info = coordinator.data.get(cam_id, {}).get("info", {})
+        cam_entities: list[Any] = [
+            BoschLiveStreamSwitch(coordinator, cam_id, config_entry),
+            BoschAudioSwitch(coordinator, cam_id, config_entry),
+            # Privacy mode — always available via cloud API (no SHC needed)
+            BoschPrivacyModeSwitch(coordinator, cam_id, config_entry),
+        ]
         # Camera light — only if cloud API reports featureSupport.light = True.
         # Do NOT fall back to "SHC configured" — cameras without a physical light
         # (e.g. CAMERA_360 indoor) would otherwise get a spurious light switch.
         has_light = cam_info.get("featureSupport", {}).get("light", False)
         if has_light:
-            entities.append(BoschCameraLightSwitch(coordinator, cam_id, config_entry))
-            entities.append(BoschFrontLightSwitch(coordinator, cam_id, config_entry))
-            entities.append(BoschWallwasherSwitch(coordinator, cam_id, config_entry))
+            cam_entities.append(
+                BoschCameraLightSwitch(coordinator, cam_id, config_entry)
+            )
+            cam_entities.append(
+                BoschFrontLightSwitch(coordinator, cam_id, config_entry)
+            )
+            cam_entities.append(
+                BoschWallwasherSwitch(coordinator, cam_id, config_entry)
+            )
         # Notifications — available for all cameras via cloud API
-        entities.append(BoschNotificationsSwitch(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschNotificationsSwitch(coordinator, cam_id, config_entry))
         # Motion detection toggle — available for all cameras via cloud API
-        entities.append(BoschMotionEnabledSwitch(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschMotionEnabledSwitch(coordinator, cam_id, config_entry))
         # Record sound toggle — available for all cameras via cloud API
-        entities.append(BoschRecordSoundSwitch(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschRecordSoundSwitch(coordinator, cam_id, config_entry))
         # Auto-follow — only for cameras with panLimit > 0 (CAMERA_360)
         pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
         if pan_limit:
-            entities.append(BoschAutoFollowSwitch(coordinator, cam_id, config_entry))
+            cam_entities.append(
+                BoschAutoFollowSwitch(coordinator, cam_id, config_entry)
+            )
         # Intercom (two-way audio) — gated on the `enable_intercom` option so
         # the option toggle has actual effect. Legacy users who enabled the
         # entity via the UI keep it (registry already has the entry); new
@@ -226,7 +236,7 @@ async def async_setup_entry(
             is not None
         )
         if opts.get("enable_intercom", False) or intercom_in_registry:
-            entities.append(BoschIntercomSwitch(coordinator, cam_id, config_entry))
+            cam_entities.append(BoschIntercomSwitch(coordinator, cam_id, config_entry))
         # Privacy sound — only for cameras where the endpoint returns 200 (not 442)
         # Indoor CAMERA_360 (Gen1) + HOME_Eyes_Indoor (Gen2) support it; outdoor returns 442.
         hw_version = cam_info.get("hardwareVersion", "")
@@ -236,90 +246,117 @@ async def async_setup_entry(
             "HOME_Eyes_Indoor",
             "CAMERA_INDOOR_GEN2",
         ):
-            entities.append(BoschPrivacySoundSwitch(coordinator, cam_id, config_entry))
+            cam_entities.append(
+                BoschPrivacySoundSwitch(coordinator, cam_id, config_entry)
+            )
         # Timestamp overlay — available for all cameras
-        entities.append(BoschTimestampSwitch(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschTimestampSwitch(coordinator, cam_id, config_entry))
         # Status LED — Gen2 cameras only
         from .models import get_model_config
 
         if get_model_config(hw_version).generation >= 2:
-            entities.append(BoschStatusLedSwitch(coordinator, cam_id, config_entry))
-            entities.append(BoschMotionLightSwitch(coordinator, cam_id, config_entry))
-            entities.append(BoschAmbientLightSwitch(coordinator, cam_id, config_entry))
-            entities.append(
+            cam_entities.append(BoschStatusLedSwitch(coordinator, cam_id, config_entry))
+            cam_entities.append(
+                BoschMotionLightSwitch(coordinator, cam_id, config_entry)
+            )
+            cam_entities.append(
+                BoschAmbientLightSwitch(coordinator, cam_id, config_entry)
+            )
+            cam_entities.append(
                 BoschSoftLightFadingSwitch(coordinator, cam_id, config_entry)
             )
-            entities.append(
+            cam_entities.append(
                 BoschIntrusionDetectionSwitch(coordinator, cam_id, config_entry)
             )
         # Notification type toggles — person is cloud AI (all cameras);
         # audio gated on featureSupport.sound (API-reported, not hardcoded by model).
         has_sound = cam_info.get("featureSupport", {}).get("sound", False)
         for ntype in ("movement", "person", "trouble", "cameraAlarm", "troubleEmail"):
-            entities.append(
+            cam_entities.append(
                 BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, ntype)
             )
         if has_sound:
-            entities.append(
+            cam_entities.append(
                 BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, "audio")
             )
         # Gen2 Audio-Plus sound analytics — glass-break + fire/smoke detection
         # (cloud audioDetectionConfig). Gated on featureSupport.sound; the entity
         # stays unavailable until the camera returns the config (the feature is
-        # Audio-Plus subscription-dependent). 2026-06-22.
+        # Audio-Plus subscription-dependent).
         if get_model_config(hw_version).generation >= 2 and has_sound:
-            entities.append(
+            cam_entities.append(
                 BoschGlassBreakDetectionSwitch(coordinator, cam_id, config_entry)
             )
-            entities.append(
+            cam_entities.append(
                 BoschFireAlarmDetectionSwitch(coordinator, cam_id, config_entry)
             )
         # Gen2 Indoor II — alarm system (integrated 75 dB siren)
         if hw_version in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
-            entities.append(
+            cam_entities.append(
                 BoschAlarmSystemArmSwitch(coordinator, cam_id, config_entry)
             )
-            entities.append(BoschAlarmModeSwitch(coordinator, cam_id, config_entry))
-            entities.append(BoschPreAlarmSwitch(coordinator, cam_id, config_entry))
+            cam_entities.append(BoschAlarmModeSwitch(coordinator, cam_id, config_entry))
+            cam_entities.append(BoschPreAlarmSwitch(coordinator, cam_id, config_entry))
         # Gen2 panic-alarm — manual siren trigger via PUT /panic_alarm.
         # Gen1 keeps the auto-stop button in button.py (BoschAcousticAlarmButton).
         if get_model_config(hw_version).generation >= 2:
-            entities.append(BoschPanicAlarmSwitch(coordinator, cam_id, config_entry))
+            cam_entities.append(
+                BoschPanicAlarmSwitch(coordinator, cam_id, config_entry)
+            )
         # Image rotation 180° — only for indoor cameras (Gen1 360 + Gen2 Indoor II).
         # Outdoor cameras have a fixed mounting orientation by design and don't
         # need this. The switch is purely client-side display state — the card
         # applies CSS transform, the snapshot path applies PIL rotation, and
         # (for Gen1 360) the pan slider sign is inverted.
         if hw_version in _INDOOR_HW:
-            entities.append(
+            cam_entities.append(
                 BoschImageRotation180Switch(coordinator, cam_id, config_entry)
             )
         # Mini-NVR recording switch — opt-in via integration option `enable_nvr`.
         # Disabled by default; user enables in options, then toggles per camera.
         if opts.get("enable_nvr", False):
-            entities.append(BoschNvrRecordingSwitch(coordinator, cam_id, config_entry))
+            cam_entities.append(
+                BoschNvrRecordingSwitch(coordinator, cam_id, config_entry)
+            )
             # Opt-out for the native FCM-triggered event→clip assembly —
             # default ON (backward compatible); installs that orchestrate
             # their own clip-saving externally can turn this off per camera
             # while the pre-roll ring keeps running for their own consumer.
-            entities.append(BoschNvrEventClipSwitch(coordinator, cam_id, config_entry))
+            cam_entities.append(
+                BoschNvrEventClipSwitch(coordinator, cam_id, config_entry)
+            )
         # External stream URL exposure — per-camera opt-in for Frigate / BlueIris users.
         # The switch is always registered (default OFF, disabled in entity registry by
         # default); user enables in HA UI per camera, then the two stream_url sensors
         # populate. Avoids entity-spam on installs that don't need external recorders.
-        entities.append(BoschExternalStreamSwitch(coordinator, cam_id, config_entry))
+        cam_entities.append(
+            BoschExternalStreamSwitch(coordinator, cam_id, config_entry)
+        )
         # Frigate / external-recorder persistent credential-free RTSP endpoints.
         # Two per-camera switches (High = inst=1, Low = inst=2); each publishes
         # its frigate_url_* sensor and starts the always-on front-door on demand.
         # Always registered (default OFF, disabled in entity registry), gated by
         # the global `frigate_endpoints_enabled` option.
-        entities.append(BoschFrigateHighSwitch(coordinator, cam_id, config_entry))
-        entities.append(BoschFrigateLowSwitch(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschFrigateHighSwitch(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschFrigateLowSwitch(coordinator, cam_id, config_entry))
         # AI Camera Analysis per-camera opt-out — always registered (see
         # BoschAiAnalysisSwitch docstring), independent of the global
         # `ai_analysis_enabled` master option.
-        entities.append(BoschAiAnalysisSwitch(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschAiAnalysisSwitch(coordinator, cam_id, config_entry))
+        return cam_entities
+
+    known_cam_ids: set[str] = set(coordinator.data)
+    entities: list[Any] = []
+    for cam_id in known_cam_ids:
+        entities.extend(_build_entities_for_cam(cam_id))
     async_add_entities(entities, update_before_add=False)
+
+    # Quality-Scale Gold `dynamic-devices`.
+    config_entry.async_on_unload(
+        register_dynamic_camera_listener(
+            coordinator, known_cam_ids, async_add_entities, _build_entities_for_cam
+        )
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -331,14 +368,14 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
     background for Lovelace card preload, Cast / `play_stream`, and
     snapshot fetch — each populates `live_connections` but does not
     reflect explicit user intent. The switch tracks intent separately so
-    those auto-opens don't flip the visible state. Reported 2026-05-20.
+    those auto-opens don't flip the visible state.
 
     Stays ON until manually turned OFF, privacy mode engages, or HA
     restarts (intent is not RestoreEntity-persisted).
     """
 
     # The (redacted) RTSP/proxy URLs rotate on every reconnect — recording
-    # them churns the `state_attributes` table with no history value (HA#39).
+    # them churns the `state_attributes` table with no history value.
     _unrecorded_attributes = frozenset({"rtsps_url", "proxy_snap_url"})
 
     def __init__(
@@ -402,8 +439,9 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             self.coordinator.shc_state_cache.get(self._cam_id, {}).get("privacy_mode")
         ):
             raise ServiceValidationError(
-                f"Cannot start stream for {self._cam_title} — privacy mode is active. "
-                "Turn off privacy mode first.",
+                translation_domain=DOMAIN,
+                translation_key="stream_start_blocked_privacy_mode",
+                translation_placeholders={"camera": self._cam_title},
             )
         # SENTINEL_RULE: "never stopped" is float("-inf"), not 0 — the prior
         # `last_off > 0` guard worked but was fragile; -inf makes elapsed huge
@@ -431,8 +469,7 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             # That start will publish the session — this is NOT a failure.
             # Keep the user intent we set above, do NOT log a failure or
             # record a (false) stream error, and reflect the optimistic
-            # "on" state. (Fixes the spurious "Live stream failed" warning
-            # seen on concurrent starts, 2026-06-18.)
+            # "on" state.
             _LOGGER.debug(
                 "Live stream start for %s coalesced into an in-progress start",
                 self._cam_title,
@@ -485,14 +522,13 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             flips True only when the FFmpeg worker has produced its first
             segment. A Stream object that exists but whose `available` is
             False means FFmpeg started and then died, which is exactly the
-            failure mode reported in issue #6 (yellow → brief blue → yellow
-            cycle).
+            failure mode (yellow → brief blue → yellow cycle).
           * when no `Stream` object exists yet (nobody has ever requested
             HLS — the common case for a WebRTC-only/mobile viewer, since
             WebRTC never touches HA's Stream component), fall back to
             go2rtc's own consumer count instead of assuming nobody is
-            watching (2026-07-19 fix — see `_stream_health_state`'s
-            docstring for the full rationale).
+            watching — see `_stream_health_state`'s docstring for the full
+            rationale.
 
         On a healthy tick the watchdog clears the coordinator error counter
         and exits. On a failing tick it records a stream error, tears the
@@ -523,10 +559,10 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             #     for the entire session — the old "no_consumer" bucket
             #     wrongly caught this and gave up watching after the very
             #     first tick, leaving a WebRTC-only session with zero
-            #     backend health monitoring (forum-review 2026-07-19: the
-            #     card's own client-side dead-track recovery can itself be
-            #     suppressed while the tab is hidden, so nothing else was
-            #     catching a session that died silently in the background).
+            #     backend health monitoring — the card's own client-side
+            #     dead-track recovery can itself be suppressed while the
+            #     tab is hidden, so nothing else was catching a session
+            #     that died silently in the background.
             cam_entity = self.coordinator.camera_entities.get(cam_id)
             if not cam_entity:
                 return "no_consumer"
@@ -558,7 +594,7 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         # watching, resetting the "seen a consumer" tracking since that
         # belongs to the old session's observation window, not this one.
         # Same generation-tracking pattern as session_renewal.py's keepalive
-        # loop. (bug-hunt finding, 2026-07-19)
+        # loop.
         watched_generation = self.coordinator.get_session(cam_id).generation
         had_webrtc_only_consumer = False
         for idx, delay in enumerate((60, 60)):  # 60s, then another 60s → ~2 min total
@@ -627,9 +663,8 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
                 # suppressed while backgrounded). Do NOT treat this like a
                 # confirmed-unhealthy HLS session: no tear-down/reconnect,
                 # and only a single gradual error (never saturate straight
-                # to forced-REMOTE) — a first bug-hunt round on this exact
-                # branch found that forcing REMOTE here punishes the common
-                # "viewer stopped watching" case with up to 30 min of
+                # to forced-REMOTE) — forcing REMOTE here would punish the
+                # common "viewer stopped watching" case with up to 30 min of
                 # degraded/cloud-routed streaming for no reason, and could
                 # even sabotage a legitimate WebRTC→HLS client-side recovery
                 # still in flight. This just nudges the same gradual
@@ -657,8 +692,8 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             # error listener reacts near-instantly, this watchdog only polls
             # every 60s. Without this guard the same crash could be counted
             # twice, saturating max_stream_errors in roughly half the
-            # configured number of genuine incidents (bug-hunt finding,
-            # 2026-07-19). stream_error_at is updated by every
+            # configured number of genuine incidents. stream_error_at is
+            # updated by every
             # record_stream_error() call regardless of caller — a very
             # recent update at the moment THIS tick fires (before this tick
             # has recorded anything itself) is a strong signal the same
@@ -705,7 +740,7 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
             # may have toggled the switch OFF in the meantime, in which
             # case `tear_down_live_stream` already cleared the intent.
             # Without this guard the watchdog re-opens the stream against
-            # the user's wishes. Bug 2026-05-20.
+            # the user's wishes.
             if cam_id not in self.coordinator.user_intent_streams:
                 _LOGGER.debug(
                     "Stream health watchdog: %s — user intent gone, skipping reconnect",
@@ -732,8 +767,8 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         _LOGGER.info("Live stream OFF for %s", self._cam_title)
         # Drop user intent first — health watchdog scheduled by the
         # previous turn_on may still be sleeping and must see the cleared
-        # intent when it wakes up (Bug 2026-05-20: watchdog re-opened
-        # stream after user OFF if the OFF landed mid-sleep).
+        # intent when it wakes up, otherwise it re-opens the stream after
+        # user OFF if the OFF landed mid-sleep.
         self.coordinator.user_intent_streams.discard(self._cam_id)
         # Shared teardown: cancels renewal task, pops live_connections,
         # stops TLS proxy + go2rtc, stops HA's camera.stream so
@@ -946,8 +981,8 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         self._attr_translation_key = "privacy_mode"
         # Debounce/coalesce state: a toggle that arrives during the cooldown /
         # warm-up window is remembered here (latest wins) and applied once the
-        # window clears — instead of raising into the caller (which aborted an
-        # automation's remaining steps, live ERROR 2026-06-10).
+        # window clears — instead of raising into the caller (which would
+        # abort an automation's remaining steps).
         self._pending_privacy: bool | None = None
         self._pending_apply_task: asyncio.Task[None] | None = None
 
@@ -1017,9 +1052,8 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         # let the user try — the write either succeeds (Gen2) or fails
         # cleanly (Gen1, no LAN endpoint), and not gating means the user
         # can recover privacy/light on a Gen2 cam during a multi-hour
-        # cloud outage without waiting for hw_version to backfill.
-        # Bug 2026-05-20 (Bosch maintenance window, hw_version never
-        # populated on Indoor II → switch grey, user stuck).
+        # cloud outage without waiting for hw_version to backfill (e.g. a
+        # Bosch maintenance window where hw_version never gets populated).
         from .shc import _is_gen2
 
         if _is_gen2(self.coordinator, self._cam_id):
@@ -1198,9 +1232,9 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         Apply immediately when allowed; otherwise remember the latest desired
         state and apply it once the cooldown / warm-up clears. NEVER raises —
         an automation calling this must keep running its later steps (a raised
-        ServiceValidationError previously aborted the whole action sequence,
-        live ERROR 2026-06-10). The card's optimistic flip stays correct because
-        `is_on` reflects the pending state until the write lands.
+        ServiceValidationError would abort the whole action sequence). The
+        card's optimistic flip stays correct because `is_on` reflects the
+        pending state until the write lands.
         """
         self._pending_privacy = desired
         if self._privacy_block_remaining() <= 0:
@@ -1444,21 +1478,14 @@ class BoschIntercomSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc
 
     When turned ON: enables speaker via PUT /v11/video_inputs/{id}/audio
     with {"audioEnabled": True, "speakerLevel": 50} merged onto the current
-    cached body (preserves microphoneLevel — capture 2026-04-08 confirms the
-    body shape {"audioEnabled":true,"microphoneLevel":60,"speakerLevel":80}).
+    cached body (preserves microphoneLevel — real body shape is
+    {"audioEnabled":true,"microphoneLevel":60,"speakerLevel":80}).
     When turned OFF: disables speaker with {"audioEnabled": False}, same
     merge. Shares coordinator.audio_cache and a per-camera lock with
     BoschSpeakerLevelNumber/BoschMicrophoneLevelNumber (same endpoint) so a
     concurrent write to a sibling field can't be clobbered by a stale
     snapshot.
 
-    Bug-hunt 2026-07-03: previously used a raw session.put (no 401/token-
-    refresh retry, unlike async_put_camera), sent the wrong JSON key casing
-    ("SpeakerLevel" instead of the API's "speakerLevel" — silently ignored
-    by the API, so speaker level 50 was never actually applied), omitted
-    microphoneLevel entirely from the ON body, and never wrote back to
-    audio_cache — leaving the Speaker/Microphone Number entities' cached
-    view permanently stale after every intercom toggle.
     Disabled by default — enable in Settings -> Entities.
     """
 
@@ -1810,13 +1837,12 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
             async with asyncio.timeout(10):
                 async with session.get(url, headers=headers) as resp:
                     if resp.status != 200:
-                        # Was a completely silent return — a camera that
-                        # doesn't support ambient lighting (or any other GET
-                        # failure) left `is_on` stuck at "unknown" forever
-                        # with zero indication why (found via live E2E
-                        # testing, 2026-07-28). Sibling switches
-                        # (motion light, _warn_write_failed users) all log
-                        # on failure — this one didn't.
+                        # A camera that doesn't support ambient lighting (or
+                        # any other GET failure) would otherwise leave
+                        # `is_on` stuck at "unknown" forever with zero
+                        # indication why. Sibling switches (motion light,
+                        # _warn_write_failed users) all log on failure — log
+                        # here too for consistency.
                         _LOGGER.warning(
                             "Ambient light GET HTTP %d for %s",
                             resp.status,
@@ -1989,7 +2015,7 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
 # Audio-Plus sound analytics (Gen2): glass-break + fire/smoke alarm detection
 # Cloud API: GET/PUT /v11/video_inputs/{id}/audioDetectionConfig
 # Payload model: {"detectGlassBreak": bool, "detectFireAlarm": bool} — BOTH fields
-# are always sent, so toggling one preserves the other. 2026-06-22.
+# are always sent, so toggling one preserves the other.
 # ─────────────────────────────────────────────────────────────────────────────
 class _BoschAudioDetectionSwitchBase(_BoschSwitchBase):
     """Base for the two audioDetectionConfig toggles (glass-break / fire alarm)."""
@@ -2026,7 +2052,6 @@ class _BoschAudioDetectionSwitchBase(_BoschSwitchBase):
         # field's stale value — reverting it in cache AND on the camera. The lock
         # makes each write read a cache that already holds the sibling's result,
         # and we merge only our own field back (never the whole entry).
-        # (bug-hunt 2026-07-01)
         locks = getattr(self.coordinator, "audio_detection_locks", None)
         if locks is None:
             locks = {}
@@ -2366,7 +2391,7 @@ class BoschPanicAlarmSwitch(_BoschSwitchBase):
     """Switch: trigger the integrated 75 dB siren (Gen2 only).
 
     PUT /v11/video_inputs/{id}/panic_alarm  body {"status": "ON" | "OFF"} → 204.
-    Confirmed via mitmproxy capture of the iOS app (2026-05-13).
+    Confirmed via mitmproxy capture of the iOS app.
 
     Unlike the Gen1 acoustic_alarm endpoint (auto-stops after a hardware-defined
     duration), panic_alarm is a stateful ON/OFF switch — the siren keeps blaring
@@ -2550,9 +2575,8 @@ class BoschNvrEventClipSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
 
     Opt-out for installs that orchestrate their own clip-saving externally
     (e.g. HA automations driving a fork's own service) and don't want a
-    second, native clip produced on top of theirs on every event (feature
-    request, realKim-dotcom, issue #43 follow-up). Turning this OFF only
-    skips `recorder.assemble_and_ship_motion_clip` — the underlying
+    second, native clip produced on top of theirs on every event. Turning
+    this OFF only skips `recorder.assemble_and_ship_motion_clip` — the underlying
     pre-roll/post-roll ring buffer keeps running unaffected, since other
     consumers (this switch's whole reason to exist) still need it.
 
@@ -2587,9 +2611,9 @@ class BoschNvrEventClipSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
         # persists those to the restore cache if the coordinator's last
         # update failed at shutdown). This entity defaults to enabled, so
         # blindly writing `last.state == "on"` for a non-on state would
-        # silently disable a feature the user never turned off (bug-hunt
-        # finding, issue #43 follow-up — the inverse of the gotcha already
-        # solved on BoschNvrRecordingSwitch, whose default is off).
+        # silently disable a feature the user never turned off — the
+        # inverse of the gotcha already solved on BoschNvrRecordingSwitch,
+        # whose default is off.
         if last is not None and last.state in ("on", "off"):
             self.coordinator.set_nvr_event_clip_enabled(
                 self._cam_id, last.state == "on"
@@ -2683,7 +2707,6 @@ class _BoschFrigateEndpointSwitch(_BoschSwitchBase, RestoreEntity):  # type: ign
     """
 
     _attr_entity_registry_enabled_default = False
-    _attr_icon = "mdi:cctv"
     _attr_entity_category = EntityCategory.CONFIG
     # Subclasses set: _quality ("high"/"low"), _state_map attr name, translation key.
     _quality: str = ""

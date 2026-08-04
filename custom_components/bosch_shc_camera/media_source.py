@@ -403,19 +403,17 @@ class _SmbBackend:
     def _path(self, *segments: str) -> str:
         """Build the UNC path, rejecting any traversal attempt in *segments*.
 
-        Regression (bug-hunt 2026-07-03): `camera` (and the other path
-        segments from callers like list_years/list_months/list_days/
-        open_file/open_flat_file) reached this string-join with ZERO
-        validation — unlike `filename`, which every caller already
-        re-validates against exactly this pattern before calling _path().
-        Camera titles come from the Bosch cloud account (in principle
-        attacker-influenceable) and `media_content_id` segments are
-        reachable via any media_source.resolve_media call, not just this
-        integration's own browse UI, so a crafted segment containing
-        "..\\" could escape `{share}\\{base}\\{camera}\\...` and read/list
-        outside the intended NAS tree. Same reject pattern as filename
-        validation elsewhere in this file, applied at the single choke
-        point every segment passes through.
+        Every path segment (camera, filename, and any other component from
+        callers like list_years/list_months/list_days/open_file/
+        open_flat_file) is validated here. Camera titles come from the Bosch
+        cloud account (in principle attacker-influenceable) and
+        `media_content_id` segments are reachable via any
+        media_source.resolve_media call, not just this integration's own
+        browse UI, so a crafted segment containing "..\\" could escape
+        `{share}\\{base}\\{camera}\\...` and read/list outside the intended
+        NAS tree. Same reject pattern as filename validation elsewhere in
+        this file, applied at the single choke point every segment passes
+        through.
         """
         for seg in segments:
             if not seg:
@@ -711,7 +709,7 @@ class _SmbBackend:
 class _NvrBackend:
     """Read continuous-recording segments from the local NVR base path.
 
-    Layout: ``{base}/{Camera}/{YYYY-MM-DD}/HH-MM.mp4`` (Phase 1 MVP).
+    Layout: ``{base}/{Camera}/{YYYY-MM-DD}/HH-MM.mp4``.
     """
 
     def __init__(self, base: str) -> None:
@@ -1239,8 +1237,8 @@ class BoschCameraMediaSource(MediaSource):  # type: ignore[misc]
 
         A single node can need 1-2 sequential `scandir` calls (e.g. the
         "years + flat dates" probe at the camera level tries both
-        `list_years` and `list_flat_dates`) — each used to be a brand-new
-        TCP+SMB2-session handshake. `_SmbBackend`'s per-call-cache design
+        `list_years` and `list_flat_dates`) — each would otherwise be a
+        brand-new TCP+SMB2-session handshake. `_SmbBackend`'s per-call-cache design
         (see its class docstring) exists to stop *concurrent* callers (HTTP
         Range-request streaming via open_file/open_flat_file — untouched
         here, still per-call) from starving one connection's SMB2 credit
@@ -1567,11 +1565,10 @@ class BoschCameraMediaView(HomeAssistantView):  # type: ignore[misc]
             )
             tail = parts
 
-        # Regression (bug-hunt 2026-07-03): _find_source → _enabled_sources
-        # does blocking Path.exists()/mkdir()/is_dir() per configured entry.
-        # _browse() below already wraps this in async_add_executor_job; this
-        # HTTP GET handler (hit once per served file/thumbnail — a day-folder
-        # view can fire ~200+ of these) called it directly on the event loop.
+        # _find_source → _enabled_sources does blocking Path.exists()/
+        # mkdir()/is_dir() per configured entry, so it must run off the
+        # event loop — this HTTP GET handler is hit once per served
+        # file/thumbnail (a day-folder view can fire ~200+ of these).
         match = await self.hass.async_add_executor_job(
             _find_source, self.hass, entry_id, kind
         )

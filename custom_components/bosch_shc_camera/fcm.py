@@ -46,8 +46,7 @@ def _is_safe_bosch_url(url: str) -> bool:
 
     ``urlparse`` can raise ``ValueError`` on malformed input (unmatched IPv6
     brackets, invalid NFKC-normalized netloc) — fail closed rather than let
-    it propagate to callers that don't expect it (backported from the Core
-    PR's Copilot review round 18, 2026-08-04).
+    it propagate to callers that don't expect it.
     """
     try:
         parsed = urlparse(url)
@@ -102,13 +101,14 @@ FCM_SUPERVISOR_POLL_SEC = 10.0
 # next restart escalates to a hard-heal (credential purge + re-register).
 FCM_SUPERVISOR_SOFT_HEAL_MAX = 3
 
-# Proactive Bosch-CBS re-registration cadence (issue #36). The integration used
-# to skip the POST /v11/devices forever as long as the FCM token was unchanged.
-# If Bosch drops the device registration server-side (FW upgrade, re-pair, or an
-# undocumented TTL) while our token stays the same, push delivery silently dies
-# and nothing ever re-announces us. A real phone app re-registers on every
-# launch; we re-POST at least this often (wall-clock, persisted in
-# `fcm_registered_at`) even when the token is unchanged, matching that behaviour.
+# Proactive Bosch-CBS re-registration cadence. Without this, the integration
+# would skip the POST /v11/devices forever as long as the FCM token was
+# unchanged. If Bosch drops the device registration server-side (FW upgrade,
+# re-pair, or an undocumented TTL) while our token stays the same, push
+# delivery silently dies and nothing ever re-announces us. A real phone app
+# re-registers on every launch; we re-POST at least this often (wall-clock,
+# persisted in `fcm_registered_at`) even when the token is unchanged, matching
+# that behaviour.
 FCM_REREGISTER_INTERVAL_SEC = 7 * 24 * 3600  # 7 days
 
 
@@ -487,7 +487,7 @@ async def fetch_firebase_config(hass: HomeAssistant) -> dict[str, str]:
     app_id = f"1:{FCM_SENDER_ID}:android:9e5b6b58e4c70075"
     import base64
 
-    # Vendor-sanctioned OSS Firebase API key (2026-04-20) — FCM permissions confirmed for OSS use.
+    # Vendor-sanctioned OSS Firebase API key — FCM permissions confirmed for OSS use.
     _k = base64.b64decode(
         "QUl6YVN5Q0toaGZ4ZlRzMUc3V3Z6VERBaU8wQWlzN0VIMjVEYk9z"
     ).decode()
@@ -625,7 +625,7 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> bool:
                 # land on the loop afterwards. Without this check the late
                 # callback would silently overwrite the fresh credentials
                 # with stale ones, defeating the hard-heal it was meant to
-                # recover from (bug-hunt 2026-07-03).
+                # recover from.
                 if coordinator.fcm_client is not _this_client:
                     _LOGGER.debug(
                         "FCM: ignoring credentials_updated_callback from a "
@@ -750,17 +750,16 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
     #   2. The registration used deviceType=ANDROID (marker written since Fix C++).
     # If either is false the POST fires to heal any drift.
     #
-    # Drift scenario (live bug 2026-05-18): migration v2→v3 without Fix C left
-    # fcm_registered_token intact but wrote no fcm_registered_device_type marker.
-    # Old skip-logic fired on token==token, leaving Bosch CBS with deviceType=IOS
-    # while the HA client used the Android Firebase context. All FCM pushes were
-    # routed to the wrong sub-app for hours (latency 3:43 min → polling fallback).
-    # Fix: require the ANDROID marker before allowing the skip.
+    # Drift scenario: a migration that left fcm_registered_token intact but
+    # wrote no fcm_registered_device_type marker would fire the old skip-logic
+    # on token==token, leaving Bosch CBS with deviceType=IOS while the HA
+    # client used the Android Firebase context — routing all FCM pushes to
+    # the wrong sub-app. Fix: require the ANDROID marker before allowing the skip.
     stored_token: str | None = coordinator.entry.data.get("fcm_registered_token")
     stored_device_type: str | None = coordinator.entry.data.get(
         "fcm_registered_device_type"
     )
-    # Proactive re-registration (issue #36): even when the token is unchanged,
+    # Proactive re-registration: even when the token is unchanged,
     # re-POST if the last successful registration is older than
     # FCM_REREGISTER_INTERVAL_SEC so a server-side-dropped Bosch device
     # registration self-heals without needing a token change or a hard-heal.
@@ -912,10 +911,9 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
       4. When the listener dies, waits FCM_SUPERVISOR_BACKOFF_SEC[failures]
          before the next attempt (resets to 0 if a real push arrived).
 
-    Root-cause context (2026-06-25): `firebase-messaging 0.4.5` bug #33
-    causes the listener to terminate permanently after SSL timeout / 3
-    sequential errors. PR #36 (merged main, not yet on PyPI) fixes this.
-    The supervisor ensures recovery regardless of library version.
+    Root-cause context: `firebase-messaging`'s listener can terminate
+    permanently after an SSL timeout / 3 sequential errors depending on the
+    installed library version. The supervisor ensures recovery regardless.
     """
     failures = 0  # consecutive restarts WITHOUT a push received
     soft_streak = 0  # consecutive soft-only restarts (no hard-heal between)
@@ -969,19 +967,14 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                     )
                 reset_fcm_creds_staleness_counter()
                 soft_streak = 0
-                # Bug-hunt 2026-07-20: a hard-heal purge+re-registration is
-                # exactly the fix for a credential-related failure, but only
-                # soft_streak was ever reset here — failures (the backoff-
-                # delay counter) stayed at whatever it had climbed to,
-                # contradicting this module's own docstring ("resets to 0
-                # after a successful push arrived"). If the freshly
-                # re-registered listener then dies again for an unrelated
-                # reason (a WAN blip, not credentials) before any push has
-                # arrived — plausible whenever real camera events are
-                # infrequent — the supervisor computed its retry delay off
-                # the stale, still-elevated failures value and could wait up
-                # to 30 minutes, even though the actual root cause had just
-                # been fixed.
+                # A hard-heal purge+re-registration is exactly the fix for a
+                # credential-related failure, so also reset the backoff-delay
+                # counter here — otherwise a freshly re-registered listener
+                # dying again for an unrelated reason (a WAN blip, not
+                # credentials) before any push arrives would compute its
+                # retry delay off the stale, still-elevated failures value
+                # and could wait up to 30 minutes despite the root cause
+                # having just been fixed.
                 failures = 0
             except asyncio.CancelledError:
                 raise
@@ -991,7 +984,7 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                 # entire supervisor task — FCM push then stayed fully down
                 # until the next coordinator-tick watchdog cycle noticed
                 # sup.done() and restarted it, instead of the designed ~10s
-                # poll cadence (bug-hunt 2026-07-03). Log and retry instead.
+                # poll cadence. Log and retry instead.
                 _LOGGER.exception(
                     "FCM supervisor: hard-heal purge raised an exception — "
                     "retrying next iteration"
@@ -1052,7 +1045,7 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                     # fires promptly — otherwise the forced flag is only re-read
                     # once the client independently dies, which in this exact
                     # scenario (the whole reason the flag exists) may not happen
-                    # for a long time, or ever. (bug-hunt 2026-07-01)
+                    # for a long time, or ever.
                     forced_heal = True
                     _LOGGER.info(
                         "FCM supervisor: forced hard-heal requested while listener "
@@ -1068,7 +1061,7 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
             # used to propagate straight out of _async_run_fcm_supervisor,
             # killing the task outright — recovery then depended on the
             # coordinator-tick watchdog noticing sup.done(), not the designed
-            # ~10s poll cadence (bug-hunt 2026-07-03). Treat it the same as a
+            # ~10s poll cadence. Treat it the same as a
             # normal listener termination: fall through to the stop+backoff
             # logic below instead of dying silently.
             _LOGGER.exception(
@@ -1088,7 +1081,7 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
             # A hard-heal was explicitly requested (delivery-death watchdog).
             # Restart fast so the top-of-loop credential purge happens promptly
             # instead of sitting on an escalated backoff delay. The flag is left
-            # set for the top of the loop to consume. (bug-hunt 2026-07-01)
+            # set for the top of the loop to consume.
             delay = FCM_SUPERVISOR_BACKOFF_SEC[0]
             _LOGGER.info(
                 "FCM supervisor: applying forced hard-heal — fast restart in %.0fs",
@@ -1262,11 +1255,10 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
                 # Gen2 cameras (Outdoor II w/ DualRadar, Indoor II) send
                 # eventType=MOVEMENT with eventTags=["PERSON"] when a human is
                 # detected — the tag is more specific than the type, so upgrade.
-                # Confirmed 2026-04-11 via /v11/events on Terrasse: 15x tags=['PERSON'].
                 if "PERSON" in event_tags and event_type == "MOVEMENT":
                     event_type = "PERSON"
 
-                # Diagnostic only (GitHub timing question 2026-07-31): logs
+                # Diagnostic only: logs
                 # Bosch's own event timestamp alongside our local wall-clock
                 # receipt time, so a Bosch-cloud-side delay (movement/person
                 # events issued close together after server-side AI analysis)
@@ -1332,9 +1324,9 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
                         "bosch_shc_camera_person", event_payload
                     )
 
-                # Mini-NVR event_buffered clip assembly (issue #43 follow-up,
-                # realKim-dotcom): on a movement/person event for a camera in
-                # event_buffered mode with the NVR switch ON and LOCAL, assemble
+                # Mini-NVR event_buffered clip assembly: on a movement/person
+                # event for a camera in event_buffered mode with the NVR
+                # switch ON and LOCAL, assemble
                 # the pre-roll(+post-roll) clip and drop it into the NVR staging
                 # tree so the existing drain watcher ships it. Independent of the
                 # notification switches below — a user may want clips without
@@ -1633,8 +1625,7 @@ async def async_send_alert(
     # inside an untracked-by-caller hass.async_create_task, so an unguarded
     # TypeError here was silently swallowed by asyncio's default exception
     # handler — the HA event bus fired fine, but the text/snapshot/clip
-    # notification steps never ran, with no visible symptom (bug-hunt
-    # 2026-07-03).
+    # notification steps never ran, with no visible symptom.
     timestamp = timestamp or ""
 
     opts = coordinator.options
@@ -1681,18 +1672,17 @@ async def async_send_alert(
     # unconditionally. alert_delete_after_send used to additionally gate the
     # actual os.remove() call, so leaving it OFF (its own text: "OFF = files
     # kept for reference") silently defeated alert_save_snapshots=OFF and
-    # let files accumulate forever in www/bosch_alerts/ (GitHub #53). It is
+    # let files accumulate forever in www/bosch_alerts/. It is
     # now read only for backward-compat option-schema presence and has no
     # effect on cleanup — deletion is decided by alert_save_snapshots alone.
     save_snapshots = opts.get("alert_save_snapshots", False)
     ts_short = timestamp[11:19] if len(timestamp) >= 19 else timestamp
 
     # Event type → German label + emoji icon.
-    # Derived from full mitmproxy capture analysis (116K+ events across 12 captures,
-    # 2026-04-11): 5 unique (eventType, eventTags) combinations observed.
-    # Key finding: PERSON events are eventType=MOVEMENT + eventTags=["PERSON"] (Gen2
-    # DualRadar) — the caller is expected to have already upgraded event_type from
-    # "MOVEMENT" to "PERSON" when tag is present (see __init__.py + fcm.py push path).
+    # PERSON events are eventType=MOVEMENT + eventTags=["PERSON"] (Gen2
+    # DualRadar) — the caller is expected to have already upgraded event_type
+    # from "MOVEMENT" to "PERSON" when the tag is present (see __init__.py +
+    # fcm.py push path).
     type_label = {
         "MOVEMENT": "Bewegung",
         "PERSON": "Person erkannt",
@@ -1736,13 +1726,10 @@ async def async_send_alert(
         unset alert_notify_video means zero services here), or every
         configured service's call raised (each failure is still logged at
         WARNING here, but that's easy to miss — the caller's "sent"/"skipped"
-        summary log must not claim delivery either way). Originally this
-        returned `bool(services)` — true whenever anything was CONFIGURED,
-        even if every single call failed — which is the same "attempted vs.
-        delivered" misreport class as the bug this function was first fixed
-        for (2026-07-17, Thomas: notifications not reliably arriving),
-        just triggered by a live service-call failure instead of an unset
-        option (maintenance-round bug-hunt finding, same day).
+        summary log must not claim delivery either way). A naive
+        `bool(services)` check would be true whenever anything was
+        CONFIGURED, even if every single call failed — misreporting
+        "attempted" as "delivered".
         """
         services = get_alert_services(coordinator, type_key)
         delivered = False
@@ -1783,13 +1770,13 @@ async def async_send_alert(
 
     # -- Step 2: Snapshot image (after 3s, retries up to ~25s) ------------
     # The FCM push sometimes arrives before Bosch's event API has the imageUrl
-    # populated. Single re-fetch at 5s missed slow-cloud events (observed
-    # 2026-04-26: text alert sent, snapshot silently skipped, JPG only
-    # appeared 90s later via the SMB upload path). Retry at +3 / +10 / +25 s
-    # cumulative — covers steady-state cloud and warm-up cases without
-    # delaying the common path noticeably.
+    # populated. A single re-fetch at 5s can miss slow-cloud events (text
+    # alert sent, snapshot silently skipped, JPG only appearing much later
+    # via the SMB upload path). Retry at +3 / +10 / +25 s cumulative — covers
+    # steady-state cloud and warm-up cases without delaying the common path
+    # noticeably.
     #
-    # BUG-5 fix: track whether image_url was empty at push-arrival time.
+    # Track whether image_url was empty at push-arrival time.
     # The 5s sleep before downloading is only needed when the URL was missing
     # on push arrival (retry loop already introduces cumulative delays for that
     # case, so the extra sleep is for the "URL present from the start" path only
@@ -1872,8 +1859,7 @@ async def async_send_alert(
                         # No else-branch below (the 200+image body is large and
                         # deeply nested) — log here instead so an expired/404/
                         # 410 snapshot URL doesn't skip step 2 with zero trace,
-                        # making delivery failures undiagnosable (bug-hunt
-                        # 2026-07-03).
+                        # making delivery failures undiagnosable.
                         _LOGGER.debug(
                             "Alert step 2 (screenshot) skipped for %s: HTTP %s "
                             "content-type=%r",

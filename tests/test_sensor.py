@@ -5936,6 +5936,9 @@ def _stub_coord_phase2(**overrides):
         },
         is_camera_online=lambda cid: True,
         is_stream_warming=lambda cid: False,
+        # dynamic-devices (Quality-Scale Gold): async_setup_entry registers
+        # a coordinator listener via this.
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -5963,7 +5966,9 @@ class TestAsyncSetupEntryGating:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options=coord.options)
+        entry = SimpleNamespace(
+            runtime_data=coord, options=coord.options, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschLedDimmerSensor" in entity_classes, (
@@ -5983,7 +5988,9 @@ class TestAsyncSetupEntryGating:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options=coord.options)
+        entry = SimpleNamespace(
+            runtime_data=coord, options=coord.options, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschLedDimmerSensor" not in entity_classes, (
@@ -6003,7 +6010,9 @@ class TestAsyncSetupEntryGating:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options=coord.options)
+        entry = SimpleNamespace(
+            runtime_data=coord, options=coord.options, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschAmbientLightScheduleSensor" in entity_classes, (
@@ -6023,7 +6032,9 @@ class TestAsyncSetupEntryGating:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options=coord.options)
+        entry = SimpleNamespace(
+            runtime_data=coord, options=coord.options, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschAmbientLightScheduleSensor" not in entity_classes, (
@@ -6043,7 +6054,9 @@ class TestAsyncSetupEntryGating:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options=coord.options)
+        entry = SimpleNamespace(
+            runtime_data=coord, options=coord.options, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschAlarmStateSensor" in entity_classes, (
@@ -6064,7 +6077,9 @@ class TestAsyncSetupEntryGating:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options=coord.options)
+        entry = SimpleNamespace(
+            runtime_data=coord, options=coord.options, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschNvrStateSensor" in entity_classes, (
@@ -6084,9 +6099,77 @@ class TestAsyncSetupEntryGating:
 
         import asyncio
 
-        entry = SimpleNamespace(runtime_data=coord, options=coord.options)
+        entry = SimpleNamespace(
+            runtime_data=coord, options=coord.options, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         assert added == [], "No entities must be registered when enable_sensors=False"
+
+    def test_new_camera_gets_per_cam_sensors_added_dynamically(self):
+        """Quality-Scale Gold `dynamic-devices`: a camera added to the
+        account after setup gets its per-cam sensors added by the
+        registered coordinator listener, WITHOUT re-adding the
+        account-level FCM-push-status/maintenance/feature-flags sensors a
+        second time."""
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschCameraStatusSensor,
+            BoschCloudFeatureFlagsSensor,
+            BoschCloudMaintenanceSensor,
+            BoschFcmPushStatusSensor,
+            async_setup_entry,
+        )
+
+        coord = _stub_coord_phase2()
+        added = []
+
+        def _fake_add(entities, **kw):
+            added.extend(entities)
+
+        import asyncio
+
+        entry = SimpleNamespace(
+            runtime_data=coord, options=coord.options, async_on_unload=MagicMock()
+        )
+        asyncio.run(async_setup_entry(None, entry, _fake_add))
+
+        coord.async_add_listener.assert_called_once()
+        entry.async_on_unload.assert_called_once()
+        listener = coord.async_add_listener.call_args[0][0]
+
+        added.clear()
+        coord.data["NEW-CAM-ID"] = {
+            "info": {
+                "title": "Neue Kamera",
+                "hardwareVersion": "HOME_Eyes_Outdoor",
+                "featureSupport": {"light": False, "panLimit": 0},
+            },
+            "status": "ONLINE",
+            "events": [],
+        }
+        listener()
+
+        assert len(added) > 0, "listener must add entities for the new camera"
+        assert any(
+            isinstance(e, BoschCameraStatusSensor) and e._cam_id == "NEW-CAM-ID"
+            for e in added
+        )
+        # Account-level entities must NOT be re-added by the listener.
+        assert not any(
+            isinstance(
+                e,
+                (
+                    BoschFcmPushStatusSensor,
+                    BoschCloudMaintenanceSensor,
+                    BoschCloudFeatureFlagsSensor,
+                ),
+            )
+            for e in added
+        )
+
+        # A second listener invocation with no new cam_ids is a no-op.
+        added.clear()
+        listener()
+        assert added == []
 
 
 # ── BoschAlarmCatalogSensor ───────────────────────────────────────────────────
@@ -7638,6 +7721,7 @@ class TestSensorSetupAiDescriptionOption:
             },
             is_camera_online=lambda cid: True,
             is_stream_warming=lambda cid: False,
+            async_add_listener=MagicMock(return_value=MagicMock()),
         )
 
     def test_ai_description_sensor_appended_when_option_true(self):
@@ -7655,6 +7739,7 @@ class TestSensorSetupAiDescriptionOption:
         entry = SimpleNamespace(
             runtime_data=coord,
             options={"enable_ai_description": True, "enable_sensors": True},
+            async_on_unload=MagicMock(),
         )
 
         added_entities: list = []
@@ -7688,6 +7773,7 @@ class TestSensorSetupAiDescriptionOption:
         entry = SimpleNamespace(
             runtime_data=coord,
             options={"enable_sensors": True},  # no enable_ai_description
+            async_on_unload=MagicMock(),
         )
 
         added_entities: list = []
@@ -7714,6 +7800,7 @@ class TestSensorSetupAiDescriptionOption:
         entry = SimpleNamespace(
             runtime_data=coord,
             options={"ai_analysis_enabled": True, "enable_sensors": True},
+            async_on_unload=MagicMock(),
         )
         added_entities: list = []
 
@@ -7741,6 +7828,7 @@ class TestSensorSetupAiDescriptionOption:
         entry = SimpleNamespace(
             runtime_data=coord,
             options={"enable_sensors": True},  # no ai_analysis_enabled
+            async_on_unload=MagicMock(),
         )
         added_entities: list = []
 

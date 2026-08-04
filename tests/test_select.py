@@ -1267,6 +1267,7 @@ def _stub_coord_platform(gen2: bool = True):
         async_start_fcm_push=AsyncMock(),
         async_update_listeners=lambda: None,
         try_live_connection=AsyncMock(return_value={"rtspsUrl": "rtsps://new"}),
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
     return coord
 
@@ -1277,6 +1278,7 @@ def _stub_entry_platform(options=None):
         data={},
         options=options or {},
         runtime_data=None,
+        async_on_unload=MagicMock(),
     )
 
 
@@ -1388,6 +1390,73 @@ class TestAsyncSetupEntryPlatform:
             async_add_entities=lambda e: captured.extend(e),
         )
         assert captured == []
+
+    @pytest.mark.asyncio
+    async def test_new_camera_gets_entities_added_dynamically(self):
+        """Quality-Scale Gold `dynamic-devices`: a camera that appears in
+        coordinator.data AFTER the initial async_setup_entry pass (e.g.
+        added to the Bosch account while HA is already running) must get
+        its per-camera select entities added automatically via the
+        registered coordinator listener — no integration reload required.
+        The account-level selects (FcmPushMode/StreamMode) must NOT be
+        re-added by the listener.
+        """
+        from custom_components.bosch_shc_camera.select import (
+            BoschFcmPushModeSelect,
+            BoschStreamModeSelect,
+            BoschVideoQualitySelect,
+            async_setup_entry,
+        )
+
+        coord = _stub_coord_platform(gen2=False)
+        entry = _stub_entry_platform()
+        entry.runtime_data = coord
+        captured: list = []
+        await async_setup_entry(
+            hass=None,
+            config_entry=entry,
+            async_add_entities=lambda e, **kw: captured.extend(e),
+        )
+
+        coord.async_add_listener.assert_called_once()
+        entry.async_on_unload.assert_called_once()
+        initial_count = len(captured)
+        assert initial_count > 0
+
+        listener = coord.async_add_listener.call_args[0][0]
+
+        new_cam_id = "33333333-3333-3333-3333-333333333333"
+        coord.data[new_cam_id] = {
+            "info": {
+                "title": "Garten",
+                "hardwareVersion": "OUTDOOR",
+                "firmwareVersion": "9.40.25",
+            },
+            "live": {},
+            "motion": {"motionAlarmConfiguration": "HIGH", "enabled": True},
+        }
+
+        listener()
+
+        new_types = {type(e).__name__ for e in captured[initial_count:]}
+        assert "BoschVideoQualitySelect" in new_types
+        assert any(
+            isinstance(e, BoschVideoQualitySelect)
+            and getattr(e, "_cam_id", None) == new_cam_id
+            for e in captured[initial_count:]
+        )
+        # Account-level entities must NOT be re-added by the dynamic listener.
+        assert "BoschFcmPushModeSelect" not in new_types
+        assert "BoschStreamModeSelect" not in new_types
+
+        # No-op: calling again with no new cameras must not add anything.
+        listener()
+        assert len(captured) == initial_count + len(
+            [e for e in captured[initial_count:]]
+        )
+        count_after_first_add = len(captured)
+        listener()
+        assert len(captured) == count_after_first_add
 
 
 class TestVideoQualitySelectDeviceInfoAndRestore:
@@ -2138,6 +2207,7 @@ def _coord(*, with_pan: bool):
         image_rotation_180={},
         last_update_success=True,
         async_cloud_set_pan=AsyncMock(return_value=True),
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
 
 
@@ -2147,6 +2217,7 @@ def _entry(*, ptz_enabled: bool):
         entry_id="01TEST",
         title="Bosch",
         runtime_data=None,
+        async_on_unload=MagicMock(),
     )
 
 
@@ -2214,6 +2285,7 @@ async def test_pan_select_options_value_missing_treated_as_disabled() -> None:
         entry_id="01TEST",
         title="Bosch",
         runtime_data=coord,
+        async_on_unload=MagicMock(),
     )
     added: list = []
     await async_setup_entry(MagicMock(), entry, lambda ents: added.extend(ents))
@@ -2237,6 +2309,7 @@ async def test_pan_select_options_value_garbage_collapses_to_disabled() -> None:
         entry_id="01TEST",
         title="Bosch",
         runtime_data=coord,
+        async_on_unload=MagicMock(),
     )
     added: list = []
     await async_setup_entry(MagicMock(), entry, lambda ents: added.extend(ents))

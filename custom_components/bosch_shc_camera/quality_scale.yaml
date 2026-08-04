@@ -1,6 +1,12 @@
 rules:
   # Bronze
-  action-setup: done
+  action-setup:
+    status: done
+    comment: >-
+      All hass.services.async_register calls happen in async_setup (via
+      services.py's _register_services). Last 3 holdouts (describe_snapshot,
+      analyze_camera_ai, send_event_webhook) moved out of async_setup_entry
+      into services.py 2026-08-04.
   appropriate-polling: done
   brands: done
   common-modules: done
@@ -59,7 +65,28 @@ rules:
   docs-supported-functions: done
   docs-troubleshooting: done
   docs-use-cases: done
-  dynamic-devices: done
+  dynamic-devices:
+    status: done
+    comment: >-
+      2026-08-04 audit found this entry was aspirational, not implemented —
+      no platform ever registered a coordinator listener, so a camera added
+      to the Bosch account after HA startup required a manual integration
+      reload. Fixed: new shared helper `dynamic_devices.py::
+      register_dynamic_camera_listener` wraps `coordinator.async_add_listener`
+      + `config_entry.async_on_unload`; every platform's `async_setup_entry`
+      now extracts its per-camera entity-construction logic into a
+      `_build_entities_for_cam(cam_id)` closure shared between the initial
+      setup pass and the dynamic-add listener (so there is exactly one
+      definition of "what entities does a camera get", not two that could
+      drift). Applied to all 11 platforms: camera, sensor, binary_sensor,
+      switch, light, number, select, button, text, image, update.
+      Account-level (one-per-integration, not one-per-camera) entities —
+      sensor.py's FCM-push-status/cloud-maintenance/feature-flags sensors,
+      select.py's fcm-push-mode/stream-mode selects — are deliberately kept
+      OUTSIDE the per-cam closure so the listener never re-creates them.
+      Regression test per platform proves a camera appearing in
+      `coordinator.data` after setup gets its entities added by the
+      listener, and a second no-op tick adds nothing.
   entity-category: done
   entity-device-class: done
   entity-disabled-by-default: done
@@ -68,13 +95,57 @@ rules:
   icon-translations: done
   reconfiguration-flow: done
   repair-issues: done
-  stale-devices: done
+  stale-devices:
+    status: done
+    comment: >-
+      2026-08-04 audit re-verified this against the actual rule text
+      (developers.home-assistant.io/.../stale-devices) — the "automatic
+      removal" approach it describes is genuinely implemented and wired up,
+      not just aspirational: `coordinator.cleanup_stale_devices(cam_ids)`
+      (coordinator.py) is called every tick after the first from
+      `tick_housekeeping.py`'s `run_housekeeping`, diffs the device
+      registry against the freshly-fetched camera list, and calls
+      `dr.async_remove_device()` for any camera no longer in the Bosch
+      cloud account — HA's own device_registry → entity_registry cascade
+      (`EntityRegistry.async_device_modified`) removes the entities too, no
+      separate per-platform cleanup needed. Also purges every per-cam_id
+      coordinator dict/set entry (`_purge_cam_id`) so removed cameras don't
+      leak state across the coordinator's lifetime. Covered by
+      `tests/test_tick_housekeeping.py`, `tests/test_cam_id_purge_completeness.py`,
+      `tests/test_chaos_fault_injection.py`, `tests/test_init.py`.
 
   # Platinum
   async-dependency:
     status: done
     comment: All requests imports removed; HTTP via aiohttp (auth_utils.async_digest_request) and stdlib urllib (sync cloud downloads). Verified 2026-05-12.
-  inject-websession: done
+  inject-websession:
+    status: done
+    comment: >-
+      2026-08-04 audit found 3 real fresh-per-call `aiohttp.ClientSession()`
+      sites (shc.py's local-mTLS SHC request, coordinator.py's `_rcp_session`
+      Bosch cloud-proxy RCP handshake, go2rtc_client.py) — none used HA's
+      injected/pooled session, each opened a new TCP+TLS connection per
+      call. Fixed: go2rtc_client.py's session now built via
+      `aiohttp_client.async_create_clientsession(hass, ...)` (HA's own
+      shared connector, torn down via `.detach()` not `.close()` on unload
+      so it doesn't kill the pool for other integrations still using it).
+      coordinator.py's `_rcp_session` now routes through cloud_ssl.py's
+      `async_bosch_cloud_session_cm` (the same cached Bosch-cloud singleton
+      described below) instead of opening its own raw session. shc.py's
+      session needs per-camera-SHC mutual-TLS (client cert+key) which HA's
+      shared session can't express — now a long-lived, coordinator-cached
+      session+connector pair (built once, reused, explicitly closed on
+      unload/HA-stop) instead of one per call.
+      `cloud_ssl.py:158`'s `aiohttp.ClientSession(connector=connector)` was
+      a FALSE POSITIVE in the initial grep-based audit — it's already a
+      correctly cached hass.data-keyed singleton (see
+      `async_get_bosch_cloud_session`'s own docstring), built once and
+      reused via `async_bosch_cloud_session_cm`, closed on
+      EVENT_HOMEASSISTANT_CLOSE; it can't use `async_create_clientsession`
+      directly because HA's connector has no extension point for the
+      pinned Bosch cloud CA cert. All 4 originally-flagged sites now either
+      use HA's injected session or are a long-lived, HA-lifecycle-tied,
+      documented exception — none mint a session per call anymore.
   strict-typing:
     status: done
     comment: pyproject.toml mypy --strict configured; 0 errors across 24 source files (was 593 baseline). ~80 targeted # type: ignore for HA-stub gaps. Verified 2026-05-12.

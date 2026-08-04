@@ -148,42 +148,55 @@ async def async_shc_request(
         _shc_mark_failure(coordinator)
         return None
 
-    # Reuse connector across calls — avoids a new TLS handshake per request
+    # Reuse the connector AND the ClientSession across calls — avoids both a
+    # new TLS handshake per request and (inject-websession quality-scale gap,
+    # closed 2026-08-04) minting a fresh aiohttp.ClientSession object on
+    # every single request. Both are rebuilt together whenever the
+    # (cert_path, key_path) pair changes or either has been closed —
+    # `connector_owner=False` on the session (kept from before this fix)
+    # means the session's own close() never touches the connector, but the
+    # session itself is now long-lived like the connector, not per-call.
     _connector_key = (cert_path, key_path)
     _cached_conn: aiohttp.TCPConnector | None = getattr(
         coordinator, "shc_connector", None
+    )
+    _cached_sess: aiohttp.ClientSession | None = getattr(
+        coordinator, "shc_session", None
     )
     if (
         _cached_conn is None
         or _cached_conn.closed
         or getattr(coordinator, "shc_connector_key", None) != _connector_key
+        or _cached_sess is None
+        or _cached_sess.closed
     ):
         _cached_conn = aiohttp.TCPConnector(ssl=ctx)
+        _cached_sess = aiohttp.ClientSession(
+            connector=_cached_conn, connector_owner=False
+        )
         coordinator.shc_connector = _cached_conn
         coordinator.shc_connector_key = _connector_key
+        coordinator.shc_session = _cached_sess
 
     url = f"https://{shc_ip}:8444/smarthome{path}"
     headers = {"api-version": "3.2", "Content-Type": "application/json"}
     try:
-        async with aiohttp.ClientSession(
-            connector=_cached_conn, connector_owner=False
-        ) as s:
-            async with asyncio.timeout(10):
-                if method == "GET":
-                    async with s.get(url, headers=headers) as r:
-                        if r.status == 200:
-                            _shc_mark_success(coordinator)
-                            return await r.json()  # type: ignore[no-any-return]
-                        _LOGGER.debug("SHC GET %s -> HTTP %d", path, r.status)
+        async with asyncio.timeout(10):
+            if method == "GET":
+                async with _cached_sess.get(url, headers=headers) as r:
+                    if r.status == 200:
+                        _shc_mark_success(coordinator)
+                        return await r.json()  # type: ignore[no-any-return]
+                    _LOGGER.debug("SHC GET %s -> HTTP %d", path, r.status)
+                    _shc_mark_failure(coordinator)
+            elif method == "PUT":
+                async with _cached_sess.put(url, json=body, headers=headers) as r:
+                    _LOGGER.debug("SHC PUT %s -> HTTP %d", path, r.status)
+                    if r.status in (200, 201, 204):
+                        _shc_mark_success(coordinator)
+                    else:
                         _shc_mark_failure(coordinator)
-                elif method == "PUT":
-                    async with s.put(url, json=body, headers=headers) as r:
-                        _LOGGER.debug("SHC PUT %s -> HTTP %d", path, r.status)
-                        if r.status in (200, 201, 204):
-                            _shc_mark_success(coordinator)
-                        else:
-                            _shc_mark_failure(coordinator)
-                        return {"status": r.status, "ok": r.status in (200, 201, 204)}
+                    return {"status": r.status, "ok": r.status in (200, 201, 204)}
     except TimeoutError:
         _LOGGER.debug("SHC request timeout: %s %s", method, path)
         _shc_mark_failure(coordinator)

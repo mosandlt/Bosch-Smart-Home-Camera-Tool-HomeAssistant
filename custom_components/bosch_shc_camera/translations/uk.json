@@ -966,6 +966,51 @@
     },
     "ai_task_unavailable": {
       "message": "Сервіс AI Task недоступний або завершився з помилкою: {error}"
+    },
+    "stream_blocked_privacy_mode": {
+      "message": "{camera}: потік недоступний — режим конфіденційності УВІМКНЕНО"
+    },
+    "stream_start_blocked_privacy_mode": {
+      "message": "Не вдається запустити потік для {camera} — режим конфіденційності активний. Спочатку вимкніть режим конфіденційності."
+    },
+    "motion_sensitivity_unknown": {
+      "message": "{camera}: чутливість руху ще невідома — спробуйте ще раз після завершення першого оновлення інтеграції"
+    },
+    "motion_detection_enable_failed": {
+      "message": "{camera}: не вдалося увімкнути виявлення руху"
+    },
+    "motion_detection_disable_failed": {
+      "message": "{camera}: не вдалося вимкнути виявлення руху"
+    },
+    "firmware_install_in_progress": {
+      "message": "Встановлення прошивки вже виконується"
+    },
+    "firmware_no_update_available": {
+      "message": "Наразі немає доступного оновлення прошивки для встановлення"
+    },
+    "firmware_install_rejected": {
+      "message": "Хмара Bosch відхилила запит на встановлення прошивки для {target}"
+    },
+    "soft_reset_rejected": {
+      "message": "Хмара Bosch відхилила запит на soft-reset (перезапуск)"
+    },
+    "hard_reset_rejected": {
+      "message": "Хмара Bosch відхилила запит на hard-reset (скидання до заводських налаштувань)"
+    },
+    "not_authenticated": {
+      "message": "Не автентифіковано — додайте інтеграцію знову, щоб увійти"
+    },
+    "token_expired_renewal_failed": {
+      "message": "Термін дії токена закінчився, оновлення не вдалося — повторно автентифікуйтеся через запит reauth або перейдіть до Налаштування → Інтеграції → Bosch Smart Home Camera → Налаштувати → Примусовий новий вхід через браузер"
+    },
+    "no_refresh_token": {
+      "message": "Немає refresh token — потрібна повторна автентифікація"
+    },
+    "refresh_token_invalid": {
+      "message": "Refresh token недійсний — повторно автентифікуйтеся за допомогою кнопки **Reconfigure** на картці інтеграції."
+    },
+    "token_refresh_failed_repeatedly": {
+      "message": "Оновлення токена неодноразово завершувалося невдачею — повторно автентифікуйтеся за допомогою кнопки **Reconfigure** на картці інтеграції."
     }
   },
   "issues": {

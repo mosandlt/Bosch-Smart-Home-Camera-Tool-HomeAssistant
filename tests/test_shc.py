@@ -747,36 +747,35 @@ class TestAsyncShcRequest:
 
         coord = _stub_coord_round6()
         devices = [{"id": "dev1", "name": "Terrasse"}]
-        mock_session_cm = MagicMock()
         mock_session = MagicMock()
+        mock_session.closed = False
         mock_session.get.return_value = _mock_resp(200, devices)
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with (
             patch("ssl.SSLContext") as mock_ssl,
             patch("aiohttp.TCPConnector"),
-            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+            patch("aiohttp.ClientSession", return_value=mock_session),
         ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "GET", "/devices")
         assert result == devices
+        # inject-websession gap (closed 2026-08-04): the ClientSession is now
+        # cached on the coordinator across calls, not opened+closed per call.
+        assert coord.shc_session is mock_session
 
     @pytest.mark.asyncio
     async def test_get_non200_marks_failure(self):
         from custom_components.bosch_shc_camera.shc import async_shc_request
 
         coord = _stub_coord_round6()
-        mock_session_cm = MagicMock()
         mock_session = MagicMock()
+        mock_session.closed = False
         mock_session.get.return_value = _mock_resp(403)
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with (
             patch("ssl.SSLContext") as mock_ssl,
             patch("aiohttp.TCPConnector"),
-            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+            patch("aiohttp.ClientSession", return_value=mock_session),
         ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "GET", "/devices")
@@ -787,16 +786,14 @@ class TestAsyncShcRequest:
         from custom_components.bosch_shc_camera.shc import async_shc_request
 
         coord = _stub_coord_round6()
-        mock_session_cm = MagicMock()
         mock_session = MagicMock()
+        mock_session.closed = False
         mock_session.put.return_value = _mock_resp(204)
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with (
             patch("ssl.SSLContext") as mock_ssl,
             patch("aiohttp.TCPConnector"),
-            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+            patch("aiohttp.ClientSession", return_value=mock_session),
         ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(
@@ -809,16 +806,14 @@ class TestAsyncShcRequest:
         from custom_components.bosch_shc_camera.shc import async_shc_request
 
         coord = _stub_coord_round6()
-        mock_session_cm = MagicMock()
         mock_session = MagicMock()
+        mock_session.closed = False
         mock_session.put.return_value = _mock_resp(500)
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with (
             patch("ssl.SSLContext") as mock_ssl,
             patch("aiohttp.TCPConnector"),
-            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+            patch("aiohttp.ClientSession", return_value=mock_session),
         ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "PUT", "/path", {})
@@ -829,16 +824,14 @@ class TestAsyncShcRequest:
         from custom_components.bosch_shc_camera.shc import async_shc_request
 
         coord = _stub_coord_round6()
-        mock_session_cm = MagicMock()
         mock_session = MagicMock()
+        mock_session.closed = False
         mock_session.get.side_effect = TimeoutError()
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with (
             patch("ssl.SSLContext") as mock_ssl,
             patch("aiohttp.TCPConnector"),
-            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+            patch("aiohttp.ClientSession", return_value=mock_session),
         ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "GET", "/x")
@@ -849,16 +842,14 @@ class TestAsyncShcRequest:
         from custom_components.bosch_shc_camera.shc import async_shc_request
 
         coord = _stub_coord_round6()
-        mock_session_cm = MagicMock()
         mock_session = MagicMock()
+        mock_session.closed = False
         mock_session.get.side_effect = aiohttp.ClientError("conn refused")
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with (
             patch("ssl.SSLContext") as mock_ssl,
             patch("aiohttp.TCPConnector"),
-            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+            patch("aiohttp.ClientSession", return_value=mock_session),
         ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "GET", "/x")
@@ -869,20 +860,83 @@ class TestAsyncShcRequest:
         from custom_components.bosch_shc_camera.shc import async_shc_request
 
         coord = _stub_coord_round6()
-        mock_session_cm = MagicMock()
         mock_session = MagicMock()
+        mock_session.closed = False
         mock_session.get.side_effect = RuntimeError("unexpected")
-        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         with (
             patch("ssl.SSLContext") as mock_ssl,
             patch("aiohttp.TCPConnector"),
-            patch("aiohttp.ClientSession", return_value=mock_session_cm),
+            patch("aiohttp.ClientSession", return_value=mock_session),
         ):
             mock_ssl.return_value.load_cert_chain = MagicMock()
             result = await async_shc_request(coord, "GET", "/x")
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_session_and_connector_reused_across_calls(self):
+        """inject-websession gap (closed 2026-08-04): a second call with the
+        same (cert_path, key_path) must reuse the cached ClientSession, not
+        open a fresh one."""
+        from custom_components.bosch_shc_camera.shc import async_shc_request
+
+        coord = _stub_coord_round6()
+        mock_session = MagicMock()
+        mock_session.closed = False
+        mock_session.get.return_value = _mock_resp(200, {"ok": True})
+        mock_connector = MagicMock()
+        mock_connector.closed = False
+        created = []
+
+        def _fake_ctor(*_a, **_kw):
+            created.append(1)
+            return mock_session
+
+        with (
+            patch("ssl.SSLContext") as mock_ssl,
+            patch("aiohttp.TCPConnector", return_value=mock_connector),
+            patch("aiohttp.ClientSession", side_effect=_fake_ctor),
+        ):
+            mock_ssl.return_value.load_cert_chain = MagicMock()
+            await async_shc_request(coord, "GET", "/devices")
+            await async_shc_request(coord, "GET", "/devices")
+
+        assert len(created) == 1, (
+            f"Expected exactly 1 pooled SHC ClientSession across 2 calls, "
+            f"got {len(created)} — SHC session pooling regressed"
+        )
+
+    @pytest.mark.asyncio
+    async def test_session_rebuilt_when_closed(self):
+        """A closed cached session must be rebuilt, not reused."""
+        from custom_components.bosch_shc_camera.shc import async_shc_request
+
+        coord = _stub_coord_round6()
+        stale_session = MagicMock()
+        stale_session.closed = True
+        coord.shc_session = stale_session
+        stale_connector = MagicMock()
+        stale_connector.closed = False
+        coord.shc_connector = stale_connector
+        coord.shc_connector_key = (
+            coord.options["shc_cert_path"],
+            coord.options["shc_key_path"],
+        )
+
+        fresh_session = MagicMock()
+        fresh_session.closed = False
+        fresh_session.get.return_value = _mock_resp(200, {"ok": True})
+
+        with (
+            patch("ssl.SSLContext") as mock_ssl,
+            patch("aiohttp.TCPConnector"),
+            patch("aiohttp.ClientSession", return_value=fresh_session),
+        ):
+            mock_ssl.return_value.load_cert_chain = MagicMock()
+            result = await async_shc_request(coord, "GET", "/devices")
+
+        assert result == {"ok": True}
+        assert coord.shc_session is fresh_session
 
 
 class TestAsyncUpdateShcStates:

@@ -236,7 +236,10 @@ class TokenAuthCoordinatorMixin:
         if not refresh:
             # No refresh token at all — trigger the built-in HA reauth button
             # (shows "Reconfigure" on the integration card, runs our auto-login).
-            raise ConfigEntryAuthFailed("No refresh token — re-authentication required")
+            raise ConfigEntryAuthFailed(
+                translation_domain=DOMAIN,
+                translation_key="no_refresh_token",
+            )
         session = await async_get_bosch_cloud_session(self.hass)
         # Retry up to 3 times with 2s delay on TRANSIENT errors only.
         # Hard auth errors (invalid_grant) raise RefreshTokenInvalidError
@@ -307,8 +310,8 @@ class TokenAuthCoordinatorMixin:
                 "Refresh token rejected by Keycloak (invalid_grant) — triggering reauth flow"
             )
             raise ConfigEntryAuthFailed(
-                "Refresh token invalid — please re-authenticate via the "
-                "Reconfigure button on the integration card."
+                translation_domain=DOMAIN,
+                translation_key="refresh_token_invalid",
             ) from None
         except AuthServerOutageError as err:
             self.auth_outage_count += 1
@@ -365,8 +368,8 @@ class TokenAuthCoordinatorMixin:
         # the existing entry in place (keeps options, entities, automations).
         if self._token_fail_count >= 3:
             raise ConfigEntryAuthFailed(
-                "Token refresh failed repeatedly — please re-authenticate via "
-                "the Reconfigure button on the integration card."
+                translation_domain=DOMAIN,
+                translation_key="token_refresh_failed_repeatedly",
             )
         raise UpdateFailed("Token refresh failed — will retry")
 

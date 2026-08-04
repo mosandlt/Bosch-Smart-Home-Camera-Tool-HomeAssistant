@@ -27,6 +27,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .base import _BoschEntityBase
+from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _get_cam_lock, _is_gen2_indoor, _warn_if_privacy_on
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,21 +41,22 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator = config_entry.runtime_data
-    entities = []
-    for cam_id in coordinator.data:
-        cam_info = coordinator.data[cam_id].get("info", {})
+
+    def _build_entities_for_cam(cam_id: str) -> list[Any]:
+        cam_info = coordinator.data.get(cam_id, {}).get("info", {})
+        cam_entities: list[Any] = []
         pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
         if pan_limit:
-            entities.append(
+            cam_entities.append(
                 BoschPanNumber(coordinator, cam_id, config_entry, pan_limit)
             )
-        entities.append(BoschSpeakerLevelNumber(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschSpeakerLevelNumber(coordinator, cam_id, config_entry))
         # Card playback volume — paired with the audio switch (registered for
         # every camera), the automatable source of truth for the card's volume.
-        entities.append(BoschAudioVolumeNumber(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschAudioVolumeNumber(coordinator, cam_id, config_entry))
         has_light = cam_info.get("featureSupport", {}).get("light", False)
         if has_light:
-            entities.append(
+            cam_entities.append(
                 BoschFrontLightIntensityNumber(coordinator, cam_id, config_entry)
             )
         # Gen2-only entities
@@ -64,46 +66,65 @@ async def async_setup_entry(
         if get_model_config(hw).generation >= 2:
             # lens_elevation works on both Indoor II and Outdoor II
             # (Indoor II slow-tier returns 200 on this endpoint, confirmed 2026-04-11)
-            entities.append(BoschLensElevationNumber(coordinator, cam_id, config_entry))
-            entities.append(
+            cam_entities.append(
+                BoschLensElevationNumber(coordinator, cam_id, config_entry)
+            )
+            cam_entities.append(
                 BoschMicrophoneLevelNumber(coordinator, cam_id, config_entry)
             )
             # Intrusion detection tuning — available on both Indoor II and Outdoor II.
-            entities.append(
+            cam_entities.append(
                 BoschIntrusionSensitivityNumber(coordinator, cam_id, config_entry)
             )
-            entities.append(
+            cam_entities.append(
                 BoschIntrusionDistanceNumber(coordinator, cam_id, config_entry)
             )
             # Light-related entities only for cameras that actually expose Gen2 lighting
             # (Indoor II has no RGB/wallwasher lights — only Power-LED via iconLedBrightness).
             if hw not in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
-                entities.append(
+                cam_entities.append(
                     BoschWhiteBalanceNumber(coordinator, cam_id, config_entry)
                 )
-                entities.append(
+                cam_entities.append(
                     BoschTopLedBrightnessNumber(coordinator, cam_id, config_entry)
                 )
-                entities.append(
+                cam_entities.append(
                     BoschBottomLedBrightnessNumber(coordinator, cam_id, config_entry)
                 )
-                entities.append(
+                cam_entities.append(
                     BoschMotionLightSensitivityNumber(coordinator, cam_id, config_entry)
                 )
-                entities.append(
+                cam_entities.append(
                     BoschDarknessThresholdNumber(coordinator, cam_id, config_entry)
                 )
         # Gen2 Indoor II — alarm delays + power-LED brightness
         if hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
-            entities.append(
+            cam_entities.append(
                 BoschPowerLedBrightnessNumber(coordinator, cam_id, config_entry)
             )
-            entities.append(BoschAlarmDelayNumber(coordinator, cam_id, config_entry))
-            entities.append(
+            cam_entities.append(
+                BoschAlarmDelayNumber(coordinator, cam_id, config_entry)
+            )
+            cam_entities.append(
                 BoschAlarmActivationDelayNumber(coordinator, cam_id, config_entry)
             )
-            entities.append(BoschPreAlarmDelayNumber(coordinator, cam_id, config_entry))
+            cam_entities.append(
+                BoschPreAlarmDelayNumber(coordinator, cam_id, config_entry)
+            )
+        return cam_entities
+
+    known_cam_ids: set[str] = set(coordinator.data)
+    entities: list[Any] = []
+    for cam_id in known_cam_ids:
+        entities.extend(_build_entities_for_cam(cam_id))
     async_add_entities(entities, update_before_add=False)
+
+    # Quality-Scale Gold `dynamic-devices`.
+    config_entry.async_on_unload(
+        register_dynamic_camera_listener(
+            coordinator, known_cam_ids, async_add_entities, _build_entities_for_cam
+        )
+    )
 
 
 class BoschPanNumber(_BoschEntityBase, NumberEntity):  # type: ignore[misc]
@@ -534,7 +555,6 @@ class BoschWhiteBalanceNumber(_BoschGen2NumberBase):
 class _BoschLedBrightnessBase(_BoschGen2NumberBase):
     """Base for Top/Bottom LED brightness (0-100%, Gen2 only)."""
 
-    _attr_icon = "mdi:brightness-6"
     _attr_native_min_value = 0
     _attr_native_max_value = 100
     _attr_native_step = 5

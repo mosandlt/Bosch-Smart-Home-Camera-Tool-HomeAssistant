@@ -33,6 +33,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import CLOUD_API, DOMAIN  # type: ignore[attr-defined]
 from .cloud_ssl import async_get_bosch_cloud_session
+from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _warn_if_privacy_on
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,9 +47,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator = config_entry.runtime_data
-    entities = []
-    for cam_id in coordinator.data:
-        cam_info = coordinator.data[cam_id].get("info", {})
+
+    def _build_entities_for_cam(cam_id: str) -> list[Any]:
+        cam_info = coordinator.data.get(cam_id, {}).get("info", {})
         # Prefer cam_info hardwareVersion (live cloud data); fall back to the
         # persistent `hw_version` store so a cold-start during a cloud outage
         # still creates the right entities for Outdoor II. `getattr` keeps the
@@ -57,6 +58,7 @@ async def async_setup_entry(
         hw = cam_info.get("hardwareVersion") or _hw_cache.get(cam_id, "CAMERA")
         from .models import get_model_config
 
+        cam_entities: list[Any] = []
         if get_model_config(hw).generation >= 2:
             has_light = cam_info.get("featureSupport", {}).get("light", False)
             # ONLY Outdoor II has controllable lights (RGB top + bottom + color-
@@ -68,10 +70,25 @@ async def async_setup_entry(
             # the registry from an older codepath — those numbers also never
             # worked. Reverted in v12.5.1; cleanup runs in async_setup_entry.
             if has_light:
-                entities.append(BoschTopLedLight(coordinator, cam_id, config_entry))
-                entities.append(BoschBottomLedLight(coordinator, cam_id, config_entry))
-                entities.append(BoschFrontLight(coordinator, cam_id, config_entry))
+                cam_entities.append(BoschTopLedLight(coordinator, cam_id, config_entry))
+                cam_entities.append(
+                    BoschBottomLedLight(coordinator, cam_id, config_entry)
+                )
+                cam_entities.append(BoschFrontLight(coordinator, cam_id, config_entry))
+        return cam_entities
+
+    known_cam_ids: set[str] = set(coordinator.data)
+    entities: list[Any] = []
+    for cam_id in known_cam_ids:
+        entities.extend(_build_entities_for_cam(cam_id))
     async_add_entities(entities, update_before_add=False)
+
+    # Quality-Scale Gold `dynamic-devices`.
+    config_entry.async_on_unload(
+        register_dynamic_camera_listener(
+            coordinator, known_cam_ids, async_add_entities, _build_entities_for_cam
+        )
+    )
 
 
 class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: ignore[misc]

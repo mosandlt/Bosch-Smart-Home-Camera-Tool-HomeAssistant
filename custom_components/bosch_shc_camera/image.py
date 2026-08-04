@@ -36,6 +36,7 @@ from . import (  # type: ignore[attr-defined]
     get_options,
 )
 from .const import CONF_AI_ANALYSIS_ENABLED
+from .dynamic_devices import register_dynamic_camera_listener
 from .models import get_display_name
 from .snapshot_store import load_snapshot
 
@@ -52,23 +53,36 @@ async def async_setup_entry(
     """Set up one image entity per discovered Bosch camera."""
     opts = get_options(config_entry)
     coordinator: BoschCameraCoordinator = config_entry.runtime_data
-    entities: list[Any] = []
-    if opts.get("enable_snapshots", True):
-        entities.extend(
-            BoschCameraLastSnapshotImage(hass, coordinator, cam_id, config_entry)
-            for cam_id in coordinator.data
-        )
-    else:
+    if not opts.get("enable_snapshots", True):
         _LOGGER.debug("Camera snapshots disabled — skipping snapshot image entities")
-    # AI Camera Analysis latest-alert image — only when the master option is
-    # enabled (same gate as the sensor.py/binary_sensor.py AI-analysis
-    # entities), independent of `enable_snapshots` above.
-    if opts.get(CONF_AI_ANALYSIS_ENABLED, False):
-        entities.extend(
-            BoschAiLatestAlertImage(hass, coordinator, cam_id, config_entry)
-            for cam_id in coordinator.data
-        )
+
+    def _build_entities_for_cam(cam_id: str) -> list[Any]:
+        cam_entities: list[Any] = []
+        if opts.get("enable_snapshots", True):
+            cam_entities.append(
+                BoschCameraLastSnapshotImage(hass, coordinator, cam_id, config_entry)
+            )
+        # AI Camera Analysis latest-alert image — only when the master
+        # option is enabled (same gate as the sensor.py/binary_sensor.py
+        # AI-analysis entities), independent of `enable_snapshots` above.
+        if opts.get(CONF_AI_ANALYSIS_ENABLED, False):
+            cam_entities.append(
+                BoschAiLatestAlertImage(hass, coordinator, cam_id, config_entry)
+            )
+        return cam_entities
+
+    known_cam_ids: set[str] = set(coordinator.data)
+    entities: list[Any] = []
+    for cam_id in known_cam_ids:
+        entities.extend(_build_entities_for_cam(cam_id))
     async_add_entities(entities, update_before_add=False)
+
+    # Quality-Scale Gold `dynamic-devices`.
+    config_entry.async_on_unload(
+        register_dynamic_camera_listener(
+            coordinator, known_cam_ids, async_add_entities, _build_entities_for_cam
+        )
+    )
 
 
 class BoschCameraLastSnapshotImage(ImageEntity):  # type: ignore[misc]  # HA base class is untyped (no py.typed) → Any

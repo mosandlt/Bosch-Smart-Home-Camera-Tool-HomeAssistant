@@ -14,7 +14,7 @@ coordinator itself is healthy.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -260,8 +260,14 @@ class TestAiSceneContextTextSetupEntry:
             },
             ai_analysis_scene_context={},
             last_update_success=True,
+            async_add_listener=MagicMock(return_value=MagicMock()),
         )
-        entry = SimpleNamespace(runtime_data=coord, entry_id="01ENTRY", options={})
+        entry = SimpleNamespace(
+            runtime_data=coord,
+            entry_id="01ENTRY",
+            options={},
+            async_on_unload=MagicMock(),
+        )
         added: list = []
         hass = SimpleNamespace()
 
@@ -269,3 +275,41 @@ class TestAiSceneContextTextSetupEntry:
 
         assert len(added) == 2
         assert all(isinstance(e, BoschAiSceneContextText) for e in added)
+
+    @pytest.mark.asyncio
+    async def test_new_camera_gets_entity_added_dynamically(self) -> None:
+        from custom_components.bosch_shc_camera.text import async_setup_entry
+
+        coord = SimpleNamespace(
+            data={CAM_ID: {"info": {"title": "Terrasse"}}},
+            ai_analysis_scene_context={},
+            last_update_success=True,
+            async_add_listener=MagicMock(return_value=MagicMock()),
+        )
+        entry = SimpleNamespace(
+            runtime_data=coord,
+            entry_id="01ENTRY",
+            options={},
+            async_on_unload=MagicMock(),
+        )
+        added: list = []
+        hass = SimpleNamespace()
+
+        await async_setup_entry(hass, entry, lambda ents, **kw: added.extend(ents))
+
+        assert len(added) == 1
+        coord.async_add_listener.assert_called_once()
+        entry.async_on_unload.assert_called_once()
+
+        listener = coord.async_add_listener.call_args[0][0]
+
+        coord.data["22222222-0000-0000-0000-000000000002"] = {
+            "info": {"title": "Innenbereich"}
+        }
+        listener()
+
+        assert len(added) == 2
+        assert all(isinstance(e, BoschAiSceneContextText) for e in added)
+
+        listener()
+        assert len(added) == 2

@@ -30,17 +30,22 @@ import aiohttp
 from bosch_shc_camera_client.auth_utils import (
     async_digest_request as async_digest_request,  # re-export: mypy --no-implicit-reexport (coordinator.py imports it via `from . import`)
 )
+from bosch_shc_camera_client.tls_proxy import (
+    confirm_encoder_ready as confirm_encoder_ready,  # re-export: mypy --no-implicit-reexport (live_connection.py imports it via `from . import`)
+)
+from bosch_shc_camera_client.tls_proxy import (
+    pre_warm_rtsp as pre_warm_rtsp,  # re-export: mypy --no-implicit-reexport (live_connection.py imports it via `from . import`)
+)
+from bosch_shc_camera_client.tls_proxy import stop_all_proxies
 from homeassistant.components.application_credentials import (
     ClientCredential,
     async_import_client_credential,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import (
     ConfigEntryNotReady,
-    HomeAssistantError,
-    ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
@@ -65,13 +70,6 @@ from .coordinator import (
     get_options as get_options,  # re-export: mypy --no-implicit-reexport (button.py/image.py/sensor.py/switch.py import it via `from . import`)
 )
 from .services import _register_services
-from .tls_proxy import (
-    confirm_encoder_ready as confirm_encoder_ready,  # re-export: mypy --no-implicit-reexport (live_connection.py imports it via `from . import`)
-)
-from .tls_proxy import (
-    pre_warm_rtsp as pre_warm_rtsp,  # re-export: mypy --no-implicit-reexport (live_connection.py imports it via `from . import`)
-)
-from .tls_proxy import stop_all_proxies
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -524,8 +522,6 @@ async def _migrate_doubled_prefix_entity_ids(
     the buggy entity_id stuck in the registry. v12.3.0 fixes the source;
     this helper renames the surviving entries so they match what the
     corrected code now produces.
-
-    Reported in forum 998974/15 (Andrew75, 2026-05-15).
     """
     from homeassistant.helpers import entity_registry as er
 
@@ -605,11 +601,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     upgrader on a legacy FCM mode.
 
     Version steps accumulate into shared `new_options`/`new_data` dicts and
-    are persisted with a SINGLE `async_update_entry` call at the end (Runde 2
-    P2 #6) — a v1 entry migrating straight to v3 previously triggered TWO
-    separate update calls (one per version step), each firing its own
-    reload/event cycle. The log message for each logical step still fires
-    independently so the migration history stays visible in the log.
+    are persisted with a SINGLE `async_update_entry` call at the end — a v1
+    entry migrating straight to v3 would otherwise trigger TWO separate
+    update calls (one per version step), each firing its own reload/event
+    cycle. The log message for each logical step still fires independently
+    so the migration history stays visible in the log.
     """
     starting_version = entry.version
     new_options = dict(entry.options)
@@ -774,9 +770,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Load the persistent maintenance-notification dedup key so a restart
     # mid-window does not re-fire the "Wartung läuft" alert. Stored as
-    # `[link, state]`. Bug 2026-05-20: Thomas received the same active-
-    # maintenance announcement ~20 times because every HA restart wiped
-    # `maintenance_notified_key` and the next coordinator tick re-fired
+    # `[link, state]` — without persistence, every HA restart wipes
+    # `maintenance_notified_key` and the next coordinator tick re-fires
     # the active-state notify.
     _maint_key_store: Store[dict[str, str]] = Store(
         hass, version=1, key=f"{DOMAIN}_maint_notified"
@@ -827,9 +822,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # this, a cold start during a Bosch cloud 5xx leaves `hw_version` empty
     # and `_is_gen2()` returns False for every camera — which in turn makes
     # the privacy / front-light switches unavailable even though the LAN
-    # RCP path would work. v12.4.10 added the LAN-fallback availability gate
-    # but missed this persistence; 2026-05-20 maintenance window exposed the
-    # gap (cloud 503 for 30+ minutes, switches grey, no toggle).
+    # RCP path would work.
     hw_version_store: Store = Store(hass, version=1, key=f"{DOMAIN}_hw_versions")
     coordinator.hw_version_store = hw_version_store
     _persisted_hw = await hw_version_store.async_load() or {}
@@ -852,8 +845,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Security note: stored in HA's .storage (same protection level as the
     # cloud bearer token). LAN-only effective scope (camera not internet-exposed).
     # private=True: Store defaults to mode 0644 (world-readable) — this file
-    # holds each camera's plaintext Digest username/password (backported
-    # from the Core PR's Copilot review round 5, 2026-07-27).
+    # holds each camera's plaintext Digest username/password.
     _creds_store: Store = Store(
         hass, version=1, key=f"{DOMAIN}_local_creds", private=True
     )
@@ -868,8 +860,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _raw_port = _payload.get("port", 443)
                 # A corrupted or legacy value (e.g. null, "not-a-port") must
                 # only discard this one record, not crash the entire
-                # config-entry setup for every camera (Copilot review
-                # round 14, backported from the Core PR).
+                # config-entry setup for every camera.
                 try:
                     _port = int(_raw_port)
                 except (TypeError, ValueError):
@@ -887,8 +878,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 # or previously-poisoned entry here would otherwise bypass
                 # that check and let the outage-fallback snap fetch
                 # (camera.py's _async_local_outage_snap) send authenticated
-                # Digest credentials to an arbitrary host (Copilot review
-                # round 13, backported from the Core PR).
+                # Digest credentials to an arbitrary host.
                 if not _is_safe_local_camera_host(f"{_payload['host']}:{_port}"):
                     _LOGGER.warning(
                         "Discarding persisted LOCAL Digest cred(s) for %s: "
@@ -983,9 +973,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # switch fallbacks have a useful state right away. Tracked (not
             # a bare hass.async_create_task) so a removal/reload immediately
             # after this degraded setup cancels and awaits it instead of
-            # leaving it running against an already-torn-down coordinator
-            # (backported from the Core PR's Copilot review round 10,
-            # 2026-07-27).
+            # leaving it running against an already-torn-down coordinator.
             coordinator.spawn_tracked(
                 coordinator.async_outage_ping_all(),
                 name="bosch_shc_camera_startup_ping",
@@ -1091,7 +1079,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # never completed, so the handle had no cancellation path and fired
     # _proactive_refresh() later against an orphaned coordinator. Each failed
     # setup retry (HA retries on ConfigEntryNotReady) armed one more zombie
-    # timer with no bound on how many could accumulate (bug-hunt 2026-07-03).
+    # timer with no bound on how many could accumulate.
     coordinator.schedule_token_refresh()
 
     # Quench the camera-component log spam during stream pre-warm (idempotent).
@@ -1275,191 +1263,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     for _evt_type in _WEBHOOK_EVENT_TYPES:
         entry.async_on_unload(hass.bus.async_listen(_evt_type, _async_deliver_webhook))
 
-    # describe_snapshot service — ask HA ai_task to describe a camera snapshot
-    async def handle_describe_snapshot(call: ServiceCall) -> dict[str, Any]:
-        """Ask HA's ai_task to describe the current camera snapshot."""
-        import datetime as _dt_mod
-
-        camera_id: str = call.data.get("camera_id", "").strip()
-        entity_id_arg: str = call.data.get("entity_id", "").strip()
-        instructions: str = call.data.get("instructions", "").strip()
-        ai_task_entity_arg: str = call.data.get("ai_task_entity", "").strip()
-
-        if not camera_id and not entity_id_arg:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="argument_required",
-                translation_placeholders={"argument": "camera_id or entity_id"},
-            )
-
-        loaded = list(hass.config_entries.async_loaded_entries(DOMAIN))
-        if not loaded:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="unexpected_error",
-                translation_placeholders={
-                    "action": "describe_snapshot",
-                    "error": "no loaded entries",
-                },
-            )
-        resolved_entity_id: str = ""
-        resolved_cam_id: str = ""
-        coord: Any = None
-        cur_opts: dict[str, Any] = {}
-        for entry_inst in loaded:
-            _coord = entry_inst.runtime_data
-            if not _coord:
-                continue
-            if camera_id:
-                cam_entity = getattr(_coord, "camera_entities", {}).get(camera_id)
-                if cam_entity:
-                    coord = _coord
-                    cur_opts = get_options(entry_inst)
-                    resolved_entity_id = cam_entity.entity_id
-                    resolved_cam_id = camera_id
-                    break
-            elif entity_id_arg:
-                for cid, cent in getattr(_coord, "camera_entities", {}).items():
-                    if cent.entity_id == entity_id_arg:
-                        coord = _coord
-                        cur_opts = get_options(entry_inst)
-                        resolved_entity_id = entity_id_arg
-                        resolved_cam_id = cid
-                        break
-                if coord:
-                    break
-        if coord is None:
-            # Fallback to first available coordinator for options
-            for _fb_entry in loaded:
-                if _fb_entry.runtime_data:
-                    coord = _fb_entry.runtime_data
-                    cur_opts = get_options(_fb_entry)
-                    break
-        if coord is None:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="unexpected_error",
-                translation_placeholders={
-                    "action": "describe_snapshot",
-                    "error": "no active coordinator",
-                },
-            )
-
-        # Privacy guard: do not analyze a blank/privacy frame via the manual service
-        if resolved_cam_id and coord.shc_state_cache.get(resolved_cam_id, {}).get(
-            "privacy_mode"
-        ):
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="privacy_active",
-            )
-
-        if not resolved_entity_id:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="not_found",
-                translation_placeholders={
-                    "kind": "camera entity",
-                    "id": camera_id or entity_id_arg,
-                },
-            )
-
-        prompt = instructions or cur_opts.get(
-            "ai_describe_prompt",
-            "Du bist eine Überwachungskamera-Assistenz. Melde NUR"
-            " sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise"
-            " sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere,"
-            " Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die"
-            " Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne"
-            " KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und"
-            " Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes"
-            " erkennbar ist, sage das kurz, z. B.: Keine"
-            " sicherheitsrelevanten Beobachtungen.",
-        )
-        # Language resolution: per-call override → option → fallback "Deutsch"
-        language: str = (
-            call.data.get("language", "").strip()
-            or (cur_opts.get("ai_describe_language") or "").strip()
-            or "Deutsch"
-        )
-        # Append bilingual language directive so the model replies in the chosen
-        # language regardless of its training defaults.
-        full_instructions: str = f"{prompt}\n\nRespond only in {language}. Antworte ausschließlich auf {language}."
-        ai_task_entity_used: str = (
-            ai_task_entity_arg or (cur_opts.get("ai_task_entity") or "").strip()
-        )
-
-        ai_call_data: dict[str, Any] = {
-            "task_name": "Bosch camera snapshot",
-            "instructions": full_instructions,
-            "attachments": [
-                {
-                    "media_content_id": f"media-source://camera/{resolved_entity_id}",
-                    "media_content_type": "image/jpeg",
-                }
-            ],
-        }
-        if ai_task_entity_used:
-            ai_call_data["entity_id"] = ai_task_entity_used
-
-        # Count this manual call as in-flight so a concurrent AUTO describe
-        # (whose budget gate reads ``used + ai_in_flight``) sees the work and
-        # does not push the daily total over the cap. Service-path itself has no
-        # budget gate (manual = always allowed), but it must stay visible.
-        _track_in_flight = hasattr(coord, "ai_in_flight")
-        if _track_in_flight:
-            coord.ai_in_flight += 1
-        try:
-            async with asyncio.timeout(20):
-                resp = await hass.services.async_call(
-                    "ai_task",
-                    "generate_data",
-                    ai_call_data,
-                    blocking=True,
-                    return_response=True,
-                )
-        except TimeoutError as err:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="ai_task_unavailable",
-                translation_placeholders={"error": "timed out (20s)"},
-            ) from err
-        except Exception as err:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="ai_task_unavailable",
-                translation_placeholders={"error": str(err)},
-            ) from err
-        finally:
-            if _track_in_flight:
-                coord.ai_in_flight -= 1
-
-        text: str = (
-            str(resp.get("data", "")) if isinstance(resp, dict) else str(resp or "")
-        ).strip()
-        if not text:
-            return {"description": ""}
-        if resolved_cam_id:
-            coord.ai_record_call(resolved_cam_id)
-        generated_at = _dt_mod.datetime.now(_dt_mod.UTC).isoformat()
-        if resolved_cam_id and resolved_cam_id in coord.data:
-            coord.data[resolved_cam_id]["ai_description"] = {
-                "text": text,
-                "generated_at": generated_at,
-                "ai_task_entity": ai_task_entity_used or "default",
-            }
-            coord.async_set_updated_data(coord.data)
-        hass.bus.async_fire(
-            "bosch_shc_camera_ai_description",
-            {
-                "camera_id": resolved_cam_id,
-                "entity_id": resolved_entity_id,
-                "description": text,
-                "generated_at": generated_at,
-            },
-        )
-        return {"description": text}
-
     # ── Auto-describe on motion (opt-in) ─────────────────────────────────────
     # _AI_MOTION_DEBOUNCE / _AI_MOTION_DEBOUNCE_SEC are module-level so the
     # debounce state survives integration reloads — see definition near the top.
@@ -1506,11 +1309,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # ── Auto-analyze on motion (AI Camera Analysis, opt-in) ──────────────────
     # Sibling to _async_auto_describe above — same event/debounce/coordinator-
     # resolution shape, calling ai_analysis.async_generate_ai_analysis
-    # instead. Bug-hunt finding: this listener was the one piece never wired
-    # up when the feature was built — every other part (entities, config
-    # flow, storage, routing) existed but nothing ever triggered the
-    # non-force path, so the feature only ever ran via the manual
-    # analyze_camera_ai service despite being designed as motion-triggered.
+    # instead. Without this listener wired up, the feature only ever runs
+    # via the manual analyze_camera_ai service despite being designed as
+    # motion-triggered.
     async def _async_auto_analyze(event: Any) -> None:
         """Auto-call ai_analysis on motion/person events (debounced)."""
         cam_id_evt: str = event.data.get("camera_id", "")
@@ -1547,167 +1348,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     for _motion_evt in ("bosch_shc_camera_motion", "bosch_shc_camera_person"):
         entry.async_on_unload(hass.bus.async_listen(_motion_evt, _async_auto_analyze))
 
-    if not hass.services.has_service(DOMAIN, "describe_snapshot"):
-        hass.services.async_register(
-            DOMAIN,
-            "describe_snapshot",
-            handle_describe_snapshot,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    # analyze_camera_ai service — on-demand structured AI Camera Analysis
-    # (ai_analysis.py). Mirrors describe_snapshot's camera_id/entity_id
-    # resolution shape, but delegates the actual AI call + persistence/
-    # routing to ai_analysis.async_generate_ai_analysis(force=True) instead
-    # of duplicating that logic here.
-    async def handle_analyze_camera_ai(call: ServiceCall) -> dict[str, Any]:
-        """Manually trigger a structured AI Camera Analysis for one camera.
-
-        `force=True` bypasses the per-camera cooldown and the on/away
-        window gate but still counts toward the feature's own daily
-        budget — same manual-service convention as `describe_snapshot`.
-        Returns `{"triggered": False}` (no exception) when the analysis
-        ran but produced a "nothing notable" (score <= 0) result, matching
-        `async_generate_ai_analysis`'s own never-raises contract.
-        """
-        camera_id: str = call.data.get("camera_id", "").strip()
-        entity_id_arg: str = call.data.get("entity_id", "").strip()
-
-        if not camera_id and not entity_id_arg:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="argument_required",
-                translation_placeholders={"argument": "camera_id or entity_id"},
-            )
-
-        loaded = list(hass.config_entries.async_loaded_entries(DOMAIN))
-        if not loaded:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="unexpected_error",
-                translation_placeholders={
-                    "action": "analyze_camera_ai",
-                    "error": "no loaded entries",
-                },
-            )
-
-        resolved_cam_id: str = ""
-        coord: Any = None
-        for entry_inst in loaded:
-            _coord = entry_inst.runtime_data
-            if not _coord:
-                continue
-            if camera_id:
-                cam_entity = getattr(_coord, "camera_entities", {}).get(camera_id)
-                if cam_entity:
-                    coord = _coord
-                    resolved_cam_id = camera_id
-                    break
-            elif entity_id_arg:
-                for cid, cent in getattr(_coord, "camera_entities", {}).items():
-                    if cent.entity_id == entity_id_arg:
-                        coord = _coord
-                        resolved_cam_id = cid
-                        break
-                if coord:
-                    break
-
-        if coord is None or not resolved_cam_id:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="not_found",
-                translation_placeholders={
-                    "kind": "camera entity",
-                    "id": camera_id or entity_id_arg,
-                },
-            )
-
-        # Bug-hunt finding: force=True bypasses cooldown/window but NOT the
-        # master option / per-camera switch — a manual trigger against a
-        # disabled camera previously returned the byte-identical
-        # {"triggered": False} as a genuine "AI scored <=0" result, with no
-        # way for the caller to tell them apart. Surface the reason instead.
-        ai_opts_call = get_options(coord.entry)
-        if not ai_opts_call.get(CONF_AI_ANALYSIS_ENABLED, False):
-            return {"triggered": False, "reason": "ai_analysis_disabled"}
-        if not ai_analysis.per_camera_analysis_enabled(coord, resolved_cam_id):
-            return {"triggered": False, "reason": "camera_disabled"}
-
-        result = await ai_analysis.async_generate_ai_analysis(
-            coord, resolved_cam_id, force=True
-        )
-        if result is None:
-            return {"triggered": False, "reason": "nothing_notable"}
-        return {"triggered": True, **result}
-
-    if not hass.services.has_service(DOMAIN, "analyze_camera_ai"):
-        hass.services.async_register(
-            DOMAIN,
-            "analyze_camera_ai",
-            handle_analyze_camera_ai,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-
-    # send_event_webhook service — test/manual trigger
-    # Uses live-entry iteration so the handler always reads the current options
-    # even after an integration reload — no stale closure over a setup-time entry.
-    async def handle_send_event_webhook(call: ServiceCall) -> None:
-        """Manually fire a webhook POST for testing."""
-        import datetime as _dt
-
-        from .const import CONF_ENABLE_WEBHOOK_DELIVERY, CONF_WEBHOOK_URL
-
-        loaded = list(hass.config_entries.async_loaded_entries(DOMAIN))
-        if not loaded:
-            _LOGGER.warning(
-                "send_event_webhook: no loaded entries for domain %s", DOMAIN
-            )
-            return
-        cur_opts = get_options(loaded[0])
-        if not cur_opts.get(CONF_ENABLE_WEBHOOK_DELIVERY, False):
-            _LOGGER.warning(
-                "send_event_webhook: webhook delivery is disabled in options"
-            )
-            return
-        url = cur_opts.get(CONF_WEBHOOK_URL, "").strip()
-        if not url:
-            _LOGGER.warning("send_event_webhook: webhook_url is not configured")
-            return
-        if not url.lower().startswith(("http://", "https://")):
-            _LOGGER.warning(
-                "send_event_webhook: webhook_url %r has invalid scheme — only http/https allowed",
-                url[:50],
-            )
-            return
-        event_type_val: str = call.data.get("event_type", "MOVEMENT")
-        entity_id_val: str = call.data.get("entity_id", "")
-        # Resolve camera name from entity_id if given
-        cam_name = entity_id_val
-        if entity_id_val:
-            state = hass.states.get(entity_id_val)
-            if state:
-                cam_name = state.attributes.get("friendly_name", entity_id_val)
-        payload: dict[str, Any] = {
-            "event_type": event_type_val,
-            "camera": cam_name,
-            "camera_id": "",
-            "timestamp": _dt.datetime.now(_dt.UTC).isoformat().replace("+00:00", "Z"),
-            "extra": {"source": "manual"},
-        }
-        session = async_get_clientsession(hass)
-        try:
-            async with session.post(
-                url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                _LOGGER.info("send_event_webhook: POST %s → HTTP %d", url, resp.status)
-        except aiohttp.ClientError as err:
-            _LOGGER.error("send_event_webhook: POST failed: %s", err)
-
-    if not hass.services.has_service(DOMAIN, "send_event_webhook"):
-        hass.services.async_register(
-            DOMAIN, "send_event_webhook", handle_send_event_webhook
-        )
-
     return True
 
 
@@ -1732,8 +1372,8 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     # remaining bg_tasks, the NVR drain watcher, NVR recorders, live-stream
     # teardown, Frigate endpoints, and stop_all_proxies. Catch it, finish the
     # rest of the cleanup, then re-raise at the end so the cancellation still
-    # ultimately surfaces to the caller (bug-hunt 2026-07-03).
-    # Set FIRST, before anything else (issue #47): once this is True,
+    # ultimately surfaces to the caller.
+    # Set FIRST, before anything else: once this is True,
     # start_recorder/_spawn_preroll_recorder_locked refuse to spawn a new
     # ffmpeg child (checked under the same per-cam get_nvr_recorder_lock
     # that stop_all()/stop_all_preroll() below now also acquire), closing
@@ -1803,9 +1443,6 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     # the browser then polls a 404 m3u8 until the user hard-refreshes the
     # card. tear_down_live_stream handles per-cam: unregister go2rtc,
     # stop_tls_proxy, stream.stop() + cam_entity.stream = None.
-    # Symptom hit 2026-05-26 after two mjpeg-test reloads back-to-back left
-    # a stale `cbs-76512325@127.0.0.1:32987` Terrasse entry in go2rtc that
-    # had to be cleaned manually.
     # `getattr(..., {})` keeps minimal SimpleNamespace test fixtures working —
     # they often don't populate every coordinator attribute.
     for cam_id in list(getattr(coord, "live_connections", {}).keys()):
@@ -1844,23 +1481,53 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
                 "REMOTE viewing front-door stop_all on unload raised: %s", err
             )
         coord.remote_viewing_front_door_runner = None
-    # Close the shared go2rtc-API session (Work Package 1,
-    # stream-perf-stability-refactor) — opened lazily on first
+    # Release the shared go2rtc-API session — opened lazily on first
     # register/unregister/consumer-count call. Distinct from the
     # Bosch-cloud session in cloud_ssl.py, which closes itself on
     # EVENT_HOMEASSISTANT_STOP; this one is coordinator-scoped so it is
-    # closed here on both unload and HA stop. The live-stream teardown loop
-    # above already ran every per-cam go2rtc unregister, so it's safe to
-    # close now. `getattr` keeps minimal SimpleNamespace test fixtures
+    # released here on both unload and HA stop. The live-stream teardown
+    # loop above already ran every per-cam go2rtc unregister, so it's safe
+    # to release now. `getattr` keeps minimal SimpleNamespace test fixtures
     # (predating this attribute) working unchanged.
+    #
+    # go2rtc_client.py builds this session via HA's
+    # `aiohttp_client.async_create_clientsession`, so its connector is HA's
+    # own shared, hass-wide pooled connector, not privately owned by this
+    # session. `.detach()`
+    # (sync) drops this session's reference to that connector without
+    # closing it — closing it here would tear down the connector pool out
+    # from under every other integration still using it. `.close()` would
+    # do exactly that (aiohttp.ClientSession owns/closes its connector by
+    # default), so it must never be used for this session.
     go2rtc_session = getattr(coord, "go2rtc_session", None)
     if go2rtc_session is not None and not go2rtc_session.closed:
         try:
-            await go2rtc_session.close()
+            go2rtc_session.detach()
         except Exception as err:
-            _LOGGER.debug("go2rtc session close on unload raised: %s", err)
+            _LOGGER.debug("go2rtc session detach on unload raised: %s", err)
     if hasattr(coord, "go2rtc_session"):
         coord.go2rtc_session = None
+    # Close the SHC local-mTLS session + connector (shc.py's
+    # async_shc_request) — a persistent pair reused across calls.
+    # Privately owned by this coordinator (mutual-TLS to the LAN SHC, not
+    # HA's shared connector), so both a real `.close()` here (unlike the
+    # HA-managed go2rtc session above).
+    shc_session = getattr(coord, "shc_session", None)
+    if shc_session is not None and not shc_session.closed:
+        try:
+            await shc_session.close()
+        except Exception as err:
+            _LOGGER.debug("SHC session close on unload raised: %s", err)
+    shc_connector = getattr(coord, "shc_connector", None)
+    if shc_connector is not None and not shc_connector.closed:
+        try:
+            await shc_connector.close()
+        except Exception as err:
+            _LOGGER.debug("SHC connector close on unload raised: %s", err)
+    if hasattr(coord, "shc_session"):
+        coord.shc_session = None
+    if hasattr(coord, "shc_connector"):
+        coord.shc_connector = None
     # Mark teardown done BEFORE returning so any straggler call to
     # _get_go2rtc_session that races this function (e.g. a live frontend
     # stream_source() request landing in the gap between this call and
@@ -1904,8 +1571,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     Platforms are unloaded FIRST. If `async_unload_platforms` returns False
     the config entry stays loaded, so the coordinator's timers/background
     tasks must stay alive too — cancelling them first would leave a loaded
-    integration whose entities never update again (backported from the Core
-    PR's Copilot review round 15, 2026-07-28).
+    integration whose entities never update again.
     """
     unloaded = bool(
         await hass.config_entries.async_unload_platforms(entry, ALL_PLATFORMS)
@@ -1925,8 +1591,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     which must leave this state intact. Without this, the four Store files
     (cloud-outage-notified flag, LAN IPs, hardware versions, LOCAL Digest
     credentials) and the persisted-snapshot JPEG directory all retained LAN
-    credentials and camera images indefinitely after removal (backported
-    from the Core PR's Copilot review round 5, 2026-07-27).
+    credentials and camera images indefinitely after removal.
     """
     from .snapshot_store import async_remove_all_snapshots
 
@@ -1946,11 +1611,12 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
     This listener fires on ANY config-entry update — including the frequent
     data-only writes (token refresh at L1560, plus five FCM `data=` writes in
     fcm.py). A data-only write must NEVER reload: a reload tears down every
-    camera's live stream (go2rtc unregister + TLS-proxy stop). Incident
-    2026-05-29: toggling privacy on one camera persisted a refreshed token, this
-    listener fired while `entry.runtime_data` was briefly None, the old
-    `if coord:` guard fell through straight to async_reload, and an unrelated
-    camera's WebRTC source vanished from go2rtc (DESCRIBE 404 → 30 s-delayed HLS).
+    camera's live stream (go2rtc unregister + TLS-proxy stop). Concrete
+    failure mode this guards against: toggling privacy on one camera
+    persists a refreshed token, this listener fires while
+    `entry.runtime_data` is briefly None, a naive `if coord:` guard falls
+    through straight to async_reload, and an unrelated camera's WebRTC
+    source vanishes from go2rtc (DESCRIBE 404 → 30 s-delayed HLS).
 
     The reload decision must depend ONLY on whether options changed — never on
     whether the coordinator happens to be present. The previous-options snapshot

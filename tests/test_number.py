@@ -501,6 +501,7 @@ def _coord(
         else {cam_id: {}},
         async_put_camera=AsyncMock(return_value=put_return),
         is_camera_online=lambda cid: True,
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
 
 
@@ -554,6 +555,7 @@ def _stub_coord_guards(**overrides):
         async_put_camera=AsyncMock(return_value=True),
         async_cloud_set_light_component=AsyncMock(),
         is_camera_online=lambda cid: True,
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -1484,7 +1486,11 @@ class TestAsyncSetupEntryWiring:
             intrusion_cache={CAM_ID_GEN2_OUTDOOR: dict(_INTRUSION_CFG)},
         )
         entry = SimpleNamespace(
-            runtime_data=coord, data={}, options={}, entry_id="01ENTRY"
+            runtime_data=coord,
+            data={},
+            options={},
+            entry_id="01ENTRY",
+            async_on_unload=MagicMock(),
         )
         added: list = []
         await async_setup_entry(None, entry, lambda ents, **_: added.extend(ents))  # type: ignore[arg-type]
@@ -1509,7 +1515,11 @@ class TestAsyncSetupEntryWiring:
             intrusion_cache={CAM_ID_GEN2_INDOOR: dict(_INTRUSION_CFG)},
         )
         entry = SimpleNamespace(
-            runtime_data=coord, data={}, options={}, entry_id="01ENTRY"
+            runtime_data=coord,
+            data={},
+            options={},
+            entry_id="01ENTRY",
+            async_on_unload=MagicMock(),
         )
         added: list = []
         await async_setup_entry(None, entry, lambda ents, **_: added.extend(ents))  # type: ignore[arg-type]
@@ -1534,7 +1544,11 @@ class TestAsyncSetupEntryWiring:
             intrusion_cache={},
         )
         entry = SimpleNamespace(
-            runtime_data=coord, data={}, options={}, entry_id="01ENTRY"
+            runtime_data=coord,
+            data={},
+            options={},
+            entry_id="01ENTRY",
+            async_on_unload=MagicMock(),
         )
         added: list = []
         await async_setup_entry(None, entry, lambda ents, **_: added.extend(ents))  # type: ignore[arg-type]
@@ -1554,7 +1568,9 @@ class TestAsyncSetupEntryWiring:
         def _fake_add(entities, **kw):
             added.extend(entities)
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschPanNumber" in entity_classes, (
@@ -1572,7 +1588,9 @@ class TestAsyncSetupEntryWiring:
         def _fake_add(entities, **kw):
             added.extend(entities)
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschPanNumber" not in entity_classes, (
@@ -1590,7 +1608,9 @@ class TestAsyncSetupEntryWiring:
         def _fake_add(entities, **kw):
             added.extend(entities)
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschFrontLightIntensityNumber" in entity_classes, (
@@ -1608,7 +1628,9 @@ class TestAsyncSetupEntryWiring:
         def _fake_add(entities, **kw):
             added.extend(entities)
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschLensElevationNumber" in entity_classes, (
@@ -1629,7 +1651,9 @@ class TestAsyncSetupEntryWiring:
         def _fake_add(entities, **kw):
             added.extend(entities)
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschWhiteBalanceNumber" in entity_classes, (
@@ -1650,7 +1674,9 @@ class TestAsyncSetupEntryWiring:
         def _fake_add(entities, **kw):
             added.extend(entities)
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschAlarmDelayNumber" in entity_classes, (
@@ -1671,7 +1697,9 @@ class TestAsyncSetupEntryWiring:
         def _fake_add(entities, **kw):
             added.extend(entities)
 
-        entry = SimpleNamespace(runtime_data=coord, options={})
+        entry = SimpleNamespace(
+            runtime_data=coord, options={}, async_on_unload=MagicMock()
+        )
         asyncio.run(async_setup_entry(None, entry, _fake_add))
         entity_classes = [type(e).__name__ for e in added]
         assert "BoschWhiteBalanceNumber" not in entity_classes, (

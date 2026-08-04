@@ -63,6 +63,7 @@ from .const import (
     jpeg_size_for_width,
     with_jpeg_size,
 )
+from .dynamic_devices import register_dynamic_camera_listener
 from .mjpeg_snapshot import fetch_mjpeg_snapshot
 from .models import (
     get_display_name,
@@ -180,10 +181,24 @@ async def async_setup_entry(
         return
 
     coordinator = config_entry.runtime_data
+
+    def _build_entities_for_cam(cam_id: str) -> list[Any]:
+        return [BoschCamera(coordinator, cam_id, config_entry)]
+
+    known_cam_ids: set[str] = set(coordinator.data)
     entities = [
-        BoschCamera(coordinator, cam_id, config_entry) for cam_id in coordinator.data
+        BoschCamera(coordinator, cam_id, config_entry) for cam_id in known_cam_ids
     ]
     async_add_entities(entities, update_before_add=False)
+
+    # Quality-Scale Gold `dynamic-devices`: a camera added to the Bosch
+    # account after HA startup gets its entity added automatically on the
+    # next coordinator tick, instead of requiring an integration reload.
+    config_entry.async_on_unload(
+        register_dynamic_camera_listener(
+            coordinator, known_cam_ids, async_add_entities, _build_entities_for_cam
+        )
+    )
 
 
 class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
@@ -593,8 +608,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             # was offline) — fail instead of guessing (Copilot review
             # round 13, backported from the Core PR).
             raise HomeAssistantError(
-                f"{self._display_name}: motion sensitivity not yet known — "
-                "try again once the integration has finished its first update"
+                translation_domain=DOMAIN,
+                translation_key="motion_sensitivity_unknown",
+                translation_placeholders={"camera": self._display_name},
             )
         sensitivity = settings.get("motionAlarmConfiguration", "HIGH")
         success = await self.coordinator.async_put_camera(
@@ -604,7 +620,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         )
         if not success:
             raise HomeAssistantError(
-                f"{self._display_name}: failed to enable motion detection"
+                translation_domain=DOMAIN,
+                translation_key="motion_detection_enable_failed",
+                translation_placeholders={"camera": self._display_name},
             )
         # Optimistic cache update + write-lock timestamp — motion is only
         # ever re-fetched by the slow tier, so without this,
@@ -630,8 +648,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         if not settings:
             # See async_enable_motion_detection above.
             raise HomeAssistantError(
-                f"{self._display_name}: motion sensitivity not yet known — "
-                "try again once the integration has finished its first update"
+                translation_domain=DOMAIN,
+                translation_key="motion_sensitivity_unknown",
+                translation_placeholders={"camera": self._display_name},
             )
         sensitivity = settings.get("motionAlarmConfiguration", "HIGH")
         success = await self.coordinator.async_put_camera(
@@ -641,7 +660,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         )
         if not success:
             raise HomeAssistantError(
-                f"{self._display_name}: failed to disable motion detection"
+                translation_domain=DOMAIN,
+                translation_key="motion_detection_disable_failed",
+                translation_placeholders={"camera": self._display_name},
             )
         # See async_enable_motion_detection above.
         self.coordinator.data.setdefault(self._cam_id, {}).setdefault(
@@ -886,7 +907,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             shc = self.coordinator.shc_state_cache.get(self._cam_id, {})
             if shc.get("privacy_mode") is True:
                 raise HomeAssistantError(
-                    f"{self._display_name}: stream unavailable — privacy mode is ON"
+                    translation_domain=DOMAIN,
+                    translation_key="stream_blocked_privacy_mode",
+                    translation_placeholders={"camera": self._display_name},
                 )
             _LOGGER.debug(
                 "%s: play_stream — auto-opening live connection", self._display_name
@@ -971,7 +994,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             shc = self.coordinator.shc_state_cache.get(self._cam_id, {})
             if shc.get("privacy_mode") is True:
                 raise HomeAssistantError(
-                    f"{self._display_name}: stream unavailable — privacy mode is ON"
+                    translation_domain=DOMAIN,
+                    translation_key="stream_blocked_privacy_mode",
+                    translation_placeholders={"camera": self._display_name},
                 )
             _LOGGER.debug(
                 "%s: webrtc_offer — auto-opening live connection", self._display_name

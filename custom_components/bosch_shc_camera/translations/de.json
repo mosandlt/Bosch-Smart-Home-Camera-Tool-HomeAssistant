@@ -1044,6 +1044,51 @@
     },
     "ai_task_unavailable": {
       "message": "KI-Task-Dienst nicht verfügbar oder fehlgeschlagen: {error}"
+    },
+    "stream_blocked_privacy_mode": {
+      "message": "{camera}: Stream nicht verfügbar — Privatsphäre-Modus ist aktiv"
+    },
+    "stream_start_blocked_privacy_mode": {
+      "message": "Stream für {camera} kann nicht gestartet werden — Privatsphäre-Modus ist aktiv. Privatsphäre-Modus zuerst deaktivieren."
+    },
+    "motion_sensitivity_unknown": {
+      "message": "{camera}: Bewegungsempfindlichkeit noch nicht bekannt — erneut versuchen, sobald die Integration ihre erste Aktualisierung abgeschlossen hat"
+    },
+    "motion_detection_enable_failed": {
+      "message": "{camera}: Bewegungserkennung konnte nicht aktiviert werden"
+    },
+    "motion_detection_disable_failed": {
+      "message": "{camera}: Bewegungserkennung konnte nicht deaktiviert werden"
+    },
+    "firmware_install_in_progress": {
+      "message": "Firmware-Installation läuft bereits"
+    },
+    "firmware_no_update_available": {
+      "message": "Aktuell ist kein Firmware-Update zur Installation verfügbar"
+    },
+    "firmware_install_rejected": {
+      "message": "Bosch Cloud hat die Firmware-Installationsanfrage für {target} abgelehnt"
+    },
+    "soft_reset_rejected": {
+      "message": "Bosch Cloud hat die Soft-Reset-Anfrage (Neustart) abgelehnt"
+    },
+    "hard_reset_rejected": {
+      "message": "Bosch Cloud hat die Hard-Reset-Anfrage (Werksreset) abgelehnt"
+    },
+    "not_authenticated": {
+      "message": "Nicht angemeldet — füge die Integration erneut hinzu, um dich anzumelden"
+    },
+    "token_expired_renewal_failed": {
+      "message": "Token abgelaufen und Erneuerung fehlgeschlagen — melde dich über die Reauth-Aufforderung erneut an, oder gehe zu Einstellungen → Integrationen → Bosch Smart Home Camera → Konfigurieren → Neue Browser-Anmeldung erzwingen"
+    },
+    "no_refresh_token": {
+      "message": "Kein Refresh-Token vorhanden — erneute Anmeldung erforderlich"
+    },
+    "refresh_token_invalid": {
+      "message": "Refresh-Token ungültig — bitte melde dich über die Schaltfläche **Reconfigure** auf der Integrations-Karte erneut an."
+    },
+    "token_refresh_failed_repeatedly": {
+      "message": "Token-Erneuerung wiederholt fehlgeschlagen — bitte melde dich über die Schaltfläche **Reconfigure** auf der Integrations-Karte erneut an."
     }
   },
   "issues": {

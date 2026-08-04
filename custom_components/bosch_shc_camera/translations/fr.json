@@ -966,6 +966,51 @@
     },
     "ai_task_unavailable": {
       "message": "Le service AI Task est indisponible ou a échoué : {error}"
+    },
+    "stream_blocked_privacy_mode": {
+      "message": "{camera} : flux indisponible — le mode Confidentialité est activé"
+    },
+    "stream_start_blocked_privacy_mode": {
+      "message": "Impossible de démarrer le flux pour {camera} — le mode Confidentialité est actif. Désactivez d'abord le mode Confidentialité."
+    },
+    "motion_sensitivity_unknown": {
+      "message": "{camera} : sensibilité mouvement pas encore connue — réessayez une fois que l'intégration a terminé sa première mise à jour"
+    },
+    "motion_detection_enable_failed": {
+      "message": "{camera} : échec de l'activation de la détection de mouvement"
+    },
+    "motion_detection_disable_failed": {
+      "message": "{camera} : échec de la désactivation de la détection de mouvement"
+    },
+    "firmware_install_in_progress": {
+      "message": "Une installation de firmware est déjà en cours"
+    },
+    "firmware_no_update_available": {
+      "message": "Aucune mise à jour de firmware n'est actuellement disponible à l'installation"
+    },
+    "firmware_install_rejected": {
+      "message": "Le cloud Bosch a rejeté la demande d'installation du firmware pour {target}"
+    },
+    "soft_reset_rejected": {
+      "message": "Le cloud Bosch a rejeté la demande de soft-reset (redémarrage)"
+    },
+    "hard_reset_rejected": {
+      "message": "Le cloud Bosch a rejeté la demande de hard-reset (réinitialisation d'usine)"
+    },
+    "not_authenticated": {
+      "message": "Non authentifié — ré-ajoutez l'intégration pour vous connecter"
+    },
+    "token_expired_renewal_failed": {
+      "message": "Le token a expiré et le renouvellement a échoué — reconnectez-vous via l'invite de réauthentification, ou allez dans Paramètres → Intégrations → Bosch Smart Home Camera → Configurer → Forcer une nouvelle connexion via le navigateur"
+    },
+    "no_refresh_token": {
+      "message": "Aucun refresh token — une nouvelle authentification est requise"
+    },
+    "refresh_token_invalid": {
+      "message": "Refresh token invalide — veuillez vous reconnecter via le bouton **Reconfigurer** sur la carte de l'intégration."
+    },
+    "token_refresh_failed_repeatedly": {
+      "message": "Le renouvellement du token a échoué à plusieurs reprises — veuillez vous reconnecter via le bouton **Reconfigurer** sur la carte de l'intégration."
     }
   },
   "issues": {

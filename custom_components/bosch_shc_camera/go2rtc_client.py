@@ -46,6 +46,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 import aiohttp
+from homeassistant.helpers import aiohttp_client
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator
@@ -67,6 +68,21 @@ async def _get_go2rtc_session(
     stream-perf-stability-refactor). Closed exactly once, in
     _async_cancel_coordinator_tasks (__init__.py), on config-entry unload /
     HA stop.
+
+    Built via `homeassistant.helpers.aiohttp_client.async_create_clientsession`
+    (`auto_cleanup=False` — this function keeps its own coordinator-scoped
+    close/teardown-race handling below, HA's own auto-cleanup would be
+    redundant) instead of a bare `aiohttp.ClientSession()` — inject-websession
+    quality-scale gap, closed 2026-08-04. This still shares HA's pooled
+    connector (`homeassistant.helpers.aiohttp_client`'s per-hass
+    `HomeAssistantTCPConnector`, keyed by verify_ssl/family/ssl_cipher) rather
+    than opening a private one, and gains the SSRF-redirect middleware for
+    free; no TLS/cert behavior changes since these are plain `http://`
+    localhost calls with no certificate involved. Because the returned
+    session's connector is HA-owned and shared with the rest of the
+    integration (and other integrations), teardown below calls `.detach()`
+    (releases this session's reference without closing the shared connector),
+    never `.close()` (which would tear down HA's shared connector pool).
 
     A free function taking `coordinator` explicitly (matching the existing
     poll_statuses/poll_events/run_housekeeping/try_live_connection_inner
@@ -107,7 +123,9 @@ async def _get_go2rtc_session(
             raise RuntimeError(
                 "go2rtc session unavailable — coordinator is shutting down"
             )
-        session = aiohttp.ClientSession()
+        session = aiohttp_client.async_create_clientsession(
+            coordinator.hass, auto_cleanup=False
+        )
         coordinator.go2rtc_session = session
         return session
 

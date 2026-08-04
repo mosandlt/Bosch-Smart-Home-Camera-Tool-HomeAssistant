@@ -294,6 +294,7 @@ def _stub_coord(**overrides):
         stop_remote_viewing_front_door=AsyncMock(),
         start_recorder=AsyncMock(),
         stop_recorder=AsyncMock(),
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -2389,6 +2390,7 @@ def _setup_coord():
         live_stream_entities={},
         audio_enabled={},
         options={},
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
 
 
@@ -2408,6 +2410,7 @@ class TestSetupEntryGuard:
             runtime_data=coord,
             data={},
             options={"enable_snapshot_button": False},
+            async_on_unload=MagicMock(),
         )
         hass = SimpleNamespace()
 
@@ -2444,6 +2447,7 @@ class TestSetupEntryGuard:
             runtime_data=coord,
             data={},
             options={"enable_snapshot_button": True},
+            async_on_unload=MagicMock(),
         )
         hass = SimpleNamespace()
         added: list = []
@@ -2820,6 +2824,7 @@ def _make_coord(**overrides):
         _alarm_mode_cache={CAM_ID: "STANDARD"},
         _pre_alarm_cache={CAM_ID: False},
         _nvr_recording_cache={CAM_ID: False},
+        async_add_listener=MagicMock(return_value=MagicMock()),
     )
     for k, v in overrides.items():
         setattr(coord, k, v)
@@ -7539,6 +7544,7 @@ def stub_entry_sprintma() -> SimpleNamespace:
         entry_id="01ENTRY",
         data={"bearer_token": "x"},
         options={"enable_snapshot_button": True, "enable_nvr": False},
+        async_on_unload=MagicMock(),
     )
 
 
@@ -7848,6 +7854,81 @@ class TestAsyncSetupEntry:
         ):
             await async_setup_entry(hass, stub_entry_sprintma, fake_add)
         assert any(isinstance(e, BoschImageRotation180Switch) for e in added)
+
+    @pytest.mark.asyncio
+    async def test_new_camera_gets_entities_added_dynamically(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
+        """Quality-Scale `dynamic-devices`: a camera that appears in
+        coordinator.data AFTER the initial async_setup_entry pass must get
+        its entities added automatically via the registered coordinator
+        listener — not just at the initial HA-startup pass."""
+        from custom_components.bosch_shc_camera.switch import (
+            BoschAudioSwitch,
+            BoschLiveStreamSwitch,
+            BoschPrivacyModeSwitch,
+            async_setup_entry,
+        )
+
+        stub_entry_sprintma.runtime_data = stub_coord_sprintma
+        added: list = []
+
+        def fake_add(ents, **kw):
+            added.extend(ents)
+
+        hass = MagicMock()
+        with patch(
+            "custom_components.bosch_shc_camera.switch.get_options",
+            return_value=stub_entry_sprintma.options,
+        ):
+            await async_setup_entry(hass, stub_entry_sprintma, fake_add)
+
+        # The listener must have been registered exactly once and wired
+        # into config_entry.async_on_unload for teardown.
+        stub_coord_sprintma.async_add_listener.assert_called_once()
+        stub_entry_sprintma.async_on_unload.assert_called_once()
+
+        listener = stub_coord_sprintma.async_add_listener.call_args[0][0]
+
+        # A second camera appears in coordinator.data after initial setup.
+        new_cam_id = "NEWCAM2"
+        stub_coord_sprintma.data[new_cam_id] = {
+            "info": {
+                "title": "Garten",
+                "hardwareVersion": "HOME_Eyes_Outdoor",
+                "firmwareVersion": "9.40.25",
+                "macAddress": "aa:bb:cc:dd:ee:02",
+                "featureSupport": {"light": True, "panLimit": 0, "sound": False},
+                "featureStatus": {},
+            },
+            "status": "ONLINE",
+            "events": [],
+        }
+        stub_coord_sprintma.shc_state_cache[new_cam_id] = {
+            "privacy_mode": False,
+            "camera_light": True,
+            "front_light": True,
+            "wallwasher": False,
+            "notifications_status": "FOLLOW_CAMERA_SCHEDULE",
+            "has_light": True,
+        }
+
+        before_count = len(added)
+        listener()  # plain sync callback, not awaited
+        new_entities = added[before_count:]
+        assert new_entities, "No entities added for the newly-appeared camera"
+        new_types = [type(e) for e in new_entities]
+        assert BoschLiveStreamSwitch in new_types
+        assert BoschAudioSwitch in new_types
+        assert BoschPrivacyModeSwitch in new_types
+        assert all(getattr(e, "_cam_id", None) == new_cam_id for e in new_entities)
+
+        # Calling again with no new cameras must be a no-op.
+        before_count = len(added)
+        listener()
+        assert len(added) == before_count, (
+            "Listener re-added entities for a camera it already knows about"
+        )
 
 
 # ── BoschLiveStreamSwitch ─────────────────────────────────────────────────────

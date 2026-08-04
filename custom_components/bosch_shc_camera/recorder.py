@@ -66,7 +66,7 @@ _RESPAWN_DELAY_SECONDS = 5.0
 # rather than raising, so files already found within the deadline are still
 # removed.
 _NVR_CLEANUP_MAX_SECONDS = 60.0
-# Auth-retry guard (issue #42 follow-up): a single 401 is almost always a
+# Auth-retry guard: a single 401 is almost always a
 # transient heartbeat cred-rotation race and is retried without counting
 # toward the crash-window give-up above — but a GENUINE broken credential
 # would otherwise retry silently forever. Cap consecutive 401s so a real
@@ -87,17 +87,17 @@ _PROXY_URL_WAIT_INTERVAL = 0.5
 _PREROLL_SEGMENT_SECONDS = 10  # short segments for fine-grained pre-roll
 _PREROLL_MAX_SEGMENTS = 5  # keep last 5 × 10 s = 50 s max in tmpfs
 _PREROLL_MIN_SIZE_BYTES = 1024  # discard sub-1 KB corrupt segments
-# GitHub #51 follow-up: ffmpeg's concat demuxer can exit rc=0 while having
-# stitched together segments with inconsistent timing (e.g. a mid-ring RTSP
-# reconnect on a flaky camera) — not a failure worth discarding the clip
-# over, but worth a loud log line instead of being silently invisible.
+# ffmpeg's concat demuxer can exit rc=0 while having stitched together
+# segments with inconsistent timing (e.g. a mid-ring RTSP reconnect on a
+# flaky camera) — not a failure worth discarding the clip over, but worth a
+# loud log line instead of being silently invisible.
 _CONCAT_DISCONTINUITY_MARKERS = (
     "non-monotonic",
     "non monotonically increasing dts",
     "discontinuity",
 )
-# GitHub #51 bug-hunt follow-up: a hard-killed HA process (SIGKILL/OOM) can
-# leave a `_stage/<clip>` hardlink dir behind between `_stage_segments_for_concat`
+# A hard-killed HA process (SIGKILL/OOM) can leave a `_stage/<clip>`
+# hardlink dir behind between `_stage_segments_for_concat`
 # and its own `finally` cleanup. Swept on ring spawn (below), age-gated well
 # past any realistic assembly duration (postroll capture ≤60s + concat well
 # under its own timeout) so an in-flight concurrent assembly's own
@@ -399,8 +399,8 @@ async def _watch_preroll_recorder(
     segments so the buffer never grows past max_segs × 10 s. Exits cleanly
     when the process exits or is cancelled.
 
-    GitHub #51 bug-hunt finding: the prune executor job now runs under the
-    same per-camera ``get_nvr_recorder_lock`` that ``create_motion_clip``
+    The prune executor job runs under the same per-camera
+    ``get_nvr_recorder_lock`` that ``create_motion_clip``
     holds while listing+staging segments for a clip. `asyncio.Task.cancel()`
     (used by `stop_preroll_recorder`) cannot abort a prune job already
     dispatched to the executor thread pool — only the lock makes the two
@@ -434,24 +434,20 @@ async def _watch_preroll_health(
 ) -> None:
     """Detect an unexpected pre-roll ring ffmpeg exit and respawn it.
 
-    GitHub #51 bug-hunt finding: unlike the main recorder (`_watch_recorder`),
-    the pre-roll ring previously had NO crash-respawn path at all —
-    `_watch_preroll_recorder`'s periodic prune loop only checks
-    `proc.returncode` once every `_PREROLL_SEGMENT_SECONDS` and silently
-    stops pruning (never popping the dead process handle, never logging,
-    never respawning) once it notices the process is gone. A ring that dies
-    mid-idle — e.g. the non-monotonic-DTS aborts a flaky camera can trigger —
-    stayed dead indefinitely until something UNRELATED happened to respawn
-    it (a motion event, a mode-select toggle, a session renewal). Reported
-    as "stalled ... producing no new segments until the recording switch was
-    toggled" (GitHub #51, realKim-dotcom).
+    Unlike the main recorder (`_watch_recorder`), `_watch_preroll_recorder`'s
+    periodic prune loop only checks `proc.returncode` once every
+    `_PREROLL_SEGMENT_SECONDS` and silently stops pruning (never popping the
+    dead process handle, never logging, never respawning) once it notices
+    the process is gone — so without this watcher a ring that dies mid-idle
+    (e.g. a non-monotonic-DTS abort from a flaky camera) stays dead
+    indefinitely until something UNRELATED happens to respawn it (a motion
+    event, a mode-select toggle, a session renewal).
 
     Mirrors `_watch_recorder`'s crash-window/backoff discipline (same
     `_RESPAWN_DELAY_SECONDS`/`_RESPAWN_WINDOW_SECONDS`) but tracks its own
-    crash timestamps in the dedicated `_nvr_preroll_last_crash` field
-    (already provisioned in `coordinator.py`/`session_state.py` for exactly
-    this, previously unused) so the ring's crash-loop tracking can never
-    clobber the main recorder's `nvr_recent_crash`.
+    crash timestamps in the dedicated `_nvr_preroll_last_crash` field so the
+    ring's crash-loop tracking can never clobber the main recorder's
+    `nvr_recent_crash`.
 
     Uses the same "am I still the tracked process?" identity check as
     `_watch_recorder` to distinguish an intentional stop/replacement (no
@@ -500,7 +496,7 @@ async def _watch_preroll_health(
         cam_id, float("-inf")
     )  # coordinator-owned per-cam crash tracker, recorder module is its only writer
     if (now - prev_crash) < _RESPAWN_WINDOW_SECONDS:
-        # Bug-hunt finding: neither a motion event nor an NVR-mode change
+        # Neither a motion event nor an NVR-mode change
         # actually revives a fully-dead ring — `assemble_and_ship_motion_clip`
         # only restarts the ring after a *live* finalize, and the mode-select
         # respawn (`select.py`) only refreshes an *already-running* recorder.
@@ -514,13 +510,11 @@ async def _watch_preroll_health(
             _RESPAWN_WINDOW_SECONDS,
             cam_id[:8],
         )
-        # Unlike _watch_recorder's equivalent give-up paths, this branch
-        # previously only logged — no nvr_error_state, no listener push, so
-        # the mini_nvr_state sensor's `error` attribute and the recording
-        # switch's `last_error` attribute stayed blank with the ring
-        # permanently dead. Mirror the main recorder's give-up discipline
-        # so this is visible in the UI, not log-only (maintenance-round
-        # bug-hunt finding, 2026-07-17).
+        # Mirror the main recorder's give-up discipline (nvr_error_state +
+        # listener push) so this is visible in the UI, not log-only —
+        # otherwise the mini_nvr_state sensor's `error` attribute and the
+        # recording switch's `last_error` attribute stay blank with the
+        # ring permanently dead.
         coordinator.nvr_error_state[cam_id] = "pre-roll ring crashed twice"
         coordinator.async_update_listeners()
         return
@@ -543,12 +537,10 @@ async def _watch_preroll_health(
     try:
         await start_preroll_recorder(coordinator, cam_id)
     except Exception as respawn_err:
-        # Same "external trigger never fires again" shape as the fixed #51
-        # bug — an unexpected exception here would otherwise kill this
+        # An unexpected exception here would otherwise kill this
         # health-watch task silently, permanently disabling the pre-roll
         # ring's own crash recovery (ironic: this function exists
-        # specifically to close that class of gap). Maintenance-round
-        # bug-hunt finding, 2026-07-17.
+        # specifically to close that class of gap).
         _LOGGER.error(
             "NVR pre-roll respawn raised unexpectedly for %s: %s",
             cam_id[:8],
@@ -568,7 +560,7 @@ async def _spawn_preroll_recorder_locked(
     callers (`start_recorder`'s own locked body,
     `restart_preroll_recorder_after_finalize`) can respawn the ring without
     releasing the lock between their own stop/decision and this spawn
-    (would reopen the exact race issue #44 fixed).
+    (releasing it would reopen a double-spawn race).
 
     The lock alone only prevents two callers from racing to spawn AT THE
     SAME instant — it does NOT prevent a double-spawn across two SEPARATE
@@ -582,8 +574,7 @@ async def _spawn_preroll_recorder_locked(
     those gaps and spawning its own ring via `start_recorder`. This
     idempotency guard is the actual belt-and-suspenders fix: regardless of
     which trigger pair races, never spawn a second ring writer while one is
-    still alive for this camera (bug-hunt finding, 2026-07-19 — same class
-    of bug as #44, different trigger pair not covered by that fix).
+    still alive for this camera.
     """
     existing = coordinator.nvr_preroll_processes.get(cam_id)
     if existing is not None and existing.returncode is None:
@@ -595,16 +586,15 @@ async def _spawn_preroll_recorder_locked(
         )
         return
     if coordinator.get_nvr_mode(cam_id) != "event_buffered":
-        # GitHub #54 bug-hunt finding: `_start_recorder_locked` no longer
-        # spawns the ring in continuous mode, but this function has two
-        # OTHER callers that don't go through that gate —
-        # `_watch_preroll_health`'s crash-respawn (after its
-        # `_RESPAWN_DELAY_SECONDS` sleep) and
+        # `_start_recorder_locked` doesn't spawn the ring in continuous
+        # mode, but this function has two OTHER callers that don't go
+        # through that gate — `_watch_preroll_health`'s crash-respawn
+        # (after its `_RESPAWN_DELAY_SECONDS` sleep) and
         # `restart_preroll_recorder_after_finalize` (after a possibly
         # long-running postroll capture) — either of which can fire after
         # the camera's mode already flipped to `continuous` mid-wait,
-        # resurrecting exactly the "second full-bandwidth ffmpeg consumer"
-        # the #54 fix eliminated, just via a race instead of
+        # resurrecting the "second full-bandwidth ffmpeg consumer" the mode
+        # gate exists to prevent, just via a race instead of
         # unconditionally. Re-check the mode here, the single choke point
         # both callers share with the normal path.
         _LOGGER.debug(
@@ -613,9 +603,9 @@ async def _spawn_preroll_recorder_locked(
         )
         return
     if getattr(coordinator, "nvr_shutting_down", False):
-        # Config-entry unload/HA-stop is tearing this coordinator down
-        # (issue #47) — refuse to spawn a new ring writer that
-        # stop_all_preroll()'s sweep, running concurrently, might not see.
+        # Config-entry unload/HA-stop is tearing this coordinator down —
+        # refuse to spawn a new ring writer that stop_all_preroll()'s
+        # sweep, running concurrently, might not see.
         _LOGGER.debug(
             "NVR pre-roll spawn skipped for %s — coordinator shutting down",
             cam_id[:8],
@@ -679,8 +669,8 @@ async def _spawn_preroll_recorder_locked(
     except Exception:  # best-effort prune-on-spawn; non-fatal if cache dir missing  # noqa: S110 # best-effort cache prune, non-fatal if dir missing
         pass
     # Sweep any orphaned clip-assembly stage dirs left by a hard-killed
-    # process (GitHub #51 bug-hunt follow-up) — same cadence as the prune
-    # above, harmless no-op when there's nothing to sweep.
+    # process — same cadence as the prune above, harmless no-op when
+    # there's nothing to sweep.
     try:
         await coordinator.hass.async_add_executor_job(
             _sweep_orphaned_stage_dirs, cam_dir
@@ -699,8 +689,8 @@ async def _spawn_preroll_recorder_locked(
     task.add_done_callback(coordinator.bg_tasks.discard)
     coordinator.nvr_preroll_tasks[cam_id] = task
 
-    # Start crash-detect/respawn watcher (GitHub #51) — one per spawned proc,
-    # not tracked in a dict (nothing needs to look it up/cancel it later: its
+    # Start crash-detect/respawn watcher — one per spawned proc, not
+    # tracked in a dict (nothing needs to look it up/cancel it later: its
     # own "am I still the tracked process?" identity check on wake is what
     # makes an intentional stop a no-op, same discipline as `_watch_recorder`
     # for the main recorder).
@@ -717,16 +707,15 @@ async def start_preroll_recorder(
 ) -> None:
     """Spawn parallel pre-roll ffmpeg for one camera to tmpfs.
 
-    Serialized on the same per-camera lock the main recorder spawn uses
-    (issue #44, realKim-dotcom): this function was previously unserialized,
-    unlike `start_recorder`'s spawn — two concurrent callers (switch
-    turn-on, the stream-up hook, and the NVR mode select can all reach this
-    for the same camera) could each pass the leading stop-then-spawn
-    sequence, and the loser's process handle got overwritten in
-    `nvr_preroll_processes`, leaking an untracked second ffmpeg ring
-    writer that interleaves segments with the first. `start_recorder`
-    releases this lock before calling here, so holding it for this whole
-    function cannot deadlock.
+    Serialized on the same per-camera lock the main recorder spawn uses —
+    unlike `start_recorder`'s spawn, without it two concurrent callers
+    (switch turn-on, the stream-up hook, and the NVR mode select can all
+    reach this for the same camera) could each pass the leading
+    stop-then-spawn sequence, and the loser's process handle would get
+    overwritten in `nvr_preroll_processes`, leaking an untracked second
+    ffmpeg ring writer that interleaves segments with the first.
+    `start_recorder` releases this lock before calling here, so holding it
+    for this whole function cannot deadlock.
     """
     async with coordinator.get_nvr_recorder_lock(cam_id):
         # This is a respawn (fresh creds / restart), not a genuine stop —
@@ -743,15 +732,15 @@ async def stop_preroll_recorder(
 
     Leftover segments from the just-stopped ring buffer are unlinked so they
     don't sit in ``/dev/shm`` until the next ``start_preroll_recorder()``
-    happens to overwrite them (issue #43 follow-up, realKim-dotcom).
+    happens to overwrite them.
 
     ``prune_cache=False`` is used by ``start_preroll_recorder``'s own leading
     self-call (a respawn, e.g. LOCAL session/cred-rotation renewal) so the
     ring buffer keeps its accumulated context across a restart instead of
-    being wiped to empty every renewal — a bug-hunt finding from the same
-    issue #43 follow-up: an unconditional wipe here fired on every renewal
-    (via ``start_recorder``'s own leading ``stop_recorder`` call), not just
-    genuine stops, defeating the pre-roll buffer's purpose.
+    being wiped to empty every renewal — an unconditional wipe here would
+    fire on every renewal (via ``start_recorder``'s own leading
+    ``stop_recorder`` call), not just genuine stops, defeating the
+    pre-roll buffer's purpose.
 
     Returns True iff a running process exited on SIGTERM within the grace
     window (i.e. ffmpeg finalized its own output cleanly, moov atom
@@ -806,11 +795,11 @@ def _known_cam_ids_for_shutdown(coordinator: BoschCameraCoordinator) -> set[str]
     """All camera IDs that could plausibly have (or soon get) an NVR/ring
     ffmpeg process — used by the unload-time sweeps below.
 
-    A plain ``list(coordinator.nvr_processes.keys())`` snapshot (the
-    previous implementation) misses a camera whose ``start_recorder``/
-    ``_spawn_preroll_recorder_locked`` call is still in flight and hasn't
-    registered its process yet at snapshot time — issue #47's orphaned-
-    ffmpeg finding. Including every currently-configured camera (not just
+    A plain ``list(coordinator.nvr_processes.keys())`` snapshot misses a
+    camera whose ``start_recorder``/``_spawn_preroll_recorder_locked`` call
+    is still in flight and hasn't registered its process yet at snapshot
+    time, leaking its ffmpeg past shutdown. Including every
+    currently-configured camera (not just
     ones with an already-tracked process) means the per-cam
     ``get_nvr_recorder_lock`` acquire in ``stop_all``/``stop_all_preroll``
     below will still serialize against — and thus catch — that in-flight
@@ -824,7 +813,7 @@ def _known_cam_ids_for_shutdown(coordinator: BoschCameraCoordinator) -> set[str]
 async def stop_all_preroll(coordinator: BoschCameraCoordinator) -> None:
     """Stop all pre-roll recorders — called on integration unload.
 
-    Serializes each camera on `get_nvr_recorder_lock` (issue #47) so a
+    Serializes each camera on `get_nvr_recorder_lock` so a
     `start_preroll_recorder`/`_spawn_preroll_recorder_locked` call that is
     still in flight when unload begins cannot race this sweep: it either
     hasn't acquired the lock yet (and will observe `nvr_shutting_down` and
@@ -845,8 +834,8 @@ async def stop_and_finalize_preroll_recorder(
     `restart_preroll_recorder_after_finalize`, called by the caller only
     AFTER the clip has been built from this function's returned list.
 
-    GitHub #50 (realKim-dotcom, 2026-07-15): `list_preroll_files()`'s
-    "always drop the newest file" heuristic exists because the ring's
+    `list_preroll_files()`'s "always drop the newest file" heuristic
+    exists because the ring's
     actively-written segment may lack a moov atom yet — correct while the
     ring is running, but wrong once it's genuinely stopped: everything on
     disk at that point is either complete, or (if we had to hard-kill) the
@@ -876,8 +865,8 @@ async def stop_and_finalize_preroll_recorder(
     restarting the ring itself once the clip is done.
 
     Runs under the same per-camera lock `start_preroll_recorder`/
-    `stop_preroll_recorder` use so no other caller can race in between
-    (same discipline as issue #44's fix). If the ring writer isn't running
+    `stop_preroll_recorder` use so no other caller can race in between. If
+    the ring writer isn't running
     (never started, or already crashed) returns `(False, [])` — nothing to
     finalize, caller should fall back to whatever pre-roll segments already
     exist via the normal `list_preroll_files()` path.
@@ -930,7 +919,7 @@ async def restart_preroll_recorder_after_finalize(
 ) -> None:
     """Respawn the pre-roll ring after `stop_and_finalize_preroll_recorder`.
 
-    Deliberately its own step (GitHub #50) — called only after the caller
+    Deliberately its own step — called only after the caller
     has already built the motion clip from the stable, ring-stopped segment
     list, so a freshly-restarted ring's own in-flight segment can never
     shadow that scan.
@@ -947,15 +936,13 @@ def list_preroll_files(coordinator: BoschCameraCoordinator, cam_id: str) -> list
     open at a time — the newest file on disk may still be mid-write with no
     finalized moov atom yet (it reaches the size threshold almost
     immediately after rotation, well before the 10 s segment period ends).
-    Concatenating it produces a corrupt/failing clip (issue #43 follow-up
-    bug report from realKim-dotcom: their own local event→clip patch hit
-    exactly this and had to stop the ring writer first) — always drop the
+    Concatenating it produces a corrupt/failing clip — always drop the
     newest entry here rather than risk shipping a broken assembled clip.
     Costs at most one ~10 s segment of the freshest pre-roll footage.
 
     This "always drop newest" heuristic is only correct while the ring is
-    still actively writing. `stop_and_finalize_preroll_recorder` (GitHub
-    #50) genuinely stops the ring first, so it bypasses this function
+    still actively writing. `stop_and_finalize_preroll_recorder` genuinely
+    stops the ring first, so it bypasses this function
     entirely and reads `_list_preroll_segments` directly — applying this
     drop-newest logic to an already-stopped ring's directory would drop a
     real, complete segment for no reason.
@@ -970,10 +957,9 @@ async def _newest_segment_is_finalized(path: str) -> bool:
     finalized), i.e. ffmpeg has already rotated past it rather than still
     writing it.
 
-    GitHub #54 follow-up idea (realKim-dotcom): the post-roll scan always
-    dropped the newest ring segment on the assumption it might still be
-    mid-write (issue #43's original corruption bug — concatenating a
-    moov-less file produces a broken clip). That's only true while ffmpeg
+    The post-roll scan always drops the newest ring segment on the
+    assumption it might still be mid-write (concatenating a moov-less file
+    produces a broken clip). That's only true while ffmpeg
     hasn't rotated past it yet. A *timing* heuristic (e.g. "mtime is a few
     seconds old") would reintroduce exactly that risk on a slow/buffered
     write, so this proves finalization the same way `-movflags +faststart`
@@ -1049,7 +1035,7 @@ def create_motion_clip_args(preroll_paths: list[str], output_path: str) -> list[
 def _stage_segments_for_concat(paths: list[str], stage_dir: str) -> list[str]:
     """Hardlink each segment into a private ``stage_dir`` before concat.
 
-    GitHub #51 (realKim-dotcom): listing segments and later opening those
+    Listing segments and later opening those
     exact paths in ffmpeg's concat demuxer are two separate moments in time;
     a concurrent ring prune/rotate/respawn could unlink one of them in
     between, aborting the whole clip (rc=254 "Impossible to open"). A
@@ -1098,9 +1084,9 @@ def _sweep_orphaned_stage_dirs(cam_dir: str) -> None:
     """Remove `_stage/<clip>` subdirectories left behind by a process that
     was hard-killed between `_stage_segments_for_concat` staging a clip's
     segments and its own `finally` block running `_cleanup_stage_dir`
-    (GitHub #51 bug-hunt follow-up — that `finally` covers every normal
-    exit path, but not SIGKILL/OOM). tmpfs only clears these on a full OS
-    reboot, not an HA restart, so left unswept they'd accumulate forever
+    (that `finally` covers every normal exit path, but not SIGKILL/OOM).
+    tmpfs only clears these on a full OS reboot, not an HA restart, so left
+    unswept they'd accumulate forever
     across repeated hard kills.
 
     Age-gated at `_STAGE_ORPHAN_MAX_AGE_SECONDS` — well past any realistic
@@ -1141,25 +1127,24 @@ async def create_motion_clip(
 
     ``extra_segments`` (optional) are appended, in order, after the pre-roll
     segments — the post-roll tail derived from the still-running pre-roll
-    ring (GitHub #54 follow-up), so a single clip covers both sides of the
-    event without a second ffmpeg pass or a second RTSP session. Returns
-    True on success.
+    ring, so a single clip covers both sides of the event without a second
+    ffmpeg pass or a second RTSP session. Returns True on success.
 
-    ``preroll_paths_override`` (optional, GitHub #50): when the caller
-    already has an authoritative, ring-genuinely-stopped segment list (from
+    ``preroll_paths_override`` (optional): when the caller already has an
+    authoritative, ring-genuinely-stopped segment list (from
     `stop_and_finalize_preroll_recorder`), use it directly instead of
     re-scanning via `list_preroll_files()` — that scan's "always drop the
     newest file" heuristic is only correct while the ring is still actively
     writing; applying it again to an already-finalized list would drop a
     real, complete segment for no reason.
 
-    GitHub #51: obtaining the segment list (either path above) and staging
-    it into a private hardlink dir both run under ``get_nvr_recorder_lock``
-    — the same lock the periodic prune watcher and any ring stop/respawn
-    use — so nothing can prune/rotate/wipe a segment between "we decided to
-    use this file" and "it's safely hardlinked". ``extra_segments`` is
-    staged under the SAME lock for the same reason (GitHub #54 follow-up):
-    now that the post-roll tail is read straight out of the live ring
+    Obtaining the segment list (either path above) and staging it into a
+    private hardlink dir both run under ``get_nvr_recorder_lock`` — the
+    same lock the periodic prune watcher and any ring stop/respawn use —
+    so nothing can prune/rotate/wipe a segment between "we decided to use
+    this file" and "it's safely hardlinked". ``extra_segments`` is staged
+    under the SAME lock for the same reason: now that the post-roll tail
+    is read straight out of the live ring
     directory instead of a private capture file, it's exposed to the same
     prune-race the pre-roll segments already were. This also covers the
     override path: a finalized list is only stable at the moment it was
@@ -1270,7 +1255,7 @@ async def create_motion_clip(
             )
             return False
 
-        # GitHub #51 follow-up: rc=0 doesn't guarantee clean timing — a
+        # rc=0 doesn't guarantee clean timing — a
         # mid-ring reconnect can still leave a visible glitch at a segment
         # boundary. Not treated as a failure (the clip is normally still
         # watchable), just surfaced instead of being silently invisible.
@@ -1293,7 +1278,7 @@ async def create_motion_clip(
             await coordinator.hass.async_add_executor_job(_cleanup_stage_dir, stage_dir)
 
 
-# ── Phase 5: post-roll capture + event→clip assembly (issue #43) ────────────
+# ── Phase 5: post-roll capture + event→clip assembly ────────────────────────
 
 
 async def assemble_and_ship_motion_clip(
@@ -1315,9 +1300,9 @@ async def assemble_and_ship_motion_clip(
     per-camera ``nvr_event_clip`` switch has been turned off — an opt-out
     for installs that orchestrate their own clip-saving externally (e.g.
     via HA automations) and don't want a second, native clip produced on
-    every event on top of their own (feature request, realKim-dotcom,
-    issue #43 follow-up). The underlying pre-roll ring keeps running for
-    such installs' own consumers; only this native assembly is skipped.
+    every event on top of their own. The underlying pre-roll ring keeps
+    running for such installs' own consumers; only this native assembly is
+    skipped.
     """
     if not coordinator.get_nvr_event_clip_enabled(cam_id):
         _LOGGER.debug(
@@ -1338,8 +1323,8 @@ async def assemble_and_ship_motion_clip(
         opts = coordinator.options
         base_path = (opts.get("nvr_base_path") or DEFAULT_BASE_PATH).strip()
         cam_name = coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
-        # Local (system/container) time, NOT UTC (GitHub #50, realKim-dotcom):
-        # continuous-mode's segment writer uses ffmpeg -strftime, which
+        # Local (system/container) time, NOT UTC — continuous-mode's
+        # segment writer uses ffmpeg -strftime, which
         # always renders in the local system timezone. Naming this clip in
         # UTC put it hours away from the continuous-mode segments in the
         # same dated folder, sorting out of order relative to the actual
@@ -1351,20 +1336,20 @@ async def assemble_and_ship_motion_clip(
         # Microsecond precision (not just HH-MM-SS): two motion events for
         # the same camera within the same wall-clock second would otherwise
         # collide on the output filename and the second ffmpeg -y silently
-        # overwrites the first clip (bug-hunt finding, issue #43 follow-up).
+        # overwrites the first clip.
         fname = now.strftime("%H-%M-%S-%f") + "_motion.mp4"
         staging_cam = _staging_dir(base_path, cam_name)
         dest_dir = os.path.join(staging_cam, date_str)
         output_path = os.path.join(dest_dir, fname)
 
-        # Opt-in recovery of the freshest ring segment (issue #43 follow-up,
-        # realKim-dotcom): normally `list_preroll_files()` drops it because
-        # it may still be mid-write. Finalizing it costs a small gap in ring
-        # coverage on every event (ring is stopped, then restarted after the
-        # clip is built), so it's gated behind its own option rather than on
-        # by default.
+        # Opt-in recovery of the freshest ring segment: normally
+        # `list_preroll_files()` drops it because it may still be
+        # mid-write. Finalizing it costs a small gap in ring coverage on
+        # every event (ring is stopped, then restarted after the clip is
+        # built), so it's gated behind its own option rather than on by
+        # default.
         #
-        # GitHub #50 fix: the ring is stopped HERE and only restarted after
+        # The ring is stopped HERE and only restarted after
         # the clip has been assembled (`finally` below) — see
         # `stop_and_finalize_preroll_recorder`'s docstring for why the old
         # stop-then-immediately-restart-then-scan ordering silently dropped
@@ -1381,17 +1366,16 @@ async def assemble_and_ship_motion_clip(
         postroll_secs = int(opts.get("nvr_postroll_seconds") or 0)
         postroll_attached = False
         ring_restarted = False
-        # Post-roll tail derivation (GitHub #54 follow-up, realKim-dotcom):
-        # instead of a second cold RTSP capture (the pre-#54 approach,
-        # GitHub #52 — a fresh connection at the worst possible moment
-        # inherits every transport pathology the already-flowing ring is
-        # immune to, and costs a session Gen1 hardware can't spare), wait
-        # for the still-running pre-roll ring to record past the event and
-        # then take the newly-written segments as the post-roll tail. If
-        # the ring was stopped above for `nvr_finalize_ring_on_event`, it
-        # must be restarted BEFORE the wait so it's actually recording
-        # through the post-roll window — unlike the pre-#54 code, which
-        # only ever restarted it after the whole clip had been built.
+        # Post-roll tail derivation: instead of a second cold RTSP capture
+        # (a fresh connection at the worst possible moment inherits every
+        # transport pathology the already-flowing ring is immune to, and
+        # costs a session Gen1 hardware can't spare), wait for the
+        # still-running pre-roll ring to record past the event and then
+        # take the newly-written segments as the post-roll tail. If the
+        # ring was stopped above for `nvr_finalize_ring_on_event`, it must
+        # be restarted BEFORE the wait so it's actually recording through
+        # the post-roll window rather than only after the whole clip has
+        # been built.
         event_wall_time = time.time()
         if postroll_secs > 0:
             if ring_stopped_for_finalize:
@@ -1411,7 +1395,7 @@ async def assemble_and_ship_motion_clip(
                 segs = await coordinator.hass.async_add_executor_job(
                     _list_preroll_segments, cam_dir
                 )
-                # GitHub #54 follow-up (realKim-dotcom): only drop the
+                # Only drop the
                 # newest segment if it's not yet provably finalized — see
                 # `_newest_segment_is_finalized`'s docstring. Proven-closed
                 # segments are kept, pushing the tail closer to
@@ -1536,20 +1520,18 @@ async def start_recorder(
     it, since those are legitimate "give this a fresh budget" moments.
 
     Serialized on ``get_nvr_recorder_lock`` for its ENTIRE body, not just the
-    tail-end spawn (GitHub #49 secondary finding, realKim-dotcom, 2026-07-15
-    — pre-existing on both v15.0.2 and v16.0.0, not a v16 regression): the
-    previous structure only locked the final "read fresh URL + spawn"
-    section, while the LEADING ``stop_recorder`` call ran unlocked. Two
-    concurrent callers for the same camera (e.g. a switch toggle racing a
-    coordinator-tick auto-heal) could each pass the unlocked stop step, then
-    each independently — serially, not exclusively against EACH OTHER's
-    decision to spawn — acquire the lock and spawn their own ffmpeg, both
-    writing to the same staging ``%H-%M.mp4`` segment file and mutually
-    truncating it (confirmed via ``/proc/PID/fd`` in the report). This is
-    the exact same shape issue #44 already fixed for the pre-roll ring path
-    (see ``_spawn_preroll_recorder_locked``'s docstring) — applying the
-    identical pattern here: this function acquires the lock once, and its
-    entire stop+wait+spawn sequence runs inside it.
+    tail-end spawn: locking only the final "read fresh URL + spawn"
+    section, while the LEADING ``stop_recorder`` call ran unlocked, would
+    let two concurrent callers for the same camera (e.g. a switch toggle
+    racing a coordinator-tick auto-heal) each pass the unlocked stop step,
+    then each independently — serially, not exclusively against EACH
+    OTHER's decision to spawn — acquire the lock and spawn their own
+    ffmpeg, both writing to the same staging ``%H-%M.mp4`` segment file and
+    mutually truncating it. This is the exact same shape already fixed for
+    the pre-roll ring path (see ``_spawn_preroll_recorder_locked``'s
+    docstring) — applying the identical pattern here: this function
+    acquires the lock once, and its entire stop+wait+spawn sequence runs
+    inside it.
     """
     async with coordinator.get_nvr_recorder_lock(cam_id):
         await _start_recorder_locked(coordinator, cam_id, is_auto_retry=is_auto_retry)
@@ -1569,7 +1551,7 @@ async def _start_recorder_locked(
     """
     # Replace any pre-existing recorder (cred rotation, switch re-toggle).
     # This is a respawn, not a genuine stop — keep the pre-roll ring buffer
-    # instead of wiping it (issue #43 follow-up bug-hunt finding).
+    # instead of wiping it.
     await stop_recorder(coordinator, cam_id, prune_preroll_cache=False)
 
     live = coordinator.live_connections.get(cam_id, {})
@@ -1586,21 +1568,20 @@ async def _start_recorder_locked(
     # UI toggle would record an unwarranted WARNING every tick until the URL
     # lands.
     #
-    # Redesigned as an event wait, not a fixed-duration poll (GitHub #49,
-    # realKim-dotcom, 2026-07-15). The original implementation polled for a
-    # flat 12 s (24 x 500ms), a constant independently guessed here and
-    # never kept in sync with the REAL per-model pacing already computed
-    # and enforced in live_connection.py (``min_total_wait`` — 35 s for
-    # Gen1 Outdoor on a weak WiFi link, vs. this file's stale "~3-10s on
-    # Gen2" assumption) — so the recorder gave up on every single
-    # coordinator tick for slower-encoder cameras and the NVR recorder
-    # never started. Rather than duplicate that timing knowledge as a
-    # second guessed constant, wait on ``stream_ready_event`` — the single
-    # authoritative signal live_connection.py sets at the exact moment it
-    # actually publishes a usable rtspsUrl (see session_state.py). This
-    # structurally removes the class of bug that caused #49 (two
-    # independent timing constants for one real-world event, one of which
-    # silently drifted stale) instead of just widening the old constant.
+    # Redesigned as an event wait, not a fixed-duration poll. A flat 12 s
+    # (24 x 500ms) poll, a constant independently guessed here, would never
+    # stay in sync with the REAL per-model pacing already computed and
+    # enforced in live_connection.py (``min_total_wait`` — 35 s for Gen1
+    # Outdoor on a weak WiFi link, vs. a stale "~3-10s on Gen2" assumption)
+    # — so the recorder would give up on every single coordinator tick for
+    # slower-encoder cameras and the NVR recorder would never start.
+    # Rather than duplicate that timing knowledge as a second guessed
+    # constant, wait on ``stream_ready_event`` — the single authoritative
+    # signal live_connection.py sets at the exact moment it actually
+    # publishes a usable rtspsUrl (see session_state.py). This structurally
+    # removes the class of bug where two independent timing constants
+    # exist for one real-world event and one of them silently drifts
+    # stale, instead of just widening the old constant.
     # The model's own ``min_total_wait`` is still used, but only as an
     # outer safety-net ceiling ("something is genuinely stuck, give up") —
     # not as the primary correctness mechanism.
@@ -1635,7 +1616,7 @@ async def _start_recorder_locked(
 
     # Event-only mode: skip continuous recording, run only the pre-roll ring
     # buffer. Motion events can still create clips from cached segments.
-    # Resolved per-camera (GitHub #43) with fallback to the global option —
+    # Resolved per-camera with fallback to the global option —
     # lets a mixed fleet run continuous-while-armed on cameras where PIR
     # can't fire (e.g. shooting through glass) while others stay event-only.
     if coordinator.get_nvr_mode(cam_id) == "event_buffered":
@@ -1646,10 +1627,10 @@ async def _start_recorder_locked(
             # Push an immediate entity update so `mini_nvr_state`'s
             # preroll_running/preroll_segments attributes reflect reality the
             # instant the ring spawns, instead of waiting for the next
-            # coordinator tick (issue #43 follow-up, realKim-dotcom).
+            # coordinator tick.
             coordinator.async_update_listeners()
         elif cam_id not in coordinator._nvr_preroll_zero_warned:
-            # GitHub #64: mode is per-camera, but the seconds knob is a
+            # Mode is per-camera, but the seconds knob is a
             # single global option — a user can pick "Event Buffered
             # (Preroll)" without ever touching it, leaving it at its 0
             # default. Nothing else in this path logs anything, so the
@@ -1677,7 +1658,7 @@ async def _start_recorder_locked(
 
     # Pre-create the staging camera dir AND today's/tomorrow's date subdir.
     # -strftime_mkdir 1 is unreliable on some ffmpeg versions bundled with HA
-    # (confirmed rc=254 "Failed to open segment" on HA 2026-05-08). We create
+    # (confirmed via rc=254 "Failed to open segment"). We create
     # the next 2 days so a recording that starts just before midnight doesn't
     # fail when ffmpeg rolls over to a new date subdirectory.
     staging_cam = _staging_dir(base_path, cam_name)
@@ -1708,18 +1689,18 @@ async def _start_recorder_locked(
         pattern,
         quality,
     )
-    # Issue #42 follow-up: the makedirs step above awaits an executor job,
+    # The makedirs step above awaits an executor job,
     # long enough for a Bosch heartbeat to rotate LOCAL creds out from under
     # the `rtsp_url` captured earlier -- ffmpeg would then connect with an
     # already-invalid cred pair and 401 on its first DESCRIBE. Re-read the
     # live URL right before spawning (closing the window to a few
     # microseconds) -- still under the SAME get_nvr_recorder_lock this whole
-    # function has held since start_recorder acquired it (GitHub #49 fix),
+    # function has held since start_recorder acquired it,
     # the same lock `refresh_local_creds_from_heartbeat` uses while mutating
     # `live_connections`, so the two can't interleave.
     if getattr(coordinator, "nvr_shutting_down", False):
         # Config-entry unload/HA-stop started while we were creating
-        # staging dirs (issue #47) — refuse to spawn a process that
+        # staging dirs — refuse to spawn a process that
         # stop_all()'s concurrent sweep, serialized on this same lock,
         # might already have passed for this camera.
         _LOGGER.debug(
@@ -1753,7 +1734,7 @@ async def _start_recorder_locked(
     coordinator.nvr_processes[cam_id] = proc
     # A fresh spawn is underway — clear any stale give-up/error state from a
     # prior crash-loop so the sensor doesn't keep showing "error" forever
-    # after a successful restart (issue #42).
+    # after a successful restart.
     coordinator.nvr_error_state.pop(cam_id, None)
     # Do NOT reset the auth-retry counter when THIS spawn is itself an
     # auto-retry from the auth-failure branch below — a successful
@@ -1766,9 +1747,9 @@ async def _start_recorder_locked(
         coordinator.nvr_auth_retry_count.pop(cam_id, None)
     # Push an immediate entity update so `mini_nvr_state` (and anything else
     # reading these dicts) reflects "recording" the instant ffmpeg actually
-    # spawns, instead of waiting for the next ~60s coordinator tick (issue
-    # #42 follow-up — realKim-dotcom, 2026-07-10: sensor read "idle" up to
-    # 20s after the process was already up).
+    # spawns, instead of waiting for the next ~60s coordinator tick (which
+    # could otherwise leave the sensor reading "idle" up to 20s after the
+    # process was already up).
     coordinator.async_update_listeners()
     # Watcher coroutine restarts ffmpeg once on transient crash and gives up
     # if it crashes again within _RESPAWN_WINDOW_SECONDS.
@@ -1780,18 +1761,17 @@ async def _start_recorder_locked(
     task.add_done_callback(coordinator.bg_tasks.discard)
 
     # Do NOT also run the pre-roll ring while the continuous recorder is
-    # active for this camera (GitHub #54, realKim-dotcom): the ring's
-    # output is only ever consumed by motion-clip assembly, which is gated
-    # to `event_buffered` mode (see the early-return above) — the
-    # continuous recorder already captures everything, so a concurrently
-    # running ring is a second full-bandwidth ffmpeg consumer whose output
-    # nothing reads. On a bandwidth-constrained link the reporter measured
-    # this second session actively degrading the continuous recorder's own
-    # footage. `stop_recorder`'s leading call above already stopped any
-    # ring left over from a prior `event_buffered` stint; mode flipping
-    # back to `event_buffered` re-triggers `start_recorder` (switch.py /
+    # active for this camera: the ring's output is only ever consumed by
+    # motion-clip assembly, which is gated to `event_buffered` mode (see
+    # the early-return above) — the continuous recorder already captures
+    # everything, so a concurrently running ring is a second
+    # full-bandwidth ffmpeg consumer whose output nothing reads, actively
+    # degrading footage on a bandwidth-constrained link.
+    # `stop_recorder`'s leading call above already stopped any ring left
+    # over from a prior `event_buffered` stint; mode flipping back to
+    # `event_buffered` re-triggers `start_recorder` (switch.py /
     # select.py) which respawns it fresh — an accepted pre-roll-refill
-    # gap the reporter explicitly asked to trade for this.
+    # gap traded for avoiding the bandwidth contention.
 
 
 async def stop_recorder(
@@ -1805,7 +1785,7 @@ async def stop_recorder(
     ``prune_preroll_cache=False`` passes through to ``stop_preroll_recorder``
     — used by ``start_recorder``'s own leading self-call (a respawn, not a
     genuine stop) so a LOCAL session/cred-rotation renewal doesn't wipe the
-    pre-roll ring buffer every time (issue #43 follow-up bug-hunt finding).
+    pre-roll ring buffer every time.
     """
     await stop_preroll_recorder(coordinator, cam_id, prune_cache=prune_preroll_cache)
     proc = coordinator.nvr_processes.pop(cam_id, None)
@@ -1813,10 +1793,9 @@ async def stop_recorder(
         return
     # Push immediately — `nvr_processes` (the sensor's source of truth) is
     # already popped above, so "recording" flips to "idle" right now
-    # regardless of how long the graceful-stop/SIGKILL sequence below takes.
-    # Issue #42 follow-up: previously the sensor kept reading "recording"
-    # for up to 1-2 minutes after a stop, waiting for the next coordinator
-    # tick to notice the (already correct) state.
+    # regardless of how long the graceful-stop/SIGKILL sequence below takes,
+    # instead of leaving the sensor reading "recording" for up to 1-2
+    # minutes while it waits for the next coordinator tick.
     coordinator.async_update_listeners()
     if proc.returncode is not None:
         _LOGGER.debug(
@@ -1858,7 +1837,7 @@ async def stop_recorder(
 async def stop_all(coordinator: BoschCameraCoordinator) -> None:
     """Stop every recorder — called on integration unload / HA stop.
 
-    See `stop_all_preroll`'s docstring (issue #47): sweeps every known
+    See `stop_all_preroll`'s docstring: sweeps every known
     camera (not just ones with an already-tracked process) under
     `get_nvr_recorder_lock`, so an in-flight `start_recorder` call cannot
     leave an untracked, never-killed ffmpeg process behind.
@@ -1892,8 +1871,8 @@ async def _watch_recorder(
     coordinator.nvr_processes.pop(cam_id, None)
     # Push immediately — an unexpected ffmpeg exit is a real "recording"→
     # "idle" transition the instant it's detected, not something that should
-    # wait for the next coordinator tick (issue #42 follow-up, same reasoning
-    # as stop_recorder above).
+    # wait for the next coordinator tick (same reasoning as stop_recorder
+    # above).
     coordinator.async_update_listeners()
 
     # Drain stderr for the first crash to surface ffmpeg's reason.
@@ -1968,7 +1947,7 @@ async def _watch_recorder(
             pass
         return
 
-    # Issue #42: a 401/Unauthorized ffmpeg exit means it raced a Bosch
+    # A 401/Unauthorized ffmpeg exit means it raced a Bosch
     # credential rotation — a known-transient condition (the next heartbeat
     # tick, or this very respawn once it lands after the rotation settles,
     # will pick up fresh creds), not a persistent fault. Counting it toward
@@ -2009,13 +1988,10 @@ async def _watch_recorder(
         try:
             await start_recorder(coordinator, cam_id, is_auto_retry=True)
         except Exception as respawn_err:
-            # Same "external trigger never fires again" shape as the fixed
-            # #51 bug (live_connection.py's LOCAL warm-up exception handler)
-            # — an unexpected exception here would otherwise kill this
+            # An unexpected exception here would otherwise kill this
             # background watcher task silently, with no nvr_error_state and
             # no listener push, leaving recording permanently stopped with
-            # zero user-visible signal (maintenance-round bug-hunt finding,
-            # 2026-07-17).
+            # zero user-visible signal.
             _LOGGER.error(
                 "NVR respawn (auth-retry path) raised unexpectedly for %s: %s",
                 cam_id[:8],
@@ -2496,11 +2472,10 @@ def _sync_nvr_cleanup_local(coordinator: BoschCameraCoordinator) -> None:
     # Second pass: prune empty date folders (but never the camera dir,
     # base_path itself, or anything under the _staging tree).
     #
-    # Bug-hunt 2026-07-20: this walk used to cover the ENTIRE base_path,
-    # which includes _staging/{cam}/{date}/ — start_recorder deliberately
-    # pre-creates TODAY's and TOMORROW's staging date-dir on start because
-    # ffmpeg's `-strftime_mkdir 1` is unreliable on some bundled builds
-    # (confirmed rc=254 "Failed to open segment" on HA 2026-05-08, see
+    # This walk must exclude _staging/{cam}/{date}/ — start_recorder
+    # deliberately pre-creates TODAY's and TOMORROW's staging date-dir on
+    # start because ffmpeg's `-strftime_mkdir 1` is unreliable on some
+    # bundled builds (confirmed via rc=254 "Failed to open segment", see
     # start_recorder's own comment). Tomorrow's dir is empty by
     # construction and stays empty until midnight rollover — this daily
     # cleanup runs on essentially the same cadence as that pre-creation,
