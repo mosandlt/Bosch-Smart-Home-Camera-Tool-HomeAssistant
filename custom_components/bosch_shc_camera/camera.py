@@ -80,6 +80,13 @@ IMAGE_REFRESH_INTERVAL = (
     1800  # fallback: seconds between background proactive refreshes
 )
 CLOUD_SNAP_CACHE_TTL = 30  # minimum seconds between cloud fetches (de-bounce)
+# Retry interval for re-verifying an unknown privacy state (e.g. a
+# cloud-degraded restart with an empty shc_state_cache) — deliberately
+# shorter than CLOUD_SNAP_CACHE_TTL so a stale-but-unverified frame isn't
+# served indefinitely, but still throttled so an outage doesn't re-run the
+# full snapshot fallback chain on every single camera-proxy request
+# (backported from the Core PR's Copilot review rounds 17/20, 2026-08-04).
+PRIVACY_UNKNOWN_RETRY_SEC = 5
 DEFAULT_SNAPSHOT_INTERVAL = (
     1800  # default proactive background refresh interval (30 min)
 )
@@ -1147,7 +1154,28 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 self._display_name,
                 err,
             )
-            jpeg = self.cached_image or self._PLACEHOLDER_JPEG
+            # Same fail-closed reasoning as every other blind-cache-serve
+            # point in _async_camera_image_impl: an unhandled exception here
+            # (e.g. _async_rcp_thumbnail has no try/except of its own) must
+            # not bypass the privacy gate by serving cached_image
+            # unconditionally. Checked as `is not False` rather than just
+            # `is None` — privacy could have flipped ON *during* this same
+            # call (e.g. a fetch call outside any try/except raising after
+            # a concurrent coordinator poll resolved privacy_mode=True),
+            # and only a confirmed-False read is safe to serve stale data
+            # for (bug-hunt, backported from the Core PR's Copilot review
+            # round 20, 2026-08-04).
+            privacy_confirmed_safe = (
+                self.coordinator.shc_state_cache.get(self._cam_id, {}).get(
+                    "privacy_mode"
+                )
+                is False
+            )
+            jpeg = (
+                self.cached_image or self._PLACEHOLDER_JPEG
+                if privacy_confirmed_safe
+                else self._PLACEHOLDER_JPEG
+            )
         # Apply 180° rotation if the user enabled it via the Bild 180° drehen
         # switch (ceiling-mounted indoor cameras). Skip the placeholder JPEG.
         # [S5] Use None default instead of {} to avoid allocating a throwaway dict
@@ -1297,6 +1325,18 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # instead (bug-hunt 2026-07-27, backported from Core PR review).
         if self.coordinator.shc_state_cache.get(self._cam_id, {}).get("privacy_mode"):
             return None
+        # An unknown privacy state (e.g. a cloud-degraded restart, where
+        # shc_state_cache starts empty, or a camera whose cloud payload
+        # never carries privacyMode) must not silently trust a possibly-stale
+        # cached frame at any of this cascade's several blind
+        # cache/placeholder-fallback return points — only a confirmed-False
+        # state is safe to serve stale data for. Computed once here and
+        # threaded through the rest of the function (backported from the
+        # Core PR's Copilot review rounds 17/20, 2026-08-04).
+        privacy_unknown = (
+            self.coordinator.shc_state_cache.get(self._cam_id, {}).get("privacy_mode")
+            is None
+        )
 
         # Verifying Bosch-cloud session: REMOTE proxy snap.jpg fetches below are
         # TLS-validated against the pinned Bosch CA. The LOCAL Digest paths pass
@@ -1387,7 +1427,15 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         "%s: skipping LOCAL snap, stream pre-warming",
                         self._display_name,
                     )
-                    return self.cached_image or self._PLACEHOLDER_JPEG
+                    # Fail closed while privacy is unverified — this is a
+                    # blind cache serve with no fetch attempt at all
+                    # (backported from the Core PR's Copilot review
+                    # round 20, 2026-08-04).
+                    return (
+                        None
+                        if privacy_unknown
+                        else self.cached_image or self._PLACEHOLDER_JPEG
+                    )
                 if local_user and local_pass:
                     data: bytes | None = None
                     try:
@@ -1446,7 +1494,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     # the Digest auth we just tried — aiohttp without auth would
                     # 401 in another ~10 s burning HA's outer budget. Go straight
                     # to cached image / placeholder via the final return.
-                    return self.cached_image or self._PLACEHOLDER_JPEG
+                    # Fail closed while privacy is unverified (backported
+                    # from the Core PR's Copilot review round 20, 2026-08-04).
+                    return (
+                        None
+                        if privacy_unknown
+                        else self.cached_image or self._PLACEHOLDER_JPEG
+                    )
             renew_after_status: int | None = None
             try:
                 async with asyncio.timeout(10):
@@ -1561,7 +1615,19 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # Skip when streaming — opening a new PUT /connection kills the active RTSP session.
         if not self.is_streaming:
             now = time.monotonic()
-            cache_stale = (now - self.last_image_fetch) >= CLOUD_SNAP_CACHE_TTL
+            cache_age = now - self.last_image_fetch
+            # An unknown privacy state must force a live-fetch attempt even
+            # when the cache timestamp looks fresh — otherwise the `else:
+            # return self.cached_image` fast path below could serve a
+            # pre-privacy frame with zero verification. Throttled to
+            # PRIVACY_UNKNOWN_RETRY_SEC (not forced on every call): every
+            # fetch attempt below re-stamps last_image_fetch regardless of
+            # outcome, so an unresolved-unknown state would otherwise defeat
+            # CLOUD_SNAP_CACHE_TTL's backoff entirely (backported from the
+            # Core PR's Copilot review rounds 17/20, 2026-08-04).
+            cache_stale = cache_age >= CLOUD_SNAP_CACHE_TTL or (
+                privacy_unknown and cache_age >= PRIVACY_UNKNOWN_RETRY_SEC
+            )
             if (
                 not self.cached_image or self.cached_image is self._PLACEHOLDER_JPEG
             ) and cache_stale:
@@ -1679,7 +1745,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         REFRESH_ON_STALE_CACHE_BUDGET_SEC,
                         int(cache_age),
                     )
-                    return self.cached_image
+                    # privacy_unknown forced this fetch attempt specifically
+                    # to verify the cached frame is safe to serve; a failed
+                    # attempt must not fall back to it anyway (backported
+                    # from the Core PR's Copilot review round 20,
+                    # 2026-08-04).
+                    return None if privacy_unknown else self.cached_image
                 if fresh2:
                     # Only a full-resolution fetch may update the shared cache.
                     if req_jpeg_size is None:
@@ -1697,9 +1768,20 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     self._display_name,
                     int(cache_age),
                 )
-                return self.cached_image
+                # Same fail-closed reasoning as the TimeoutError branch above.
+                return None if privacy_unknown else self.cached_image
             else:
-                return self.cached_image
+                # A failed verification attempt above stamps
+                # last_image_fetch even on fail-closed paths (so the
+                # throttle still engages and doesn't hammer the network) —
+                # which means the very next request within
+                # PRIVACY_UNKNOWN_RETRY_SEC would otherwise land here with
+                # cache_stale now False and unconditionally serve the frame
+                # just withheld. Keep failing closed for the whole throttle
+                # window instead of only the single request that actually
+                # attempted verification (backported from the Core PR's
+                # Copilot review round 20, 2026-08-04).
+                return None if privacy_unknown else self.cached_image
 
         # ── 2b. LOCAL snap.jpg with cached Digest creds (cloud-outage fallback) ──
         # When the Bosch cloud or auth server is unreachable, PUT /connection
@@ -1767,8 +1849,20 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # The placeholder is a real (truthy) 1x1 black JPEG, so `if
         # self.cached_image:` alone would intercept it here too, before tier 4
         # (the actual last resort) ever runs on a genuine cold start — use the
-        # identity check too, mirroring the tier-2 guard above.
-        if self.cached_image and self.cached_image is not self._PLACEHOLDER_JPEG:
+        # identity check too, mirroring the tier-2 guard above. `not
+        # privacy_unknown`: this tier can be reached via a tier-1a/2a
+        # ("first load") fall-through whose own precondition was an
+        # empty/placeholder cache at entry — but `cached_image` can be
+        # concurrently set by `async_added_to_hass`'s disk restore or
+        # `async_trigger_image_refresh` while an earlier tier's fetch
+        # awaits, so the same fail-closed guarantee as tier 2 above applies
+        # here too (backported from the Core PR's Copilot review round 20,
+        # 2026-08-04).
+        if (
+            self.cached_image
+            and self.cached_image is not self._PLACEHOLDER_JPEG
+            and not privacy_unknown
+        ):
             return self.cached_image
 
         # ── 4. Latest event snapshot (last resort — first startup before cloud fetch runs) ──
@@ -1805,13 +1899,25 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                                 len(self.cached_image),
                                 _fmt_event_ts(ev.get("timestamp")),
                             )
-                            return self.cached_image
+                            # Unlike the other tiers, this fetches a STORED
+                            # HISTORICAL motion-event JPEG from Bosch cloud
+                            # storage — independent of the camera's current
+                            # privacy state, so it does not naturally
+                            # short-circuit to empty/error the way a live
+                            # camera fetch does while privacy is engaged. The
+                            # event itself could predate privacy being
+                            # enabled just as easily as a stale
+                            # `cached_image` can, so the same fail-closed
+                            # guarantee applies (bug-hunt, backported from
+                            # the Core PR's round 20, 2026-08-04).
+                            return None if privacy_unknown else self.cached_image
                         if resp.status == 401:
                             _LOGGER.warning(
                                 "%s: token expired — update via integration options",
                                 self._display_name,
                             )
-                            return self.cached_image
+                            # Same fail-closed reasoning as tier 3 above.
+                            return None if privacy_unknown else self.cached_image
                         # e.g. 403/404/410 = expired URL — try next event
                         _LOGGER.debug(
                             "%s: event snapshot HTTP %d @ %s — trying next",
@@ -1822,5 +1928,12 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             except (TimeoutError, aiohttp.ClientError) as err:
                 _LOGGER.debug("%s: event snapshot error: %s", self._display_name, err)
 
-        # Return last cached image if all methods failed
+        # Return last cached image if all methods failed. Same fail-closed
+        # reasoning as tier 3 above — withhold it if privacy is still
+        # unknown. `None` (not the placeholder directly) for consistency
+        # with every other fail-closed exit point in this method — the
+        # public wrapper converts either way, but a direct impl caller sees
+        # a consistent contract.
+        if privacy_unknown:
+            return None
         return self.cached_image or self._PLACEHOLDER_JPEG

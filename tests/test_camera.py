@@ -603,7 +603,7 @@ def _make_coord(**overrides):
         camera_entities={},
         stream_fell_back={},
         stream_error_count={},
-        shc_state_cache={},
+        shc_state_cache={CAM_ID: {"privacy_mode": False}},
         stream_warming=set(),
         last_update_success=True,
         motion_settings=lambda cid: {},
@@ -1710,7 +1710,7 @@ def _make_coord_gaps(**overrides):
         local_creds_cache={},
         live_opened_at={},
         image_rotation_180={},
-        shc_state_cache={},
+        shc_state_cache={CAM_ID_GAPS: {"privacy_mode": False}},
         timestamp_cache={},
         auth_outage_count=0,
         last_update_success=True,
@@ -2285,7 +2285,7 @@ def _make_coord_impl(**overrides):
         camera_entities={},
         stream_fell_back={},
         stream_error_count={},
-        shc_state_cache={},
+        shc_state_cache={CAM_ID: {"privacy_mode": False}},
         stream_warming=set(),
         image_rotation_180={},
         local_creds_cache={},
@@ -2369,6 +2369,28 @@ class TestAsyncCameraImageWrapper:
         cam._async_camera_image_impl = AsyncMock(side_effect=RuntimeError("oops"))
         out = await BoschCamera.async_camera_image(cam)
         assert out == b"\xff\xd8cached"
+
+    @pytest.mark.asyncio
+    async def test_returns_placeholder_not_cached_when_impl_raises_and_privacy_unknown(
+        self,
+    ):
+        """A blind cached-image serve on exception must also fail closed.
+
+        Regression test for a 3-agent bug-hunt finding (round 20 backport,
+        2026-08-04): `_async_rcp_thumbnail()` has no try/except of its own,
+        so an aiohttp.ClientError/OSError from it propagates out of
+        `_async_camera_image_impl` uncaught — the wrapper's `except
+        Exception` branch must not then serve `cached_image` unconditionally
+        while privacy state is unknown (e.g. a cloud-degraded restart), or
+        it defeats every other fail-closed guard in the cascade.
+        """
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        cam = _make_camera_impl(cached_image=b"\xff\xd8cached-pre-privacy-frame")
+        cam.coordinator.shc_state_cache = {}  # no entry for this cam — unknown
+        cam._async_camera_image_impl = AsyncMock(side_effect=RuntimeError("oops"))
+        out = await BoschCamera.async_camera_image(cam)
+        assert out == BoschCamera._PLACEHOLDER_JPEG
 
     @pytest.mark.asyncio
     async def test_returns_placeholder_when_impl_raises_and_no_cache(self):
@@ -3155,7 +3177,7 @@ def _make_coord_valerr(**overrides):
         camera_entities={},
         stream_fell_back={},
         stream_error_count={},
-        shc_state_cache={},
+        shc_state_cache={CAM_ID: {"privacy_mode": False}},
         stream_warming=set(),
         image_rotation_180={},
         local_creds_cache={},
@@ -3348,7 +3370,7 @@ def _make_coord_mjpeg(
         camera_entities={},
         stream_fell_back={},
         stream_error_count={},
-        shc_state_cache={},
+        shc_state_cache={CAM_ID: {"privacy_mode": False}},
         stream_warming=set(),
         image_rotation_180={},
         local_creds_cache=(
@@ -4137,7 +4159,7 @@ def _make_coord_r6(**overrides):
         camera_entities={},
         stream_fell_back={},
         stream_error_count={},
-        shc_state_cache={},
+        shc_state_cache={CAM_ID: {"privacy_mode": False}},
         stream_warming=set(),
         image_rotation_180={},
         local_creds_cache={},
@@ -5063,6 +5085,84 @@ class TestEventSnapshotLastResort:
         assert cam.cached_image == b"\xff\xd8event-img", "must cache event image"
 
     @pytest.mark.asyncio
+    async def test_unknown_privacy_state_withholds_event_snapshot(self):
+        """Even the event-snapshot last resort must fail closed.
+
+        Regression test for a 3-agent bug-hunt finding (round 20 backport,
+        2026-08-04): unlike every other tier, this one fetches a STORED
+        HISTORICAL motion-event JPEG from Bosch cloud storage — independent
+        of the camera's current live privacy state, so it doesn't naturally
+        short-circuit to empty/error while privacy is engaged the way a
+        live camera fetch does. The event itself could predate privacy
+        being enabled just as easily as a stale cached_image can.
+        """
+        img_url = "https://residential.cbs.boschsecurity.com/v11/events/abc/image.jpg"
+        coord = _make_coord_r6(
+            data={
+                CAM_ID: {
+                    "info": {"title": "Terrasse", "hardwareVersion": "X"},
+                    "events": [
+                        {
+                            "imageUrl": img_url,
+                            "timestamp": "2026-05-07T10:00:00.000Z",
+                        }
+                    ],
+                }
+            },
+            shc_state_cache={},  # unknown — no entry for this cam
+        )
+        coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
+        cam = _make_camera_r6(coord=coord)  # cached_image=None
+
+        img_resp = _resp_cm(200, body=b"\xff\xd8event-img", content_type="image/jpeg")
+        session = MagicMock()
+        session.get.return_value = img_resp
+
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            from custom_components.bosch_shc_camera.camera import BoschCamera
+
+            out = await BoschCamera._async_camera_image_impl(cam)
+
+        assert out is None, "must withhold the event snapshot while privacy is unknown"
+
+    @pytest.mark.asyncio
+    async def test_unknown_privacy_state_withholds_final_fallback_with_no_events(self):
+        """The absolute final catch-all (no events at all) must also fail closed.
+
+        Same reasoning as test_unknown_privacy_state_withholds_event_snapshot
+        above, but exercising the truly last line of the cascade — no events
+        in the camera's data at all, so tier 4's loop never even runs.
+        """
+        coord = _make_coord_r6(
+            data={
+                CAM_ID: {
+                    "info": {"title": "Terrasse", "hardwareVersion": "X"},
+                    "events": [],
+                }
+            },
+            shc_state_cache={},  # unknown — no entry for this cam
+        )
+        coord.async_fetch_live_snapshot = AsyncMock(return_value=None)
+        cam = _make_camera_r6(coord=coord)  # cached_image=None
+
+        session = MagicMock()
+
+        with patch(
+            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            from custom_components.bosch_shc_camera.camera import BoschCamera
+
+            out = await BoschCamera._async_camera_image_impl(cam)
+
+        assert out is None, (
+            "must withhold when all methods failed and privacy is unknown"
+        )
+
+    @pytest.mark.asyncio
     async def test_placeholder_cached_image_does_not_block_last_resort(self):
         """Regression: section 3's `if self.cached_image:` must exclude the
         placeholder sentinel (identity check, mirroring section 2's guard a
@@ -5210,7 +5310,7 @@ def _make_coord_r7(**overrides):
         camera_entities={},
         stream_fell_back={},
         stream_error_count={},
-        shc_state_cache={},
+        shc_state_cache={CAM_ID: {"privacy_mode": False}},
         stream_warming=set(),
         image_rotation_180={},
         local_creds_cache={},
@@ -6356,7 +6456,11 @@ def _make_camera_stale(cached: bytes | None):
     coord = SimpleNamespace(
         data={CAM_ID_STALE: {"info": {"title": "Terrasse"}}},
         live_connections={},
-        shc_state_cache={},  # privacy OFF
+        shc_state_cache={},  # no entry — these tests only exercise
+        # async_trigger_image_refresh, which checks `is True` and fails
+        # open on an empty/unknown state; not the privacy_unknown-gated
+        # _async_camera_image_impl cascade (harmless here, but don't reuse
+        # this factory for that path without adding privacy_mode: False).
         image_entities={},
         async_fetch_live_snapshot=AsyncMock(return_value=None),  # live FAILS
         async_fetch_live_snapshot_local=AsyncMock(return_value=None),
@@ -6456,7 +6560,7 @@ def stub_coord_webrtc() -> SimpleNamespace:
         camera_entities={},
         stream_fell_back={},
         stream_error_count={},
-        shc_state_cache={},
+        shc_state_cache={CAM_ID_WEBRTC: {"privacy_mode": False}},
         last_update_success=True,
         motion_settings=lambda cam_id: {},
         is_stream_warming=lambda cam_id: False,
@@ -6683,7 +6787,7 @@ def _make_coord_prewarm(**overrides):
     base = dict(
         live_connections={},
         stream_warming=set(),
-        shc_state_cache={},
+        shc_state_cache={CAM_ID_PREWARM: {"privacy_mode": False}},
         try_live_connection=AsyncMock(return_value={"rtspsUrl": "rtsp://x"}),
         async_update_listeners=MagicMock(),
         get_model_config=lambda cid: SimpleNamespace(min_total_wait=2),
@@ -7053,7 +7157,7 @@ def _make_real_camera_prewarm() -> BoschCamera:
         stream_fell_back={},
         stream_error_count={},
         stream_warming=set(),
-        shc_state_cache={},
+        shc_state_cache={CAM_ID_PREWARM: {"privacy_mode": False}},
         last_update_success=True,
         motion_settings=lambda cam_id: {},
         is_stream_warming=lambda cam_id: False,
@@ -7104,7 +7208,7 @@ def _make_camera_for_snap(**overrides):
         camera_entities={},
         stream_fell_back={},
         stream_error_count={},
-        shc_state_cache={},
+        shc_state_cache={CAM_ID: {"privacy_mode": False}},
         stream_warming=set(),
         image_rotation_180={},
         local_creds_cache={},
