@@ -3171,6 +3171,14 @@ class TestFcmSafeBoschUrl:
 
         assert _is_safe_bosch_url(url) is expected
 
+    def test_malformed_ipv6_bracket_fails_closed(self) -> None:
+        """urlparse() can raise ValueError on malformed input — fail closed
+        (backported from the Core PR's Copilot review round 18, 2026-08-04).
+        """
+        from custom_components.bosch_shc_camera.fcm import _is_safe_bosch_url
+
+        assert _is_safe_bosch_url("https://[::1") is False
+
 
 def _make_record(msg: str, *, with_exc: bool = False) -> logging.LogRecord:
     record = logging.LogRecord(

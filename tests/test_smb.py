@@ -273,6 +273,14 @@ class TestSmbSafeBoschUrl:
 
         assert _is_safe_bosch_url(url) is False
 
+    def test_malformed_ipv6_bracket_fails_closed(self) -> None:
+        """urlparse() can raise ValueError on malformed input — fail closed
+        (backported from the Core PR's Copilot review round 18, 2026-08-04).
+        """
+        from custom_components.bosch_shc_camera.smb import _is_safe_bosch_url
+
+        assert _is_safe_bosch_url("https://[::1") is False
+
 
 class TestBoschSslCtxVerifies:
     """Regression (2026-06-16, CWE-295 / GHSA-6qh5-x5m5-vj6v): smb cloud-media

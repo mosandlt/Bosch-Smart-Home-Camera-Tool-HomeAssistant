@@ -42,8 +42,17 @@ _SNAP_EVENT_TYPES = frozenset(
 
 
 def _is_safe_bosch_url(url: str) -> bool:
-    """Validate that a URL points to a known Bosch domain (HTTPS only)."""
-    parsed = urlparse(url)
+    """Validate that a URL points to a known Bosch domain (HTTPS only).
+
+    ``urlparse`` can raise ``ValueError`` on malformed input (unmatched IPv6
+    brackets, invalid NFKC-normalized netloc) — fail closed rather than let
+    it propagate to callers that don't expect it (backported from the Core
+    PR's Copilot review round 18, 2026-08-04).
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
     return (
         parsed.scheme == "https"
         and parsed.hostname is not None

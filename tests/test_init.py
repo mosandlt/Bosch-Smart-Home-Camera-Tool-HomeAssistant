@@ -10253,6 +10253,70 @@ class TestSSRFGuard:
         # `xbosch.com` — endswith `.bosch.com` is False
         assert _is_safe_bosch_url("https://xbosch.com/x") is False
 
+    def test_malformed_ipv6_bracket_fails_closed(self) -> None:
+        """urlparse() can raise ValueError on malformed input — fail closed
+        rather than let it propagate to callers that don't expect it
+        (backported from the Core PR's Copilot review round 18, 2026-08-04).
+        """
+        assert _is_safe_bosch_url("https://[::1") is False
+
+
+class TestIsSafeBoschHost:
+    """`_is_safe_bosch_host` — bare host:port SSRF allowlist for the RCP proxy.
+
+    Backported from the Core PR's Copilot review round 18 (2026-08-04): the
+    old naive `rsplit(":", 1)` implementation was vulnerable to userinfo
+    smuggling in the value's authority syntax.
+    """
+
+    def test_accepts_known_domain(self) -> None:
+        from custom_components.bosch_shc_camera.coordinator import (
+            _is_safe_bosch_host,
+        )
+
+        assert _is_safe_bosch_host("proxy-01.live.cbs.boschsecurity.com:42090") is True
+
+    def test_rejects_arbitrary_host(self) -> None:
+        from custom_components.bosch_shc_camera.coordinator import (
+            _is_safe_bosch_host,
+        )
+
+        assert _is_safe_bosch_host("169.254.169.254:80") is False
+        assert _is_safe_bosch_host("internal-service.local:8080") is False
+
+    def test_rejects_userinfo_smuggled_host(self) -> None:
+        """Reject any "@" outright — a legitimate Bosch value never contains one.
+
+        A naive rsplit(":", 1) on this value yields the allowlisted-looking
+        "proxy.boschsecurity.com", but an HTTP client parses "user:pass@host"
+        authority syntax and actually connects to attacker.example. Even
+        where the real connection target IS the safe host (userinfo before
+        "@"), aiohttp turns that userinfo into a Basic-Auth header sent to
+        Bosch's real proxy — reject unconditionally instead of relying on
+        userinfo-vs-host semantics.
+        """
+        from custom_components.bosch_shc_camera.coordinator import (
+            _is_safe_bosch_host,
+        )
+
+        assert (
+            _is_safe_bosch_host("proxy.boschsecurity.com:443@attacker.example") is False
+        )
+        assert _is_safe_bosch_host("attacker.example@proxy.boschsecurity.com") is False
+
+    def test_rejects_malformed_ipv6_bracket(self) -> None:
+        """urlparse() can raise ValueError on malformed input — fail closed.
+
+        The old rsplit(":", 1) implementation could never raise; a value
+        like "[::1" now must not propagate a ValueError past the callers'
+        narrower except (TimeoutError, aiohttp.ClientError).
+        """
+        from custom_components.bosch_shc_camera.coordinator import (
+            _is_safe_bosch_host,
+        )
+
+        assert _is_safe_bosch_host("[::1") is False
+
 
 class TestParseSafeRcpProxyUrl:
     """`_parse_safe_rcp_proxy_url` splits a Bosch `urls[0]` proxy entry into
