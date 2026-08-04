@@ -10412,6 +10412,20 @@ class TestIsSafeLocalCameraHost:
 
         assert _is_safe_local_camera_host("169.254.169.254:443") is False
 
+    def test_rejects_loopback_and_unspecified(self) -> None:
+        """A poisoned cache/cloud response must not connect HA back to itself.
+
+        Python's `ipaddress.is_private` is also true for loopback and
+        unspecified addresses — both must be excluded explicitly (backported
+        from the Core PR's Copilot review round 19, 2026-08-04).
+        """
+        from custom_components.bosch_shc_camera.coordinator import (
+            _is_safe_local_camera_host,
+        )
+
+        assert _is_safe_local_camera_host("127.0.0.1:443") is False
+        assert _is_safe_local_camera_host("0.0.0.0:443") is False
+
 
 class TestRedactCreds:
     """`_redact_creds` redacts ephemeral Bosch Digest passwords for logs."""
