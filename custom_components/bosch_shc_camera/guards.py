@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
+
+from homeassistant.exceptions import HomeAssistantError
+
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -93,3 +99,26 @@ async def _warn_if_privacy_on(entity: Any, feature_name: str) -> bool:
     except Exception as err:
         _LOGGER.debug("persistent_notification create failed: %s", err)
     return True
+
+
+@contextmanager
+def wrap_service_errors(action: str) -> Iterator[None]:
+    """Translate any non-HomeAssistantError raised inside the block into a
+    HomeAssistantError with a consistent ``unexpected_error`` translation key.
+
+    Deduplicates the identical try/except HomeAssistantError-passthrough /
+    except Exception-wrap pattern that used to be repeated at every HTTP-call
+    site in services.py (style audit, 2026-08-05). A plain sync
+    `@contextmanager` works fine inside `async def` handlers since exception
+    translation itself needs no `await`.
+    """
+    try:
+        yield
+    except HomeAssistantError:
+        raise
+    except Exception as err:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="unexpected_error",
+            translation_placeholders={"action": action, "error": str(err)},
+        ) from err
