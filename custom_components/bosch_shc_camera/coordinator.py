@@ -36,10 +36,12 @@ from . import (
     ai_analysis_runtime,
     announcements,
     device_actions,
+    maintenance_announcements,
     quality_prefs,
     rcp_client,
     rcp_diagnostics,
     repairs,
+    status_compute,
 )
 from . import recorder as nvr_recorder
 from .camera_list import fetch_camera_list
@@ -2046,46 +2048,17 @@ class BoschCameraCoordinator(
     async def _async_refresh_maintenance(self, *, reactive: bool) -> None:
         """Fetch the Bosch community maintenance announcement in the background.
 
-        Reactive calls (triggered by cloud 5xx/timeout) are rate-limited so a
-        flapping cloud does not hammer the community site. Periodic calls run
-        once per _MAINTENANCE_INTERVAL_S regardless of cloud health.
-
-        Failure is silent — the previous cache value is retained so the sensor
-        does not flap on a transient community-site outage.
+        Thin delegator — logic lives in maintenance_announcements.py (style
+        audit, 2026-08-05: the community-feed fetch + cache-update side
+        effect doesn't belong inline on the coordinator). Kept as a real
+        bound method (not removed) so tick_failure.py/tick_housekeeping.py/
+        camera_list.py's `getattr(coordinator, "_async_refresh_maintenance",
+        None)` reach and the test suite's attribute-mocking/unbound-method-
+        call patterns keep working unchanged.
         """
-        # Local import (not top-level): keeps unittest.mock.patch(
-        # "custom_components.bosch_shc_camera.async_get_clientsession", ...)
-        # working the same way it did before BoschCameraCoordinator moved
-        # out of __init__.py — matches the live_connection.py pattern.
-        from . import (
-            async_get_clientsession as async_get_clientsession,
+        await maintenance_announcements.async_refresh_maintenance(
+            self, reactive=reactive
         )
-        from .maintenance import async_fetch_maintenance
-
-        now = time.monotonic()
-        if (
-            reactive
-            and (now - self.maintenance_last_fetch)
-            < self._MAINTENANCE_REACTIVE_COOLDOWN_S
-        ):
-            return
-        self.maintenance_last_fetch = now
-        try:
-            session = async_get_clientsession(self.hass)
-            result = await async_fetch_maintenance(session)
-        except Exception as exc:
-            _LOGGER.debug("Maintenance fetch raised: %s", exc)
-            return
-        if result is not None:
-            self.maintenance_cache = result
-            _LOGGER.debug(
-                "Maintenance: %s state=%s window=%s..%s",
-                result.title[:60],
-                result.state(),
-                result.scheduled_start,
-                result.scheduled_end,
-            )
-            await self._async_maybe_announce_maintenance(result)
 
     async def _async_maybe_announce_maintenance(self, mw: "MaintenanceWindow") -> None:
         """Fire a user notification for a maintenance-window state transition.
@@ -2099,33 +2072,25 @@ class BoschCameraCoordinator(
         await announcements.maybe_announce_maintenance(self, mw)
 
     def _persist_maint_notified_key(self) -> None:
-        """Write `maintenance_notified_key` to disk so HA restarts mid-
-        window do not re-fire the active-state announcement on the next
-        coordinator tick — otherwise every restart wipes the in-memory
-        dedup key and a single maintenance window can produce dozens of
-        duplicate alerts.
+        """Write `maintenance_notified_key` to disk so a restart mid-window
+        doesn't re-fire the active-state announcement.
+
+        Thin delegator — see _async_refresh_maintenance docstring.
+        Kept as a real bound method specifically because announcements.py
+        reaches this via `getattr(coordinator, "_persist_maint_notified_key",
+        lambda: None)()` to stay a safe no-op for stub coordinators that
+        don't define it.
         """
-        key = self.maintenance_notified_key
-        store = getattr(self, "maint_notified_store", None)
-        if store is None or key is None:
-            return
-        self.hass.async_create_task(store.async_save({"link": key[0], "state": key[1]}))
+        maintenance_announcements.persist_maint_notified_key(self)
 
     def _persist_cloud_outage_flag(self) -> None:
         """Mirror the maintenance-key persistence for the cloud-state
         dedup flag, so a restart mid-outage doesn't re-fire "Cloud nicht
-        erreichbar"."""
-        store = getattr(self, "cloud_alert_store", None)
-        if store is None:
-            return
-        # Tracked (not a bare hass.async_create_task) — an untracked save
-        # can still complete after config-entry removal deletes the Store,
-        # recreating integration-owned state on disk after removal and
-        # bypassing the teardown behavior spawn_tracked() documents.
-        self.spawn_tracked(
-            store.async_save({"outage_notified": bool(self.cloud_outage_notified)}),
-            name="bosch_shc_camera_persist_cloud_outage_flag",
-        )
+        erreichbar".
+
+        Thin delegator — see _persist_maint_notified_key docstring.
+        """
+        maintenance_announcements.persist_cloud_outage_flag(self)
 
     async def _async_maybe_announce_camera_status(
         self,
@@ -2147,49 +2112,13 @@ class BoschCameraCoordinator(
     async def _async_handle_session_quota_hit(self, cam_id: str) -> None:
         """Track HTTP 444 hits per camera and fire a persistent notification if repeated.
 
-        After _SESSION_QUOTA_NOTIFY_THRESHOLD (3) hits within _SESSION_QUOTA_WINDOW_S (5 min)
-        a HA persistent_notification is created advising the user to close other clients.
-        Non-fatal — any failure is swallowed so the caller's status update is unaffected.
+        Thin delegator — see _async_refresh_maintenance docstring. Kept as
+        a real bound method specifically because camera_status.py reaches
+        this via `getattr(coordinator, "_async_handle_session_quota_hit",
+        None)` to stay a safe no-op for stub coordinators that don't define
+        it.
         """
-        try:
-            now = time.monotonic()
-            hits = self._session_quota_hits.setdefault(cam_id, [])
-            # Prune hits outside the window
-            hits[:] = [t for t in hits if (now - t) < self._SESSION_QUOTA_WINDOW_S]
-            hits.append(now)
-
-            if len(hits) >= self._SESSION_QUOTA_NOTIFY_THRESHOLD:
-                cam_info = (
-                    self.data.get(cam_id, {}).get("info", {}) if self.data else {}
-                )
-                cam_name = cam_info.get("title") or cam_id[:8]
-                notification_id = f"bosch_session_quota_{cam_id[:8].lower()}"
-                title = f"Bosch Kamera {cam_name}: Sitzungslimit erreicht"
-                message = (
-                    f"Kamera {cam_name} meldet HTTP 444 (Session-Quota). "
-                    "Zu viele gleichzeitige Live-Verbindungen im Bosch-Konto. "
-                    "Bitte schließen Sie die Bosch App auf weiteren Geräten "
-                    "oder deaktivieren Sie parallele Integrationen (ioBroker, Python CLI). "
-                    "Die Integration wiederholt den Verbindungsaufbau automatisch."
-                )
-                await self.hass.services.async_call(
-                    "persistent_notification",
-                    "create",
-                    {
-                        "title": title,
-                        "message": message,
-                        "notification_id": notification_id,
-                    },
-                    blocking=False,
-                )
-                _LOGGER.warning(
-                    "Session-quota persistent notification created for %s (%d hits in %.0fs)",
-                    cam_id[:8],
-                    len(hits),
-                    self._SESSION_QUOTA_WINDOW_S,
-                )
-        except Exception as exc:
-            _LOGGER.debug("Session-quota notification failed (non-fatal): %s", exc)
+        await maintenance_announcements.async_handle_session_quota_hit(self, cam_id)
 
     async def _async_maybe_announce_cloud_state(self, success: bool) -> None:
         """Fire a user notification on cloud-reachability transitions.
@@ -2213,24 +2142,16 @@ class BoschCameraCoordinator(
         """Re-uses the BoschCameraStatusSensor logic so the announce path and
         the sensor never drift apart.
 
-        Mirror of `sensor.BoschCameraStatusSensor.native_value`: cloud ONLINE
-        + latest event TROUBLE_DISCONNECT → offline; otherwise the cloud
-        status verbatim. The `cam_data` argument lets the update-loop pass
-        the fresh data dict before `self.data` has been swapped by the
-        parent class (`_async_update_data` returns after the per-cam
-        transition check fires).
+        Thin delegator — logic lives in status_compute.py (style audit,
+        2026-08-05: this is pure status-string derivation with no
+        `self.hass`/Store/notification side effects, unlike its sibling
+        methods extracted the same round into maintenance_announcements.py
+        — see that module's docstring). Kept as a real bound method (not
+        removed) so tick_housekeeping.py's `getattr(coordinator,
+        "_compute_status_for", None)` reach and the test suite's
+        unbound-method-call pattern keep working unchanged.
         """
-        if cam_data is None:
-            cam_data = self.data.get(cam_id, {}) if self.data else {}
-        raw = str(cam_data.get("status", "UNKNOWN")).lower()
-        if raw == "online":
-            events = cam_data.get("events", [])
-            if (
-                events
-                and str(events[0].get("eventType", "")).upper() == "TROUBLE_DISCONNECT"
-            ):
-                return "offline"
-        return raw
+        return status_compute.compute_status_for(self, cam_id, cam_data)
 
     # ── Per-cam_id dict/set purge ──────────────────────────
     # `cleanup_stale_devices` below only removed the device-registry entry
