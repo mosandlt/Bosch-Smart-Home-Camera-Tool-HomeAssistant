@@ -30,6 +30,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import get_options
+from .guards import wrap_service_errors
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
                 }
-                try:
+                with wrap_service_errors("Create rule"):
                     async with asyncio.timeout(10):
                         async with session.post(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules",
@@ -154,17 +155,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "status": str(resp.status),
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Create rule",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_delete_rule(call: ServiceCall) -> None:
@@ -192,7 +182,7 @@ def _register_services(hass: HomeAssistant) -> None:
             if coord:
                 session = await async_get_bosch_cloud_session(hass)
                 headers = {"Authorization": f"Bearer {coord.token}"}
-                try:
+                with wrap_service_errors("Delete rule"):
                     async with asyncio.timeout(10):
                         async with session.delete(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules/{rule_id}",
@@ -209,17 +199,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "status": str(resp.status),
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Delete rule",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_update_rule(call: ServiceCall) -> None:
@@ -296,7 +275,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     existing["endTime"] = call.data["end_time"]
                 if "weekdays" in call.data:
                     existing["weekdays"] = call.data["weekdays"]
-                try:
+                with wrap_service_errors("Update rule"):
                     async with asyncio.timeout(10):
                         async with session.put(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules/{rule_id}",
@@ -317,17 +296,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "body": body[:200],
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Update rule",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_set_motion_zones(call: ServiceCall) -> None:
@@ -401,7 +369,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
                 }
-                try:
+                with wrap_service_errors("Set motion zones"):
                     async with asyncio.timeout(10):
                         async with session.post(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
@@ -434,17 +402,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "body": body[:200],
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Set motion zones",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_get_motion_zones(call: ServiceCall) -> None:
@@ -471,7 +428,7 @@ def _register_services(hass: HomeAssistant) -> None:
             if coord:
                 session = await async_get_bosch_cloud_session(hass)
                 headers = {"Authorization": f"Bearer {coord.token}"}
-                try:
+                with wrap_service_errors("Get motion zones"):
                     async with asyncio.timeout(10):
                         async with session.get(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
@@ -527,17 +484,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "body": body[:200],
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Get motion zones",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_share_camera(call: ServiceCall) -> None:
@@ -591,7 +537,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
                 }
-                try:
+                with wrap_service_errors("Share camera"):
                     async with asyncio.timeout(10):
                         async with session.put(
                             f"{CLOUD_API}/v11/friends/{friend_id}/share",
@@ -624,17 +570,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "body": body[:200],
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Share camera",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_get_privacy_masks(call: ServiceCall) -> None:
@@ -661,7 +596,7 @@ def _register_services(hass: HomeAssistant) -> None:
             if coord:
                 session = await async_get_bosch_cloud_session(hass)
                 headers = {"Authorization": f"Bearer {coord.token}"}
-                try:
+                with wrap_service_errors("Get privacy masks"):
                     async with asyncio.timeout(10):
                         async with session.get(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_masks",
@@ -719,17 +654,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "body": body[:200],
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Get privacy masks",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_set_privacy_masks(call: ServiceCall) -> None:
@@ -802,7 +726,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
                 }
-                try:
+                with wrap_service_errors("Set privacy masks"):
                     async with asyncio.timeout(10):
                         async with session.post(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_masks",
@@ -835,17 +759,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "body": body[:200],
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Set privacy masks",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_delete_motion_zone(call: ServiceCall) -> None:
@@ -877,7 +790,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
                 }
-                try:
+                with wrap_service_errors("delete_motion_zone"):
                     async with asyncio.timeout(10):
                         async with session.get(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
@@ -926,17 +839,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "status": str(resp.status),
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "delete_motion_zone",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_get_lighting_schedule(call: ServiceCall) -> None:
@@ -961,7 +863,7 @@ def _register_services(hass: HomeAssistant) -> None:
         for entry in hass.config_entries.async_loaded_entries(DOMAIN):
             coord = entry.runtime_data
             if coord:
-                try:
+                with wrap_service_errors("get_lighting_schedule"):
                     cached = getattr(coord, "lighting_options_cache", {}).get(cam_id)
                     if cached:
                         data = cached
@@ -1011,17 +913,6 @@ def _register_services(hass: HomeAssistant) -> None:
                             "notification_id": "bosch_lighting",
                         },
                     )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "get_lighting_schedule",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_set_lighting_schedule(call: ServiceCall) -> None:
@@ -1085,7 +976,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
                 }
-                try:
+                with wrap_service_errors("Set lighting schedule"):
                     async with asyncio.timeout(10):
                         async with session.get(
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
@@ -1151,17 +1042,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "body": body[:200],
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Set lighting schedule",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_rename_camera(call: ServiceCall) -> None:
@@ -1192,7 +1072,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
                 }
-                try:
+                with wrap_service_errors("Rename"):
                     async with asyncio.timeout(10):
                         async with session.put(
                             f"{CLOUD_API}/v11/video_inputs",
@@ -1217,17 +1097,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "status": str(resp.status),
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Rename",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_invite_friend(call: ServiceCall) -> None:
@@ -1257,7 +1126,7 @@ def _register_services(hass: HomeAssistant) -> None:
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
                 }
-                try:
+                with wrap_service_errors("Invite"):
                     async with asyncio.timeout(10):
                         async with session.post(
                             f"{CLOUD_API}/v11/friends",
@@ -1295,17 +1164,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "body": body[:200],
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Invite",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_list_friends(call: ServiceCall) -> None:
@@ -1325,7 +1183,7 @@ def _register_services(hass: HomeAssistant) -> None:
             if coord:
                 session = await async_get_bosch_cloud_session(hass)
                 headers = {"Authorization": f"Bearer {coord.token}"}
-                try:
+                with wrap_service_errors("List friends"):
                     async with asyncio.timeout(10):
                         async with session.get(
                             f"{CLOUD_API}/v11/friends", headers=headers
@@ -1368,17 +1226,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "status": str(resp.status),
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "List friends",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     async def handle_remove_friend(call: ServiceCall) -> None:
@@ -1405,7 +1252,7 @@ def _register_services(hass: HomeAssistant) -> None:
             if coord:
                 session = await async_get_bosch_cloud_session(hass)
                 headers = {"Authorization": f"Bearer {coord.token}"}
-                try:
+                with wrap_service_errors("Remove friend"):
                     async with asyncio.timeout(10):
                         async with session.delete(
                             f"{CLOUD_API}/v11/friends/{friend_id}", headers=headers
@@ -1421,17 +1268,6 @@ def _register_services(hass: HomeAssistant) -> None:
                                         "status": str(resp.status),
                                     },
                                 )
-                except HomeAssistantError:
-                    raise
-                except Exception as err:
-                    raise HomeAssistantError(
-                        translation_domain=DOMAIN,
-                        translation_key="unexpected_error",
-                        translation_placeholders={
-                            "action": "Remove friend",
-                            "error": str(err),
-                        },
-                    ) from err
                 break
 
     # describe_snapshot service — ask HA ai_task to describe a camera snapshot

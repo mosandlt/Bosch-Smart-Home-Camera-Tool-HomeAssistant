@@ -97,6 +97,31 @@ coordinator methods directly, so the added indirection doesn't change what
 they intercept). 6421 pytest / 100% coverage / mypy --strict / ruff /
 codespell clean.
 
+Internal — two small, mechanical style cleanups from the Platinum-structural
+comparison research, no user-facing behavior change. (1) Deduplicated
+`services.py`'s 15 near-identical `try/except HomeAssistantError: raise/
+except Exception as err: raise HomeAssistantError(...)` error-translation
+blocks (one per HTTP-call service handler — `create_rule`, `delete_rule`,
+`update_rule`, `set_motion_zones`, `get_motion_zones`, `share_camera`,
+`get_privacy_masks`, `set_privacy_masks`, `delete_motion_zone`,
+`get_lighting_schedule`, `set_lighting_schedule`, `rename_camera`,
+`invite_friend`, `list_friends`, `remove_friend`) into one shared
+`guards.wrap_service_errors(action)` context manager, used as
+`with wrap_service_errors("<action>"):` in place of the repeated try/except.
+Same exception type, same `unexpected_error` translation key, same
+placeholders — `services.py` shrank from 1994 to 1829 lines. (2) Extracted
+the ~110-line inline 12-language "thanks for updating" persistent-
+notification dict literal out of `__init__.py::async_setup_entry`'s body
+into a new `announcements.maybe_announce_feedback_hint()` function
+(matching the existing `tick_bootstrap`/`tick_failure`/`tick_housekeeping`/
+`announcements` free-function pattern already used for coordinator-adjacent
+notification logic in this repo) — same trigger condition, same message
+content/language keys, same `entry.options["feedback_hint_version"]`
+persistence. Zero behavior change — verified via the full test suite
+(6420 passed, 1 skipped, 100% coverage, matching the pre-change baseline;
+no tests were added, removed, or modified) plus `ruff format --check` /
+`ruff check` / `mypy --strict` / `codespell` all clean.
+
 ## [v16.1.6] - 2026-08-05
 
 Patch — a Home Assistant integration-quality audit (Bronze through Platinum

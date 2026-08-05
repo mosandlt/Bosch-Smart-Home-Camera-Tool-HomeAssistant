@@ -33,11 +33,142 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from .const import DOMAIN
+
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+
     from . import BoschCameraCoordinator
     from .maintenance import MaintenanceWindow
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def maybe_announce_feedback_hint(
+    hass: HomeAssistant, entry: ConfigEntry, integration_version: str
+) -> None:
+    """Fire a one-time-per-version persistent notification pointing at
+    GitHub Discussions after the user updates the integration.
+
+    Extracted from `__init__.py::async_setup_entry` (style audit,
+    2026-08-05) — a ~110-line inline i18n dict literal doesn't belong in
+    the setup-entry function body. Multi-lang: picks message text per
+    `hass.config.language`; falls back to English when the language isn't
+    in the small inline dict below (we keep this inline rather than in
+    translations/ because persistent_notification doesn't go through the
+    entity-translation pipeline). Stored per-version in `entry.options`;
+    we only fire when the persisted "feedback_hint_version" != current.
+    """
+    try:
+        last_hint_version = entry.options.get("feedback_hint_version", "")
+        if integration_version not in (last_hint_version, "unknown"):
+            _disc_url = "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/discussions"
+            _iss_url = "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues"
+            _lang_messages: dict[str, tuple[str, str]] = {
+                "de": (
+                    f"Bosch Smart Home Camera v{integration_version}",
+                    f"Update auf **v{integration_version}** abgeschlossen. "
+                    f"Feedback, Fragen, Ideen? Nutze die neuen "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Bug-Reports weiter via [Issues]({_iss_url}).",
+                ),
+                "en": (
+                    f"Bosch Smart Home Camera v{integration_version}",
+                    f"Updated to **v{integration_version}**. "
+                    f"Feedback, questions, ideas? Use the new "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Bug reports still on [Issues]({_iss_url}).",
+                ),
+                "fr": (
+                    f"Bosch Smart Home Camera v{integration_version}",
+                    f"Mise à jour vers **v{integration_version}** terminée. "
+                    f"Commentaires, questions, idées ? Utilisez les nouvelles "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Rapports de bugs toujours via [Issues]({_iss_url}).",
+                ),
+                "es": (
+                    f"Bosch Smart Home Camera v{integration_version}",
+                    f"Actualización a **v{integration_version}** completada. "
+                    f"¿Comentarios, preguntas, ideas? Usa las nuevas "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Informes de errores siguen en [Issues]({_iss_url}).",
+                ),
+                "it": (
+                    f"Bosch Smart Home Camera v{integration_version}",
+                    f"Aggiornamento a **v{integration_version}** completato. "
+                    f"Feedback, domande, idee? Usa le nuove "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Segnalazioni di bug ancora su [Issues]({_iss_url}).",
+                ),
+                "nl": (
+                    f"Bosch Smart Home Camera v{integration_version}",
+                    f"Bijgewerkt naar **v{integration_version}**. "
+                    f"Feedback, vragen, ideeën? Gebruik de nieuwe "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Bugmeldingen nog steeds via [Issues]({_iss_url}).",
+                ),
+                "pl": (
+                    f"Bosch Smart Home Camera v{integration_version}",
+                    f"Aktualizacja do **v{integration_version}** zakończona. "
+                    f"Opinie, pytania, pomysły? Skorzystaj z nowych "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Zgłoszenia błędów nadal przez [Issues]({_iss_url}).",
+                ),
+                "pt": (
+                    f"Bosch Smart Home Camera v{integration_version}",
+                    f"Atualização para **v{integration_version}** concluída. "
+                    f"Feedback, perguntas, ideias? Use as novas "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Relatórios de bugs ainda via [Issues]({_iss_url}).",
+                ),
+                "ru": (
+                    f"Bosch Smart Home Camera v{integration_version}",
+                    f"Обновление до **v{integration_version}** завершено. "
+                    f"Отзывы, вопросы, идеи? Используйте новые "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Сообщения об ошибках по-прежнему в [Issues]({_iss_url}).",
+                ),
+                "uk": (
+                    f"Bosch Smart Home Camera v{integration_version}",
+                    f"Оновлення до **v{integration_version}** завершено. "
+                    f"Відгуки, питання, ідеї? Використовуйте нові "
+                    f"[GitHub Discussions]({_disc_url}). "
+                    f"Звіти про помилки досі через [Issues]({_iss_url}).",
+                ),
+                "zh-Hans": (
+                    f"Bosch Smart Home Camera v{integration_version}",
+                    f"已更新至 **v{integration_version}**。"
+                    f"反馈、问题、建议？请使用新的 "
+                    f"[GitHub Discussions]({_disc_url})。"
+                    f"错误报告请继续通过 [Issues]({_iss_url}) 提交。",
+                ),
+            }
+            _lang_raw = (hass.config.language or "en").lower()
+            # zh-CN / zh-Hans normalisation
+            if _lang_raw.startswith("zh"):
+                _lang_key = "zh-Hans"
+            else:
+                _lang_key = _lang_raw.split("-", 1)[0]
+            _title, _message = _lang_messages.get(_lang_key, _lang_messages["en"])
+            hass.async_create_task(
+                hass.services.async_call(
+                    "persistent_notification",
+                    "create",
+                    {
+                        "notification_id": f"{DOMAIN}_feedback_v{integration_version}",
+                        "title": _title,
+                        "message": _message,
+                    },
+                    blocking=False,
+                )
+            )
+            # Persist version so the prompt won't fire again until next update
+            new_opts = dict(entry.options)
+            new_opts["feedback_hint_version"] = integration_version
+            hass.config_entries.async_update_entry(entry, options=new_opts)
+    except Exception as _fb_err:
+        _LOGGER.debug("feedback-hint suppressed: %s", _fb_err)
 
 
 async def maybe_announce_maintenance(
