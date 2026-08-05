@@ -134,6 +134,15 @@ jobs:
               /^## / { f=0 }
               f && NF { print; exit }
             ' CHANGELOG.md | sed -E 's/\*\*//g; s/^(Patch|Minor|Major)[[:space:]]+[—-]+[[:space:]]*//')
+            # GitHub release titles cap at 256 chars total ("TAG — SUMMARY");
+            # a long first CHANGELOG bullet (a full paragraph, not a short
+            # one-liner) would otherwise fail release creation outright with
+            # a 422 (real incident: v16.1.6-beta-5, a multi-sentence #64 fix
+            # bullet). Truncate on a word boundary with an ellipsis, leaving
+            # headroom for "$TAG — " (longest realistic tag ~20 chars).
+            if [ "${#SUMMARY}" -gt 200 ]; then
+              SUMMARY="$(echo "$SUMMARY" | cut -c1-199 | sed -E 's/[[:space:]]+[^[:space:]]*$//')…"
+            fi
             if [ "$IS_PRERELEASE" != "true" ]; then
               # Stable releases always ARE the accumulated beta-1..beta-N
               # content for this version (see promote-beta.yml) — explain
