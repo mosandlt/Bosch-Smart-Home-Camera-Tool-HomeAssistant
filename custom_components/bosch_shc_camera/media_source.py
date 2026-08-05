@@ -47,6 +47,11 @@ _LOGGER = logging.getLogger(__name__)
 URL_PREFIX = f"/api/{DOMAIN}/event"
 VIEW_REGISTERED_KEY = f"{DOMAIN}_media_view_registered"
 
+# register_session()'s own default (60s) is tuned for a background upload
+# tolerating transient slowness, not an interactive media-browser click —
+# see _SmbBackend.new_session_cache's docstring.
+_SMB_BROWSE_CONNECTION_TIMEOUT = 8
+
 # Filename pattern: "{Camera}_{YYYY-MM-DD}_{HH-MM-SS}_{TYPE}_{ID}.ext"
 _FILE_RE = re.compile(
     r"^(?:(?P<camera>.+?)_)?(?P<date>\d{4}-\d{2}-\d{2})_(?P<time>\d{2}-\d{2}-\d{2})_(?P<etype>[A-Z_]+)_[0-9A-F]+\.(?P<ext>jpg|jpeg|mp4)$",
@@ -375,16 +380,44 @@ class _SmbBackend:
         Returning a new dict per call forces smbclient to instantiate a new
         ``Connection`` object (= new TCP socket + new SMB2 sequence_window),
         so concurrent callers don't contend on one credit pool.
+
+        ``register_session``'s own default ``connection_timeout`` is 60s —
+        fine for a background upload, but an interactive media-browser
+        click left silently spinning for a full minute (then surfacing as
+        a bare, unexplained "browse_media_failed" toast, nothing logged at
+        ERROR level) before failing is a bad experience when the NAS is
+        simply unreachable (wrong IP, offline, port 445 blocked). Cut to a
+        short interactive timeout and turn any failure into a specific,
+        loud `Unresolvable` instead of an opaque hang.
         """
         cache: dict[str, Any] = {}
         from smbclient import register_session
+        from smbprotocol.exceptions import IOTimeout
 
-        register_session(
-            self.server,
-            username=self.username,
-            password=self.password,
-            connection_cache=cache,
-        )
+        try:
+            register_session(
+                self.server,
+                username=self.username,
+                password=self.password,
+                connection_cache=cache,
+                connection_timeout=_SMB_BROWSE_CONNECTION_TIMEOUT,
+            )
+        except (TimeoutError, OSError, IOTimeout) as err:
+            # Deliberately narrow: only connection-level failures (socket
+            # timeout/refused/unreachable, SMB2 negotiate I/O timeout) map
+            # to "cannot reach the NAS" — auth failures and other
+            # SMBException subtypes are a different problem with a
+            # different fix and must not be relabeled as unreachable.
+            _LOGGER.warning(
+                "SMB browse: cannot reach NAS at %s within %ds: %s",
+                self.server,
+                _SMB_BROWSE_CONNECTION_TIMEOUT,
+                err,
+            )
+            raise Unresolvable(
+                f"Cannot reach the NAS at {self.server} — check it's online "
+                "and reachable on the network (SMB port 445)."
+            ) from err
         return cache
 
     def close_session_cache(self, cache: dict[str, Any]) -> None:

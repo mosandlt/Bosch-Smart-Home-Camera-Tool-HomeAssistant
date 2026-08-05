@@ -2882,6 +2882,100 @@ class TestSmbConnectionCachePerCall:
             )
 
 
+class TestSmbBrowseUnreachableNas:
+    """Regression: an unreachable NAS during interactive browse must fail
+    fast with a specific `Unresolvable`, not hang for register_session's
+    full 60s default and then surface as an opaque "browse_media_failed"
+    with nothing logged at ERROR level. Live-reproduced: SMB port 445 on
+    the configured server was unreachable, and the browse click just spun."""
+
+    def test_socket_timeout_raises_unresolvable_with_short_timeout(self):
+        backend = _backend_credit_starvation()
+        fake = _fake_smbclient_default()
+        fake.register_session = MagicMock(side_effect=TimeoutError("timed out"))
+
+        with (
+            patch.dict(sys.modules, {"smbclient": fake}),
+            pytest.raises(Unresolvable, match="Cannot reach the NAS"),
+        ):
+            backend.new_session_cache()
+
+        # Must use a short interactive timeout, not register_session's own
+        # 60s default meant for tolerating a slow background upload.
+        assert fake.register_session.call_args.kwargs["connection_timeout"] == 8
+
+    def test_connection_refused_raises_unresolvable(self):
+        """Plain OSError (e.g. ConnectionRefusedError) must be caught too,
+        not just TimeoutError — a firewall/port-closed rejection is
+        immediate, not a timeout, but should surface the same clear error."""
+        backend = _backend_credit_starvation()
+        fake = _fake_smbclient_default()
+        fake.register_session = MagicMock(side_effect=ConnectionRefusedError("refused"))
+
+        with (
+            patch.dict(sys.modules, {"smbclient": fake}),
+            pytest.raises(Unresolvable, match="Cannot reach the NAS"),
+        ):
+            backend.new_session_cache()
+
+    def test_smb_io_timeout_raises_unresolvable(self):
+        """smbprotocol's own IOTimeout (SMB2 negotiate phase timing out
+        after the TCP connect succeeded) must be caught too — not just
+        bare socket-level errors.
+
+        IOTimeout only constructs cleanly through smbprotocol's own
+        metaclass with a real SMB2 response header (not something worth
+        faking for a unit test) — `__new__` bypasses that, and `__str__`
+        is patched for the duration so the log/exception-chaining code
+        under test can format the error normally, matching what happens
+        with a real header-backed instance in production."""
+        from smbprotocol.exceptions import IOTimeout
+
+        backend = _backend_credit_starvation()
+        fake = _fake_smbclient_default()
+        io_timeout = IOTimeout.__new__(IOTimeout)
+        fake.register_session = MagicMock(side_effect=io_timeout)
+
+        with (
+            patch.object(IOTimeout, "__str__", lambda self: "negotiate timed out"),
+            patch.dict(sys.modules, {"smbclient": fake}),
+            pytest.raises(Unresolvable, match="Cannot reach the NAS"),
+        ):
+            backend.new_session_cache()
+
+    def test_auth_failure_not_relabeled_as_unreachable(self):
+        """A different SMBException subtype (e.g. an auth failure) must
+        propagate as-is — must NOT be caught and relabeled "cannot reach
+        the NAS", which would be actively misleading (wrong credentials
+        vs. a genuinely offline/unreachable server are different problems
+        needing different fixes from the user)."""
+        from smbprotocol.exceptions import SMBAuthenticationError
+
+        backend = _backend_credit_starvation()
+        fake = _fake_smbclient_default()
+        fake.register_session = MagicMock(
+            side_effect=SMBAuthenticationError("bad credentials")
+        )
+
+        with (
+            patch.dict(sys.modules, {"smbclient": fake}),
+            pytest.raises(SMBAuthenticationError),
+        ):
+            backend.new_session_cache()
+
+    def test_happy_path_still_passes_connection_timeout_kwarg(self):
+        """Successful connect must still receive the explicit short
+        timeout — this isn't a fallback-only path."""
+        backend = _backend_credit_starvation()
+        fake = _fake_smbclient_default()
+
+        with patch.dict(sys.modules, {"smbclient": fake}):
+            cache = backend.new_session_cache()
+
+        assert cache == {}
+        assert fake.register_session.call_args.kwargs["connection_timeout"] == 8
+
+
 class TestSmbSessionReuseWithinBrowseStep:
     """Session-reuse fix (stream-perf-stability-refactor Phase 2 #12):
     ONE `_browse()` step (== one `_browse_smb`/`_browse_smb_inner`
