@@ -183,8 +183,13 @@ class TestPersistMaintNotifiedKey:
     def test_store_and_key_present_schedules_save(self) -> None:
         store = MagicMock()
         store.async_save = AsyncMock()
+
+        def _close(coro: object, **_kwargs: object) -> MagicMock:
+            coro.close()  # type: ignore[attr-defined]
+            return MagicMock()
+
         coord = SimpleNamespace(
-            hass=MagicMock(),
+            hass=MagicMock(async_create_task=MagicMock(side_effect=_close)),
             maintenance_notified_key=("https://example.com/maint", "active"),
             maint_notified_store=store,
         )
