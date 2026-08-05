@@ -33267,7 +33267,7 @@ class TestCoordRcpSession:
         step2 = _resp_cm_round7(200)
         _connector, session = self._make_session(step1, step2)
         with patch(
-            f"{COORD_MODULE}.async_bosch_cloud_session_cm",
+            "custom_components.bosch_shc_camera.rcp_client.async_bosch_cloud_session_cm",
             return_value=session,
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
@@ -33278,7 +33278,7 @@ class TestCoordRcpSession:
         coord = self._bind(_stub_coord())
         _connector, session = self._make_session(_resp_cm_round7(403))
         with patch(
-            f"{COORD_MODULE}.async_bosch_cloud_session_cm",
+            "custom_components.bosch_shc_camera.rcp_client.async_bosch_cloud_session_cm",
             return_value=session,
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
@@ -33291,7 +33291,7 @@ class TestCoordRcpSession:
             _resp_cm_round7(200, text="<result>ok</result>")
         )
         with patch(
-            f"{COORD_MODULE}.async_bosch_cloud_session_cm",
+            "custom_components.bosch_shc_camera.rcp_client.async_bosch_cloud_session_cm",
             return_value=session,
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
@@ -33303,7 +33303,7 @@ class TestCoordRcpSession:
         _connector, session = _aiohttp_mocks()
         session.get = MagicMock(return_value=_timeout_cm())
         with patch(
-            f"{COORD_MODULE}.async_bosch_cloud_session_cm",
+            "custom_components.bosch_shc_camera.rcp_client.async_bosch_cloud_session_cm",
             return_value=session,
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")
@@ -33317,7 +33317,7 @@ class TestCoordRcpSession:
         _connector, session = _aiohttp_mocks()
         session.get = MagicMock(side_effect=[step1, _timeout_cm()])
         with patch(
-            f"{COORD_MODULE}.async_bosch_cloud_session_cm",
+            "custom_components.bosch_shc_camera.rcp_client.async_bosch_cloud_session_cm",
             return_value=session,
         ):
             result = await coord._rcp_session("proxy-01:42090", "abc123hash")

@@ -17,7 +17,6 @@ import time
 from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
 
 import aiohttp
 from bosch_shc_camera_client.media_transfer import (
@@ -34,7 +33,14 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from . import announcements, device_actions, quality_prefs, repairs
+from . import (
+    announcements,
+    device_actions,
+    quality_prefs,
+    rcp_client,
+    rcp_diagnostics,
+    repairs,
+)
 from . import recorder as nvr_recorder
 from .camera_list import fetch_camera_list
 from .camera_status import poll_statuses
@@ -71,6 +77,18 @@ from .go2rtc_client import (
 from .live_connection import try_live_connection_inner
 from .lock_utils import get_or_create_lock
 from .rcp import async_update_rcp_data
+from .rcp_client import (
+    _SAFE_DOMAINS as _SAFE_DOMAINS,
+)
+from .rcp_client import (
+    _is_safe_bosch_host as _is_safe_bosch_host,
+)
+from .rcp_client import (
+    _parse_onvif_scopes as _parse_onvif_scopes,
+)
+from .rcp_client import (
+    _parse_safe_rcp_proxy_url as _parse_safe_rcp_proxy_url,
+)
 from .remote_viewing_front_door import (
     start_remote_viewing_front_door,
     stop_remote_viewing_front_door,
@@ -170,60 +188,11 @@ try:
 except Exception:  # pragma: no cover — manifest.json ships with the package; only fires on a corrupted install
     _INTEGRATION_VERSION = "unknown"
 
-# ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
-_SAFE_DOMAINS = frozenset({".boschsecurity.com", ".bosch.com"})
-
 # `_is_safe_bosch_url` was previously a byte-identical copy duplicated across
 # fcm.py/smb.py/coordinator.py — now a single shared implementation in
 # bosch_shc_camera_client.media_transfer, aliased here to keep the private
-# name every call site in this file already uses. `_SAFE_DOMAINS` stays
-# local since `_is_safe_bosch_host` below still uses it directly.
+# name every call site in this file already uses.
 _is_safe_bosch_url = _lib_is_safe_bosch_url
-
-
-def _is_safe_bosch_host(host_and_port: str) -> bool:
-    """Validate a bare ``host[:port]`` string (no scheme) against the Bosch allowlist.
-
-    Used for the RCP proxy host/hash pair Bosch's cloud PUT /connection
-    response hands back (e.g. "proxy-01.live.cbs.boschsecurity.com:42090")
-    before it is used to build a request URL for the RCP client library —
-    an unvalidated value here is an SSRF path. Parsed via ``urlparse`` (not a
-    naive ``rsplit(":", 1)``) so this extracts the same authority a real
-    HTTP client would connect to — a value like
-    "proxy.boschsecurity.com:443@attacker.example" splits to an
-    allowlisted-looking "proxy.boschsecurity.com" on the last colon, but an
-    HTTP client parses it as userinfo and connects to attacker.example.
-    Any "@" is rejected outright (a legitimate Bosch value never has one;
-    aiohttp would otherwise turn userinfo into a Basic-Auth header sent to
-    Bosch's real proxy), and a ``ValueError`` from ``urlparse`` on malformed
-    input fails closed rather than propagating past callers' narrower
-    exception handlers.
-    """
-    if "@" in host_and_port:
-        return False
-    try:
-        hostname = urlparse(f"https://{host_and_port}").hostname
-    except ValueError:
-        return False
-    return hostname is not None and any(hostname.endswith(d) for d in _SAFE_DOMAINS)
-
-
-def _parse_safe_rcp_proxy_url(url_entry: str, cam_id: str) -> tuple[str, str] | None:
-    """Split a Bosch ``urls[0]`` proxy entry into ``(host, hash)``, validated.
-
-    Returns None (logging a warning) for a malformed entry or one whose host
-    fails `_is_safe_bosch_host` — never hands back an unvalidated host to a
-    caller that will use it to build a request URL.
-    """
-    parts = url_entry.split("/", 1)
-    if len(parts) != 2 or not _is_safe_bosch_host(parts[0]):
-        _LOGGER.warning(
-            "Rejected unsafe/malformed RCP proxy entry for %s: %s",
-            cam_id,
-            url_entry[:60],
-        )
-        return None
-    return parts[0], parts[1]
 
 
 def _is_safe_local_camera_host(host_and_port: str) -> bool:
@@ -256,63 +225,6 @@ def _is_safe_local_camera_host(host_and_port: str) -> bool:
         and not addr.is_loopback
         and not addr.is_unspecified
     )
-
-
-def _parse_onvif_scopes(raw: bytes) -> dict[str, Any]:
-    """Parse ONVIF scope TLV payload from RCP 0x0a98 (ASCII, ~720 bytes).
-
-    The payload is a series of null-terminated ASCII strings, each of which
-    may be an ONVIF scope URI of the form:
-        onvif://www.onvif.org/name/Bosch%20Smart%20Home%20Camera
-        onvif://www.onvif.org/hardware/HOME_Eyes_Outdoor
-        onvif://www.onvif.org/Profile/Streaming
-
-    Returns a dict with parsed fields and the raw scope list:
-        {
-            "raw_scopes": [...],
-            "name": "Bosch Smart Home Camera",
-            "hardware": "HOME_Eyes_Outdoor",
-            "profiles": ["Streaming", ...],
-            "supported": True,
-        }
-
-    Returns {"supported": True, "raw_scopes": [], "name": "", "hardware": "", "profiles": []}
-    on parse error (non-None raw means camera answered, so ONVIF is supported).
-    """
-    import re as _re_onvif
-    from urllib.parse import unquote as _unquote
-
-    result: dict[str, Any] = {
-        "supported": True,
-        "raw_scopes": [],
-        "name": "",
-        "hardware": "",
-        "profiles": [],
-    }
-    try:
-        # Null-terminated or newline-separated ASCII strings
-        text = raw.decode("ascii", errors="replace")
-        # Split on null bytes, newlines, or whitespace runs
-        scopes = [s.strip() for s in _re_onvif.split(r"[\x00\n\r]+", text) if s.strip()]
-        result["raw_scopes"] = scopes
-        for scope in scopes:
-            if not scope.startswith("onvif://www.onvif.org/"):
-                continue
-            path = scope[len("onvif://www.onvif.org/") :]
-            if "/" not in path:
-                continue
-            key, _, val = path.partition("/")
-            val_decoded = _unquote(val).replace("+", " ")
-            if key == "name":
-                result["name"] = val_decoded
-            elif key == "hardware":
-                result["hardware"] = val_decoded
-            elif key == "Profile":
-                profiles: list[str] = result["profiles"]
-                profiles.append(val_decoded)
-    except Exception:  # noqa: S110 # pragma: no cover — defensive parse of raw camera bytes; partial result still returned
-        pass
-    return result
 
 
 def get_options(entry: ConfigEntry) -> dict[str, Any]:
@@ -4057,135 +3969,38 @@ class BoschCameraCoordinator(
         await remote_session_terminator(self, cam_id, generation)
 
     # ── RCP protocol (Bosch Remote Configuration Protocol via cloud proxy) ──────
+    # Session/read primitives (rcp_client.py) + LAN diagnostic sensors
+    # (rcp_diagnostics.py) — thin delegators, same pattern as quality_prefs.py.
     def _invalidate_rcp_session(self, proxy_hash: str) -> None:
         """Drop a cached RCP session so the next call reopens the handshake.
 
-        Call this when a downstream RCP read returns HTTP 401 (auth dropped),
-        HTTP 403 (session expired), or RCP error 0x0c0d (session closed).
-        Without invalidation the cache would keep serving the dead ID for
-        its full 5-min TTL — readers would see None until the entry expired.
+        Thin delegator — logic lives in rcp_client.py.
         """
-        if self.rcp_session_cache.pop(proxy_hash, None) is not None:
-            _LOGGER.debug("RCP session cache invalidated for %s", proxy_hash[:8])
+        rcp_client._invalidate_rcp_session(self, proxy_hash)
 
     async def get_cached_rcp_session(
         self, proxy_host: str, proxy_hash: str
     ) -> str | None:
         """Return a cached RCP session ID, opening a new one if missing or expired.
 
-        Caches valid session IDs for 5 minutes (TTL 300 s) to avoid the 2-step
-        RCP handshake (0xff0c + 0xff0d) on every thumbnail or data fetch.
-
-        Serialized per proxy_hash via `_get_rcp_session_lock` — Bosch's proxy
-        only tolerates one live session per proxy_hash, so two callers racing
-        an empty/expired cache would otherwise each open their own session and
-        one gets rejected (sessionid 0x00000000).
+        Thin delegator — logic lives in rcp_client.py.
         """
-        async with self._get_rcp_session_lock(proxy_hash):
-            now = time.monotonic()
-            cached = self.rcp_session_cache.get(proxy_hash)
-            if cached:
-                session_id, expires_at = cached
-                if now < expires_at:
-                    return session_id
-                del self.rcp_session_cache[proxy_hash]
-
-            new_session_id: str | None = await self._rcp_session(proxy_host, proxy_hash)
-            if new_session_id:
-                self.rcp_session_cache[proxy_hash] = (
-                    new_session_id,
-                    now + 300.0,
-                )  # 5-min TTL
-            return new_session_id
+        return await rcp_client.get_cached_rcp_session(self, proxy_host, proxy_hash)
 
     async def _rcp_session(self, proxy_host: str, proxy_hash: str) -> str | None:
         """Open an RCP session via the cloud proxy and return the sessionid, or None on failure.
 
-        The RCP handshake consists of two steps:
-          1. WRITE command 0xff0c with a fixed payload → extract <sessionid> from XML response
-          2. WRITE command 0xff0d with the sessionid → ACK (confirms the session)
-
-        Auth=3 (anonymous via URL hash) provides read-only access.
-        The proxy_host should be in the form "proxy-NN.live.cbs.boschsecurity.com:42090".
-
-        Uses the shared, HA-lifecycle-managed Bosch-cloud session
-        (`async_bosch_cloud_session_cm` / `cloud_ssl.py`) instead of opening a
-        fresh ``aiohttp.ClientSession`` + ``TCPConnector`` per call — this
-        proxy host is the exact same Bosch-pinned-CA TLS trust domain
-        (`async_get_bosch_cloud_ssl_context`) the shared session already
-        uses, so there is no separate trust reason to keep a private
-        connector here.
+        Thin delegator — logic lives in rcp_client.py.
         """
-        base = f"https://{proxy_host}/{proxy_hash}/rcp.xml"
-        init_payload = (
-            "0x0102004000000000040000000000000000010000000000000001000000000000"
-        )
-
-        async with async_bosch_cloud_session_cm(self.hass) as session:
-            # Step 1: open session
-            params1 = {
-                "command": "0xff0c",
-                "direction": "WRITE",
-                "type": "P_OCTET",
-                "payload": init_payload,
-            }
-            try:
-                async with asyncio.timeout(8):
-                    async with session.get(base, params=params1) as resp:
-                        if resp.status != 200:
-                            _LOGGER.debug(
-                                "_rcp_session: step1 HTTP %d for %s",
-                                resp.status,
-                                proxy_host,
-                            )
-                            return None
-                        text = await resp.text()
-            except (TimeoutError, aiohttp.ClientError) as err:
-                _LOGGER.debug("_rcp_session: step1 error for %s: %s", proxy_host, err)
-                return None
-
-            # Parse <sessionid> from XML response
-            import re as _re
-
-            m = _re.search(r"<sessionid>(\S+)</sessionid>", text, _re.IGNORECASE)
-            if not m:
-                _LOGGER.debug(
-                    "_rcp_session: no <sessionid> in response for %s: %s",
-                    proxy_host,
-                    text[:200],
-                )
-                return None
-            session_id = m.group(1)
-
-            # Step 2: ACK the session
-            params2 = {
-                "command": "0xff0d",
-                "direction": "WRITE",
-                "type": "P_OCTET",
-                "sessionid": session_id,
-            }
-            try:
-                async with asyncio.timeout(8):
-                    async with session.get(base, params=params2) as resp2:
-                        _LOGGER.debug(
-                            "_rcp_session: ACK HTTP %d for %s (sessionid=%s)",
-                            resp2.status,
-                            proxy_host,
-                            session_id,
-                        )
-            except (TimeoutError, aiohttp.ClientError) as err:
-                _LOGGER.debug("_rcp_session: step2 error for %s: %s", proxy_host, err)
-                # Session may still be valid — return it anyway
-
-            return session_id
+        return await rcp_client._rcp_session(self, proxy_host, proxy_hash)
 
     @staticmethod
     def _proxy_hash_from_rcp_base(rcp_base: str) -> str | None:
-        """Extract proxy_hash from `https://host:port/{hash}/rcp.xml`."""
-        parts = rcp_base.rstrip("/").split("/")
-        if len(parts) >= 2 and parts[-1] == "rcp.xml":
-            return parts[-2]
-        return None
+        """Extract proxy_hash from `https://host:port/{hash}/rcp.xml`.
+
+        Thin delegator — logic lives in rcp_client.py.
+        """
+        return rcp_client._proxy_hash_from_rcp_base(rcp_base)
 
     async def rcp_read(
         self,
@@ -4197,54 +4012,9 @@ class BoschCameraCoordinator(
     ) -> bytes | None:
         """READ an RCP command and return the raw payload bytes, or None on failure.
 
-        Uses the HA shared session to avoid creating a new
-        connector+session per RCP command (prevents socket exhaustion).
-        Invalidates the session cache on HTTP 401/403 or RCP <err>0x0c0d</err>
-        (session closed) — the dead ID would otherwise block reads until TTL.
+        Thin delegator — logic lives in rcp_client.py.
         """
-        # Local import (not top-level): keeps unittest.mock.patch(
-        # "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
-        # ...) working the same way it did before BoschCameraCoordinator
-        # moved out of __init__.py — those patches target the package's own
-        # namespace, matching the pattern already used in live_connection.py.
-        from . import (
-            async_get_bosch_cloud_session as async_get_bosch_cloud_session,
-        )
-
-        params: dict[str, str] = {
-            "command": command,
-            "direction": "READ",
-            "type": type_,
-            "sessionid": sessionid,
-        }
-        if num:
-            params["num"] = str(num)
-
-        session = await async_get_bosch_cloud_session(self.hass)
-        try:
-            async with asyncio.timeout(8):
-                async with session.get(rcp_base, params=params) as resp:
-                    if resp.status != 200:
-                        _LOGGER.debug(
-                            "rcp_read: command=%s HTTP %d", command, resp.status
-                        )
-                        if resp.status in (401, 403):
-                            proxy_hash = self._proxy_hash_from_rcp_base(rcp_base)
-                            if proxy_hash:
-                                self._invalidate_rcp_session(proxy_hash)
-                        return None
-                    raw = await resp.read()
-                    # RCP session-closed response: <err>0x0c0d</err>. Drop the
-                    # cached session so the next read reopens the handshake.
-                    if b"0x0c0d" in raw and b"<err>" in raw:
-                        proxy_hash = self._proxy_hash_from_rcp_base(rcp_base)
-                        if proxy_hash:
-                            self._invalidate_rcp_session(proxy_hash)
-                        return None
-                    return bytes(raw)
-        except (TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.debug("rcp_read: command=%s error: %s", command, err)
-            return None
+        return await rcp_client.rcp_read(self, rcp_base, command, sessionid, type_, num)
 
     async def _async_update_rcp_data(
         self, cam_id: str, proxy_host: str, proxy_hash: str
@@ -4264,149 +4034,44 @@ class BoschCameraCoordinator(
     ) -> bytes | None:
         """Read an RCP value directly from the camera's LAN HTTPS endpoint (cbs Digest auth).
 
-        Uses the cached LOCAL session credentials (``local_creds_cache``) which
-        are populated on every successful PUT /connection LOCAL. The camera's
-        ``rcp.xml`` endpoint on port 443 requires HTTP Digest auth with the
-        rotating cbs-XXXXXXXX user/password pair.
-
-        Returns the decoded payload bytes on success, None on any error
-        (no LAN IP, no creds, network error, auth failure, RCP error).
-
-        IMPORTANT: Do NOT call this from the event loop for opcodes that would
-        rotate cbs creds (i.e. never issue PUT /connection LOCAL here — use
-        the existing slow-tier RCP proxy path for writes). This helper is
-        READ-ONLY and purely supplementary to the cloud-proxy path.
+        Thin delegator — logic lives in rcp_client.py.
         """
-        # Local import (not top-level): keeps unittest.mock.patch(
-        # "custom_components.bosch_shc_camera.async_get_clientsession", ...)
-        # working the same way it did before BoschCameraCoordinator moved
-        # out of __init__.py — matches the live_connection.py pattern.
-        from . import (
-            async_digest_request as async_digest_request,
-        )
-        from . import (
-            async_get_clientsession as async_get_clientsession,
-        )
-
-        if self._is_rcp_lan_denied(cam_id, opcode_hex):
-            return None
-        ip = self.get_cam_lan_ip(cam_id)
-        if not ip:
-            return None
-        creds = self.local_creds_cache.get(cam_id)
-        if not creds:
-            return None
-        user: str = creds.get("user", "")
-        password: str = creds.get("password", "")
-        if not (user and password):
-            return None
-        port: int = creds.get("port", 443)
-        base = f"https://{ip}:{port}/rcp.xml"
-        params: dict[str, str] = {
-            "command": opcode_hex,
-            "direction": "READ",
-            "type": "P_OCTET",
-            "num": "1",
-        }
-        from urllib.parse import urlencode
-
-        url = f"{base}?{urlencode(params)}"
-        try:
-            import re as _re_lan
-
-            async with await async_digest_request(
-                async_get_clientsession(self.hass, verify_ssl=False),
-                "GET",
-                url,
-                user,
-                password,
-                timeout=8.0,
-                ssl=False,
-            ) as resp:
-                if resp.status != 200:
-                    _LOGGER.debug(
-                        "_fetch_rcp_lan: %s@%s HTTP %d", opcode_hex, ip, resp.status
-                    )
-                    if resp.status == 401:
-                        # CBS user lacks permission for this opcode — stop hammering
-                        # the camera every 5 min. Retry once the TTL expires.
-                        self._mark_rcp_lan_denied(cam_id, opcode_hex)
-                    return None
-                self._clear_rcp_lan_denied(cam_id, opcode_hex)
-                raw = await resp.read()
-                # Check for RCP-level error
-                if b"<err>" in raw.lower():
-                    _LOGGER.debug(
-                        "_fetch_rcp_lan: %s@%s RCP error: %s", opcode_hex, ip, raw[:120]
-                    )
-                    return None
-                # Extract payload from <str>HEXDATA</str>
-                m = _re_lan.search(
-                    rb"<str>([0-9a-fA-F]+)</str>", raw, _re_lan.IGNORECASE
-                )
-                if m:
-                    return bytes.fromhex(m.group(1).decode("ascii"))
-                # Fallback: raw bytes if not XML envelope
-                if raw and not raw.lstrip(b"\n\r\t ").startswith(b"<"):
-                    return bytes(raw)
-                return None
-        except (TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.debug("_fetch_rcp_lan: %s@%s %s", opcode_hex, ip, err)
-            return None
-        except Exception as err:  # pragma: no cover
-            _LOGGER.debug("_fetch_rcp_lan: %s@%s unexpected: %s", opcode_hex, ip, err)
-            return None
+        return await rcp_client._fetch_rcp_lan(self, cam_id, opcode_hex)
 
     async def _async_update_lan_diagnostic_sensors(self, cam_id: str) -> None:
         """Fetch F4 (ONVIF scopes) and F6 (RCP version) for a single camera via LAN.
 
-        Called on slow-tier when the camera is ONLINE, LAN IP is known, and
-        cbs creds are cached. Failures are non-fatal: caches keep their last
-        known value or remain absent (sensor shows unavailable).
+        Thin delegator — logic lives in rcp_diagnostics.py.
         """
-        # F4: ONVIF scopes via RCP 0x0a98 — ~720 B ASCII TLV
-        try:
-            raw_onvif = await self._fetch_rcp_lan(cam_id, "0x0a98")
-            if raw_onvif:
-                scopes_dict = _parse_onvif_scopes(raw_onvif)
-                self.rcp_onvif_scopes_cache[cam_id] = scopes_dict
-                _LOGGER.debug("ONVIF scopes for %s: %s", cam_id[:8], scopes_dict)
-        except Exception as err:
-            _LOGGER.debug(
-                "ONVIF scopes fetch error for %s: %s",
-                cam_id[:8],
-                BoschCameraCoordinator.err_str(err),
-            )
-
-        # F6: RCP protocol versions via 0xff00 (primary) + 0xff04 (secondary)
-        try:
-            raw_ver = await self._fetch_rcp_lan(cam_id, "0xff00")
-            if raw_ver and len(raw_ver) >= 4:
-                version_str = f"{raw_ver[0]}.{raw_ver[1]}.{raw_ver[2]}.{raw_ver[3]}"
-                self.rcp_version_cache[cam_id] = version_str
-                _LOGGER.debug("RCP version for %s: %s", cam_id[:8], version_str)
-        except Exception as err:
-            _LOGGER.debug(
-                "RCP version fetch error for %s: %s",
-                cam_id[:8],
-                BoschCameraCoordinator.err_str(err),
-            )
+        await rcp_diagnostics._async_update_lan_diagnostic_sensors(self, cam_id)
 
     def clock_offset(self, cam_id: str) -> float | None:
-        """Return clock offset in seconds (camera time − server time), or None."""
-        return self.rcp_clock_offset_cache.get(cam_id)
+        """Return clock offset in seconds (camera time − server time), or None.
+
+        Thin delegator — logic lives in rcp_diagnostics.py.
+        """
+        return rcp_diagnostics.clock_offset(self, cam_id)
 
     def rcp_lan_ip(self, cam_id: str) -> str | None:
-        """Return camera LAN IP from RCP 0x0a36, or None."""
-        return self.rcp_lan_ip_cache.get(cam_id)
+        """Return camera LAN IP from RCP 0x0a36, or None.
+
+        Thin delegator — logic lives in rcp_diagnostics.py.
+        """
+        return rcp_diagnostics.rcp_lan_ip(self, cam_id)
 
     def rcp_product_name(self, cam_id: str) -> str | None:
-        """Return camera product name from RCP 0x0aea, or None."""
-        return self.rcp_product_name_cache.get(cam_id)
+        """Return camera product name from RCP 0x0aea, or None.
+
+        Thin delegator — logic lives in rcp_diagnostics.py.
+        """
+        return rcp_diagnostics.rcp_product_name(self, cam_id)
 
     def rcp_bitrate_ladder(self, cam_id: str) -> list[int]:
-        """Return bitrate ladder (kbps) from RCP 0x0c81, or empty list."""
-        return self.rcp_bitrate_cache.get(cam_id, [])
+        """Return bitrate ladder (kbps) from RCP 0x0c81, or empty list.
+
+        Thin delegator — logic lives in rcp_diagnostics.py.
+        """
+        return rcp_diagnostics.rcp_bitrate_ladder(self, cam_id)
 
     def get_quality(self, cam_id: str) -> str:
         """Return current quality preference: 'auto', 'high', or 'low'.
