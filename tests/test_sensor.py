@@ -95,11 +95,14 @@ def stub_entry() -> SimpleNamespace:
 # NOTE: this section binds coordinator methods via an explicit
 # `custom_components.bosch_shc_camera.coordinator`-qualified import (aliased
 # as `_AiCoordinatorCls`) rather than the plain top-level
-# `BoschCameraCoordinator` import used elsewhere in this file, so that a
-# function's `__globals__` (and therefore `_LOGGER`/`dt_util`) resolves
-# against `coordinator.py` — where BoschCameraCoordinator actually lives —
-# not `__init__.py`. The `patch("...coordinator._LOGGER")` / `.dt_util.now`
-# calls below target that same module for exactly this reason.
+# `BoschCameraCoordinator` import used elsewhere in this file, so a bound
+# `_AiCoordinatorCls._ai_window_allowed.__get__(coord)` resolves against
+# `coordinator.py` — where `BoschCameraCoordinator` actually lives — not
+# `__init__.py`. The gating logic itself (and therefore `_LOGGER`/`dt_util`)
+# now lives in `ai_analysis_runtime.py` (extracted out of coordinator.py),
+# so the `patch("...ai_analysis_runtime._LOGGER")` / `.dt_util.now` calls
+# below target that module instead — coordinator.py's `_ai_window_allowed`
+# etc. are now thin delegators with no `_LOGGER`/`dt_util` of their own.
 from custom_components.bosch_shc_camera.coordinator import (
     BoschCameraCoordinator as _AiCoordinatorCls,
 )
@@ -1094,7 +1097,7 @@ class TestBudgetLogOnce:
         coord._ai_day_stamp = dt_util.now().date().isoformat()  # prevent rollover
 
         with patch(
-            "custom_components.bosch_shc_camera.coordinator._LOGGER"
+            "custom_components.bosch_shc_camera.ai_analysis_runtime._LOGGER"
         ) as mock_logger:
             result = coord._ai_rate_allowed(CAM_ID)
             assert result is False
@@ -1113,7 +1116,7 @@ class TestBudgetLogOnce:
         coord._ai_day_stamp = today  # prevent rollover
 
         with patch(
-            "custom_components.bosch_shc_camera.coordinator._LOGGER"
+            "custom_components.bosch_shc_camera.ai_analysis_runtime._LOGGER"
         ) as mock_logger:
             coord._ai_rate_allowed(CAM_ID)
             mock_logger.info.assert_not_called()
@@ -1132,7 +1135,7 @@ class TestBudgetLogOnce:
         coord._ai_budget_logged_day = ""
         coord._ai_day_stamp = today_ha
 
-        with patch("custom_components.bosch_shc_camera.coordinator._LOGGER"):
+        with patch("custom_components.bosch_shc_camera.ai_analysis_runtime._LOGGER"):
             coord._ai_rate_allowed(CAM_ID)
 
         assert coord._ai_budget_logged_day == today_ha
@@ -1153,9 +1156,9 @@ class TestBudgetLogOnce:
         coord._ai_day_stamp = "2000-01-01"  # matches mocked date → no rollover
 
         with (
-            patch("custom_components.bosch_shc_camera.coordinator._LOGGER"),
+            patch("custom_components.bosch_shc_camera.ai_analysis_runtime._LOGGER"),
             patch(
-                "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+                "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
                 return_value=fixed_local,
             ),
         ):
@@ -1221,7 +1224,7 @@ class TestAiWindowAllowedTimeGate:
         coord = _make_gating_coord(time_start=time_start, time_end=time_end)
         fake_now = datetime(2026, 6, 15, now_hour, now_min, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=fake_now,
         ):
             return coord._ai_window_allowed()
@@ -1379,7 +1382,7 @@ class TestAiWindowBothGates:
         )
         fake_now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=fake_now,
         ):
             assert coord._ai_window_allowed() is True
@@ -1395,7 +1398,7 @@ class TestAiWindowBothGates:
         )
         fake_now = datetime(2026, 6, 15, 23, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=fake_now,
         ):
             assert coord._ai_window_allowed() is False
@@ -1411,7 +1414,7 @@ class TestAiWindowBothGates:
         )
         fake_now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=fake_now,
         ):
             assert coord._ai_window_allowed() is False
@@ -1439,7 +1442,7 @@ class TestAiWindowForceBypass:
         coord.hass.bus.async_fire = MagicMock()
 
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=fake_now,
         ):
             # Auto call (force=False) — window blocks
@@ -1642,7 +1645,7 @@ class TestAiWindowEdgeCases:
         coord = _make_gating_coord(time_start=time_start, time_end=time_end)
         fake_now = datetime(2026, 6, 15, now_hour, now_min, now_sec, now_us, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=fake_now,
         ):
             return coord._ai_window_allowed()
@@ -1759,7 +1762,7 @@ class TestWindowGateDoesNotConsumeBudget:
         # Time 23:00 is outside 08:00-10:00 -> window blocked
         fake_now = datetime(2026, 6, 15, 23, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=fake_now,
         ):
             result = await coord.async_generate_ai_description(CAM_ID, force=False)
@@ -1781,7 +1784,7 @@ class TestWindowGateDoesNotConsumeBudget:
 
         fake_now = datetime(2026, 6, 15, 23, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=fake_now,
         ):
             await coord.async_generate_ai_description(CAM_ID, force=False)
@@ -1803,7 +1806,7 @@ class TestWindowGateDoesNotConsumeBudget:
 
         fake_now = datetime(2026, 6, 15, 23, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=fake_now,
         ):
             await coord.async_generate_ai_description(CAM_ID, force=False)
@@ -1823,7 +1826,7 @@ class TestWindowGateDoesNotConsumeBudget:
 
         fake_now = datetime(2026, 6, 15, 23, 0, 0, tzinfo=UTC)
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=fake_now,
         ):
             await coord.async_generate_ai_description(CAM_ID, force=False)
@@ -1852,7 +1855,7 @@ class TestWindowGateDoesNotConsumeBudget:
 
         # 5 blocked calls (outside window) must not consume the single-unit budget
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=outside_window,
         ):
             for _ in range(5):
@@ -1863,7 +1866,7 @@ class TestWindowGateDoesNotConsumeBudget:
 
         # One in-window call must succeed and consume exactly one budget unit
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=inside_window,
         ):
             result = await coord.async_generate_ai_description(CAM_ID, force=False)
@@ -1962,7 +1965,7 @@ class TestAiWindowEntityEdgeCases:
 
         fake_now = _dt.datetime(2026, 6, 15, 12, 0, tzinfo=_dt.UTC)
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.dt_util.now",
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util.now",
             return_value=fake_now,
         ):
             coord.ai_record_call("cam-aabbccdd")

@@ -35185,7 +35185,9 @@ class TestAiBudgetStateNonNumeric:
             _async_save_ai_budget=AsyncMock(),
         )
 
-        with patch("custom_components.bosch_shc_camera.coordinator.dt_util") as mock_dt:
+        with patch(
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util"
+        ) as mock_dt:
             mock_dt.now.return_value.date.return_value.isoformat.return_value = (
                 "2026-06-18"
             )
@@ -35216,7 +35218,9 @@ class TestAiBudgetStateNonNumeric:
             _async_save_ai_budget=AsyncMock(),
         )
 
-        with patch("custom_components.bosch_shc_camera.coordinator.dt_util") as mock_dt:
+        with patch(
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util"
+        ) as mock_dt:
             mock_dt.now.return_value.date.return_value.isoformat.return_value = (
                 "2026-06-18"
             )
@@ -35245,7 +35249,9 @@ class TestAsyncLoadAiBudgetNonInt:
             _ai_day_stamp="",
         )
 
-        with patch("custom_components.bosch_shc_camera.coordinator.dt_util") as mock_dt:
+        with patch(
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util"
+        ) as mock_dt:
             mock_dt.now.return_value.date.return_value.isoformat.return_value = today
             await BoschCameraCoordinator.async_load_ai_budget(coord)
 
@@ -35265,7 +35271,9 @@ class TestAsyncLoadAiBudgetNonInt:
             _ai_day_stamp="",
         )
 
-        with patch("custom_components.bosch_shc_camera.coordinator.dt_util") as mock_dt:
+        with patch(
+            "custom_components.bosch_shc_camera.ai_analysis_runtime.dt_util"
+        ) as mock_dt:
             mock_dt.now.return_value.date.return_value.isoformat.return_value = today
             await BoschCameraCoordinator.async_load_ai_budget(coord)
 

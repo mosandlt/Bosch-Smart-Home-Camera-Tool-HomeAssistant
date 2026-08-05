@@ -31,9 +31,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.util import dt as dt_util
 
 from . import (
+    ai_analysis_runtime,
     announcements,
     device_actions,
     quality_prefs,
@@ -3067,285 +3067,60 @@ class BoschCameraCoordinator(
                 _LOGGER.debug("fetch_live_snapshot error for %s: %s", cam_id, err)
                 return None
 
+    # ── AI-description budget/rate/window gating (ai_analysis_runtime.py) ──────
+    # Thin delegators, same pattern as quality_prefs.py/rcp_client.py.
     def _ai_window_allowed(self) -> bool:
         """Time-window + condition-entity gate for AUTO AI analyses.
 
-        Returns True if the current moment is within the configured activation
-        window AND the condition entity (if any) is in the expected state.
-        When neither gate is configured, always returns True.
-        Manual force=True callers MUST bypass this — callers are responsible.
+        Thin delegator — logic lives in ai_analysis_runtime.py.
         """
-        opts = self.options
-        time_start_raw: str = (opts.get("ai_active_time_start") or "").strip()
-        time_end_raw: str = (opts.get("ai_active_time_end") or "").strip()
-        condition_entity_id: str = (
-            opts.get("ai_active_condition_entity") or ""
-        ).strip()
-        condition_state: str = (
-            opts.get("ai_active_condition_state") or "not_home"
-        ).strip()
-
-        time_gate_active = bool(time_start_raw and time_end_raw)
-        if bool(time_start_raw) != bool(time_end_raw):
-            _LOGGER.warning(
-                "AI activation window: only one of start/end time is configured"
-                " (start=%r end=%r) — time gate disabled. Set both or neither.",
-                time_start_raw,
-                time_end_raw,
-            )
-        condition_gate_active = bool(condition_entity_id)
-
-        if not time_gate_active and not condition_gate_active:
-            return True
-
-        time_allowed = True
-        if time_gate_active:
-            try:
-                from datetime import time as _dt_time
-
-                def _parse_t(s: str) -> _dt_time:
-                    parts = s.split(":")
-                    h, m = int(parts[0]), int(parts[1])
-                    sec = int(parts[2]) if len(parts) > 2 else 0
-                    return _dt_time(h, m, sec)
-
-                t_start = _parse_t(time_start_raw)
-                t_end = _parse_t(time_end_raw)
-                now_t = dt_util.now().time().replace(microsecond=0)
-                if t_end >= t_start:
-                    # Normal window: e.g. 08:00–22:00. start==end is a zero-width
-                    # window (allowed only at that exact second) — matches live.
-                    time_allowed = t_start <= now_t <= t_end
-                else:
-                    # Overnight window: e.g. 22:00–06:00
-                    time_allowed = now_t >= t_start or now_t <= t_end
-            except Exception:
-                _LOGGER.debug(
-                    "AI activation window: malformed time value (start=%r end=%r)"
-                    " — treating as no time gate",
-                    time_start_raw,
-                    time_end_raw,
-                )
-                time_allowed = True  # malformed → allow (fail-open)
-
-        condition_allowed = True
-        if condition_gate_active:
-            state_obj = self.hass.states.get(condition_entity_id)
-            if state_obj is None or state_obj.state in ("unknown", "unavailable"):
-                condition_allowed = False  # conservative: don't burn credits
-                _LOGGER.debug(
-                    "AI activation window: condition entity %s is %s — blocking AI",
-                    condition_entity_id,
-                    state_obj.state if state_obj else "missing",
-                )
-            else:
-                condition_allowed = state_obj.state == condition_state
-
-        return time_allowed and condition_allowed
+        return ai_analysis_runtime._ai_window_allowed(self)
 
     def ai_budget_state(self) -> tuple[int, int]:
         """Return (used_today, max_per_day) for the AI-analysis daily budget.
 
-        Rolls the counter over when the local calendar date changes.
-        max_per_day == 0 means unlimited.
+        Thin delegator — logic lives in ai_analysis_runtime.py.
         """
-        opts = self.options
-        try:
-            max_per_day = int(opts.get("ai_max_per_day", 100) or 0)
-        except (TypeError, ValueError):
-            max_per_day = 100
-        today = dt_util.now().date().isoformat()
-        if self._ai_day_stamp != today:
-            self._ai_day_stamp = today
-            self._ai_day_count = 0
-            self.hass.async_create_task(self._async_save_ai_budget())
-        return self._ai_day_count, max_per_day
+        return ai_analysis_runtime.ai_budget_state(self)
 
     async def async_load_ai_budget(self) -> None:
-        """Load persisted daily AI budget from storage (called on setup)."""
-        try:
-            stored = await self._ai_budget_store.async_load()
-        except Exception as err:
-            _LOGGER.debug("AI budget store load failed: %s", err)
-            stored = None
-        if isinstance(stored, dict):
-            stored_date: str = stored.get("date", "")
-            today = dt_util.now().date().isoformat()
-            if stored_date == today:
-                try:
-                    self._ai_day_count = int(stored.get("count", 0))
-                    self._ai_day_stamp = stored_date
-                except (TypeError, ValueError):
-                    pass
-            # else: stored day != today → counter stays at 0 (already reset for new day)
+        """Load persisted daily AI budget from storage (called on setup).
+
+        Thin delegator — logic lives in ai_analysis_runtime.py.
+        """
+        await ai_analysis_runtime.async_load_ai_budget(self)
 
     async def _async_save_ai_budget(self) -> None:
-        """Persist daily AI budget count to storage."""
-        try:
-            await self._ai_budget_store.async_save(
-                {
-                    "date": self._ai_day_stamp,
-                    "count": self._ai_day_count,
-                }
-            )
-        except Exception as err:
-            _LOGGER.debug("AI budget store save failed: %s", err)
+        """Persist daily AI budget count to storage.
+
+        Thin delegator — logic lives in ai_analysis_runtime.py.
+        """
+        await ai_analysis_runtime._async_save_ai_budget(self)
 
     def _ai_rate_allowed(self, cam_id: str) -> bool:
-        """Cooldown + daily-budget gate for AUTO AI analyses."""
-        opts = self.options
-        try:
-            cooldown = float(opts.get("ai_cooldown_seconds", 60) or 0)
-        except (TypeError, ValueError):
-            cooldown = 60.0
-        used, max_per_day = self.ai_budget_state()
-        if max_per_day and (used + self.ai_in_flight) >= max_per_day:
-            # Use the SAME local-date source as ai_budget_state() above so the
-            # one-shot "budget reached" log re-arms in lockstep with the daily
-            # counter reset (a UTC date here would suppress the log for the
-            # hours between local and UTC midnight). Lesson: events-today UTC bug.
-            today = dt_util.now().date().isoformat()
-            if self._ai_budget_logged_day != today:
-                self._ai_budget_logged_day = today
-                _LOGGER.info(
-                    "AI analysis daily budget of %d reached — skipping until tomorrow",
-                    max_per_day,
-                )
-            return False
-        last = self._ai_last_call.get(cam_id, float("-inf"))
-        return (time.monotonic() - last) >= cooldown
+        """Cooldown + daily-budget gate for AUTO AI analyses.
+
+        Thin delegator — logic lives in ai_analysis_runtime.py.
+        """
+        return ai_analysis_runtime._ai_rate_allowed(self, cam_id)
 
     def ai_record_call(self, cam_id: str) -> None:
-        """Record an AI analysis for cooldown + daily-budget accounting."""
-        self.ai_budget_state()  # ensure the day-rollover runs first
-        self._ai_last_call[cam_id] = time.monotonic()
-        self._ai_day_count += 1
-        self.hass.async_create_task(self._async_save_ai_budget())
+        """Record an AI analysis for cooldown + daily-budget accounting.
+
+        Thin delegator — logic lives in ai_analysis_runtime.py.
+        """
+        ai_analysis_runtime.ai_record_call(self, cam_id)
 
     async def async_generate_ai_description(
         self, cam_id: str, *, force: bool = False
     ) -> str | None:
         """Generate an AI description of a camera's current snapshot via ai_task.
 
-        Shared by the notify-include path (F2) and the on-motion auto path.
-        Returns the description text, or None when skipped (rate-limited,
-        camera unknown, ai_task unavailable, or empty result). Auto callers
-        pass force=False so the cooldown + daily budget apply; manual/service
-        callers pass force=True to bypass the cooldown (still counts toward
-        the daily budget). Never raises — failures return None so the calling
-        notification/event path is never broken.
+        Thin delegator — logic lives in ai_analysis_runtime.py.
         """
-        if not self.options.get("enable_ai_description", False):
-            return None
-        if self.shc_state_cache.get(cam_id, {}).get("privacy_mode"):
-            return None
-        if not force and not self._ai_window_allowed():
-            return None
-        if not force and not self._ai_rate_allowed(cam_id):
-            # Reuse cached description only if not stale and not from a privacy era
-            cached_entry = self.data.get(cam_id, {}).get("ai_description", {})
-            cached_text: str | None = cached_entry.get("text")
-            if cached_text and not self.shc_state_cache.get(cam_id, {}).get(
-                "privacy_mode"
-            ):
-                # Reject cache if generated_at is older than cooldown window or 300s cap
-                try:
-                    opts_cs = self.options
-                    cooldown_secs = float(opts_cs.get("ai_cooldown_seconds", 60) or 0)
-                    max_age = min(cooldown_secs, 300.0)
-                    gen_at_str: str | None = cached_entry.get("generated_at")
-                    if gen_at_str:
-                        gen_dt = datetime.fromisoformat(gen_at_str)
-                        age_secs = (datetime.now(UTC) - gen_dt).total_seconds()
-                        if max_age > 0 and age_secs <= max_age:
-                            return cached_text
-                except Exception as _cache_err:
-                    _LOGGER.debug("AI cache staleness check failed: %s", _cache_err)
-            return None
-        cam_entity = getattr(self, "camera_entities", {}).get(cam_id)
-        if cam_entity is None:
-            return None
-        entity_id = cam_entity.entity_id
-        opts = self.options
-        prompt = opts.get("ai_describe_prompt") or (
-            "Du bist eine Überwachungskamera-Assistenz. Melde NUR"
-            " sicherheitsrelevante Beobachtungen: Personen (auch nur teilweise"
-            " sichtbar: Beine, Arme, Silhouette, Schatten), Fahrzeuge, Tiere,"
-            " Pakete oder ungewöhnliche Aktivität. Beschreibe NICHT die"
-            " Umgebung, Räume, Möbel, Architektur oder Bildqualität und benenne"
-            " KEINE Orte. Rate nicht: Fußmatten, Teppiche, Bodenfliesen und"
-            " Schatten sind kein Paket. Wenn nichts Sicherheitsrelevantes"
-            " erkennbar ist, sage das kurz, z. B.: Keine"
-            " sicherheitsrelevanten Beobachtungen."
+        return await ai_analysis_runtime.async_generate_ai_description(
+            self, cam_id, force=force
         )
-        language = (opts.get("ai_describe_language") or "").strip() or "Deutsch"
-        full_instructions = (
-            f"{prompt}\n\nRespond only in {language}."
-            f" Antworte ausschließlich auf {language}."
-        )
-        ai_task_entity = (opts.get("ai_task_entity") or "").strip()
-        ai_call_data: dict[str, Any] = {
-            "task_name": "Bosch camera snapshot",
-            "instructions": full_instructions,
-            "attachments": [
-                {
-                    "media_content_id": f"media-source://camera/{entity_id}",
-                    "media_content_type": "image/jpeg",
-                }
-            ],
-        }
-        if ai_task_entity:
-            ai_call_data["entity_id"] = ai_task_entity
-        self.ai_in_flight += 1
-        _ai_resp: Any = None
-        _text_result: str | None = None
-        try:
-            async with asyncio.timeout(20):
-                _ai_resp = await self.hass.services.async_call(
-                    "ai_task",
-                    "generate_data",
-                    ai_call_data,
-                    blocking=True,
-                    return_response=True,
-                )
-            if _ai_resp is not None:
-                _text_candidate = (
-                    str(_ai_resp.get("data", ""))
-                    if isinstance(_ai_resp, dict)
-                    else str(_ai_resp or "")
-                ).strip()
-                if _text_candidate:
-                    _text_result = _text_candidate
-                    # Record the call while ai_in_flight is still 1 so the
-                    # budget counter reflects in-progress work correctly.
-                    self.ai_record_call(cam_id)
-        except TimeoutError:
-            _LOGGER.debug("AI description timed out (20s) for %s", cam_id[:8])
-        except Exception as err:
-            _LOGGER.debug("AI description generate failed for %s: %s", cam_id[:8], err)
-        finally:
-            self.ai_in_flight -= 1
-        if _text_result is None:
-            return None
-        text = _text_result
-        generated_at = datetime.now(UTC).isoformat()
-        if cam_id in self.data:
-            self.data[cam_id]["ai_description"] = {
-                "text": text,
-                "generated_at": generated_at,
-                "ai_task_entity": ai_task_entity or "default",
-            }
-            self.async_set_updated_data(self.data)
-        self.hass.bus.async_fire(
-            "bosch_shc_camera_ai_description",
-            {
-                "camera_id": cam_id,
-                "entity_id": entity_id,
-                "description": text,
-                "generated_at": generated_at,
-            },
-        )
-        return text
 
     async def async_fetch_fresh_event_snapshot(self, cam_id: str) -> bytes | None:
         """Fetch fresh events from Bosch API and return the latest event JPEG.
