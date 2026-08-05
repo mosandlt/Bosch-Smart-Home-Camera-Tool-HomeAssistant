@@ -1,7 +1,7 @@
 """AI Camera Analysis — motion-triggered structured suspicion scoring.
 
 Sibling to the free-text AI Snapshot Description feature
-(`coordinator.py`'s `async_generate_ai_description`): that feature asks for
+(`ai_analysis_runtime.py`'s `async_generate_ai_description`): that feature asks for
 a plain description string, this one asks `ai_task.generate_data` for a
 STRUCTURED 1-10 suspicion score + fields, with its own separate
 cooldown/daily-budget so the two AI features never compete for the same
