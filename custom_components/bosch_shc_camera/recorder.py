@@ -27,12 +27,32 @@ import datetime
 import logging
 import math
 import os
-import re
 import shutil
 import signal
 import time
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
+
+from bosch_shc_camera_client.mini_nvr import apply_quality as _lib_apply_quality
+from bosch_shc_camera_client.mini_nvr import build_ffmpeg_args as _lib_build_ffmpeg_args
+from bosch_shc_camera_client.mini_nvr import (
+    build_preroll_ffmpeg_args as _lib_build_preroll_ffmpeg_args,
+)
+from bosch_shc_camera_client.mini_nvr import (
+    create_motion_clip_args as _lib_create_motion_clip_args,
+)
+from bosch_shc_camera_client.mini_nvr import (
+    list_preroll_segments as _lib_list_preroll_segments,
+)
+from bosch_shc_camera_client.mini_nvr import (
+    newest_preroll_path as _lib_newest_preroll_path,
+)
+from bosch_shc_camera_client.mini_nvr import (
+    newest_segment_is_finalized as _lib_newest_segment_is_finalized,
+)
+from bosch_shc_camera_client.mini_nvr import (
+    prune_preroll_cache as _lib_prune_preroll_cache,
+)
 
 from .const import (
     TIMEOUT_RECORDER_FFMPEG_INIT,
@@ -198,20 +218,8 @@ def _remote_ftp_path(opts: dict[str, Any], cam_name: str, date: str, fname: str)
 
 
 def _apply_quality(rtsp_url: str, quality: str) -> str:
-    """Return a copy of rtsp_url with inst= adjusted for the requested quality.
-
-    "low"  → inst=4 (~1.9 Mbps, LOCAL only — REMOTE rejects inst=4)
-    "auto" → inst=1 (~30 Mbps, unchanged)
-    If the URL has no inst= parameter and quality is "low", append &inst=4.
-    Pure function so tests can exercise it without spawning ffmpeg.
-    """
-    if quality != "low":
-        return rtsp_url
-    if "inst=" in rtsp_url:
-        return re.sub(r"inst=\d+", "inst=4", rtsp_url)
-    # No inst= in URL — append it
-    sep = "&" if "?" in rtsp_url else "?"
-    return rtsp_url + sep + "inst=4"
+    """Thin wrapper around bosch_shc_camera_client.mini_nvr.apply_quality."""
+    return _lib_apply_quality(rtsp_url, quality)
 
 
 def _build_ffmpeg_args(
@@ -221,52 +229,13 @@ def _build_ffmpeg_args(
     segment_seconds: int = DEFAULT_SEGMENT_SECONDS,
     quality: str = "auto",
 ) -> list[str]:
-    """Return the exact ffmpeg argv used to record the stream.
-
-    Pure function so tests can pin the wire format without spawning ffmpeg.
-    Pattern is fed to ``-f segment`` via ``-strftime 1`` — ffmpeg substitutes
-    ``%Y/%m/%d/%H/%M`` from the wall clock and creates parent directories
-    implicitly via ``-segment_format mp4`` + ``-strftime_mkdir 1``.
-    Phase 3: pass quality="low" to select inst=4 (~1.9 Mbps) instead of inst=1.
-    """
-    effective_url = _apply_quality(rtsp_url, quality)
-    return [
-        "ffmpeg",
-        "-hide_banner",
-        "-nostdin",
-        "-loglevel",
-        "warning",
-        # Force TCP — RTP-over-UDP through the loopback proxy is fragile and
-        # the TLS proxy already rewrites SETUP to TCP-interleaved anyway.
-        "-rtsp_transport",
-        "tcp",
-        # -reconnect_* are HTTP-only options and crash ffmpeg with rc=8 on
-        # rtsp:// inputs. The watcher (_watch_recorder) handles respawn on
-        # TLS-proxy renewal gaps instead.
-        "-i",
-        effective_url,
-        "-map",
-        "0",  # include all streams (video + AAC audio) — MVP keeps audio per concept §10
-        "-c",
-        "copy",
-        "-f",
-        "segment",
-        "-segment_time",
-        str(segment_seconds),
-        "-segment_format",
-        "mp4",
-        "-segment_atclocktime",
-        "1",
-        "-reset_timestamps",
-        "1",
-        "-strftime",
-        "1",
-        "-strftime_mkdir",
-        "1",
-        "-movflags",
-        "+faststart",
+    """Thin wrapper around bosch_shc_camera_client.mini_nvr.build_ffmpeg_args."""
+    return _lib_build_ffmpeg_args(
+        rtsp_url,
         segment_pattern,
-    ]
+        segment_seconds=segment_seconds,
+        quality=quality,
+    )
 
 
 # ── Phase 4: pre-roll helpers ─────────────────────────────────────────────────
@@ -299,92 +268,44 @@ def _preroll_pattern(cache_dir: str, cam_name: str) -> str:
 
 
 def _newest_preroll_path(cam_dir: str) -> str | None:
-    """Return the currently-newest pre-roll segment path, or None if empty.
+    """Thin wrapper around bosch_shc_camera_client.mini_nvr.newest_preroll_path.
 
     Runs inside an executor job (filesystem I/O). Used by
     `stop_and_finalize_preroll_recorder` to identify the ring's actively-
     written segment *before* stopping it, so the now-finalized file can be
     handed back to the caller once the stop confirms a clean ffmpeg exit.
     """
-    segs = _list_preroll_segments(cam_dir)
-    return segs[-1][0] if segs else None
+    return _lib_newest_preroll_path(cam_dir)
 
 
 def _list_preroll_segments(cam_dir: str) -> list[tuple[str, float]]:
-    """Return [(path, mtime)] sorted oldest-first for one camera's cache dir."""
-    out: list[tuple[str, float]] = []
-    if not os.path.isdir(cam_dir):
-        return out
-    try:
-        names = os.listdir(cam_dir)
-    except OSError:
-        return out
-    for name in names:
-        full = os.path.join(cam_dir, name)
-        if not os.path.isfile(full):
-            continue
-        try:
-            st = os.stat(full)
-        except OSError:
-            continue
-        if st.st_size < _PREROLL_MIN_SIZE_BYTES:
-            continue
-        out.append((full, st.st_mtime))
-    out.sort(key=lambda x: x[1])
-    return out
+    """Thin wrapper around bosch_shc_camera_client.mini_nvr.list_preroll_segments."""
+    return _lib_list_preroll_segments(cam_dir)
 
 
 def prune_preroll_cache(cam_dir: str, max_segments: int) -> int:
-    """Delete oldest segments keeping max_segments newest. Returns count deleted."""
-    segs = _list_preroll_segments(cam_dir)
-    to_delete = segs[: max(0, len(segs) - max_segments)]
-    deleted = 0
-    for path, _ in to_delete:
-        try:
-            os.unlink(path)
-            deleted += 1
-        except OSError:
-            pass
-    return deleted
+    """Thin wrapper around bosch_shc_camera_client.mini_nvr.prune_preroll_cache."""
+    return _lib_prune_preroll_cache(cam_dir, max_segments)
 
 
 def _prune_and_count(cam_dir: str, max_segments: int) -> int:
-    """Prune then return remaining segment count. Runs inside executor job."""
+    """Prune then return remaining segment count. Runs inside an executor job.
+
+    Deliberately calls this module's own `prune_preroll_cache`/
+    `_list_preroll_segments` wrappers rather than the library's
+    `prune_and_count` directly — several tests patch
+    `recorder.prune_preroll_cache` to intercept pruning, which only works
+    if the call stays routed through this module's own namespace.
+    """
     prune_preroll_cache(cam_dir, max_segments)
     return len(_list_preroll_segments(cam_dir))
 
 
 def _build_preroll_ffmpeg_args(rtsp_url: str, pattern: str) -> list[str]:
-    """ffmpeg args for 10 s segments to tmpfs. No -segment_atclocktime, no -strftime_mkdir.
-    No -reconnect* — those are HTTP-only and crash ffmpeg rc=8 on rtsp:// inputs."""
-    return [
-        "ffmpeg",
-        "-hide_banner",
-        "-nostdin",
-        "-loglevel",
-        "warning",
-        "-rtsp_transport",
-        "tcp",
-        "-i",
-        rtsp_url,
-        "-map",
-        "0",
-        "-c",
-        "copy",
-        "-f",
-        "segment",
-        "-segment_time",
-        str(_PREROLL_SEGMENT_SECONDS),
-        "-segment_format",
-        "mp4",
-        "-reset_timestamps",
-        "1",
-        "-strftime",
-        "1",
-        "-movflags",
-        "+faststart",
-        pattern,
-    ]
+    """Thin wrapper around bosch_shc_camera_client.mini_nvr.build_preroll_ffmpeg_args."""
+    return _lib_build_preroll_ffmpeg_args(
+        rtsp_url, pattern, segment_seconds=_PREROLL_SEGMENT_SECONDS
+    )
 
 
 async def _watch_preroll_recorder(
@@ -980,83 +901,30 @@ def list_preroll_files(coordinator: BoschCameraCoordinator, cam_id: str) -> list
 
 
 async def _newest_segment_is_finalized(path: str) -> bool:
-    """Return True if `path` already has a readable duration (moov atom
-    finalized), i.e. ffmpeg has already rotated past it rather than still
-    writing it.
+    """Thin wrapper around bosch_shc_camera_client.mini_nvr.newest_segment_is_finalized.
 
     The post-roll scan always drops the newest ring segment on the
     assumption it might still be mid-write (concatenating a moov-less file
-    produces a broken clip). That's only true while ffmpeg
-    hasn't rotated past it yet. A *timing* heuristic (e.g. "mtime is a few
-    seconds old") would reintroduce exactly that risk on a slow/buffered
-    write, so this proves finalization the same way `-movflags +faststart`
-    itself requires: only a container ffprobe can actually parse (moov atom
-    present at the front) reports a duration — a still-open segment has no
-    moov atom yet and ffprobe fails. False (probe failure, timeout, ffprobe
-    missing) always falls back to the pre-existing drop-newest behavior.
+    produces a broken clip) unless this proves the segment already has a
+    finalized moov atom.
     """
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            path,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-    except (FileNotFoundError, OSError):
-        return False
-    try:
-        stdout_bytes, _ = await asyncio.wait_for(
-            proc.communicate(), timeout=TIMEOUT_RECORDER_SEGMENT_PROBE
-        )
-    except TimeoutError:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=TIMEOUT_RECORDER_KILL_WAIT)
-        except TimeoutError:
-            pass
-        return False
-    if proc.returncode != 0:
-        return False
-    try:
-        return float(stdout_bytes.strip()) > 0
-    except ValueError:
-        return False
+    return await _lib_newest_segment_is_finalized(
+        path,
+        timeout_probe=TIMEOUT_RECORDER_SEGMENT_PROBE,
+        timeout_kill_wait=TIMEOUT_RECORDER_KILL_WAIT,
+    )
 
 
 def create_motion_clip_args(preroll_paths: list[str], output_path: str) -> list[str]:
-    """Return ffmpeg argv to concat preroll_paths into one MP4 clip."""
-    # Build concat list in memory via pipe — use -f concat -safe 0
-    # The actual concat file is written by create_motion_clip before calling ffmpeg.
-    concat_file = output_path + ".concat.txt"
-    return [
-        "ffmpeg",
-        "-hide_banner",
-        "-nostdin",
-        "-loglevel",
-        "warning",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        concat_file,
-        "-c",
-        "copy",
-        "-movflags",
-        "+faststart",
-        "-y",
-        output_path,
-    ]
+    """Thin wrapper around bosch_shc_camera_client.mini_nvr.create_motion_clip_args.
+
+    `preroll_paths` is unused here (kept for backward compatibility with
+    existing call sites/tests) — the actual concat-list file contents are
+    built by `create_motion_clip` before this returns its ffmpeg argv, same
+    as before this was extracted.
+    """
+    del preroll_paths
+    return _lib_create_motion_clip_args(output_path)
 
 
 def _stage_segments_for_concat(paths: list[str], stage_dir: str) -> list[str]:

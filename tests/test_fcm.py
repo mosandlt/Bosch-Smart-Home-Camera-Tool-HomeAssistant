@@ -3144,9 +3144,9 @@ class TestAlertTimestampNone:
 
 
 class TestFcmSafeBoschUrl:
-    """`fcm.py` has its own copy of `_is_safe_bosch_url` (alongside the one
-    in `__init__.py` / `smb.py`). All copies must enforce identical rules —
-    divergence opens an SSRF window in one of the alert paths.
+    """`fcm.py` aliases `bosch_shc_camera_client.media_transfer.is_safe_bosch_url`
+    as `_is_safe_bosch_url` — this pins the alert-path behavior against the
+    shared library implementation.
     """
 
     @pytest.mark.parametrize(

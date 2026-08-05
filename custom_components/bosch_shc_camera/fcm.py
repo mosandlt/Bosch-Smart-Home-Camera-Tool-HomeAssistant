@@ -20,17 +20,21 @@ import os
 import ssl
 import time
 from typing import TYPE_CHECKING, Any, ClassVar
-from urllib.parse import urlparse
 
 import aiohttp
+from bosch_shc_camera_client.media_transfer import (
+    is_safe_bosch_url as _is_safe_bosch_url,
+)
 from homeassistant.util import dt as dt_util
 
 from .cloud_ssl import async_get_bosch_cloud_session
 from .recorder import assemble_and_ship_motion_clip, should_record
 from .snapshot_store import save_snapshot
 
-# ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
-_SAFE_DOMAINS = frozenset({".boschsecurity.com", ".bosch.com"})
+# `_is_safe_bosch_url` was previously a byte-identical copy duplicated across
+# fcm.py/smb.py/coordinator.py — now a single shared implementation in
+# bosch_shc_camera_client.media_transfer, aliased here to keep the private
+# name every call site in this file already uses.
 
 # Event types that carry image data and warrant a live-snapshot refresh (Path A).
 # Status-only types (connectivity events) are excluded — they carry no image
@@ -39,24 +43,6 @@ _SAFE_DOMAINS = frozenset({".boschsecurity.com", ".bosch.com"})
 _SNAP_EVENT_TYPES = frozenset(
     {"MOVEMENT", "PERSON", "VEHICLE", "ANIMAL", "AUDIO_ALARM", "BABY_CRY"}
 )
-
-
-def _is_safe_bosch_url(url: str) -> bool:
-    """Validate that a URL points to a known Bosch domain (HTTPS only).
-
-    ``urlparse`` can raise ``ValueError`` on malformed input (unmatched IPv6
-    brackets, invalid NFKC-normalized netloc) — fail closed rather than let
-    it propagate to callers that don't expect it.
-    """
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return False
-    return (
-        parsed.scheme == "https"
-        and parsed.hostname is not None
-        and any(parsed.hostname.endswith(d) for d in _SAFE_DOMAINS)
-    )
 
 
 def _safe_path_segment(seg: str) -> str:

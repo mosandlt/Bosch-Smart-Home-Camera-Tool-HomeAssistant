@@ -20,6 +20,9 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import aiohttp
+from bosch_shc_camera_client.media_transfer import (
+    is_safe_bosch_url as _lib_is_safe_bosch_url,
+)
 
 if TYPE_CHECKING:
     from .maintenance import MaintenanceWindow
@@ -170,23 +173,12 @@ except Exception:  # pragma: no cover — manifest.json ships with the package; 
 # ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
 _SAFE_DOMAINS = frozenset({".boschsecurity.com", ".bosch.com"})
 
-
-def _is_safe_bosch_url(url: str) -> bool:
-    """Validate that a URL points to a known Bosch domain (HTTPS only).
-
-    ``urlparse`` can raise ``ValueError`` on malformed input (unmatched IPv6
-    brackets, invalid NFKC-normalized netloc) — fail closed rather than let
-    it propagate to callers that don't expect it.
-    """
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return False
-    return (
-        parsed.scheme == "https"
-        and parsed.hostname is not None
-        and any(parsed.hostname.endswith(d) for d in _SAFE_DOMAINS)
-    )
+# `_is_safe_bosch_url` was previously a byte-identical copy duplicated across
+# fcm.py/smb.py/coordinator.py — now a single shared implementation in
+# bosch_shc_camera_client.media_transfer, aliased here to keep the private
+# name every call site in this file already uses. `_SAFE_DOMAINS` stays
+# local since `_is_safe_bosch_host` below still uses it directly.
+_is_safe_bosch_url = _lib_is_safe_bosch_url
 
 
 def _is_safe_bosch_host(host_and_port: str) -> bool:

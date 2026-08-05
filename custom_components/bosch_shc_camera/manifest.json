@@ -20,7 +20,7 @@
   ],
   "quality_scale": "platinum",
   "requirements": [
-    "bosch-shc-camera-client>=0.5.6,<0.6",
+    "bosch-shc-camera-client>=0.5.8,<0.6",
     "defusedxml>=0.7.1",
     "firebase-messaging>=0.4.5,<1",
     "smbprotocol>=1.10.0,<2"

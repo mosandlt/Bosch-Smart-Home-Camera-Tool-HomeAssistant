@@ -7,6 +7,59 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+Internal — re-evaluated `smb.py` for further client-library extraction (an
+earlier session had rejected it wholesale as too coordinator-coupled; this
+pass went function-by-function instead). Moved the genuinely pure/stateless
+pieces to `bosch-shc-camera-client` v0.5.7's new `media_transfer` module:
+`is_safe_bosch_url` (was a byte-identical copy duplicated three times across
+this repo — `smb.py`, `fcm.py`, `coordinator.py`; only the `smb.py` copy was
+replaced this round, the other two are unchanged, flagged as a follow-up),
+`sanitize_filename` (camera-name/path sanitizer), the synchronous
+urllib-based `sync_http_get`/`sync_http_get_to_file`/`sync_http_get_chunked`
+(Bearer-token cloud media download, the sync GET-side sibling of `cloud.py`'s
+async `cloud_put_json`), and plain-FTP mechanics `ftp_connect`/`ftp_exists`/
+`ftp_makedirs`. `smb.py` keeps identical public names/signatures for every
+symbol other modules import (`recorder.py`/`sensor.py`/`ai_alert_store.py`
+still do `from .smb import _safe_name`, etc.) — these are now thin
+module-level re-exports/wrappers, not a call-site change. Deliberately left
+in place: `smb_makedirs` (uses the optional `smbclient` dependency, kept out
+of the library to avoid adding that dependency surface for every library
+consumer) and every coordinator-coupled function (`sync_smb_upload`,
+`sync_smb_cleanup`, `_fire_cleanup_alert`, `_async_cleanup_alert`,
+`smb_available`, `smb_dependent_features`, `sync_local_save`, and the
+`_sync_smb_upload_events`/`_sync_ftp_upload`/`_sync_ftp_cleanup`
+orchestration loops), all of which read `coordinator.hass`/`.options` or
+dispatch HA events/notifications directly. Zero behavior change — verified
+via the full pre-existing `tests/test_smb*.py` suite passing unchanged
+(6420 passed, 1 skipped, same as the pre-change baseline), plus 21 new tests
+in the library repo. `ruff format --check` / `ruff check` / `mypy --strict` /
+`codespell` / `pylint` clean, 100% coverage maintained in both repos.
+
+Follow-up: closed the `is_safe_bosch_url` dedup gap for the other two copies
+— `fcm.py` and `coordinator.py` now alias the same shared
+`bosch_shc_camera_client.media_transfer.is_safe_bosch_url` instead of
+carrying their own byte-identical copies. No version bump needed (the
+function already shipped in 0.5.7). Zero behavior change.
+
+Also re-evaluated `recorder.py` (Mini-NVR ffmpeg subprocess manager) for
+the same kind of extraction. Moved a scoped, well-understood first slice to
+`bosch-shc-camera-client` v0.5.8's new `mini_nvr` module: the pure ffmpeg
+argv builders (`apply_quality`, `build_ffmpeg_args`,
+`build_preroll_ffmpeg_args`, `create_motion_clip_args`), the pure pre-roll
+ring cache filesystem mechanics (`list_preroll_segments`,
+`newest_preroll_path`, `prune_preroll_cache`), and
+`newest_segment_is_finalized` (one `ffprobe` subprocess call proving
+moov-atom finalization). The bulk of `recorder.py` — per-camera subprocess
+lifecycle, coordinator locks/caches, crash-respawn bookkeeping, and the
+staging/concat orchestration around these helpers — stays in the
+integration, genuinely coupled. `recorder.py` keeps identical function
+names/signatures as thin wrappers (`_prune_and_count` deliberately keeps
+its pruning call routed through this module's own `prune_preroll_cache`
+rather than the library's internal one, since several tests patch it at
+that exact point). Zero behavior change — verified via the full test suite
+(6421 passed, 100% coverage, same as the pre-change baseline) plus 31 new
+tests in the library repo.
+
 ## [v16.1.6] - 2026-08-05
 
 Patch — a Home Assistant integration-quality audit (Bronze through Platinum

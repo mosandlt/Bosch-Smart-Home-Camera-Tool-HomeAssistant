@@ -9,7 +9,6 @@ from __future__ import annotations
 import calendar
 import logging
 import os
-import re
 import socket
 import ssl
 import threading
@@ -18,35 +17,48 @@ import urllib.error
 import urllib.request
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+
+from bosch_shc_camera_client.media_transfer import ftp_connect as _lib_ftp_connect
+from bosch_shc_camera_client.media_transfer import ftp_exists as _lib_ftp_exists
+from bosch_shc_camera_client.media_transfer import ftp_makedirs as _lib_ftp_makedirs
+from bosch_shc_camera_client.media_transfer import (
+    is_safe_bosch_url as _lib_is_safe_bosch_url,
+)
+from bosch_shc_camera_client.media_transfer import (
+    sanitize_filename as _lib_sanitize_filename,
+)
+from bosch_shc_camera_client.media_transfer import sync_http_get as _lib_sync_http_get
+from bosch_shc_camera_client.media_transfer import (
+    sync_http_get_chunked as _lib_sync_http_get_chunked,
+)
+from bosch_shc_camera_client.media_transfer import (
+    sync_http_get_to_file as _lib_sync_http_get_to_file,
+)
 
 if TYPE_CHECKING:
     from . import BoschCameraCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-
-# ── URL allowlist for image/video downloads (SSRF prevention) ────────────────
-_SAFE_DOMAINS = frozenset({".boschsecurity.com", ".bosch.com"})
-
-
-def _is_safe_bosch_url(url: str) -> bool:
-    """Validate that a URL points to a known Bosch domain (HTTPS only).
-
-    ``urlparse`` can raise ``ValueError`` on malformed input (unmatched IPv6
-    brackets, invalid NFKC-normalized netloc) — fail closed rather than let
-    it propagate to callers that don't expect it (backported from the Core
-    PR's Copilot review round 18, 2026-08-04).
-    """
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return False
-    return (
-        parsed.scheme == "https"
-        and parsed.hostname is not None
-        and any(parsed.hostname.endswith(d) for d in _SAFE_DOMAINS)
-    )
+# `_is_safe_bosch_url`, `_safe_name`, `_ftp_connect`/`_ftp_exists`/
+# `_ftp_makedirs` are now thin re-exports of the pure
+# `bosch_shc_camera_client.media_transfer` module (zero coordinator/HA
+# coupling — extracted 2026-08-05, see CHANGELOG.md). Assigned via a plain
+# module-level binding (not `import x as x`) so `recorder.py`/`sensor.py`/
+# `ai_alert_store.py`'s existing `from .smb import _safe_name` (and
+# `recorder.py`'s `_ftp_connect`/`_ftp_makedirs`) keep working unchanged —
+# `mypy --strict`'s `no_implicit_reexport` only requires special handling for
+# a *renamed* import alias, not for an ordinary name binding.
+# `_is_safe_bosch_url` was previously a byte-identical copy duplicated three
+# times across this repo (smb.py/fcm.py/coordinator.py) — this module now
+# calls the library's single canonical implementation; the other two copies
+# are unchanged this round (out of scope — see task notes) but are candidates
+# for the same dedup in a future pass.
+_is_safe_bosch_url = _lib_is_safe_bosch_url
+_safe_name = _lib_sanitize_filename
+_ftp_connect = _lib_ftp_connect
+_ftp_exists = _lib_ftp_exists
+_ftp_makedirs = _lib_ftp_makedirs
 
 
 _SSL_CTX: ssl.SSLContext | None = None
@@ -86,10 +98,15 @@ def _http_get(
     Returns (status_code, body_bytes).  For streaming downloads use
     _http_get_chunked() instead so memory stays bounded.
     If the request fails with a network error, raises urllib.error.URLError or OSError.
+
+    Thin wrapper around `bosch_shc_camera_client.media_transfer.sync_http_get`
+    supplying this module's cached, pinned SSL context — kept as a
+    same-signature local wrapper (rather than a straight re-export like
+    `_is_safe_bosch_url`/`_safe_name`) because the library function is pure
+    and takes an explicit `ssl_context` param, while every caller here
+    expects the pre-v16.1.6 two-arg call shape.
     """
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
-    with urllib.request.urlopen(req, context=_bosch_ssl_ctx(), timeout=timeout) as r:  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
-        return r.status, r.read()
+    return _lib_sync_http_get(url, token, _bosch_ssl_ctx(), timeout=timeout)
 
 
 def _http_get_to_file(url: str, token: str, dest_path: str, timeout: int = 60) -> bool:
@@ -97,18 +114,11 @@ def _http_get_to_file(url: str, token: str, dest_path: str, timeout: int = 60) -
 
     Returns True on success (HTTP 200), False on non-200.
     Raises urllib.error.URLError / OSError on network failure.
+    See `_http_get` docstring re: thin-wrapper rationale.
     """
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
-    with urllib.request.urlopen(req, context=_bosch_ssl_ctx(), timeout=timeout) as r:  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
-        if r.status != 200:
-            return False
-        with open(dest_path, "wb") as f:
-            while True:
-                chunk = r.read(65536)
-                if not chunk:
-                    break
-                f.write(chunk)
-    return True
+    return _lib_sync_http_get_to_file(
+        url, token, dest_path, _bosch_ssl_ctx(), timeout=timeout
+    )
 
 
 def _http_get_chunked(url: str, token: str, timeout: int = 60) -> Any:
@@ -119,9 +129,10 @@ def _http_get_chunked(url: str, token: str, timeout: int = 60) -> Any:
             if r.status == 200:
                 while chunk := r.read(65536):
                     ...
+
+    See `_http_get` docstring re: thin-wrapper rationale.
     """
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
-    return urllib.request.urlopen(req, context=_bosch_ssl_ctx(), timeout=timeout)  # noqa: S310 # Bosch cloud URL, https+bearer, caller must validate via _is_safe_bosch_url
+    return _lib_sync_http_get_chunked(url, token, _bosch_ssl_ctx(), timeout=timeout)
 
 
 def smb_available() -> bool:
@@ -172,14 +183,6 @@ def smb_dependent_features(opts: dict[str, Any]) -> list[str]:
     ):
         features.append("Mini-NVR SMB storage")
     return features
-
-
-def _safe_name(name: str) -> str:
-    """Sanitize a camera name for use as a directory/file name component.
-
-    Removes path traversal sequences and non-safe characters, truncates to 64 chars.
-    """
-    return re.sub(r"[^\w\-. ]", "_", name.replace("..", "_"))[:64]
 
 
 # ── Local save (FCM-triggered, runs in executor thread) ───────────────────────
@@ -729,42 +732,6 @@ async def _async_cleanup_alert(
 # is ~75 file/s on the same hardware. FTP backend reuses smb_* options
 # (server / username / password / base_path / patterns); smb_share is unused
 # because FTP has no shares — the base_path is relative to the FTP root.
-
-
-def _ftp_connect(server: str, username: str, password: str) -> Any:
-    """Open a passive-mode FTP connection. Caller closes via .quit()."""
-    import ftplib
-
-    ftp = ftplib.FTP(server, timeout=30)  # noqa: S321 # FTP ist eine bewusst konfigurierbare Upload-Zieloption (smb.py FTP-Pfad)
-    ftp.login(username, password)
-    ftp.set_pasv(True)
-    return ftp
-
-
-def _ftp_exists(ftp: Any, path: str) -> bool:
-    import ftplib
-
-    try:
-        ftp.size(path)
-        return True
-    except ftplib.error_perm:
-        return False
-    except Exception:
-        return False
-
-
-def _ftp_makedirs(ftp: Any, path: str) -> None:
-    """Create FTP directories recursively, ignoring already-exists errors."""
-    import ftplib
-
-    parts = [p for p in path.split("/") if p]
-    current = ""
-    for part in parts:
-        current = f"{current}/{part}"
-        try:
-            ftp.mkd(current)
-        except ftplib.error_perm:
-            pass  # already exists or permission — ignore
 
 
 def _sync_ftp_upload(
