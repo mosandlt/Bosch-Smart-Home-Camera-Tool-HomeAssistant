@@ -9,6 +9,9 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [v16.1.6] - 2026-08-05
 
+- **Mini-NVR pre-roll ring (and the continuous recorder) could hang completely silently, producing zero output forever** (GitHub [#64](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/64), Lawyer82). Both ffmpeg spawns piped `stderr` but nothing read it while the process ran — only after it exited. On a flaky RTSP source, enough `-loglevel warning` output fills the OS pipe buffer and ffmpeg's own `write()` to its stderr blocks forever: the process never exits, never crashes, never logs anything, and produces no output — exactly the reported symptom (debug logs showed "NVR pre-roll starting", the cache directory stayed empty forever). Fixed with a live background stderr-drain task for the lifetime of each ffmpeg process, keeping a small rolling tail for crash diagnostics instead of the old post-exit-only read. Proven against a real OS pipe deadlock (not just theorized) with a dedicated regression test, plus a 3-agent adversarial review confirming the wiring itself is covered (an earlier draft of the fix had zero test coverage on whether the drain was actually attached at the real spawn call sites — closed before merge).
+- Bumped the CI test harness to Home Assistant 2026.8.0b5 (was 2026.6.0b2) — no code changes required, full suite green.
+
 Internal — re-evaluated `smb.py` for further client-library extraction (an
 earlier session had rejected it wholesale as too coordinator-coupled; this
 pass went function-by-function instead). Moved the genuinely pure/stateless
