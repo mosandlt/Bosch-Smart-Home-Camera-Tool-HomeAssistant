@@ -175,11 +175,9 @@ VIDEO_INPUTS_RETRY_DELAY_SEC = 3.0
 LAN_RECHECK_FORCE_INTERVAL_SEC = 600.0
 
 # Subprocess-lifecycle timeouts (recorder.py). Grace = SIGTERM→SIGKILL window;
-# kill_wait = post-SIGKILL wait_for; stderr_drain = drain pipe before close;
-# ffmpeg_init = NVR FFmpeg process init wait.
+# kill_wait = post-SIGKILL wait_for; ffmpeg_init = NVR FFmpeg process init wait.
 TIMEOUT_RECORDER_GRACE = 20.0
 TIMEOUT_RECORDER_KILL_WAIT = 2.0
-TIMEOUT_RECORDER_STDERR_DRAIN = 1.0
 TIMEOUT_RECORDER_FFMPEG_INIT = 30.0
 TIMEOUT_RECORDER_SEGMENT_PROBE = 5.0
 

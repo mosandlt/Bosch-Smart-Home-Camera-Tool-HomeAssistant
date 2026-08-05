@@ -187,8 +187,9 @@ async def _drain_stderr_live(
             if not chunk:
                 return
             tail.data = (tail.data + chunk)[-_STDERR_TAIL_MAX_BYTES:]
-    except (ValueError, ConnectionError):
-        # Reading from an already-closed/broken pipe — nothing more to drain.
+    except (ValueError, OSError):
+        # Reading from an already-closed/broken pipe (ConnectionError and
+        # rarer OSError variants like EIO alike) — nothing more to drain.
         return
 
 

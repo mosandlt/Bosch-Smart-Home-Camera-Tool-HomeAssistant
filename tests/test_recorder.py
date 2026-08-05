@@ -2520,6 +2520,38 @@ class TestStartRecorder:
         assert (tmp_path / "_staging" / "Terrasse").exists()
 
     @pytest.mark.asyncio
+    async def test_happy_path_wires_live_stderr_drain(self, tmp_path: Path):
+        """GitHub #64 regression guard: proves the WIRING, not just that
+        `_drain_stderr_live` works in isolation. A mutation deleting the
+        `_spawn_stderr_drain_task(...)` call at the real `_start_recorder_
+        locked` call site (or reverting to the old post-exit-only read)
+        left every other test in this file passing — nothing asserted the
+        drain is actually attached to the real spawned process. This
+        directly patches `_spawn_stderr_drain_task` and asserts it fires
+        exactly once, with the process just spawned and this camera's id,
+        so deleting/breaking that call site is caught here."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        proc = _mock_proc(returncode=None)
+
+        async def _spawn(*args, **kwargs):
+            return proc
+
+        with (
+            patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn),
+            patch.object(recorder, "_spawn_stderr_drain_task") as drain_spawn,
+        ):
+            await recorder.start_recorder(coord, CAM_ID)
+
+        drain_spawn.assert_called_once()
+        call_coord, call_cam_id, call_proc = drain_spawn.call_args.args[:3]
+        assert call_coord is coord
+        assert call_cam_id == CAM_ID
+        assert call_proc is proc
+        assert drain_spawn.call_args.kwargs["name_prefix"] == "bosch_nvr_stderr_drain"
+
+    @pytest.mark.asyncio
     async def test_successful_spawn_clears_stale_error_state(self, tmp_path: Path):
         """Issue #42: nvr_error_state must not stay stuck showing "error"
         forever after a give-up — a fresh successful spawn (manual toggle,
@@ -3660,6 +3692,40 @@ class TestStartPrerollRecorder:
         assert prune_calls[0][1] == 4
 
     @pytest.mark.asyncio
+    async def test_happy_path_wires_live_stderr_drain(self, tmp_path: Path):
+        """GitHub #64 regression guard for the pre-roll ring spawn path —
+        same rationale as the main recorder's sibling test above: proves
+        `_spawn_stderr_drain_task` is actually wired to the real spawned
+        preroll process at `_spawn_preroll_recorder_locked`'s real call
+        site, not just that the drain function works when called directly."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
+        coord.options["nvr_preroll_seconds"] = 30
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
+        proc = _mock_proc(returncode=None)
+
+        async def _spawn(*_args, **_kwargs):
+            return proc
+
+        with (
+            patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn),
+            patch.object(recorder, "_spawn_stderr_drain_task") as drain_spawn,
+        ):
+            await recorder.start_preroll_recorder(coord, CAM_ID)
+
+        drain_spawn.assert_called_once()
+        call_coord, call_cam_id, call_proc = drain_spawn.call_args.args[:3]
+        assert call_coord is coord
+        assert call_cam_id == CAM_ID
+        assert call_proc is proc
+        assert (
+            drain_spawn.call_args.kwargs["name_prefix"]
+            == "bosch_nvr_preroll_stderr_drain"
+        )
+
+    @pytest.mark.asyncio
     async def test_orphan_sweep_failure_swallowed_spawn_still_succeeds(
         self, tmp_path: Path
     ):
@@ -4597,6 +4663,31 @@ class TestWatchRecorder:
         # ENOSPC marker in the pre-populated tail must have been detected —
         # proves the tail buffer, not proc.stderr, is the diagnostic source.
         assert coord.nvr_error_state.get(CAM_ID) == "disk full"
+
+    @pytest.mark.asyncio
+    async def test_logs_stderr_tail_on_crash(self, caplog):
+        """Sibling to `_watch_preroll_health`'s identical test — the main
+        recorder's crash WARNING must actually contain real stderr content
+        pulled from the live-drained tail, not just fire some log line.
+        Mutation-tested gap: this assertion did not previously exist for
+        the main recorder path (only the preroll ring had it)."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = _mock_proc(returncode=-11)
+        proc.wait = AsyncMock(return_value=-11)
+        coord.nvr_processes[CAM_ID] = proc
+        tail = recorder._StderrTail(data=b"Non-monotonic DTS in output stream")
+
+        with (
+            patch.object(recorder, "start_recorder", new=AsyncMock()),
+            patch.object(asyncio, "sleep", new=AsyncMock()),
+            caplog.at_level("WARNING"),
+        ):
+            await recorder._watch_recorder(coord, CAM_ID, proc, tail)
+
+        assert any("exited rc=" in rec.message for rec in caplog.records)
+        assert any("Non-monotonic DTS" in rec.message for rec in caplog.records)
 
 
 class TestDrainStderrLive:
