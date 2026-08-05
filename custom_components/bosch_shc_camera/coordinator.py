@@ -77,6 +77,12 @@ from .go2rtc_client import (
 from .live_connection import try_live_connection_inner
 from .lock_utils import get_or_create_lock
 from .rcp import async_update_rcp_data
+
+# These 4 are re-exported for backward-compat imports only — they are plain
+# module-level helpers in rcp_client.py, not coordinator methods, so
+# rcp_client.py's own internal callers use them directly (not via this
+# coordinator alias). Patching `coordinator._is_safe_bosch_host` etc. will
+# NOT affect rcp_client.py's own internal use of these functions.
 from .rcp_client import (
     _SAFE_DOMAINS as _SAFE_DOMAINS,
 )

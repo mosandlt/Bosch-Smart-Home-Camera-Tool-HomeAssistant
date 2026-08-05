@@ -440,6 +440,6 @@ async def _fetch_rcp_lan(
     except (TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.debug("_fetch_rcp_lan: %s@%s %s", opcode_hex, ip, err)
         return None
-    except Exception as err:  # pragma: no cover
+    except Exception as err:
         _LOGGER.debug("_fetch_rcp_lan: %s@%s unexpected: %s", opcode_hex, ip, err)
         return None

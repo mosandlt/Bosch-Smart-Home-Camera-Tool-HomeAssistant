@@ -382,6 +382,23 @@ class TestRcpRead:
         coord._invalidate_rcp_session.assert_called_once_with("abc123")
 
     @pytest.mark.asyncio
+    async def test_401_derives_proxy_hash_via_coordinator_instance(self) -> None:
+        """Virtual-dispatch guard: rcp_read must derive the proxy hash via
+        `coordinator._proxy_hash_from_rcp_base(...)`, not the raw module
+        function — an instance-level override must be honored."""
+        coord = _make_coord()
+        coord._proxy_hash_from_rcp_base = MagicMock(return_value="overridden-hash")
+        coord._invalidate_rcp_session = MagicMock()
+        with patch(
+            f"{PKG_MODULE}.async_get_bosch_cloud_session",
+            AsyncMock(return_value=self._session(_resp_cm(401))),
+        ):
+            result = await rcp_client.rcp_read(coord, RCP_BASE, "0x099e", "sess-1")
+        assert result is None
+        coord._proxy_hash_from_rcp_base.assert_called_once_with(RCP_BASE)
+        coord._invalidate_rcp_session.assert_called_once_with("overridden-hash")
+
+    @pytest.mark.asyncio
     async def test_403_invalidates_session(self) -> None:
         coord = _make_coord()
         coord._invalidate_rcp_session = MagicMock()
@@ -496,6 +513,7 @@ class TestFetchRcpLan:
         ):
             result = await rcp_client._fetch_rcp_lan(coord, CAM_A, "0x0a98")
         assert result == bytes.fromhex("deadbeef")
+        coord._clear_rcp_lan_denied.assert_called_once_with(CAM_A, "0x0a98")
 
     @pytest.mark.asyncio
     async def test_401_marks_denied_via_coordinator_instance(self) -> None:
