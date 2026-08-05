@@ -36,9 +36,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
@@ -843,7 +843,172 @@ class BoschAudioSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschCameraLightSwitch(_BoschSwitchBase):
+@dataclass(frozen=True, kw_only=True)
+class BoschDelegatedSwitchEntityDescription(SwitchEntityDescription):  # type: ignore[misc]
+    """Describes a Bosch camera switch whose entire write path is delegated to
+    a `shc.py` cloud-setter coroutine (reached via `SHCCoordinatorMixin`) that
+    already owns the full endpoint selection, Gen1-vs-Gen2 branching,
+    dual-endpoint writes (e.g. wallwasher's brightness-restore + topdown PUT),
+    lock/SHC-fallback cascade, and cache-write logic.
+
+    Unlike `BoschSwitchEntityDescription` (which owns the PUT itself via
+    `_async_apply_toggle`), these switches never touch an endpoint or a
+    request body directly — they only read one field out of
+    `coordinator.shc_state_cache[cam_id]` and call `write_fn`, which returns
+    a plain success bool the entity turns into a `_warn_write_failed()` call
+    on failure. `write_fn` closes over the coordinator method plus any extra
+    positional args (e.g. the `component` string for
+    `async_cloud_set_light_component`), so the same generic entity covers
+    both 2-arg (`async_cloud_set_camera_light`) and 3-arg
+    (`async_cloud_set_light_component`) cloud setters without change — the
+    coordinator-side write logic (Gen1/Gen2 branching, brightness
+    save/restore, SHC fallback) is completely untouched by this refactor.
+
+    `require_online=False` + `require_field_present=True` reproduces
+    `BoschNotificationsSwitch`'s one genuine behavioral difference from its
+    3 siblings: cloud-only availability (no `is_camera_online()` gate) that
+    instead gates on the cache already holding a value. `is_on_transform`,
+    when set, is Notifications' three-state-to-bool mapping — the other 3
+    switches read a plain bool straight out of the cache.
+    """
+
+    unique_id_prefix: str = ""
+    shc_field: str = ""
+    is_on_transform: Callable[[Any], bool] | None = None
+    write_fn: Callable[[BoschCameraCoordinator, str, bool], Awaitable[bool]] | None = (
+        None
+    )
+    write_fail_label: str = ""
+    require_online: bool = True
+    require_field_present: bool = False
+
+
+class BoschDelegatedSwitchEntity(_BoschSwitchBase):
+    """Generic Bosch camera switch driven by a
+    `BoschDelegatedSwitchEntityDescription` — see its docstring for the
+    delegated-write model and the one genuine divergence
+    (`require_online`/`require_field_present`/`is_on_transform`).
+    """
+
+    entity_description: BoschDelegatedSwitchEntityDescription
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+        description: BoschDelegatedSwitchEntityDescription,
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self.entity_description = description
+        self._attr_unique_id = f"{description.unique_id_prefix}_{cam_id.lower()}"
+        self._attr_translation_key = description.translation_key
+        if description.entity_category is not None:
+            self._attr_entity_category = description.entity_category
+
+    @property
+    def _raw_cache_value(self) -> Any:
+        return self.coordinator.shc_state_cache.get(self._cam_id, {}).get(
+            self.entity_description.shc_field
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        raw = self._raw_cache_value
+        if raw is None:
+            return None
+        transform = self.entity_description.is_on_transform
+        if transform is not None:
+            return transform(raw)
+        return raw  # type: ignore[no-any-return]  # correct at runtime; cache is Any-typed
+
+    @property
+    def available(self) -> bool:
+        description = self.entity_description
+        if not self.coordinator.last_update_success:
+            return False
+        if description.require_online and not self.coordinator.is_camera_online(
+            self._cam_id
+        ):
+            return False
+        if description.require_field_present and self._raw_cache_value is None:
+            return False
+        return True
+
+    async def _apply(self, desired: bool) -> None:
+        description = self.entity_description
+        if description.write_fn is None:
+            raise NotImplementedError
+        success = await description.write_fn(self.coordinator, self._cam_id, desired)
+        if not success:
+            self._warn_write_failed(
+                description.write_fail_label, "ON" if desired else "OFF"
+            )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._apply(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._apply(False)
+
+
+CAMERA_LIGHT_DESCRIPTION = BoschDelegatedSwitchEntityDescription(
+    key="camera_light",
+    translation_key="camera_light",
+    unique_id_prefix="bosch_shc_light",
+    shc_field="camera_light",
+    write_fn=lambda coord, cam_id, val: coord.async_cloud_set_camera_light(cam_id, val),
+    write_fail_label="Camera light",
+)
+
+FRONT_LIGHT_DESCRIPTION = BoschDelegatedSwitchEntityDescription(
+    key="front_light",
+    translation_key="front_light",
+    entity_category=EntityCategory.CONFIG,
+    unique_id_prefix="bosch_shc_front_light",
+    shc_field="front_light",
+    write_fn=lambda coord, cam_id, val: coord.async_cloud_set_light_component(
+        cam_id, "front", val
+    ),
+    write_fail_label="Front light",
+)
+
+WALLWASHER_DESCRIPTION = BoschDelegatedSwitchEntityDescription(
+    key="wallwasher",
+    translation_key="wallwasher",
+    entity_category=EntityCategory.CONFIG,
+    unique_id_prefix="bosch_shc_wallwasher",
+    shc_field="wallwasher",
+    write_fn=lambda coord, cam_id, val: coord.async_cloud_set_light_component(
+        cam_id, "wallwasher", val
+    ),
+    write_fail_label="Wallwasher",
+)
+
+# Both FOLLOW_CAMERA_SCHEDULE and ON_CAMERA_SCHEDULE map to switch state ON;
+# only ALWAYS_OFF (or an unfetched None) is OFF/unknown.
+_NOTIFICATIONS_ON_STATES: frozenset[str] = frozenset(
+    {"FOLLOW_CAMERA_SCHEDULE", "ON_CAMERA_SCHEDULE"}
+)
+
+NOTIFICATIONS_DESCRIPTION = BoschDelegatedSwitchEntityDescription(
+    key="notifications",
+    translation_key="notifications",
+    entity_category=EntityCategory.CONFIG,
+    unique_id_prefix="bosch_shc_notifications",
+    shc_field="notifications_status",
+    is_on_transform=lambda status: status in _NOTIFICATIONS_ON_STATES,
+    write_fn=lambda coord, cam_id, val: coord.async_cloud_set_notifications(
+        cam_id, val
+    ),
+    write_fail_label="Notifications",
+    require_online=False,
+    require_field_present=True,
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschCameraLightSwitch(BoschDelegatedSwitchEntity):
     """Switch: ON = camera indicator LED on, OFF = LED off.
 
     Only registered for cameras with featureSupport.light = True (from cloud API).
@@ -855,45 +1020,11 @@ class BoschCameraLightSwitch(_BoschSwitchBase):
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_light_{cam_id.lower()}"
-        self._attr_translation_key = "camera_light"
-
-    @property
-    def is_on(self) -> bool | None:
-        return self.coordinator.shc_state_cache.get(self._cam_id, {}).get(  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
-            "camera_light"
-        )
-
-    @property
-    def available(self) -> bool:
-        """Available when coordinator is running, camera online, and light support present.
-
-        Control uses cloud API (PUT /v11/video_inputs/{id}/lighting_override).
-        Requires camera ONLINE: light control needs camera to respond.
-        """
-        return (  # type: ignore[no-any-return]
-            self.coordinator.last_update_success
-            and self.coordinator.is_camera_online(self._cam_id)
-        )
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_cloud_set_camera_light(
-            self._cam_id, True
-        )
-        if not success:
-            self._warn_write_failed("Camera light", "ON")
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_cloud_set_camera_light(
-            self._cam_id, False
-        )
-        if not success:
-            self._warn_write_failed("Camera light", "OFF")
+        super().__init__(coordinator, cam_id, entry, CAMERA_LIGHT_DESCRIPTION)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschFrontLightSwitch(_BoschSwitchBase):
+class BoschFrontLightSwitch(BoschDelegatedSwitchEntity):
     """Switch: front spotlight on/off (independent of wallwasher).
 
     Uses cloud API: PUT /v11/video_inputs/{id}/lighting_override
@@ -903,34 +1034,11 @@ class BoschFrontLightSwitch(_BoschSwitchBase):
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_front_light_{cam_id.lower()}"
-        self._attr_translation_key = "front_light"
-        self._attr_entity_category = EntityCategory.CONFIG
-
-    @property
-    def is_on(self) -> bool | None:
-        return self.coordinator.shc_state_cache.get(self._cam_id, {}).get(  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
-            "front_light"
-        )
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_cloud_set_light_component(
-            self._cam_id, "front", True
-        )
-        if not success:
-            self._warn_write_failed("Front light", "ON")
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_cloud_set_light_component(
-            self._cam_id, "front", False
-        )
-        if not success:
-            self._warn_write_failed("Front light", "OFF")
+        super().__init__(coordinator, cam_id, entry, FRONT_LIGHT_DESCRIPTION)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschWallwasherSwitch(_BoschSwitchBase):
+class BoschWallwasherSwitch(BoschDelegatedSwitchEntity):
     """Switch: top + bottom ambient lights on/off (independent of front light).
 
     Gen1: Uses cloud API: PUT /v11/video_inputs/{id}/lighting_override (wallwasherOn)
@@ -941,28 +1049,7 @@ class BoschWallwasherSwitch(_BoschSwitchBase):
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_wallwasher_{cam_id.lower()}"
-        self._attr_translation_key = "wallwasher"
-        self._attr_entity_category = EntityCategory.CONFIG
-
-    @property
-    def is_on(self) -> bool | None:
-        return self.coordinator.shc_state_cache.get(self._cam_id, {}).get("wallwasher")  # type: ignore[no-any-return]
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_cloud_set_light_component(
-            self._cam_id, "wallwasher", True
-        )
-        if not success:
-            self._warn_write_failed("Wallwasher", "ON")
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        success = await self.coordinator.async_cloud_set_light_component(
-            self._cam_id, "wallwasher", False
-        )
-        if not success:
-            self._warn_write_failed("Wallwasher", "OFF")
+        super().__init__(coordinator, cam_id, entry, WALLWASHER_DESCRIPTION)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1271,7 +1358,7 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschNotificationsSwitch(_BoschSwitchBase):
+class BoschNotificationsSwitch(BoschDelegatedSwitchEntity):
     """Switch: ON = notifications enabled (FOLLOW_CAMERA_SCHEDULE or ON_CAMERA_SCHEDULE), OFF = ALWAYS_OFF.
 
     Three-state aware: the API can return FOLLOW_CAMERA_SCHEDULE, ON_CAMERA_SCHEDULE, or ALWAYS_OFF.
@@ -1280,62 +1367,15 @@ class BoschNotificationsSwitch(_BoschSwitchBase):
 
     Uses Bosch cloud API: PUT /v11/video_inputs/{id}/enable_notifications.
     State is read from the /v11/video_inputs response (notificationsEnabledStatus field).
-    No SHC local API required.
+    No SHC local API required. Cloud-only: available without camera being
+    ONLINE (`NOTIFICATIONS_DESCRIPTION.require_online=False`) — overrides the
+    base class `is_camera_online()` guard intentionally.
     """
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_notifications_{cam_id.lower()}"
-        self._attr_translation_key = "notifications"
-        self._attr_entity_category = EntityCategory.CONFIG
-
-    # Values that map to ON state (notifications active in some form)
-    _NOTIFICATIONS_ON_STATES: ClassVar[set[str]] = {
-        "FOLLOW_CAMERA_SCHEDULE",
-        "ON_CAMERA_SCHEDULE",
-    }
-
-    @property
-    def is_on(self) -> bool | None:
-        status = self.coordinator.shc_state_cache.get(self._cam_id, {}).get(
-            "notifications_status"
-        )
-        if status is None:
-            return None
-        return status in self._NOTIFICATIONS_ON_STATES
-
-    @property
-    def available(self) -> bool:
-        """Cloud-only: available without camera being ONLINE.
-
-        Notification state comes from the cloud API — overrides base class
-        is_camera_online() guard intentionally.
-        """
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.shc_state_cache.get(self._cam_id, {}).get(
-                "notifications_status"
-            )
-            is not None
-        )
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        """Enable notifications (follow camera schedule)."""
-        success = await self.coordinator.async_cloud_set_notifications(
-            self._cam_id, True
-        )
-        if not success:
-            self._warn_write_failed("Notifications", "ON")
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        """Disable notifications (always off)."""
-        success = await self.coordinator.async_cloud_set_notifications(
-            self._cam_id, False
-        )
-        if not success:
-            self._warn_write_failed("Notifications", "OFF")
+        super().__init__(coordinator, cam_id, entry, NOTIFICATIONS_DESCRIPTION)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

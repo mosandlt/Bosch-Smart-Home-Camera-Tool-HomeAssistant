@@ -60,6 +60,43 @@ that exact point). Zero behavior change — verified via the full test suite
 (6421 passed, 100% coverage, same as the pre-change baseline) plus 31 new
 tests in the library repo.
 
+Internal — round 2 of the `switch.py` `EntityDescription` pilot (round 1,
+shipped in v16.1.6, collapsed 4 switches sharing the direct
+PUT-endpoint/body write pattern). This round targeted `BoschCameraLightSwitch`
+/`BoschFrontLightSwitch`/`BoschWallwasherSwitch` — described up front as
+"structurally similar but not mechanically identical" to round 1's 4, and
+that held up: these 3 (plus `BoschNotificationsSwitch`, found during the
+same read-through) share a different, second pattern — their entire write
+path is already delegated to a `shc.py` cloud-setter coroutine
+(`async_cloud_set_camera_light`/`async_cloud_set_light_component`/
+`async_cloud_set_notifications`) that owns all the real complexity
+(Gen1-vs-Gen2 branching, wallwasher's dual front+topdown PUT with
+brightness save/restore, the cloud→local-RCP→SHC fallback cascade); the
+switch class itself was only ever a thin "read one field out of
+`shc_state_cache`, call the coordinator method, warn on failure" wrapper.
+That thin wrapper shape — not the underlying write logic, which is
+untouched — is what collapses into a new `BoschDelegatedSwitchEntity` /
+`BoschDelegatedSwitchEntityDescription` pair (distinct from round 1's
+`BoschSwitchEntity`, which owns the PUT itself). `BoschNotificationsSwitch`
+needed two extra description fields to fit without forcing anything: an
+`is_on_transform` for its three-state (FOLLOW_CAMERA_SCHEDULE/
+ON_CAMERA_SCHEDULE/ALWAYS_OFF) → bool mapping, and `require_online=False`
++ `require_field_present=True` for its cloud-only availability (the other
+3 gate on camera-online instead). Every other switch touched during this
+read-through (`BoschMotionLightSwitch`, `BoschAmbientLightSwitch`,
+`BoschSoftLightFadingSwitch`, `BoschIntrusionDetectionSwitch`,
+`BoschMotionEnabledSwitch`, `BoschRecordSoundSwitch`,
+`BoschAutoFollowSwitch`, the alarm-settings/notification-type switches, …)
+does its own direct read-modify-write HTTP call, refresh scheduling, or
+Gen2-privacy guard and was deliberately left alone — same judgment call as
+round 1. Zero behavior change: unique_id, translation_key, entity_category,
+and every write call's exact (coordinator-method, args) tuple are
+byte-identical before/after for all 4 switches, verified against the
+pre-refactor call sites and the existing pinned tests (which patch the
+coordinator methods directly, so the added indirection doesn't change what
+they intercept). 6421 pytest / 100% coverage / mypy --strict / ruff /
+codespell clean.
+
 ## [v16.1.6] - 2026-08-05
 
 Patch — a Home Assistant integration-quality audit (Bronze through Platinum

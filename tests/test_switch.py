@@ -9997,3 +9997,56 @@ class TestGenericSwitchEntityWithoutCacheOrSetAtFn:
         )
         sw = BoschSwitchEntity(stub_coord, CAM_ID, stub_entry, description)
         assert sw.device_class == SwitchDeviceClass.OUTLET
+
+
+class TestGenericDelegatedSwitchEntityWithoutWriteFn:
+    """Direct unit tests for `BoschDelegatedSwitchEntity`'s guard branches
+    that the 4 concrete switches (CameraLight/FrontLight/Wallwasher/
+    Notifications, all of which always supply `write_fn`) never reach:
+    a description missing `write_fn`, and `require_field_present=True`
+    actually gating `available` when the field is absent (Notifications is
+    the only concrete switch with that flag set, and its own tests only
+    exercise the field-present case). Mirrors
+    `TestGenericSwitchEntityWithoutCacheOrSetAtFn` above (round 1's own
+    equivalent guard-branch tests for the sibling `BoschSwitchEntity`).
+    """
+
+    def _bare_entity(self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace):
+        from custom_components.bosch_shc_camera.switch import (
+            BoschDelegatedSwitchEntity,
+            BoschDelegatedSwitchEntityDescription,
+        )
+
+        description = BoschDelegatedSwitchEntityDescription(
+            key="no_write_fn", unique_id_prefix="bosch_shc_no_write_fn"
+        )
+        return BoschDelegatedSwitchEntity(stub_coord, CAM_ID, stub_entry, description)
+
+    async def test_apply_raises_without_write_fn(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        sw = self._bare_entity(stub_coord, stub_entry)
+        with pytest.raises(NotImplementedError):
+            await sw.async_turn_on()
+
+    def test_unavailable_when_field_required_but_absent(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        """`require_field_present=True` (Notifications' one divergence from
+        its 3 siblings) must actually gate `available` when the cache
+        doesn't hold the field yet — not just when it's explicitly None."""
+        from custom_components.bosch_shc_camera.switch import (
+            BoschDelegatedSwitchEntity,
+            BoschDelegatedSwitchEntityDescription,
+        )
+
+        description = BoschDelegatedSwitchEntityDescription(
+            key="field_required",
+            unique_id_prefix="bosch_shc_field_required",
+            shc_field="some_field",
+            require_online=False,
+            require_field_present=True,
+        )
+        stub_coord.shc_state_cache[CAM_ID] = {}
+        sw = BoschDelegatedSwitchEntity(stub_coord, CAM_ID, stub_entry, description)
+        assert sw.available is False
