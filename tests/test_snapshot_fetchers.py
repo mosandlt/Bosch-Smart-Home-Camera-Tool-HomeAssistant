@@ -45,6 +45,19 @@ def _digest_cm(status: int, content_type: str = "image/jpeg", body: bytes = b"")
     return cm
 
 
+def _digest_cm_no_content_type(status: int, body: bytes = b""):
+    """Same as `_digest_cm` but with no Content-Type header at all — pins
+    the `.get("Content-Type", "")` default-to-empty-string fallback."""
+    resp = MagicMock()
+    resp.status = status
+    resp.headers = {}
+    resp.read = AsyncMock(return_value=body)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=resp)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    return cm
+
+
 class TestFetchDigestSnapshot:
     @pytest.mark.asyncio
     async def test_200_image_returns_bytes(self) -> None:
@@ -76,6 +89,26 @@ class TestFetchDigestSnapshot:
                 new=AsyncMock(
                     return_value=_digest_cm(200, "text/html", b"<html></html>")
                 ),
+            ),
+        ):
+            result = await snapshot_fetchers.fetch_digest_snapshot(
+                _coord(), CAM_ID, SNAP_URL, "u", "p"
+            )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_200_missing_content_type_header_returns_none(self) -> None:
+        """No Content-Type header at all (not just a non-image one) — pins
+        `resp.headers.get("Content-Type", "")`'s default-to-empty fallback,
+        which a same-key-different-value test can't exercise."""
+        with (
+            patch(
+                "homeassistant.helpers.aiohttp_client.async_get_clientsession",
+                return_value=MagicMock(),
+            ),
+            patch(
+                f"{MODULE}.async_digest_request",
+                new=AsyncMock(return_value=_digest_cm_no_content_type(200, b"x")),
             ),
         ):
             result = await snapshot_fetchers.fetch_digest_snapshot(
