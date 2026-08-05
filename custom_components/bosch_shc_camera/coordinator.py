@@ -41,6 +41,7 @@ from . import (
     rcp_client,
     rcp_diagnostics,
     repairs,
+    snapshot_fetchers,
     status_compute,
 )
 from . import recorder as nvr_recorder
@@ -3254,53 +3255,12 @@ class BoschCameraCoordinator(
             "ts": time.monotonic(),
         }
 
-        from homeassistant.helpers.aiohttp_client import async_get_clientsession
-
-        # Local import (not top-level): keeps unittest.mock.patch(
-        # "custom_components.bosch_shc_camera.async_digest_request", ...)
-        # working the same way it did before BoschCameraCoordinator moved
-        # out of __init__.py, matching _fetch_rcp_lan's identical pattern
-        # below and the live_connection.py precedent — matters here even
-        # though only one call site remains, so a future third caller isn't
-        # tempted to reintroduce the top-level-only inconsistency.
-        from . import (
-            async_digest_request as async_digest_request,
+        # Leaf HTTP fetch (Digest-auth snap.jpg GET) lives in
+        # snapshot_fetchers.py — see that module's docstring for why only
+        # this piece of the snapshot cascade was extracted.
+        return await snapshot_fetchers.fetch_digest_snapshot(
+            self, cam_id, snap_url, user, password
         )
-
-        session = async_get_clientsession(self.hass, verify_ssl=False)
-        try:
-            async with asyncio.timeout(12):
-                async with await async_digest_request(
-                    session,
-                    "GET",
-                    snap_url,
-                    user,
-                    password,
-                    timeout=10.0,
-                    ssl=False,
-                ) as resp:
-                    if resp.status == 200 and "image" in resp.headers.get(
-                        "Content-Type", ""
-                    ):
-                        content: bytes = await resp.read()
-                        _LOGGER.debug(
-                            "fetch_live_snapshot_local: %s → %d bytes via Digest",
-                            cam_id,
-                            len(content),
-                        )
-                        return content
-                    _LOGGER.debug(
-                        "fetch_live_snapshot_local: Digest snap.jpg → HTTP %d for %s",
-                        resp.status,
-                        cam_id,
-                    )
-        except (TimeoutError, aiohttp.ClientError, ValueError) as err:
-            # ValueError: malformed/missing WWW-Authenticate (cam Digest state
-            # may be half-rotated during FCM flap). Forum 998974/15 (Andrew75).
-            _LOGGER.debug(
-                "fetch_live_snapshot_local: aiohttp error for %s: %s", cam_id, err
-            )
-        return None
 
     # ── Local / Cloud-Proxy RCP+ READ helpers ────────────────────────────────
     async def _rcp_read_active(self, cam_id: str, command: str, type_: str) -> Any:
