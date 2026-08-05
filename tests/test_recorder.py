@@ -49,9 +49,11 @@ SENTINEL_RULE: every `time.monotonic()` default in this file uses
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime
 import os
 import signal
+import sys
 import tempfile
 import time
 import unittest
@@ -2423,6 +2425,27 @@ def _mock_proc(
     return proc
 
 
+def _tail_for(proc: MagicMock) -> recorder._StderrTail:
+    """Build a `recorder._StderrTail` pre-populated with whatever a live
+    `_drain_stderr_live` task would have collected by the time a (mocked)
+    process exits — since `_watch_recorder`/`_watch_preroll_health` no
+    longer read `proc.stderr` themselves post-exit (GitHub #64 fix), every
+    test that constructs its own `proc` double must construct the matching
+    tail explicitly instead. Only understands the simple
+    `AsyncMock(return_value=...)` shape `_mock_proc` builds — tests that
+    exercise `_drain_stderr_live` itself (timeouts/exceptions/large output)
+    build a `_StderrTail` directly, they don't use this helper.
+    """
+    data = b""
+    stderr = getattr(proc, "stderr", None)
+    if stderr is not None:
+        read_fn = getattr(stderr, "read", None)
+        ret = getattr(read_fn, "return_value", None)
+        if isinstance(ret, bytes):
+            data = ret
+    return recorder._StderrTail(data=data)
+
+
 class TestStartRecorder:
     @pytest.mark.asyncio
     async def test_skipped_when_not_local(self, tmp_path: Path):
@@ -4302,7 +4325,7 @@ class TestWatchRecorder:
         proc.wait = AsyncMock(return_value=0)
         # Not registered → already replaced/stopped
         with patch.object(recorder, "start_recorder", new=AsyncMock()) as restart:
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
         restart.assert_not_called()
 
     @pytest.mark.asyncio
@@ -4320,7 +4343,7 @@ class TestWatchRecorder:
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
         restart.assert_not_called()
 
     @pytest.mark.asyncio
@@ -4338,7 +4361,7 @@ class TestWatchRecorder:
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
         restart.assert_awaited_once_with(coord, CAM_ID)
 
     @pytest.mark.asyncio
@@ -4358,7 +4381,7 @@ class TestWatchRecorder:
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
         restart.assert_not_called()
         assert "crashed" in coord.nvr_error_state.get(CAM_ID, "").lower()
 
@@ -4384,7 +4407,7 @@ class TestWatchRecorder:
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
         restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
         assert CAM_ID not in coord.nvr_error_state
@@ -4418,7 +4441,7 @@ class TestWatchRecorder:
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
             # Must NOT raise.
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
         assert "respawn" in coord.nvr_error_state.get(CAM_ID, "").lower()
         coord.async_update_listeners.assert_called()
@@ -4445,7 +4468,7 @@ class TestWatchRecorder:
             ),
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
         assert "respawn" in coord.nvr_error_state.get(CAM_ID, "").lower()
         coord.async_update_listeners.assert_called()
@@ -4465,7 +4488,7 @@ class TestWatchRecorder:
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
         restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
         assert CAM_ID not in coord.nvr_error_state
@@ -4494,7 +4517,7 @@ class TestWatchRecorder:
             patch.object(asyncio, "sleep", new=AsyncMock()),
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
         ):
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
         restart.assert_not_called()
 
@@ -4538,7 +4561,7 @@ class TestWatchRecorder:
             patch("time.monotonic", return_value=9999.0),
         ):
             # Need elapsed >= _RESPAWN_WINDOW_SECONDS to skip crash-loop guard
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
         # Sleep happened (respawn delay)
         assert len(sleep_calls) == 1
@@ -4546,82 +4569,192 @@ class TestWatchRecorder:
         assert len(start_calls) == 0
 
     @pytest.mark.asyncio
-    async def test_stderr_drain_timeout_no_crash(self, tmp_path: Path):
-        """If `proc.stderr.read(2048)` never resolves, `asyncio.wait_for`
-        raises `asyncio.TimeoutError` which is swallowed. The watcher must
-        continue (not crash, not propagate) — production: a frozen TCP
-        stack on the camera mustn't kill the integration's task pool.
-        """
+    async def test_watch_recorder_uses_tail_populated_before_exit(self):
+        """`_watch_recorder` must read its stderr tail from the
+        `_StderrTail` object passed in (populated by a live
+        `_drain_stderr_live` task, GitHub #64) — NOT from `proc.stderr`
+        itself post-exit. Simulate a tail already containing data at the
+        moment the process exits (exactly what a live drain leaves behind)
+        and confirm it reaches the respawn-gating marker logic (ENOSPC)
+        even though `proc.stderr.read` is never called at all."""
         from custom_components.bosch_shc_camera import recorder
 
-        coord = _make_lifecycle_coord(base_path=str(tmp_path))
-
-        # stderr.read returns a coroutine that hangs forever. We then
-        # patch `asyncio.wait_for` to raise TimeoutError so we don't
-        # actually block.
-        stderr = MagicMock()
-
-        async def _hang(_n):
-            await asyncio.sleep(3600)  # would block; wait_for short-circuits
-
-        stderr.read = _hang
-
-        proc = _mock_proc(returncode=1, stderr=stderr)
+        coord = _make_lifecycle_coord()
+        proc = _mock_proc(returncode=1)  # no stderr mock at all
+        proc.wait = AsyncMock(return_value=1)
         coord.nvr_processes[CAM_ID] = proc
-
-        # User intent stays True, so the watcher will try to respawn — we
-        # patch `start_recorder` to a no-op so we observe only the drain
-        # branch.
-        respawn_called = {"n": 0}
-
-        async def _fake_start(_coord, _cam):
-            respawn_called["n"] += 1
-
-        async def _fake_wait_for(coro, timeout):
-            # Coroutine cleanup: close so we don't warn.
-            if asyncio.iscoroutine(coro):
-                coro.close()
-            raise TimeoutError()
+        tail = recorder._StderrTail(data=b"no space left on device")
 
         async def _fake_sleep(_secs):
             return None
 
         with (
-            patch.object(recorder, "start_recorder", _fake_start),
-            patch("asyncio.wait_for", _fake_wait_for),
+            patch.object(recorder, "start_recorder", new=AsyncMock()),
             patch("asyncio.sleep", _fake_sleep),
         ):
-            # Must NOT raise. Drain TimeoutError caught, rest of watcher
-            # runs to completion (respawn path).
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, tail)
 
-        # Watcher reached the respawn branch → drain swallowed correctly.
-        assert respawn_called["n"] == 1
+        # ENOSPC marker in the pre-populated tail must have been detected —
+        # proves the tail buffer, not proc.stderr, is the diagnostic source.
+        assert coord.nvr_error_state.get(CAM_ID) == "disk full"
+
+
+class TestDrainStderrLive:
+    """`_drain_stderr_live` is the actual fix for GitHub #64: without a live
+    reader, ffmpeg's own write() to a full stderr pipe blocks forever and
+    `proc.wait()` never returns — a completely silent hang, exactly the
+    reported symptom (cache dir stays empty forever, no crash, no log)."""
 
     @pytest.mark.asyncio
-    async def test_stderr_drain_generic_exception_swallowed(self, tmp_path: Path):
-        """Same fall-through for non-Timeout exceptions (e.g. stderr already
-        closed)."""
+    async def test_drains_large_output_without_hanging(self):
+        """Proves the real deadlock scenario against a REAL OS pipe: spawn a
+        python3 subprocess that writes more than the ~64KB default pipe
+        buffer to stderr in one burst, THEN exits. Without a live reader,
+        `proc.wait()` never returns (write() blocks on the full pipe) —
+        this test asserts the whole drain+wait sequence completes well
+        within a bounded timeout, i.e. it does NOT hang."""
         from custom_components.bosch_shc_camera import recorder
 
-        coord = _make_lifecycle_coord(base_path=str(tmp_path))
-        stderr = MagicMock()
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            "import sys; sys.stderr.write('x' * 200000); sys.stderr.flush()",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        tail = recorder._StderrTail()
+        drain_task = asyncio.ensure_future(
+            recorder._drain_stderr_live(proc.stderr, tail)
+        )
+        try:
+            rc = await asyncio.wait_for(proc.wait(), timeout=10.0)
+        finally:
+            if not drain_task.done():
+                drain_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await drain_task
+
+        assert rc == 0
+        # Tail is bounded to the configured max, not the full 200000 bytes.
+        assert len(tail.data) == recorder._STDERR_TAIL_MAX_BYTES
+        assert tail.data == b"x" * recorder._STDERR_TAIL_MAX_BYTES
+
+    @pytest.mark.asyncio
+    async def test_without_live_drain_large_output_hangs(self):
+        """Negative control proving the ORIGINAL bug was real: the exact
+        same subprocess, but with nothing draining stderr while it runs —
+        only `proc.wait()`, mirroring the pre-fix `_watch_recorder`/
+        `_watch_preroll_health` structure. Must NOT complete within a short
+        deadline (the child blocks on its own stderr write()), demonstrating
+        this is a genuine OS-level pipe deadlock, not a hypothetical."""
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            "import sys; sys.stderr.write('x' * 200000); sys.stderr.flush()",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+        finally:
+            # Cleanup: kill + drain now so the test doesn't leak a hung
+            # child process/pipe past this test.
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
+
+    @pytest.mark.asyncio
+    async def test_returns_on_none_stderr(self):
+        """`proc.stderr` can be None (e.g. never piped) — must return
+        immediately, not raise."""
+        from custom_components.bosch_shc_camera import recorder
+
+        tail = recorder._StderrTail()
+        await asyncio.wait_for(recorder._drain_stderr_live(None, tail), timeout=1.0)
+        assert tail.data == b""
+
+    @pytest.mark.asyncio
+    async def test_returns_on_eof(self):
+        """A closed/exhausted stream (read() returns b"") ends the loop
+        without raising."""
+        from custom_components.bosch_shc_camera import recorder
+
+        stderr = AsyncMock()
+        stderr.read = AsyncMock(return_value=b"")
+        tail = recorder._StderrTail()
+        await asyncio.wait_for(recorder._drain_stderr_live(stderr, tail), timeout=1.0)
+        assert tail.data == b""
+
+    @pytest.mark.asyncio
+    async def test_swallows_value_error(self):
+        """Reading from an already-broken/closed pipe raises ValueError in
+        practice — must be swallowed, not propagated (matches the old
+        post-exit drain's broad exception tolerance for this exact case)."""
+        from custom_components.bosch_shc_camera import recorder
+
+        stderr = AsyncMock()
         stderr.read = AsyncMock(side_effect=ValueError("stream closed"))
-        proc = _mock_proc(returncode=1, stderr=stderr)
-        coord.nvr_processes[CAM_ID] = proc
+        tail = recorder._StderrTail()
+        await asyncio.wait_for(recorder._drain_stderr_live(stderr, tail), timeout=1.0)
+        assert tail.data == b""
 
-        async def _fake_start(_coord, _cam):
-            pass
+    @pytest.mark.asyncio
+    async def test_swallows_connection_error(self):
+        """A broken pipe on the read side raises ConnectionError — also
+        swallowed."""
+        from custom_components.bosch_shc_camera import recorder
 
-        async def _fake_sleep(_secs):
-            return None
+        stderr = AsyncMock()
+        stderr.read = AsyncMock(side_effect=ConnectionResetError("broken pipe"))
+        tail = recorder._StderrTail()
+        await asyncio.wait_for(recorder._drain_stderr_live(stderr, tail), timeout=1.0)
+        assert tail.data == b""
 
-        with (
-            patch.object(recorder, "start_recorder", _fake_start),
-            patch("asyncio.sleep", _fake_sleep),
-        ):
-            await recorder._watch_recorder(coord, CAM_ID, proc)
-        # No assertion needed beyond "did not raise".
+    @pytest.mark.asyncio
+    async def test_cancellation_propagates(self):
+        """`asyncio.CancelledError` must NOT be swallowed — this task is
+        tracked in `bg_tasks` and must be cleanly cancellable on integration
+        unload like every other tracked background task."""
+        from custom_components.bosch_shc_camera import recorder
+
+        stderr = AsyncMock()
+
+        async def _hang(_n):
+            await asyncio.sleep(3600)
+
+        stderr.read = _hang
+        tail = recorder._StderrTail()
+        task = asyncio.ensure_future(recorder._drain_stderr_live(stderr, tail))
+        await asyncio.sleep(0)  # let it start waiting on read()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    @pytest.mark.asyncio
+    async def test_tail_rolls_over_bound(self):
+        """Multiple small chunks accumulating past `_STDERR_TAIL_MAX_BYTES`
+        must roll — keep only the newest bytes, not grow unbounded (a
+        long-lived continuous recorder with lots of warnings must not leak
+        memory)."""
+        from custom_components.bosch_shc_camera import recorder
+
+        chunks = [b"a" * 1500, b"b" * 1500]  # 3000 total > 2048 max
+
+        async def _fake_read(_n):
+            if chunks:
+                return chunks.pop(0)
+            return b""
+
+        stderr = AsyncMock()
+        stderr.read = _fake_read
+        tail = recorder._StderrTail()
+        await asyncio.wait_for(recorder._drain_stderr_live(stderr, tail), timeout=1.0)
+        assert len(tail.data) == recorder._STDERR_TAIL_MAX_BYTES
+        # Newest bytes (the "b"s) must be what's kept.
+        assert tail.data.endswith(b"b" * 1500)
+        assert tail.data.startswith(b"a" * (recorder._STDERR_TAIL_MAX_BYTES - 1500))
 
 
 class TestWatchPrerollRecorder:
@@ -4891,7 +5024,7 @@ class TestWatchPrerollHealth:
         with patch.object(
             recorder, "start_preroll_recorder", new=AsyncMock()
         ) as respawn:
-            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+            await recorder._watch_preroll_health(coord, CAM_ID, proc, _tail_for(proc))
 
         respawn.assert_not_awaited()
 
@@ -4914,7 +5047,7 @@ class TestWatchPrerollHealth:
             ) as respawn,
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
-            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+            await recorder._watch_preroll_health(coord, CAM_ID, proc, _tail_for(proc))
 
         respawn.assert_awaited_once_with(coord, CAM_ID)
         # The dead process handle must not linger (GitHub #51 bug-hunt
@@ -4942,7 +5075,7 @@ class TestWatchPrerollHealth:
             ) as respawn,
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
-            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+            await recorder._watch_preroll_health(coord, CAM_ID, proc, _tail_for(proc))
 
         respawn.assert_not_awaited()
         # Maintenance-round bug-hunt finding, 2026-07-17: unlike
@@ -4978,7 +5111,7 @@ class TestWatchPrerollHealth:
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
             # Must NOT raise.
-            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+            await recorder._watch_preroll_health(coord, CAM_ID, proc, _tail_for(proc))
 
         assert "respawn" in coord.nvr_error_state.get(CAM_ID, "").lower()
         coord.async_update_listeners.assert_called()
@@ -4999,7 +5132,7 @@ class TestWatchPrerollHealth:
         with patch.object(
             recorder, "start_preroll_recorder", new=AsyncMock()
         ) as respawn:
-            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+            await recorder._watch_preroll_health(coord, CAM_ID, proc, _tail_for(proc))
 
         respawn.assert_not_awaited()
 
@@ -5020,7 +5153,7 @@ class TestWatchPrerollHealth:
         with patch.object(
             recorder, "start_preroll_recorder", new=AsyncMock()
         ) as respawn:
-            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+            await recorder._watch_preroll_health(coord, CAM_ID, proc, _tail_for(proc))
 
         respawn.assert_not_awaited()
 
@@ -5048,7 +5181,7 @@ class TestWatchPrerollHealth:
                 asyncio, "sleep", new=AsyncMock(side_effect=_close_gate_during_sleep)
             ),
         ):
-            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+            await recorder._watch_preroll_health(coord, CAM_ID, proc, _tail_for(proc))
 
         respawn.assert_not_awaited()
 
@@ -5073,25 +5206,27 @@ class TestWatchPrerollHealth:
             patch.object(asyncio, "sleep", new=AsyncMock()),
             caplog.at_level("WARNING"),
         ):
-            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+            await recorder._watch_preroll_health(coord, CAM_ID, proc, _tail_for(proc))
 
         assert any("exited unexpectedly" in rec.message for rec in caplog.records)
         assert any("Non-monotonic DTS" in rec.message for rec in caplog.records)
 
     @pytest.mark.asyncio
-    async def test_stderr_drain_timeout_swallowed(self, caplog):
-        """A stderr drain that times out (or raises for any reason) must be
-        swallowed — the crash-detect/respawn logic still proceeds with
-        "(no stderr)" rather than failing the whole health-check."""
+    async def test_empty_stderr_tail_logs_no_stderr_placeholder(self, caplog):
+        """An empty `_StderrTail` (e.g. the process crashed before the live
+        drain task ever read any bytes, or stderr was never piped) must
+        still proceed with the "(no stderr)" placeholder rather than
+        failing the whole health-check — same diagnostic-value guarantee
+        the old post-exit-read-with-timeout path gave, now sourced from the
+        live tail buffer instead."""
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = MagicMock()
         proc.wait = AsyncMock(return_value=-11)
-        stderr_reader = AsyncMock()
-        stderr_reader.read = AsyncMock(side_effect=TimeoutError())
-        proc.stderr = stderr_reader
+        proc.stderr = None
         coord.nvr_preroll_processes[CAM_ID] = proc
+        tail = recorder._StderrTail()  # nothing collected yet
 
         with (
             patch.object(
@@ -5100,7 +5235,7 @@ class TestWatchPrerollHealth:
             patch.object(asyncio, "sleep", new=AsyncMock()),
             caplog.at_level("WARNING"),
         ):
-            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+            await recorder._watch_preroll_health(coord, CAM_ID, proc, tail)
 
         assert any("(no stderr)" in rec.message for rec in caplog.records)
         respawn.assert_awaited_once()
@@ -5132,7 +5267,7 @@ class TestWatchPrerollHealth:
                 new=AsyncMock(side_effect=_shutdown_during_sleep),
             ),
         ):
-            await recorder._watch_preroll_health(coord, CAM_ID, proc)
+            await recorder._watch_preroll_health(coord, CAM_ID, proc, _tail_for(proc))
 
         respawn.assert_not_awaited()
 
@@ -7274,7 +7409,7 @@ class TestPersistentNotificationScheduling:
         proc.wait = _wait
         coord.nvr_processes[cam_id] = proc
 
-        await recorder._watch_recorder(coord, cam_id, proc)
+        await recorder._watch_recorder(coord, cam_id, proc, _tail_for(proc))
 
         # async_create_task MUST have been called (notification scheduled).
         create_task.assert_called_once()
@@ -7329,7 +7464,7 @@ class TestPersistentNotificationScheduling:
         coord.nvr_processes[cam_id] = proc
 
         # Must not raise even though async_create_task blows up.
-        await recorder._watch_recorder(coord, cam_id, proc)
+        await recorder._watch_recorder(coord, cam_id, proc, _tail_for(proc))
 
         assert coord.nvr_error_state.get(cam_id) == "disk full"
 
@@ -7625,7 +7760,7 @@ class TestWatchRecorderBoundedAuthRetry:
             # have done on its own.
             proc = first_proc
             for _ in range(recorder._MAX_CONSECUTIVE_AUTH_RETRIES + 1):
-                await recorder._watch_recorder(coord, CAM_ID, proc)
+                await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
                 proc = coord.nvr_processes.get(CAM_ID)
                 if proc is None:
                     break  # gave up
@@ -7659,7 +7794,7 @@ class TestWatchRecorderBoundedAuthRetry:
             patch.object(recorder, "start_recorder", new=AsyncMock()) as restart,
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
         restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
         assert CAM_ID not in coord.nvr_error_state
@@ -7738,7 +7873,7 @@ class TestNvrStateChangePushesImmediateUpdate:
             patch.object(recorder, "start_recorder", new=AsyncMock()),
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
         coord.async_update_listeners.assert_called()
 
@@ -7750,7 +7885,7 @@ class TestNvrStateChangePushesImmediateUpdate:
         )
         coord.nvr_processes[CAM_ID] = proc
 
-        await recorder._watch_recorder(coord, CAM_ID, proc)
+        await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
         assert coord.nvr_error_state[CAM_ID] == "disk full"
         coord.async_update_listeners.assert_called()
@@ -7764,7 +7899,7 @@ class TestNvrStateChangePushesImmediateUpdate:
         )
         coord.nvr_processes[CAM_ID] = proc
 
-        await recorder._watch_recorder(coord, CAM_ID, proc)
+        await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
         assert "repeated auth failures" in coord.nvr_error_state[CAM_ID]
         coord.async_update_listeners.assert_called()
@@ -7777,7 +7912,7 @@ class TestNvrStateChangePushesImmediateUpdate:
         coord.nvr_processes[CAM_ID] = proc
 
         with patch.object(asyncio, "sleep", new=AsyncMock()):
-            await recorder._watch_recorder(coord, CAM_ID, proc)
+            await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
         assert coord.nvr_error_state[CAM_ID] == "ffmpeg crashed twice"
         coord.async_update_listeners.assert_called()

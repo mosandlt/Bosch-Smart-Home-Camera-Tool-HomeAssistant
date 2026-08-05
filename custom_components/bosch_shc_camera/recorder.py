@@ -59,7 +59,6 @@ from .const import (
     TIMEOUT_RECORDER_GRACE,
     TIMEOUT_RECORDER_KILL_WAIT,
     TIMEOUT_RECORDER_SEGMENT_PROBE,
-    TIMEOUT_RECORDER_STDERR_DRAIN,
 )
 from .smb import _safe_name
 
@@ -135,6 +134,86 @@ _DRAIN_MIN_SIZE_BYTES = 10 * 1024  # < 10 KB → still being written / corrupt
 _DRAIN_MAX_RETRIES = 5  # quarantine after this many failed uploads
 _STAGING_DIRNAME = "_staging"
 _FAILED_DIRNAME = "_failed"
+
+
+# ── live stderr drain (GitHub #64) ───────────────────────────────────────────
+# ffmpeg is spawned with stderr=PIPE but nothing used to read it until AFTER
+# `proc.wait()` returned. On a flaky/bandwidth-constrained RTSP source
+# (-loglevel warning still emits frequent non-monotonic-DTS / packet-loss
+# lines), enough unread output fills the OS pipe buffer (~64KB on Linux) and
+# ffmpeg's own write() to its stderr blocks forever — the process never
+# exits, `proc.wait()` never returns, and the recorder hangs completely
+# silently: no crash, no log line, registered as "running" while the output
+# directory stays empty forever. Exactly the reported symptom. Fix: drain
+# stderr continuously for the life of the process via a dedicated background
+# task, keeping only a small rolling tail for diagnostics.
+_STDERR_TAIL_MAX_BYTES = 2048  # matches the old single post-exit read() size
+_STDERR_DRAIN_CHUNK_BYTES = 4096
+
+
+class _StderrTail:
+    """Bounded rolling tail of a live-drained ffmpeg stderr stream.
+
+    Mutated only by `_drain_stderr_live` (single writer); read only by the
+    owning process's crash-watcher after the process has exited. Both run on
+    the same asyncio event loop with no `await` between the watcher's read
+    and its use, so no lock is needed.
+    """
+
+    __slots__ = ("data",)
+
+    def __init__(self, data: bytes = b"") -> None:
+        self.data = data
+
+
+async def _drain_stderr_live(
+    stderr: asyncio.StreamReader | None, tail: _StderrTail
+) -> None:
+    """Continuously read `stderr` for the life of the ffmpeg child.
+
+    Keeps only the last `_STDERR_TAIL_MAX_BYTES` bytes — unbounded buffering
+    here would itself be a memory leak on a long-lived continuous recorder
+    with lots of warnings. Returns on EOF (process exited, pipe closed) or on
+    a broken/closed-stream error — both are ordinary end-of-life, not bugs.
+    `asyncio.CancelledError` is intentionally NOT caught here; it must
+    propagate so this task can be cancelled cleanly on shutdown like any
+    other tracked `bg_tasks` entry.
+    """
+    if stderr is None:
+        return
+    try:
+        while True:
+            chunk = await stderr.read(_STDERR_DRAIN_CHUNK_BYTES)
+            if not chunk:
+                return
+            tail.data = (tail.data + chunk)[-_STDERR_TAIL_MAX_BYTES:]
+    except (ValueError, ConnectionError):
+        # Reading from an already-closed/broken pipe — nothing more to drain.
+        return
+
+
+def _spawn_stderr_drain_task(
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    proc: asyncio.subprocess.Process,
+    tail: _StderrTail,
+    *,
+    name_prefix: str,
+) -> None:
+    """Spawn + track the live stderr-drain task for one ffmpeg child.
+
+    Tracked in `coordinator.bg_tasks` (same discipline as every other
+    fire-and-forget task in this module) so integration unload's
+    cancel-and-gather sweep covers it too — it otherwise self-terminates on
+    EOF the moment the process exits (SIGTERM/SIGKILL close its stderr pipe),
+    so explicit cancellation on a normal stop is not required.
+    """
+    task = coordinator.hass.async_create_background_task(
+        _drain_stderr_live(proc.stderr, tail),
+        f"{name_prefix}_{cam_id[:8]}",
+    )
+    coordinator.bg_tasks.add(task)
+    task.add_done_callback(coordinator.bg_tasks.discard)
 
 
 # ── pure helpers (testable without spawning ffmpeg or touching disk) ─────────
@@ -352,6 +431,7 @@ async def _watch_preroll_health(
     coordinator: BoschCameraCoordinator,
     cam_id: str,
     proc: asyncio.subprocess.Process,
+    stderr_tail: _StderrTail,
 ) -> None:
     """Detect an unexpected pre-roll ring ffmpeg exit and respawn it.
 
@@ -383,18 +463,11 @@ async def _watch_preroll_health(
     coordinator.nvr_preroll_processes.pop(cam_id, None)
     coordinator.nvr_preroll_segment_counts.pop(cam_id, None)
 
-    err_tail = ""
-    if proc.stderr is not None:
-        try:
-            err_bytes = await asyncio.wait_for(
-                proc.stderr.read(2048), timeout=TIMEOUT_RECORDER_STDERR_DRAIN
-            )
-            err_tail = err_bytes.decode("utf-8", errors="replace").strip()
-        except (  # noqa: S110 # best-effort stderr drain before respawn; exit already logged
-            TimeoutError,
-            Exception,
-        ):
-            pass
+    # `stderr_tail` was populated live by `_drain_stderr_live` for the whole
+    # life of the process (see GitHub #64) — by the time we get here the
+    # pipe may already be closed/empty, so a post-exit read is no longer the
+    # right source of diagnostic data.
+    err_tail = stderr_tail.data.decode("utf-8", errors="replace").strip()
 
     _LOGGER.warning(
         "NVR pre-roll ring ffmpeg exited unexpectedly rc=%s for %s — pre-roll "
@@ -603,6 +676,14 @@ async def _spawn_preroll_recorder_locked(
         return
 
     coordinator.nvr_preroll_processes[cam_id] = proc
+    stderr_tail = _StderrTail()
+    _spawn_stderr_drain_task(
+        coordinator,
+        cam_id,
+        proc,
+        stderr_tail,
+        name_prefix="bosch_nvr_preroll_stderr_drain",
+    )
     # Compute max_segs once; used for prune-on-spawn and periodic watcher.
     preroll_secs = int(opts.get("nvr_preroll_seconds", 0))
     max_segs = max(2, math.ceil(preroll_secs / _PREROLL_SEGMENT_SECONDS) + 1)
@@ -643,7 +724,7 @@ async def _spawn_preroll_recorder_locked(
     # makes an intentional stop a no-op, same discipline as `_watch_recorder`
     # for the main recorder).
     health_task = coordinator.hass.async_create_background_task(
-        _watch_preroll_health(coordinator, cam_id, proc),
+        _watch_preroll_health(coordinator, cam_id, proc, stderr_tail),
         f"bosch_nvr_preroll_health_{cam_id[:8]}",
     )
     coordinator.bg_tasks.add(health_task)
@@ -1627,6 +1708,10 @@ async def _start_recorder_locked(
         return
 
     coordinator.nvr_processes[cam_id] = proc
+    stderr_tail = _StderrTail()
+    _spawn_stderr_drain_task(
+        coordinator, cam_id, proc, stderr_tail, name_prefix="bosch_nvr_stderr_drain"
+    )
     # A fresh spawn is underway — clear any stale give-up/error state from a
     # prior crash-loop so the sensor doesn't keep showing "error" forever
     # after a successful restart.
@@ -1649,7 +1734,7 @@ async def _start_recorder_locked(
     # Watcher coroutine restarts ffmpeg once on transient crash and gives up
     # if it crashes again within _RESPAWN_WINDOW_SECONDS.
     task = coordinator.hass.async_create_background_task(
-        _watch_recorder(coordinator, cam_id, proc),
+        _watch_recorder(coordinator, cam_id, proc, stderr_tail),
         f"bosch_nvr_watch_{cam_id[:8]}",
     )
     coordinator.bg_tasks.add(task)
@@ -1747,6 +1832,7 @@ async def _watch_recorder(
     coordinator: BoschCameraCoordinator,
     cam_id: str,
     proc: asyncio.subprocess.Process,
+    stderr_tail: _StderrTail,
 ) -> None:
     """Watch one ffmpeg child, retry-once-then-give-up.
 
@@ -1770,19 +1856,11 @@ async def _watch_recorder(
     # above).
     coordinator.async_update_listeners()
 
-    # Drain stderr for the first crash to surface ffmpeg's reason.
-    err_tail = ""
-    if proc.stderr is not None:
-        try:
-            err_bytes = await asyncio.wait_for(
-                proc.stderr.read(2048), timeout=TIMEOUT_RECORDER_STDERR_DRAIN
-            )
-            err_tail = err_bytes.decode("utf-8", errors="replace").strip()
-        except (  # noqa: S110 # best-effort stderr drain before respawn, exit already logged
-            TimeoutError,
-            Exception,
-        ):  # best-effort stderr drain before respawn; ffmpeg exit already logged
-            pass
+    # `stderr_tail` was populated live by `_drain_stderr_live` for the whole
+    # life of the process (see GitHub #64) — by the time we get here the
+    # pipe may already be closed/empty, so a post-exit read is no longer the
+    # right source of diagnostic data.
+    err_tail = stderr_tail.data.decode("utf-8", errors="replace").strip()
 
     elapsed = time.monotonic() - started_at
     _LOGGER.warning(
