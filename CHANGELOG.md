@@ -7,6 +7,8 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v16.1.6] - 2026-08-05
+
 Internal — re-evaluated `smb.py` for further client-library extraction (an
 earlier session had rejected it wholesale as too coordinator-coupled; this
 pass went function-by-function instead). Moved the genuinely pure/stateless
@@ -122,7 +124,38 @@ persistence. Zero behavior change — verified via the full test suite
 no tests were added, removed, or modified) plus `ruff format --check` /
 `ruff check` / `mypy --strict` / `codespell` all clean.
 
-## [v16.1.6] - 2026-08-05
+Internal — 6-round structural cleanup of `coordinator.py` (4,585 → 3,899
+lines, -15%), each round implemented in an isolated worktree, independently
+re-verified (full suite + gates re-run directly, never trusting a self-report),
+adversarially peer-reviewed, findings fixed, then merged. All new modules
+follow the established pattern: module-level free functions taking
+`coordinator` as first arg, thin delegating stubs kept on
+`BoschCameraCoordinator` for API/test-pattern compatibility, cross-calls
+routed through `coordinator.method_name(...)` rather than the raw module
+function (preserves virtual dispatch for instance-level overrides — the
+round-1 peer review's real finding, and the thing every later round had to
+explicitly guard against). New modules: `quality_prefs.py` (video-quality +
+Mini-NVR-mode preference getters/setters), `rcp_client.py` +
+`rcp_diagnostics.py` (RCP session/read protocol + LAN diagnostic sensors),
+`ai_analysis_runtime.py` (AI-analysis budget/rate/window gating),
+`status_compute.py` + `maintenance_announcements.py` (pure status-derivation
+split from side-effecting Repairs/Store/notification logic),
+`snapshot_fetchers.py` (one deliberately small leaf — the terminal
+Digest-authenticated `snap.jpg` GET — pulled out of the live/event snapshot
+fetch cascade; the tiered fallback orchestration itself reads/writes
+coordinator state at nearly every step and correctly stayed inline rather
+than risk this integration's most business-critical path). Landed above the
+original ~3,300-3,600-line floor estimate — not a shortfall: one round found
+6 of its 11 planned methods were already extracted in an earlier session,
+another deliberately extracted only 40 of ~700 possible lines to avoid risk
+on the snapshot path. Zero behavior change anywhere — every extraction
+diffed statement-by-statement against the removed inline code. 6629 pytest,
+100.00% coverage across all 15,249 statements, `ruff format --check` /
+`ruff check` / `mypy --strict` / `codespell` all clean. Also fixed in
+passing: `quality_scale.yaml`/its test's `BRONZE_RULES` constant was
+missing `docs-triggers`/`docs-conditions` (2 genuine official Bronze rules
+per `home-assistant/core`'s own `hassfest` source, verified directly against
+it) — both now marked `exempt` with justification.
 
 Patch — a Home Assistant integration-quality audit (Bronze through Platinum
 tiers, verified against the actual code rather than self-reported) found
