@@ -1,8 +1,10 @@
 """Video-quality and Mini-NVR-mode preference getters/setters.
 
 These are pure per-camera preference lookups/writes over a handful of
-runtime-only dicts (`_quality_preference`, `_proxy_url_cache`,
-`_quality_effective_inst`, `_nvr_mode_preference`, `_nvr_event_clip_enabled`)
+per-cam_id containers (`_quality_preference`, `_proxy_url_cache`,
+`_quality_effective_inst` are runtime-only dicts; `_nvr_mode_preference`
+and `_nvr_event_clip_enabled` are session-state-backed `CacheFieldView`s,
+subject to the same per-cam_id purge as the rest of `session_state.py`)
 plus two read-only coordinator views (`options`, `data`) — no `self.hass`,
 no locking, no `async_set_updated_data`. They don't belong inline on the
 `DataUpdateCoordinator` subclass any more than the other free-function
@@ -51,7 +53,7 @@ def get_quality_params(
     coordinator: BoschCameraCoordinator, cam_id: str
 ) -> tuple[bool, int]:
     """Return (highQualityVideo: bool, inst: int) for current quality preference."""
-    q = get_quality(coordinator, cam_id)
+    q = coordinator.get_quality(cam_id)
     if q == "high":
         return True, 1  # primary encoder, max quality (~30 Mbps)
     if q == "low":
@@ -70,7 +72,7 @@ def get_quality_remote_fallback_active(
     the bandwidth the label promises.
     """
     return (
-        get_quality(coordinator, cam_id) == "low"
+        coordinator.get_quality(cam_id) == "low"
         and coordinator._quality_effective_inst.get(cam_id) == 2
     )
 

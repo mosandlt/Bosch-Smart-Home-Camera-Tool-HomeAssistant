@@ -29,7 +29,13 @@ def _make_coord(**overrides: object) -> SimpleNamespace:
         "data": {},
     }
     base.update(overrides)
-    return SimpleNamespace(**base)
+    coord = SimpleNamespace(**base)
+    # get_quality_params/get_quality_remote_fallback_active call
+    # coordinator.get_quality(cam_id) (not the module function directly) so
+    # an instance-level override is respected — bind it here the same way
+    # coordinator.py's real delegating stub does.
+    coord.get_quality = lambda cam_id: quality_prefs.get_quality(coord, cam_id)  # type: ignore[attr-defined]
+    return coord
 
 
 class TestGetQuality:
