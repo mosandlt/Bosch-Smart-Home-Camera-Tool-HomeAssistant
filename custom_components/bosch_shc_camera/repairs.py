@@ -8,11 +8,9 @@ directly instead of only pointing the user at a separate button
 elsewhere.
 
 Also owns the two sibling per-tick Repairs-issue lifecycle checks
-(notifications-disabled, SMB-unavailable) — extracted from
-`coordinator.py` (style audit, 2026-08-04) alongside the firmware one,
+(notifications-disabled, SMB-unavailable) alongside the firmware one,
 since all three share the exact same idempotent create/delete
-issue_registry pattern and previously lived next to each other in
-coordinator.py anyway. `BoschCameraCoordinator` keeps a thin delegating
+issue_registry pattern. `BoschCameraCoordinator` keeps a thin delegating
 method for each (same name) so `_async_update_data`'s existing call
 sites and the test suite's unbound-method-call patterns keep working
 unchanged — see the docstring on `announcements.py` for the fuller

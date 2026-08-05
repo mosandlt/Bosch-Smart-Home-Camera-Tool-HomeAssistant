@@ -1,9 +1,7 @@
 """Stable-URL, credential-free-in-spirit RTSP front-door for REMOTE sessions.
 
 Companion to `viewing_front_door.py` (LOCAL), built for the analogous but
-structurally different problem on the REMOTE (cloud-relay) path, as part of
-the same HA-Core-submission-prep go2rtc-native-registration-leak fix
-(2026-07-14).
+structurally different problem on the REMOTE (cloud-relay) path.
 
 Problem: HA-core's own built-in go2rtc integration registers whatever
 `camera.stream_source()` currently returns on every WebRTC offer, purely
@@ -61,28 +59,24 @@ viewing front-door's needs, only the per-connection relay differs.
 
 Separate coordinator state (`remote_viewing_front_door_runner` /
 `remote_viewing_sticky_port`) from LOCAL's `viewing_front_door_runner` /
-`viewing_sticky_port` — considered and REJECTED sharing them: a camera's
+`viewing_sticky_port` — deliberately NOT shared: a camera's
 `_connection_type` is LOCAL xor REMOTE per live session, so at first glance
-sharing looked safe (guidance in the originating task explicitly flagged
-this as worth checking). But a LOCAL→REMOTE or REMOTE→LOCAL transition
-that does NOT go through `tear_down_live_stream` first — e.g.
+sharing looks safe. But a LOCAL→REMOTE or REMOTE→LOCAL transition that
+does NOT go through `tear_down_live_stream` first — e.g.
 `session_renewal.promote_to_local`'s REMOTE→LOCAL live promotion, which
 calls `try_live_connection(is_renewal=True)` directly, not a teardown+
 reopen — would leave the OLD front-door's listener still bound under a
 SHARED runner. Both `start_viewing_front_door`/`start_remote_...` short-
 circuit to "reuse the already-bound listener" whenever
-`runner.has_server(cam_id)` is true (the bug-hunt-driven optimization from
-the LOCAL front-door's own initial commit, avoiding needless rebinds on
-routine renewals) — with a shared runner that reuse check can't tell
-"bound, but with the WRONG relay type for the NEW connection type" apart
-from "bound, and fine to reuse", silently wiring a Digest-auth relay to a
-REMOTE resolve function (or vice versa) after a cross-type promotion.
-Separate runners make that failure mode structurally impossible: each
-runner's own resolve function already rejects the wrong `_connection_type`
-(returns None → 503) exactly as it did before this feature existed, so a
-stale listener from the OTHER type just quietly 503s any leftover client
-until its owning module's teardown call catches up — an unchanged
-degradation mode, not a new bug this feature introduces.
+`runner.has_server(cam_id)` is true (avoiding needless rebinds on routine
+renewals) — with a shared runner that reuse check can't tell "bound, but
+with the WRONG relay type for the NEW connection type" apart from "bound,
+and fine to reuse", silently wiring a Digest-auth relay to a REMOTE
+resolve function (or vice versa) after a cross-type promotion. Separate
+runners make that failure mode structurally impossible: each runner's own
+resolve function already rejects the wrong `_connection_type` (returns
+None → 503), so a stale listener from the OTHER type just quietly 503s
+any leftover client until its owning module's teardown call catches up.
 """
 
 from __future__ import annotations
@@ -292,11 +286,11 @@ async def start_remote_viewing_front_door(
     streaming still works, just without the stable-URL benefit).
 
     Mirrors `viewing_front_door.start_viewing_front_door`'s "genuinely
-    reuse an already-bound listener" behaviour (same bug-hunt rationale:
-    `remote_resolve_inner` reads the fresh inner port/path per client
-    (re)connect, so a routine call for an already-running listener must not
-    restart it — that would needlessly ECONNREFUSE a client racing the
-    close->rebind gap for zero benefit).
+    reuse an already-bound listener" behaviour: `remote_resolve_inner`
+    reads the fresh inner port/path per client (re)connect, so a routine
+    call for an already-running listener must not restart it — that would
+    needlessly ECONNREFUSE a client racing the close->rebind gap for zero
+    benefit.
     """
     if coordinator.remote_viewing_front_door_runner is None:
         coordinator.remote_viewing_front_door_runner = FrontDoorRunner()

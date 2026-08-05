@@ -127,9 +127,9 @@ class BoschCameraLastSnapshotImage(ImageEntity):  # type: ignore[misc]  # HA bas
 
         # In-RAM copy of the last-served JPEG. async_notify_refreshed()
         # invalidates it on every persisted snapshot, so it stays fresh while
-        # turning the per-request disk read into a per-refresh one (perf
-        # 2026-06-18 — every dashboard client and the iOS app re-fetch the
-        # same signed URL repeatedly between refreshes).
+        # turning the per-request disk read into a per-refresh one — every
+        # dashboard client and the iOS app re-fetch the same signed URL
+        # repeatedly between refreshes.
         self._cached_bytes: bytes | None = None
 
         # Register ourselves with the coordinator's camera entity so

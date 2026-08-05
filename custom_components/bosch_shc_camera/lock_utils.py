@@ -1,14 +1,10 @@
 """Get-or-create per-key ``asyncio.Lock`` helper.
 
-The coordinator (``__init__.py``) independently grew several near-identical
-copies of the same "get-or-create a lock for this key in my dict" pattern —
-``get_stream_lock``, ``_get_rcp_session_lock``, ``get_nvr_recorder_lock``,
-``get_nvr_clip_assembly_lock``, ``async_fetch_live_snapshot``'s
-``_snapshot_fetch_locks`` lookup, the go2rtc re-registration coalescing
-lookup, and ``async_fetch_fresh_event_snapshot``'s ``_fresh_snap_locks``
-lookup — as new per-camera/per-session locking needs were bolted on release
-after release. This collapses all of them into one function each now
-delegates to.
+Used by every per-camera/per-session locking need across the coordinator
+(``get_stream_lock``, ``_get_rcp_session_lock``, ``get_nvr_recorder_lock``,
+``get_nvr_clip_assembly_lock``, snapshot-fetch lock lookups, etc.) so each
+now delegates to one function instead of duplicating the same
+"get-or-create a lock for this key in my dict" pattern.
 
 Deliberately NOT applied to the go2rtc setup lock in ``async_setup_entry``
 (``hass.data.setdefault(f"{DOMAIN}_go2rtc_init_lock", asyncio.Lock())``) —
@@ -18,20 +14,13 @@ owns, so forcing it through this helper would be a shape mismatch rather
 than real deduplication.
 
 ``store`` accepts any ``MutableMapping`` (not just a plain ``dict``) since
-Session-State-Facade Slice 4 (``docs/stream-perf-stability-refactor-plan.md``)
-backs five per-cam_id coordinator lock dicts (``_stream_locks``/
-``_nvr_recorder_locks``/``_snapshot_fetch_locks``/
-``_nvr_clip_assembly_locks``/``_fresh_snap_locks``) with
-``session_state.CacheFieldView`` instead (``_go2rtc_reregister_locks`` was a
-sixth, removed 2026-07-14 when the manual go2rtc PUT/DELETE registration it
-serialized was replaced by HA-core's native lazy auto-registration,
-HA-Core-submission-prep) — a
-full ``MutableMapping`` whose ``.get()``/``__setitem__`` behave identically
-to a plain dict's for this helper's purposes (verified in
-``tests/test_session_state_facade_slice4.py``, including that a lock's
-IDENTITY survives across repeated calls). Test fixtures across the suite
-still pass plain ``dict[str, asyncio.Lock]`` stand-ins directly, which
-continue to work unchanged since ``dict`` satisfies ``MutableMapping`` too.
+several per-cam_id coordinator lock dicts are backed by
+``session_state.CacheFieldView`` instead of a plain dict — a full
+``MutableMapping`` whose ``.get()``/``__setitem__`` behave identically to a
+plain dict's for this helper's purposes, including that a lock's IDENTITY
+survives across repeated calls. Test fixtures across the suite still pass
+plain ``dict[str, asyncio.Lock]`` stand-ins directly, which continue to
+work unchanged since ``dict`` satisfies ``MutableMapping`` too.
 """
 
 from __future__ import annotations

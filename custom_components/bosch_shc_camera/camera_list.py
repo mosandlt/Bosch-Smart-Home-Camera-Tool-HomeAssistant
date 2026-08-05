@@ -1,23 +1,17 @@
 """Camera list fetch + one 401→token-refresh→retry cycle.
 
-Phase 2 step 2 of the coordinator-rewrite split (see
-.claude/plans/jiggly-moseying-peacock.md, project root) —
 `BoschCameraCoordinator._async_update_data` (`__init__.py`) opens with a
 `GET /v11/video_inputs` call whose result (`cam_list`) and possibly-mutated
-`token`/`headers` feed every later section of the tick. Extracted second
-(after the exception-handler dispatch in tick_failure.py) because it's
-still self-contained — the only SYNCHRONOUS RETURN state it produces is
-the three return values, threaded explicitly rather than via `self.`
-mutation. It may also schedule fire-and-forget background tasks as a side
-effect (maintenance-refresh/outage-ping on a non-200 response) — those are
-not captured in the return tuple, unchanged from the pre-extraction inline
-code's behavior.
+`token`/`headers` feed every later section of the tick; those three values
+are threaded explicitly through the return tuple rather than via `self.`
+mutation. This function may also schedule fire-and-forget background tasks
+as a side effect (maintenance-refresh/outage-ping on a non-200 response) —
+those are not captured in the return tuple.
 
-The `except UpdateFailed:`/`TimeoutError`/`aiohttp.ClientError` boundary
-stays in `_async_update_data` itself — this function raises `UpdateFailed`
-on failure but does not catch anything; a raised timeout/network error
-here propagates up through the SAME outer try/except in `__init__.py` as
-before this extraction, unchanged.
+This function raises `UpdateFailed` on failure but does not catch
+anything itself; a raised timeout/network error propagates up through the
+caller's own `except UpdateFailed:`/`TimeoutError`/`aiohttp.ClientError`
+boundary in `_async_update_data`.
 """
 
 from __future__ import annotations
@@ -110,8 +104,7 @@ async def fetch_camera_list(
                             # and keep running against a torn-down
                             # coordinator, bypassing the teardown contract
                             # the other outage-ping call sites already
-                            # honor (backported from the Core PR's Copilot
-                            # review round 11, 2026-07-27).
+                            # honor.
                             coordinator.spawn_tracked(
                                 _outage_ping(),
                                 name="bosch_shc_camera_camera_list_outage_ping",
@@ -155,9 +148,7 @@ async def fetch_camera_list(
                     # the account itself lacks camera-API access (e.g. a
                     # shared-user registration that never completed).
                     # Re-authenticating cannot fix this; say so instead of
-                    # sending the user in an endless, pointless relogin loop
-                    # (2026-07-06 SebastianHarder community report — debug
-                    # logging above finally surfaced the real reason).
+                    # sending the user in an endless, pointless relogin loop.
                     if body_json.get("error") == "sh:authorization.failed":
                         # The official Bosch Camera App performs a separate,
                         # one-time "registration/check" step against the camera
@@ -185,10 +176,7 @@ async def fetch_camera_list(
                     # flow automatically instead of retrying this
                     # non-transient condition forever. The manual "Configure
                     # → Force new browser login" path still exists in this
-                    # build too, so it stays mentioned as an alternative
-                    # (backported from the Core PR's Copilot review round 3,
-                    # 2026-07-27 — Core's own build has no manual relogin
-                    # option, so its message differs slightly).
+                    # build too, so it stays mentioned as an alternative.
                     raise ConfigEntryAuthFailed(
                         translation_domain=DOMAIN,
                         translation_key="token_expired_renewal_failed",

@@ -1,45 +1,30 @@
 """Slow-tier per-camera diagnostic pass (largest, most complex piece of
 the coordinator tick).
 
-Phase 2 step 7 of the coordinator-rewrite split (see
-.claude/plans/jiggly-moseying-peacock.md, project root). Extracted
-sub-function by sub-function — see the plan file's "slow_tier.py
-internal sub-split" section for the target module layout.
-
-Sub-step 1 added `CamContext`/`_compute_cam_context`: the per-camera
-values (hardware generation, online/stream state, the stream-
-contention slow-tier defer gate) that the original inline loop
-recomputed piecemeal at several different points — computed ONCE here
-and threaded through every later sub-function instead.
-
-Sub-step 2 added `_poll_cam_info_caches`: the privacy-mode/camera-
-light/notifications-status cache update at the TOP of the per-camera
-loop, driven entirely by fields already present in `cam_raw` (from the
-`/v11/video_inputs` list fetch) — no network I/O of its own, unlike
-every later sub-function in this module.
-
-Sub-step 3 added `_poll_cam_control`: the two small every-tick (not
-slow-tier-gated) fetches — pan position (cameras with `panLimit`) and
-Gen2 lighting/switch state (polled every tick because the Bosch app
-itself polls it ~every 40s, faster than the 300s slow-tier interval
-would allow).
-
-Sub-step 4 (the single highest-risk sub-step of the whole rewrite,
-per the plan) adds `_poll_slow_tier_endpoints`: the 10-20-endpoint
-parallel `asyncio.gather` fetch that only runs on the ~5-min slow-tier
-interval (`ctx.do_slow_cam and ctx.is_online`), plus its full
-per-endpoint result dispatcher (wifiinfo/firmware/zones/alarm/etc.,
+`CamContext`/`_compute_cam_context` computes the per-camera values
+(hardware generation, online/stream state, the stream-contention
+slow-tier defer gate) ONCE per tick and threads them through every
+later sub-function, instead of each one re-deriving `hw`/`is_gen2`
+independently. `_poll_cam_info_caches` updates the privacy-mode/
+camera-light/notifications-status cache from fields already present in
+`cam_raw` (no network I/O). `_poll_cam_control` fetches pan position
+and Gen2 lighting/switch state every tick (not slow-tier-gated) since
+the Bosch app itself polls lighting/switch ~every 40s, faster than the
+300s slow-tier interval would allow. `_poll_slow_tier_endpoints` is the
+10-20-endpoint parallel `asyncio.gather` fetch that only runs on the
+~5-min slow-tier interval (`ctx.do_slow_cam and ctx.is_online`), plus
+its per-endpoint result dispatcher (wifiinfo/firmware/zones/alarm/etc.,
 many gated by `coordinator.is_write_locked(...)` to avoid reverting a
-just-written optimistic cache value). Takes a `fire_intrusion_event`
+just-written optimistic cache value). It takes a `fire_intrusion_event`
 callable instead of calling `coordinator._maybe_fire_intrusion_event`
-directly — the original inline code called that via
+directly, because that method is invoked via
 `BoschCameraCoordinator._maybe_fire_intrusion_event(self, ...)` class
-dispatch specifically to tolerate `SimpleNamespace` test-fixture
-coordinators that don't set it as a bound attribute; a plain
-`coordinator.<name>` call here would break those existing tests, and
-importing `BoschCameraCoordinator` at runtime would be circular (this
-module is imported BY `__init__.py`). The caller in `__init__.py`
-passes a closure that does the exact same class-dispatch.
+dispatch to tolerate `SimpleNamespace` test-fixture coordinators that
+don't set it as a bound attribute; a plain `coordinator.<name>` call
+here would break those tests, and importing `BoschCameraCoordinator` at
+runtime would be circular (this module is imported BY `__init__.py`).
+The caller in `__init__.py` passes a closure that does the same
+class-dispatch.
 """
 
 from __future__ import annotations
@@ -116,8 +101,7 @@ def _compute_cam_context(
     pan_limit = feat_support.get("panLimit", 0)
     has_light = feat_support.get("light", False)
 
-    # Stream-contention gate (Root-Cause: stream-freeze-on-motion-event-
-    # contention.md, 2026-06-12): the Gen2 camera exposes ONE TLS control
+    # Stream-contention gate: the Gen2 camera exposes ONE TLS control
     # channel shared by the RTSP keepalive AND every RCP / cloud slow-tier
     # read. When both compete, OPTIONS RTT grows from ~1 s to ~21 s against
     # a 30-s RTSP session timeout → go2rtc EOF → 5-10 s video freeze.
@@ -436,7 +420,7 @@ async def _poll_slow_tier_endpoints(
     # Gen1 uses motion_sensitive_areas + privacy_masks (rectangles)
     # Gen2 Outdoor II uses zones + privateAreas (polygons) — different endpoints!
     # Gen2 Indoor II returns 442 ("hardware not supported") on privateAreas
-    # — confirmed by direct API test 2026-04-11. Only poll zones.
+    # — only poll zones.
     if is_gen2:
         endpoints.append("zones")
         if hw not in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
@@ -659,7 +643,7 @@ async def _poll_slow_tier_endpoints(
                     ep_data if isinstance(ep_data, dict) else {}
                 )
         elif ep == "alarmStatus":
-            # Actual response format confirmed 2026-04-11:
+            # Response format:
             #   {"alarmType": "NONE" | ..., "intrusionSystem": "INACTIVE" | "ACTIVE" | ...}
             coordinator.alarm_status_cache[cam_id] = (
                 ep_data if isinstance(ep_data, dict) else {}

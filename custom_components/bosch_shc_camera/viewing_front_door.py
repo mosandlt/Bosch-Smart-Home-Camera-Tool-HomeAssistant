@@ -1,12 +1,11 @@
 """Always-on, credential-free RTSP front-door for the MAIN live-viewing path.
 
-Problem (HA-Core-submission prep, 2026-07-14): HA-core's own built-in go2rtc
-integration automatically registers a stream with go2rtc on every WebRTC
-offer, using whatever `camera.stream_source()` currently returns — no opt-in
-required, this happens for free once the integration is Core-eligible.
-go2rtc's registration is purely additive: it dedupes only on an exact
-URL-string match and offers no API to remove a stale entry. This integration's
-LOCAL `stream_source()` URL embeds real, frequently-rotating Bosch Digest
+Problem: HA-core's own built-in go2rtc integration automatically registers
+a stream with go2rtc on every WebRTC offer, using whatever
+`camera.stream_source()` currently returns — no opt-in required. go2rtc's
+registration is purely additive: it dedupes only on an exact URL-string
+match and offers no API to remove a stale entry. This integration's LOCAL
+`stream_source()` URL embeds real, frequently-rotating Bosch Digest
 credentials (`rtsp://user:pass@127.0.0.1:PORT/...`) — creds that rotate on
 every heartbeat PUT /connection, as fast as ~15s on Gen1 cameras — and a fresh
 ephemeral TLS-proxy port on every session rebuild. Relying on native
@@ -16,11 +15,11 @@ lifetime — go2rtc's registry has no eviction for entries that fall out of
 use).
 
 This module reuses the exact same proven pattern already shipped for the
-opt-in external-recorder front-door (`frigate_endpoint.py`, HA#37): a
-stable-port, credential-free RTSP listener that performs the Digest
-challenge/response dance itself (harvesting the challenge fresh, injecting
-`Authorization` using the live session's current rotating creds) instead of
-requiring the client to supply credentials. It reuses the SAME inner
+opt-in external-recorder front-door (`frigate_endpoint.py`): a stable-port,
+credential-free RTSP listener that performs the Digest challenge/response
+dance itself (harvesting the challenge fresh, injecting `Authorization`
+using the live session's current rotating creds) instead of requiring the
+client to supply credentials. It reuses the SAME inner
 `tls_proxy.py` port and the SAME live Bosch session the main viewing path
 already opened — this module never opens a second session itself, matching
 `frigate_endpoint.py`'s `_frigate_resolve_inner` "reuse, don't open" contract
@@ -125,10 +124,10 @@ async def start_viewing_front_door(
         coordinator.viewing_front_door_runner = FrontDoorRunner()
     runner = coordinator.viewing_front_door_runner
     if runner.has_server(cam_id):
-        # Already bound — genuinely REUSE it rather than restart
-        # (bug-hunt finding: `FrontDoorRunner.start_server` always does an
-        # internal stop_server()+rebind, which is fine for a fresh connect
-        # but is unnecessary churn on every periodic LOCAL session renewal —
+        # Already bound — genuinely REUSE it rather than restart.
+        # `FrontDoorRunner.start_server` always does an internal
+        # stop_server()+rebind, which is fine for a fresh connect but is
+        # unnecessary churn on every periodic LOCAL session renewal —
         # `viewing_resolve_inner` reads `tls_proxy_ports`/`_local_user`/
         # `_local_password` fresh on every client (re)connect, so a
         # renewal's new inner TLS-proxy port is picked up automatically by
@@ -136,10 +135,10 @@ async def start_viewing_front_door(
         # needlessly ECONNREFUSE any client racing the close→rebind gap —
         # the same "don't restart what doesn't need restarting" class of
         # bug already fixed elsewhere in this codebase for the NVR recorder
-        # on heartbeat cred rotation, HA#41/#42). The URL is still rebuilt
-        # from THIS call's `inst`/`audio_param`/`max_session_duration` (a
-        # quality change on a fresh, non-renewal call still gets reflected
-        # in the returned URL even though the listener itself is untouched).
+        # on heartbeat cred rotation. The URL is still rebuilt from THIS
+        # call's `inst`/`audio_param`/`max_session_duration` (a quality
+        # change on a fresh, non-renewal call still gets reflected in the
+        # returned URL even though the listener itself is untouched).
         return (
             f"rtsp://127.0.0.1:{runner.port(cam_id)}/rtsp_tunnel"
             f"?inst={inst}{audio_param}&fmtp=1&maxSessionDuration={max_session_duration}"

@@ -160,9 +160,9 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
         ``PERSON`` type. The coordinator only upgrades a *local* variable to
         PERSON when firing the HA bus event — the raw event dict kept in
         ``coordinator.data[...]["events"]`` is never rewritten, so matching on
-        ``eventType=="PERSON"`` alone left the Person sensor stuck OFF on Gen2
-        (issue #36). Accept either the explicit PERSON type or a MOVEMENT event
-        tagged PERSON, whichever is newer in the (newest-first) event list.
+        ``eventType=="PERSON"`` alone left the Person sensor stuck OFF on Gen2.
+        Accept either the explicit PERSON type or a MOVEMENT event tagged
+        PERSON, whichever is newer in the (newest-first) event list.
         """
         events = self._cam_data.get("events", [])
         for ev in events:
@@ -203,8 +203,7 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
         ``ts_str[:19]`` + ``replace(tzinfo=UTC)`` re-labelled the local
         wall-clock reading as UTC, so a fresh event appeared ~2h in the future
         (negative age → window stuck on) in CEST. Parsing the offset restores
-        the true instant. (Originally reported via simon42 forum (geotie) as
-        'Motion-Sensor wird oft nicht ausgelöst'; see issue #34.)
+        the true instant.
 
         The window duration is taken from `_motion_active_window` which reads
         the `motion_active_window` config-entry option (default 90 s, range
@@ -395,8 +394,8 @@ class BoschLanReachableBinarySensor(BoschBinarySensorEntity):
 
     # Both freshness fields are monotonic-derived → they change on every
     # coordinator tick while the on/off state stays put. Recording them spawns
-    # a new `state_attributes` row each tick and bloats the DB (HA#39). Keep
-    # them visible live, but never historize them.
+    # a new `state_attributes` row each tick and bloats the DB. Keep them
+    # visible live, but never historize them.
     _unrecorded_attributes = frozenset(
         {"last_check_seconds_ago", "write_grace_seconds_left"}
     )
@@ -476,10 +475,9 @@ class BoschAiRecentAlertBinarySensor(BoschBinarySensorEntity):
     `last_score`/`last_short` only change when a NEW alert lands (same
     cadence as the on/off state itself), so they're safe to record. The
     "how long until this turns off" value changes every coordinator tick
-    while on/off stays put — exact recorder-DB-bloat shape the v14.3.1
-    postmortem (HA#39) fixed elsewhere in this file
-    (`BoschLanReachableBinarySensor`) — so it's excluded via
-    `_unrecorded_attributes`, same discipline.
+    while on/off stays put — same recorder-DB-bloat shape
+    `BoschLanReachableBinarySensor` guards against elsewhere in this file —
+    so it's excluded via `_unrecorded_attributes`, same discipline.
     """
 
     _unrecorded_attributes = frozenset({"seconds_since_last_alert"})

@@ -9,25 +9,23 @@ Creates number entities per camera:
   • {Name} Intrusion Sensitivity  — intrusion detection sensitivity 0-7 (Gen2 only).
     Reads from coordinator.intrusion_config_cache[cam_id]["sensitivity"].
     Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig — full body preserved.
-    FW 9.40+ supports range 0-7 (capture 2026-04-28 confirmed sensitivity=3, max=7).
+    FW 9.40+ supports range 0-7 (confirmed live: sensitivity=3, max=7).
 
   • {Name} Intrusion Distance  — detection range in metres 1-8 (Gen2 only).
     Reads from coordinator.intrusion_config_cache[cam_id]["distance"].
     Writes via PUT /v11/video_inputs/{id}/intrusionDetectionConfig — full body preserved.
     API rejects distance > 8 with HTTP 400 (verified FW 9.40.102). Max clamped to 8.
 
-Style-audit pass (binary_sensor.py pilot pattern, mirrored here): every
-structurally-similar number entity (single cache field read + single-endpoint
-PUT write, with an optional per-camera lock / privacy guard / write-lock
-timestamp) is driven by one generic `BoschNumberEntity` parametrized by a
-`BoschNumberEntityDescription` — matching the pattern used by Platinum-tier
-core integrations like `reolink`, instead of one hand-written subclass per
-entity. `BoschPanNumber` stays a genuine outlier (its min/max range depends
-on a per-camera `pan_limit` value that a single shared description object
-cannot express) and overrides `native_value`/`available`/
-`async_set_native_value` directly — a legitimate hybrid, not a mechanical
-one-size-fits-all collapse, same as `binary_sensor.py`'s LanReachable/
-AiRecentAlert outliers.
+Every structurally-similar number entity (single cache field read +
+single-endpoint PUT write, with an optional per-camera lock / privacy guard
+/ write-lock timestamp) is driven by one generic `BoschNumberEntity`
+parametrized by a `BoschNumberEntityDescription` — matching the pattern used
+by Platinum-tier core integrations like `reolink`, instead of one
+hand-written subclass per entity. `BoschPanNumber` stays a genuine outlier
+(its min/max range depends on a per-camera `pan_limit` value that a single
+shared description object cannot express) and overrides `native_value`/
+`available`/`async_set_native_value` directly — a legitimate hybrid, not a
+mechanical one-size-fits-all collapse.
 """
 
 from __future__ import annotations
@@ -87,7 +85,7 @@ async def async_setup_entry(
         hw = cam_info.get("hardwareVersion", "CAMERA")
         if get_model_config(hw).generation >= 2:
             # lens_elevation works on both Indoor II and Outdoor II
-            # (Indoor II slow-tier returns 200 on this endpoint, confirmed 2026-04-11)
+            # (Indoor II slow-tier returns 200 on this endpoint, confirmed live)
             cam_entities.append(
                 BoschLensElevationNumber(coordinator, cam_id, config_entry)
             )
@@ -317,15 +315,12 @@ class BoschPanNumber(BoschNumberEntity):
 # Reads from coordinator.audio_cache[cam_id]["speakerLevel"].
 # Writes via PUT /v11/video_inputs/{id}/audio with full body preserved —
 # same pattern as microphone level so audioEnabled is not clobbered.
-# Capture 2026-04-08 confirms body shape:
-# {"audioEnabled":true,"microphoneLevel":60,"speakerLevel":80}.
+# Body shape: {"audioEnabled":true,"microphoneLevel":60,"speakerLevel":80}.
 # Disabled by default — enable in Settings -> Entities.
 # Serialized on a per-camera lock shared with microphone level and
 # BoschIntercomSwitch (same /audio endpoint, same audio_cache) so a
 # concurrent write to a sibling field can't be clobbered by a stale snapshot
-# taken before the lock (bug-hunt 2026-07-03; the merge-only-own-field step
-# already existed since 2026-06-02, but without a lock the READ before it
-# could still race).
+# taken before the lock.
 def _speaker_level_value(entity: BoschNumberEntity) -> float | None:
     audio = entity.coordinator.audio_cache.get(entity._cam_id, {})
     val = audio.get("speakerLevel")
@@ -480,8 +475,8 @@ async def _front_light_intensity_set(entity: BoschNumberEntity, value: float) ->
     )
     if not success:
         # The setter (shc.py) never raises — see BoschPrivacyModeSwitch's
-        # matching fix (2026-07-07) for why: a total failure across every
-        # fallback path used to be invisible (state just reverted).
+        # matching fix for why: a total failure across every fallback path
+        # used to be invisible (state just reverted).
         _LOGGER.warning(
             "Front light intensity set to %.0f%% failed on all paths for %s "
             "— state unchanged",
@@ -592,8 +587,7 @@ async def _microphone_level_set(entity: BoschNumberEntity, value: float) -> None
         return
     level = round(value)
     # Serialized on the same per-camera lock as speaker level and
-    # BoschIntercomSwitch — see that description's comment (bug-hunt
-    # 2026-07-03).
+    # BoschIntercomSwitch — see that description's comment.
     lock = _get_cam_lock(entity.coordinator, "_audio_config_locks", entity._cam_id)
     async with lock:
         audio = dict(entity.coordinator.audio_cache.get(entity._cam_id, {}))
@@ -669,7 +663,7 @@ def _white_balance_value(entity: BoschNumberEntity) -> float | None:
 def _white_balance_available(entity: BoschNumberEntity) -> bool:
     # Gate on the lighting cache being populated — a write during the
     # pre-populate / failed-sub-fetch window would PUT zero-defaults and
-    # clobber the camera's real light settings (bug-hunt 2026-06-02).
+    # clobber the camera's real light settings.
     return bool(entity.coordinator.last_update_success) and (
         entity.coordinator.lighting_switch_cache.get(entity._cam_id, {}).get(
             "frontLightSettings"
@@ -689,8 +683,7 @@ async def _white_balance_set(entity: BoschNumberEntity, value: float) -> None:
         "color": None,
     }
     # Route through the coordinator's universal writer, which handles a 401
-    # via token-refresh + retry. Previously this used a raw Bearer PUT that
-    # silently failed on an expired token (bug-hunt 2026-06-02).
+    # via token-refresh + retry.
     ok = await entity.coordinator.async_put_camera(
         entity._cam_id, "lighting/switch", body
     )
@@ -698,7 +691,7 @@ async def _white_balance_set(entity: BoschNumberEntity, value: float) -> None:
         entity._wb_value = wb
         # Merge ONLY the group we changed into the live cache (not the whole
         # snapshot) so a concurrent sibling write to a different light group
-        # isn't clobbered by our stale snapshot (bug-hunt 2026-06-02).
+        # isn't clobbered by our stale snapshot.
         cur = entity.coordinator.lighting_switch_cache.setdefault(entity._cam_id, {})
         cur["frontLightSettings"] = body["frontLightSettings"]
         _LOGGER.debug("White balance set to %.2f for %s", wb, entity._cam_id[:8])
@@ -763,8 +756,7 @@ async def _led_brightness_set(entity: BoschNumberEntity, value: float) -> None:
     body = _lighting_switch_body(cached)
     body[entity._led_key] = {**body[entity._led_key], "brightness": brightness}
     # Route through the coordinator's universal writer (401 → token-refresh +
-    # retry) instead of a raw Bearer PUT that silently failed on an expired
-    # token (bug-hunt 2026-06-02).
+    # retry).
     ok = await entity.coordinator.async_put_camera(
         entity._cam_id, "lighting/switch", body
     )
@@ -973,7 +965,7 @@ class BoschDarknessThresholdNumber(BoschNumberEntity):
 # Maps to "Power-LED" slider in iOS app → Kamera-Funktionen.
 # Distinct from Status-LED (red, recording indicator, BoschStatusLedSwitch).
 # PUT /v11/video_inputs/{id}/iconLedBrightness  body: {"value": 0-4}
-# Confirmed by direct API test 2026-04-11: writing value=5 → HTTP 400
+# Confirmed live: writing value=5 → HTTP 400
 # "must be less than or equal to 4". The iOS app shows this as a percent
 # slider but internally maps to 5 discrete positions (0 = off, 4 = max).
 def _power_led_brightness_value(entity: BoschNumberEntity) -> float | None:
@@ -1239,8 +1231,7 @@ INTRUSION_DISTANCE_DESCRIPTION = BoschNumberEntityDescription(
 class BoschIntrusionSensitivityNumber(BoschNumberEntity):
     """Number: intrusion detection sensitivity 0–7 (Gen2 only).
 
-    FW 9.40+ raised the range from 0–5 to 0–7 (confirmed via captures 2026-04-28:
-    value=3 seen, comment in api-findings.md §5 "sensitivity bis 7 (vorher 5)").
+    FW 9.40+ raised the range from 0–5 to 0–7 (confirmed live: value=3 seen).
     """
 
     entity_description = INTRUSION_SENSITIVITY_DESCRIPTION
@@ -1254,7 +1245,7 @@ class BoschIntrusionSensitivityNumber(BoschNumberEntity):
 class BoschIntrusionDistanceNumber(BoschNumberEntity):
     """Number: intrusion detection range in metres 1–8 (Gen2 only).
 
-    API rejects distance > 8 with HTTP 400 (verified live FW 9.40.102 2026-05-29).
+    API rejects distance > 8 with HTTP 400 (verified live on FW 9.40.102).
     """
 
     entity_description = INTRUSION_DISTANCE_DESCRIPTION

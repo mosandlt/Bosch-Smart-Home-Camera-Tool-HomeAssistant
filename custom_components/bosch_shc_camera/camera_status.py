@@ -1,15 +1,12 @@
 """Parallel per-camera status-check pass.
 
-Phase 2 step 4 of the coordinator-rewrite split (see
-.claude/plans/jiggly-moseying-peacock.md, project root). Local TCP ping +
-cloud `/ping`/`/commissioned` run in parallel for all cameras via
-`asyncio.gather(..., return_exceptions=True)` — one camera's failure must
-never abort the others.
+Local TCP ping + cloud `/ping`/`/commissioned` run in parallel for all
+cameras via `asyncio.gather(..., return_exceptions=True)` — one camera's
+failure must never abort the others.
 
 Gating semantics are DELIBERATELY different from `event_polling.py`'s
-`poll_events` (do not homogenize the two — a bug-hunt agent flagged this
-explicitly during review of the event-polling extraction): there is no
-single top-level "do_status" bool. Instead, each camera's own coroutine
+`poll_events` (do not homogenize the two): there is no single top-level
+"do_status" bool. Instead, each camera's own coroutine
 gates itself via `coordinator.should_check_status(cam_id, now,
 interval_status)` — cameras can be on different per-camera check
 intervals (e.g. extended intervals for persistently-offline cameras).
@@ -94,8 +91,7 @@ async def _check_one_camera_status(
             # cost is negligible, and reading the entry's options
             # directly avoids coupling to the caller's `opts`
             # snapshot (which a caller/test may set independently of
-            # the entry). Reverted a micro-opt that broke that
-            # contract. 2026-06-18.
+            # the entry).
             _check_opts = _get_options(coordinator.entry)
             if _check_opts.get("stream_connection_type", "local") == "auto":
                 err_count_was = coordinator.stream_error_count.get(cam_id, 0)
@@ -135,8 +131,7 @@ async def _check_one_camera_status(
     # `status` must stay whatever it already was (e.g. a genuine OFFLINE),
     # not silently reset to UNKNOWN. A reset here clears offline_since
     # tracking and makes an unavailable camera read as available again on a
-    # transient probe blip (backported from the Core PR's Copilot review
-    # round 5, 2026-07-27).
+    # transient probe blip.
     status = coordinator.cached_status.get(cam_id, "UNKNOWN")
     ping_ok = False
     try:

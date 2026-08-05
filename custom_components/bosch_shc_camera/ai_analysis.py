@@ -287,9 +287,9 @@ def _parse_json_fallback(text: str) -> dict[str, Any] | None:
     """Best-effort JSON extraction for an AI-Task provider that doesn't
     honor the `structure` param and returns free text instead.
 
-    Security bug-hunt finding: the extracted dict is camera-scene-derived
-    text (an AI-Task response, ultimately influenced by whatever is visible
-    to the camera) and flows into a user-configured `domain.service` call's
+    Security note: the extracted dict is camera-scene-derived text (an
+    AI-Task response, ultimately influenced by whatever is visible to the
+    camera) and flows into a user-configured `domain.service` call's
     `data` payload (`ai_alert_routing.py`). Unlike the `structure`-enforced
     path, free-text JSON has no schema enforcement, so a crafted scene
     (e.g. a sign held up to the camera) could inject arbitrary extra keys

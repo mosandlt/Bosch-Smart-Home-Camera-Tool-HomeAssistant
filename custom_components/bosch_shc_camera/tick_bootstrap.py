@@ -1,16 +1,14 @@
 """One-time bootstrap fetches inside `_async_update_data`.
 
-Phase 2 step 3 of the coordinator-rewrite split (see
-.claude/plans/jiggly-moseying-peacock.md, project root). Feature-flags and
-the Bosch API protocol-version check are each guarded by an instance flag
-(`self.feature_flags`/`self.protocol_checked`) so they only genuinely run
-on the first tick, but the guard checks themselves are re-evaluated every
-tick inline — this is bootstrap-shaped logic riding along in the per-tick
-polling method, not repeated polling work. Left inline-called on every tick
-(not moved to a scheduled background task) per the plan's own judgment
-call: the existing throttle guards ARE the correctness mechanism, and
-converting to `async_track_time_interval` would change failure/ordering
-semantics for no benefit at this stage.
+Feature-flags and the Bosch API protocol-version check are each guarded by
+an instance flag (`self.feature_flags`/`self.protocol_checked`) so they
+only genuinely run on the first tick, but the guard checks themselves are
+re-evaluated every tick inline — this is bootstrap-shaped logic riding
+along in the per-tick polling method, not repeated polling work. Left
+inline-called on every tick (not moved to a scheduled background task):
+the existing throttle guards ARE the correctness mechanism, and converting
+to `async_track_time_interval` would change failure/ordering semantics for
+no benefit.
 
 Both functions swallow their own failures (matching the pre-extraction
 inline code exactly) — a fetch failure here must never abort the tick,

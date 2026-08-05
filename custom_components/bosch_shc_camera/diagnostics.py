@@ -56,18 +56,18 @@ TO_REDACT = {
     "smb_share",
     "smb_base_path",
     # Frigate/external-recorder persistent RTSP front-door credentials.
-    # Regression (bug-hunt 2026-07-03): async_redact_data matches keys
-    # EXACTLY, so the generic "token"/"auth" entries above never caught
-    # "frigate_token" — the front-door auth token, Basic-Auth username, and
-    # allowed-IP list leaked in plaintext into every diagnostics export
-    # (a user-facing feature routinely pasted into public bug reports).
+    # async_redact_data matches keys EXACTLY, so the generic "token"/"auth"
+    # entries above never catch "frigate_token" — the front-door auth
+    # token, Basic-Auth username, and allowed-IP list would otherwise leak
+    # in plaintext into every diagnostics export (a user-facing feature
+    # routinely pasted into public bug reports).
     "frigate_token",
     "frigate_basic_user",
     "frigate_ip_allowlist",
-    # Event-webhook delivery URL (bug-hunt 2026-07-20, same class as the
-    # frigate_token gap above): third-party push endpoints (Slack/Discord
-    # incoming-webhooks, ntfy topics, HA long-lived-token webhooks) embed a
-    # secret token in the URL path itself — leaked verbatim without this.
+    # Event-webhook delivery URL (same class as the frigate_token gap
+    # above): third-party push endpoints (Slack/Discord incoming-webhooks,
+    # ntfy topics, HA long-lived-token webhooks) embed a secret token in
+    # the URL path itself — leaked verbatim without this.
     "webhook_url",
     # Stream / RTSP URLs (contain proxy session credentials)
     "rtspsUrl",
@@ -124,9 +124,9 @@ async def async_get_config_entry_diagnostics(
                 )
             )
 
-    # Not a set[str] anymore — coord.stream_warming is a StreamWarmingView
-    # facade (session_state.py) since the Phase 1 coordinator rewrite. Sized
-    # is the correct minimal type for the only operation used here, len().
+    # coord.stream_warming is a StreamWarmingView facade (session_state.py),
+    # not a set[str] — Sized is the correct minimal type for the only
+    # operation used here, len().
     stream_warming: Sized = getattr(coord, "stream_warming", set())
 
     return {

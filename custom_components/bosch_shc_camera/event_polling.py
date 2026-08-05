@@ -1,18 +1,15 @@
 """Parallel per-camera events-fetch pass.
 
-Phase 2 step 4 of the coordinator-rewrite split (see
-.claude/plans/jiggly-moseying-peacock.md, project root). Fetches
-`/v11/events` for every camera in parallel via `asyncio.gather(...,
-return_exceptions=True)` — one camera's failure must never abort the
-others, and a transient per-camera failure must never blank that camera's
-cached events (see `_fetch_one_camera_events`'s own docstring for the
-`ok` flag's exact contract, carried over unchanged from the pre-extraction
-inline code).
+Fetches `/v11/events` for every camera in parallel via
+`asyncio.gather(..., return_exceptions=True)` — one camera's failure must
+never abort the others, and a transient per-camera failure must never
+blank that camera's cached events (see `_fetch_one_camera_events`'s own
+docstring for the `ok` flag's exact contract).
 
-`poll_events` is gated by `do_events` exactly as the inline code was — the
-gate lives in the caller-supplied bool, not recomputed here, since that
-gate's computation depends on FCM-health/first-tick state that stays
-inline in `_async_update_data` (not this decomposition's concern).
+`poll_events` is gated by `do_events` — the gate lives in the
+caller-supplied bool, not recomputed here, since that gate's computation
+depends on FCM-health/first-tick state that stays inline in
+`_async_update_data`.
 """
 
 from __future__ import annotations
@@ -139,8 +136,8 @@ async def poll_events(
             # actively CLOBBER the newer data back to the stale snapshot —
             # while last_event_ids stays at FCM's newer value, so the next
             # dispatch pass sees a newest_id OLDER than prev_id and
-            # re-fires an already-delivered alert (bug-hunt finding,
-            # 2026-07-19). There is nothing new to persist for this camera
+            # re-fires an already-delivered alert. There is nothing new to
+            # persist for this camera
             # in the skip_full_fetch case either way, so just skip the
             # write entirely rather than risk the clobber.
             if ev_ok and not skip_full_fetch:

@@ -2,15 +2,12 @@
 pruning, availability-transition notify, LAN-IP/hw-version/local-creds
 persistence, maintenance-feed refresh, cloud-state notify.
 
-Phase 2 step 6 of the coordinator-rewrite split (see
-.claude/plans/jiggly-moseying-peacock.md, project root). Everything
-here is fire-and-forget (`hass.async_create_task`/
+Everything here is fire-and-forget (`hass.async_create_task`/
 `async_create_background_task`) or a cheap in-memory check — none of
 it blocks the coordinator tick's return of `data`. Deliberately does
 NOT include `_refresh_notifications_disabled_issues`/
 `_refresh_firmware_update_issues` — those stay as their own coordinator
-methods called directly from `_async_update_data`, per the orchestrator
-skeleton in the plan file.
+methods called directly from `_async_update_data`.
 """
 
 from __future__ import annotations
@@ -75,9 +72,8 @@ async def run_housekeeping(
     # `data` is only ever a genuine, successful fetch result by this point —
     # fetch_camera_list raises on any failure before reaching here — so an
     # empty `data` is a definitive zero-camera account, not a fetch glitch,
-    # and must still run cleanup (an `and data` guard here previously left
-    # the account's last-removed camera's device/state behind forever;
-    # backported from the Core PR's Copilot review round 3, 2026-07-27).
+    # and must still run cleanup (an `and data` guard here would leave the
+    # account's last-removed camera's device/state behind forever).
     if not is_first_tick:
         coordinator.cleanup_stale_devices(set(data.keys()))
 
@@ -108,9 +104,7 @@ async def run_housekeeping(
         # No truthiness guard on `_snapshot` here — cleanup_stale_devices()
         # clears rcp_lan_ip_cache when the account's last camera is removed,
         # and that empty snapshot must still be persisted, or the stale
-        # camera ID/IP is reloaded and pinged again after a restart
-        # (backported from the Core PR's Copilot review round 5,
-        # 2026-07-27 — same class of bug already fixed for local_creds).
+        # camera ID/IP is reloaded and pinged again after a restart.
         if _snapshot != _prev:
             coordinator.lan_ips_snapshot = _snapshot
             coordinator.spawn_tracked(
@@ -130,9 +124,7 @@ async def run_housekeeping(
         # clears hw_version when the account's last camera is removed, and
         # that empty snapshot must still be persisted, or the removed
         # camera's hardware version is reloaded from .storage after a
-        # restart (same class of bug already fixed for LAN IPs and LOCAL
-        # creds — backported from the Core PR's Copilot review round 6,
-        # 2026-07-27).
+        # restart (same class of bug as LAN IPs and LOCAL creds below).
         if _hw_snapshot != _hw_prev:
             coordinator.hw_version_snapshot = _hw_snapshot
             coordinator.spawn_tracked(
@@ -160,8 +152,7 @@ async def run_housekeeping(
         # No truthiness guard on `_cred_snapshot` here — the account's last
         # camera being removed clears `local_creds_cache` to `{}`, and that
         # empty snapshot must still be persisted so the deleted camera's
-        # Digest credentials don't remain in `.storage` indefinitely
-        # (backported from the Core PR's Copilot review round 3, 2026-07-27).
+        # Digest credentials don't remain in `.storage` indefinitely.
         if _cred_snapshot != _cred_prev:
             coordinator.local_creds_snapshot = _cred_snapshot
             coordinator.spawn_tracked(
@@ -182,18 +173,16 @@ async def run_housekeeping(
             name="bosch_shc_camera_maint_refresh_periodic",
         )
 
-    # Cloud-state transition notifier (v12.4.11). Called directly
-    # (awaited) rather than spawned as a task: this call site always
-    # passes success=True, and `_async_maybe_announce_cloud_state`
-    # early-returns immediately (a couple of in-memory attribute
-    # checks, no I/O) unless a prior outage was actually announced —
-    # the rare "recovery" branch it can fall into only fires
-    # `hass.services.async_call(..., blocking=False)`, which schedules
-    # the notify service without waiting for it to finish, so it's
-    # cheap too. Spawning a fresh `async_create_task` every tick for a
-    # call that almost always no-ops was pure overhead (perf-refactor
-    # Phase 1 step 5). getattr handles stub coordinators in tests that
-    # bypass __init__.
+    # Cloud-state transition notifier. Called directly (awaited) rather
+    # than spawned as a task: this call site always passes success=True,
+    # and `_async_maybe_announce_cloud_state` early-returns immediately (a
+    # couple of in-memory attribute checks, no I/O) unless a prior outage
+    # was actually announced — the rare "recovery" branch it can fall into
+    # only fires `hass.services.async_call(..., blocking=False)`, which
+    # schedules the notify service without waiting for it to finish, so
+    # it's cheap too. Spawning a fresh `async_create_task` every tick for a
+    # call that almost always no-ops would be pure overhead. getattr
+    # handles stub coordinators in tests that bypass __init__.
     _cloud_alert = getattr(coordinator, "_async_maybe_announce_cloud_state", None)
     if _cloud_alert is not None:
         await _cloud_alert(True)

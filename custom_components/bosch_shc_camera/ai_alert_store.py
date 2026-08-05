@@ -231,11 +231,10 @@ async def async_load_recent_alerts(coordinator: BoschCameraCoordinator) -> None:
     empty after a restart, which would silently disable repeat-context for
     up to `ai_analysis_repeat_context_minutes` after every restart).
 
-    Bug-hunt finding: a per-camera failure here (unreadable dir, executor
-    error) previously had no guard and would abort setup entirely for every
-    OTHER camera too, and integration setup as a whole — this is a
-    best-effort cache warm-up, not a critical path, so one bad camera must
-    not break setup. Matches this codebase's general "startup enhancement
+    A per-camera failure here (unreadable dir, executor error) must not
+    abort setup entirely for every OTHER camera too, or integration setup
+    as a whole — this is a best-effort cache warm-up, not a critical path.
+    Matches this codebase's general "startup enhancement
     must never break setup" discipline (see `async_load_ai_budget`'s own
     try/except around its store load).
     """
