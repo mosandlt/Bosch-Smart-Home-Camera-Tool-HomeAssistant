@@ -75,7 +75,7 @@ _FLUSH_PREFIX = "text/event-stream; x-actual="
 # embedded in the HLS URL (/api/hls/<token>/...). See __init__.py
 # has_active_consumer.
 _HLS_ACCESS: dict[str, float] = {}
-# Cap raised from 64 → 256 (B05-5).  64 was enough for typical deployments,
+# 64 would be enough for typical deployments,
 # but tokens rotate on every HLS session renewal.  With >64 cameras — or after
 # many rapid session restarts — the oldest token could be evicted while HLS was
 # still actively serving a segment.  hls_access_age() would then return None

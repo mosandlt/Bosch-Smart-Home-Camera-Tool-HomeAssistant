@@ -1,10 +1,9 @@
 """Bearer-token lifecycle: read/refresh/proactive-renewal + auth failure alerts.
 
-Extracted from __init__.py's BoschCameraCoordinator (Phase 5 mixin split,
-continuing the pattern established by FCMCoordinatorMixin/
-FrigateCoordinatorMixin/SHCCoordinatorMixin — see those files' docstrings
-for why `self: Any` is used instead of a concrete
-`self: BoschCameraCoordinator` annotation).
+Extracted from __init__.py's BoschCameraCoordinator, following the same
+mixin pattern as FCMCoordinatorMixin/FrigateCoordinatorMixin/
+SHCCoordinatorMixin — see those files' docstrings for why `self: Any` is
+used instead of a concrete `self: BoschCameraCoordinator` annotation.
 
 Covers: the `token`/`refresh_token`/`options` properties (options included
 here since it lives right alongside the token properties in the original
@@ -41,8 +40,7 @@ async def _do_refresh_attempt(
     about the refresh token's validity), False otherwise (either success,
     or an ambiguous-but-real Keycloak HTTP response). Factored out of
     `_refresh_token_locked` to keep that method's cyclomatic complexity
-    under the repo's C901 limit (backported from the Core PR's Copilot
-    review round 5, 2026-07-27).
+    under the repo's C901 limit.
     """
     from .config_flow import _do_refresh
 
@@ -121,9 +119,8 @@ class TokenAuthCoordinatorMixin:
             before its own JWT `exp` claim says so — trusting `exp` alone
             (as this used to) meant a token rejected for any other reason
             was never actually refreshed: it still "looked" valid, so every
-            retry just resent the same dead token forever (2026-07-06,
-            SebastianHarder community report — a manual-login token was
-            rejected immediately, and the integration never recovered).
+            retry just resent the same dead token forever (e.g. a manual-
+            login token rejected immediately, with no recovery).
           - Always re-read the freshest refresh_token from the
             config entry under the lock so we never send a stale
             token that was already rotated and persisted by the
@@ -141,8 +138,7 @@ class TokenAuthCoordinatorMixin:
         """Persist a successful refresh's tokens and reset all failure tracking.
 
         Factored out of `_refresh_token_locked` to keep that method's
-        cyclomatic complexity under the repo's C901 limit (backported from
-        the Core PR's Copilot review round 5, 2026-07-27).
+        cyclomatic complexity under the repo's C901 limit.
         """
         from . import ir as ir  # type: ignore[attr-defined]
 
@@ -263,8 +259,7 @@ class TokenAuthCoordinatorMixin:
         # True when the LAST attempt failed via a caught network-layer
         # exception (not an ambiguous-but-real HTTP response) — gates the
         # bottom fallback path below so 3 consecutive network/DNS failures
-        # never count toward the invalid-grant/reauth escalation either
-        # (backported from the Core PR's Copilot review round 5, 2026-07-27).
+        # never count toward the invalid-grant/reauth escalation either.
         last_attempt_was_transient = False
         try:
             async with asyncio.timeout(15):
@@ -291,8 +286,7 @@ class TokenAuthCoordinatorMixin:
             # _token_fail_count (which drives the reauth escalation below
             # and must only reflect a genuine invalid-grant/empty-response
             # failure) — abort the loop early instead of letting it run to
-            # ~49s (backported from the Core PR's Copilot review round 4,
-            # 2026-07-27).
+            # ~49s.
             self._token_timeout_fail_count += 1
             _LOGGER.warning(
                 "Token refresh timed out after 15s (attempt %d) — Keycloak "
@@ -329,9 +323,7 @@ class TokenAuthCoordinatorMixin:
             # No Repairs issue here — Repairs must be user-actionable, and
             # this one's own text said the opposite ("no action needed",
             # retries automatically). The WARNING log above plus the
-            # entities-unavailable state already surface this correctly
-            # (backported from the Core PR's Copilot review round 6,
-            # 2026-07-27).
+            # entities-unavailable state already surface this correctly.
             raise UpdateFailed(
                 f"Bosch auth server outage — will retry in {backoff}s"
             ) from err
@@ -346,7 +338,7 @@ class TokenAuthCoordinatorMixin:
         # again, the >=3-failures reauth escalation below can never fire.
         # Same check already exists at the other two _do_refresh call
         # sites in config_flow.py — this was a real inconsistency, not an
-        # intentional design choice. (bug-hunt finding, 2026-07-19)
+        # intentional design choice.
         if tokens and tokens.get("access_token"):
             return await self._handle_successful_refresh(  # type: ignore[no-any-return]  # self: Any (mixin) — real type is str
                 tokens, refresh
@@ -354,8 +346,7 @@ class TokenAuthCoordinatorMixin:
         if last_attempt_was_transient:
             # All 3 attempts failed via a network-layer exception, not an
             # ambiguous-but-real Keycloak response — stay transient, never
-            # touch the reauth-escalation counter (backported from the
-            # Core PR's Copilot review round 5, 2026-07-27).
+            # touch the reauth-escalation counter.
             raise UpdateFailed("Token refresh failed — network error, will retry")
         self._token_fail_count += 1
         _LOGGER.warning(

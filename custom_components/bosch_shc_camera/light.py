@@ -65,10 +65,6 @@ async def async_setup_entry(
             # temp front spotlight). Indoor II has NO visible light hardware —
             # only the IR night-vision LEDs which are not user-controllable.
             # Bosch's API correctly reports `featureSupport.light=false` for it.
-            # v12.5.0 mistakenly created a `BoschFrontLight` for Indoor II based
-            # on the stale `number.*_helligkeit_*` entities that were left in
-            # the registry from an older codepath — those numbers also never
-            # worked. Reverted in v12.5.1; cleanup runs in async_setup_entry.
             if has_light:
                 cam_entities.append(BoschTopLedLight(coordinator, cam_id, config_entry))
                 cam_entities.append(
@@ -307,8 +303,7 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
         # AND on the actual camera. The lock makes each write build its body from
         # a cache that already contains the prior write's result, and we merge
         # only the changed group(s) back (never the whole entry). Matches the
-        # merge-only-own-key fix number.py already got in 2026-06-02.
-        # (bug-hunt 2026-07-01)
+        # merge-only-own-key pattern number.py also uses.
         locks = getattr(self.coordinator, "lighting_switch_locks", None)
         if locks is None:
             locks = {}
@@ -342,9 +337,9 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
                             # /lighting/switch returns 204 No Content (empty body);
                             # 200/201 would carry authoritative JSON. Prefer the
                             # server body when present, else the optimistic `body`
-                            # we sent. (BUG-FIX 2026-05-28: the old resp.json() on a
-                            # 204 raised → swallowed → cache never updated → is_on
-                            # stuck False.)
+                            # we sent — calling resp.json() unconditionally on a
+                            # 204 raises, which would leave the cache never
+                            # updated and is_on stuck False.
                             try:
                                 rsp = await resp.json(content_type=None)
                             except Exception:

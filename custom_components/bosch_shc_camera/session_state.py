@@ -1,230 +1,73 @@
 """Per-camera live-session bookkeeping.
 
-Phase 1 of the coordinator god-object rewrite (see
-.claude/plans/jiggly-moseying-peacock.md, in the project root). Consolidates
-per-camera coordinator dicts into one object per camera.
+Consolidates per-camera coordinator state into one `CameraSessionState`
+dataclass per camera, accessed either directly or through thin dict/set-like
+"view" facades (`StreamWarmingView`, `LiveOpenedAtView`, `FloatFieldView`,
+`BoolFieldView`, `CacheFieldView`) that preserve the exact `dict`/`set`
+contract external call sites (`camera.py`, `switch.py`, `shc.py`,
+`select.py`, `light.py`, `number.py`, `services.py`, `slow_tier.py`,
+`stream_lifecycle.py`, `live_connection.py`, etc.) already rely on — so
+those call sites keep using `.get()`/`[cam_id] = ...`/`in`/`.add()`/
+`.discard()`/`.pop()` unchanged.
 
-Slice 1 folded in three dicts with NO external readers (only
-`BoschCameraCoordinator` itself, in ``__init__.py``, ever touched them):
-``_auto_renew_generation``, ``_session_idle_since``, ``_stream_warming_started``.
-
-Slice 2 (this one) folds in two more: ``stream_warming`` (a ``set[str]``)
-and ``live_opened_at`` (a ``dict[str, float]``) — both DO have external
-readers (``camera.py``: ``in``/``not in`` on ``stream_warming``, ``.get()``/
-``.pop()`` on ``live_opened_at``). Rather than rewrite those call sites,
-``_StreamWarmingView``/``_LiveOpenedAtView`` below are thin facades
-implementing exactly the subset of the ``set``/``dict`` protocol those call
-sites use, backed by the same ``_sessions`` store — so
-``coordinator.stream_warming``/``coordinator.live_opened_at`` keep
-behaving exactly as before to every external caller, with zero changes
-needed in ``camera.py``/``switch.py``.
-
-Deliberately NOT folded into Slice 2: ``live_connections`` itself — a much
-larger, heterogeneous ~15-key dict (raw Bosch API JSON plus derived fields)
-with real external MUTATION (multiple ``.pop()`` call sites across
-``camera.py``/``switch.py``/``stream_lifecycle.py``/``live_connection.py``),
-not just reads. That merge needed its own dedicated design and was folded
-in later, in Slice 3 (see below) — `CacheFieldView` turned out to be
-sufficient after all (verified via a dedicated `.pop()`-semantics test
-before relying on it), since it is already a full `MutableMapping`.
-
-Slice 1 of the ``docs/stream-perf-stability-refactor-plan.md`` "Session-
-State-Facade — inkrementeller Migrationsplan" (Anhang 2026-07-13) folds in
-the diagnostic/write-lock timestamp fields: ``offline_seen_at`` and every
-``*_set_at`` write-lock timestamp (13 of them — one per cloud-writable
-field guarded by ``BoschCameraCoordinator.is_write_locked``), plus three
-boolean "already logged/deferred this cycle" flags
-(``notif_disabled_logged``, ``fw_update_alerted``, ``slow_tier_deferred``).
-Generalizes the ``LiveOpenedAtView``/``StreamWarmingView`` pattern above
-into reusable ``FloatFieldView``/``BoolFieldView`` classes parameterized by
-field name, since Slice 1 has 14 float fields and 3 bool fields rather than
-one each — a hand-rolled view class per field would be pure duplication.
-External call sites (``shc.py``, ``switch.py``, ``select.py``, ``light.py``,
-``number.py``, ``services.py``, ``slow_tier.py``) keep using
-``coordinator._x_set_at.get()``/``[cam_id] = ...`` / ``in``/``.add()``/
-``.discard()`` exactly as before — only the ``__init__.py`` declaration
-changed from a bare ``dict``/``set`` to a view instance.
-
-``generation`` is the TOCTOU guard central to this rewrite's motivation: a
-caller that decides to tear down or renew a session captures the generation
-at decision time, and re-checks it after any ``await`` (lock acquisition,
+``generation`` is the TOCTOU guard central to this design: a caller that
+decides to tear down or renew a session captures the generation at
+decision time, and re-checks it after any ``await`` (lock acquisition,
 sleep) before acting — a generation mismatch means a newer session has
 since superseded the stale decision.
 
-Slice 2 of the ``docs/stream-perf-stability-refactor-plan.md`` "Session-
-State-Facade — inkrementeller Migrationsplan" folds in 27 per-cam_id cache
-fields with no cross-camera access: every ``_rcp_*_cache`` (RCP protocol
-data — dimmer/privacy/clock-offset/lan-ip/product-name/bitrate/alarm-
-catalog/motion-zones/motion-coords/tls-cert/network-services/iva-catalog/
-onvif-scopes/version/state), ``shc_state_cache``, ``pan_cache``,
-``audio_cache``, ``local_creds_cache``, ``_nvr_mode_preference``, and the
-plain per-cam Mini-NVR status dicts ``nvr_user_intent``/``nvr_error_state``/
-``nvr_recent_crash``/``nvr_auth_retry_count``/``_nvr_event_clip_enabled``/
-``_nvr_preroll_last_crash``/``nvr_preroll_segment_counts``. Unlike Slice 1's
-float/bool fields, these are heterogeneous (dict/list/int/str/float/bool,
-several themselves ``Optional``) — generalized into one generic
-``CacheFieldView[_T]`` built on ``collections.abc.MutableMapping`` rather
-than one hand-rolled view class per field. Uses the ``_UNSET`` sentinel
-(not ``None``) for "no value yet", since several of these fields are
-themselves ``Optional``-valued caches (e.g. ``rcp_privacy_cache: int |
-None``) where a stored ``None`` is a legitimate cached value ("queried,
+Cache fields default to the `_UNSET` sentinel (not `None`), since several
+of them are themselves `Optional`-valued caches (e.g. `rcp_privacy_cache:
+int | None`) where a stored `None` is a legitimate cached value ("queried,
 camera reported nothing") that must stay distinguishable from "never
 queried" for `in`/`.get()` callers.
 
-Deliberately NOT folded into Slice 2 (audited, not an oversight):
-``nvr_processes``/``nvr_preroll_processes`` (live ``asyncio.subprocess.
-Process`` handles, not simple cached data — same "needs its own dedicated
-design" reasoning as ``live_connections`` above), ``nvr_preroll_tasks``
-(``asyncio.Task`` handles), ``_nvr_recorder_locks``/
-``_nvr_clip_assembly_locks`` (locks — Slice 4), and ``nvr_drain_state``/
-``nvr_drain_failures`` — both LOOKED like per-cam_id caches from their
-`dict[str, ...]` type hints and their presence in `_PURGE_CAM_DICT_ATTRS`,
-but turned out on inspection of `recorder.py` to NOT be cam_id-keyed at
-all: `nvr_drain_state` is a single flat dict with fixed string keys
-("target"/"pending"/"promoted"/"uploaded"/"failed"/"last_age_by_cam"/
-"last_tick_ts") replaced wholesale every drain tick
-(`recorder.py::sync_drain_tick`), and `nvr_drain_failures` is keyed by
-staging **file path**, not cam_id (`recorder.py:1774`,
-`failures[full] = failures.get(full, 0) + 1`). Migrating either into a
-per-cam `CameraSessionState` field would be actively wrong. Their
-`_PURGE_CAM_DICT_ATTRS` membership was already a no-op in practice (a
-cam_id never literally matches a staging file path or a fixed key like
-"target"), so leaving them as plain dicts changes nothing.
+`CacheFieldView.__getitem__`/`.get()` return the SAME stored object
+reference (not a copy) for mutable dict/list/Lock values, so nested
+in-place mutation (`cache[cam_id]["key"] = value`, used by
+`session_renewal.py`'s credential-rotation path) and lock identity
+(repeated `get_or_create_lock()` calls for the same cam_id returning the
+SAME `asyncio.Lock`) both work exactly as they did against the old bare
+per-field dicts — verified explicitly, including a real two-coroutine
+`async with lock:` mutual-exclusion test with a same-object check
+performed while the lock is held (`tests/test_session_state_facade_slice4.py`).
+An `asyncio.Lock` is a stateful, identity-bearing object: two different
+`Lock()` instances are never interchangeable even both-unlocked, so this
+identity guarantee is what makes the shared-lock pattern safe to move onto
+this facade at all.
 
-Slice 3 of the ``docs/stream-perf-stability-refactor-plan.md`` "Session-
-State-Facade — inkrementeller Migrationsplan" folds in the session-/
-stream-state fields flagged there as higher-risk (actively read by
-today's Phase 1/2/3 code): ``live_connections`` and
-``user_intent_streams``. ``_sessions`` itself is NOT a migration target —
-it already IS the base `dict[cam_id, CameraSessionState]` store every view
-in this module is backed by. ``live_opened_at``/``stream_warming`` were
-already folded before Slice 1 (see `LiveOpenedAtView`/`StreamWarmingView`
-above) and needed no further work here.
+`CacheFieldView.__iter__` materializes eagerly (not a lazy generator) so a
+concurrent `get_or_create_session()` call elsewhere growing the shared
+`_sessions` dict mid-loop cannot raise "dictionary changed size during
+iteration" on a caller iterating a view (e.g. `rcp_lan_ip_cache` in
+`__init__.py`'s outage-ping loop).
 
-``live_connections`` (a `dict[str, dict[str, Any]]`, one ~15-key raw-JSON-
-plus-derived-fields blob per cam_id) folds into a new
-`live_connection: dict[str, Any] | _Unset` field via the EXISTING
-`CacheFieldView[_T]` (Slice 2) — no new view class needed. Before relying
-on this, `CacheFieldView`'s `.pop()` behavior (inherited from
-`MutableMapping`, never previously exercised by Slice 2's callers) was
-verified explicitly against a dedicated unit test covering: popping a
-present key (returns the value, removes it), popping an absent key with a
-default (returns the default, matches `dict.pop(k, default)`), and popping
-an absent key with NO default (raises `KeyError`, matches `dict.pop(k)`).
-All match plain-`dict` semantics exactly, confirming `MutableMapping.pop`'s
-generic implementation (try `__getitem__` + `__delitem__`, catch
-`KeyError`, fall back to `default`) is correct for this sentinel-based
-storage. The two `.pop()` call sites the module docstring above originally
-flagged (`camera.py`, `switch.py`) — since grown to more call sites across
-`stream_lifecycle.py`/`live_connection.py` too — all use the
-`.pop(cam_id, None)` two-arg form and keep working unchanged. The
-nested-subscript-write pattern (`live = coordinator.live_connections.get
-(cam_id); live["key"] = value`, used by `session_renewal.py`'s
-credential-rotation path) also keeps working unchanged: `CacheFieldView.
-__getitem__`/`.get()` return the SAME stored dict object, not a copy, so
-in-place mutation persists into the backing `CameraSessionState.
-live_connection` field exactly as it did into the old bare dict.
-
-``user_intent_streams`` (a `set[str]`, pure cam_id membership with no
-associated value) folds into a new `user_intent_stream: bool` field via
-the EXISTING `BoolFieldView` (Slice 1) — same reasoning as Slice 1's
-"already logged/deferred" flags: membership in the old set is exactly
-equivalent to a per-cam boolean flag, so no new view class is needed
-either. All call sites (`switch.py`, `stream_lifecycle.py`) use only `in`/
-`.add()`/`.discard()`, all already supported by `BoolFieldView`.
-
-Both fields default to their view's normal "not set" sentinel
-(`_UNSET`/`False` respectively) — matching `cam_id not in old_dict`/
-`cam_id not in old_set` semantics exactly, so a freshly created
-`CameraSessionState` (e.g. via `get_or_create_session` from an unrelated
-field write) never spuriously reports an existing live connection or
-user-intent flag for a camera that never had one.
-
-No `race` between a `live_connections` read and a concurrent
-`user_intent_streams` write is introduced by this migration: both fields
-live on the SAME per-cam_id `CameraSessionState` instance now (previously
-two entirely separate dicts), but neither this module nor any caller ever
-held one field's read across an `await` while relying on the other field's
-prior state — every call site reads-then-acts synchronously (no lock
-contention was introduced or removed by folding both onto one dataclass
-instance; attribute reads/writes on a single object are no more or less
-atomic under asyncio's cooperative scheduling than two separate dict
-accesses were).
-
-Slice 4 of the ``docs/stream-perf-stability-refactor-plan.md`` "Session-
-State-Facade — inkrementeller Migrationsplan" — the plan's final and
-explicitly highest-risk slice ("Locks — höchstes Risiko, timing-kritisch")
-— folds in the per-cam_id ``dict[str, asyncio.Lock]`` attributes. The task
-that specified this slice named five (``_stream_locks``,
-``_nvr_recorder_locks``, ``_snapshot_fetch_locks``,
-``_go2rtc_reregister_locks``, ``_nvr_clip_assembly_locks``); a systematic
-re-audit of every ``dict[str, asyncio.Lock]``-typed attribute in
-``__init__.py`` (not just trusting that list) found a sixth that fits the
-exact same criteria and had simply been missed: ``_fresh_snap_locks``
-(per-camera lock coalescing concurrent ``async_fetch_fresh_event_snapshot``
-calls after an FCM push — already routed through the shared
-``lock_utils.get_or_create_lock`` helper; the ``lock_utils`` module
-docstring's mention of it as an "inline setdefault variant" was stale, a
-pre-existing doc/code drift unrelated to this migration). All six became
-``asyncio.Lock | _Unset`` fields (``stream_lock``/``nvr_recorder_lock``/
-``snapshot_fetch_lock``/``go2rtc_reregister_lock``/
-``nvr_clip_assembly_lock``/``fresh_snap_lock``) via the EXISTING Slice 2
-``CacheFieldView`` — no new view class needed, since a lock dict's external
-contract (``.get(key)`` returning ``None`` for a missing key,
-``store[key] = lock`` to insert) is already exactly what `CacheFieldView`
-provides as a full `MutableMapping`.
-
-Deliberately NOT migrated (excluded by the plan itself, audited again
-here): ``rcp_session_locks`` — keyed by `proxy_hash`, not `cam_id`; wrong
-shape for a per-camera facade field, same reasoning as `rcp_session_cache`
-in the Slice 2 exclusion list. Also audited and left out of scope:
-``guards.py::_get_cam_lock`` manages a structurally different per-cam lock
-registry (``_audio_config_locks``, its only caller-supplied ``lock_attr``
-today) that is never pre-declared in `BoschCameraCoordinator.__init__` at
-all — lazily materialized via `getattr`/`setattr` on first use, and never a
-member of `_PURGE_CAM_DICT_ATTRS` either (a pre-existing, unrelated gap,
-not introduced or fixed by this slice). Slice 4's target is specifically
-the coordinator's own pre-declared `__init__`-level lock dicts, so this
-dynamic-attribute pattern was not folded in.
-
-**Why identity is the whole risk here (unlike Slice 1-3's plain data
-fields):** an `asyncio.Lock` is a stateful, identity-bearing object — two
-different `Lock()` instances are NEVER interchangeable even both-unlocked.
-The entire point of `get_stream_lock(cam_id)` et al is that repeated calls
-for the SAME `cam_id` return the SAME lock object, so that two coroutines
-serializing on "the lock for this camera" are actually contending on one
-shared object rather than each silently getting their own. `CacheFieldView`
-was already verified (Slice 3) to return the SAME stored object reference
-from `__getitem__`/`.get()` (not a copy) for mutable dict/list cache
-values — that same "no copying" property is what makes it safe to reuse
-here for `asyncio.Lock` values too: nothing in `CacheFieldView` ever
-constructs a NEW value on read, it only ever returns exactly what was
-`__setitem__`-stored (or raises/returns-default if nothing was). The
-existing `lock_utils.get_or_create_lock(store, key)` helper — already used
-unchanged by all five call sites, both before and after this migration —
-supplies the actual "create on first access, return existing after" logic
-via a synchronous (no `await` in between) check-then-insert on `store`;
-`CacheFieldView` only had to keep behaving like a plain
-`dict[str, asyncio.Lock]` for `.get()`/`__setitem__`, which it already did.
-This was verified explicitly (not just reasoned about) in
-`tests/test_session_state_facade_slice4.py` — including a real
-two-coroutine `async with lock:` mutual-exclusion test, and a same-object
-check performed WHILE the lock is held — before any production call site
-was switched over.
+Deliberately NOT folded into this dataclass — each has a genuinely
+different shape that would make folding it in incorrect, not merely
+incomplete:
+  * `live_connections` (before it was folded in as `live_connection`),
+    `nvr_processes`/`nvr_preroll_processes` (live `asyncio.subprocess.
+    Process` handles) and `nvr_preroll_tasks` (`asyncio.Task` handles) are
+    not simple cached data.
+  * `nvr_drain_state` is a single flat dict with fixed string keys
+    ("target"/"pending"/"promoted"/"uploaded"/"failed"/"last_age_by_cam"/
+    "last_tick_ts") replaced wholesale every drain tick
+    (`recorder.py::sync_drain_tick`), not cam_id-keyed at all; and
+    `nvr_drain_failures` is keyed by staging **file path**
+    (`recorder.py`, `failures[full] = failures.get(full, 0) + 1`), not
+    cam_id. Migrating either into a per-cam field would be actively wrong.
+  * `rcp_session_locks` is keyed by `proxy_hash`, not `cam_id` — wrong
+    shape for a per-camera facade field.
+  * `guards.py::_get_cam_lock`'s per-cam lock registry (e.g.
+    `_audio_config_locks`) is never pre-declared in
+    `BoschCameraCoordinator.__init__` at all — lazily materialized via
+    `getattr`/`setattr` on first use.
 
 A lock is never dropped while held: `_purge_cam_id` (the only code path
-that ever removes a `CameraSessionState` — via `self._sessions.pop
-(cam_id, None)`, which the Slice 4 lock fields ride along with, same as
-every earlier slice) is documented and structurally guaranteed to run only
-after `cleanup_stale_devices` has confirmed a camera is gone from the
-Bosch cloud account entirely — never mid-operation while one of that
-camera's locks could be `locked()` by an in-flight coroutine. This
-guarantee predates Slice 4 (the old bare-dict `_stream_locks.pop(cam_id,
-None)` etc. had the exact same "never mid-operation" precondition) and is
-unchanged by moving the lock onto the shared `CameraSessionState` object —
-popping the WHOLE session (all its fields, locks included) together is no
-more or less safe than popping just the lock dict entry used to be, given
-that precondition holds.
+that ever removes a `CameraSessionState`, via `self._sessions.pop(cam_id,
+None)`) runs only after `cleanup_stale_devices` has confirmed a camera is
+gone from the Bosch cloud account entirely — never mid-operation while one
+of that camera's locks could be `locked()` by an in-flight coroutine.
 """
 
 from __future__ import annotations
@@ -240,7 +83,7 @@ _T = TypeVar("_T")
 class _Unset:
     """Sentinel type for an unpopulated `CameraSessionState` cache field.
 
-    A dedicated type (not `None`) because several Slice 2 fields are
+    A dedicated type (not `None`) because several cache fields are
     themselves `Optional`-valued caches (e.g. `rcp_privacy_cache: int |
     None`) — a stored `None` there is a legitimate cached value that must
     stay distinguishable from "never queried".
@@ -265,13 +108,12 @@ class CameraSessionState:
     never ``0.0`` for "never done", since CI/production hosts boot with a
     nonzero monotonic clock already).
 
-    Slice 1 fields below all use ``None`` as their "not set" sentinel for
-    the float write-lock timestamps (matching ``idle_since``/``opened_at``
-    above, and preserving the exact `dict.get(cam_id, default)` semantics
-    of the dicts they replace — callers supply their own default, most
-    commonly ``float('-inf')`` per SENTINEL_RULE) and ``False`` for the
-    bool "already logged/deferred" flags (matching the `not in a_set`
-    semantics of the sets they replace).
+    The float write-lock timestamp fields below likewise use ``None`` as
+    their "not set" sentinel (preserving the exact `dict.get(cam_id,
+    default)` semantics of the dicts they replace — callers supply their
+    own default, most commonly ``float('-inf')`` per SENTINEL_RULE), and
+    the bool "already logged/deferred" flags use ``False`` (matching the
+    `not in a_set` semantics of the sets they replace).
     """
 
     generation: int = 0
@@ -280,17 +122,17 @@ class CameraSessionState:
     warming: bool = False
     opened_at: float | None = None
     # Set exactly when live_connection.py actually publishes a usable
-    # rtspsUrl for a LOCAL session (GitHub #49 fix, 2026-07-15) — replaces
-    # a duplicate, independently-guessed timeout constant in recorder.py
-    # that had silently drifted out of sync with the real per-model
-    # min_total_wait pacing enforced here, causing the NVR recorder to give
-    # up on every coordinator tick for slower-encoder/weaker-WiFi cameras.
+    # rtspsUrl for a LOCAL session — replaces a duplicate,
+    # independently-guessed timeout constant in recorder.py that had
+    # silently drifted out of sync with the real per-model min_total_wait
+    # pacing enforced here, causing the NVR recorder to give up on every
+    # coordinator tick for slower-encoder/weaker-WiFi cameras.
     # Cleared at the start of every fresh LOCAL warm-up attempt so a stale
     # "ready" signal from a previous session can never leak into a new one;
     # default_factory gives every camera its own Event instance (a bare
     # `= asyncio.Event()` default would share ONE Event across all cameras).
     stream_ready_event: asyncio.Event = field(default_factory=asyncio.Event)
-    # ── Slice 1: diagnostic/write-lock timestamps ──────────────────────
+    # ── Diagnostic/write-lock timestamps ────────────────────────────────
     offline_seen_at: float | None = None
     light_set_at: float | None = None
     notif_set_at: float | None = None
@@ -305,12 +147,12 @@ class CameraSessionState:
     alarm_settings_set_at: float | None = None
     lighting_options_set_at: float | None = None
     firmware_set_at: float | None = None
-    # ── Slice 1: "already logged/deferred this cycle" flags ────────────
+    # ── "Already logged/deferred this cycle" flags ──────────────────────
     notif_disabled_logged: bool = False
     fw_update_alerted: bool = False
     slow_tier_deferred: bool = False
     nvr_preroll_zero_warned: bool = False
-    # ── Slice 2: per-cam caches without cross-camera access ─────────────
+    # ── Per-cam caches without cross-camera access ──────────────────────
     # All default to the `_UNSET` sentinel (see `_Unset` above) — matches
     # the `cam_id not in old_dict` semantics of the dicts they replace.
     rcp_state_cache: dict[str, Any] | _Unset = _UNSET
@@ -340,10 +182,10 @@ class CameraSessionState:
     nvr_event_clip_enabled: bool | _Unset = _UNSET
     nvr_preroll_last_crash: float | _Unset = _UNSET
     nvr_preroll_segment_counts: int | _Unset = _UNSET
-    # ── Slice 3: session/stream state ───────────────────────────────────
+    # ── Session/stream state ─────────────────────────────────────────────
     live_connection: dict[str, Any] | _Unset = _UNSET
     user_intent_stream: bool = False
-    # ── Slice 4: per-camera locks ────────────────────────────────────────
+    # ── Per-camera locks ─────────────────────────────────────────────────
     # All default to `_UNSET` (see `_Unset` above) — matches the
     # `cam_id not in old_dict` semantics of the `dict[str, asyncio.Lock]`
     # attributes they replace, so `lock_utils.get_or_create_lock`'s
@@ -436,12 +278,12 @@ class LiveOpenedAtView:
 class FloatFieldView:
     """Dict-like facade over a named ``float | None`` field of `CameraSessionState`.
 
-    Generalizes `LiveOpenedAtView` for reuse across the Slice 1 write-lock
-    timestamp fields (``offline_seen_at``/every ``*_set_at`` — see the
-    module docstring) — one instance per field, parameterized by
-    `field_name`, instead of one hand-rolled class per field. Preserves the
-    exact `dict[str, float]` contract (`.get()`/`[cam_id] = ...`/`.pop()`/
-    `in`) external callers already rely on.
+    Generalizes `LiveOpenedAtView` for reuse across the write-lock
+    timestamp fields (``offline_seen_at``/every ``*_set_at``) — one
+    instance per field, parameterized by `field_name`, instead of one
+    hand-rolled class per field. Preserves the exact `dict[str, float]`
+    contract (`.get()`/`[cam_id] = ...`/`.pop()`/`in`) external callers
+    already rely on.
     """
 
     def __init__(
@@ -496,12 +338,11 @@ class FloatFieldView:
 class BoolFieldView:
     """Set-like facade over a named `bool` field of `CameraSessionState`.
 
-    Generalizes `StreamWarmingView` for reuse across the Slice 1
-    "already logged/deferred this cycle" flags (``notif_disabled_logged``,
-    ``fw_update_alerted``, ``slow_tier_deferred`` — see the module
-    docstring) — one instance per field, parameterized by `field_name`.
-    Preserves the exact `set[str]` contract (`in`/`.add()`/`.discard()`)
-    external callers already rely on.
+    Generalizes `StreamWarmingView` for reuse across the "already
+    logged/deferred this cycle" flags (``notif_disabled_logged``,
+    ``fw_update_alerted``, ``slow_tier_deferred``) — one instance per
+    field, parameterized by `field_name`. Preserves the exact `set[str]`
+    contract (`in`/`.add()`/`.discard()`) external callers already rely on.
     """
 
     def __init__(
@@ -532,18 +373,17 @@ class BoolFieldView:
 
 class CacheFieldView(MutableMapping[str, _T]):
     """`MutableMapping[str, _T]` facade over a named per-camera cache field
-    of `CameraSessionState` (Session-State-Facade Slice 2 — see the module
-    docstring).
+    of `CameraSessionState`.
 
-    Generalizes `FloatFieldView`/`BoolFieldView` (Slice 1) for Slice 2's
-    heterogeneous cache value types (dict/list/int/str/float/bool, several
-    of them themselves `Optional`) — one instance per field, parameterized
-    by `field_name`, built on `collections.abc.MutableMapping` rather than
+    Generalizes `FloatFieldView`/`BoolFieldView` for the heterogeneous
+    cache value types (dict/list/int/str/float/bool, several of them
+    themselves `Optional`) — one instance per field, parameterized by
+    `field_name`, built on `collections.abc.MutableMapping` rather than
     hand-writing every dict method: only `__getitem__`/`__setitem__`/
     `__delitem__`/`__iter__`/`__len__` are implemented below, and the mixin
     supplies `.get()`/`.pop()`/`.setdefault()`/`.update()`/`.clear()`/
     `.items()`/`.values()`/`.keys()`/`in`/`==`/`bool()` on top — including
-    the two whole-dict-iteration call sites this slice's caches have
+    the two whole-dict-iteration call sites these caches have
     (`rcp_lan_ip_cache` in `__init__.py`'s outage-ping loop and
     `tick_housekeeping.py`'s persisted-snapshot comprehension;
     `local_creds_cache` in the same `tick_housekeeping.py` snapshot path)

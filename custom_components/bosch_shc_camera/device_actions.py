@@ -1,8 +1,7 @@
 """One-shot device-action triggers: firmware install, soft/hard reset.
 
-Extracted from `coordinator.py` (style audit, 2026-08-04) — these are
-device-action triggers, not "fetch and cache data" work, so they don't
-belong inline on the `DataUpdateCoordinator` subclass. Matches the
+These are device-action triggers, not "fetch and cache data" work, so they
+don't belong inline on the `DataUpdateCoordinator` subclass. Matches the
 `tick_bootstrap`/`tick_failure`/`tick_housekeeping` pattern already
 established in this package: free functions taking the coordinator
 instance as their first argument.
@@ -12,7 +11,7 @@ these (same name, calls straight into the matching function here) so
 every existing call site — `update.py`'s Install button,
 `repairs.py`'s Fix-flow, `button.py`'s soft/hard-reset buttons, and the
 test suite's attribute-mocking/unbound-method-call patterns — keeps
-working unchanged. Pure relocation of the logic, not a rewrite.
+working unchanged.
 """
 
 from __future__ import annotations

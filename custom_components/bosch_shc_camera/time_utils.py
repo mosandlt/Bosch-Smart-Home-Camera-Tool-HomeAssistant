@@ -4,7 +4,7 @@ Bosch event timestamps are **offset-bearing** and must be parsed with the
 timezone designator the API sends — they must NOT be truncated to a naive
 "YYYY-MM-DDTHH:MM:SS" string and then assumed to be UTC (or local).
 
-Observed live formats (FW 7.91.56 Gen1 and FW 9.40.x Gen2, 2026-06):
+Observed live formats (FW 7.91.56 Gen1 and FW 9.40.x Gen2):
 
     "2026-06-18T06:06:30.499+02:00[Europe/Berlin]"   ← current API: explicit
                                                         offset + RFC-9557 zone
@@ -15,12 +15,12 @@ Observed live formats (FW 7.91.56 Gen1 and FW 9.40.x Gen2, 2026-06):
 offset and a trailing ``Z``; it cannot parse the RFC-9557 ``[Europe/Berlin]``
 bracket suffix, so that is stripped first.
 
-Regression: GitHub issue #34 — ``sensor.<cam>_last_event`` showed the event
-time exactly +2h (CEST) because ``ts_str[:19]`` discarded the ``+02:00``
-offset and the local wall-clock reading was then re-labelled as UTC. The same
-truncation affected the motion active-window check (events appeared 2h in the
-future → motion stuck on) and the events-today / movement / audio counters
-(local-date events bucketed against a UTC "today").
+A previous naive ``ts_str[:19]`` truncation discarded the offset and
+re-labelled the local wall-clock reading as UTC — this showed
+``sensor.<cam>_last_event`` exactly +2h (CEST) off, made the motion
+active-window check see events 2h in the future (motion stuck on), and
+bucketed local-date events against a UTC "today" in the events-today /
+movement / audio counters.
 """
 
 from __future__ import annotations

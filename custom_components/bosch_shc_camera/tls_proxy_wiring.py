@@ -1,35 +1,26 @@
-"""Coordinator-level wiring around the low-level TCP->TLS proxy in `tls_proxy.py`.
+"""Coordinator-level wiring around the low-level TCP->TLS proxy.
 
-Phase 3 step 4 of the coordinator-rewrite split (see
-docs/stream-perf-stability-refactor-plan.md). The bodies below are the
-former `BoschCameraCoordinator` methods `start_tls_proxy`,
-`on_tls_proxy_died`, `create_ssl_ctx` and `stop_tls_proxy`, `self` ->
-`coordinator`. `BoschCameraCoordinator` keeps a thin same-named method for
-each that delegates here — these are exercised extensively from other
-coordinator-facing modules (live_connection.py, stream_lifecycle.py,
-switch.py) as bound `coordinator._foo(...)` calls and from the test suite
-both as bound methods and via `BoschCameraCoordinator._method(coord, ...)`
-unbound-style calls plus direct `AsyncMock()` attribute patching — all of
-which requires the method to keep existing on the class. Keeping the thin
-dispatch avoids rewriting that entire call surface.
+The bodies below are the former `BoschCameraCoordinator` methods
+`start_tls_proxy`, `on_tls_proxy_died`, `create_ssl_ctx` and
+`stop_tls_proxy`, `self` -> `coordinator`. `BoschCameraCoordinator` keeps a
+thin same-named method for each that delegates here — these are exercised
+extensively from other coordinator-facing modules (live_connection.py,
+stream_lifecycle.py, switch.py) as bound `coordinator._foo(...)` calls and
+from the test suite both as bound methods and via
+`BoschCameraCoordinator._method(coord, ...)` unbound-style calls plus
+direct `AsyncMock()` attribute patching — all of which requires the method
+to keep existing on the class. Keeping the thin dispatch avoids rewriting
+that entire call surface.
 
-Named `tls_proxy_wiring.py` (not `tls_proxy.py`) to avoid colliding with
-the pre-existing `tls_proxy.py` module, which holds the actual low-level
-TCP<->TLS proxy server implementation (`start_tls_proxy`/`stop_tls_proxy`
-free functions, no coordinator dependency) that the functions below call
-into.
+Named `tls_proxy_wiring.py` to avoid colliding with the low-level TCP<->TLS
+proxy server implementation (`start_tls_proxy`/`stop_tls_proxy` free
+functions, no coordinator dependency), which lives in the
+`bosch_shc_camera_client` PyPI library and is imported from here.
 
-`tls_proxy.py` is now asyncio-native (`asyncio.start_server`, no daemon
-threads) — the proxy's `on_proxy_died` callback fires from a coroutine
-already running on the HA event loop, so the old thread->event-loop
-`call_soon_threadsafe` hop is no longer needed; the callback below just
-schedules the rebuild task directly.
-
-The low-level `tls_proxy.py` module itself was extracted into the
-`bosch_shc_camera_client` PyPI library (HA-Core-submission client-library
-extraction, task #tls_proxy) — it had zero HA/coordinator coupling to
-begin with, so this was a pure move. This wiring module still imports its
-`start_tls_proxy`/`stop_tls_proxy` free functions from there.
+The proxy is asyncio-native (`asyncio.start_server`, no daemon threads) —
+its `on_proxy_died` callback fires from a coroutine already running on the
+HA event loop, so the callback below just schedules the rebuild task
+directly (no thread->event-loop `call_soon_threadsafe` hop needed).
 """
 
 from __future__ import annotations

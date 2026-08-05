@@ -62,7 +62,7 @@ async def try_live_connection_inner(
         # serialized against any concurrent renewal/heartbeat that is also
         # holding the lock to (re)build the proxy. Doing the stop in the
         # caller (outside the lock) let a renewal publish Stream/go2rtc
-        # against the port we'd just killed → frozen image (race 2026-06-01).
+        # against the port we'd just killed → frozen image.
         coordinator.live_connections.pop(cam_id, None)
         coordinator.stream_warming.discard(cam_id)
         coordinator.get_session(cam_id).warming_started = float("-inf")
@@ -188,7 +188,7 @@ async def try_live_connection_inner(
                         "reachable" if tcp_ok else "unreachable",
                     )
                 if not tcp_ok:
-                    # issue #47: chicken-and-egg breaker. `lan_ip` may be
+                    # Chicken-and-egg breaker. `lan_ip` may be
                     # stale (camera got a new DHCP lease after a mesh
                     # flap/reboot) — every future pre-check against that
                     # same stale IP would fail forever, and skipping LOCAL
@@ -318,7 +318,7 @@ async def try_live_connection_inner(
                     coordinator._quality_effective_inst[cam_id] = inst
                     # Always request audio — switch.<cam>_audio is a synced
                     # card-side mute now, not a stream-track toggle (see the
-                    # cred-rotation site above). 2026-06-01.
+                    # cred-rotation site above).
                     audio_param = "&enableaudio=1"
                     # Extract bufferingTime for FFmpeg tuning (LOCAL=500ms, REMOTE=1000ms)
                     buffering_ms = result.get("bufferingTime", 1000)
@@ -350,7 +350,7 @@ async def try_live_connection_inner(
                                     "port": int(_port),
                                     "ts": time.monotonic(),
                                 }
-                                # issue #47: `get_cam_lan_ip` prefers
+                                # `get_cam_lan_ip` prefers
                                 # `rcp_lan_ip_cache` over `local_creds_cache`
                                 # — so if that RCP-sourced cache already held a
                                 # (possibly stale, e.g. post-DHCP-re-lease) IP,
@@ -457,13 +457,9 @@ async def try_live_connection_inner(
                                 result["rtspsUrl"] = local_rtsp_url
                                 result["rtspUrl"] = local_rtsp_url
                                 result["_remote_origin_url"] = cloud_rtsps_url
-                                # `_connection_type`/`_remote_path` power both
+                                # `_connection_type`/`_remote_path` power
                                 # `remote_resolve_inner` (the credential-free-
-                                # in-spirit REMOTE front-door below) and 3
-                                # PRE-EXISTING call sites that already checked
-                                # for `_connection_type == "REMOTE"` but were
-                                # silently dead code because this field was
-                                # never actually set for REMOTE before now:
+                                # in-spirit REMOTE front-door below),
                                 # `session_renewal.remote_session_terminator`
                                 # (clean pre-cap session teardown),
                                 # `session_renewal.promote_to_local` (live
@@ -518,11 +514,7 @@ async def try_live_connection_inner(
                                 # genuinely unexpected exception, and it must
                                 # not discard the already-working proxied
                                 # stream for a bug in an unrelated, optional
-                                # feature (bug-hunt finding 2026-07-14: an
-                                # earlier version of this code shared the
-                                # block above's except and could silently
-                                # downgrade a healthy REMOTE session to the
-                                # cert-failing raw URL on any front-door bug).
+                                # feature.
                                 try:
                                     remote_front_door_url = await coordinator.start_remote_viewing_front_door(
                                         cam_id,
@@ -588,10 +580,10 @@ async def try_live_connection_inner(
                         # down at the URL level but HA's internal Stream
                         # cache held on to the worker. Reusing that worker
                         # via update_source() risks serving a *different
-                        # camera's* cached buffer to this entity (observed
-                        # 2026-04-27: two camera cards on one dashboard
-                        # showed the same video for whichever camera was
-                        # toggled last — Stream-Object Reuse-Race). Always
+                        # camera's* cached buffer to this entity — two camera
+                        # cards on one dashboard could show the same video
+                        # for whichever camera was toggled last
+                        # (Stream-Object Reuse-Race). Always
                         # forcing a fresh Stream eliminates that class of
                         # bugs at the cost of one extra FFmpeg cold-start
                         # per stream-on (negligible — the pre-warm already
@@ -747,9 +739,7 @@ async def try_live_connection_inner(
                             # sleep — otherwise the user gets locked out of the
                             # privacy toggle for ~25s on Indoor / ~100s on
                             # Outdoor while the encoder warm-up they paid for
-                            # has already definitively failed. Regression
-                            # 2026-05-19 (Innenbereich): TLS proxy reset 3×,
-                            # warm-up held the privacy switch hostage.
+                            # has already definitively failed.
                             _LOGGER.warning(
                                 "LOCAL pre-warm failed for %s without REMOTE fallback — "
                                 "clearing warm-up flag so privacy toggle stays responsive",
@@ -895,8 +885,8 @@ async def try_live_connection_inner(
                     # never-changing URL per session, native lazy
                     # registration no longer risks leaking a fresh go2rtc
                     # entry on every credential rotation the way it would
-                    # have with the old raw credentialed/hash-bearing URLs
-                    # (HA-Core-submission-prep, 2026-07-14). The explicit
+                    # have with the old raw credentialed/hash-bearing URLs.
+                    # The explicit
                     # provider-refresh push below is still needed on its own
                     # merits, independent of registration: without it, HA's
                     # auto-refresh runs async ~100 ms-4 s later and the
@@ -954,8 +944,7 @@ async def try_live_connection_inner(
                             cam_id, coordinator.remote_session_terminator(cam_id, gen)
                         )
                     # Push the freshly-updated state to entities WITHOUT a
-                    # full Bosch-cloud re-poll (stream-start latency
-                    # optimization, 2026-07-17). The two things that
+                    # full Bosch-cloud re-poll. The two things that
                     # actually need to be "fresh" here — the camera's
                     # streaming state (`is_streaming`) and `stream_source()`
                     # — both deliberately read `coordinator.live_connections`
@@ -1053,12 +1042,12 @@ async def try_live_connection_inner(
                 # async_added_to_hass restore check, recorder.py's
                 # start_recorder, is_stream_warming()'s own staleness
                 # recovery — sees a LOCAL entry that already "exists" and
-                # never re-attempts, so nothing was ever retried. This is the
-                # confirmed root cause of GitHub #51's follow-up report: a
-                # mid-run Mini-NVR recorder exit's respawn attempt waited the
-                # full stream_ready_event timeout and gave up forever, only
-                # ever recovered by a full config-entry reload (which wipes
-                # `live_connections` from scratch). Clean up exactly like the
+                # never re-attempts, so nothing was ever retried (e.g. a
+                # mid-run Mini-NVR recorder exit's respawn attempt waits out
+                # the full stream_ready_event timeout and gives up forever,
+                # only recoverable by a full config-entry reload, which
+                # wipes `live_connections` from scratch). Clean up exactly
+                # like the
                 # "pre-warm failed, no REMOTE fallback" branch above so the
                 # next external trigger (switch toggle, renewal, a fresh
                 # recorder respawn) starts from a clean slate instead of a
@@ -1083,8 +1072,7 @@ async def try_live_connection_inner(
                     # handler exists to fix — keep the session, surface the
                     # error, and hand back the working result instead of
                     # falling through to the next candidate or returning
-                    # None (bug-hunt finding on the first version of this
-                    # fix, which had no such distinction).
+                    # None.
                     #
                     # Also (re-)schedule LOCAL auto-renewal defensively: if
                     # the exception happened before or during that exact
@@ -1092,8 +1080,7 @@ async def try_live_connection_inner(
                     # further down in the normal flow), the working session
                     # would otherwise silently never renew and go stale at
                     # the next Bosch cred rotation with no observable
-                    # symptom until it does (maintenance-round bug-hunt
-                    # follow-up, 2026-07-17). replace_renewal_task() cancels
+                    # symptom until it does. replace_renewal_task() cancels
                     # any existing task before scheduling the new one, so
                     # calling it again here is safe even if renewal had
                     # already been scheduled successfully before the
@@ -1116,9 +1103,8 @@ async def try_live_connection_inner(
                             # self-exit ("stale generation") for a session
                             # that was never actually superseded, silently
                             # disabling ghost-session reaping until the next
-                            # genuine OFF→ON cycle (bug-hunt finding on the
-                            # first version of this fix, 2026-07-17). This is
-                            # a re-arm of the SAME session's renewal watcher,
+                            # genuine OFF→ON cycle. This is a re-arm of the
+                            # SAME session's renewal watcher,
                             # not a new session — it must not mint a new
                             # generation.
                             current_gen = coordinator.get_session(cam_id).generation
@@ -1147,7 +1133,7 @@ async def try_live_connection_inner(
                 # rest of this half-open state so BoschVideoQualitySelect's
                 # get_quality_remote_fallback_active() doesn't read a stale
                 # value from an attempt that was cleaned up, not the actually
-                # active session (bug-hunt finding, 2026-07-20).
+                # active session.
                 coordinator._quality_effective_inst.pop(cam_id, None)
                 coordinator.stream_warming.discard(cam_id)
                 coordinator.get_session(cam_id).warming_started = float("-inf")

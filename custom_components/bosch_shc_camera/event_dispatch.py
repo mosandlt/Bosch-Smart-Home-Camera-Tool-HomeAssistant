@@ -1,8 +1,6 @@
 """Per-camera data-dict build + new-event dispatch.
 
-Phase 2 step 5 of the coordinator-rewrite split (see
-.claude/plans/jiggly-moseying-peacock.md, project root). Runs
-sequentially (must stay ordered — `last_event_ids` bookkeeping and the
+Runs sequentially (must stay ordered — `last_event_ids` bookkeeping and the
 polling-vs-FCM dedup logic depend on being processed one camera at a
 time), unlike the parallel status/events gather passes in
 `camera_status.py`/`event_polling.py`.
@@ -74,8 +72,7 @@ async def build_data_and_dispatch(
                 # tick re-enters this branch, alert chain (`elif newest_id
                 # and newest_id != prev_id`) is never reached, and
                 # automations on `bosch_shc_camera_motion` never fire
-                # after a restart. (Forum: geotie 2026 — "Automation
-                # funktioniert, wird aber oft nicht ausgelöst".)
+                # after a restart.
                 if newest_id:
                     coordinator.last_event_ids[cam_id] = newest_id
             elif newest_id and newest_id != prev_id:
@@ -83,7 +80,7 @@ async def build_data_and_dispatch(
                 # Guards against a polling tick firing an alert that the
                 # FCM handler already dispatched for the same event ID.
                 _now_mono = time.monotonic()
-                # Delivery-death detection (issue #36): this poll found a
+                # Delivery-death detection: this poll found a
                 # genuinely new event. If FCM push is enabled+running+
                 # "healthy" yet no real push has arrived in the last
                 # FCM_DELIVERY_DEAD_AFTER_SEC, push delivery is dead at the
@@ -154,8 +151,7 @@ async def build_data_and_dispatch(
                         # rebind ran in between, that later write would
                         # land in the orphaned old dict — invisible to
                         # any later reader of coordinator.alert_sent_ids —
-                        # allowing a duplicate alert for the same event
-                        # (bug-hunt 2026-07-03).
+                        # allowing a duplicate alert for the same event.
                         _cutoff = _now_mono - 120.0
                         for _k in [
                             k
@@ -182,8 +178,8 @@ async def build_data_and_dispatch(
                     if "PERSON" in event_tags and event_type == "MOVEMENT":
                         event_type = "PERSON"
                     cam_name = cam.get("title", cam_id)
-                    # Diagnostic only (GitHub timing question 2026-07-31): logs
-                    # Bosch's own event timestamp alongside our local wall-clock
+                    # Diagnostic only: logs Bosch's own event timestamp
+                    # alongside our local wall-clock
                     # receipt time, so a Bosch-cloud-side delay (movement/person
                     # events issued close together after server-side AI
                     # analysis) can be distinguished from an integration-side

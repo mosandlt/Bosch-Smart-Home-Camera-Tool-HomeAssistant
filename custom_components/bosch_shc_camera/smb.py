@@ -41,19 +41,16 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 # `_is_safe_bosch_url`, `_safe_name`, `_ftp_connect`/`_ftp_exists`/
-# `_ftp_makedirs` are now thin re-exports of the pure
+# `_ftp_makedirs` are thin re-exports of the pure
 # `bosch_shc_camera_client.media_transfer` module (zero coordinator/HA
-# coupling — extracted 2026-08-05, see CHANGELOG.md). Assigned via a plain
-# module-level binding (not `import x as x`) so `recorder.py`/`sensor.py`/
-# `ai_alert_store.py`'s existing `from .smb import _safe_name` (and
-# `recorder.py`'s `_ftp_connect`/`_ftp_makedirs`) keep working unchanged —
-# `mypy --strict`'s `no_implicit_reexport` only requires special handling for
-# a *renamed* import alias, not for an ordinary name binding.
-# `_is_safe_bosch_url` was previously a byte-identical copy duplicated three
-# times across this repo (smb.py/fcm.py/coordinator.py) — this module now
-# calls the library's single canonical implementation; the other two copies
-# are unchanged this round (out of scope — see task notes) but are candidates
-# for the same dedup in a future pass.
+# coupling). Assigned via a plain module-level binding (not `import x as x`)
+# so `recorder.py`/`sensor.py`/`ai_alert_store.py`'s existing
+# `from .smb import _safe_name` (and `recorder.py`'s
+# `_ftp_connect`/`_ftp_makedirs`) keep working unchanged — `mypy --strict`'s
+# `no_implicit_reexport` only requires special handling for a *renamed*
+# import alias, not for an ordinary name binding.
+# `_is_safe_bosch_url` is otherwise duplicated across fcm.py/coordinator.py;
+# those two copies are candidates for the same dedup in a future pass.
 _is_safe_bosch_url = _lib_is_safe_bosch_url
 _safe_name = _lib_sanitize_filename
 _ftp_connect = _lib_ftp_connect
@@ -610,12 +607,12 @@ def sync_smb_cleanup(coordinator: BoschCameraCoordinator) -> None:
     # Mini-NVR recordings live at {base_path}/{nvr_smb_subpath}/... (see
     # recorder.py's _upload_smb / _sync_nvr_cleanup_smb) — squarely inside
     # the tree this walk covers. That subtree has its OWN independent daily
-    # retention job with its own nvr_retention_days setting. Bug-hunt
-    # 2026-07-20: without this exclusion, a user who sets smb_retention_days
-    # shorter than nvr_retention_days (a reasonable, UI-exposed combination
-    # — e.g. fast cloud-event-snapshot cleanup but longer NVR retention)
-    # gets their NVR recordings silently deleted early by the WRONG
-    # retention policy, contradicting their explicit nvr_retention_days.
+    # retention job with its own nvr_retention_days setting. Without this
+    # exclusion, a user who sets smb_retention_days shorter than
+    # nvr_retention_days (a reasonable, UI-exposed combination — e.g. fast
+    # cloud-event-snapshot cleanup but longer NVR retention) gets their NVR
+    # recordings silently deleted early by the WRONG retention policy,
+    # contradicting their explicit nvr_retention_days.
     nvr_sub = (opts.get("nvr_smb_subpath") or "NVR").strip()
 
     if (
@@ -633,8 +630,7 @@ def sync_smb_cleanup(coordinator: BoschCameraCoordinator) -> None:
     # here, stripping this call's timeout protection and leaving the
     # (many blocking scandir/stat/remove calls) walk below unbounded — a
     # network blip or unresponsive share could then hang the executor
-    # thread indefinitely. Bug-hunt 2026-07-20 (this call was missing the
-    # lock sync_smb_upload already uses for the identical pattern).
+    # thread indefinitely.
     with _SOCKET_TIMEOUT_LOCK:
         try:
             socket.setdefaulttimeout(10)

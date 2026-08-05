@@ -1,23 +1,19 @@
 """Live-stream teardown, worker-error recovery, and idle-session reaping.
 
-Phase 3 step 1 of the coordinator-rewrite split (see
-docs/stream-perf-stability-refactor-plan.md). Pure structural move: the
-bodies below are the former `BoschCameraCoordinator` methods
+The functions below are the bodies of `BoschCameraCoordinator` methods
 `tear_down_live_stream`, `schedule_stream_worker_error`,
 `handle_stream_worker_error`, `go2rtc_consumer_count`,
-`has_active_consumer` and `idle_session_reaper`, unchanged except for
-`self` → `coordinator`. `BoschCameraCoordinator` keeps a thin same-named
-method for each that delegates here — these functions are exercised
-extensively from other coordinator-facing modules (switch.py, slow_tier.py,
-frigate_endpoint.py's `FrigateCoordinatorMixin`, live_connection.py) and
-from the shutdown path in `__init__.py` (`async_unload_entry`'s
-`getattr(coord, "tear_down_live_stream", None)` duck-typed dispatch, kept
-for minimal SimpleNamespace test-fixture compatibility) as bound
-`coordinator._method(...)` calls, and from the test suite both as bound
-methods and via `BoschCameraCoordinator._method(coord, ...)` unbound-style
-calls plus direct `AsyncMock()` attribute patching — all of which requires
-the method to keep existing on the class. Keeping the thin dispatch avoids
-rewriting that entire call surface for a purely structural move.
+`has_active_consumer` and `idle_session_reaper`. `BoschCameraCoordinator`
+keeps a thin same-named method for each that delegates here — these
+functions are exercised extensively from other coordinator-facing modules
+(switch.py, slow_tier.py, frigate_endpoint.py's `FrigateCoordinatorMixin`,
+live_connection.py) and from the shutdown path in `__init__.py`
+(`async_unload_entry`'s `getattr(coord, "tear_down_live_stream", None)`
+duck-typed dispatch, kept for minimal SimpleNamespace test-fixture
+compatibility) as bound `coordinator._method(...)` calls, and from the test
+suite both as bound methods and via `BoschCameraCoordinator._method(coord,
+...)` unbound-style calls plus direct `AsyncMock()` attribute patching —
+all of which requires the method to keep existing on the class.
 """
 
 from __future__ import annotations
@@ -71,9 +67,9 @@ async def tear_down_live_stream(
       5. Stop HA's `Stream` object on the camera entity. Without this
          the stream_worker keeps its cached URL and auto-restarts
          against the (now-dead) TLS proxy forever — that's what
-         produced the yellow→blue→yellow cycle reported in #6 when
-         Privacy was flipped while a stream was running, and what our
-         own `_StreamWorkerErrorListener` would then try to "fix" by
+         produces a yellow→blue→yellow cycle when Privacy is flipped
+         while a stream is running, and what our own
+         `_StreamWorkerErrorListener` would then try to "fix" by
          falling back to REMOTE — which also fails since the camera
          returns HTTP 443 sh:camera.in.privacy.mode.
 
@@ -88,9 +84,9 @@ async def tear_down_live_stream(
     (line below) — which also silently defeats `record_stream_error`'s
     LOCAL-only counting — and closes the port the renewal just
     published, leaving the new session dead with no error escalation
-    and no automatic recovery (live incident 2026-07-04, Innenbereich:
-    stream-worker looped on "Connection refused" against a rotated
-    session for 4+ minutes until a manual HA restart).
+    and no automatic recovery (the stream-worker loops on "Connection
+    refused" against a rotated session indefinitely until a manual HA
+    restart).
 
     `expected_generation`: pass the session's `generation` value the
     caller observed when it DECIDED to tear down (idle reaper,
@@ -133,7 +129,7 @@ async def tear_down_live_stream(
         # Step 1 — clear visible state FIRST. BoschLiveStreamSwitch.is_on
         # reads from `user_intent_streams`; if anything below raises (NVR
         # child gone, file lock, ...) the user-visible switch would otherwise
-        # stay stuck on "on". Reported by Thomas 2026-05-19 (Mini-NVR BETA).
+        # stay stuck on "on".
         # Reset user intent too — privacy-on, health-watchdog REMOTE-escalation
         # and external teardowns all genuinely end the user's "live stream
         # wanted" intent.
@@ -258,11 +254,11 @@ async def handle_stream_worker_error(
 ) -> None:
     """React to an HA stream-worker error for one camera.
 
-    The primary failure mode this targets is the cycle reported in
-    issue #6: the stream briefly becomes available (~2 s), FFmpeg fails,
-    HA auto-restarts after a backoff, briefly becomes available again —
-    forever. Each worker crash logs "Error from stream worker" exactly
-    once, so our counter increments once per cycle.
+    The primary failure mode this targets is a cycle where the stream
+    briefly becomes available (~2 s), FFmpeg fails, HA auto-restarts after
+    a backoff, briefly becomes available again — forever. Each worker
+    crash logs "Error from stream worker" exactly once, so our counter
+    increments once per cycle.
 
     After `max_stream_errors` cycles we escalate: if the active connection
     is LOCAL we force a REMOTE restart (matches the watchdog's escalation
@@ -277,8 +273,7 @@ async def handle_stream_worker_error(
     4 additional retry cycles before re-issuing PUT /connection. Each
     retry just hits 401 again, and HA's stream component coalesces
     repeated identical errors so the counter may never reach the
-    threshold (live bug 2026-05-27, Indoor Gen2: 4 errors, threshold 5,
-    rescue never fired, frozen image until manual restart).
+    threshold, leaving a frozen image until a manual restart.
     """
     pending = getattr(coordinator, "stream_worker_dispatch_pending", None)
     try:
@@ -341,23 +336,22 @@ async def handle_stream_worker_error(
             coordinator.stream_fell_back.pop(cam_id, None)
             coordinator.live_connections.pop(cam_id, None)
             # Resilient rescue: a fresh PUT /connection can briefly race the
-            # camera's own session teardown — observed live 2026-05-31 (Indoor
-            # Gen2): the new TLS proxy got "SSL UNEXPECTED_EOF" / "Connection
-            # reset by peer" on the first re-issue while the camera was
-            # mid-rotation. A SINGLE attempt then left go2rtc + HA Stream
-            # pinned to the dead proxy port, so consumers saw "connection
-            # refused" / "wrong user/pass" → frozen image until a manual
-            # integration reload. Because the rescue tears the stream down,
-            # no NEW stream-worker error fires to retrigger us — so the burst
-            # must self-retry with backoff instead of relying on another
-            # error to drive attempt 2.
+            # camera's own session teardown — the new TLS proxy can get "SSL
+            # UNEXPECTED_EOF" / "Connection reset by peer" on the first
+            # re-issue while the camera is mid-rotation. A SINGLE attempt
+            # then leaves go2rtc + HA Stream pinned to the dead proxy port,
+            # so consumers see "connection refused" / "wrong user/pass" →
+            # frozen image until a manual integration reload. Because the
+            # rescue tears the stream down, no NEW stream-worker error fires
+            # to retrigger us — so the burst must self-retry with backoff
+            # instead of relying on another error to drive attempt 2.
             _LOCAL_RESCUE_MAX_ATTEMPTS = 3
             _LOCAL_RESCUE_RETRY_DELAY = 5
             result = None
             for rescue_try in range(1, _LOCAL_RESCUE_MAX_ATTEMPTS + 1):
                 # force_reset: stop-old-proxy + rebuild happen atomically
                 # under the stream lock (no external stop_tls_proxy that
-                # could race a concurrent renewal — 2026-06-01).
+                # could race a concurrent renewal).
                 result = await coordinator.try_live_connection(cam_id, force_reset=True)
                 if result:
                     _LOGGER.info(
@@ -406,7 +400,7 @@ async def handle_stream_worker_error(
         # Mark fallback BEFORE the rebuild so try_live_connection picks
         # REMOTE. force_reset stops the dead LOCAL proxy + clears live state
         # INSIDE the stream lock — same atomic teardown as the 401 rescue, so
-        # this escalation can't race a concurrent renewal either (2026-06-01).
+        # this escalation can't race a concurrent renewal either.
         coordinator.stream_fell_back[cam_id] = True
         result = await coordinator.try_live_connection(cam_id, force_reset=True)
         if result:
@@ -467,9 +461,9 @@ async def has_active_consumer(coordinator: BoschCameraCoordinator, cam_id: str) 
          STREAM_HLS_FRESH_SEC (clients refetch every few seconds; tracked by
          cf_unbuffer). HA's `Stream.available` is deliberately NOT used: it
          means "can serve", not "is serving", and stays True for the whole
-         session once HLS was ever requested — which pinned a long-abandoned
-         session as "watched" and stopped the reaper from ever firing (live
-         bug found 2026-06-03, HLS/mobile session never reaped).
+         session once HLS was ever requested — which would pin a
+         long-abandoned session as "watched" and stop the reaper from ever
+         firing.
       3. go2rtc reporting ≥1 consumer (WebRTC / RTSP / MSE).
 
     Used by the idle reaper to avoid tearing down a session that someone —
@@ -501,7 +495,7 @@ async def has_active_consumer(coordinator: BoschCameraCoordinator, cam_id: str) 
     # so the reaper killed the stream every grace window (the user's "stream
     # just dies"). A lingering ghost while go2rtc is unreachable is far less
     # harmful than reaping an active live view, so unknown ⇒ keep alive.
-    # Only a CONFIRMED count of 0 permits reaping. 2026-06-03 reaper fix.
+    # Only a CONFIRMED count of 0 permits reaping.
     if count is None:
         return True
     return count > 0

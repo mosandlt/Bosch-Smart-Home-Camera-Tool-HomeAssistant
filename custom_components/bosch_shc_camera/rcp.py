@@ -1,12 +1,10 @@
 """Bosch RCP (Remote Configuration Protocol) coordinator-cache orchestration.
 
 The actual RCP fetch (session management, protocol reads, response parsing)
-lives in `bosch_shc_camera_client.rcp.fetch_rcp_camera_data` now
-(Core-submission client-library extraction, see
-knowledge-base/ha-core-submission-plan.md task #11). This module is the thin
-HA-integration-specific wrapper: it builds the session/ssl-context the
-library needs, calls the pure fetch, and merges the returned `RcpCameraData`
-fields into the coordinator's own cache dicts.
+lives in `bosch_shc_camera_client.rcp.fetch_rcp_camera_data`. This module is
+the thin HA-integration-specific wrapper: it builds the session/ssl-context
+the library needs, calls the pure fetch, and merges the returned
+`RcpCameraData` fields into the coordinator's own cache dicts.
 """
 
 from __future__ import annotations

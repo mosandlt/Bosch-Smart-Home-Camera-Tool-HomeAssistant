@@ -170,9 +170,9 @@ async def fetch_mjpeg_snapshot(
         _LOGGER.warning("fetch_mjpeg_snapshot: OS error spawning ffmpeg: %s", err)
         return None
     finally:
-        # BUG-1 fix: always reap the subprocess on any exception path
-        # (TimeoutError, CancelledError, BaseException, etc.) to prevent
-        # zombie FFmpeg processes accumulating under HA task cancellation.
+        # Always reap the subprocess on any exception path (TimeoutError,
+        # CancelledError, BaseException, etc.) to prevent zombie FFmpeg
+        # processes accumulating under HA task cancellation.
         # FileNotFoundError / OSError mean proc was never created → guard.
         if proc is not None:
             try:

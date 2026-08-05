@@ -1,18 +1,15 @@
 """LOCAL/REMOTE live-session keepalive, cred refresh, and lifetime capping.
 
-Phase 3 step 2 of the coordinator-rewrite split (see
-docs/stream-perf-stability-refactor-plan.md). Pure structural move: the
-bodies below are the former `BoschCameraCoordinator` methods
-`refresh_local_creds_from_heartbeat`, `auto_renew_local_session`,
-`promote_to_local` and `remote_session_terminator`, unchanged except for
-`self` → `coordinator`. `BoschCameraCoordinator` keeps a thin same-named
-method for each that delegates here — these functions are exercised
-extensively from other coordinator-facing modules (live_connection.py,
-camera_status.py) and from the test suite both as bound methods and via
+Free functions taking `coordinator` explicitly — the former
+`BoschCameraCoordinator` methods `refresh_local_creds_from_heartbeat`,
+`auto_renew_local_session`, `promote_to_local` and `remote_session_terminator`.
+`BoschCameraCoordinator` keeps a thin same-named method for each that
+delegates here — these functions are exercised extensively from other
+coordinator-facing modules (live_connection.py, camera_status.py) and from
+the test suite both as bound methods and via
 `BoschCameraCoordinator._method(coord, ...)` unbound-style calls plus direct
-`AsyncMock()` attribute patching — all of which requires the method to keep
-existing on the class. Keeping the thin dispatch avoids rewriting that
-entire call surface for a purely structural move.
+`AsyncMock()` attribute patching, all of which requires the method to keep
+existing on the class.
 """
 
 from __future__ import annotations
@@ -55,9 +52,9 @@ async def refresh_local_creds_from_heartbeat(
     the heartbeat keeps running, and the reactive 401 rescue in
     handle_stream_worker_error remains as a safety net.
 
-    Async (issue #42 follow-up) so the live-dict mutation can serialize
-    against `recorder.start_recorder`'s spawn tail via
-    `get_nvr_recorder_lock` instead of only shrinking the race window.
+    Async so the live-dict mutation can serialize against
+    `recorder.start_recorder`'s spawn tail via `get_nvr_recorder_lock`
+    instead of only shrinking the race window.
     """
     try:
         import json as _json
@@ -92,7 +89,7 @@ async def refresh_local_creds_from_heartbeat(
         # lightweight synced MUTE preference applied card-side (video.muted),
         # so toggling it no longer re-opens the stream (AAC ≈ negligible
         # bandwidth) — this is what makes mute/unmute sync instantly across
-        # devices and fixes the audio-toggle reconnect jank (#22). 2026-06-01.
+        # devices and fixes the audio-toggle reconnect jank.
         audio_param = "&enableaudio=1"
         mcfg = coordinator.get_model_config(cam_id)
         new_url = (
@@ -152,27 +149,24 @@ async def refresh_local_creds_from_heartbeat(
                     cam_id[:8],
                     err,
                 )
-        # go2rtc (WebRTC) previously needed an explicit re-registration PUT
-        # here so WebRTC-only viewers (those never opening an HLS stream)
-        # wouldn't 401 once the camera rotated the old creds out — the
-        # manual PUT/DELETE registration this served has been removed
-        # (HA-Core-submission-prep, 2026-07-14): HA-core's own bundled
-        # go2rtc provider auto-registers whatever stream_source() returns on
-        # every WebRTC offer, and since the credential-free viewing
-        # front-door (viewing_front_door.py) publishes a URL that stays
-        # identical across every heartbeat rotation (`effective_url` above
-        # is `old_url`, unchanged, whenever the front-door is active), there
-        # is no longer a "stale creds baked into an already-registered URL"
-        # problem for this to fix — go2rtc's existing registration is
-        # already correct and does not need refreshing on a rotation that
-        # never changes the published URL.
+        # go2rtc (WebRTC) no longer needs an explicit re-registration PUT
+        # here: HA-core's own bundled go2rtc provider auto-registers
+        # whatever stream_source() returns on every WebRTC offer, and since
+        # the credential-free viewing front-door (viewing_front_door.py)
+        # publishes a URL that stays identical across every heartbeat
+        # rotation (`effective_url` above is `old_url`, unchanged, whenever
+        # the front-door is active), there is no longer a "stale creds
+        # baked into an already-registered URL" problem for this to fix —
+        # go2rtc's existing registration is already correct and does not
+        # need refreshing on a rotation that never changes the published
+        # URL.
         # NVR sidecar: unlike a fresh connect, the ESTABLISHED ffmpeg RTSP
         # session survives cred rotation (see docstring above) — no
         # restart needed here. A proactive restart on every heartbeat used
         # to run unconditionally, which on fast-rotating Gen1 cameras
         # (15 s heartbeat) killed and respawned ffmpeg ~4x/minute,
-        # truncating every recorded segment to a few seconds (GitHub
-        # issue #41). Genuine ffmpeg failures (the connection actually
+        # truncating every recorded segment to a few seconds. Genuine
+        # ffmpeg failures (the connection actually
         # dying, e.g. once creds truly go stale past the ~60 s grace) are
         # already recovered by `_watch_recorder`, which respawns with the
         # freshly-cached `rtspsUrl` set above.
@@ -315,7 +309,6 @@ async def auto_renew_local_session(
                 # Pooled shared session — a heartbeat fires every ~30 s per
                 # camera; a fresh TCP+TLS handshake each time was pure
                 # overhead. The CM does NOT close the shared session.
-                # 2026-06-18 (perf).
                 async with async_bosch_cloud_session_cm(coordinator.hass) as session:
                     url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection"
                     async with asyncio.timeout(TIMEOUT_PUT_CONNECTION):

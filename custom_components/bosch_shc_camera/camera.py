@@ -85,8 +85,7 @@ CLOUD_SNAP_CACHE_TTL = 30  # minimum seconds between cloud fetches (de-bounce)
 # cloud-degraded restart with an empty shc_state_cache) — deliberately
 # shorter than CLOUD_SNAP_CACHE_TTL so a stale-but-unverified frame isn't
 # served indefinitely, but still throttled so an outage doesn't re-run the
-# full snapshot fallback chain on every single camera-proxy request
-# (backported from the Core PR's Copilot review rounds 17/20, 2026-08-04).
+# full snapshot fallback chain on every single camera-proxy request.
 PRIVACY_UNKNOWN_RETRY_SEC = 5
 DEFAULT_SNAPSHOT_INTERVAL = (
     1800  # default proactive background refresh interval (30 min)
@@ -130,8 +129,7 @@ SNAPSHOT_FALLBACK_MAX_BUDGET_SEC = 10 + 10 + 12 + 10
 # _async_camera_image_impl — must stay under HA core's own CAMERA_IMAGE_TIMEOUT
 # (10s, homeassistant/components/camera/const.py) so a slow/failing RCP+REMOTE
 # +LOCAL chain still leaves time to return the cached frame instead of the
-# whole call being cancelled and serving nothing (bug-hunt 2026-07-27, ported
-# from the Core PR minimal cut).
+# whole call being cancelled and serving nothing.
 REFRESH_ON_STALE_CACHE_BUDGET_SEC = 8
 
 
@@ -139,8 +137,8 @@ def _fmt_event_ts(ts_str: str | None) -> str:
     """Format a Bosch event timestamp for a debug-log line.
 
     Never slice the raw string to 19 chars — that discards the offset
-    (+02:00/Z) and recreates GitHub #34 (a truncated-then-relabelled-UTC
-    timestamp read as +2h/CEST off). Uses the same documented parser as
+    (+02:00/Z) and produces a truncated-then-relabelled-UTC timestamp read
+    as +2h/CEST off. Uses the same documented parser as
     `extra_state_attributes`.
     """
     dt = parse_bosch_timestamp(ts_str)
@@ -215,7 +213,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     _PLACEHOLDER_JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.' \",#\x1c\x1c(7),01444\x1f'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x08\x01\x01\x00\x00?\x00T\xdf\xb2\x80\x01\xff\xd9"
     _attr_has_entity_name = True
     # The (redacted) stream/proxy URLs rotate on every reconnect, so recording
-    # them churns the `state_attributes` table with no history value (HA#39).
+    # them churns the `state_attributes` table with no history value.
     # Keep them visible live; never historize them.
     _unrecorded_attributes = frozenset({"live_rtsps", "live_proxy", "stream_url"})
 
@@ -234,7 +232,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # detection entirely (_webrtc_provider stays None forever) while
         # camera_capabilities unconditionally advertises WEB_RTC support anyway,
         # so every real offer hits super()'s `if self._webrtc_provider` check,
-        # finds None, and raises "Camera does not support WebRTC" (issue #40).
+        # finds None, and raises "Camera does not support WebRTC".
         # Force it back off so core's normal go2rtc provider bookkeeping runs;
         # our override still executes on every offer via normal polymorphism —
         # the flag only gates capability/provider bookkeeping, not dispatch.
@@ -254,7 +252,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         )  # monotonic timestamp of last *failed* fetch; separate so successes always update the cache window
         self._refresh_inflight: bool = False  # synchronous guard: set before first yield, cleared in finally  # prevents concurrent async_trigger_image_refresh (replaces locked()+async-with race)
         self._was_streaming: bool = False
-        # GitHub #55: background LOCAL-snap TLS warm-up (see
+        # Background LOCAL-snap TLS warm-up (see
         # _async_warm_local_snap_connection). Rate-limited via the timestamp;
         # the task handle lets async_will_remove_from_hass cancel a pending
         # attempt instead of leaking it past entity removal.
@@ -264,8 +262,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # (startup delay, stream-stop, or proactive coordinator-update
         # trigger) so async_will_remove_from_hass can cancel a still-pending
         # one — without this, unloading the entity mid-delay left a network
-        # task running against an already-removed entity (bug-hunt
-        # 2026-07-27, backported from Core PR review).
+        # task running against an already-removed entity.
         self._image_refresh_task: asyncio.Task[None] | None = None
 
         info = coordinator.data.get(cam_id, {}).get("info", {})
@@ -342,8 +339,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # fast-exiting duplicate — `async_will_remove_from_hass` cancels
         # whatever `_image_refresh_task` currently points at, so entity
         # removal during a long fetch would cancel the harmless duplicate
-        # and leave the real network task running uncancelled (backported
-        # from the Core PR's Copilot review round 7, 2026-07-27).
+        # and leave the real network task running uncancelled.
         if self._was_streaming and not is_now_streaming and not self._refresh_inflight:
             self._image_refresh_task = self.hass.async_create_task(
                 self.async_trigger_image_refresh(delay=2)
@@ -433,8 +429,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # async_camera_image() — that already runs the full live
                 # REMOTE/LOCAL/RCP cascade, and the slow path below runs it
                 # again immediately after, doubling the connection/snapshot
-                # requests on every cold start (backported from the Core
-                # PR's Copilot review round 3, 2026-07-27).
+                # requests on every cold start.
                 quick = await self.coordinator.async_fetch_fresh_event_snapshot(
                     self._cam_id
                 )
@@ -459,7 +454,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # fallback opens its own fresh PUT /connection against the same
                 # camera, contending with pre-warm for capacity and producing
                 # the same failure class as the inline LOCAL snap fetch in
-                # _async_camera_image_impl (forum 998974/40).
+                # _async_camera_image_impl.
                 if not image and not self.coordinator.is_stream_warming(self._cam_id):
                     image = await self.coordinator.async_fetch_live_snapshot_local(
                         self._cam_id
@@ -554,7 +549,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         below also gates on `rtspsUrl`). The card then 5-s-timed-out and fell
         back to HLS — which is what made WebRTC look like "only works after a
         browser reload" (after a reload, pre-warm was already done and rtspsUrl
-        was present from the first state read). Bug 2026-05-27 Innenbereich.
+        was present from the first state read).
         """
         live = self.coordinator.live_connections.get(self._cam_id, {})
         if not live:
@@ -574,7 +569,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         the gate is on OFFLINE status, NOT on is_streaming and NOT on `available`
         (which stays True for an offline camera: the cloud poll succeeds, the
         camera just reports status OFFLINE). UNKNOWN/missing status keeps STREAM
-        (only drop when definitively offline). 2026-06-17.
+        (only drop when definitively offline).
         """
         status = str(self._cam_data.get("status", "")).upper()
         if status == "OFFLINE":
@@ -605,8 +600,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             # enabled, and inventing a default here would silently reset a
             # real LOW/MEDIUM setting to HIGH before the coordinator has
             # ever fetched it (e.g. right after startup while the camera
-            # was offline) — fail instead of guessing (Copilot review
-            # round 13, backported from the Core PR).
+            # was offline) — fail instead of guessing.
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="motion_sensitivity_unknown",
@@ -627,16 +621,14 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # Optimistic cache update + write-lock timestamp — motion is only
         # ever re-fetched by the slow tier, so without this,
         # motion_detection_enabled would read stale data for minutes after
-        # this service call succeeded (backported from the Core PR's
-        # Copilot review round 3, 2026-07-27).
+        # this service call succeeded.
         self.coordinator.data.setdefault(self._cam_id, {}).setdefault(
             "motion", {}
         ).update({"enabled": True, "motionAlarmConfiguration": sensitivity})
         self.coordinator.motion_set_at[self._cam_id] = time.monotonic()
         # Tracked (not a bare hass.async_create_task) — otherwise this can
         # outlive config-entry unload and keep running against an
-        # already-torn-down coordinator (Copilot review round 12, backported
-        # from the Core PR).
+        # already-torn-down coordinator.
         self.coordinator.spawn_tracked(
             self.coordinator.async_request_refresh(),
             name="bosch_shc_camera_motion_enable_refresh",
@@ -723,8 +715,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             # A successful account-level coordinator update does not mean
             # every camera is reachable — check this camera's own cached
             # status too, otherwise an OFFLINE/UPDATING/SESSION_LIMIT camera
-            # stays marked available and serves stale imagery as if live
-            # (bug-hunt 2026-07-27, ported from the Core PR minimal cut).
+            # stays marked available and serves stale imagery as if live.
             cam_status = str(self._cam_data.get("status", "UNKNOWN")).upper()
             return cam_status not in ("OFFLINE", "UPDATING", "SESSION_LIMIT")
         # Cloud poll failed. Inside a KNOWN active Bosch maintenance window the
@@ -732,7 +723,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # LOCAL datapath (TLS proxy + RTSP) keeps serving frames. Keep a
         # locally-streaming camera available so the UI/automations don't churn
         # through unavailable on every cloud dip — local snapshot + live stream
-        # stay functional. Verified live 2026-06-16 maintenance window.
+        # stay functional.
         return self._local_available_during_cloud_outage()
 
     def _local_available_during_cloud_outage(self) -> bool:
@@ -795,8 +786,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         info = cam_data.get("info", {})
         bosch_priority = info.get("priority")
         # Never slice a Bosch timestamp to 19 chars — it discards the offset
-        # (+02:00/Z), recreating GitHub #34 (last_event showed +2h/CEST
-        # because the naive wall-clock reading got re-labelled as UTC).
+        # (+02:00/Z), which shows last_event as +2h/CEST off because the
+        # naive wall-clock reading gets re-labelled as UTC.
         # parse_bosch_timestamp() is the documented, correct parser.
         last_event_dt = parse_bosch_timestamp(latest.get("timestamp"))
         attrs = {
@@ -896,7 +887,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         HA calls this when camera.play_stream is invoked (e.g. Cast to Chromecast).
         Without the override stream_source() returns None with no active session
         → async_create_stream() returns None → HA logs
-        "does not support play stream service" (observed 2026-05-09 19:02 CEST).
+        "does not support play stream service".
 
         When privacy mode is ON the live connection is intentionally blocked.
         We raise HomeAssistantError so HA surfaces a meaningful message instead of
@@ -930,8 +921,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 return None
             else:
                 self.coordinator.async_update_listeners()
-        # Pre-warm race (observed 2026-05-17 05:16:14 UTC for bosch_innenbereich):
-        # coordinator sets live_connections[cam_id] BEFORE the LOCAL pre-warm
+        # Pre-warm race: coordinator sets live_connections[cam_id] BEFORE the LOCAL pre-warm
         # populates rtspsUrl. During that window stream_source() intentionally
         # returns None — but super().async_create_stream() reads stream_source()
         # and returns None too, which HA core surfaces as the misleading
@@ -948,9 +938,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         async_handle_async_webrtc_offer() (native app / go2rtc path) — both read
         stream_source() right after this returns, and stream_source() only
         returns a URL once pre-warm has cleared. Without this wait, a WebRTC
-        offer made mid-warm-up (MOBILE_BACKLOG item, ~25-35s black screen in the
-        native HA more-info view) fails immediately instead of waiting like the
-        card's own JS retry already does.
+        offer made mid-warm-up (~25-35s black screen in the native HA
+        more-info view) fails immediately instead of waiting like the card's
+        own JS retry already does.
         """
         if self._cam_id not in self.coordinator.stream_warming:
             return True
@@ -979,16 +969,15 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         Stream" switch was never turned on (e.g. right after first setup)
         has no active session, so stream_source() stays None and go2rtc
         raised "Camera does not support WebRTC" for a first-time user simply
-        opening the native more-info dialog — no image/stream at all,
-        reported by a new user on community.simon42.com. Mirrors the
-        auto-open already done in async_create_stream().
+        opening the native more-info dialog — no image/stream at all. Mirrors
+        the auto-open already done in async_create_stream().
 
         Also: wait for LOCAL pre-warm before delegating to the go2rtc
         provider. Without this, a native WebRTC offer (HA Companion app /
         more-info dialog) arriving while the camera is still warming up hits
         stream_source() returning None with no retry — up to ~35s of black
-        screen (MOBILE_BACKLOG). The custom card already retries client-side
-        via _waitForStreamReady(); the native path had no equivalent.
+        screen. The custom card already retries client-side via
+        _waitForStreamReady(); the native path had no equivalent.
         """
         if not self.coordinator.live_connections.get(self._cam_id):
             shc = self.coordinator.shc_state_cache.get(self._cam_id, {})
@@ -1047,7 +1036,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # Audio track is ALWAYS kept in the stream now — switch.<cam>_audio is a
         # card-side mute preference (applied to video.muted), not a track toggle.
         # Stripping it here on a muted-at-start session would leave no track to
-        # unmute. The track stays (≈ negligible bandwidth). 2026-06-01.
+        # unmute. The track stays (≈ negligible bandwidth).
         return url
 
     # ── RCP thumbnail fallback ────────────────────────────────────────────────
@@ -1161,7 +1150,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         HA's camera proxy serve a textual `500: Internal Server Error` body
         (26 bytes of plain text in place of an image).
 
-        Observed 2026-04-27 on Gen1 cams during the pre-warm transition: while
+        On Gen1 cams during the pre-warm transition: while
         `live_connections[cam_id]` had a partial entry but no proxyUrl yet,
         an unhandled exception path in `_async_camera_image_impl` propagated up
         and HA returned 500. Lovelace's `<img>` element rendered the literal
@@ -1188,8 +1177,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             # call (e.g. a fetch call outside any try/except raising after
             # a concurrent coordinator poll resolved privacy_mode=True),
             # and only a confirmed-False read is safe to serve stale data
-            # for (bug-hunt, backported from the Core PR's Copilot review
-            # round 20, 2026-08-04).
+            # for.
             privacy_confirmed_safe = (
                 self.coordinator.shc_state_cache.get(self._cam_id, {}).get(
                     "privacy_mode"
@@ -1220,7 +1208,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     ) -> None:
         """Schedule a rate-limited background LOCAL-snap TLS warm-up.
 
-        GitHub #55: synchronous guard (set before any `await`) mirrors
+        Synchronous guard (set before any `await`) mirrors
         `async_trigger_image_refresh`'s `_refresh_inflight` pattern — a second
         concurrent caller within the same rate-limit window must not also
         schedule a warm-up, which would double the concurrent-handshake load
@@ -1261,13 +1249,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     ) -> None:
         """Best-effort background Digest handshake to prime the connection pool.
 
-        GitHub #55: the inline LOCAL snap.jpg request is capped at
+        The inline LOCAL snap.jpg request is capped at
         ``LOCAL_SNAP_TIMEOUT`` (8.5s) to stay under HA's outer
         ``CAMERA_IMAGE_TIMEOUT`` — but on cameras whose TLS handshake alone
         runs 2.5-6.9s, a timeout still fires often enough that the handshake
         never completes, and a killed handshake never gets pooled, so every
         subsequent inline request starts cold and hits the same wall. Raising
-        the cap (see GitHub #57) only fixes request 1 — it does nothing for
+        the cap only fixes request 1 — it does nothing for
         requests 2..N without something priming the pool. This runs on the
         same shared session (`auth_utils.async_digest_request` calls
         `session.request()` directly, so a completed request here pools a
@@ -1347,7 +1335,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # before privacy was enabled — and keeps serving it through the
         # camera proxy indefinitely. Return None here so the public
         # wrapper's `result or _PLACEHOLDER_JPEG` serves the placeholder
-        # instead (bug-hunt 2026-07-27, backported from Core PR review).
+        # instead.
         if self.coordinator.shc_state_cache.get(self._cam_id, {}).get("privacy_mode"):
             return None
         # An unknown privacy state (e.g. a cloud-degraded restart, where
@@ -1356,8 +1344,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # cached frame at any of this cascade's several blind
         # cache/placeholder-fallback return points — only a confirmed-False
         # state is safe to serve stale data for. Computed once here and
-        # threaded through the rest of the function (backported from the
-        # Core PR's Copilot review rounds 17/20, 2026-08-04).
+        # threaded through the rest of the function.
         privacy_unknown = (
             self.coordinator.shc_state_cache.get(self._cam_id, {}).get("privacy_mode")
             is None
@@ -1446,16 +1433,14 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     # (live_connection.py's ~2-concurrent-session note),
                     # producing spurious "LOCAL snap via proxy failed"
                     # warnings and adding jitter to the pre-warm retries
-                    # themselves — forum 998974/40. Serve the cached frame
+                    # themselves. Serve the cached frame
                     # instead of racing the live session.
                     _LOGGER.debug(
                         "%s: skipping LOCAL snap, stream pre-warming",
                         self._display_name,
                     )
                     # Fail closed while privacy is unverified — this is a
-                    # blind cache serve with no fetch attempt at all
-                    # (backported from the Core PR's Copilot review
-                    # round 20, 2026-08-04).
+                    # blind cache serve with no fetch attempt at all.
                     return (
                         None
                         if privacy_unknown
@@ -1493,11 +1478,11 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                                     data = await resp.read()
                     except (TimeoutError, aiohttp.ClientError, ValueError) as err:
                         # ValueError: malformed/missing WWW-Authenticate header
-                        # from auth_utils.async_digest_request — forum 998974/15.
+                        # from auth_utils.async_digest_request.
                         _LOGGER.debug("LOCAL snap via proxy failed: %s", err)
                         data = None
                         if isinstance(err, TimeoutError):
-                            # GitHub #55: only a real timeout indicates the
+                            # Only a real timeout indicates the
                             # "TLS handshake killed before completion" pattern
                             # a warm-up can fix — a ValueError (malformed auth
                             # header) or a connection-level ClientError won't
@@ -1519,8 +1504,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     # the Digest auth we just tried — aiohttp without auth would
                     # 401 in another ~10 s burning HA's outer budget. Go straight
                     # to cached image / placeholder via the final return.
-                    # Fail closed while privacy is unverified (backported
-                    # from the Core PR's Copilot review round 20, 2026-08-04).
+                    # Fail closed while privacy is unverified.
                     return (
                         None
                         if privacy_unknown
@@ -1563,7 +1547,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # Renew OUTSIDE the 10s snapshot timeout: try_live_connection can
                 # take up to ~100s (PUT /connection + LOCAL pre-warm) and must not
                 # be cancelled mid-flight by the snapshot budget — which previously
-                # aborted every renewal on a slow camera (bug-hunt 2026-06-02).
+                # aborted every renewal on a slow camera.
                 if renew_after_status is not None:
                     opened_at = self.coordinator.live_opened_at.get(
                         self._cam_id, float("-inf")
@@ -1585,7 +1569,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         # reading its creds. Leave the state untouched. This was
                         # the one snapshot-recovery call site missing the
                         # `is STREAM_START_SKIPPED` guard used at camera.py play_stream
-                        # and switch.py turn-on. (bug-hunt 2026-07-01)
+                        # and switch.py turn-on.
                         _LOGGER.debug(
                             "%s: snapshot renewal coalesced into an in-progress "
                             "start — keeping live session",
@@ -1648,8 +1632,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             # PRIVACY_UNKNOWN_RETRY_SEC (not forced on every call): every
             # fetch attempt below re-stamps last_image_fetch regardless of
             # outcome, so an unresolved-unknown state would otherwise defeat
-            # CLOUD_SNAP_CACHE_TTL's backoff entirely (backported from the
-            # Core PR's Copilot review rounds 17/20, 2026-08-04).
+            # CLOUD_SNAP_CACHE_TTL's backoff entirely.
             cache_stale = cache_age >= CLOUD_SNAP_CACHE_TTL or (
                 privacy_unknown and cache_age >= PRIVACY_UNKNOWN_RETRY_SEC
             )
@@ -1680,8 +1663,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         # None) — never let one poison the shared full-res
                         # cache, or a full-res request arriving within
                         # CLOUD_SNAP_CACHE_TTL would be served this undersized
-                        # frame from cache instead of fetching fresh
-                        # (bug-hunt 2026-07-27, backported from Core PR review).
+                        # frame from cache instead of fetching fresh.
                         if req_jpeg_size is None:
                             self.cached_image = rcp_img
                             self.last_image_fetch = now
@@ -1720,8 +1702,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # timestamp — a failed width=N (thumbnail) request must not
                 # suppress a following full-resolution request for the rest
                 # of the TTL window, since the shared cache was never
-                # actually refreshed (backported from the Core PR's
-                # Copilot review round 8, 2026-07-27).
+                # actually refreshed.
                 if req_jpeg_size is None:
                     self.last_image_fetch = now
             elif cache_stale:
@@ -1772,9 +1753,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     )
                     # privacy_unknown forced this fetch attempt specifically
                     # to verify the cached frame is safe to serve; a failed
-                    # attempt must not fall back to it anyway (backported
-                    # from the Core PR's Copilot review round 20,
-                    # 2026-08-04).
+                    # attempt must not fall back to it anyway.
                     return None if privacy_unknown else self.cached_image
                 if fresh2:
                     # Only a full-resolution fetch may update the shared cache.
@@ -1784,8 +1763,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     return fresh2
                 # Both REMOTE + LOCAL failed — advance timestamp so next tick retries instead of looping.
                 # Only a full-resolution fetch may advance the shared
-                # timestamp — see the tier-1a comment above (backported
-                # from the Core PR's Copilot review round 8, 2026-07-27).
+                # timestamp — see the tier-1a comment above.
                 if req_jpeg_size is None:
                     self.last_image_fetch = now
                 _LOGGER.debug(
@@ -1804,8 +1782,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 # cache_stale now False and unconditionally serve the frame
                 # just withheld. Keep failing closed for the whole throttle
                 # window instead of only the single request that actually
-                # attempted verification (backported from the Core PR's
-                # Copilot review round 20, 2026-08-04).
+                # attempted verification.
                 return None if privacy_unknown else self.cached_image
 
         # ── 2b. LOCAL snap.jpg with cached Digest creds (cloud-outage fallback) ──
@@ -1856,8 +1833,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     # serves width=N (thumbnail) requests; without this guard
                     # a thumbnail-sized outage snap would poison cached_image
                     # and suppress the next full-resolution fetch until the
-                    # cache TTL elapses (backported from the Core PR's
-                    # Copilot review round 15, 2026-07-28).
+                    # cache TTL elapses.
                     if req_jpeg_size is None:
                         self.cached_image = outage_data
                         self.last_image_fetch = time.monotonic()
@@ -1881,8 +1857,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # concurrently set by `async_added_to_hass`'s disk restore or
         # `async_trigger_image_refresh` while an earlier tier's fetch
         # awaits, so the same fail-closed guarantee as tier 2 above applies
-        # here too (backported from the Core PR's Copilot review round 20,
-        # 2026-08-04).
+        # here too.
         if (
             self.cached_image
             and self.cached_image is not self._PLACEHOLDER_JPEG
@@ -1910,8 +1885,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     # allow_redirects=False: _is_safe_bosch_url only
                     # validates img_url itself — aiohttp follows redirects
                     # by default, so a validated URL could still redirect
-                    # to an arbitrary internal host (backported from the
-                    # Core PR's Copilot review round 5, 2026-07-27).
+                    # to an arbitrary internal host.
                     async with session.get(
                         img_url, headers=headers_bearer, allow_redirects=False
                     ) as resp:
@@ -1933,8 +1907,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                             # event itself could predate privacy being
                             # enabled just as easily as a stale
                             # `cached_image` can, so the same fail-closed
-                            # guarantee applies (bug-hunt, backported from
-                            # the Core PR's round 20, 2026-08-04).
+                            # guarantee applies.
                             return None if privacy_unknown else self.cached_image
                         if resp.status == 401:
                             _LOGGER.warning(

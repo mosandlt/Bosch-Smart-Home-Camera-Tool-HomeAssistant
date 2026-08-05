@@ -122,7 +122,7 @@ class BoschSoftResetButton(_BoschEntityBase, ButtonEntity):  # type: ignore[misc
     camera briefly drops offline while it reboots, then reconnects on its
     own. Non-destructive: no re-pairing needed afterward.
 
-    Disabled by default (2026-07-08): live-tested against a real, online,
+    Disabled by default: live-tested against a real, online,
     owned Gen2 camera and Bosch's cloud rejected it with HTTP 404
     sh:entity.notfound, even though the request matches the decompiled
     Bosch app byte-for-byte (URL, base host, camera ID, empty body — a

@@ -1,7 +1,7 @@
 """User-facing notification orchestration: maintenance windows, per-camera
 online/offline transitions, and Bosch-cloud reachability transitions.
 
-Extracted from `coordinator.py` (style audit, 2026-08-04) — this is
+Extracted from `coordinator.py` — this is
 persistent_notification/notify-service dispatch business logic, not
 "fetch and cache data" work, so it doesn't belong inline on the
 `DataUpdateCoordinator` subclass. Matches the `tick_bootstrap`/

@@ -10,7 +10,7 @@ DOMAIN = "bosch_shc_camera"
 CARD_VERSION = "14.1.20"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
-# Delivery-death detection (issue #36). When the periodic /v11/events poll finds
+# Delivery-death detection. When the periodic /v11/events poll finds
 # a genuinely NEW event while FCM is enabled+running+"healthy" yet no real push
 # has arrived in this window, push delivery is dead at the cloud/Google layer
 # even though the socket reports is_started()=True (the exact silent-death case
@@ -136,12 +136,14 @@ def with_jpeg_size(url: str, size: int | None) -> str:
 # inconsistent (CLI 5/15s vs. integration 10s).
 TIMEOUT_SNAP = 10  # GET on signed image / imageUrl
 TIMEOUT_PUT_CONNECTION = 10  # PUT /v11/video_inputs/{id}/connection
-TIMEOUT_RCP_099E_PROBE = 2.5  # RCP 0x099e thumbnail probe (GitHub #56 — must not eat the snap.jpg leg's budget)
+TIMEOUT_RCP_099E_PROBE = (
+    2.5  # RCP 0x099e thumbnail probe — must not eat the snap.jpg leg's budget
+)
 RCP_099E_PROBE_FAILURE_MEMO_SEC = (
     3600  # skip the probe for this long per-cam_id after a failure/timeout
 )
 
-# GitHub #55: LOCAL snap.jpg's inline Digest request is capped at 6s to stay
+# LOCAL snap.jpg's inline Digest request is capped at 6s to stay
 # under HA's outer 10s CAMERA_IMAGE_TIMEOUT — too tight for cameras whose TLS
 # handshake alone runs 2.5-6.9s, and a handshake killed mid-flight never gets
 # pooled, so every request starts cold and hits the same wall. On a timeout,
@@ -153,16 +155,16 @@ LOCAL_SNAP_WARMUP_MIN_INTERVAL_SEC = 30.0
 
 # GET /v11/video_inputs (camera_list.py) — first call of every coordinator
 # tick, gating everything else that tick. A bare timeout here used to fail
-# the WHOLE tick immediately (community report, forum thread, 2026-07-23: a
-# brief Bosch-cloud blip caused two consecutive failed ticks, self-recovered
-# on the third) — one quick in-tick retry absorbs a momentary hiccup instead
-# of costing users a full failed update + stale/offline-looking cameras over
-# what a few seconds' grace would have covered. A persistent outage still
-# fails after the retry, same as before.
+# the WHOLE tick immediately — a brief Bosch-cloud blip could cause
+# consecutive failed ticks that self-recover on their own — so one quick
+# in-tick retry absorbs a momentary hiccup instead of costing users a full
+# failed update + stale/offline-looking cameras over what a few seconds'
+# grace would have covered. A persistent outage still fails after the
+# retry, same as before.
 TIMEOUT_VIDEO_INPUTS = 15.0
 VIDEO_INPUTS_RETRY_DELAY_SEC = 3.0
 
-# issue #47: AUTO-mode TCP pre-check chicken-and-egg breaker. When the
+# AUTO-mode TCP pre-check chicken-and-egg breaker. When the
 # camera's cached LAN IP is stale (DHCP re-lease after a mesh flap/reboot),
 # every pre-check ping against it fails forever, which would otherwise skip
 # LOCAL — and only the LOCAL PUT itself can teach us the camera's *current*
@@ -273,8 +275,7 @@ DEFAULT_OPTIONS = {
     # Opt-in: stop-finalize the ring's actively-written segment (SIGTERM,
     # wait for moov atom) and re-attach it before dropping the newest
     # segment on an FCM event, instead of always discarding it. Costs a
-    # small (~1s) ring gap per event. Default OFF — issue #43 follow-up
-    # feature request, realKim-dotcom.
+    # small (~1s) ring gap per event. Default OFF.
     "nvr_finalize_ring_on_event": False,
     "enable_go2rtc": True,
     # Green IT (power/bandwidth saving). Currently: the idle-session reaper tears
@@ -283,7 +284,7 @@ DEFAULT_OPTIONS = {
     # one (saves WLAN bandwidth + camera power/heat, turns the live LED off,
     # frees Bosch's per-camera 60-min session slot). Umbrella flag — future
     # power-saving behaviours hang off the same toggle.
-    # DEFAULT OFF / UNDER DEVELOPMENT (2026-06-03): the idle reaper's consumer
+    # DEFAULT OFF / UNDER DEVELOPMENT: the idle reaper's consumer
     # detection cannot reliably see a live WebRTC viewer — HA's go2rtc-backed
     # WebRTC session does not surface as a go2rtc `consumers` entry on every
     # setup (verified live: real WebRTC viewer → consumers:null), so the reaper
@@ -311,7 +312,7 @@ DEFAULT_OPTIONS = {
     # falling back to the normal cloud-proxy / snap.jpg path. Bypasses the
     # H.264-transcode overhead for snapshot requests (~150-300 ms vs ~500 ms
     # cloud-proxy round-trip on a healthy LAN).
-    # KNOWN ISSUE (2026-05-25): FFmpeg's built-in TLS stack does not negotiate
+    # KNOWN ISSUE: FFmpeg's built-in TLS stack does not negotiate
     # cleanly with Bosch's RTSPS server on port 443 — returns "Invalid data
     # found when processing input" (FFmpeg code 183) even with `-tls_verify 0`.
     # The reliable path is to route FFmpeg through our existing tls_proxy.py

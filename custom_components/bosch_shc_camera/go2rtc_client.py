@@ -1,35 +1,26 @@
 """go2rtc stream unregistration + go2rtc WebRTC-provider scheme refresh.
 
-Originally Phase 3 step 3 of the coordinator-rewrite split (see
-docs/stream-perf-stability-refactor-plan.md): the bodies below were the
-former `BoschCameraCoordinator` methods `_ensure_go2rtc_schemes_fresh`,
-`_register_go2rtc_stream` and `unregister_go2rtc_stream`, moved out
-unchanged except for `self` → `coordinator`.
-
-`register_go2rtc_stream` (the manual `PUT /api/streams` call) was removed
-2026-07-14 (HA-Core-submission-prep): HA-core's own bundled go2rtc
-integration already auto-registers whatever `camera.stream_source()`
-returns on every WebRTC offer (`homeassistant/components/go2rtc/__init__.py`
-`WebRTCProvider._update_stream_source`), so a manual PUT duplicated
-Core-owned protocol logic reviewers push back on. This only became safe
-once both LOCAL (`viewing_front_door.py`) and REMOTE
-(`remote_viewing_front_door.py`) started publishing a STABLE URL per
-session — go2rtc's registration is purely additive with no removal API, so
-registering a URL that changed on every credential rotation (as fast as
-~15s on Gen1 LOCAL sessions) would have leaked a fresh dead entry every
-time; native auto-registration only became viable once that churn was
-fixed at the source. `unregister_go2rtc_stream` (`DELETE /api/streams`) is
-KEPT — there is no native equivalent at all (go2rtc's registration API has
-no removal call, confirmed by reading `python-go2rtc-client`'s actual
-surface), so this remains the only way to keep the registry tidy on a
-genuine session teardown (as opposed to the URL churn problem the removed
-PUT call no longer needs to guard against).
+There is deliberately no `register_go2rtc_stream` here: HA-core's own
+bundled go2rtc integration already auto-registers whatever
+`camera.stream_source()` returns on every WebRTC offer
+(`homeassistant/components/go2rtc/__init__.py`
+`WebRTCProvider._update_stream_source`), so a manual `PUT /api/streams`
+would duplicate Core-owned protocol logic. This is only safe because both
+LOCAL (`viewing_front_door.py`) and REMOTE (`remote_viewing_front_door.py`)
+publish a STABLE URL per session — go2rtc's registration is purely
+additive with no removal API, so registering a URL that changed on every
+credential rotation (as fast as ~15s on Gen1 LOCAL sessions) would leak a
+fresh dead entry every time. `unregister_go2rtc_stream`
+(`DELETE /api/streams`) is still needed — there is no native equivalent at
+all (go2rtc's registration API has no removal call, confirmed by reading
+`python-go2rtc-client`'s actual surface), so this remains the only way to
+keep the registry tidy on a genuine session teardown.
 
 `ensure_go2rtc_schemes_fresh` is unrelated to registration — a separate
-workaround for an HA-core provider-initialization race — and unaffected.
+workaround for an HA-core provider-initialization race.
 
-`BoschCameraCoordinator` keeps a thin same-named method for each remaining
-function that delegates here — exercised extensively from other
+`BoschCameraCoordinator` keeps a thin same-named method for each function
+here that delegates to it — exercised extensively from other
 coordinator-facing modules (stream_lifecycle.py) and from the test suite
 both as bound methods and via `BoschCameraCoordinator._method(coord, ...)`
 unbound-style calls plus direct `AsyncMock()` attribute patching — all of
@@ -61,19 +52,14 @@ async def _get_go2rtc_session(
 
     go2rtc is reached over plain HTTP on localhost (11984/1984) — a
     different trust domain from the Bosch-cloud TLS session in cloud_ssl.py,
-    so it gets its own pooled session instead of reusing that one. Was
-    previously a fresh `aiohttp.ClientSession()` per call on all three
-    go2rtc call sites (go2rtc_consumer_count / register_go2rtc_stream /
-    unregister_go2rtc_stream — Work Package 1,
-    stream-perf-stability-refactor). Closed exactly once, in
-    _async_cancel_coordinator_tasks (__init__.py), on config-entry unload /
-    HA stop.
+    so it gets its own pooled session instead of reusing that one. Closed
+    exactly once, in _async_cancel_coordinator_tasks (__init__.py), on
+    config-entry unload / HA stop.
 
     Built via `homeassistant.helpers.aiohttp_client.async_create_clientsession`
     (`auto_cleanup=False` — this function keeps its own coordinator-scoped
     close/teardown-race handling below, HA's own auto-cleanup would be
-    redundant) instead of a bare `aiohttp.ClientSession()` — inject-websession
-    quality-scale gap, closed 2026-08-04. This still shares HA's pooled
+    redundant) instead of a bare `aiohttp.ClientSession()`. This still shares HA's pooled
     connector (`homeassistant.helpers.aiohttp_client`'s per-hass
     `HomeAssistantTCPConnector`, keyed by verify_ssl/family/ssl_cipher) rather
     than opening a private one, and gains the SSRF-redirect middleware for
@@ -136,14 +122,9 @@ async def _go2rtc_client_session(
 ) -> AsyncIterator[aiohttp.ClientSession]:
     """Yield the shared, pooled session for one localhost go2rtc API call.
 
-    Used to take an optional `connector` param for the removed
-    `register_go2rtc_stream`'s Unix-socket-first-try path (HA-Core-
-    submission-prep, 2026-07-14 — see the module docstring) — the only
-    caller that ever needed a private, non-pooled session. The two
-    remaining callers (`unregister_go2rtc_stream`,
+    Both callers (`unregister_go2rtc_stream`,
     `stream_lifecycle.go2rtc_consumer_count`) always want the shared,
-    plain-TCP-to-127.0.0.1 session, so the connector branch was dead code
-    once removal landed; simplified accordingly rather than left unreachable.
+    plain-TCP-to-127.0.0.1 session.
     """
     yield await _get_go2rtc_session(coordinator)
 
@@ -210,10 +191,8 @@ async def ensure_go2rtc_schemes_fresh(coordinator: BoschCameraCoordinator) -> No
             # HA Core's `async_refresh_providers` calls `stream_source()`
             # on the entity, which our implementation answers with
             # `try_live_connection()` — opening a fresh LOCAL stream on
-            # idle cams the user never asked to view. Bug 2026-05-20:
-            # Innenbereich woke up streaming after this loop ran on a
-            # Terrasse stream-open. Guard added so the watchdog stays
-            # scoped to the cam that triggered it.
+            # idle cams the user never asked to view. Guard scopes the
+            # watchdog to the cam that triggered it.
             if cam_id_x not in coordinator.live_connections:
                 continue
             try:

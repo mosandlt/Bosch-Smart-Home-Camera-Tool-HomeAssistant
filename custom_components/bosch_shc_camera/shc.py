@@ -155,9 +155,8 @@ async def async_shc_request(
         return None
 
     # Reuse the connector AND the ClientSession across calls — avoids both a
-    # new TLS handshake per request and (inject-websession quality-scale gap,
-    # closed 2026-08-04) minting a fresh aiohttp.ClientSession object on
-    # every single request. Both are rebuilt together whenever the
+    # new TLS handshake per request and minting a fresh aiohttp.ClientSession
+    # object on every single request. Both are rebuilt together whenever the
     # (cert_path, key_path) pair changes or either has been closed —
     # `connector_owner=False` on the session (kept from before this fix)
     # means the session's own close() never touches the connector, but the
@@ -256,7 +255,7 @@ async def _update_one_camera_shc_state(
         # Honor light_set_at write-lock — same race as privacy_mode.
         # Without this, a fresh user-toggle can be overwritten by a
         # stale SHC reading within the cloud's eventual-consistency
-        # window. Fixed 2026-05-05.
+        # window.
         light_lock = coordinator.light_set_at.get(cam_id)
         ttl = getattr(coordinator, "WRITE_LOCK_SECS", 0)
         light_locked = light_lock is not None and (time.monotonic() - light_lock) < ttl
@@ -280,11 +279,11 @@ async def _update_one_camera_shc_state(
         val = svc.get("state", {}).get("value", "")
         new_priv = val.upper() == "ENABLED"
         # Honor the privacy_set_at write-lock (same pattern that
-        # __init__.py:1690 already respects for the cloud fetcher).
-        # Without this guard the SHC fetcher overwrites a fresh
-        # user-toggle within the cloud's eventual-consistency window
-        # → first OFF-toggle visibly reverts to ON until the next
-        # user click forces the issue. Fixed 2026-05-05.
+        # __init__.py's cloud fetcher already respects). Without this
+        # guard the SHC fetcher overwrites a fresh user-toggle within
+        # the cloud's eventual-consistency window → first OFF-toggle
+        # visibly reverts to ON until the next user click forces the
+        # issue.
         lock_ts = coordinator.privacy_set_at.get(cam_id)
         ttl = getattr(coordinator, "WRITE_LOCK_SECS", 0)
         locked = lock_ts is not None and (time.monotonic() - lock_ts) < ttl
@@ -362,7 +361,7 @@ async def async_shc_set_camera_light(
     ):
         coordinator.shc_state_cache[cam_id]["camera_light"] = on
         coordinator.async_update_listeners()
-        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
+        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams.
         return True
     return False
 
@@ -393,9 +392,9 @@ async def async_shc_set_privacy_mode(
         coordinator.shc_state_cache[cam_id]["privacy_mode"] = enabled
         coordinator.privacy_set_at[cam_id] = time.monotonic()
         coordinator.async_update_listeners()
-        # No forced refresh — see async_cloud_set_privacy_mode (path C,
-        # 2026-05-29): a privacy toggle must not re-register go2rtc streams and
-        # tear down unrelated cameras' live sessions. Optimistic push above +
+        # No forced refresh — see async_cloud_set_privacy_mode: a privacy
+        # toggle must not re-register go2rtc streams and tear down
+        # unrelated cameras' live sessions. Optimistic push above +
         # the regular tick are sufficient; privacy-OFF still snapshots below.
         if not enabled:
             _schedule_privacy_off_snapshot(coordinator, cam_id)
@@ -457,9 +456,7 @@ async def _notify_write_failed(
     a one-off write-time failure while a user is toggling a switch never
     touches it). Without this, a total failure left zero user-visible
     feedback: the entity just silently reverted, looking like "the button
-    does nothing" (live report 2026-07-07, privacy mode; same gap existed —
-    even worse, with no notification code path at all — for camera light and
-    notifications).
+    does nothing".
 
     `notification_id` is deterministic per camera+feature, so repeated
     failures during a real outage overwrite the same entry instead of
@@ -536,11 +533,11 @@ async def async_cloud_set_privacy_mode(
             # above already push the new privacy state to the UI
             # optimistically. A forced (un-throttled) coordinator
             # refresh re-touches go2rtc stream registration for ALL
-            # active cameras, which made go2rtc TEARDOWN + reconnect
+            # active cameras, which makes go2rtc TEARDOWN + reconnect
             # an UNRELATED camera's live session (~1 s blip → "HLS
-            # reload" overlay). Incident 2026-05-29, path C. The
-            # regular 60 s tick confirms the state; privacy-OFF still
-            # triggers a lightweight snapshot refresh below.
+            # reload" overlay). The regular 60 s tick confirms the
+            # state; privacy-OFF still triggers a lightweight snapshot
+            # refresh below.
             if not enabled:
                 _schedule_privacy_off_snapshot(coordinator, cam_id)
             return True
@@ -562,9 +559,9 @@ async def async_cloud_set_privacy_mode(
                         "privacy_mode"
                     ] = enabled
                     coordinator.async_update_listeners()
-                    # See primary path above: no forced refresh
-                    # (path C — avoids tearing down unrelated
-                    # cameras' live sessions). 2026-05-29.
+                    # See primary path above: no forced refresh —
+                    # avoids tearing down unrelated cameras' live
+                    # sessions.
                     if not enabled:
                         _schedule_privacy_off_snapshot(coordinator, cam_id)
                     return True
@@ -644,9 +641,9 @@ async def async_cloud_set_privacy_mode(
         # SHC was reachable but its own write also failed (e.g. no cached
         # device_id yet, or a non-2xx from the local PUT) — fall through to
         # the notification tail instead of returning this False directly.
-        # Returning early here reproduced the exact "swallowed failure" bug
-        # this function was fixed for, just for this one sub-case (found by
-        # bug-hunt verification, 2026-07-07).
+        # Returning early here would reproduce the exact "swallowed
+        # failure" bug this function guards against, just for this one
+        # sub-case.
 
     # -- All fallbacks exhausted — surface a persistent notification ----------
     await _notify_write_failed(
@@ -717,7 +714,7 @@ async def async_cloud_set_camera_light(
                 "ON" if on else "OFF",
                 2 if gen2 else 1,
             )
-            # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
+            # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams.
             return True
 
     # -- SHC local API fallback (offline mode) ---------------------------------
@@ -728,8 +725,7 @@ async def async_cloud_set_camera_light(
         if await async_shc_set_camera_light(coordinator, cam_id, on):
             return True
         # SHC was reachable but its own write also failed — fall through to
-        # the notification tail (same fix as async_cloud_set_privacy_mode,
-        # found by bug-hunt verification 2026-07-07).
+        # the notification tail (same pattern as async_cloud_set_privacy_mode).
     await _notify_write_failed(
         coordinator, cam_id, "light", "Kameralicht", "ON" if on else "OFF"
     )
@@ -882,7 +878,7 @@ async def async_cloud_set_light_component(
         elif component == "intensity":
             intensity = value
 
-        # Bosch API constraint (verified live 2026-04-25): the lighting_override
+        # Bosch API constraint: the lighting_override
         # endpoint rejects frontLightIntensity if frontLightOn is False with HTTP 400
         # `frontIlluminatorIntensity must not be set if frontLightOn is false`. Omit
         # the intensity field when the front light is being turned off.
@@ -922,15 +918,14 @@ async def async_cloud_set_light_component(
             value,
             2 if gen2 else 1,
         )
-        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
+        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams.
         return True
 
     # -- Gen2 LOCAL RCP fallback for front-light (cloud outage) ---------------
     # Mirror of the privacy fallback. Only supports "front" + "intensity" —
     # wallwasher RGB needs per-LED colour + whiteBalance which is blocked by
     # the LAN RCP service-auth gate. Treat "Gen2 confirmed OR unknown" as
-    # eligible so cold-start during a cloud outage isn't artificially blocked
-    # (Bug 2026-05-20).
+    # eligible so cold-start during a cloud outage isn't artificially blocked.
     _hw_light = coordinator.hw_version.get(cam_id)
     if (gen2 or _hw_light in (None, "", "CAMERA")) and component in (
         "front",
@@ -1032,7 +1027,7 @@ async def async_cloud_set_notifications(
                 status,
                 result.status,
             )
-            # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
+            # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams.
             return True
         _LOGGER.warning(
             "cloud_set_notifications: HTTP %s for %s", result.status, cam_id
@@ -1076,7 +1071,7 @@ async def async_cloud_set_pan(
             result.status,
             result.eta_ms,
         )
-        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
+        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams.
         return True
     _LOGGER.warning("cloud_set_pan: HTTP %s for %s", result.status, cam_id)
     return False

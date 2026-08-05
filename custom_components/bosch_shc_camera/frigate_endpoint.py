@@ -1,16 +1,16 @@
 """Always-on, credential-free RTSP front-door for external recorders (Frigate/BlueIris).
 
-Problem (HA#37, MattSharp + forum requests): the per-camera TLS proxy
-(``tls_proxy.py``) only binds its TCP port while a livestream session is open,
-and the URL it exposes carries inline Digest credentials that rotate roughly
-hourly. An external recorder (Frigate, BlueIris, go2rtc add-on) polls the RTSP
-URL on its own schedule, so whenever the livestream is off — the default, and
-the state after every HA restart, privacy-credential rotation or 60-minute
-session renewal — the recorder gets "Connection refused" or a 401.
+Problem: the per-camera TLS proxy (``tls_proxy.py``) only binds its TCP port
+while a livestream session is open, and the URL it exposes carries inline
+Digest credentials that rotate roughly hourly. An external recorder (Frigate,
+BlueIris, go2rtc add-on) polls the RTSP URL on its own schedule, so whenever
+the livestream is off — the default, and the state after every HA restart,
+privacy-credential rotation or 60-minute session renewal — the recorder gets
+"Connection refused" or a 401.
 
 This module is the HA analogue of the ioBroker adapter's ``lazy_stream.ts`` +
-``rtsp_auth.ts`` (forum #84538). It adds, per camera, an always-listening
-front-door bound to a stable port that:
+``rtsp_auth.ts``. It adds, per camera, an always-listening front-door bound
+to a stable port that:
 
   * stays bound regardless of Bosch session state (no more ECONNREFUSED),
   * opens the Bosch session + inner TLS proxy lazily on the first client
@@ -231,7 +231,7 @@ def ip_allowed(peer_ip: str, allowlist: frozenset[str]) -> bool:
         return False
     # A dual-stack (0.0.0.0) bind reports an IPv4 client as an IPv4-mapped IPv6
     # address (``::ffff:192.0.2.5``). Match against the real IPv4 too, so an
-    # IPv4 allowlist entry still applies. (forum/verify-agent finding 2026-06-24)
+    # IPv4 allowlist entry still applies.
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
     for entry in allowlist:
@@ -589,7 +589,7 @@ class _CameraServer:
         self.port = 0
         self.client_count = 0
         # Pending zero-client idle-linger task (see _idle_linger). Wired to the
-        # frigate_idle_timeout option. (bug-hunt 2026-07-01)
+        # frigate_idle_timeout option.
         self._idle_task: asyncio.Task[None] | None = None
 
     async def start(self, preferred_port: int) -> int:
@@ -664,15 +664,15 @@ class _CameraServer:
                 # before signalling idle, so a recorder that briefly reconnects
                 # (segment boundary, go2rtc restream re-open) doesn't thrash the
                 # on-demand session. idle_timeout <= 0 → signal immediately
-                # ("0 = close immediately", as documented). This wires the
-                # previously-dead frigate_idle_timeout option. (bug-hunt 2026-07-01)
+                # ("0 = close immediately", as documented).
                 if self._idle_task is not None and not self._idle_task.done():
                     self._idle_task.cancel()
                 self._idle_task = asyncio.create_task(self._idle_linger())
 
     async def _idle_linger(self) -> None:
         """Wait config.idle_timeout of continuous zero-client idle, then fire
-        on_idle. Cancelled and replaced the instant a new client connects."""
+        on_idle. Cancelled and replaced the instant a new client connects.
+        """
         try:
             if self.config.idle_timeout > 0:
                 await asyncio.sleep(self.config.idle_timeout)
@@ -894,9 +894,7 @@ class FrigateCoordinatorMixin:
         # (vol.Range(min=0, max=3600)) as an explicit "close immediately"
         # value (frigate_endpoint.py: "if idle_timeout > 0: ... # 0 = close
         # immediately"). `or 60` treats 0 as falsy and silently substitutes
-        # the default, making that documented value unreachable — the same
-        # class of bug as the previously-dead-until-v14.4.0
-        # frigate_idle_timeout option (bug-hunt 2026-07-03).
+        # the default, making that documented value unreachable.
         idle_timeout_opt = opts.get("frigate_idle_timeout", 60)
         idle_timeout = 60 if idle_timeout_opt is None else idle_timeout_opt
         return FrontDoorConfig(
@@ -939,7 +937,7 @@ class FrigateCoordinatorMixin:
         Only opens a new session when there is no active LOCAL session — calling
         try_live_connection() unconditionally would issue a PUT /connection on
         Gen2 FW 9.40.25+, rotating Digest credentials and destroying the running
-        TLS proxy port every time a recorder reconnects (HA#37 stream-drop loop).
+        TLS proxy port every time a recorder reconnects.
         """
         live = self.live_connections.get(cam_id, {})
         if live.get("_connection_type") != "LOCAL":
@@ -969,8 +967,7 @@ class FrigateCoordinatorMixin:
         but ONLY if no OTHER consumer (a live card view, Cast, Mini-NVR) is still
         using it; otherwise do nothing and let the generic idle reaper handle
         teardown when everyone leaves. Runs as a background task because on_idle
-        is a synchronous loop callback. (bug-hunt 2026-07-01 — wires the
-        previously-dead frigate_idle_timeout option.)
+        is a synchronous loop callback.
         """
 
         async def _maybe_teardown() -> None:
@@ -1070,8 +1067,7 @@ class FrigateCoordinatorMixin:
                     # async_added_to_hass calls this on every HA restart for
                     # a RestoreEntity-restored "on" switch, a bad
                     # frigate_bind_host used to break entity setup with a
-                    # traceback on every restart instead of a clear log
-                    # (bug-hunt 2026-07-03).
+                    # traceback on every restart instead of a clear log.
                     _LOGGER.error(
                         "frigate front-door %s: could not bind even an "
                         "ephemeral port (%s) — check frigate_bind_host",
