@@ -10,6 +10,12 @@ rules:
   appropriate-polling: done
   brands: done
   common-modules: done
+  docs-conditions:
+    status: exempt
+    comment: This integration has no device_condition.py; no automation conditions are implemented.
+  docs-triggers:
+    status: exempt
+    comment: This integration has no device_trigger.py; no automation triggers are implemented.
   config-flow: done
   config-flow-test-coverage: done
   dependency-transparency: done
