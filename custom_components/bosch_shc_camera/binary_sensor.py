@@ -21,12 +21,15 @@ from __future__ import annotations
 
 import logging
 import time as _time
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
+    BinarySensorEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -215,109 +218,173 @@ class _BoschBinarySensorBase(CoordinatorEntity, BinarySensorEntity):  # type: ig
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschMotionBinarySensor(_BoschBinarySensorBase):
+@dataclass(frozen=True, kw_only=True)
+class BoschBinarySensorEntityDescription(BinarySensorEntityDescription):  # type: ignore[misc]
+    """Describes a Bosch camera binary sensor.
+
+    Mirrors the `EntityDescription`-driven pattern used by Platinum-tier core
+    integrations (e.g. `reolink`): structurally-identical entities share one
+    generic entity class (`BoschBinarySensorEntity` below) parametrized by a
+    description instance, instead of one hand-written subclass per entity.
+
+    `unique_id_prefix`/`unique_id_suffix` express the historical (and in one
+    case quirky — see `BoschPersonDetectedBinarySensor`'s `bosch_shc_cam_`
+    prefix) unique_id scheme; preserved verbatim so existing users' entities
+    are never orphaned by this refactor.
+
+    `event_lookup_fn`, when set, is the shared "find the most-recent matching
+    event" behavior the event-based sensors (motion/audio_alarm/person) all
+    share — `is_on`/`extra_state_attributes` are ON only if the found event's
+    timestamp is within the configurable active window. Sensors with
+    genuinely different logic (LAN-reachable, AI-recent-alert) leave this
+    `None` and override `is_on`/`extra_state_attributes`/`available` directly
+    in their own thin subclass, same as Reolink does for its own outliers.
+    """
+
+    unique_id_prefix: str = "bosch_shc_camera"
+    unique_id_suffix: str = ""
+    event_lookup_fn: (
+        Callable[[BoschBinarySensorEntity], dict[str, Any] | None] | None
+    ) = None
+
+
+class BoschBinarySensorEntity(_BoschBinarySensorBase):
+    """Generic Bosch camera binary sensor driven by a `BoschBinarySensorEntityDescription`.
+
+    Implements the shared "most-recent-event-of-type within the active
+    window" behavior for `event_lookup_fn`-based descriptions. Subclasses
+    with different semantics (LAN-reachable, AI-recent-alert) override
+    `is_on`/`extra_state_attributes`/`available` and simply don't rely on
+    `event_lookup_fn`.
+    """
+
+    entity_description: BoschBinarySensorEntityDescription
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+        description: BoschBinarySensorEntityDescription,
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self.entity_description = description
+        self._attr_unique_id = (
+            f"{description.unique_id_prefix}_{cam_id}_{description.unique_id_suffix}"
+        )
+        self._attr_translation_key = description.translation_key
+        if description.device_class is not None:
+            self._attr_device_class = description.device_class
+        if description.entity_category is not None:
+            self._attr_entity_category = description.entity_category
+        self._attr_entity_registry_enabled_default = (
+            description.entity_registry_enabled_default
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        if self.entity_description.event_lookup_fn is None:
+            raise NotImplementedError
+        event = self.entity_description.event_lookup_fn(self)
+        if event is None:
+            return False
+        return self._event_within_window(event)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if self.entity_description.event_lookup_fn is None:
+            return {}
+        event = self.entity_description.event_lookup_fn(self)
+        if not event:
+            return {}
+        return {
+            "event_id": event.get("id", ""),
+            "timestamp": event.get("timestamp", ""),
+        }
+
+
+MOTION_DESCRIPTION = BoschBinarySensorEntityDescription(
+    key="motion",
+    device_class=BinarySensorDeviceClass.MOTION,
+    translation_key="motion",
+    entity_registry_enabled_default=False,
+    unique_id_suffix="motion_binary",
+    event_lookup_fn=lambda entity: entity._get_latest_event_of_type("MOVEMENT"),
+)
+
+AUDIO_ALARM_DESCRIPTION = BoschBinarySensorEntityDescription(
+    key="audio_alarm",
+    device_class=BinarySensorDeviceClass.SOUND,
+    translation_key="audio_alarm_binary",
+    entity_registry_enabled_default=False,
+    unique_id_suffix="audio_alarm_binary",
+    event_lookup_fn=lambda entity: entity._get_latest_event_of_type("AUDIO_ALARM"),
+)
+
+PERSON_DESCRIPTION = BoschBinarySensorEntityDescription(
+    key="person_detected",
+    device_class=BinarySensorDeviceClass.OCCUPANCY,
+    translation_key="person_detected",
+    entity_registry_enabled_default=False,
+    unique_id_prefix="bosch_shc_cam",
+    unique_id_suffix="person_detected",
+    event_lookup_fn=lambda entity: entity._get_latest_person_event(),
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschMotionBinarySensor(BoschBinarySensorEntity):
     """Binary sensor: ON when a MOVEMENT event occurred within the configurable active window (default 90 s)."""
 
-    _attr_device_class = BinarySensorDeviceClass.MOTION
-
     def __init__(
         self,
         coordinator: BoschCameraCoordinator,
         cam_id: str,
         entry: ConfigEntry,
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_motion_binary"
-        self._attr_translation_key = "motion"
-
-    @property
-    def is_on(self) -> bool:
-        event = self._get_latest_event_of_type("MOVEMENT")
-        if event is None:
-            return False
-        return self._event_within_window(event)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        event = self._get_latest_event_of_type("MOVEMENT")
-        if not event:
-            return {}
-        return {
-            "event_id": event.get("id", ""),
-            "timestamp": event.get("timestamp", ""),
-        }
+        super().__init__(coordinator, cam_id, entry, MOTION_DESCRIPTION)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschAudioAlarmBinarySensor(_BoschBinarySensorBase):
+class BoschAudioAlarmBinarySensor(BoschBinarySensorEntity):
     """Binary sensor: ON when an AUDIO_ALARM event occurred within the configurable active window (default 90 s)."""
 
-    _attr_device_class = BinarySensorDeviceClass.SOUND
-
     def __init__(
         self,
         coordinator: BoschCameraCoordinator,
         cam_id: str,
         entry: ConfigEntry,
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_audio_alarm_binary"
-        self._attr_translation_key = "audio_alarm_binary"
-
-    @property
-    def is_on(self) -> bool:
-        event = self._get_latest_event_of_type("AUDIO_ALARM")
-        if event is None:
-            return False
-        return self._event_within_window(event)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        event = self._get_latest_event_of_type("AUDIO_ALARM")
-        if not event:
-            return {}
-        return {
-            "event_id": event.get("id", ""),
-            "timestamp": event.get("timestamp", ""),
-        }
+        super().__init__(coordinator, cam_id, entry, AUDIO_ALARM_DESCRIPTION)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschPersonDetectedBinarySensor(_BoschBinarySensorBase):
+class BoschPersonDetectedBinarySensor(BoschBinarySensorEntity):
     """Binary sensor: ON when a PERSON event occurred within the configurable active window (default 90 s)."""
 
-    _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
-
     def __init__(
         self,
         coordinator: BoschCameraCoordinator,
         cam_id: str,
         entry: ConfigEntry,
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_cam_{cam_id}_person_detected"
-        self._attr_translation_key = "person_detected"
+        super().__init__(coordinator, cam_id, entry, PERSON_DESCRIPTION)
 
-    @property
-    def is_on(self) -> bool:
-        event = self._get_latest_person_event()
-        if event is None:
-            return False
-        return self._event_within_window(event)
 
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        event = self._get_latest_person_event()
-        if not event:
-            return {}
-        return {
-            "event_id": event.get("id", ""),
-            "timestamp": event.get("timestamp", ""),
-        }
+LAN_REACHABLE_DESCRIPTION = BoschBinarySensorEntityDescription(
+    key="lan_reachable",
+    device_class=BinarySensorDeviceClass.CONNECTIVITY,
+    entity_category=EntityCategory.DIAGNOSTIC,
+    translation_key="lan_reachable",
+    entity_registry_enabled_default=True,
+    unique_id_suffix="lan_reachable",
+    # No event_lookup_fn — TCP-reachability logic, not event-based. is_on /
+    # extra_state_attributes / available are all overridden below.
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschLanReachableBinarySensor(_BoschBinarySensorBase):
+class BoschLanReachableBinarySensor(BoschBinarySensorEntity):
     """Reports whether the camera answers a TCP connect on port 443.
 
     Always available — useful precisely when the Bosch cloud is unreachable.
@@ -326,10 +393,6 @@ class BoschLanReachableBinarySensor(_BoschBinarySensorBase):
     tears down its HTTPS endpoint while Digest creds rotate).
     """
 
-    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_translation_key = "lan_reachable"
-    _attr_entity_registry_enabled_default = True
     # Both freshness fields are monotonic-derived → they change on every
     # coordinator tick while the on/off state stays put. Recording them spawns
     # a new `state_attributes` row each tick and bloats the DB (HA#39). Keep
@@ -344,8 +407,7 @@ class BoschLanReachableBinarySensor(_BoschBinarySensorBase):
         cam_id: str,
         entry: ConfigEntry,
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_lan_reachable"
+        super().__init__(coordinator, cam_id, entry, LAN_REACHABLE_DESCRIPTION)
         # Use HA's auto-naming via translation_key + device_info — no `name`
         # override here, otherwise the device-name prefix gets duplicated
         # into the slug, producing entity_ids like
@@ -393,8 +455,18 @@ class BoschLanReachableBinarySensor(_BoschBinarySensorBase):
 # sensor stays on. See task spec / ai-camera-analysis plan.
 AI_RECENT_ALERT_WINDOW_MINUTES = 10
 
+AI_RECENT_ALERT_DESCRIPTION = BoschBinarySensorEntityDescription(
+    key="ai_recent_alert",
+    translation_key="ai_recent_alert",
+    entity_registry_enabled_default=True,
+    unique_id_suffix="ai_recent_alert",
+    # No event_lookup_fn — reads coordinator.ai_analysis_recent, not
+    # coordinator.data[...]["events"]. is_on / extra_state_attributes /
+    # available are all overridden below.
+)
 
-class BoschAiRecentAlertBinarySensor(_BoschBinarySensorBase):
+
+class BoschAiRecentAlertBinarySensor(BoschBinarySensorEntity):
     """ON for `AI_RECENT_ALERT_WINDOW_MINUTES` minutes after the most recent
     AI Camera Analysis alert for this camera (`ai_analysis.py`).
 
@@ -410,8 +482,6 @@ class BoschAiRecentAlertBinarySensor(_BoschBinarySensorBase):
     `_unrecorded_attributes`, same discipline.
     """
 
-    _attr_entity_registry_enabled_default = True
-    _attr_translation_key = "ai_recent_alert"
     _unrecorded_attributes = frozenset({"seconds_since_last_alert"})
 
     def __init__(
@@ -420,8 +490,7 @@ class BoschAiRecentAlertBinarySensor(_BoschBinarySensorBase):
         cam_id: str,
         entry: ConfigEntry,
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ai_recent_alert"
+        super().__init__(coordinator, cam_id, entry, AI_RECENT_ALERT_DESCRIPTION)
 
     def _latest_alert(self) -> tuple[str, int] | None:
         entries = self.coordinator.ai_analysis_recent.get(self._cam_id, [])

@@ -5276,6 +5276,88 @@ class TestPrerollWiring(unittest.TestCase):
         )
 
 
+class TestGitHub64PrerollRingGenuineEndToEnd(unittest.TestCase):
+    """GitHub #64 (Lawyer82): Event Buffered (Preroll) mode,
+    nvr_preroll_seconds=10 (nonzero — the zero-seconds case is a distinct,
+    already-fixed bug per `TestPrerollWiring`), nvr_postroll_seconds=20,
+    Live Stream + Mini-NVR Recording switches ON — reporter found
+    /dev/shm/bosch_nvr_cache stayed completely empty (zero files ever
+    written), checked repeatedly including after runtime switch
+    re-toggles, on v16.1.5-beta-2 AND v16.1.5-beta-6.
+
+    Every pre-existing "event_buffered + nonzero preroll -> ring starts"
+    test (`TestPrerollWiring` above) mocked out
+    `_spawn_preroll_recorder_locked` itself via `patch.object`, so none of
+    them ever exercised the real function body — the LOCAL/rtsp_url gates,
+    `os.makedirs`, or the real `asyncio.create_subprocess_exec` call. This
+    test deliberately does NOT mock `_spawn_preroll_recorder_locked` — it
+    only fakes the ffmpeg subprocess boundary (same
+    `patch("asyncio.create_subprocess_exec", ...)` convention every other
+    real-path recorder test in this file uses) and drives real
+    `os.makedirs`/directory checks against `tmp_path` via
+    `_make_lifecycle_coord`'s inline executor stub, so it actually proves
+    (or disproves) that the ring reaches a real ffmpeg argv targeting the
+    configured cache dir.
+    """
+
+    def test_ring_actually_spawns_for_event_buffered_nonzero_preroll(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = os.path.join(tmp, "bosch_nvr_cache")
+            coord = _make_lifecycle_coord(base_path=os.path.join(tmp, "bosch_nvr"))
+            coord.options["nvr_preroll_cache_dir"] = cache_dir
+            coord.options["nvr_preroll_seconds"] = 10
+            coord.options["nvr_postroll_seconds"] = 20
+            coord._nvr_mode_preference[CAM_ID] = "event_buffered"
+            coord._nvr_preroll_zero_warned = set()
+
+            mock_proc = MagicMock()
+            mock_proc.returncode = None
+            mock_proc.pid = 4242
+            mock_proc.wait = AsyncMock(return_value=0)
+            mock_proc.stderr = MagicMock()
+            mock_proc.stderr.read = AsyncMock(return_value=b"")
+
+            captured: dict[str, list[str]] = {}
+
+            async def _fake_exec(*args, **_kwargs):
+                captured["args"] = list(args)
+                return mock_proc
+
+            async def _run():
+                with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+                    await recorder.start_recorder(coord, CAM_ID)
+
+            asyncio.get_event_loop().run_until_complete(_run())
+
+            # No continuous-mode ffmpeg — only the pre-roll ring.
+            assert CAM_ID not in coord.nvr_processes
+            assert CAM_ID in coord.nvr_preroll_processes, (
+                "the pre-roll ring must be tracked as running — this is "
+                "exactly the state GitHub #64's reporter never observed "
+                "(cache dir stayed empty, nothing ever spawned)"
+            )
+            assert "args" in captured, (
+                "asyncio.create_subprocess_exec was never called — the ring "
+                "ffmpeg never actually spawned"
+            )
+            argv = captured["args"]
+            assert argv[0] == "ffmpeg"
+            target = argv[-1]
+            assert cache_dir in target, (
+                f"ffmpeg target pattern {target!r} does not point into the "
+                f"configured cache dir {cache_dir!r}"
+            )
+            assert "Terrasse" in target
+            # The real os.makedirs call (via _make_lifecycle_coord's inline
+            # executor) must have actually created the per-camera cache dir
+            # — the exact directory GitHub #64's reporter found empty.
+            assert os.path.isdir(os.path.join(cache_dir, "Terrasse")), (
+                "pre-roll cache dir for the camera was never created on disk"
+            )
+
+
 class TestNvrSwitchTurnOnOff:
     """The switch is a thin shim over `coordinator.start_recorder` /
     `stop_recorder`. Pin that shape so a refactor can't introduce a third

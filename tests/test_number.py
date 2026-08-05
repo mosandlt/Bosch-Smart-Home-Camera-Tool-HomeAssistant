@@ -2764,3 +2764,43 @@ class TestFrontLightIntensityNumberWarnsOnFailure:
         with caplog.at_level("WARNING"):
             await num.async_set_native_value(75.0)
         assert not any("failed on all paths" in r.message for r in caplog.records)
+
+
+# BoschNumberEntity guard branches for a hypothetical description with no
+# value_fn/available_fn/set_value_fn — dead code from every concrete number
+# entity's perspective (all 16 non-Pan descriptions in number.py always set
+# all three; BoschPanNumber is the one class that overrides native_value/
+# available/async_set_native_value directly instead of relying on the
+# description), but real code in BoschNumberEntity that must behave
+# correctly. Mirrors the equivalent binary_sensor.py pilot coverage for its
+# generic entity's event_lookup_fn=None branches.
+class TestBoschNumberEntityBareDescriptionGuards:
+    def _make_bare_entity(self):
+        from custom_components.bosch_shc_camera.number import (
+            BoschNumberEntity,
+            BoschNumberEntityDescription,
+        )
+
+        bare_description = BoschNumberEntityDescription(
+            key="_bare_for_coverage",
+            unique_id_fn=lambda cam_id: f"bosch_shc_camera_{cam_id}_bare",
+        )
+        coord = _coord()
+        entity = BoschNumberEntity(coord, CAM_ID, _entry(), bare_description)
+        return entity
+
+    def test_native_value_raises_without_value_fn(self):
+        entity = self._make_bare_entity()
+        with pytest.raises(NotImplementedError):
+            _ = entity.native_value
+
+    def test_available_raises_without_available_fn(self):
+        entity = self._make_bare_entity()
+        with pytest.raises(NotImplementedError):
+            _ = entity.available
+
+    @pytest.mark.asyncio
+    async def test_set_native_value_raises_without_set_value_fn(self):
+        entity = self._make_bare_entity()
+        with pytest.raises(NotImplementedError):
+            await entity.async_set_native_value(1.0)

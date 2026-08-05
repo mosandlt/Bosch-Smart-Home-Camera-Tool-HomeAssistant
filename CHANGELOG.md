@@ -40,6 +40,26 @@ outside the items listed below.
   opening a fresh network connection on every single call instead of
   reusing a managed session — fixed, with connection pooling/lifecycle now
   matching how Home Assistant expects integrations to manage HTTP sessions.
+- Mini-NVR "Event Buffered (Preroll)" mode's pre-roll ring writer had two
+  completely silent early-returns (wrong connection type / no valid RTSP
+  URL yet) with zero log trace, making a never-spawning ring
+  undiagnosable from the logs alone (GitHub #64). Both now log a clear
+  DEBUG reason. Also closed a real test-coverage gap: every existing
+  "ring starts for event_buffered" test mocked out the spawn function
+  itself, so none of them ever exercised its real body — added a
+  genuine end-to-end test that drives the real code path down to a real
+  `ffmpeg` argv and directory creation, which passes against current
+  code and did not reveal a defect in the direct switch-toggle path.
+  Investigation confirmed a genuine (but narrower than first suspected)
+  race window: `coordinator.live_connections` can be mutated outside the
+  per-camera NVR lock by the LOCAL/REMOTE session layer, so the crash-
+  respawn and post-event-restart callers of the ring spawn (which have a
+  real await gap before re-reading the connection state) can legitimately
+  hit either silent branch — the direct switch-toggle path itself runs
+  under one uninterrupted, lock-held stretch and is not subject to it.
+  No definitive single root cause was found for the reporter's fully
+  empty cache directory; the new logging is intended to pinpoint the
+  exact branch on the next occurrence.
 
 ### Changed
 
@@ -53,6 +73,31 @@ outside the items listed below.
   difference for any camera, stream, or entity. Verified via full test
   suite (100% coverage, 0 regressions) plus independent adversarial review
   of every change before merge.
+- Internal-only: the cloud-write request-building for privacy mode, camera
+  light on/off, notifications, and pan (the exact endpoint URL + JSON body
+  for each) moved into the companion `bosch-shc-camera-client` library
+  (bumped to v0.5.6) as pure, stateless functions. The 401-detect +
+  refresh-and-retry-once orchestration, the local-RCP/SHC fallback cascade,
+  coordinator cache writes, and write-failure notifications all stay in
+  `shc.py` unchanged. No behavior difference — same endpoint URLs, same
+  JSON body shapes, same retry semantics, verified via the existing test
+  suite (100% coverage, 0 regressions).
+- Internal-only: `binary_sensor.py`, `sensor.py`, `switch.py`, and
+  `number.py` were restructured to use Home Assistant's standard
+  `EntityDescription` pattern (one generic entity class driven by a table
+  of per-entity descriptions, instead of a hand-written subclass per
+  entity) for the entities structurally simple enough to benefit —
+  5 of 5 binary sensors, 24 of ~30 sensors, 4 of ~32 switches, 16 of 17
+  numbers. Entities with genuinely distinct write-paths or multi-source
+  logic (privacy mode, intercom, glass-break/fire-alarm, Frigate, NVR
+  recording, the live-stream watchdog, motion-zone aggregation, and
+  others) were deliberately left as their own classes rather than forced
+  into the shared pattern. Every collapsed entity's `unique_id`,
+  `translation_key`, `device_class`, `entity_category`, and (for
+  switches/numbers) exact write endpoint/request body were individually
+  diffed against the pre-refactor code and independently
+  adversarially re-verified — no entity_ids changed, no write behavior
+  changed. 100% coverage maintained throughout.
 
 ## [v16.1.5] - 2026-08-02
 

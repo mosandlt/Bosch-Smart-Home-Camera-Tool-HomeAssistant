@@ -4950,6 +4950,69 @@ def _make_sensor_via_new(cls, coord=None, cam_id=CAM_ID):
     return sw
 
 
+class TestGenericSensorEntityGuardBranches:
+    """Direct unit tests for `BoschSensorEntity`'s guard branches on a
+    description with no `value_fn`/`available_fn`/`extra_attrs_fn` — mirrors
+    `test_binary_sensor.py`'s `TestGenericBinarySensorEntityWithoutEventLookupFn`.
+    Unreachable via any of the ~24 concrete sensors built on this generic
+    entity today (every one of them sets `value_fn`; several already leave
+    `available_fn`/`extra_attrs_fn` unset and are covered by their own
+    dedicated tests) but still real code paths that must behave correctly
+    for any future EntityDescription-only sensor that forgets to set one.
+    """
+
+    def test_native_value_raises_without_value_fn(
+        self, stub_entry: SimpleNamespace
+    ) -> None:
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschSensorEntity,
+            BoschSensorEntityDescription,
+        )
+
+        description = BoschSensorEntityDescription(
+            key="no_value_fn", unique_id_fn=lambda cam_id: "bosch_no_value_fn"
+        )
+        s = BoschSensorEntity(
+            _make_broad_sensor_coord(), CAM_ID, stub_entry, description
+        )
+        with pytest.raises(NotImplementedError):
+            _ = s.native_value
+
+    def test_available_defaults_to_last_update_success_without_available_fn(
+        self, stub_entry: SimpleNamespace
+    ) -> None:
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschSensorEntity,
+            BoschSensorEntityDescription,
+        )
+
+        description = BoschSensorEntityDescription(
+            key="no_available_fn", unique_id_fn=lambda cam_id: "bosch_no_available_fn"
+        )
+        coord = _make_broad_sensor_coord(last_update_success=True)
+        s = BoschSensorEntity(coord, CAM_ID, stub_entry, description)
+        assert s.available is True
+        coord.last_update_success = False
+        assert s.available is False
+
+    def test_extra_state_attributes_empty_without_extra_attrs_fn(
+        self, stub_entry: SimpleNamespace
+    ) -> None:
+        from custom_components.bosch_shc_camera.sensor import (
+            BoschSensorEntity,
+            BoschSensorEntityDescription,
+        )
+
+        description = BoschSensorEntityDescription(
+            key="no_extra_attrs_fn",
+            unique_id_fn=lambda cam_id: "bosch_no_extra_attrs_fn",
+        )
+        s = BoschSensorEntity(
+            _make_broad_sensor_coord(), CAM_ID, stub_entry, description
+        )
+        assert s.extra_state_attributes == {}
+
+
 # ── BoschCameraStatusSensor ───────────────────────────────────────────────────
 
 

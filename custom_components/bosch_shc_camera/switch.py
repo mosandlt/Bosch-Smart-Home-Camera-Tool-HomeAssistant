@@ -36,10 +36,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, ClassVar
 from urllib.parse import urlsplit, urlunsplit
 
-from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
@@ -1553,7 +1555,181 @@ class BoschIntercomSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschPrivacySoundSwitch(_BoschSwitchBase):
+@dataclass(frozen=True, kw_only=True)
+class BoschSwitchEntityDescription(SwitchEntityDescription):  # type: ignore[misc]
+    """Describes a Bosch camera switch driven by `_async_apply_toggle`.
+
+    Mirrors the `EntityDescription`-driven pattern from the `binary_sensor.py`
+    pilot / Platinum-tier core integrations (e.g. `reolink`): the switches
+    that all previously copy-pasted the exact same
+    read-cache/available/write→`_async_apply_toggle` sequence (differing only
+    in endpoint, request body, and which coordinator cache/set_at pair they
+    read/write) collapse into one generic `BoschSwitchEntity`. Switches with
+    genuinely different logic (debounce/cooldown, read-modify-write merges,
+    multi-path fallback cascades, local-only state, …) keep their own
+    hand-written class, same as the pilot's `LanReachable`/`AiRecentAlert`.
+
+    `require_cache_for_available=False` preserves `BoschAlarmSystemArmSwitch`'s
+    one genuine behavioral difference from its 3 siblings: it does not gate
+    `available` on the cache already holding a value (the other 3 do).
+    `extra_attributes_fn`, when set, is `BoschAlarmSystemArmSwitch`'s
+    `alarm_type`/`intrusion_system` attribute pair — the other 3 have none.
+    """
+
+    unique_id_prefix: str = "bosch_shc_camera"
+    unique_id_suffix: str = ""
+    endpoint: str = ""
+    on_body: tuple[tuple[str, Any], ...] = ()
+    off_body: tuple[tuple[str, Any], ...] = ()
+    cache_fn: Callable[[BoschCameraCoordinator], dict[str, Any]] | None = None
+    set_at_fn: (
+        Callable[[BoschCameraCoordinator], dict[str, float] | FloatFieldView] | None
+    ) = None
+    require_cache_for_available: bool = True
+    extra_attributes_fn: Callable[[BoschSwitchEntity], dict[str, Any]] | None = None
+
+
+class BoschSwitchEntity(_BoschSwitchBase):
+    """Generic Bosch camera switch driven by a `BoschSwitchEntityDescription`.
+
+    Implements the shared cache-read `is_on`, cache-gated `available`, and
+    `_async_apply_toggle`-based write sequence. Subclasses just supply the
+    description; behavior is otherwise identical to the original hand-written
+    classes (see `BoschSwitchEntityDescription`'s docstring for the one
+    genuine divergence, `require_cache_for_available`/`extra_attributes_fn`).
+    """
+
+    entity_description: BoschSwitchEntityDescription
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+        description: BoschSwitchEntityDescription,
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry)
+        self.entity_description = description
+        self._attr_unique_id = (
+            f"{description.unique_id_prefix}_{cam_id}_{description.unique_id_suffix}"
+        )
+        self._attr_translation_key = description.translation_key
+        if description.device_class is not None:
+            self._attr_device_class = description.device_class
+        if description.entity_category is not None:
+            self._attr_entity_category = description.entity_category
+        self._attr_entity_registry_enabled_default = (
+            description.entity_registry_enabled_default
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        if self.entity_description.cache_fn is None:
+            raise NotImplementedError
+        return self.entity_description.cache_fn(self.coordinator).get(self._cam_id)
+
+    @property
+    def available(self) -> bool:
+        if not (
+            self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
+        ):
+            return False
+        if not self.entity_description.require_cache_for_available:
+            return True
+        if self.entity_description.cache_fn is None:
+            return True
+        return (
+            self.entity_description.cache_fn(self.coordinator).get(self._cam_id)
+            is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if self.entity_description.extra_attributes_fn is None:
+            return {}
+        return self.entity_description.extra_attributes_fn(self)
+
+    async def _apply(self, desired: bool) -> None:
+        description = self.entity_description
+        if description.cache_fn is None or description.set_at_fn is None:
+            raise NotImplementedError
+        body = dict(description.on_body if desired else description.off_body)
+        await self._async_apply_toggle(
+            description.endpoint,
+            body,
+            description.cache_fn(self.coordinator),
+            description.set_at_fn(self.coordinator),
+            desired,
+        )
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._apply(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._apply(False)
+
+
+PRIVACY_SOUND_DESCRIPTION = BoschSwitchEntityDescription(
+    key="privacy_sound",
+    translation_key="privacy_sound",
+    entity_category=EntityCategory.CONFIG,
+    unique_id_suffix="privacy_sound",
+    endpoint="privacy_sound_override",
+    on_body=(("result", True),),
+    off_body=(("result", False),),
+    cache_fn=lambda c: c.privacy_sound_cache,
+    set_at_fn=lambda c: c.privacy_sound_set_at,
+)
+
+TIMESTAMP_DESCRIPTION = BoschSwitchEntityDescription(
+    key="timestamp",
+    translation_key="timestamp_overlay",
+    entity_category=EntityCategory.CONFIG,
+    entity_registry_enabled_default=False,
+    unique_id_suffix="timestamp",
+    endpoint="timestamp",
+    on_body=(("result", True),),
+    off_body=(("result", False),),
+    cache_fn=lambda c: c.timestamp_cache,
+    set_at_fn=lambda c: c.timestamp_set_at,
+)
+
+STATUS_LED_DESCRIPTION = BoschSwitchEntityDescription(
+    key="ledlights",
+    translation_key="status_led",
+    entity_category=EntityCategory.CONFIG,
+    unique_id_suffix="ledlights",
+    endpoint="ledlights",
+    on_body=(("state", "ON"),),
+    off_body=(("state", "OFF"),),
+    cache_fn=lambda c: c.ledlights_cache,
+    set_at_fn=lambda c: c.ledlights_set_at,
+)
+
+ALARM_SYSTEM_ARM_DESCRIPTION = BoschSwitchEntityDescription(
+    key="alarm_arm",
+    translation_key="alarm_system_arm",
+    unique_id_suffix="alarm_arm",
+    endpoint="intrusionSystem/arming",
+    on_body=(("arm", True),),
+    off_body=(("arm", False),),
+    cache_fn=lambda c: c.arming_cache,
+    set_at_fn=lambda c: c.arming_set_at,
+    require_cache_for_available=False,
+    extra_attributes_fn=lambda entity: {
+        "alarm_type": entity.coordinator.alarm_status_cache.get(entity._cam_id, {}).get(
+            "alarmType"
+        ),
+        "intrusion_system": entity.coordinator.alarm_status_cache.get(
+            entity._cam_id, {}
+        ).get("intrusionSystem"),
+    },
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+class BoschPrivacySoundSwitch(BoschSwitchEntity):
     """Switch: ON = privacy sound override active, OFF = privacy sound off.
 
     Maps to the iOS app "Ton" toggle under Kamera-Funktionen — when enabled,
@@ -1564,141 +1740,38 @@ class BoschPrivacySoundSwitch(_BoschSwitchBase):
     Outdoor cameras return 442.
     """
 
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_translation_key = "privacy_sound"
-
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_privacy_sound"
-
-    @property
-    def is_on(self) -> bool | None:
-        return self.coordinator.privacy_sound_cache.get(self._cam_id)  # type: ignore[no-any-return]
-
-    @property
-    def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.is_camera_online(self._cam_id)
-            and self.coordinator.privacy_sound_cache.get(self._cam_id) is not None
-        )
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._async_apply_toggle(
-            "privacy_sound_override",
-            {"result": True},
-            self.coordinator.privacy_sound_cache,
-            self.coordinator.privacy_sound_set_at,
-            True,
-        )
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._async_apply_toggle(
-            "privacy_sound_override",
-            {"result": False},
-            self.coordinator.privacy_sound_cache,
-            self.coordinator.privacy_sound_set_at,
-            False,
-        )
+        super().__init__(coordinator, cam_id, entry, PRIVACY_SOUND_DESCRIPTION)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschTimestampSwitch(_BoschSwitchBase):
+class BoschTimestampSwitch(BoschSwitchEntity):
     """Switch: ON = time/date overlay visible on video, OFF = hidden.
 
     Uses cloud API: GET/PUT /v11/video_inputs/{id}/timestamp
     Body: {"result": true/false}
     """
 
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_entity_registry_enabled_default = False
-    _attr_translation_key = "timestamp_overlay"
-
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_timestamp"
-
-    @property
-    def is_on(self) -> bool | None:
-        return self.coordinator.timestamp_cache.get(self._cam_id)  # type: ignore[no-any-return]
-
-    @property
-    def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.is_camera_online(self._cam_id)
-            and self.coordinator.timestamp_cache.get(self._cam_id) is not None
-        )
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._async_apply_toggle(
-            "timestamp",
-            {"result": True},
-            self.coordinator.timestamp_cache,
-            self.coordinator.timestamp_set_at,
-            True,
-        )
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._async_apply_toggle(
-            "timestamp",
-            {"result": False},
-            self.coordinator.timestamp_cache,
-            self.coordinator.timestamp_set_at,
-            False,
-        )
+        super().__init__(coordinator, cam_id, entry, TIMESTAMP_DESCRIPTION)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschStatusLedSwitch(_BoschSwitchBase):
+class BoschStatusLedSwitch(BoschSwitchEntity):
     """Switch: status LED on/off (Gen2 cameras only).
 
     Uses cloud API: GET/PUT /v11/video_inputs/{id}/ledlights
     Body: {"state": "ON"/"OFF"}
     """
 
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_translation_key = "status_led"
-
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_ledlights"
-
-    @property
-    def is_on(self) -> bool | None:
-        return self.coordinator.ledlights_cache.get(self._cam_id)  # type: ignore[no-any-return]
-
-    @property
-    def available(self) -> bool:
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.is_camera_online(self._cam_id)
-            and self.coordinator.ledlights_cache.get(self._cam_id) is not None
-        )
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._async_apply_toggle(
-            "ledlights",
-            {"state": "ON"},
-            self.coordinator.ledlights_cache,
-            self.coordinator.ledlights_set_at,
-            True,
-        )
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._async_apply_toggle(
-            "ledlights",
-            {"state": "OFF"},
-            self.coordinator.ledlights_cache,
-            self.coordinator.ledlights_set_at,
-            False,
-        )
+        super().__init__(coordinator, cam_id, entry, STATUS_LED_DESCRIPTION)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2203,7 +2276,7 @@ class BoschNotificationTypeSwitch(_BoschSwitchBase):
 # ─────────────────────────────────────────────────────────────────────────────
 # Gen2 Indoor II — Alarm System (integrated 75 dB siren)
 # ─────────────────────────────────────────────────────────────────────────────
-class BoschAlarmSystemArmSwitch(_BoschSwitchBase):
+class BoschAlarmSystemArmSwitch(BoschSwitchEntity):
     """Switch: scharf/unscharf (armed / disarmed) for the integrated alarm system.
 
     PUT /v11/video_inputs/{id}/intrusionSystem/arming  body: {"arm": true/false}
@@ -2214,43 +2287,7 @@ class BoschAlarmSystemArmSwitch(_BoschSwitchBase):
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
-        super().__init__(coordinator, cam_id, entry)
-        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_alarm_arm"
-        self._attr_translation_key = "alarm_system_arm"
-
-    @property
-    def is_on(self) -> bool | None:
-        return self.coordinator.arming_cache.get(self._cam_id)  # type: ignore[no-any-return]
-
-    @property
-    def available(self) -> bool:
-        return (  # type: ignore[no-any-return]
-            self.coordinator.last_update_success
-            and self.coordinator.is_camera_online(self._cam_id)
-        )
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        status = self.coordinator.alarm_status_cache.get(self._cam_id, {})
-        return {
-            "alarm_type": status.get("alarmType"),
-            "intrusion_system": status.get("intrusionSystem"),
-        }
-
-    async def _set_arm(self, arm: bool) -> None:
-        await self._async_apply_toggle(
-            "intrusionSystem/arming",
-            {"arm": arm},
-            self.coordinator.arming_cache,
-            self.coordinator.arming_set_at,
-            arm,
-        )
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._set_arm(True)
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._set_arm(False)
+        super().__init__(coordinator, cam_id, entry, ALARM_SYSTEM_ARM_DESCRIPTION)
 
 
 class _BoschAlarmSettingsSwitchBase(_BoschSwitchBase):

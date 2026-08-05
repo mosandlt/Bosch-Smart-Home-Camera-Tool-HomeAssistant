@@ -36,7 +36,13 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
-from bosch_shc_camera_client.cloud import cloud_put_json
+from bosch_shc_camera_client.cloud import (
+    cloud_put_json,
+    cloud_set_camera_light,
+    cloud_set_notifications,
+    cloud_set_pan,
+    cloud_set_privacy_mode,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .cloud_ssl import async_get_bosch_cloud_session
@@ -510,10 +516,8 @@ async def async_cloud_set_privacy_mode(
     token = coordinator.token
     if token and not cam_offline:
         session = await async_get_bosch_cloud_session(coordinator.hass)
-        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy"
-        body = {"privacyMode": "ON" if enabled else "OFF", "durationInSeconds": None}
 
-        result = await cloud_put_json(session, token, url, body)
+        result = await cloud_set_privacy_mode(session, token, cam_id, enabled)
         if result.ok:
             # Stamp the write-lock BEFORE updating the cache so the
             # SHC background tick can never see a window where the
@@ -549,7 +553,9 @@ async def async_cloud_set_privacy_mode(
             except Exception:  # noqa: S110 # token refresh failed; fall through to local SHC path
                 pass  # fall through to SHC
             else:
-                retry_result = await cloud_put_json(session, token, url, body)
+                retry_result = await cloud_set_privacy_mode(
+                    session, token, cam_id, enabled
+                )
                 if retry_result.ok:
                     coordinator.privacy_set_at[cam_id] = time.monotonic()
                     coordinator.shc_state_cache.setdefault(cam_id, {})[
@@ -671,40 +677,31 @@ async def async_cloud_set_camera_light(
     if token:
         session = await async_get_bosch_cloud_session(coordinator.hass)
         gen2 = _is_gen2(coordinator, cam_id)
-        ok = False
+        cache = coordinator.shc_state_cache.get(cam_id, {})
+        last_intensity = cache.get("front_light_intensity") or 1.0
 
-        if gen2:
-            # Gen2: separate endpoints for front and top-down lights
-            base = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting/switch"
-            body_toggle = {"enabled": on}
-            r1 = await cloud_put_json(session, token, f"{base}/front", body_toggle)
-            r2 = await cloud_put_json(session, token, f"{base}/topdown", body_toggle)
-            ok = r1.ok or r2.ok
-            if not ok:
+        light_result = await cloud_set_camera_light(
+            session,
+            token,
+            cam_id,
+            on,
+            gen2=gen2,
+            last_front_intensity=last_intensity,
+        )
+        ok = light_result.ok
+        if not ok:
+            if gen2:
                 _LOGGER.warning(
                     "cloud_set_camera_light (gen2): front=%s topdown=%s for %s",
-                    r1.status,
-                    r2.status,
+                    light_result.status,
+                    light_result.topdown_status,
                     cam_id,
                 )
-        else:
-            # Gen1: single endpoint with combined body
-            url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override"
-            cache = coordinator.shc_state_cache.get(cam_id, {})
-            last_intensity = cache.get("front_light_intensity") or 1.0
-            if on:
-                body = {
-                    "frontLightOn": True,
-                    "wallwasherOn": True,
-                    "frontLightIntensity": last_intensity,
-                }
             else:
-                body = {"frontLightOn": False, "wallwasherOn": False}
-            result = await cloud_put_json(session, token, url, body)
-            ok = result.ok
-            if not ok:
                 _LOGGER.warning(
-                    "cloud_set_camera_light: HTTP %s for %s", result.status, cam_id
+                    "cloud_set_camera_light: HTTP %s for %s",
+                    light_result.status,
+                    cam_id,
                 )
 
         if ok:
@@ -1021,10 +1018,8 @@ async def async_cloud_set_notifications(
         _LOGGER.warning("cloud_set_notifications: no token for %s", cam_id)
     else:
         session = await async_get_bosch_cloud_session(coordinator.hass)
-        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/enable_notifications"
-        body = {"enabledNotificationsStatus": status}
 
-        result = await cloud_put_json(session, token, url, body)
+        result = await cloud_set_notifications(session, token, cam_id, enabled)
         if result.ok:
             coordinator.shc_state_cache.setdefault(cam_id, {})[
                 "notifications_status"
@@ -1069,25 +1064,17 @@ async def async_cloud_set_pan(
         return False
 
     session = await async_get_bosch_cloud_session(coordinator.hass)
-    url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/pan"
 
-    result = await cloud_put_json(session, token, url, {"absolutePosition": position})
+    result = await cloud_set_pan(session, token, cam_id, position)
     if result.ok:
-        # 200 returns a JSON body with currentAbsolutePosition + ETA;
-        # 204 has no body — fall back to the requested position.
-        actual = position
-        eta = 0
-        if result.body is not None:
-            actual = result.body.get("currentAbsolutePosition", position)
-            eta = result.body.get("estimatedTimeToCompletion", 0)
-        coordinator.pan_cache[cam_id] = actual
+        coordinator.pan_cache[cam_id] = result.position
         coordinator.async_update_listeners()
         _LOGGER.debug(
             "cloud_set_pan: %s -> %d deg (HTTP %s, ETA %dms)",
             cam_id,
-            actual,
+            result.position,
             result.status,
-            eta,
+            result.eta_ms,
         )
         # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams (path C, 2026-05-29).
         return True

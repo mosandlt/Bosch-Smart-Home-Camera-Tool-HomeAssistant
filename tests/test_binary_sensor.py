@@ -2012,3 +2012,42 @@ class TestAiRecentAlertBinarySensorSetupGating:
                 MagicMock(), entry, lambda ents, **kw: added.extend(ents)
             )
         assert not any(isinstance(e, BoschAiRecentAlertBinarySensor) for e in added)
+
+
+class TestGenericBinarySensorEntityWithoutEventLookupFn:
+    """Direct unit tests for `BoschBinarySensorEntity`'s two guard branches
+    for a description with `event_lookup_fn=None` — unreachable via the 5
+    concrete sensors (the 3 event-based ones always pass an event_lookup_fn;
+    LanReachable/AiRecentAlert always override is_on/extra_state_attributes
+    entirely) but still real code paths that must behave correctly for any
+    future EntityDescription-only sensor that forgets to set one.
+    """
+
+    def test_is_on_raises_without_event_lookup_fn(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschBinarySensorEntity,
+            BoschBinarySensorEntityDescription,
+        )
+
+        description = BoschBinarySensorEntityDescription(
+            key="no_lookup", unique_id_suffix="no_lookup"
+        )
+        s = BoschBinarySensorEntity(stub_coord, CAM_ID, stub_entry, description)
+        with pytest.raises(NotImplementedError):
+            _ = s.is_on
+
+    def test_extra_state_attributes_empty_without_event_lookup_fn(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        from custom_components.bosch_shc_camera.binary_sensor import (
+            BoschBinarySensorEntity,
+            BoschBinarySensorEntityDescription,
+        )
+
+        description = BoschBinarySensorEntityDescription(
+            key="no_lookup", unique_id_suffix="no_lookup"
+        )
+        s = BoschBinarySensorEntity(stub_coord, CAM_ID, stub_entry, description)
+        assert s.extra_state_attributes == {}

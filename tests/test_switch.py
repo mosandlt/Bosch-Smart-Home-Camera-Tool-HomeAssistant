@@ -5735,12 +5735,16 @@ async def test_intercom_turn_off_put_failure():
 
 
 def _make_privacy_sound_switch(privacy_sound_cache=None, cam_online=True):
-    from custom_components.bosch_shc_camera.switch import BoschPrivacySoundSwitch
+    from custom_components.bosch_shc_camera.switch import (
+        PRIVACY_SOUND_DESCRIPTION,
+        BoschPrivacySoundSwitch,
+    )
 
     coord = _coord(privacy_sound_cache=privacy_sound_cache or {})
     coord.is_camera_online = lambda cid: cam_online
     sw = BoschPrivacySoundSwitch.__new__(BoschPrivacySoundSwitch)
     sw.coordinator = coord
+    sw.entity_description = PRIVACY_SOUND_DESCRIPTION
     sw._cam_id = CAM_ID
     sw._cam_title = "Kamera"
     sw._model_name = "360"
@@ -5801,12 +5805,16 @@ async def test_privacy_sound_turn_off():
 
 
 def _make_led_switch(ledlights_cache=None, cam_online=True):
-    from custom_components.bosch_shc_camera.switch import BoschStatusLedSwitch
+    from custom_components.bosch_shc_camera.switch import (
+        STATUS_LED_DESCRIPTION,
+        BoschStatusLedSwitch,
+    )
 
     coord = _coord(ledlights_cache=ledlights_cache or {})
     coord.is_camera_online = lambda cid: cam_online
     sw = BoschStatusLedSwitch.__new__(BoschStatusLedSwitch)
     sw.coordinator = coord
+    sw.entity_description = STATUS_LED_DESCRIPTION
     sw._cam_id = CAM_ID
     sw._cam_title = "Terrasse"
     sw._model_name = "Outdoor"
@@ -6059,11 +6067,15 @@ async def test_notif_type_turn_off():
 
 
 def _make_alarm_arm_switch(arming_cache=None):
-    from custom_components.bosch_shc_camera.switch import BoschAlarmSystemArmSwitch
+    from custom_components.bosch_shc_camera.switch import (
+        ALARM_SYSTEM_ARM_DESCRIPTION,
+        BoschAlarmSystemArmSwitch,
+    )
 
     coord = _coord(arming_cache=arming_cache or {})
     sw = BoschAlarmSystemArmSwitch.__new__(BoschAlarmSystemArmSwitch)
     sw.coordinator = coord
+    sw.entity_description = ALARM_SYSTEM_ARM_DESCRIPTION
     sw._cam_id = CAM_ID
     sw._cam_title = "Terrasse"
     sw._model_name = "Outdoor"
@@ -6831,6 +6843,19 @@ class TestAlarmSystemArmSwitch:
         stub_coord_round9.is_camera_online = lambda cid: False
         entity = BoschAlarmSystemArmSwitch(stub_coord_round9, CAM_ID, stub_entry_round9)
         assert entity.available is False, "Must be unavailable when camera is offline"
+
+    def test_available_true_when_online_regardless_of_cache(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
+        """Unlike PrivacySound/Timestamp/StatusLed, arming has NO "cache
+        already holds a value" gate — available whenever online, even with
+        an empty arming_cache (require_cache_for_available=False)."""
+        from custom_components.bosch_shc_camera.switch import BoschAlarmSystemArmSwitch
+
+        stub_coord_round9.is_camera_online = lambda cid: True
+        stub_coord_round9.arming_cache = {}
+        entity = BoschAlarmSystemArmSwitch(stub_coord_round9, CAM_ID, stub_entry_round9)
+        assert entity.available is True
 
     def test_extra_attrs_include_alarm_status(
         self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
@@ -9901,3 +9926,74 @@ class TestAiAnalysisSwitch:
         sw.__class__.__mro__[1].async_added_to_hass = _noop_async  # type: ignore[method-assign]
         await sw.async_added_to_hass()
         assert sw.is_on is True
+
+
+class TestGenericSwitchEntityWithoutCacheOrSetAtFn:
+    """Direct unit tests for `BoschSwitchEntity`'s guard branches for a
+    description missing `cache_fn`/`set_at_fn` — unreachable via the 4
+    concrete switches (PrivacySound/Timestamp/StatusLed/AlarmSystemArm all
+    always supply both) but still real code that must behave correctly for
+    any future EntityDescription-only switch that forgets to set one.
+    Mirrors `TestGenericBinarySensorEntityWithoutEventLookupFn` in
+    `test_binary_sensor.py` (the pilot this refactor follows).
+    """
+
+    def _bare_entity(self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace):
+        from custom_components.bosch_shc_camera.switch import (
+            BoschSwitchEntity,
+            BoschSwitchEntityDescription,
+        )
+
+        description = BoschSwitchEntityDescription(
+            key="no_cache_fn", unique_id_suffix="no_cache_fn"
+        )
+        return BoschSwitchEntity(stub_coord, CAM_ID, stub_entry, description)
+
+    def test_is_on_raises_without_cache_fn(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        sw = self._bare_entity(stub_coord, stub_entry)
+        with pytest.raises(NotImplementedError):
+            _ = sw.is_on
+
+    def test_available_true_without_cache_fn_when_online(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        """require_cache_for_available defaults True, but with no cache_fn
+        to check there is nothing to gate on beyond the base online check."""
+        sw = self._bare_entity(stub_coord, stub_entry)
+        assert sw.available is True
+
+    async def test_apply_raises_without_cache_fn_or_set_at_fn(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        sw = self._bare_entity(stub_coord, stub_entry)
+        with pytest.raises(NotImplementedError):
+            await sw.async_turn_on()
+
+    def test_extra_state_attributes_empty_without_extra_attributes_fn(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        sw = self._bare_entity(stub_coord, stub_entry)
+        assert sw.extra_state_attributes == {}
+
+    def test_device_class_applied_when_description_sets_one(
+        self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
+    ) -> None:
+        """None of the 4 concrete switch descriptions set `device_class`
+        (unreachable via them), but the generic entity must still apply it
+        correctly for any future description that does."""
+        from homeassistant.components.switch import SwitchDeviceClass
+
+        from custom_components.bosch_shc_camera.switch import (
+            BoschSwitchEntity,
+            BoschSwitchEntityDescription,
+        )
+
+        description = BoschSwitchEntityDescription(
+            key="with_device_class",
+            unique_id_suffix="with_device_class",
+            device_class=SwitchDeviceClass.OUTLET,
+        )
+        sw = BoschSwitchEntity(stub_coord, CAM_ID, stub_entry, description)
+        assert sw.device_class == SwitchDeviceClass.OUTLET

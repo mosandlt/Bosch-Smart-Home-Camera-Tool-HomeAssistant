@@ -612,10 +612,37 @@ async def _spawn_preroll_recorder_locked(
         )
         return
     live = coordinator.live_connections.get(cam_id, {})
-    if live.get("_connection_type") != "LOCAL":
+    conn_type = live.get("_connection_type")
+    if conn_type != "LOCAL":
+        # GitHub #64: this re-read is a SEPARATE snapshot of
+        # `coordinator.live_connections` from whatever the caller already
+        # checked — `_start_recorder_locked`'s own LOCAL/rtsp_url gate runs
+        # under this same `get_nvr_recorder_lock`, but `live_connection.py`'s
+        # writers (`try_live_connection_inner`) mutate `live_connections`
+        # WITHOUT holding that lock, so the connection can genuinely have
+        # flipped (or never been LOCAL to begin with, e.g. an AUTO-mode
+        # REMOTE fallback) by the time this function's two OTHER callers
+        # (`_watch_preroll_health`'s crash-respawn after its backoff sleep,
+        # `restart_preroll_recorder_after_finalize` after a possibly
+        # long-running live postroll capture) reach here. Both of those
+        # callers have a genuine await gap before this read; the direct
+        # `_start_recorder_locked` path does not (single uninterrupted
+        # synchronous stretch under the lock). Previously silent — this was
+        # the single biggest blind spot reported in #64 (cache dir stayed
+        # completely empty with zero log trace of why the ring never spawned).
+        _LOGGER.debug(
+            "NVR pre-roll spawn skipped for %s: connection type is %r, expected LOCAL",
+            cam_id[:8],
+            conn_type,
+        )
         return
     rtsp_url = live.get("rtspsUrl") or live.get("rtspUrl") or ""
     if not rtsp_url.startswith("rtsp://"):
+        _LOGGER.debug(
+            "NVR pre-roll spawn skipped for %s: no valid rtsp URL (got %r)",
+            cam_id[:8],
+            rtsp_url,
+        )
         return
 
     opts = coordinator.options
