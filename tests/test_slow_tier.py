@@ -472,6 +472,9 @@ def _make_control_coord(**overrides):
     coord = SimpleNamespace(
         pan_cache=overrides.pop("pan_cache", {}),
         lighting_switch_cache=overrides.pop("lighting_switch_cache", {}),
+        light_set_at=overrides.pop("light_set_at", {}),
+        WRITE_LOCK_SECS=overrides.pop("WRITE_LOCK_SECS", 30.0),
+        shc_state_cache=overrides.pop("shc_state_cache", {}),
     )
     for k, v in overrides.items():
         setattr(coord, k, v)
@@ -608,6 +611,85 @@ class TestPollCamControlGen2Lighting:
             coord, CAM_A, _ctx(is_gen2=True, is_online=True), session, HEADERS
         )
         assert CAM_A not in coord.lighting_switch_cache
+
+    @pytest.mark.asyncio
+    async def test_lighting_switch_skipped_while_light_write_locked(self):
+        """GitHub #66: this wholesale-overwrite poll must NOT run while a
+        fresh switch/light-entity write is still inside its
+        eventual-consistency window — else it immediately restores the
+        cloud's still-stale brightness right after an optimistic OFF-zero,
+        making the Front/Top/Bottom Light entities flip back "on" while the
+        camera_light switch (protected by the same lock, elsewhere) stays
+        correctly "off"."""
+        coord = _make_control_coord(
+            lighting_switch_cache={CAM_A: {"frontLightSettings": {"brightness": 0}}},
+            light_set_at={CAM_A: time.monotonic()},
+            shc_state_cache={CAM_A: {"camera_light": False}},
+        )
+        session = _make_session(
+            {
+                "/lighting/switch": _make_resp(
+                    200, {"frontLightSettings": {"brightness": 80}}
+                )
+            }
+        )
+        await _poll_cam_control(
+            coord, CAM_A, _ctx(is_gen2=True, is_online=True), session, HEADERS
+        )
+        assert coord.lighting_switch_cache[CAM_A] == {
+            "frontLightSettings": {"brightness": 0}
+        }, (
+            "poll must not overwrite lighting_switch_cache while light_set_at lock is active"
+        )
+
+    @pytest.mark.asyncio
+    async def test_lighting_switch_fetched_once_lock_expires(self):
+        coord = _make_control_coord(
+            lighting_switch_cache={CAM_A: {"frontLightSettings": {"brightness": 0}}},
+            light_set_at={CAM_A: time.monotonic() - 999},
+            WRITE_LOCK_SECS=30.0,
+            shc_state_cache={CAM_A: {"camera_light": False}},
+        )
+        session = _make_session(
+            {
+                "/lighting/switch": _make_resp(
+                    200, {"frontLightSettings": {"brightness": 80}}
+                )
+            }
+        )
+        await _poll_cam_control(
+            coord, CAM_A, _ctx(is_gen2=True, is_online=True), session, HEADERS
+        )
+        assert coord.lighting_switch_cache[CAM_A] == {
+            "frontLightSettings": {"brightness": 80}
+        }, "poll must resume once the write-lock TTL has elapsed"
+
+    @pytest.mark.asyncio
+    async def test_lighting_switch_not_blocked_by_on_write(self):
+        """GitHub #66 round-2 finding: an ON write also stamps light_set_at
+        but never touches lighting_switch_cache — gating the poll on the
+        timestamp alone (ignoring which direction it protects) would block
+        the ONLY corrective fetch for a camera that was just turned back ON,
+        prolonging the stale post-OFF zeroed brightness instead of fixing it.
+        """
+        coord = _make_control_coord(
+            lighting_switch_cache={CAM_A: {"frontLightSettings": {"brightness": 0}}},
+            light_set_at={CAM_A: time.monotonic()},
+            shc_state_cache={CAM_A: {"camera_light": True}},
+        )
+        session = _make_session(
+            {
+                "/lighting/switch": _make_resp(
+                    200, {"frontLightSettings": {"brightness": 80}}
+                )
+            }
+        )
+        await _poll_cam_control(
+            coord, CAM_A, _ctx(is_gen2=True, is_online=True), session, HEADERS
+        )
+        assert coord.lighting_switch_cache[CAM_A] == {
+            "frontLightSettings": {"brightness": 80}
+        }, "poll must NOT be blocked by a fresh ON write, which never zeroed the cache"
 
 
 def _make_slow_coord(**overrides):

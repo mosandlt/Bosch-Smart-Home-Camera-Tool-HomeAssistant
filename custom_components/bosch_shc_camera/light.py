@@ -390,6 +390,32 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
             _LOGGER.warning("lighting/switch/%s error: %s", endpoint, err)
         return False
 
+    def _sync_wallwasher_cache(self) -> None:
+        """Sync camera_light/wallwasher switch state from lighting/switch cache.
+
+        Called after ANY light entity (Front, Top LED, Bottom LED) turn_on/
+        turn_off so the `switch.*_kameralicht` entity (which reads
+        shc_state_cache, not lighting_switch_cache) reflects the change
+        immediately instead of waiting for the next coordinator poll — and
+        so the light_set_at write-lock protects the fresh value from being
+        overwritten by a stale SHC/cloud poll in flight (see shc.py).
+        """
+        lsc = self.coordinator.lighting_switch_cache.get(self._cam_id, {})
+        top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
+        bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+        front_bri = lsc.get("frontLightSettings", {}).get("brightness", 0)
+        cache_entry = self.coordinator.shc_state_cache.setdefault(self._cam_id, {})
+        # Mirror slow_tier.py's _process_cam_state derivation of all 4 fields
+        # from the same 3 brightnesses — else switch.*_front_light and
+        # number.*_front_light_intensity (unlike wallwasher/camera_light)
+        # stay stale under this same call's light_set_at lock (GitHub #66).
+        cache_entry["front_light"] = front_bri > 0
+        cache_entry["front_light_intensity"] = front_bri / 100.0 if front_bri else 0.0
+        cache_entry["wallwasher"] = top_bri > 0 or bot_bri > 0
+        cache_entry["camera_light"] = front_bri > 0 or top_bri > 0 or bot_bri > 0
+        self.coordinator.light_set_at[self._cam_id] = time.monotonic()
+        self.coordinator.async_update_listeners()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 class _BoschRgbLedLight(_BoschLightBase):
@@ -411,22 +437,6 @@ class _BoschRgbLedLight(_BoschLightBase):
             return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
         # Default warm white when no color known (e.g. after HA restart with light off)
         return (255, 180, 100)
-
-    def _sync_wallwasher_cache(self) -> None:
-        """Sync wallwasher switch state from lighting/switch cache.
-
-        Called after light entity turn_on/turn_off to immediately update the
-        wallwasher switch without waiting for the next coordinator poll.
-        """
-        lsc = self.coordinator.lighting_switch_cache.get(self._cam_id, {})
-        top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
-        bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
-        front_bri = lsc.get("frontLightSettings", {}).get("brightness", 0)
-        cache_entry = self.coordinator.shc_state_cache.setdefault(self._cam_id, {})
-        cache_entry["wallwasher"] = top_bri > 0 or bot_bri > 0
-        cache_entry["camera_light"] = front_bri > 0 or top_bri > 0 or bot_bri > 0
-        self.coordinator.light_set_at[self._cam_id] = time.monotonic()
-        self.coordinator.async_update_listeners()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         # Privacy mode blocks /lighting/switch PUT with HTTP 443 — warn the user.
@@ -491,7 +501,11 @@ class _BoschRgbLedLight(_BoschLightBase):
             self._last_brightness = api_brightness
             self._is_on = True
             await self._put_switch_endpoint("topdown", True)
-        self._sync_wallwasher_cache()
+            # Only sync (and stamp the light_set_at write-lock) on confirmed
+            # success — on a failed write this would freeze the stale
+            # camera_light/wallwasher cache against SHC/cloud correction for
+            # the full WRITE_LOCK_SECS window (GitHub #66 bug-hunt finding).
+            self._sync_wallwasher_cache()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -510,7 +524,7 @@ class _BoschRgbLedLight(_BoschLightBase):
             bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
             if top_bri == 0 and bot_bri == 0:
                 await self._put_switch_endpoint("topdown", False)
-        self._sync_wallwasher_cache()
+            self._sync_wallwasher_cache()
         self.async_write_ha_state()
 
 
@@ -620,6 +634,9 @@ class BoschFrontLight(_BoschLightBase):
             self._last_brightness = api_brightness
             self._is_on = True
             await self._put_switch_endpoint("front", True)
+            # Only sync (and stamp the light_set_at write-lock) on confirmed
+            # success — see the matching comment in _BoschRgbLedLight.
+            self._sync_wallwasher_cache()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -634,4 +651,5 @@ class BoschFrontLight(_BoschLightBase):
             self._is_on = False
             self._brightness = 0
             await self._put_switch_endpoint("front", False)
+            self._sync_wallwasher_cache()
         self.async_write_ha_state()

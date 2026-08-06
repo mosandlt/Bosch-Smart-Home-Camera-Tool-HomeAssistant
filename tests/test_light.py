@@ -1779,6 +1779,148 @@ class TestFrontLightTurnOff:
         )
 
 
+class TestFrontLightSyncsCameraLightCache:
+    """GitHub #66 regression: BoschFrontLight must sync shc_state_cache like
+    _BoschRgbLedLight already does, else switch.bosch_kamera_*_kameralicht
+    (which reads shc_state_cache, not lighting_switch_cache) stays stale
+    after a Front-Light-only toggle until the next coordinator poll.
+    """
+
+    def _make_front_light(self, coord, entry):
+        from custom_components.bosch_shc_camera.light import BoschFrontLight
+
+        entity = BoschFrontLight(coord, CAM_ID, entry)
+        entity.async_write_ha_state = MagicMock()
+        entity._put_lighting_switch = AsyncMock(return_value=True)
+        entity._put_switch_endpoint = AsyncMock(return_value=True)
+        return entity
+
+    @pytest.mark.asyncio
+    async def test_turn_on_stamps_light_set_at_write_lock(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
+        entity._is_on = False
+        entity._last_brightness = 80
+        assert CAM_ID not in stub_coord_setup.light_set_at
+        await entity.async_turn_on()
+        assert CAM_ID in stub_coord_setup.light_set_at, (
+            "turn_on must stamp light_set_at so a stale SHC/cloud poll can't "
+            "immediately overwrite the fresh optimistic state (GitHub #66)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_turn_on_updates_shc_state_cache_camera_light(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """switch.*_kameralicht reads shc_state_cache — must reflect a Front-Light-only turn_on."""
+
+        async def _fake_put(body):
+            stub_coord_setup.lighting_switch_cache.setdefault(CAM_ID, {})[
+                "frontLightSettings"
+            ] = {"brightness": body["frontLightSettings"]["brightness"]}
+            return True
+
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
+        entity._put_lighting_switch = AsyncMock(side_effect=_fake_put)
+        entity._is_on = False
+        entity._last_brightness = 80
+        await entity.async_turn_on()
+        assert stub_coord_setup.shc_state_cache[CAM_ID]["camera_light"] is True
+
+    @pytest.mark.asyncio
+    async def test_turn_off_updates_shc_state_cache_camera_light(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """Front-Light-only turn_off, with top/bottom LEDs already off, must clear camera_light."""
+        stub_coord_setup.shc_state_cache[CAM_ID]["camera_light"] = True
+
+        async def _fake_put(body):
+            stub_coord_setup.lighting_switch_cache.setdefault(CAM_ID, {})[
+                "frontLightSettings"
+            ] = {"brightness": 0}
+            return True
+
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
+        entity._put_lighting_switch = AsyncMock(side_effect=_fake_put)
+        entity._is_on = True
+        entity._brightness = 80
+        await entity.async_turn_off()
+        assert stub_coord_setup.shc_state_cache[CAM_ID]["camera_light"] is False, (
+            "turn_off must clear the camera_light switch's cache once every "
+            "LED group is confirmed at brightness 0 (GitHub #66)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_turn_on_failure_does_not_stamp_write_lock(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """A failed PUT must NOT stamp light_set_at — else it blocks the
+        SHC/cloud poll from correcting reality with nothing actually
+        written to protect (bug-hunt round-2 finding: the sync call was
+        previously unconditional, even on failure)."""
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
+        entity._put_lighting_switch = AsyncMock(return_value=False)
+        entity._is_on = False
+        entity._last_brightness = 80
+        await entity.async_turn_on()
+        assert CAM_ID not in stub_coord_setup.light_set_at
+
+    @pytest.mark.asyncio
+    async def test_turn_off_failure_does_not_stamp_write_lock(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
+        entity._put_lighting_switch = AsyncMock(return_value=False)
+        entity._is_on = True
+        entity._brightness = 80
+        await entity.async_turn_off()
+        assert CAM_ID not in stub_coord_setup.light_set_at
+
+    @pytest.mark.asyncio
+    async def test_turn_off_clears_front_light_and_intensity(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        """switch.*_front_light and number.*_front_light_intensity (unlike
+        wallwasher/camera_light) were previously never written by
+        _sync_wallwasher_cache — pin both fields explicitly (bug-hunt
+        round-2 finding)."""
+        stub_coord_setup.shc_state_cache[CAM_ID]["front_light"] = True
+        stub_coord_setup.shc_state_cache[CAM_ID]["front_light_intensity"] = 0.8
+
+        async def _fake_put(body):
+            stub_coord_setup.lighting_switch_cache.setdefault(CAM_ID, {})[
+                "frontLightSettings"
+            ] = {"brightness": 0}
+            return True
+
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
+        entity._put_lighting_switch = AsyncMock(side_effect=_fake_put)
+        entity._is_on = True
+        entity._brightness = 80
+        await entity.async_turn_off()
+        assert stub_coord_setup.shc_state_cache[CAM_ID]["front_light"] is False
+        assert stub_coord_setup.shc_state_cache[CAM_ID]["front_light_intensity"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_turn_on_sets_front_light_intensity_from_brightness(
+        self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
+    ):
+        async def _fake_put(body):
+            stub_coord_setup.lighting_switch_cache.setdefault(CAM_ID, {})[
+                "frontLightSettings"
+            ] = {"brightness": body["frontLightSettings"]["brightness"]}
+            return True
+
+        entity = self._make_front_light(stub_coord_setup, stub_entry)  # type: ignore[no-untyped-call]
+        entity._put_lighting_switch = AsyncMock(side_effect=_fake_put)
+        entity._is_on = False
+        entity._last_brightness = 80
+        await entity.async_turn_on()
+        assert stub_coord_setup.shc_state_cache[CAM_ID]["front_light"] is True
+        assert stub_coord_setup.shc_state_cache[CAM_ID]["front_light_intensity"] == 0.8
+
+
 class TestTopLedLightTurnOn:
     def _make_top_led(self, coord, entry):
         from custom_components.bosch_shc_camera.light import BoschTopLedLight

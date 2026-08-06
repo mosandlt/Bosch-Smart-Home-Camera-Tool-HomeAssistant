@@ -329,7 +329,21 @@ async def _poll_cam_control(
     # ── Gen2 lighting/switch — fetched every tick (60s) ──
     # Bosch app polls this every ~40s. Slow tier (300s) is too slow
     # for responsive light state sync when lights are changed via the app.
-    if ctx.is_online and ctx.is_gen2:
+    # Skip while a fresh camera_light OFF write is still inside its
+    # eventual-consistency window — else this wholesale overwrite immediately
+    # undoes the optimistic zeroing (_zero_lighting_switch_cache_gen2 in
+    # shc.py) with the cloud's still-stale non-zero brightness (GitHub #66).
+    # Gated on the cached camera_light value (not just the light_set_at
+    # timestamp alone): an ON write also stamps light_set_at but never
+    # touches lighting_switch_cache, so blocking the poll for ON too would
+    # only prolong the OFF-zeroed staleness with nothing to protect.
+    lighting_switch_locked = (
+        cam_id in coordinator.light_set_at
+        and (time.monotonic() - coordinator.light_set_at[cam_id])
+        < coordinator.WRITE_LOCK_SECS
+        and coordinator.shc_state_cache.get(cam_id, {}).get("camera_light") is False
+    )
+    if ctx.is_online and ctx.is_gen2 and not lighting_switch_locked:
         try:
             async with asyncio.timeout(5):
                 async with session.get(

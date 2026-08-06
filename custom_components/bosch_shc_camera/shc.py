@@ -214,6 +214,69 @@ async def async_shc_request(
     return None
 
 
+def _default_lighting_group() -> dict[str, Any]:
+    """Full-shape default for one lighting/switch LED group.
+
+    Must match every key `_get_current_state()` (light.py) and
+    `_put_lighting_switch()`'s full-body PUT expect — a partial dict (e.g.
+    brightness-only) would drop `color`/`whiteBalance` from the next PUT the
+    light entities send, since the Bosch API requires all 3 groups in full.
+    """
+    return {"brightness": 0, "color": None, "whiteBalance": -1.0}
+
+
+_ALL_LIGHTING_GROUPS = (
+    "frontLightSettings",
+    "topLedLightSettings",
+    "bottomLedLightSettings",
+)
+
+
+async def _zero_lighting_switch_cache_gen2(
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    groups: tuple[str, ...] = _ALL_LIGHTING_GROUPS,
+) -> None:
+    """Zero the given LED-group brightnesses in lighting_switch_cache on a
+    Gen2 light-off (all 3 groups by default; pass a narrower tuple for a
+    single-component setter like the front-light-only switch).
+
+    The `camera_light`/`front_light`/`wallwasher` switches' OFF writes only
+    hit the simple `/lighting/switch/{front,topdown}` enable toggles — they
+    never touch `lighting_switch_cache`, which is the SEPARATE cache
+    light.py's Front/Top/Bottom Light entities read via
+    `_load_state_from_cache()`. Without this, those entities keep showing
+    their last-known ON brightness until the next coordinator poll refreshes
+    `lighting_switch_cache`, appearing "frozen" (GitHub #66). Only safe to
+    zero on OFF: on ON we don't know the camera's restored per-group
+    brightness split, so that direction is left to the next poll rather than
+    guessed.
+
+    Runs under the same per-camera `lighting_switch_locks` lock light.py's
+    `_put_lighting_switch` uses — without it, a light entity's own in-flight
+    read-modify-write PUT (built from a pre-zero cache snapshot) could merge
+    stale non-zero brightness back in right after this zeroes it.
+    """
+    if not _is_gen2(coordinator, cam_id):
+        return
+    locks = getattr(coordinator, "lighting_switch_locks", None)
+    if locks is None:
+        locks = {}
+        coordinator.lighting_switch_locks = locks
+    lock = locks.get(cam_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        locks[cam_id] = lock
+    async with lock:
+        lsc_entry = coordinator.lighting_switch_cache.setdefault(cam_id, {})
+        for key in groups:
+            group = lsc_entry.get(key)
+            if not isinstance(group, dict):
+                group = _default_lighting_group()
+                lsc_entry[key] = group
+            group["brightness"] = 0
+
+
 # ── SHC state polling ────────────────────────────────────────────────────────
 
 
@@ -359,7 +422,13 @@ async def async_shc_set_camera_light(
         and isinstance(result, dict)
         and result.get("ok", result.get("status", 0) in (200, 201, 204))
     ):
+        # Mirror async_cloud_set_camera_light's 3-field write (GitHub #66).
         coordinator.shc_state_cache[cam_id]["camera_light"] = on
+        coordinator.shc_state_cache[cam_id]["front_light"] = on
+        coordinator.shc_state_cache[cam_id]["wallwasher"] = on
+        coordinator.light_set_at[cam_id] = time.monotonic()
+        if not on:
+            await _zero_lighting_switch_cache_gen2(coordinator, cam_id)
         coordinator.async_update_listeners()
         # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams.
         return True
@@ -707,6 +776,8 @@ async def async_cloud_set_camera_light(
             cache_entry["front_light"] = on
             cache_entry["wallwasher"] = on
             coordinator.light_set_at[cam_id] = time.monotonic()
+            if not on:
+                await _zero_lighting_switch_cache_gen2(coordinator, cam_id)
             coordinator.async_update_listeners()
             _LOGGER.debug(
                 "cloud_set_camera_light: %s -> %s (gen%d)",
@@ -910,6 +981,15 @@ async def async_cloud_set_light_component(
             "wallwasher"
         )
         coordinator.light_set_at[cam_id] = time.monotonic()
+        if component == "front" and not value:
+            # The "front" toggle above only hit the plain enable/disable
+            # endpoint — unlike the "wallwasher" branch, it never updates
+            # lighting_switch_cache's brightness, so light.*_front_light
+            # would show stale ON brightness until the next poll (GitHub
+            # #66, same class as the camera_light switch's own gap).
+            await _zero_lighting_switch_cache_gen2(
+                coordinator, cam_id, groups=("frontLightSettings",)
+            )
         coordinator.async_update_listeners()
         _LOGGER.debug(
             "cloud_set_light_component: %s %s=%s (gen%d)",

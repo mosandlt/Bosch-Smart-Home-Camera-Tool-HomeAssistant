@@ -38168,12 +38168,28 @@ class TestPrivacySetAtRace:
             "BUG-4: `privacy_set_at` write-lock not present in shc.py — "
             "SHC background tick will always overwrite privacy cache changes."
         )
-        # The fetcher must also reference the lock (not just the setter)
-        fetcher_start = shc_src.find("async def async_fetch_shc_state")
+        # The fetcher must also reference the lock (not just the setter).
+        # `_update_one_camera_shc_state` is the actual SHC background-poll
+        # fetcher; a bare "shc_state_cache[cam_id]" fallback is too fragile —
+        # it matches whichever setter happens to come first in the file
+        # (e.g. async_shc_set_camera_light, unrelated to the privacy lock).
+        # Use the full function body (up to the next top-level function) —
+        # same technique as test_privacy_set_at_stamped_before_shc_can_read
+        # above — rather than a fixed char window, since the fetcher's own
+        # body (it also handles the light write-lock first) is longer than
+        # any one fixed window would reliably cover.
+        fetcher_start = shc_src.find("async def _update_one_camera_shc_state")
+        if fetcher_start == -1:
+            fetcher_start = shc_src.find("async def async_fetch_shc_state")
         if fetcher_start == -1:
             fetcher_start = shc_src.find("shc_state_cache[cam_id]")
         assert fetcher_start != -1, "SHC state fetcher not found"
-        fetcher_body = shc_src[fetcher_start : fetcher_start + 1500]
+        next_func = shc_src.find("\nasync def ", fetcher_start + 1)
+        fetcher_body = (
+            shc_src[fetcher_start:next_func]
+            if next_func != -1
+            else shc_src[fetcher_start:]
+        )
         assert "privacy_set_at" in fetcher_body, (
             "BUG-4: SHC state fetcher does not check `privacy_set_at` write-lock. "
             "A concurrent toggle can be overwritten by the background tick."

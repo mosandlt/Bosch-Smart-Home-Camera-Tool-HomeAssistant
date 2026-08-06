@@ -37,6 +37,7 @@ were left behind — see NOTE at the bottom of this file).
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -1143,6 +1144,152 @@ class TestAsyncShcSetCameraLight:
             result = await async_shc_set_camera_light(coord, CAM_ID, True)
         assert result is False
 
+    @pytest.mark.asyncio
+    async def test_success_stamps_light_set_at_write_lock(self):
+        """GitHub #66: unlike its sibling async_shc_set_privacy_mode, this
+        setter never stamped light_set_at — leaving the very next SHC poll
+        free to overwrite a fresh optimistic write with a stale eventual-
+        consistency reading (the switch flipping back to its old state)."""
+        from custom_components.bosch_shc_camera.shc import async_shc_set_camera_light
+
+        coord = _stub_coord_round6()
+        assert CAM_ID not in coord.light_set_at
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value={"status": 204, "ok": True}),
+        ):
+            result = await async_shc_set_camera_light(coord, CAM_ID, False)
+        assert result is True
+        assert CAM_ID in coord.light_set_at
+
+    @pytest.mark.asyncio
+    async def test_success_mirrors_cloud_setters_three_field_write(self):
+        """Bug-hunt round-2 finding: this setter must mirror
+        async_cloud_set_camera_light's camera_light/front_light/wallwasher
+        write, not just camera_light — else switch.*_front_light stays
+        stale under this same write's own light_set_at lock."""
+        from custom_components.bosch_shc_camera.shc import async_shc_set_camera_light
+
+        coord = _stub_coord_round6()
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value={"status": 204, "ok": True}),
+        ):
+            await async_shc_set_camera_light(coord, CAM_ID, True)
+        cache = coord.shc_state_cache[CAM_ID]
+        assert cache["camera_light"] is True
+        assert cache["front_light"] is True
+        assert cache["wallwasher"] is True
+
+    @pytest.mark.asyncio
+    async def test_off_zeroes_lighting_switch_cache_gen2(self):
+        """GitHub #66: turning the camera_light switch OFF must also zero
+        lighting_switch_cache (the SEPARATE cache light.py's Front/Top/Bottom
+        Light entities read) — else those entities show stale ON brightness
+        until the next coordinator poll."""
+        from custom_components.bosch_shc_camera.shc import async_shc_set_camera_light
+
+        coord = _stub_coord_round6(gen2=True)
+        coord.lighting_switch_cache[CAM_ID] = {
+            "frontLightSettings": {"brightness": 80},
+            "topLedLightSettings": {"brightness": 60},
+            "bottomLedLightSettings": {"brightness": 40},
+        }
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value={"status": 204, "ok": True}),
+        ):
+            result = await async_shc_set_camera_light(coord, CAM_ID, False)
+        assert result is True
+        lsc = coord.lighting_switch_cache[CAM_ID]
+        assert lsc["frontLightSettings"]["brightness"] == 0
+        assert lsc["topLedLightSettings"]["brightness"] == 0
+        assert lsc["bottomLedLightSettings"]["brightness"] == 0
+
+    @pytest.mark.asyncio
+    async def test_on_does_not_touch_lighting_switch_cache(self):
+        """Turning ON must NOT guess a per-group brightness split — leave it
+        to the next poll rather than write a fabricated value."""
+        from custom_components.bosch_shc_camera.shc import async_shc_set_camera_light
+
+        coord = _stub_coord_round6(gen2=True)
+        coord.lighting_switch_cache[CAM_ID] = {
+            "frontLightSettings": {"brightness": 0},
+        }
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value={"status": 204, "ok": True}),
+        ):
+            await async_shc_set_camera_light(coord, CAM_ID, True)
+        assert (
+            coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"] == 0
+        )
+
+    @pytest.mark.asyncio
+    async def test_off_on_empty_cache_creates_full_shape_groups(self):
+        """Bug-hunt round-2 finding: zeroing a group that doesn't exist yet
+        (empty lighting_switch_cache, e.g. cold start) must create a
+        full-shape dict with color/whiteBalance — not a brightness-only
+        partial dict, which would drop those keys from the next PUT the
+        light entities send (Bosch requires all 3 groups in full)."""
+        from custom_components.bosch_shc_camera.shc import async_shc_set_camera_light
+
+        coord = _stub_coord_round6(gen2=True)
+        assert coord.lighting_switch_cache == {}
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_shc_request",
+            AsyncMock(return_value={"status": 204, "ok": True}),
+        ):
+            await async_shc_set_camera_light(coord, CAM_ID, False)
+        for key in (
+            "frontLightSettings",
+            "topLedLightSettings",
+            "bottomLedLightSettings",
+        ):
+            group = coord.lighting_switch_cache[CAM_ID][key]
+            assert group == {"brightness": 0, "color": None, "whiteBalance": -1.0}, (
+                f"{key} must be a full-shape default, not a brightness-only partial dict"
+            )
+
+
+class TestZeroLightingSwitchCacheLock:
+    @pytest.mark.asyncio
+    async def test_waits_for_lighting_switch_locks_held_by_another_writer(self):
+        """Bug-hunt round-1 finding: _zero_lighting_switch_cache_gen2 must
+        serialize on the same per-camera lock light.py's _put_lighting_switch
+        uses — else an in-flight light-entity PUT (built from a pre-zero
+        cache snapshot) could merge stale non-zero brightness back in right
+        after this zeroes it. Proven here by holding the lock manually and
+        confirming the zero call blocks until released, rather than by
+        indirect effect (which a lock-free implementation could also pass)."""
+        from custom_components.bosch_shc_camera.shc import (
+            _zero_lighting_switch_cache_gen2,
+        )
+
+        coord = _stub_coord_round6(gen2=True)
+        coord.lighting_switch_cache[CAM_ID] = {
+            "frontLightSettings": {"brightness": 80},
+        }
+        lock = asyncio.Lock()
+        coord.lighting_switch_locks = {CAM_ID: lock}
+
+        await lock.acquire()
+        task = asyncio.ensure_future(_zero_lighting_switch_cache_gen2(coord, CAM_ID))
+        await asyncio.sleep(0)
+        assert not task.done(), (
+            "zero helper must block while another writer holds lighting_switch_locks"
+        )
+        assert (
+            coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"]
+            == 80
+        ), "must not have written yet while the lock is held elsewhere"
+
+        lock.release()
+        await task
+        assert (
+            coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"] == 0
+        )
+
 
 class TestAsyncShcSetPrivacyMode:
     @pytest.mark.asyncio
@@ -1242,6 +1389,10 @@ def _stub_coord_setters(*, gen2: bool = True, with_token: bool = True):
         hw_version={CAM_ID: "HOME_Eyes_Outdoor" if gen2 else "OUTDOOR"},
         cached_status={},
         auth_outage_count=0,
+        # Needed by _zero_lighting_switch_cache_gen2 (GitHub #66 fix) on any
+        # successful Gen2 camera_light OFF write — without this every future
+        # gen2-OFF-success test written against this fixture AttributeErrors.
+        lighting_switch_cache={},
         async_update_listeners=lambda: None,
         async_request_refresh=AsyncMock(),
         ensure_valid_token=AsyncMock(return_value="token-FRESH"),
@@ -1857,6 +2008,34 @@ class TestCloudSetCameraLight:
         assert CAM_ID[:8] in notif_data["notification_id"]
         assert "light" in notif_data["notification_id"]
         assert "OFF" in notif_data["message"]
+
+    @pytest.mark.asyncio
+    async def test_gen2_off_zeroes_lighting_switch_cache(self):
+        """GitHub #66: cloud OFF must zero lighting_switch_cache (read by
+        light.py's Front/Top/Bottom Light entities), not just shc_state_cache
+        (read by the camera_light switch) — else those light entities freeze
+        showing stale ON brightness until the next poll."""
+        coord = _stub_coord_setters(gen2=True)
+        coord.lighting_switch_cache = {
+            CAM_ID: {
+                "frontLightSettings": {"brightness": 80},
+                "topLedLightSettings": {"brightness": 60},
+                "bottomLedLightSettings": {"brightness": 40},
+            }
+        }
+        from custom_components.bosch_shc_camera import shc
+
+        session = MagicMock()
+        session.put = MagicMock(side_effect=[_mock_response(204), _mock_response(204)])
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
+            ok = await shc.async_cloud_set_camera_light(coord, CAM_ID, False)
+        assert ok is True
+        lsc = coord.lighting_switch_cache[CAM_ID]
+        assert lsc["frontLightSettings"]["brightness"] == 0
+        assert lsc["topLedLightSettings"]["brightness"] == 0
+        assert lsc["bottomLedLightSettings"]["brightness"] == 0
 
 
 class TestCloudSetCameraLightBranches:
