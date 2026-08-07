@@ -826,6 +826,50 @@ class TestBuildPrerollFfmpegArgs(unittest.TestCase):
         args = _build_preroll_ffmpeg_args("rtsp://127.0.0.1:9000/stream", pattern)
         assert args[-1] == pattern
 
+    def test_analyzeduration_and_probesize_bumped(self):
+        """GitHub #64: rc=234 'unspecified size' on the ring's own RTSP
+        session -- ffmpeg needs a bigger probe window than the 5s/5MB
+        default to find SPS/PPS."""
+        from custom_components.bosch_shc_camera.recorder import (
+            _build_preroll_ffmpeg_args,
+        )
+
+        args = _build_preroll_ffmpeg_args(
+            "rtsp://user:pass@127.0.0.1:9000/stream", "/tmp/%H%M%S.mp4"
+        )
+        i_index = args.index("-i")
+        assert args[args.index("-analyzeduration") + 1] == "10M"
+        assert args.index("-analyzeduration") < i_index
+        assert args[args.index("-probesize") + 1] == "10M"
+        assert args.index("-probesize") < i_index
+
+    def test_low_quality_rewrites_url(self):
+        """GitHub #64 follow-up: the ring previously ignored nvr_quality
+        entirely and always requested the full inst=1 stream, unlike the
+        continuous recorder."""
+        from custom_components.bosch_shc_camera.recorder import (
+            _build_preroll_ffmpeg_args,
+        )
+
+        args = _build_preroll_ffmpeg_args(
+            "rtsp://user:pass@127.0.0.1:9000/stream?inst=1",
+            "/tmp/%H%M%S.mp4",
+            quality="low",
+        )
+        assert (
+            args[args.index("-i") + 1]
+            == "rtsp://user:pass@127.0.0.1:9000/stream?inst=4"
+        )
+
+    def test_default_quality_is_auto_unchanged_url(self):
+        from custom_components.bosch_shc_camera.recorder import (
+            _build_preroll_ffmpeg_args,
+        )
+
+        url = "rtsp://user:pass@127.0.0.1:9000/stream?inst=1"
+        args = _build_preroll_ffmpeg_args(url, "/tmp/%H%M%S.mp4")
+        assert args[args.index("-i") + 1] == url
+
 
 def _make_preroll_coord(tmp_path, *, cam_title: str = CAM_TITLE) -> SimpleNamespace:
     """Stub coordinator with the fields the pre-roll/clip helpers read."""
@@ -3724,6 +3768,34 @@ class TestStartPrerollRecorder:
             drain_spawn.call_args.kwargs["name_prefix"]
             == "bosch_nvr_preroll_stderr_drain"
         )
+
+    @pytest.mark.asyncio
+    async def test_nvr_quality_option_reaches_spawned_argv(self, tmp_path: Path):
+        """GitHub #64 follow-up: the ring previously always requested the
+        full inst=1 stream regardless of the user's nvr_quality option
+        (unlike the continuous recorder). Proves the actual spawned argv
+        carries the option, not just that the pure builder accepts it."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
+        coord.options["nvr_preroll_seconds"] = 30
+        coord.options["nvr_quality"] = "low"
+        coord._nvr_mode_preference[CAM_ID] = "event_buffered"
+        coord.live_connections[CAM_ID]["rtspsUrl"] = "rtsp://cam/stream?inst=1"
+        proc = _mock_proc(returncode=None)
+        spawn_args: list[tuple] = []
+
+        async def _spawn(*args, **_kwargs):
+            spawn_args.append(args)
+            return proc
+
+        with patch.object(asyncio, "create_subprocess_exec", side_effect=_spawn):
+            await recorder.start_preroll_recorder(coord, CAM_ID)
+
+        assert len(spawn_args) == 1
+        args = spawn_args[0]
+        assert args[args.index("-i") + 1] == "rtsp://cam/stream?inst=4"
 
     @pytest.mark.asyncio
     async def test_orphan_sweep_failure_swallowed_spawn_still_succeeds(

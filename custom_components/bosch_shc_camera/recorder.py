@@ -381,10 +381,15 @@ def _prune_and_count(cam_dir: str, max_segments: int) -> int:
     return len(_list_preroll_segments(cam_dir))
 
 
-def _build_preroll_ffmpeg_args(rtsp_url: str, pattern: str) -> list[str]:
+def _build_preroll_ffmpeg_args(
+    rtsp_url: str, pattern: str, *, quality: str = "auto"
+) -> list[str]:
     """Thin wrapper around bosch_shc_camera_client.mini_nvr.build_preroll_ffmpeg_args."""
     return _lib_build_preroll_ffmpeg_args(
-        rtsp_url, pattern, segment_seconds=_PREROLL_SEGMENT_SECONDS
+        rtsp_url,
+        pattern,
+        segment_seconds=_PREROLL_SEGMENT_SECONDS,
+        quality=quality,
     )
 
 
@@ -660,7 +665,8 @@ async def _spawn_preroll_recorder_locked(
         return
 
     pattern = _preroll_pattern(cache_dir, cam_name)
-    args = _build_preroll_ffmpeg_args(rtsp_url, pattern)
+    quality = (opts.get("nvr_quality") or "auto").strip().lower()
+    args = _build_preroll_ffmpeg_args(rtsp_url, pattern, quality=quality)
     _LOGGER.debug("NVR pre-roll starting for %s -> %s", cam_name, pattern)
     try:
         proc = await asyncio.create_subprocess_exec(
