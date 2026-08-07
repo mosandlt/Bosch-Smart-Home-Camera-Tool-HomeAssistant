@@ -1,6 +1,6 @@
 {
   "name": "Bosch Smart Home Camera",
   "content_in_root": false,
-  "homeassistant": "2026.7.1",
+  "homeassistant": "2026.7.0",
   "hacs": "2.0.0"
 }

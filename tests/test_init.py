@@ -15557,7 +15557,7 @@ class TestRecorderWrappers:
             ),
         ):
             await BoschCameraCoordinator.start_recorder(coord, CAM_A)
-        start.assert_awaited_once_with(coord, CAM_A)
+        start.assert_awaited_once_with(coord, CAM_A, reason="unspecified")
 
     @pytest.mark.asyncio
     async def test_stop_recorder_clears_intent_by_default(self):
@@ -16645,7 +16645,9 @@ class TestTearDownLiveStream_sprint_j1:
 
         await BoschCameraCoordinator.tear_down_live_stream(coord, CAM_A)
 
-        stop_recorder.assert_awaited_once_with(CAM_A, clear_intent=False)
+        stop_recorder.assert_awaited_once_with(
+            CAM_A, clear_intent=False, reason="LAN session torn down"
+        )
 
     @pytest.mark.asyncio
     async def test_nvr_not_present_skips_stop_recorder(self):

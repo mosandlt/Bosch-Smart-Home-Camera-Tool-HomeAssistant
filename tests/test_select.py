@@ -449,7 +449,9 @@ class TestNvrModeSelectBasic:
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         sel.async_write_ha_state = MagicMock()
         await sel.async_select_option("event_buffered")
-        stub_coord_nvr_mode.start_recorder.assert_awaited_once_with(CAM_ID)
+        stub_coord_nvr_mode.start_recorder.assert_awaited_once_with(
+            CAM_ID, reason="NVR mode changed via select"
+        )
 
     @pytest.mark.asyncio
     async def test_async_select_option_restarts_active_preroll_recorder(
@@ -463,7 +465,9 @@ class TestNvrModeSelectBasic:
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         sel.async_write_ha_state = MagicMock()
         await sel.async_select_option("continuous")
-        stub_coord_nvr_mode.start_recorder.assert_awaited_once_with(CAM_ID)
+        stub_coord_nvr_mode.start_recorder.assert_awaited_once_with(
+            CAM_ID, reason="NVR mode changed via select"
+        )
 
     @pytest.mark.asyncio
     async def test_async_select_option_no_restart_when_recorder_inactive(
@@ -531,7 +535,9 @@ class TestNvrModeSelectBasic:
         # on stream_ready_event. start_recorder is CALLED (args captured)
         # but its coroutine is handed to async_create_task, not awaited
         # synchronously by this entity.
-        stub_coord_nvr_mode.start_recorder.assert_called_once_with(CAM_ID)
+        stub_coord_nvr_mode.start_recorder.assert_called_once_with(
+            CAM_ID, reason="mode-select restore-race correction (GitHub #64)"
+        )
         stub_coord_nvr_mode.start_recorder.assert_not_awaited()
         stub_coord_nvr_mode.hass.async_create_task.assert_called_once()
 
@@ -556,7 +562,9 @@ class TestNvrModeSelectBasic:
         ):
             await sel.async_added_to_hass()
         assert stub_coord_nvr_mode.get_nvr_mode(CAM_ID) == "continuous"
-        stub_coord_nvr_mode.start_recorder.assert_called_once_with(CAM_ID)
+        stub_coord_nvr_mode.start_recorder.assert_called_once_with(
+            CAM_ID, reason="mode-select restore-race correction (GitHub #64)"
+        )
         stub_coord_nvr_mode.start_recorder.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -655,7 +663,9 @@ class TestNvrModeSelectBasic:
         await concurrent_task
 
         assert CAM_ID in stub_coord_nvr_mode.nvr_processes
-        stub_coord_nvr_mode.start_recorder.assert_called_once_with(CAM_ID)
+        stub_coord_nvr_mode.start_recorder.assert_called_once_with(
+            CAM_ID, reason="mode-select restore-race correction (GitHub #64)"
+        )
 
     @pytest.mark.asyncio
     async def test_restore_state_ignores_invalid_saved_option(

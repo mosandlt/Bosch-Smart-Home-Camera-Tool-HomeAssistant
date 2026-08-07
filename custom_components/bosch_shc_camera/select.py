@@ -340,7 +340,10 @@ class BoschNvrModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):  # typ
                     last_state.state,
                 )
                 self.coordinator.spawn_tracked(
-                    self.coordinator.start_recorder(self._cam_id),
+                    self.coordinator.start_recorder(
+                        self._cam_id,
+                        reason="mode-select restore-race correction (GitHub #64)",
+                    ),
                     name=f"bosch_nvr_mode_correct_{self._cam_id[:8]}",
                 )
 
@@ -381,7 +384,9 @@ class BoschNvrModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):  # typ
             or self._cam_id in self.coordinator.nvr_preroll_processes
         )
         if recorder_active:
-            await self.coordinator.start_recorder(self._cam_id)
+            await self.coordinator.start_recorder(
+                self._cam_id, reason="NVR mode changed via select"
+            )
         self.async_write_ha_state()
 
 

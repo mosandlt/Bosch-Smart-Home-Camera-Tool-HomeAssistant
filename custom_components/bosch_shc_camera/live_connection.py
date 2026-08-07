@@ -986,14 +986,22 @@ async def try_live_connection_inner(
                     if coordinator.nvr_user_intent.get(cam_id):
                         if type_val == "LOCAL":
                             coordinator.hass.async_create_task(
-                                nvr_recorder.start_recorder(coordinator, cam_id),
+                                nvr_recorder.start_recorder(
+                                    coordinator,
+                                    cam_id,
+                                    reason="LOCAL session opened/renewed",
+                                ),
                                 name=f"bosch_nvr_start_{cam_id[:8]}",
                             )
                         elif (
                             type_val == "REMOTE" and cam_id in coordinator.nvr_processes
                         ):
                             coordinator.hass.async_create_task(
-                                nvr_recorder.stop_recorder(coordinator, cam_id),
+                                nvr_recorder.stop_recorder(
+                                    coordinator,
+                                    cam_id,
+                                    reason="session became REMOTE",
+                                ),
                                 name=f"bosch_nvr_stop_{cam_id[:8]}",
                             )
                     return result

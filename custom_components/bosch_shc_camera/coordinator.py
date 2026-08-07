@@ -2641,12 +2641,15 @@ class BoschCameraCoordinator(
             _LOGGER.debug("SMB cleanup background task error: %s", err)
 
     # ── Mini-NVR plumbing (delegate to recorder.py) ──────────────────────────
-    async def start_recorder(self, cam_id: str) -> None:
+    async def start_recorder(self, cam_id: str, *, reason: str = "unspecified") -> None:
         """Spawn the per-camera ffmpeg recorder if the LAN-only gate is open.
 
         Called by `BoschNvrRecordingSwitch.async_turn_on` and from the
         connection-type/cred-rotation hooks below. Idempotent — replaces an
         existing recorder so a fresh URL is picked up.
+
+        ``reason`` is caller-supplied free text (GitHub #64) propagated all
+        the way down to the stop-side log lines this respawn triggers.
         """
         # User-intent flag (consulted by the watcher's respawn check).
         self.nvr_user_intent[cam_id] = True
@@ -2674,18 +2677,23 @@ class BoschCameraCoordinator(
                     self.is_camera_online(cam_id),
                 )
             return
-        await nvr_recorder.start_recorder(self, cam_id)
+        await nvr_recorder.start_recorder(self, cam_id, reason=reason)
 
-    async def stop_recorder(self, cam_id: str, *, clear_intent: bool = True) -> None:
+    async def stop_recorder(
+        self, cam_id: str, *, clear_intent: bool = True, reason: str = "unspecified"
+    ) -> None:
         """Stop the per-camera ffmpeg recorder.
 
         ``clear_intent=False`` is used when the LAN drops out: we stop the
         running ffmpeg but keep the user-intent flag so the recorder restarts
         automatically when the LAN comes back.
+
+        ``reason`` is caller-supplied free text (GitHub #64), logged by the
+        recorder-module stop functions this delegates to.
         """
         if clear_intent:
             self.nvr_user_intent.pop(cam_id, None)
-        await nvr_recorder.stop_recorder(self, cam_id)
+        await nvr_recorder.stop_recorder(self, cam_id, reason=reason)
 
     async def run_nvr_cleanup_bg(self) -> None:
         """Run NVR retention purge in an executor thread (called once per day)."""

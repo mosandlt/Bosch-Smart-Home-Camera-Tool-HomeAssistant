@@ -1,21 +1,24 @@
 name: Promote Beta to Stable
 
-# EXPLICIT, SCOPED EXCEPTION to this repo's NEVER_AUTO_PUSH policy (Thomas,
-# 2026-07-17: "kannst du den publish workflow auf freitag 18 uhr stellen...
-# voll automatisierter GitHub-Actions-Cron"). Every other release in this
-# repo requires an explicit human "push"/"neues release" trigger — this is
-# the one deliberate, narrow carve-out: every Friday at 18:00 Europe/Berlin,
-# promote the newest still-open beta prerelease straight to stable, with no
-# human review in the loop at that moment.
+# MANUAL-ONLY (Thomas, 2026-08-07 — the prior automated Friday-18:00 cron
+# carve-out is REVOKED after it promoted v16.1.6 to stable on autopilot
+# while GitHub #64 turned out to still have an open, unresolved regression):
+# "There are two release trains: beta (vX.Y.Z-beta.N, released as
+# fixes/features land, for anyone who wants updates sooner) and stable
+# (vX.Y.Z, this one — promoted manually by the maintainer once a beta has
+# had some real-world testing)." Stable promotion is now `workflow_dispatch`
+# only, same as every other release action in this repo — no schedule
+# trigger, no unattended NEVER_AUTO_PUSH exception. Thomas decides when a
+# beta has accumulated enough real-world confirmation to promote; there is
+# no fixed cadence.
 #
-# Selection rule (explicit tradeoff Thomas chose after being shown the
-# alternative): always promotes the NEWEST open beta prerelease, not the
-# oldest. If a fresh same-day beta supersedes an older one that was
-# scheduled for this week's promotion, the older one's changes aren't lost —
-# they're still in the newer beta's tree (this repo bundles pending fixes
-# into the next release window, see NEXT_RELEASE_BUNDLE_EVERYTHING in
-# CLAUDE.md) — it's just promoted under the newer version number instead of
-# getting its own dedicated stable release that week.
+# Selection rule (unchanged): always promotes the NEWEST open beta
+# prerelease, not the oldest. If a fresh same-day beta supersedes an older
+# one, the older one's changes aren't lost — they're still in the newer
+# beta's tree (this repo bundles pending fixes into the next release
+# window, see NEXT_RELEASE_BUNDLE_EVERYTHING in CLAUDE.md) — it's just
+# promoted under the newer version number instead of getting its own
+# dedicated stable release.
 #
 # What "promote" means: take the exact commit the newest beta tag points
 # to, bump manifest.json's version to strip the "-beta.N" suffix, commit
@@ -38,22 +41,6 @@ name: Promote Beta to Stable
 # test).
 
 on:
-  schedule:
-    # Fridays ~18:05 Europe/Berlin. Cron is UTC-only and has no DST
-    # awareness: 16:05 UTC = ~18:05 CEST (summer, UTC+2) but ~17:05 CET
-    # (winter, UTC+1) — a known static-cron limitation, documented rather
-    # than worked around (the weekly cadence matters far more than the
-    # exact hour during CET months).
-    #
-    # Deliberately offset 5 minutes past the hour, not on it: GitHub
-    # documents that scheduled workflows can be delayed under high load,
-    # "especially at the start of every hour" -- this exact run, on
-    # 2026-07-17, fired over an hour late (16:00 UTC scheduled, actually
-    # ran ~17:12 UTC), and the sibling boschshc-hass repo's identical
-    # on-the-hour cron didn't fire AT ALL that same day and needed a
-    # manual trigger. A few minutes off the hour avoids the worst of
-    # that contention.
-    - cron: "5 16 * * 5"
   workflow_dispatch:
     inputs:
       tag:
@@ -151,9 +138,9 @@ jobs:
             git add custom_components/bosch_shc_camera/manifest.json
             git commit -m "$STABLE_TAG: promote tested beta $BETA_TAG to stable
 
-          Automated Friday promotion (promote-beta.yml). Strips the -beta.N
-          suffix from manifest.json's version; no other code changes versus
-          the tested beta commit."
+          Manual promotion (promote-beta.yml, workflow_dispatch). Strips
+          the -beta.N suffix from manifest.json's version; no other code
+          changes versus the tested beta commit."
             NEW_SHA=$(git rev-parse HEAD)
           fi
 
@@ -171,7 +158,7 @@ jobs:
             git push origin HEAD:refs/heads/main
           fi
 
-          git tag -a "$STABLE_TAG" -m "$STABLE_TAG — promoted from tested beta $BETA_TAG (automated Friday promotion)" "$NEW_SHA"
+          git tag -a "$STABLE_TAG" -m "$STABLE_TAG — promoted from tested beta $BETA_TAG (manual promotion)" "$NEW_SHA"
           git push origin "refs/tags/$STABLE_TAG"
 
           # A GITHUB_TOKEN-authored push does not trigger ANY other

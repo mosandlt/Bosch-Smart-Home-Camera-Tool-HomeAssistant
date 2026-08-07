@@ -2209,7 +2209,7 @@ class TestNvrSwitchIntent:
 
         # Intent MUST be set — is_on reads from it
         assert coord.nvr_user_intent[CAM_ID] is True
-        coord.start_recorder.assert_awaited_once_with(CAM_ID)
+        coord.start_recorder.assert_awaited_once_with(CAM_ID, reason="switch turned on")
         sw.async_write_ha_state.assert_called()
 
     @pytest.mark.asyncio
@@ -2238,7 +2238,7 @@ class TestNvrSwitchIntent:
 
         assert coord.nvr_user_intent[CAM_ID] is False
         assert sw.is_on is False
-        coord.stop_recorder.assert_awaited_once_with(CAM_ID)
+        coord.stop_recorder.assert_awaited_once_with(CAM_ID, reason="switch turned off")
 
     @pytest.mark.asyncio
     async def test_turn_off_is_on_false_immediately(self):
@@ -6289,7 +6289,9 @@ def test_nvr_extra_state_attributes_no_proc():
 async def test_nvr_turn_on():
     sw = _make_nvr_switch()
     await sw.async_turn_on()
-    sw.coordinator.start_recorder.assert_awaited_once_with(CAM_ID)
+    sw.coordinator.start_recorder.assert_awaited_once_with(
+        CAM_ID, reason="switch turned on"
+    )
     sw.async_write_ha_state.assert_called()
 
 
@@ -6297,7 +6299,9 @@ async def test_nvr_turn_on():
 async def test_nvr_turn_off():
     sw = _make_nvr_switch(nvr_intent={CAM_ID: True})
     await sw.async_turn_off()
-    sw.coordinator.stop_recorder.assert_awaited_once_with(CAM_ID)
+    sw.coordinator.stop_recorder.assert_awaited_once_with(
+        CAM_ID, reason="switch turned off"
+    )
     sw.async_write_ha_state.assert_called()
 
 
@@ -9045,7 +9049,9 @@ class TestNvrRecordingSwitchRestoreState:
         sw = BoschNvrRecordingSwitch(stub_coord_sprintma, CAM_ID, stub_entry_sprintma)
         sw.async_write_ha_state = MagicMock()
         await sw.async_turn_on()
-        stub_coord_sprintma.start_recorder.assert_awaited_once_with(CAM_ID)
+        stub_coord_sprintma.start_recorder.assert_awaited_once_with(
+            CAM_ID, reason="switch turned on"
+        )
 
     @pytest.mark.asyncio
     async def test_turn_off_stops_recorder(
@@ -9061,7 +9067,9 @@ class TestNvrRecordingSwitchRestoreState:
         sw = BoschNvrRecordingSwitch(stub_coord_sprintma, CAM_ID, stub_entry_sprintma)
         sw.async_write_ha_state = MagicMock()
         await sw.async_turn_off()
-        stub_coord_sprintma.stop_recorder.assert_awaited_once_with(CAM_ID)
+        stub_coord_sprintma.stop_recorder.assert_awaited_once_with(
+            CAM_ID, reason="switch turned off"
+        )
 
 
 def _stub_coord_e(

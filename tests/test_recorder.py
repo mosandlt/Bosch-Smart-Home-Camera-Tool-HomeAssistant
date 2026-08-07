@@ -3574,7 +3574,7 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
 
         stopped = []
 
-        async def mock_stop(c, cid):
+        async def mock_stop(c, cid, **kwargs):
             stopped.append(cid)
 
         coord.nvr_preroll_processes = {"cam1": MagicMock(), "cam2": MagicMock()}
@@ -4299,7 +4299,9 @@ class TestStopAndFinalizePrerollRecorder:
         # Clean exit — nothing discarded, both files still on disk.
         assert os.path.isfile(older)
         assert os.path.isfile(newest)
-        mock_stop.assert_awaited_once_with(coord, CAM_ID_SHORT, prune_cache=False)
+        mock_stop.assert_awaited_once_with(
+            coord, CAM_ID_SHORT, prune_cache=False, reason="motion-clip finalize"
+        )
 
     @pytest.mark.asyncio
     async def test_hard_kill_excludes_and_deletes_newest_only(self, tmp_path: Path):
@@ -4408,7 +4410,7 @@ class TestStopAndFinalizePrerollRecorder:
         lock = coord.get_nvr_recorder_lock(CAM_ID_SHORT)
         observed_locked_during_stop = False
 
-        async def _fake_stop(_coord, _cam_id, *, prune_cache):
+        async def _fake_stop(_coord, _cam_id, *, prune_cache, reason="unspecified"):
             nonlocal observed_locked_during_stop
             observed_locked_during_stop = lock.locked()
             return True
@@ -4500,7 +4502,9 @@ class TestWatchRecorder:
             patch.object(asyncio, "sleep", new=AsyncMock()),
         ):
             await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
-        restart.assert_awaited_once_with(coord, CAM_ID)
+        restart.assert_awaited_once_with(
+            coord, CAM_ID, reason="ffmpeg transient-crash respawn"
+        )
 
     @pytest.mark.asyncio
     async def test_second_crash_within_window_gives_up(self):
@@ -4547,7 +4551,9 @@ class TestWatchRecorder:
         ):
             await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
-        restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
+        restart.assert_awaited_once_with(
+            coord, CAM_ID, is_auto_retry=True, reason="ffmpeg auth-retry respawn"
+        )
         assert CAM_ID not in coord.nvr_error_state
         # The crash-window timestamp must be untouched by the auth-failure
         # path — it doesn't count as a "crash" for give-up purposes.
@@ -4628,7 +4634,9 @@ class TestWatchRecorder:
         ):
             await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
-        restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
+        restart.assert_awaited_once_with(
+            coord, CAM_ID, is_auto_retry=True, reason="ffmpeg auth-retry respawn"
+        )
         assert CAM_ID not in coord.nvr_error_state
 
     @pytest.mark.asyncio
@@ -5212,7 +5220,9 @@ class TestWatchPrerollHealth:
         ):
             await recorder._watch_preroll_health(coord, CAM_ID, proc, _tail_for(proc))
 
-        respawn.assert_awaited_once_with(coord, CAM_ID)
+        respawn.assert_awaited_once_with(
+            coord, CAM_ID, reason="preroll health-watch crash respawn"
+        )
         # The dead process handle must not linger (GitHub #51 bug-hunt
         # finding: this used to keep `preroll_running` sensor attribute
         # misleadingly True after a crash).
@@ -5700,7 +5710,7 @@ class TestNvrSwitchTurnOnOff:
         sw = BoschNvrRecordingSwitch(coord, CAM_ID, self._stub_entry())
         sw.async_write_ha_state = MagicMock()
         await sw.async_turn_on()
-        coord.start_recorder.assert_awaited_once_with(CAM_ID)
+        coord.start_recorder.assert_awaited_once_with(CAM_ID, reason="switch turned on")
 
     @pytest.mark.asyncio
     async def test_async_turn_off_calls_stop_recorder(self):
@@ -5712,7 +5722,7 @@ class TestNvrSwitchTurnOnOff:
         sw = BoschNvrRecordingSwitch(coord, CAM_ID, self._stub_entry())
         sw.async_write_ha_state = MagicMock()
         await sw.async_turn_off()
-        coord.stop_recorder.assert_awaited_once_with(CAM_ID)
+        coord.stop_recorder.assert_awaited_once_with(CAM_ID, reason="switch turned off")
 
     def test_unique_id_matches_concept_doc(self):
         """`bosch_shc_nvr_recording_<lowercased-cam-id>` — pinned so users'
@@ -7959,7 +7969,9 @@ class TestWatchRecorderBoundedAuthRetry:
         ):
             await recorder._watch_recorder(coord, CAM_ID, proc, _tail_for(proc))
 
-        restart.assert_awaited_once_with(coord, CAM_ID, is_auto_retry=True)
+        restart.assert_awaited_once_with(
+            coord, CAM_ID, is_auto_retry=True, reason="ffmpeg auth-retry respawn"
+        )
         assert CAM_ID not in coord.nvr_error_state
         assert coord.nvr_auth_retry_count[CAM_ID] == 1
 

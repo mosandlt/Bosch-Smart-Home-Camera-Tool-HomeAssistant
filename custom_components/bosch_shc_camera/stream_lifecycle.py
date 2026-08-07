@@ -174,7 +174,9 @@ async def tear_down_live_stream(
         # Concept §2.
         if cam_id in coordinator.nvr_processes:
             try:
-                await coordinator.stop_recorder(cam_id, clear_intent=False)
+                await coordinator.stop_recorder(
+                    cam_id, clear_intent=False, reason="LAN session torn down"
+                )
             except Exception as exc:
                 _LOGGER.warning(
                     "stop_recorder for %s raised %s during teardown — "

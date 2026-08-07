@@ -535,7 +535,9 @@ async def _watch_preroll_health(
         "NVR pre-roll ring respawning for %s after transient crash", cam_id[:8]
     )
     try:
-        await start_preroll_recorder(coordinator, cam_id)
+        await start_preroll_recorder(
+            coordinator, cam_id, reason="preroll health-watch crash respawn"
+        )
     except Exception as respawn_err:
         # An unexpected exception here would otherwise kill this
         # health-watch task silently, permanently disabling the pre-roll
@@ -739,7 +741,7 @@ async def _spawn_preroll_recorder_locked(
 
 
 async def start_preroll_recorder(
-    coordinator: BoschCameraCoordinator, cam_id: str
+    coordinator: BoschCameraCoordinator, cam_id: str, *, reason: str = "unspecified"
 ) -> None:
     """Spawn parallel pre-roll ffmpeg for one camera to tmpfs.
 
@@ -757,12 +759,18 @@ async def start_preroll_recorder(
         # This is a respawn (fresh creds / restart), not a genuine stop —
         # keep the accumulated ring buffer instead of wiping it (see
         # prune_cache docstring on stop_preroll_recorder).
-        await stop_preroll_recorder(coordinator, cam_id, prune_cache=False)
+        await stop_preroll_recorder(
+            coordinator, cam_id, prune_cache=False, reason=f"respawn ({reason})"
+        )
         await _spawn_preroll_recorder_locked(coordinator, cam_id)
 
 
 async def stop_preroll_recorder(
-    coordinator: BoschCameraCoordinator, cam_id: str, *, prune_cache: bool = True
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    *,
+    prune_cache: bool = True,
+    reason: str = "unspecified",
 ) -> bool:
     """Stop pre-roll recorder for one camera and clear its tmpfs ring cache.
 
@@ -777,6 +785,14 @@ async def stop_preroll_recorder(
     fire on every renewal (via ``start_recorder``'s own leading
     ``stop_recorder`` call), not just genuine stops, defeating the
     pre-roll buffer's purpose.
+
+    ``reason`` is caller-supplied free text logged when there's an actual
+    running process to stop (GitHub #64: this function was previously
+    completely silent, and it's the ONLY code path that ever signals the
+    ring's ffmpeg — `_watch_preroll_health`'s "am I still the tracked
+    process?" check means an intentional stop from here is invisible to
+    that watcher too, so without this log line a ring that gets killed
+    moments after spawning leaves zero trace of why).
 
     Returns True iff a running process exited on SIGTERM within the grace
     window (i.e. ffmpeg finalized its own output cleanly, moov atom
@@ -796,6 +812,12 @@ async def stop_preroll_recorder(
     proc = coordinator.nvr_preroll_processes.pop(cam_id, None)
     clean_exit = False
     if proc is not None and proc.returncode is None:
+        _LOGGER.debug(
+            "NVR pre-roll stopping for %s (reason=%s, pid=%s)",
+            cam_id[:8],
+            reason,
+            proc.pid,
+        )
         try:
             proc.send_signal(signal.SIGTERM)
         except ProcessLookupError:
@@ -859,7 +881,9 @@ async def stop_all_preroll(coordinator: BoschCameraCoordinator) -> None:
     """
     for cam_id in _known_cam_ids_for_shutdown(coordinator):
         async with coordinator.get_nvr_recorder_lock(cam_id):
-            await stop_preroll_recorder(coordinator, cam_id)
+            await stop_preroll_recorder(
+                coordinator, cam_id, reason="integration unload/HA stop"
+            )
 
 
 async def stop_and_finalize_preroll_recorder(
@@ -924,7 +948,9 @@ async def stop_and_finalize_preroll_recorder(
             # Ring is alive but hasn't produced any segment yet — nothing
             # to gain from stopping+restarting a perfectly healthy writer.
             return False, []
-        clean_exit = await stop_preroll_recorder(coordinator, cam_id, prune_cache=False)
+        clean_exit = await stop_preroll_recorder(
+            coordinator, cam_id, prune_cache=False, reason="motion-clip finalize"
+        )
 
         # Ring is now genuinely stopped — every remaining file is complete
         # EXCEPT possibly `newest`, which lacks a moov-atom guarantee if we
@@ -1482,7 +1508,11 @@ def should_record(
 
 
 async def start_recorder(
-    coordinator: BoschCameraCoordinator, cam_id: str, *, is_auto_retry: bool = False
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    *,
+    is_auto_retry: bool = False,
+    reason: str = "unspecified",
 ) -> None:
     """Spawn (or replace) the ffmpeg recorder for one camera.
 
@@ -1517,11 +1547,17 @@ async def start_recorder(
     inside it.
     """
     async with coordinator.get_nvr_recorder_lock(cam_id):
-        await _start_recorder_locked(coordinator, cam_id, is_auto_retry=is_auto_retry)
+        await _start_recorder_locked(
+            coordinator, cam_id, is_auto_retry=is_auto_retry, reason=reason
+        )
 
 
 async def _start_recorder_locked(
-    coordinator: BoschCameraCoordinator, cam_id: str, *, is_auto_retry: bool = False
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    *,
+    is_auto_retry: bool = False,
+    reason: str = "unspecified",
 ) -> None:
     """Body of `start_recorder`, run under its caller's `get_nvr_recorder_lock`.
 
@@ -1535,7 +1571,9 @@ async def _start_recorder_locked(
     # Replace any pre-existing recorder (cred rotation, switch re-toggle).
     # This is a respawn, not a genuine stop — keep the pre-roll ring buffer
     # instead of wiping it.
-    await stop_recorder(coordinator, cam_id, prune_preroll_cache=False)
+    await stop_recorder(
+        coordinator, cam_id, prune_preroll_cache=False, reason=f"respawn ({reason})"
+    )
 
     live = coordinator.live_connections.get(cam_id, {})
     if live.get("_connection_type") != "LOCAL":
@@ -1766,6 +1804,7 @@ async def stop_recorder(
     cam_id: str,
     *,
     prune_preroll_cache: bool = True,
+    reason: str = "unspecified",
 ) -> None:
     """Stop the recorder for one camera, giving ffmpeg up to 5 s to flush MP4.
 
@@ -1773,8 +1812,14 @@ async def stop_recorder(
     — used by ``start_recorder``'s own leading self-call (a respawn, not a
     genuine stop) so a LOCAL session/cred-rotation renewal doesn't wipe the
     pre-roll ring buffer every time.
+
+    ``reason`` is caller-supplied free text, logged (GitHub #64) alongside
+    the pre-roll ring's own stop trace via the ``stop_preroll_recorder``
+    call below — see that function's docstring for why this matters.
     """
-    await stop_preroll_recorder(coordinator, cam_id, prune_cache=prune_preroll_cache)
+    await stop_preroll_recorder(
+        coordinator, cam_id, prune_cache=prune_preroll_cache, reason=reason
+    )
     proc = coordinator.nvr_processes.pop(cam_id, None)
     if proc is None:
         return
@@ -1791,6 +1836,12 @@ async def stop_recorder(
             proc.returncode,
         )
         return
+    _LOGGER.debug(
+        "NVR stop_recorder: stopping for %s (reason=%s, pid=%s)",
+        cam_id[:8],
+        reason,
+        proc.pid,
+    )
     try:
         proc.send_signal(signal.SIGTERM)
     except ProcessLookupError:
@@ -1832,7 +1883,9 @@ async def stop_all(coordinator: BoschCameraCoordinator) -> None:
     await stop_all_preroll(coordinator)
     for cam_id in _known_cam_ids_for_shutdown(coordinator):
         async with coordinator.get_nvr_recorder_lock(cam_id):
-            await stop_recorder(coordinator, cam_id)
+            await stop_recorder(
+                coordinator, cam_id, reason="integration unload/HA stop"
+            )
 
 
 async def _watch_recorder(
@@ -1966,7 +2019,12 @@ async def _watch_recorder(
         if not should_record(coordinator, cam_id, switch_on=last):
             return
         try:
-            await start_recorder(coordinator, cam_id, is_auto_retry=True)
+            await start_recorder(
+                coordinator,
+                cam_id,
+                is_auto_retry=True,
+                reason="ffmpeg auth-retry respawn",
+            )
         except Exception as respawn_err:
             # An unexpected exception here would otherwise kill this
             # background watcher task silently, with no nvr_error_state and
@@ -2005,7 +2063,9 @@ async def _watch_recorder(
         return
     _LOGGER.info("NVR respawning ffmpeg for %s after transient crash", cam_id[:8])
     try:
-        await start_recorder(coordinator, cam_id)
+        await start_recorder(
+            coordinator, cam_id, reason="ffmpeg transient-crash respawn"
+        )
     except Exception as respawn_err:
         # See the matching comment on the auth-retry respawn above — same
         # fix, same reasoning.

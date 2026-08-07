@@ -941,7 +941,7 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
 # ─────────────────────────────────────────────────────────────────────────────
 # AI Camera Analysis subentry flows — one repeatable structure per type,
 # native HA config_entries.ConfigSubentryFlow mechanism (available since HA
-# 2024.11; this repo pins to a much newer HA, confirmed via .venv). Each
+# 2025.3; this repo pins to a much newer HA, confirmed via .venv). Each
 # subentry is a small standalone add/edit form (no OPTIONS_SECTIONS wiring —
 # subentries are a parallel top-level structure on the config entry, not
 # nested inside the flat options dict `_flatten_sections` round-trips).

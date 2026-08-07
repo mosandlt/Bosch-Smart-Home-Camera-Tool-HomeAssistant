@@ -2628,20 +2628,22 @@ class BoschNvrRecordingSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
                 == "LOCAL"
             ):
                 self.hass.async_create_task(
-                    self.coordinator.start_recorder(self._cam_id),
+                    self.coordinator.start_recorder(
+                        self._cam_id, reason="switch restored ON (async_added_to_hass)"
+                    ),
                     name=f"bosch_nvr_resume_{self._cam_id[:8]}",
                 )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         _LOGGER.info("NVR ON for %s", self._cam_title)
         self.coordinator.nvr_user_intent[self._cam_id] = True
-        await self.coordinator.start_recorder(self._cam_id)
+        await self.coordinator.start_recorder(self._cam_id, reason="switch turned on")
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         _LOGGER.info("NVR OFF for %s", self._cam_title)
         self.coordinator.nvr_user_intent[self._cam_id] = False
-        await self.coordinator.stop_recorder(self._cam_id)
+        await self.coordinator.stop_recorder(self._cam_id, reason="switch turned off")
         self.async_write_ha_state()
 
 
