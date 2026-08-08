@@ -463,7 +463,24 @@ async def _watch_preroll_health(
     time any exit is observed here the dict entry has either already moved
     on (intentional) or still points at this exact `proc` (crash).
     """
-    rc = await proc.wait()
+    try:
+        rc = await proc.wait()
+    except asyncio.CancelledError:
+        # Defense-in-depth (GitHub #64 follow-up, 2026-08-08): the primary
+        # fix reorders unload teardown so this watcher is never raced by
+        # the generic bg_tasks sweep (see __init__.py). This still catches
+        # any OTHER as-yet-unknown path that cancels this task directly —
+        # without this, the coroutine would be torn down here with zero
+        # log line, reproducing the exact "silent after starting" symptom
+        # for whatever cancelled it. `pid`/`returncode` capture what state
+        # was observable at the moment of cancellation for diagnosis.
+        _LOGGER.debug(
+            "NVR pre-roll health watcher for %s cancelled (pid=%s, returncode=%s)",
+            cam_id[:8],
+            proc.pid,
+            proc.returncode,
+        )
+        raise
     if coordinator.nvr_preroll_processes.get(cam_id) is not proc:
         return
     coordinator.nvr_preroll_processes.pop(cam_id, None)

@@ -4223,6 +4223,56 @@ class TestSpawnTracked:
         assert cancelled.is_set()
         assert coord.bg_tasks == set()
 
+    @pytest.mark.asyncio
+    async def test_nvr_stop_all_runs_before_generic_bg_tasks_sweep(self) -> None:
+        """GitHub #64 follow-up (2026-08-08): `nvr_recorder.stop_all()` must
+        run BEFORE the generic bg_tasks cancel sweep. The pre-roll ring's
+        own crash/health watcher is ALSO tracked in `bg_tasks` — if the
+        generic sweep hard-cancels it first, its bare `await proc.wait()`
+        gets a CancelledError with no chance to log "exited unexpectedly",
+        and by the time stop_all() would otherwise run, the process may
+        already be untracked, so stop_preroll_recorder's own
+        "stopping (reason=...)" log line is ALSO skipped — total silence
+        in the recorder log right after "starting", reproducing the
+        reported symptom. This pins the fix: stop_all() must be called
+        while any pre-roll watcher tasks are still coherent, before the
+        generic sweep can race them."""
+        from custom_components.bosch_shc_camera import (
+            _async_cancel_coordinator_tasks,
+        )
+
+        call_order: list[str] = []
+
+        async def _fake_preroll_watcher():
+            try:
+                await asyncio.sleep(100)
+            except asyncio.CancelledError:
+                call_order.append("bg_task_cancelled")
+                raise
+
+        coord = _make_cancel_coord(
+            hass=SimpleNamespace(
+                async_create_task=asyncio.get_event_loop().create_task
+            ),
+        )
+        BoschCameraCoordinator.spawn_tracked(
+            coord, _fake_preroll_watcher(), name="fake_preroll_watcher"
+        )
+        await asyncio.sleep(0)  # let the fake watcher actually start
+
+        with (
+            patch(
+                f"{MODULE}.nvr_recorder.stop_all",
+                AsyncMock(
+                    side_effect=lambda *_a, **_kw: call_order.append("nvr_stop_all")
+                ),
+            ),
+            patch(f"{MODULE}.stop_all_proxies"),
+        ):
+            await _async_cancel_coordinator_tasks(coord)
+
+        assert call_order == ["nvr_stop_all", "bg_task_cancelled"]
+
 
 class TestHasActiveConsumer:
     def _coord(self, *, token, go2rtc_count, nvr=False):
@@ -16176,6 +16226,184 @@ class TestSetupEntryBranches:
         mock_stop_all_proxies.assert_called_once_with(
             coord.tls_proxy_ports, coord.tls_proxy_servers
         )
+
+    @pytest.mark.asyncio
+    async def test_nvr_stop_all_cancelled_still_runs_remaining_cleanup(self):
+        """GitHub #64 follow-up bug-hunt (2026-08-08): `nvr_recorder.stop_all()`
+        was reordered to run BEFORE the generic bg_tasks sweep/live-stream
+        teardown/proxy cleanup (see the ordering fix above it). Unlike
+        `drain_task`'s self-cancellation, `stop_all()` never cancels its
+        own containing task, so any CancelledError observed there can only
+        be a genuine outer cancellation (e.g. HA's shutdown deadline) — it
+        must be caught explicitly (`except Exception` does NOT catch
+        CancelledError, BaseException since 3.8), recorded, and the
+        remaining cleanup steps must still run, with the CancelledError
+        still surfacing to the caller afterwards. Mirrors
+        test_fcm_stop_cancelled_still_runs_remaining_cleanup above."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        coord = SimpleNamespace()
+        coord.async_stop_fcm_push = AsyncMock()
+        coord.token_refresh_handle = None
+        coord.renewal_tasks = {}
+        coord.reaper_tasks = {}
+        coord.bg_tasks = set()
+        coord.nvr_drain_task = None
+        coord.live_connections = {}
+        coord.tls_proxy_ports = {"11111111-1111-1111-1111-111111111111": 12345}
+        coord.tls_proxy_servers = {}
+        coord.stream_log_listener = None
+        coord.async_stop_frigate_endpoints = MagicMock()
+
+        with (
+            patch(
+                f"{MODULE}.nvr_recorder.stop_all",
+                new=AsyncMock(side_effect=asyncio.CancelledError()),
+            ),
+            patch(
+                f"{MODULE}.stop_all_proxies", new=AsyncMock()
+            ) as mock_stop_all_proxies,
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await _async_cancel_coordinator_tasks(coord)
+
+        coord.async_stop_frigate_endpoints.assert_called_once()
+        mock_stop_all_proxies.assert_called_once_with(
+            coord.tls_proxy_ports, coord.tls_proxy_servers
+        )
+
+    @pytest.mark.asyncio
+    async def test_drain_task_self_cancel_not_treated_as_outer_cancellation(self):
+        """GitHub #64 follow-up bug-hunt (2026-08-08): the drain-task block
+        calls `drain_task.cancel()` on ITSELF right before awaiting it, so
+        the CancelledError that resolves from that await is the expected,
+        common case on every ordinary unload/reload — it must NOT be
+        conflated with a genuine outer cancellation reaching this teardown
+        coroutine (that would make every normal unload spuriously raise
+        CancelledError at the end of this function, breaking reloads).
+        Pins that a normal unload with an active drain task completes
+        cleanly without raising."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        async def _drain_forever():
+            await asyncio.sleep(100)
+
+        coord = _make_cancel_coord(
+            hass=SimpleNamespace(
+                async_create_task=asyncio.get_event_loop().create_task
+            ),
+            nvr_drain_task=asyncio.get_event_loop().create_task(_drain_forever()),
+            live_connections={},
+            tls_proxy_ports={},
+            tls_proxy_servers={},
+            async_stop_frigate_endpoints=MagicMock(),
+        )
+
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", new=AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies", new=AsyncMock()),
+        ):
+            await _async_cancel_coordinator_tasks(coord)  # must NOT raise
+
+        assert coord.nvr_drain_task is None
+
+    @pytest.mark.asyncio
+    async def test_outer_cancellation_during_drain_task_await_is_recorded(self):
+        """If HA's shutdown deadline cancels THIS teardown coroutine's own
+        task while it's suspended on `await drain_task` — distinct from
+        drain_task's own self-inflicted cancellation resolving, pinned by
+        test_drain_task_self_cancel_not_treated_as_outer_cancellation above
+        — the CancelledError must be recorded via `_cancelled_during_cleanup`
+        (detected via `Task.cancelling()`, 3.11+) and remaining cleanup
+        must still run, mirroring the FCM-stop pattern, instead of being
+        silently swallowed by the old bare `except (CancelledError,
+        Exception): pass`."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        drain_cancelling = asyncio.Event()
+
+        async def _drain_forever():
+            try:
+                await asyncio.sleep(100)
+            except asyncio.CancelledError:
+                # Swallow our own (drain_task.cancel()) cancellation and
+                # block again — this keeps `await drain_task` in the outer
+                # coroutine suspended until the test's outer.cancel() below
+                # cascades a SECOND cancellation onto this exact await,
+                # deterministically landing the outer cancellation at the
+                # precise suspension point under test (no sleep(0)-count
+                # guessing against how fast the mocked steps resolve).
+                drain_cancelling.set()
+                await asyncio.sleep(100)
+
+        coord = _make_cancel_coord(
+            hass=SimpleNamespace(
+                async_create_task=asyncio.get_event_loop().create_task
+            ),
+            nvr_drain_task=asyncio.get_event_loop().create_task(_drain_forever()),
+            live_connections={},
+            tls_proxy_ports={},
+            tls_proxy_servers={},
+            async_stop_frigate_endpoints=MagicMock(),
+        )
+
+        stop_all_proxies_called = asyncio.Event()
+
+        async def _stop_all_proxies_stub(*_a, **_kw):
+            stop_all_proxies_called.set()
+
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", new=AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies", new=_stop_all_proxies_stub),
+        ):
+            outer = asyncio.get_event_loop().create_task(
+                _async_cancel_coordinator_tasks(coord)
+            )
+            await asyncio.wait_for(drain_cancelling.wait(), timeout=2)
+            outer.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await outer
+
+        # Remaining cleanup ran despite the outer cancellation.
+        assert stop_all_proxies_called.is_set()
+        assert coord.nvr_drain_task is None
+
+    @pytest.mark.asyncio
+    async def test_drain_task_residual_non_cancelled_error_is_logged(self):
+        """If the drain task's own cleanup raises something OTHER than
+        CancelledError while unwinding from our `.cancel()` (e.g. a
+        finally-adjacent bug), `await drain_task` surfaces that exception
+        instead — must be caught, logged, and NOT propagate (a residual
+        drain-task-internal error is non-actionable and must not block
+        the rest of unload cleanup, unlike a genuine outer cancellation)."""
+        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+
+        async def _drain_with_broken_cleanup():
+            try:
+                await asyncio.sleep(100)
+            except asyncio.CancelledError:
+                raise ValueError("cleanup exploded") from None
+
+        coord = _make_cancel_coord(
+            hass=SimpleNamespace(
+                async_create_task=asyncio.get_event_loop().create_task
+            ),
+            nvr_drain_task=asyncio.get_event_loop().create_task(
+                _drain_with_broken_cleanup()
+            ),
+            live_connections={},
+            tls_proxy_ports={},
+            tls_proxy_servers={},
+            async_stop_frigate_endpoints=MagicMock(),
+        )
+
+        with (
+            patch(f"{MODULE}.nvr_recorder.stop_all", new=AsyncMock()),
+            patch(f"{MODULE}.stop_all_proxies", new=AsyncMock()),
+        ):
+            await _async_cancel_coordinator_tasks(coord)  # must NOT raise
+
+        assert coord.nvr_drain_task is None
 
     @pytest.mark.asyncio
     async def test_fcm_push_start_when_option_enabled(self):

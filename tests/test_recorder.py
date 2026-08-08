@@ -5200,6 +5200,41 @@ class TestWatchPrerollHealth:
         respawn.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_cancellation_during_wait_logs_before_reraising(self):
+        """GitHub #64 follow-up (2026-08-08): the primary fix reorders
+        unload teardown so this watcher is never raced by the generic
+        bg_tasks sweep — but this is defense-in-depth for any OTHER path
+        that might cancel this task directly. Before this, a cancellation
+        arriving at `await proc.wait()` propagated with ZERO log line,
+        reproducing the reported "silent after starting" symptom for
+        whatever cancelled it. Must log a debug line with the observable
+        pid/returncode, then re-raise (cancellation must still propagate —
+        this is diagnostics, not cancellation suppression)."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord()
+        proc = MagicMock()
+        proc.wait = AsyncMock(side_effect=asyncio.CancelledError())
+        proc.pid = 4242
+        proc.returncode = None
+        coord.nvr_preroll_processes[CAM_ID] = proc
+
+        with (
+            patch.object(recorder._LOGGER, "debug") as mock_debug,
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await recorder._watch_preroll_health(coord, CAM_ID, proc, _tail_for(proc))
+
+        assert any(
+            "cancelled" in str(call.args[0])
+            and call.args[1:] == (CAM_ID[:8], 4242, None)
+            for call in mock_debug.call_args_list
+        ), mock_debug.call_args_list
+        # The dead-process bookkeeping must NOT run on this path — cancel
+        # means "something else owns cleanup," not "this exited."
+        assert CAM_ID in coord.nvr_preroll_processes
+
+    @pytest.mark.asyncio
     async def test_crash_respawns_after_delay(self):
         """A genuine unexpected exit (process still the tracked one) with
         the gate open and no recent prior crash → respawn after the normal

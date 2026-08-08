@@ -1296,10 +1296,82 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
         if not task.done():
             task.cancel()
     coord.reaper_tasks.clear()
+    # Stop the NVR drain watcher BEFORE the recorders. The watcher is a
+    # long-running coroutine; cancelling it is the supported stop path.
+    #
+    # This block MUST run before the generic bg_tasks sweep below (GitHub
+    # #64 follow-up, 2026-08-08): the pre-roll ring's crash/health watcher
+    # (`_watch_preroll_health`) is ALSO tracked in `bg_tasks`. If the
+    # generic sweep hard-cancels it first, its bare `await proc.wait()`
+    # gets a CancelledError with zero opportunity to log — and by the time
+    # `stop_all()` below runs, `nvr_preroll_processes` may already be
+    # empty, so `stop_preroll_recorder`'s own "stopping (reason=...)" log
+    # line is ALSO skipped (guarded on the process still being tracked as
+    # alive). Two independently-correct diagnostic guards, individually
+    # fine, were mutually exclusive in this exact unload race — producing
+    # exactly the reported symptom: the recorder log trace goes completely
+    # silent right after "starting", even with every intentional-stop call
+    # site instrumented. Running the cooperative stop_all() FIRST fixes
+    # this NOT by cancelling the health watcher (it isn't tracked in
+    # `nvr_preroll_tasks` — that dict only holds the separate *prune*
+    # watcher, `_watch_preroll_recorder` — the health watcher is
+    # deliberately untracked in any per-camera dict) but because
+    # `stop_preroll_recorder` pops+SIGTERMs the still-tracked process
+    # itself: the health watcher's own `await proc.wait()` then resolves
+    # NORMALLY once the process actually exits, hits the "am I still the
+    # tracked process?" identity check (the entry was already popped
+    # before the SIGTERM), and exits as a clean no-op — never cancelled at
+    # all on this path. The generic sweep afterward still cleanly
+    # cancels+awaits anything left over (already-done tasks are a no-op).
+    drain_task = getattr(coord, "nvr_drain_task", None)
+    if drain_task is not None and not drain_task.done():
+        drain_task.cancel()
+        try:
+            await drain_task
+        except asyncio.CancelledError:
+            # Ambiguous by construction: we just cancelled drain_task
+            # ourselves above, so ITS OWN cancellation resolving THIS WAY
+            # is the expected, common case and must not be treated as an
+            # outer cancellation reaching this teardown coroutine (that
+            # would make every normal unload/reload spuriously re-raise
+            # CancelledError at the end of this function). Distinguish via
+            # our own task's pending-cancellation-request count (3.11+):
+            # only a genuine external cancel() on THIS task increments it.
+            current = asyncio.current_task()
+            if (
+                current is not None
+                and current.cancelling()
+                and _cancelled_during_cleanup is None
+            ):
+                _cancelled_during_cleanup = asyncio.CancelledError()
+        except Exception as err:  # residual drain_task error is non-actionable
+            _LOGGER.debug("NVR drain task cancel on unload raised: %s", err)
+        coord.nvr_drain_task = None
+    # Stop all NVR recorders BEFORE the TLS proxies — once the proxies are
+    # gone the ffmpeg children would die anyway, but we want a clean SIGTERM
+    # so the trailing MP4 moov atom is flushed and the in-progress segment
+    # stays playable.
+    #
+    # CancelledError caught explicitly (not just `except Exception`, which
+    # does not catch it — BaseException since 3.8): unlike the drain_task
+    # cancellation above, `stop_all()` never cancels its own containing
+    # task, so any CancelledError observed here can only be a genuine
+    # outer cancellation reaching in (e.g. HA's shutdown deadline). Record
+    # it and keep going — matching the `async_stop_fcm_push` pattern above
+    # — so the reordering doesn't newly skip the bg_tasks sweep/live-stream
+    # teardown/proxy cleanup that follows (bug-hunt finding, 2026-08-08).
+    try:
+        await nvr_recorder.stop_all(coord)
+    except asyncio.CancelledError as err:
+        if _cancelled_during_cleanup is None:
+            _cancelled_during_cleanup = err
+    except Exception as err:
+        _LOGGER.debug("NVR stop_all on unload raised: %s", err)
     # Cancel tracked fire-and-forget background tasks (snapshot refreshes
     # from FCM pushes, renewal tasks registered above, go2rtc registration,
     # etc.). Await them so cancellation actually propagates before HA
-    # enters its own final-writes shutdown stage.
+    # enters its own final-writes shutdown stage. Runs AFTER stop_all()
+    # above — see the comment there for why the order matters.
     bg = list(coord.bg_tasks)
     for t in bg:
         if not t.done():
@@ -1307,24 +1379,6 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     if bg:
         await asyncio.gather(*bg, return_exceptions=True)
     coord.bg_tasks.clear()
-    # Stop the NVR drain watcher BEFORE the recorders. The watcher is a
-    # long-running coroutine; cancelling it is the supported stop path.
-    drain_task = getattr(coord, "nvr_drain_task", None)
-    if drain_task is not None and not drain_task.done():
-        drain_task.cancel()
-        try:
-            await drain_task
-        except (asyncio.CancelledError, Exception):  # noqa: S110 # drain_task cancelled intentionally on shutdown; any residual error is non-actionable
-            pass
-        coord.nvr_drain_task = None
-    # Stop all NVR recorders BEFORE the TLS proxies — once the proxies are
-    # gone the ffmpeg children would die anyway, but we want a clean SIGTERM
-    # so the trailing MP4 moov atom is flushed and the in-progress segment
-    # stays playable.
-    try:
-        await nvr_recorder.stop_all(coord)
-    except Exception as err:
-        _LOGGER.debug("NVR stop_all on unload raised: %s", err)
     # Tear down every active LOCAL/REMOTE live stream cleanly BEFORE
     # stop_all_proxies. Without this, integration reload leaves stale state
     # behind: go2rtc keeps the producer URL with the now-dead proxy port,
