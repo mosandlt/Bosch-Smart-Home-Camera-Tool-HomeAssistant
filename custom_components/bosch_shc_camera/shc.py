@@ -1151,10 +1151,52 @@ async def async_cloud_set_pan(
             result.status,
             result.eta_ms,
         )
-        # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams.
+        _schedule_pan_snapshot(coordinator, cam_id, result.eta_ms)
         return True
     _LOGGER.warning("cloud_set_pan: HTTP %s for %s", result.status, cam_id)
     return False
+
+
+def _schedule_pan_snapshot(
+    coordinator: BoschCameraCoordinator, cam_id: str, eta_ms: int
+) -> None:
+    """Trigger a fresh snapshot once the pan motor has settled.
+
+    Mirrors `_schedule_privacy_off_snapshot`: a pan write alone only updates
+    `pan_cache` + fires listeners (entity *state*), it never touches the
+    cached snapshot bytes, so the old pre-pan frame sat until the next
+    unrelated 30s-TTL poll (user-observed: had to manually refresh).
+
+    Bosch returns `estimatedTimeToCompletion` (`eta_ms`) for the pan motor
+    itself, which is more accurate than a hardcoded guess — used as the base
+    delay, floored at 1.0s (a 204 response has no body, so `eta_ms` is 0/
+    unknown, and even a small pan can undershoot a too-short fixed delay)
+    and capped at 30.0s (an implausibly large/bogus value should not park a
+    background task for minutes), plus a 0.5s buffer for the encoder to
+    produce a frame from the new position (same buffer reasoning as the
+    indoor privacy-off delay).
+    """
+    cam = coordinator.camera_entities.get(cam_id)
+    if not cam:
+        return
+    # Bosch's JSON is untrusted external input: an explicit `null` (not just
+    # a missing key) survives the client library's `.get(..., 0)` fallback
+    # as `eta_ms=None`, which would raise TypeError out of an already-
+    # successful pan write (bug-hunt finding, 2026-08-08). Coerce first, and
+    # clamp the upper bound too — nothing in a realistic pan sweep should
+    # need a multi-minute settle delay.
+    eta_sec = eta_ms / 1000 if isinstance(eta_ms, (int, float)) else 0.0
+    delay = max(1.0, min(eta_sec, 30.0)) + 0.5
+    _LOGGER.debug(
+        "Pan snapshot trigger for %s (eta_ms=%s, delay=%.1fs)",
+        cam_id[:8],
+        eta_ms,
+        delay,
+    )
+    coordinator.spawn_tracked(
+        cam.async_trigger_image_refresh(delay=delay),
+        name=f"pan_snapshot_{cam_id[:8]}",
+    )
 
 
 class SHCCoordinatorMixin:

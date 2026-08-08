@@ -193,6 +193,7 @@ def _base_coord() -> SimpleNamespace:
             CAM_ID: {"device_id": "shc-dev-1", "front_light_intensity": 0.5}
         },
         hw_version={CAM_ID: "HOME_Eyes_Outdoor"},  # gen2
+        camera_entities={},  # empty → _schedule_pan_snapshot no-ops (no cam found)
         lighting_switch_cache={},
         local_creds_cache={},
         rcp_lan_ip_cache={},
@@ -400,10 +401,18 @@ class TestCloudSetNotificationsNoRefresh:
         coord.hass.async_create_task.assert_not_called()
 
 
-class TestCloudSetPanNoRefresh:
+class TestCloudSetPanNoCoordinatorRefresh:
+    """`_base_coord()` has no registered `camera_entities`, so
+    `_schedule_pan_snapshot`'s no-op branch is exercised here (that branch
+    itself is pinned by `TestSchedulePanSnapshot`; the real scheduling path
+    is pinned end-to-end by `TestCloudSetPanTriggersSnapshot`). These tests
+    only pin what stays true regardless of the entity-snapshot mechanism: a
+    pan write must never trigger a full *coordinator* refresh — that would
+    re-poll every camera, disrupting unrelated live streams."""
+
     @pytest.mark.asyncio
-    async def test_pan_positive_no_refresh(self) -> None:
-        """Pan to positive position: cache updated, listeners called, no refresh scheduled."""
+    async def test_pan_positive_no_coordinator_refresh(self) -> None:
+        """Pan to positive position: cache updated, listeners called, no full coordinator refresh."""
         from custom_components.bosch_shc_camera.shc import async_cloud_set_pan
 
         coord = _base_coord()
@@ -419,11 +428,10 @@ class TestCloudSetPanNoRefresh:
         assert coord.pan_cache[CAM_ID] == 90
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
-        coord.hass.async_create_task.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_pan_negative_no_refresh(self) -> None:
-        """Pan to negative position: cache updated, listeners called, no refresh scheduled."""
+    async def test_pan_negative_no_coordinator_refresh(self) -> None:
+        """Pan to negative position: cache updated, listeners called, no full coordinator refresh."""
         from custom_components.bosch_shc_camera.shc import async_cloud_set_pan
 
         coord = _base_coord()
@@ -439,11 +447,10 @@ class TestCloudSetPanNoRefresh:
         assert coord.pan_cache[CAM_ID] == -45
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
-        coord.hass.async_create_task.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_pan_200_with_json_body_no_refresh(self) -> None:
-        """Pan 200 with actual position from response body: correct cache + no refresh."""
+    async def test_pan_200_with_json_body_no_coordinator_refresh(self) -> None:
+        """Pan 200 with actual position from response body: correct cache, no full coordinator refresh."""
         from custom_components.bosch_shc_camera.shc import async_cloud_set_pan
 
         coord = _base_coord()
@@ -463,7 +470,6 @@ class TestCloudSetPanNoRefresh:
         assert coord.pan_cache[CAM_ID] == 42  # actual from response, not requested
         coord.async_update_listeners.assert_called()
         coord.async_request_refresh.assert_not_called()
-        coord.hass.async_create_task.assert_not_called()
 
 
 # Privacy-mode / camera-light cache write-lock race (PRIVACY_REVERT bug)
@@ -2356,6 +2362,11 @@ def _stub_coord_light(*, gen2: bool = True, with_token: bool = True):
             async_create_task=lambda coro: coro.close(),
             services=SimpleNamespace(async_call=AsyncMock()),
         ),
+        # _schedule_pan_snapshot goes through coordinator.spawn_tracked (not
+        # hass.async_create_task directly) so a background snapshot refresh
+        # is cancelled on unload — mirror the real method's coro.close()
+        # (never actually run) semantics for this stub.
+        spawn_tracked=lambda coro, name=None: coro.close(),
         shc_state_cache={
             CAM_ID: {
                 "front_light": False,
@@ -3760,6 +3771,141 @@ class TestSchedulePrivacyOffSnapshotSmoke:
             _schedule_privacy_off_snapshot(coord, CAM_ID)
         except Exception:
             pass
+
+
+# _schedule_pan_snapshot — pan writes must trigger a fresh snapshot once the
+# motor settles. User-reported bug (Gen1 360 Indoor): after panning, the
+# still image/thumbnail kept showing the pre-pan frame until the next
+# unrelated ~30s TTL poll — had to manually refresh. `async_cloud_set_pan`
+# previously only updated pan_cache + fired listeners (entity *state*), it
+# never touched the cached snapshot bytes.
+
+
+class TestSchedulePanSnapshot:
+    def _make_coord(self):
+        cam_entity = MagicMock()
+        cam_entity.async_trigger_image_refresh = AsyncMock()
+        coord = SimpleNamespace(
+            camera_entities={CAM_ID: cam_entity},
+            spawn_tracked=MagicMock(),
+        )
+        return coord, cam_entity
+
+    def test_eta_ms_drives_delay(self):
+        """Bosch-provided ETA (2000ms) + 0.5s encoder buffer => 2.5s delay."""
+        from custom_components.bosch_shc_camera.shc import _schedule_pan_snapshot
+
+        coord, cam_entity = self._make_coord()
+        _schedule_pan_snapshot(coord, CAM_ID, eta_ms=2000)
+
+        assert coord.spawn_tracked.called, "Must schedule a tracked task"
+        coro = coord.spawn_tracked.call_args[0][0]
+        coro.close()
+        _, kwargs = cam_entity.async_trigger_image_refresh.call_args
+        assert kwargs["delay"] == pytest.approx(2.5)
+
+    def test_zero_eta_floors_to_1s_plus_buffer(self):
+        """A 204 response has no body => eta_ms=0 (unknown). Must floor to
+        1.0s (not fire an immediate/near-immediate refresh that could race
+        the motor still moving) + the same 0.5s encoder buffer => 1.5s."""
+        from custom_components.bosch_shc_camera.shc import _schedule_pan_snapshot
+
+        coord, cam_entity = self._make_coord()
+        _schedule_pan_snapshot(coord, CAM_ID, eta_ms=0)
+
+        coro = coord.spawn_tracked.call_args[0][0]
+        coro.close()
+        _, kwargs = cam_entity.async_trigger_image_refresh.call_args
+        assert kwargs["delay"] == pytest.approx(1.5)
+
+    def test_large_eta_clamped_to_30s_plus_buffer(self):
+        """A bogus/implausible ETA (100s) must not park a background task
+        for minutes — clamped to 30.0s + the 0.5s buffer => 30.5s."""
+        from custom_components.bosch_shc_camera.shc import _schedule_pan_snapshot
+
+        coord, cam_entity = self._make_coord()
+        _schedule_pan_snapshot(coord, CAM_ID, eta_ms=100_000)
+
+        coro = coord.spawn_tracked.call_args[0][0]
+        coro.close()
+        _, kwargs = cam_entity.async_trigger_image_refresh.call_args
+        assert kwargs["delay"] == pytest.approx(30.5)
+
+    def test_negative_eta_floors_same_as_zero(self):
+        """A nonsensical negative ETA must not produce a negative/near-zero
+        delay — floors identically to eta_ms=0 => 1.5s."""
+        from custom_components.bosch_shc_camera.shc import _schedule_pan_snapshot
+
+        coord, cam_entity = self._make_coord()
+        _schedule_pan_snapshot(coord, CAM_ID, eta_ms=-500)
+
+        coro = coord.spawn_tracked.call_args[0][0]
+        coro.close()
+        _, kwargs = cam_entity.async_trigger_image_refresh.call_args
+        assert kwargs["delay"] == pytest.approx(1.5)
+
+    def test_non_numeric_eta_does_not_raise(self):
+        """Bosch returning an explicit JSON `null` for
+        `estimatedTimeToCompletion` survives the client library's
+        `.get(..., 0)` fallback as `eta_ms=None` (only the *missing-key*
+        case defaults to 0) — must not raise TypeError out of an
+        already-successful pan write. Coerced to 0 => same 1.5s as eta_ms=0."""
+        from custom_components.bosch_shc_camera.shc import _schedule_pan_snapshot
+
+        coord, cam_entity = self._make_coord()
+        _schedule_pan_snapshot(coord, CAM_ID, eta_ms=None)  # type: ignore[arg-type]
+
+        coro = coord.spawn_tracked.call_args[0][0]
+        coro.close()
+        _, kwargs = cam_entity.async_trigger_image_refresh.call_args
+        assert kwargs["delay"] == pytest.approx(1.5)
+
+    def test_missing_camera_entity_does_not_crash(self):
+        """No camera entity registered for cam_id => must return silently."""
+        from custom_components.bosch_shc_camera.shc import _schedule_pan_snapshot
+
+        coord = SimpleNamespace(
+            camera_entities={},
+            spawn_tracked=MagicMock(),
+        )
+        _schedule_pan_snapshot(coord, CAM_ID, eta_ms=1000)
+        assert not coord.spawn_tracked.called, (
+            "Must not schedule a task when no camera entity is registered"
+        )
+
+
+class TestCloudSetPanTriggersSnapshot:
+    """End-to-end: `async_cloud_set_pan` success must schedule a snapshot
+    refresh (regression test for the pan-then-stale-snapshot bug)."""
+
+    @pytest.mark.asyncio
+    async def test_success_schedules_snapshot_refresh(self):
+        from custom_components.bosch_shc_camera import shc
+
+        cam_entity = MagicMock()
+        cam_entity.async_trigger_image_refresh = AsyncMock()
+        coord = _stub_coord_light()
+        coord.camera_entities = {CAM_ID: cam_entity}
+
+        session = MagicMock()
+        session.put = MagicMock(
+            return_value=_mock_response(
+                200,
+                json_data={
+                    "currentAbsolutePosition": 60,
+                    "estimatedTimeToCompletion": 1200,
+                },
+            )
+        )
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
+            ok = await shc.async_cloud_set_pan(coord, CAM_ID, 60)
+
+        assert ok is True
+        cam_entity.async_trigger_image_refresh.assert_called_once()
+        _, kwargs = cam_entity.async_trigger_image_refresh.call_args
+        assert kwargs["delay"] == pytest.approx(1.7)  # max(1.2, 1.0) + 0.5
 
 
 # Structural pins: write-lock timestamps must exist in the right functions
