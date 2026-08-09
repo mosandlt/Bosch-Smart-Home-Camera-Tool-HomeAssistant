@@ -253,6 +253,16 @@ const AUTO_PLAY_MODES = ["lan", "always", "never"];
 // case static instead of a visible reconnect. 2026-06-24 (was 8000, 2026-06-22).
 const BACKGROUND_TEARDOWN_GRACE_MS = 60000;
 
+// Backend `switch.py`'s `_STREAM_COOLDOWN` (5s): a turn_on within 5s of the
+// last turn_off is silently rejected there (WARNING-logged only, no
+// exception — `_callService`'s caller never learns). `_maybeForceBackendRewarm`'s
+// re-arm delay MUST clear this with margin or the backend swallows the
+// turn_on unconditionally, every rewarm cycle, with no backgrounding
+// required. (bug found 2026-08-08 via GitHub multi-camera "was streaming,
+// then stopped" report — the original 1500ms re-arm was inside the cooldown
+// on every single attempt.)
+const REWARM_TURN_ON_DELAY_MS = 5500;
+
 // Card-side i18n. Language is taken from hass.language: "de*" → German,
 // everything else → English (the universal fallback). To add a locale, add a
 // CARD_I18N["xx"] block with the same keys and extend cardLang(); any missing
@@ -2998,6 +3008,7 @@ class BoschCameraCard extends HTMLElement {
     this._hls               = null;  // hls.js instance for Chrome (null = native or inactive)
     this._staleSourceSeen   = false; // true when WebRTC failed on a dead go2rtc source (rotated creds / dead proxy port)
     this._lastRewarmAt      = 0;     // ts of last forced backend stream rebuild (cooldown guard)
+    this._rewarmPending     = false; // true between rewarm's turn_off and its re-arm turn_on (see _completeRewarmIfPending)
     this._streamDropCount   = 0;     // consecutive HLS-stall/fatal reconnect cycles with no healthy frame → escalates to backend rewarm
     // Skip WebRTC + show HLS banner when:
     //   (a) HA Companion App reaches us through an external endpoint
@@ -4430,14 +4441,24 @@ class BoschCameraCard extends HTMLElement {
     // Bosch session slot, until the user eventually returns or navigates
     // away — defeating the whole point of this hidden-tab teardown design.
     if (document.visibilityState === "hidden") return;
-    if (!this._isStreaming()) return;          // backend stream switch is off → leave it
-    // Never auto-(re)start live video while privacy mode is ON. Privacy is a
-    // SEPARATE switch from the live-stream switch, so _isStreaming() can still
-    // read "on" under privacy — reviving here (e.g. from the leavepictureinpicture
-    // hook when privacy ON closed the PiP window, or a tab-return under privacy)
-    // would fight the privacy teardown and waste a Bosch session. The shutter is
-    // closed; there is nothing to resume. 2026-06-24 (kill-zombies-on-stop).
+    // Never auto-(re)start live video (or complete a pending rewarm's
+    // turn_on, which the backend would reject anyway — switch.py raises on
+    // turn_on while privacy is engaged) while privacy mode is ON. Privacy is
+    // a SEPARATE switch from the live-stream switch, so _isStreaming() can
+    // still read "on" under privacy — reviving here (e.g. from the
+    // leavepictureinpicture hook when privacy ON closed the PiP window, or a
+    // tab-return under privacy) would fight the privacy teardown and waste a
+    // Bosch session. The shutter is closed; there is nothing to resume.
+    // Checked before _completeRewarmIfPending() (2026-08-08 bug-hunt finding)
+    // so a rewarm left pending by a hidden-window privacy toggle doesn't try
+    // a turn_on that's certain to be rejected. 2026-06-24 (kill-zombies-on-stop).
     if (this._entities?.privacy && this._getEffectiveState(this._entities.privacy) === "on") return;
+    // A rewarm cycle interrupted mid-flight by the same backgrounding that
+    // just ended left the switch genuinely OFF — finish it before the
+    // _isStreaming() check below reads that as "left off on purpose" and
+    // bails, which would otherwise strand the stream off forever.
+    this._completeRewarmIfPending();
+    if (!this._isStreaming()) return;          // backend stream switch is off → leave it
     if (!this._liveVideoActive) {
       if (this._startingLiveVideo || this._waitingForStream || this._reconnectingLiveVideo) return;
       // Defer so the Companion App's WebSocket finishes reconnecting first, then
@@ -8738,13 +8759,68 @@ class BoschCameraCard extends HTMLElement {
     this._waitingForStream = true;
     this._setLoadingOverlay(true, this._t("stream_reconnecting"));
     this._callService("switch", "turn_off", { entity_id: sw });
-    // Re-arm after the backend has torn down (camera → idle), then poll until
-    // it reports "streaming" again and restart the video on the live port.
-    setTimeout(() => {
-      this._callService("switch", "turn_on", { entity_id: sw });
-      setTimeout(() => { if (this._waitingForStream) this._waitForStreamReady(); }, 1000);
-    }, 1500);
+    // `_rewarmPending`/`_rewarmSwitchEntity` are the single source of truth
+    // for "a turn_on is still owed" — `_completeRewarmIfPending()` (called on
+    // tab/app return) and this timer both funnel through `_fireRewarmTurnOn`,
+    // which self-guards on `_rewarmPending` so only ONE of them can ever
+    // actually call turn_on, however this races. `_rewarmSwitchEntity` (not
+    // a live re-read of `this._entities.switch`) so a config change mid-cycle
+    // can't send the turn_on to the wrong entity while the real one stays
+    // stuck off. A tab/app backgrounding right after the turn_off above (the
+    // same class of event that likely caused the stale-source error in the
+    // first place) can clamp a plain setTimeout to Chrome's ~1×/min
+    // intensive throttling, or drop it outright — without the pending state,
+    // _resumeLiveStreamIfNeeded()'s own "_isStreaming() is false → leave it,
+    // user/system turned it off" guard would treat that stuck-off state as
+    // intentional and never turn it back on. (live fix 2026-08-08)
+    this._rewarmPending = true;
+    this._rewarmSwitchEntity = sw;
+    this._rewarmTurnOnTimer = setTimeout(
+      () => this._fireRewarmTurnOn(),
+      REWARM_TURN_ON_DELAY_MS,
+    );
     return true;
+  }
+
+  // Single place that actually issues the rewarm's turn_on — called from
+  // either the timer above or _completeRewarmIfPending(), never both (each
+  // guards on / clears the same `_rewarmPending` flag first).
+  _fireRewarmTurnOn() {
+    if (!this._rewarmPending) return;
+    this._rewarmPending = false;
+    this._rewarmTurnOnTimer = null;
+    const sw = this._rewarmSwitchEntity;
+    this._rewarmSwitchEntity = null;
+    if (!sw) return;
+    this._callService("switch", "turn_on", { entity_id: sw });
+    this._waitingForStream = true;
+    setTimeout(() => { if (this._waitingForStream) this._waitForStreamReady(); }, 1000);
+  }
+
+  // Complete a rewarm cycle that got stuck mid-flight (see _rewarmPending
+  // above) once the tab/app is confirmed visible again. Called from the
+  // same places that call _resumeLiveStreamIfNeeded() so a throttled/dropped
+  // re-arm timer can't leave the stream permanently off.
+  _completeRewarmIfPending() {
+    if (!this._rewarmPending) return;
+    // Still inside the backend's cooldown window (e.g. the tab flickered
+    // hidden→visible seconds after turn_off) — firing now would just be
+    // silently rejected same as the original bug. Cancel the stale-delay
+    // timer and re-arm for exactly the remaining wait instead of guessing.
+    const elapsed = Date.now() - this._lastRewarmAt;
+    if (elapsed < REWARM_TURN_ON_DELAY_MS) {
+      if (this._rewarmTurnOnTimer) clearTimeout(this._rewarmTurnOnTimer);
+      this._rewarmTurnOnTimer = setTimeout(
+        () => this._fireRewarmTurnOn(),
+        REWARM_TURN_ON_DELAY_MS - elapsed,
+      );
+      return;
+    }
+    if (this._rewarmTurnOnTimer) {
+      clearTimeout(this._rewarmTurnOnTimer);
+      this._rewarmTurnOnTimer = null;
+    }
+    this._fireRewarmTurnOn();
   }
 
   // Un-throttled background stall heartbeat. Chrome clamps main-thread

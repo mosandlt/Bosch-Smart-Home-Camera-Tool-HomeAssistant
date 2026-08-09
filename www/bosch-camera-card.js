@@ -59,6 +59,8 @@ const AUTO_PLAY_MODES = [ "lan", "always", "never" ];
 
 const BACKGROUND_TEARDOWN_GRACE_MS = 6e4;
 
+const REWARM_TURN_ON_DELAY_MS = 5500;
+
 const CARD_I18N = {
   en: {
     play_gate_label: "Start stream",
@@ -2768,6 +2770,7 @@ class BoschCameraCard extends HTMLElement {
     this._hls = null;
     this._staleSourceSeen = false;
     this._lastRewarmAt = 0;
+    this._rewarmPending = false;
     this._streamDropCount = 0;
     this._remoteSkipWebRTC = (() => {
       const ua = navigator.userAgent || "";
@@ -3580,8 +3583,9 @@ class BoschCameraCard extends HTMLElement {
   _resumeLiveStreamIfNeeded() {
     if (!this.isConnected || !this._hass) return;
     if (document.visibilityState === "hidden") return;
-    if (!this._isStreaming()) return;
     if (this._entities?.privacy && this._getEffectiveState(this._entities.privacy) === "on") return;
+    this._completeRewarmIfPending();
+    if (!this._isStreaming()) return;
     if (!this._liveVideoActive) {
       if (this._startingLiveVideo || this._waitingForStream || this._reconnectingLiveVideo) return;
       this._reconnectingLiveVideo = true;
@@ -4834,15 +4838,39 @@ class BoschCameraCard extends HTMLElement {
     this._callService("switch", "turn_off", {
       entity_id: sw
     });
-    setTimeout(() => {
-      this._callService("switch", "turn_on", {
-        entity_id: sw
-      });
-      setTimeout(() => {
-        if (this._waitingForStream) this._waitForStreamReady();
-      }, 1e3);
-    }, 1500);
+    this._rewarmPending = true;
+    this._rewarmSwitchEntity = sw;
+    this._rewarmTurnOnTimer = setTimeout(() => this._fireRewarmTurnOn(), REWARM_TURN_ON_DELAY_MS);
     return true;
+  }
+  _fireRewarmTurnOn() {
+    if (!this._rewarmPending) return;
+    this._rewarmPending = false;
+    this._rewarmTurnOnTimer = null;
+    const sw = this._rewarmSwitchEntity;
+    this._rewarmSwitchEntity = null;
+    if (!sw) return;
+    this._callService("switch", "turn_on", {
+      entity_id: sw
+    });
+    this._waitingForStream = true;
+    setTimeout(() => {
+      if (this._waitingForStream) this._waitForStreamReady();
+    }, 1e3);
+  }
+  _completeRewarmIfPending() {
+    if (!this._rewarmPending) return;
+    const elapsed = Date.now() - this._lastRewarmAt;
+    if (elapsed < REWARM_TURN_ON_DELAY_MS) {
+      if (this._rewarmTurnOnTimer) clearTimeout(this._rewarmTurnOnTimer);
+      this._rewarmTurnOnTimer = setTimeout(() => this._fireRewarmTurnOn(), REWARM_TURN_ON_DELAY_MS - elapsed);
+      return;
+    }
+    if (this._rewarmTurnOnTimer) {
+      clearTimeout(this._rewarmTurnOnTimer);
+      this._rewarmTurnOnTimer = null;
+    }
+    this._fireRewarmTurnOn();
   }
   _startLiveStallWorker() {
     this._stopLiveStallWorker();

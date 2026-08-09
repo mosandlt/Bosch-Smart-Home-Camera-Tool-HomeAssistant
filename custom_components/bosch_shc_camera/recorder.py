@@ -429,8 +429,31 @@ async def _watch_preroll_recorder(
                     max_segs,
                 )
                 coordinator.nvr_preroll_segment_counts[cam_id] = remaining
-        except Exception:  # best-effort prune-on-stop; non-fatal if cache dir missing  # noqa: S110 # best-effort cache prune, non-fatal if dir missing
-            pass
+        except Exception:  # noqa: S112 # best-effort prune-on-stop; non-fatal if cache dir missing
+            continue
+        if (
+            remaining
+            and remaining > 0
+            and cam_id not in coordinator._nvr_preroll_first_segment_logged
+        ):
+            # One-time proof-of-life per ring lifetime (GitHub #64): confirms
+            # segments are actually landing in `cam_dir` as seen by HA Core's
+            # OWN process — the only filesystem view that matters, since a
+            # user checking via a separate container's shell (e.g. the SSH &
+            # Web Terminal add-on, which does not share /dev/shm or the PID
+            # namespace with Core by default) would see an empty dir and no
+            # ffmpeg process even while the ring is working correctly.
+            coordinator._nvr_preroll_first_segment_logged.add(cam_id)
+            _LOGGER.info(
+                "NVR pre-roll ring confirmed writing segments for %s: %d "
+                "file(s) in %s (as seen by HA Core itself — if you're "
+                "checking this path from a different shell/container, e.g. "
+                "an SSH add-on, it will not show these files unless that "
+                "shell shares Core's filesystem/PID namespace)",
+                cam_id[:8],
+                remaining,
+                cam_dir,
+            )
 
 
 async def _watch_preroll_health(
@@ -702,6 +725,7 @@ async def _spawn_preroll_recorder_locked(
         return
 
     coordinator.nvr_preroll_processes[cam_id] = proc
+    coordinator._nvr_preroll_first_segment_logged.discard(cam_id)
     stderr_tail = _StderrTail()
     _spawn_stderr_drain_task(
         coordinator,

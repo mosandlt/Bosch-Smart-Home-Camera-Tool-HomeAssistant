@@ -936,6 +936,7 @@ def _make_phase_coord(opts=None, cam_title="Terrasse", cam_id=CAM_ID_SHORT):
         nvr_auth_retry_count={},
         _nvr_recorder_locks={},
         _nvr_preroll_zero_warned=set(),
+        _nvr_preroll_first_segment_logged=set(),
         hass=MagicMock(),
         async_update_listeners=MagicMock(),
     )
@@ -2263,6 +2264,8 @@ def _make_lifecycle_coord(
         is_camera_online=lambda cid: True,
         async_update_listeners=MagicMock(),
         nvr_shutting_down=False,
+        _nvr_preroll_zero_warned=set(),
+        _nvr_preroll_first_segment_logged=set(),
     )
 
     def get_nvr_recorder_lock(cam_id: str) -> asyncio.Lock:
@@ -2742,6 +2745,7 @@ class TestStartRecorder:
             async_update_listeners=MagicMock(),
             _sessions={},
             _nvr_preroll_zero_warned=set(),
+            _nvr_preroll_first_segment_logged=set(),
         )
         coord.get_session = lambda cid: get_or_create_session(coord._sessions, cid)
         coord._nvr_recorder_locks = {}
@@ -5167,6 +5171,52 @@ class TestWatchPrerollRecorder:
         assert hasattr(coord, "nvr_preroll_tasks"), "nvr_preroll_tasks not created"
         assert cam_id in coord.nvr_preroll_tasks, "watcher task not stored for cam_id"
 
+    @pytest.mark.asyncio
+    async def test_logs_proof_of_life_once_segments_confirmed(
+        self, tmp_path: Path, caplog
+    ):
+        """GitHub #64: once the periodic prune tick confirms segments > 0 on
+        disk, a one-time INFO proof-of-life log fires and the cam_id is
+        recorded in `_nvr_preroll_first_segment_logged` — but only once, not
+        on every subsequent tick."""
+        from custom_components.bosch_shc_camera import recorder
+
+        coord = _make_lifecycle_coord(base_path=str(tmp_path))
+        coord._nvr_preroll_first_segment_logged = set()
+        proc = _mock_proc(returncode=None)
+        coord.nvr_preroll_processes[CAM_ID] = proc
+
+        tick = {"n": 0}
+
+        def _fake_prune_and_count(cam_dir, max_segs):
+            tick["n"] += 1
+            if tick["n"] >= 3:
+                proc.returncode = 0
+            return 2  # segments present on every tick
+
+        async def _fake_sleep(_secs):
+            return None
+
+        with (
+            patch.object(recorder, "_prune_and_count", _fake_prune_and_count),
+            patch("asyncio.sleep", _fake_sleep),
+            caplog.at_level(
+                "INFO", logger="custom_components.bosch_shc_camera.recorder"
+            ),
+        ):
+            await recorder._watch_preroll_recorder(
+                coord, CAM_ID, str(tmp_path / "cam"), max_segs=4
+            )
+
+        assert CAM_ID in coord._nvr_preroll_first_segment_logged
+        proof_logs = [
+            r for r in caplog.records if "confirmed writing segments" in r.message
+        ]
+        assert len(proof_logs) == 1, (
+            "proof-of-life log must fire exactly once across multiple "
+            f"segments-present ticks, got {len(proof_logs)}"
+        )
+
 
 class TestWatchPrerollHealth:
     """GitHub #51 bug-hunt finding: unlike `_watch_recorder` (the main
@@ -5654,6 +5704,7 @@ class TestGitHub64PrerollRingGenuineEndToEnd(unittest.TestCase):
             coord.options["nvr_postroll_seconds"] = 20
             coord._nvr_mode_preference[CAM_ID] = "event_buffered"
             coord._nvr_preroll_zero_warned = set()
+            coord._nvr_preroll_first_segment_logged = set()
 
             mock_proc = MagicMock()
             mock_proc.returncode = None
@@ -8978,6 +9029,7 @@ class TestStartRecorderEventBufferedPushesUpdate:
             cid, asyncio.Lock()
         )
         coord._nvr_preroll_zero_warned = set()
+        coord._nvr_preroll_first_segment_logged = set()
 
         with (
             patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)),
@@ -9013,6 +9065,7 @@ class TestStartRecorderEventBufferedPushesUpdate:
             cid, asyncio.Lock()
         )
         coord._nvr_preroll_zero_warned = set()
+        coord._nvr_preroll_first_segment_logged = set()
 
         with patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)):
             await recorder.start_recorder(coord, CAM_ID_SHORT)
@@ -9055,6 +9108,7 @@ class TestStartRecorderEventBufferedPushesUpdate:
             cid, asyncio.Lock()
         )
         coord._nvr_preroll_zero_warned = set()
+        coord._nvr_preroll_first_segment_logged = set()
 
         with (
             patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)),
@@ -9094,6 +9148,7 @@ class TestStartRecorderEventBufferedPushesUpdate:
             cid, asyncio.Lock()
         )
         coord._nvr_preroll_zero_warned = set()
+        coord._nvr_preroll_first_segment_logged = set()
 
         with patch.object(recorder, "stop_recorder", new=AsyncMock(return_value=None)):
             await recorder.start_recorder(coord, CAM_ID_SHORT)

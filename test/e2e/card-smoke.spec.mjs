@@ -887,7 +887,9 @@ test("stale go2rtc source forces a cooldown-guarded backend stream rebuild", asy
     card._waitForStreamReady = () => {};
     const first = card._maybeForceBackendRewarm();
     const second = card._maybeForceBackendRewarm(); // within the 20s cooldown
-    await new Promise((res) => setTimeout(res, 1800)); // let the off→on timeouts fire
+    // Re-arm delay is 5500ms (must clear backend switch.py's 5s _STREAM_COOLDOWN
+    // — see REWARM_TURN_ON_DELAY_MS), not the old 1500ms.
+    await new Promise((res) => setTimeout(res, 5800)); // let the off→on timeouts fire
     return { first, second, calls };
   });
   expect(r.first, "first stale-source rebuild is initiated").toBe(true);
@@ -2195,6 +2197,118 @@ test("_resumeLiveStreamIfNeeded restarts a torn-down stream only when streaming+
   expect(r.restartedWhenStreaming, "restarts a torn-down stream when backend still streaming").toBe(1);
   expect(r.restartedWhenNotStreaming, "never restarts when the backend stream switch is off").toBe(0);
   expect(r.restartedWhenDetached, "never restarts on a disconnected card").toBe(0);
+});
+
+// 2026-08-08 bug fix (GitHub multi-camera "was streaming, then stopped"
+// report). Two real, independently confirmed bugs (3-agent adversarial
+// bug-hunt) in _maybeForceBackendRewarm's off→on self-heal cycle:
+//   1. Its re-arm turn_on fired after only 1500ms, but backend switch.py's
+//      _STREAM_COOLDOWN (5s) silently rejects any turn_on within 5s of the
+//      last turn_off (WARNING-logged only, no exception) — so the rewarm's
+//      own turn_on was rejected on EVERY cycle, foreground or not.
+//   2. On top of that, a tab/app backgrounding right after turn_off could
+//      throttle/drop the plain setTimeout entirely, and
+//      _resumeLiveStreamIfNeeded's !_isStreaming() guard then reads the
+//      stuck-OFF switch as "left off on purpose" and never revives it.
+// Fixed via a single source of truth (_rewarmPending/_rewarmSwitchEntity)
+// funnelled through _fireRewarmTurnOn from either the (now cooldown-safe)
+// timer or _completeRewarmIfPending (tab-return path), each guarding so
+// only one can ever actually call turn_on.
+test("_maybeForceBackendRewarm re-arms past the backend's 5s cooldown, not before", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", switch_entity: "switch.test_live" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+        "switch.test_live": { state: "on", attributes: {} },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    const calls = [];
+    card._callService = (dom, svc, data) => calls.push({ t: Date.now(), call: `${dom}.${svc}:${data.entity_id}` });
+
+    const started = Date.now();
+    const initiated = card._maybeForceBackendRewarm();
+    const pendingRightAfterCall = card._rewarmPending;
+    const switchCapturedRightAfterCall = card._rewarmSwitchEntity;
+
+    // Just after the backend's 5s cooldown should have cleared, turn_on
+    // must have fired — and not a moment before 5000ms.
+    await new Promise((res) => setTimeout(res, 5700));
+
+    const turnOnCall = calls.find((c) => c.call === "switch.turn_on:switch.test_live");
+    return {
+      initiated,
+      pendingRightAfterCall,
+      switchCapturedRightAfterCall,
+      turnOffFired: calls.some((c) => c.call === "switch.turn_off:switch.test_live"),
+      turnOnDelayMs: turnOnCall ? turnOnCall.t - started : null,
+      rewarmPendingAfter: card._rewarmPending,
+    };
+  });
+  expect(r.initiated, "rewarm was actually initiated (not skipped by cooldown/missing switch)").toBe(true);
+  expect(r.pendingRightAfterCall, "flags a pending turn_on immediately after turn_off").toBe(true);
+  expect(r.switchCapturedRightAfterCall, "captures the switch entity at turn_off time").toBe("switch.test_live");
+  expect(r.turnOffFired, "turn_off fired immediately").toBe(true);
+  expect(r.turnOnDelayMs, "turn_on fires, and only after clearing the 5s backend cooldown").not.toBeNull();
+  expect(r.turnOnDelayMs).toBeGreaterThanOrEqual(5000);
+  expect(r.rewarmPendingAfter, "clears the pending flag once the turn_on actually fires").toBe(false);
+});
+
+test("_resumeLiveStreamIfNeeded completes a rewarm interrupted by backgrounding, without violating the cooldown", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", switch_entity: "switch.test_live" });
+    card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
+      callApi: async () => ({}), callWS: async () => ({}), states: {
+        "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" },
+      } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+
+    const calls = [];
+    card._callService = (dom, svc, data) => calls.push({ t: Date.now(), call: `${dom}.${svc}:${data.entity_id}` });
+    let start = 0; card._startLiveVideo = () => { start++; };
+
+    // Simulate a rewarm's turn_off having fired 1s ago (well inside the
+    // backend's 5s cooldown), then the tab backgrounding before the re-arm
+    // timer could run — switch reads OFF now, but turn_on this instant
+    // would still be rejected by the backend.
+    const turnOffAt = Date.now();
+    card._lastRewarmAt = turnOffAt - 1000;
+    card._rewarmPending = true;
+    card._rewarmSwitchEntity = "switch.test_live";
+    card._rewarmTurnOnTimer = null; // simulate the original timer having been dropped entirely
+    card._isStreaming = () => false;
+    card._liveVideoActive = false;
+    card._waitingForStream = false;
+
+    card._resumeLiveStreamIfNeeded();
+    // Immediately after: must NOT have fired turn_on yet (still inside cooldown).
+    const firedImmediately = calls.some((c) => c.call === "switch.turn_on:switch.test_live");
+    const stillPendingImmediately = card._rewarmPending;
+
+    // Wait past the re-armed remaining wait (cooldown - 1s elapsed + margin).
+    await new Promise((res) => setTimeout(res, 5200));
+
+    return {
+      firedImmediately,
+      stillPendingImmediately,
+      calls: calls.map((c) => c.call),
+      rewarmPendingAfter: card._rewarmPending,
+    };
+  });
+  expect(r.firedImmediately, "does not fire turn_on immediately while still inside the backend cooldown").toBe(false);
+  expect(r.stillPendingImmediately, "leaves the rewarm pending, re-armed for the remaining wait").toBe(true);
+  expect(r.calls, "turns the switch back on once the cooldown has genuinely cleared")
+    .toContain("switch.turn_on:switch.test_live");
+  expect(r.rewarmPendingAfter, "clears the pending flag once completed").toBe(false);
 });
 
 // 2026-07-19 bug-hunt finding: _resumeLiveStreamIfNeeded is called not just

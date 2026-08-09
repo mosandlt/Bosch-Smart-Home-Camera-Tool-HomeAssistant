@@ -841,6 +841,16 @@ class BoschCameraCoordinator(
         self._nvr_preroll_zero_warned = BoolFieldView(
             self._sessions, "nvr_preroll_zero_warned"
         )
+        # Tracks cam_ids for which the "pre-roll ring confirmed writing
+        # segments" one-time INFO has already been logged for the current
+        # ring lifetime. Cleared on every fresh spawn so it re-fires per
+        # session, not just once ever — proves segments are landing on the
+        # SAME filesystem HA Core itself sees (GitHub #64: reporters kept
+        # checking /dev/shm from a separate container's shell, where it's
+        # never shared, and mistook that for the ring not writing at all).
+        self._nvr_preroll_first_segment_logged = BoolFieldView(
+            self._sessions, "nvr_preroll_first_segment_logged"
+        )
         self.privacy_set_at = FloatFieldView(
             self._sessions, "privacy_set_at"
         )  # privacy write timestamp
