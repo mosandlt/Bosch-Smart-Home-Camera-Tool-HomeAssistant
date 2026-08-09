@@ -263,6 +263,21 @@ const BACKGROUND_TEARDOWN_GRACE_MS = 60000;
 // on every single attempt.)
 const REWARM_TURN_ON_DELAY_MS = 5500;
 
+// Unconditional stall-recovery escalation window: if the generic stall/freeze
+// path (_scheduleLiveRecovery) fires this many times within this many ms —
+// even when each cycle briefly rendered a frame before stalling again — force
+// a backend rewarm instead of looping the same source forever. A plain
+// consecutive-recovery counter reset on every real frame does NOT catch this:
+// a flapping source plays a few seconds each cycle (firing the `playing`
+// event) before stalling again, wiping a reset-on-frame counter every single
+// cycle (2026-08-09 live report: "stream war für 8 sekunden da" then froze,
+// repeating — the original fable-agent fix never escalated because of
+// exactly this). The stall-checker interval is ~15s, so 3 stalls need
+// roughly 30-45s minimum — 90s gives margin without waiting too long on a
+// genuinely flapping remote connection.
+const STALL_RECOVERY_WINDOW_MS = 90000;
+const STALL_RECOVERY_THRESHOLD = 3;
+
 // Card-side i18n. Language is taken from hass.language: "de*" → German,
 // everything else → English (the universal fallback). To add a locale, add a
 // CARD_I18N["xx"] block with the same keys and extend cardLang(); any missing
@@ -3118,7 +3133,10 @@ class BoschCameraCard extends HTMLElement {
     this._webrtcDeadPolls    = 0;     // consecutive getStats polls with bytes flowing but framesDecoded flat (decoder stall). 2026-06-23
     this._webrtcRecoveryStreak = 0;   // consecutive live WebRTC recoveries with no healthy frame in between → escalate to sticky HLS. Reset by the rVFC onFrame. 2026-06-23
     this._deadStreamRecoveryStreak = 0; // consecutive recoveries (ANY transport) with no rendered frame in between → backs off the rebuild delay instead of hammering a source that never delivers (e.g. HLS also failing after sticky-HLS escalation). Reset whenever a frame actually plays. 2026-08-09
+    this._stallRecoveryTimestamps = []; // Date.now() of each unconditional stall-recovery (unlike _deadStreamRecoveryStreak, counts even when the stream WAS rendering and then froze) within a rolling window — escalates to _maybeForceBackendRewarm() once STALL_RECOVERY_THRESHOLD hits within STALL_RECOVERY_WINDOW_MS. Deliberately NOT reset when a frame renders (see clearOverlay) — a repeatedly-flapping source that plays a few seconds each cycle before stalling again (the actual reported pattern, 2026-08-09: "stream war für 8 sekunden da" then froze, repeating) fires the `playing` event every cycle, so a plain reset-on-frame counter (the original 2026-08-09 fable-agent fix) got wiped every cycle and never escalated. Old entries age out of the window naturally once the stream is genuinely healthy again — no explicit reset needed. 2026-08-09 (2nd pass).
     this._deadStreamRebuildPending = false; // true from the moment a backed-off rebuild timer is armed until it fires or a start actually begins. _stopLiveVideo() clears _reconnectingLiveVideo/_waitingForStream/_liveVideoActive synchronously, so WITHOUT this flag the _update() auto-start gate (sees exactly that all-false state) restarts the stream on the very next hass push — long before the backoff delay elapses, making the backoff a no-op (verify-agent finding, 2026-08-09).
+    this._startGen = 0; // re-entrancy token for _startLiveVideo(). _startLiveVideo has two long awaits (camera/stream WS call, hls.js CDN load) with NO guard against a NEWER call superseding it while parked there — a teardown+fresh-start racing an old attempt's pending await let the OLD one resume afterward and destroy/reattach the NEW, already-healthy hls.js instance (`this._hls.destroy()` then `attachMedia()` on the shared #cam-video), producing a repeating snapshot-flash-then-resume cycle even with every other reconnect fix in place (verify-agent finding, 2026-08-09). Incremented at the top of every _startLiveVideo() call and in _stopLiveVideo(); each attempt captures its own value and bails if it no longer matches after either await — same pattern as the existing `this._webrtcPc !== pc` guard.
+    this._rewarmSkipGate = false; // one-shot: set by _fireRewarmTurnOn() right before it flips the live-stream switch OFF→ON as an internal recovery — _evaluateGateForStreamTransition() consumes it to skip the tap-to-play gate for that specific transition, since the viewer was already actively watching and never touched anything. 2026-08-09.
     this._statsCachePc       = null;  // pc identity the cached getStats() snapshot belongs to (dead-track watchdog + freeze oracle share one poll). 2026-07-13
     this._statsCacheAt       = 0;     // performance.now() the cached snapshot was taken
     this._statsCachePromise  = null;  // in-flight/last pc.getStats() Promise for the TTL window above
@@ -3179,6 +3197,8 @@ class BoschCameraCard extends HTMLElement {
     this._preferHlsThisSession = false;
     this._webrtcRecoveryStreak = 0;
     this._deadStreamRecoveryStreak = 0;
+    this._stallRecoveryTimestamps = [];
+    this._rewarmSkipGate = false;
     this._deadStreamRebuildPending = false;
     this._hasEverDecodedFrames = false;
     this._clearTimer(this._hlsBannerAutoHideTimer); this._hlsBannerAutoHideTimer = null;
@@ -4187,6 +4207,19 @@ class BoschCameraCard extends HTMLElement {
       if (this._playGateActive) this._hidePlayGate();
       return;
     }
+    // Consume the rewarm one-shot flag on the VERY FIRST "on" observation,
+    // before any other early return. 3 independent bug-hunt agents (2026-08-09)
+    // found the same leak when this check sat after the `prev === "on"` and
+    // camera-unavailable returns below: a backend rewarm frequently lands
+    // while the camera entity is still momentarily "unavailable" (it just
+    // tore the session down), or HA's state-push coalescing can skip over
+    // the intermediate "off" entirely, making `prev` already "on" by the time
+    // this runs — either way the flag never got consumed and stuck `true`
+    // indefinitely, silently un-gating some LATER unrelated automation-driven
+    // turn-on on a remote/never-autoplay session (exactly what this gate
+    // exists to prevent). Consuming here regardless of prev/camera-state
+    // means it can never survive past this one "on" observation.
+    if (this._rewarmSkipGate) { this._rewarmSkipGate = false; return; }
     // Stream is ON. Re-decide gate ONLY on transition into "on" — if we
     // already decided in a previous _update() pass (prev was "on"), don't
     // reshow the gate; the user's earlier tap stands until stream cycles.
@@ -7872,6 +7905,11 @@ class BoschCameraCard extends HTMLElement {
     const video = this.shadowRoot.getElementById("cam-video");
     const img   = this.shadowRoot.getElementById("cam-img");
     if (!video) return;
+    // Re-entrancy token — see the _startGen field comment in the constructor
+    // for why this exists. Checked after each of this function's two long
+    // awaits (camera/stream WS call, hls.js CDN load) before touching shared
+    // state a newer attempt may already own. 2026-08-09.
+    const gen = ++this._startGen;
 
     // A start is actually beginning (whichever path triggered it) — any
     // still-pending dead-stream backoff bookkeeping is moot now: either this
@@ -7944,8 +7982,20 @@ class BoschCameraCard extends HTMLElement {
         // Live frame is on screen — the backend source is healthy again. Clear
         // the stale-source latch + rewarm cooldown so a future creds rotation
         // can recover immediately. (live fix 2026-05-31)
+        //
+        // EXCEPT while a stall/freeze is still recent (a non-empty
+        // _stallRecoveryTimestamps window): a repeatedly-flapping source
+        // renders a frame every cycle (firing this exact "playing" event)
+        // before stalling again, which unconditionally wiped this cooldown
+        // on every single cycle — defeating _maybeForceBackendRewarm()'s own
+        // 20s guard for precisely the case it exists to protect, and settling
+        // into a rewarm every ~20-45s indefinitely with no real backoff
+        // (bug-hunt finding, 2026-08-09). Only release the cooldown early
+        // once the stall window has actually gone quiet.
         this._staleSourceSeen = false;
-        this._lastRewarmAt    = 0;
+        if (!this._stallRecoveryTimestamps || this._stallRecoveryTimestamps.length === 0) {
+          this._lastRewarmAt = 0;
+        }
         // A real frame rendered → the reconnect chain succeeded. Reset the
         // consecutive-drop counter so only genuinely repeated failures escalate
         // to a backend rewarm. 2026-06-18 (HLS-reconnect-loop fix).
@@ -7954,6 +8004,12 @@ class BoschCameraCard extends HTMLElement {
         // actually played, so the source is alive again regardless of which
         // transport got there. 2026-08-09.
         this._deadStreamRecoveryStreak = 0;
+        // Deliberately do NOT reset _stallRecoveryTimestamps here. A rewarm-worthy
+        // flapping source plays a few seconds every cycle (firing this exact
+        // "playing" event) before stalling again — resetting on every real frame
+        // wiped the streak every cycle and the escalation never fired (2026-08-09,
+        // 2nd pass). The rolling time window ages old entries out on its own once
+        // the stream is genuinely stable again; no reset needed here.
         // Flip the badge to Live now — the first frame is on screen. Don't wait
         // for the next hass push (stream_status sensor can lag 10s+). 2026-05-30.
         this._markLiveBadge();
@@ -8286,6 +8342,11 @@ class BoschCameraCard extends HTMLElement {
         type:      "camera/stream",
         entity_id: this._entities.camera,
       });
+      // A newer _startLiveVideo() call superseded this one while it was
+      // parked on the await above — bail silently rather than proceed to
+      // build a second HLS attempt on top of whatever the newer one is
+      // doing. 2026-08-09.
+      if (this._startGen !== gen) return;
       if (!result?.url) throw new Error("no url");
 
       // Always start muted to comply with Chrome autoplay policy.
@@ -8365,6 +8426,12 @@ class BoschCameraCard extends HTMLElement {
       } catch (e) {
         console.warn("bosch-camera-card: hls.js load failed, will try native HLS:", e?.message);
       }
+      // Same re-entrancy check as above, after the second long await —
+      // this is the one that matters most: without it, an orphaned attempt
+      // resuming here destroys a NEWER, already-healthy this._hls instance
+      // and reattaches media on top of it (the exact bug reported live,
+      // 2026-08-09).
+      if (this._startGen !== gen) return;
       if (Hls && Hls.isSupported()) {
         if (this._hls) { this._hls.destroy(); this._hls = null; }
         // Apply the buffer profile selected via integration options.
@@ -8929,7 +8996,13 @@ class BoschCameraCard extends HTMLElement {
     // intentional and never turn it back on. (live fix 2026-08-08)
     this._rewarmPending = true;
     this._rewarmSwitchEntity = sw;
-    this._rewarmTurnOnTimer = setTimeout(
+    // _armTimer (not a raw setTimeout) so a disconnect mid-rewarm (e.g. HA's
+    // documented 5-min hidden-tab panel removal, v14.0.0) actually cancels
+    // this — otherwise the orphaned timer fires _fireRewarmTurnOn() on a
+    // detached card after reconnect, setting _rewarmSkipGate on an instance
+    // whose connectedCallback already ran and reset it, losing the gate-skip
+    // for the reconnect's own real transition (bug-hunt finding, 2026-08-09).
+    this._rewarmTurnOnTimer = this._armTimer(
       () => this._fireRewarmTurnOn(),
       REWARM_TURN_ON_DELAY_MS,
     );
@@ -8946,6 +9019,18 @@ class BoschCameraCard extends HTMLElement {
     const sw = this._rewarmSwitchEntity;
     this._rewarmSwitchEntity = null;
     if (!sw) return;
+    // The switch is about to flip OFF→ON purely as an internal recovery
+    // mechanic — the user never touched anything and is already actively
+    // watching this camera. Without this flag, _evaluateGateForStreamTransition()
+    // treats it exactly like an unrelated/automation-driven turn-on and shows
+    // the manual tap-to-play gate for any non-"always" autoplay mode (the
+    // common "lan"-only default on a remote/tunneled session — precisely the
+    // case this rewarm exists for) — silently swallowing the automatic
+    // recovery and leaving the viewer stuck until they notice and tap play
+    // themselves. (live report 2026-08-09: rewarm fired correctly per the
+    // backend logs — switch + RTSP session both came back up — but the card
+    // never resumed on its own.)
+    this._rewarmSkipGate = true;
     this._callService("switch", "turn_on", { entity_id: sw });
     this._waitingForStream = true;
     setTimeout(() => { if (this._waitingForStream) this._waitForStreamReady(); }, 1000);
@@ -8963,17 +9048,15 @@ class BoschCameraCard extends HTMLElement {
     // timer and re-arm for exactly the remaining wait instead of guessing.
     const elapsed = Date.now() - this._lastRewarmAt;
     if (elapsed < REWARM_TURN_ON_DELAY_MS) {
-      if (this._rewarmTurnOnTimer) clearTimeout(this._rewarmTurnOnTimer);
-      this._rewarmTurnOnTimer = setTimeout(
+      this._clearTimer(this._rewarmTurnOnTimer);
+      this._rewarmTurnOnTimer = this._armTimer(
         () => this._fireRewarmTurnOn(),
         REWARM_TURN_ON_DELAY_MS - elapsed,
       );
       return;
     }
-    if (this._rewarmTurnOnTimer) {
-      clearTimeout(this._rewarmTurnOnTimer);
-      this._rewarmTurnOnTimer = null;
-    }
+    this._clearTimer(this._rewarmTurnOnTimer);
+    this._rewarmTurnOnTimer = null;
     this._fireRewarmTurnOn();
   }
 
@@ -9337,6 +9420,35 @@ class BoschCameraCard extends HTMLElement {
     } else {
       this._deadStreamRecoveryStreak = 0;
     }
+    // Unconditional stall-recovery window — catches what _deadStreamRecoveryStreak
+    // structurally cannot: a stream that played successfully and THEN froze
+    // mid-session (neverRendered is false there, so that streak never engages).
+    // Before this, the generic stall/freeze path had NO escalation to a backend
+    // rewarm at all — only HLS's own FATAL error handler
+    // (_reconnectAfterStreamDrop -> _maybeForceBackendRewarm) could force one,
+    // and a silently-frozen manifest (Bosch LOCAL session renewal killing the
+    // backend source while the HLS playlist/hls.js reports only non-fatal
+    // bufferStall, or a REMOTE session hitting its lifetime cap) never throws a
+    // fatal error — so the card looped teardown+rebuild against the same dead
+    // source forever. Time-windowed (not a reset-on-frame counter, see
+    // _stallRecoveryTimestamps' field comment) so a source that keeps briefly
+    // reviving then re-stalling — the actual observed pattern — still
+    // escalates. (fable-agent finding 2026-08-09, corrected same day)
+    // "quality changed" is a deliberate, user/config-driven restart of an
+    // otherwise healthy stream (_setLiveBufferMode), not a failure — counting
+    // it here let 3 quick quality toggles trip a full disruptive backend
+    // rewarm instead of the intended cheap 1s reconnect (bug-hunt finding,
+    // 2026-08-09).
+    if (reason !== "quality changed") {
+      const nowForStall = Date.now();
+      this._stallRecoveryTimestamps = (this._stallRecoveryTimestamps || [])
+        .filter((t) => nowForStall - t < STALL_RECOVERY_WINDOW_MS);
+      this._stallRecoveryTimestamps.push(nowForStall);
+      if (this._stallRecoveryTimestamps.length >= STALL_RECOVERY_THRESHOLD && this._maybeForceBackendRewarm()) {
+        this._stallRecoveryTimestamps = [];
+        return;
+      }
+    }
     console.warn("bosch-camera-card: live recovery (" + reason + ")");
     this._reconnectingLiveVideo = true;
     this._setLiveStalled(true); // badge → "connecting" for the rebuild window
@@ -9438,6 +9550,12 @@ class BoschCameraCard extends HTMLElement {
     // Mark teardown so the <video> pause-guard (added in activateVideo) doesn't
     // auto-resume the stream we are intentionally stopping here. 2026-06-03.
     this._stoppingLiveVideo = true;
+    // Invalidate any _startLiveVideo() attempt currently parked on one of its
+    // two long awaits — belt-and-braces alongside the gen check inside
+    // _startLiveVideo itself, so a teardown always immediately orphans
+    // whatever was in flight rather than relying solely on a later start
+    // to bump the counter first. 2026-08-09.
+    this._startGen++;
     this._disarmAutoUnmute();
     if (this._hls) { this._hls.destroy(); this._hls = null; }
     this._clearTimer(this._stallChecker); this._stallChecker = null;

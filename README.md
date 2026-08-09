@@ -2260,6 +2260,8 @@ curl -sI https://your-ha.example.com/api/hls/<token>/segment/0.m4s
 # Expected: Transfer-Encoding: chunked  AND  no Content-Length
 ```
 
+**2026-08-09 investigation update**: on one real-world setup, a remote (Cloudflare-Tunnel, no VPN) live stream kept flapping (WebRTC failing fast → HLS → plays ~8-15 s → stalls → rebuilds, repeating) even with the unbuffer patch confirmed active and correctly configured (verified via the `curl` check above and the add-on's generated ingress config). Root-caused to an open, unresolved upstream cloudflared limitation ([cloudflare/cloudflared#1449](https://github.com/cloudflare/cloudflared/issues/1449)): GET requests can buffer completely through cloudflared regardless of header/content-type tricks, while POST requests stream fine — HLS delivery is all-GET. Confirmed on the same setup: streaming the identical camera over a VPN (bypassing the Cloudflare Tunnel entirely) works with no issues. **If you hit this exact symptom** (rock-solid on LAN, flapping only over a Cloudflare-Tunneled remote connection with no VPN): route the streaming path through a VPN (WireGuard/Tailscale/Nabu Casa) instead of relying on the tunnel for sustained live video — the tunnel remains fine for UI/REST/snapshots. Tracking: [issue #67](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/67).
+
 ### Optional cloudflared improvement
 
 Force cloudflared off QUIC onto HTTP/2 — QUIC over cellular is fragile (regular `failed to accept QUIC stream: timeout` errors). HA → *Settings → Add-ons → Cloudflared → Configuration*: add `--protocol=http2` to `run_parameters`, restart the add-on. Verify in the add-on log: `Initial protocol http2`. Costs nothing, helps WebSocket and large-response stability.

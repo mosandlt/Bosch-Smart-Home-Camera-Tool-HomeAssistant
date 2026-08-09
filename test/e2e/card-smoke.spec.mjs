@@ -2609,6 +2609,421 @@ test("2026-06-22 bug-hunt fixes are wired: stale-pc guard, getStats oracle, HLS 
   expect(deadEndSlice).toMatch(/this\._startingLiveVideo\s*=\s*false;/);
 });
 
+test("a stream that plays then repeatedly freezes escalates to a backend rewarm, not just an infinite same-source rebuild loop (2026-08-09)", async ({ page }) => {
+  // Real-world report: over a remote connection, the stream plays fine, then
+  // at some point starts looping "stalled/frozen, recovering" -> "no presented
+  // frame >10s" forever, ONLY while HLS is the active transport, and never
+  // self-heals. Root cause (fable-agent investigation): _deadStreamRecoveryStreak
+  // only tracks "never rendered ANY frame this session" — a stream that played
+  // successfully and THEN froze has neverRendered=false, so that streak (and
+  // its backoff) never engages. The generic stall/freeze path had NO
+  // escalation to a backend rewarm at all — only HLS's own FATAL error
+  // handler could trigger one, and a silently-frozen manifest (e.g. a Bosch
+  // LOCAL session renewal killing the backend source) reports only a
+  // non-fatal bufferStall, never a fatal error — so the card looped
+  // teardown+rebuild against the same dead source forever. This test verifies
+  // the unconditional _stallRecoveryTimestamps window escalates to
+  // _maybeForceBackendRewarm() after repeated recoveries even when frames DID
+  // render previously (neverRendered=false throughout).
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "de", localize: (k) => k, callService: () => {}, callApi: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { ...base, states: { "camera.test": { state: "streaming", attributes: {}, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+
+    let rewarmCalls = 0;
+    card._maybeForceBackendRewarm = () => { rewarmCalls++; return true; };
+    card._stopLiveVideo = () => {};
+    card._armTimer = () => 0;
+    // neverRendered=false throughout — this stream DID render frames, matching
+    // the reported "worked, then broke" case, not a "never worked" one.
+    card._hasEverDecodedFrames = true;
+    card._liveVideoActive = true;
+    card._streamTransport = "hls";
+
+    for (let i = 0; i < 3; i++) {
+      card._reconnectingLiveVideo = false;
+      card._liveVideoActive = true;
+      card._scheduleLiveRecovery("no presented frame >10s");
+    }
+    const streakAfter3 = card._stallRecoveryTimestamps.length;
+
+    card.remove();
+    return { rewarmCalls, streakAfter3 };
+  });
+  expect(r.rewarmCalls, "backend rewarm triggered exactly once, on the 3rd consecutive stall recovery").toBe(1);
+  expect(r.streakAfter3, "timestamp window clears once a rewarm is triggered").toBe(0);
+});
+
+test("stall escalation survives a brief real frame render between each stall (2026-08-09 regression)", async ({ page }) => {
+  // The FIRST version of the fix above used a plain counter reset whenever a
+  // frame rendered (clearOverlay's "playing" listener). Live-reproduced same
+  // day: a flapping remote source plays ~8s every cycle (firing that exact
+  // "playing" event) before stalling again — wiping a reset-on-frame counter
+  // every single cycle, so it never reached 3 and the rewarm never fired,
+  // even after 5+ consecutive stall/HLS-restart cycles. This test reproduces
+  // that exact interleaving (recovery -> real "playing" event -> recovery)
+  // and asserts the rewarm still fires, since the fix must survive brief
+  // successful renders, not just a fully-dead source.
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "de", localize: (k) => k, callService: () => {}, callApi: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { ...base, states: { "camera.test": { state: "streaming", attributes: {}, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+
+    let rewarmCalls = 0;
+    card._maybeForceBackendRewarm = () => { rewarmCalls++; return true; };
+    card._stopLiveVideo = () => {};
+    card._armTimer = () => 0;
+    card._hasEverDecodedFrames = true;
+    card._streamTransport = "hls";
+
+    for (let i = 0; i < 3; i++) {
+      card._reconnectingLiveVideo = false;
+      card._liveVideoActive = true;
+      card._scheduleLiveRecovery("no presented frame >10s");
+      // Simulate the brief real render each cycle gets before stalling again
+      // — the video element's "playing" event fires, running clearOverlay's
+      // reset logic on every OTHER streak this class of code tracks.
+      card._deadStreamRecoveryStreak = 0;
+      card._streamDropCount = 0;
+    }
+    const streakAfter3 = card._stallRecoveryTimestamps.length;
+
+    card.remove();
+    return { rewarmCalls, streakAfter3 };
+  });
+  expect(r.rewarmCalls, "rewarm still fires after 3 stalls even with a brief real render between each").toBe(1);
+  expect(r.streakAfter3).toBe(0);
+});
+
+test("a backend rewarm's own switch turn-on does not get stuck behind the manual tap-to-play gate (2026-08-09)", async ({ page }) => {
+  // Live report same day: the rewarm escalation above fired correctly (backend
+  // logs confirmed the switch cycled off/on and a fresh LOCAL RTSP session
+  // opened) but the card never resumed playback on its own — the user had to
+  // manually tap play, and even then it kept re-flapping. Root cause:
+  // _evaluateGateForStreamTransition() runs on every _update() pass and shows
+  // the manual tap-to-play gate on ANY switch OFF→ON transition unless
+  // autoplay mode is "always" (or "lan" on a LAN session) — it can't tell an
+  // internal recovery apart from an unrelated/automation-driven turn-on. On a
+  // remote/tunneled session (autoplay mode "lan", the common default — and
+  // exactly the case this rewarm exists for) that gate swallowed the
+  // automatic resume completely. Fix: _fireRewarmTurnOn() sets a one-shot
+  // _rewarmSkipGate flag consumed by _evaluateGateForStreamTransition() to
+  // bypass the gate for that specific transition.
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "de", localize: (k) => k, callService: () => {}, callApi: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", switch_entity: "switch.test_live" });
+    card.hass = {
+      ...base,
+      states: {
+        "camera.test": { state: "streaming", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+        "switch.test_live": { state: "off", attributes: {} },
+      },
+    };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+
+    // Force "lan"-only autoplay mode on a non-LAN (remote) session — the
+    // exact combination that showed the gate for every unrelated turn-on.
+    card._getAutoPlayMode = () => "lan";
+    card._isLanSession = () => false;
+
+    let showGateCalls = 0;
+    card._showPlayGate = () => { showGateCalls++; };
+
+    // Simulate _fireRewarmTurnOn()'s flag set (without going through the
+    // full rewarm/service-call machinery, which isn't wired in this fixture).
+    card._rewarmSkipGate = true;
+    card._lastEvaluatedSwitchState = "off";
+    card.hass = {
+      ...base,
+      states: {
+        "camera.test": { state: "streaming", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+        "switch.test_live": { state: "on", attributes: {} },
+      },
+    };
+    card._evaluateGateForStreamTransition();
+    const gateSkippedOnRewarmTurnOn = showGateCalls === 0;
+    const flagConsumed = card._rewarmSkipGate === false;
+
+    // A SEPARATE, later OFF→ON transition (a real unrelated turn-on, not a
+    // rewarm) must still show the gate normally — the flag is one-shot only.
+    card._lastEvaluatedSwitchState = "off";
+    card.hass = {
+      ...base,
+      states: {
+        "camera.test": { state: "streaming", attributes: {}, last_updated: "2026-01-01T00:00:00Z" },
+        "switch.test_live": { state: "on", attributes: {} },
+      },
+    };
+    card._evaluateGateForStreamTransition();
+    const gateStillShownForRealTurnOn = showGateCalls === 1;
+
+    card.remove();
+    return { gateSkippedOnRewarmTurnOn, flagConsumed, gateStillShownForRealTurnOn };
+  });
+  expect(r.gateSkippedOnRewarmTurnOn, "rewarm's own turn-on must not show the tap-to-play gate").toBe(true);
+  expect(r.flagConsumed, "_rewarmSkipGate is one-shot").toBe(true);
+  expect(r.gateStillShownForRealTurnOn, "an unrelated later turn-on still gates normally").toBe(true);
+});
+
+test("_rewarmSkipGate is consumed even when the camera is unavailable or the switch was already \"on\" (2026-08-09 bug-hunt)", async ({ page }) => {
+  // 3 independent opus bug-hunt agents (2026-08-09) found the same leak: the
+  // original placement consumed the flag AFTER the `prev === "on"` and
+  // camera-unavailable early returns, so a rewarm landing while the camera
+  // entity was still momentarily unavailable (very plausible — the rewarm
+  // just tore the backend session down) — or HA's own state-push coalescing
+  // skipping over the intermediate "off" so `prev` was already "on" — left
+  // the flag stuck `true` forever, later silently un-gating some UNRELATED
+  // automation-driven turn-on on a remote/never-autoplay session. Fix: the
+  // flag is now consumed on the very first "on" observation, before either
+  // of those returns.
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "de", localize: (k) => k, callService: () => {}, callApi: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", switch_entity: "switch.test_live" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    card._getAutoPlayMode = () => "lan";
+    card._isLanSession = () => false;
+    let showGateCalls = 0;
+    card._showPlayGate = () => { showGateCalls++; };
+
+    // Case A: camera is unavailable when the rewarm's "on" lands.
+    card._rewarmSkipGate = true;
+    card._lastEvaluatedSwitchState = "off";
+    card.hass = {
+      ...base,
+      states: {
+        "camera.test": { state: "unavailable", attributes: {} },
+        "switch.test_live": { state: "on", attributes: {} },
+      },
+    };
+    card._evaluateGateForStreamTransition();
+    const flagConsumedDespiteUnavailableCamera = card._rewarmSkipGate === false;
+
+    // Case B: prev was already "on" (state-push coalescing skipped "off").
+    card._rewarmSkipGate = true;
+    card._lastEvaluatedSwitchState = "on";
+    card.hass = {
+      ...base,
+      states: {
+        "camera.test": { state: "streaming", attributes: {} },
+        "switch.test_live": { state: "on", attributes: {} },
+      },
+    };
+    card._evaluateGateForStreamTransition();
+    const flagConsumedDespitePrevAlreadyOn = card._rewarmSkipGate === false;
+
+    // Neither case should ever have shown the gate.
+    const gateNeverShown = showGateCalls === 0;
+
+    card.remove();
+    return { flagConsumedDespiteUnavailableCamera, flagConsumedDespitePrevAlreadyOn, gateNeverShown };
+  });
+  expect(r.flagConsumedDespiteUnavailableCamera, "flag must not leak past an unavailable-camera observation").toBe(true);
+  expect(r.flagConsumedDespitePrevAlreadyOn, "flag must not leak past a prev-already-on observation").toBe(true);
+  expect(r.gateNeverShown).toBe(true);
+});
+
+test("a quality-mode restart does not count toward the stall-recovery escalation window (2026-08-09 bug-hunt)", async ({ page }) => {
+  // 2 independent bug-hunt agents found that "quality changed" — a
+  // deliberate, user/config-driven restart of an otherwise HEALTHY stream —
+  // was being counted by the same unconditional stall-timestamp push as a
+  // genuine failure. 3 quick buffer-mode/quality toggles within the 90s
+  // window would trip a full disruptive backend rewarm (switch off, ~5.5s
+  // dead time, fresh session) instead of the intended cheap ~1s reconnect.
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "de", localize: (k) => k, callService: () => {}, callApi: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { ...base, states: { "camera.test": { state: "streaming", attributes: {}, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+
+    let rewarmCalls = 0;
+    card._maybeForceBackendRewarm = () => { rewarmCalls++; return true; };
+    card._stopLiveVideo = () => {};
+    card._armTimer = () => 0;
+    card._hasEverDecodedFrames = true;
+    card._liveVideoActive = true;
+
+    for (let i = 0; i < 5; i++) {
+      card._reconnectingLiveVideo = false;
+      card._liveVideoActive = true;
+      card._scheduleLiveRecovery("quality changed");
+    }
+    const timestampsAfterFiveQualityChanges = card._stallRecoveryTimestamps.length;
+
+    card.remove();
+    return { rewarmCalls, timestampsAfterFiveQualityChanges };
+  });
+  expect(r.rewarmCalls, "5 quality-change restarts must never trigger a backend rewarm").toBe(0);
+  expect(r.timestampsAfterFiveQualityChanges, "quality-change restarts must not push into the stall window").toBe(0);
+});
+
+test("the rewarm cooldown is not wiped by a brief render while a stall is still recent (2026-08-09 bug-hunt)", async ({ page }) => {
+  // Bug-hunt finding: clearOverlay's "playing" handler unconditionally reset
+  // _lastRewarmAt=0 on EVERY real frame — including the brief ~8s render a
+  // flapping remote source gets every cycle before stalling again. That wiped
+  // _maybeForceBackendRewarm()'s own 20s cooldown guard on every single
+  // cycle, defeating it for exactly the case it exists to protect and
+  // settling into a rewarm roughly every 20-45s indefinitely with no real
+  // backoff. Fix: only release the cooldown early once the stall-recovery
+  // timestamp window has actually gone quiet (length 0).
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "de", localize: (k) => k, callService: () => {}, callApi: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { ...base, states: { "camera.test": { state: "streaming", attributes: {}, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+
+    card._lastRewarmAt = 12345; // simulate a rewarm having just fired
+    card._stallRecoveryTimestamps = [Date.now()]; // a stall is still "recent"
+
+    // Simulate clearOverlay's real-frame path directly (constructing the full
+    // WebRTC/video pipeline isn't needed to test this one guard).
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+    card._staleSourceSeen = true;
+    if (!card._stallRecoveryTimestamps || card._stallRecoveryTimestamps.length === 0) {
+      card._lastRewarmAt = 0;
+    }
+    const cooldownPreservedWhileStallRecent = card._lastRewarmAt === 12345;
+
+    // Once the stall window is actually empty, the cooldown SHOULD release.
+    card._stallRecoveryTimestamps = [];
+    if (!card._stallRecoveryTimestamps || card._stallRecoveryTimestamps.length === 0) {
+      card._lastRewarmAt = 0;
+    }
+    const cooldownReleasedOnceQuiet = card._lastRewarmAt === 0;
+
+    video.remove();
+    card.remove();
+    return { cooldownPreservedWhileStallRecent, cooldownReleasedOnceQuiet };
+  });
+  expect(r.cooldownPreservedWhileStallRecent, "cooldown must survive a brief render while a stall is still recent").toBe(true);
+  expect(r.cooldownReleasedOnceQuiet, "cooldown releases once the stall window is actually empty").toBe(true);
+
+  // Pin that clearOverlay's REAL code contains this exact guard (the behavioral
+  // test above exercises the same logic standalone, not through the actual
+  // "playing" event listener) — source-anchor on the surrounding comment to
+  // stay resilient to reformatting.
+  const idx = CARD_SRC.indexOf("EXCEPT while a stall/freeze is still recent");
+  expect(idx, "clearOverlay's cooldown-preservation comment must exist").toBeGreaterThan(-1);
+  const slice = CARD_SRC.slice(idx, idx + 1000);
+  expect(slice).toMatch(/if\s*\(\s*!this\._stallRecoveryTimestamps\s*\|\|\s*this\._stallRecoveryTimestamps\.length\s*===\s*0\s*\)\s*\{\s*\n\s*this\._lastRewarmAt\s*=\s*0;/);
+});
+
+test("_startLiveVideo re-entrancy guard prevents an orphaned attempt from destroying a newer, healthy hls.js instance (2026-08-09)", async ({ page }) => {
+  // Real-world report: even after the LL-HLS/backoff/ontrack fixes, the
+  // stream kept flashing to the snapshot and resuming. Root cause found via
+  // opus audit: _startLiveVideo has two long awaits (camera/stream WS call,
+  // hls.js CDN load) with no guard against a NEWER call superseding it while
+  // parked there. A teardown+fresh-start racing an old attempt's pending
+  // await let the OLD one resume afterward, destroy the NEW already-healthy
+  // hls.js instance, and reattach media on top of it — producing exactly
+  // the reported flash-then-resume cycle. This test reproduces the exact
+  // race against the real _startLiveVideo()/_stopLiveVideo() code path.
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    let resolveFirstStreamCall;
+    let callCount = 0;
+    class FakeHls {
+      static isSupported() { return true; }
+      static get Events() { return { MANIFEST_PARSED: "m", FRAG_LOADED: "f", FRAG_BUFFERED: "b", ERROR: "e" }; }
+      static get ErrorTypes() { return { NETWORK_ERROR: "net", MEDIA_ERROR: "media" }; }
+      static get DefaultConfig() { return { loader: class {} }; }
+      constructor() { this.destroyed = false; }
+      on() {}
+      loadSource() {}
+      attachMedia() {}
+      destroy() { this.destroyed = true; }
+    }
+    window.Hls = FakeHls;
+
+    const base = { config: {}, language: "de", localize: (k) => k, callService: () => {}, callApi: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    // Block _update()'s own auto-start gate during setup — it would otherwise
+    // race the manual _startLiveVideo() calls below the moment `hass` (with a
+    // "streaming" camera state) is assigned, confusing the controlled race
+    // this test is deliberately constructing.
+    card._startingLiveVideo = true;
+    card._waitingForStream = true;
+    card.hass = {
+      ...base,
+      callWS: async (msg) => {
+        if (msg.type === "camera/stream") {
+          callCount++;
+          if (callCount === 1) {
+            return new Promise((res) => { resolveFirstStreamCall = () => res({ url: "http://x/stale.m3u8" }); });
+          }
+          return { url: "http://x/fresh.m3u8" };
+        }
+        return {};
+      },
+      states: { "camera.test": { state: "streaming", attributes: {}, last_updated: "2026-01-01T00:00:00Z" } },
+    };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    card._preferHlsThisSession = true; // skip WebRTC, go straight to the HLS branch
+    card._liveVideoActive = false;
+    card._startingLiveVideo = false;
+    card._waitingForStream = false;
+
+    // Attempt #1: starts, gets stuck awaiting camera/stream (the WS call
+    // never resolves until we call resolveFirstStreamCall() below).
+    const p1 = card._startLiveVideo();
+    await new Promise((res) => setTimeout(res, 20)); // let it reach the await
+
+    // Simulate a teardown+fresh start superseding attempt #1 — exactly what
+    // a real reconnect cycle does (_scheduleLiveRecovery -> _stopLiveVideo
+    // -> _startLiveVideo) while the old attempt is still parked.
+    card._stopLiveVideo();
+    card._liveVideoActive = false;
+    const p2 = card._startLiveVideo(); // attempt #2 resolves camera/stream immediately
+    await p2;
+    const healthyHls = card._hls;
+    const healthyDestroyedBeforeResume = healthyHls?.destroyed;
+
+    // Now let attempt #1 resume — this is the exact race that used to
+    // destroy the healthy instance created by attempt #2.
+    resolveFirstStreamCall();
+    await p1;
+    await new Promise((res) => setTimeout(res, 20));
+
+    const healthyDestroyedAfterResume = healthyHls?.destroyed;
+    const stillSameInstance = card._hls === healthyHls;
+
+    card.remove();
+    return { healthyDestroyedBeforeResume, healthyDestroyedAfterResume, stillSameInstance };
+  });
+  expect(r.healthyDestroyedBeforeResume, "sanity: healthy instance not destroyed yet").toBe(false);
+  expect(r.healthyDestroyedAfterResume, "orphaned attempt #1 must NOT destroy the newer healthy hls instance").toBe(false);
+  expect(r.stillSameInstance, "this._hls must still be the healthy instance, not replaced by the orphan").toBe(true);
+});
+
 test("pc.ontrack guards on pc identity like its sibling onmute/onunmute handlers (2026-08-09)", () => {
   // Real-world report: with sticky-HLS correctly active and hls.js confirmed
   // successfully fetching/playing the (LL-HLS-stripped) manifest, the stream

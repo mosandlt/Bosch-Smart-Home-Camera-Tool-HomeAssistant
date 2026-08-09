@@ -61,6 +61,10 @@ const BACKGROUND_TEARDOWN_GRACE_MS = 6e4;
 
 const REWARM_TURN_ON_DELAY_MS = 5500;
 
+const STALL_RECOVERY_WINDOW_MS = 9e4;
+
+const STALL_RECOVERY_THRESHOLD = 3;
+
 const CARD_I18N = {
   en: {
     play_gate_label: "Start stream",
@@ -2827,7 +2831,10 @@ class BoschCameraCard extends HTMLElement {
     this._webrtcDeadPolls = 0;
     this._webrtcRecoveryStreak = 0;
     this._deadStreamRecoveryStreak = 0;
+    this._stallRecoveryTimestamps = [];
     this._deadStreamRebuildPending = false;
+    this._startGen = 0;
+    this._rewarmSkipGate = false;
     this._statsCachePc = null;
     this._statsCacheAt = 0;
     this._statsCachePromise = null;
@@ -2874,6 +2881,8 @@ class BoschCameraCard extends HTMLElement {
     this._preferHlsThisSession = false;
     this._webrtcRecoveryStreak = 0;
     this._deadStreamRecoveryStreak = 0;
+    this._stallRecoveryTimestamps = [];
+    this._rewarmSkipGate = false;
     this._deadStreamRebuildPending = false;
     this._hasEverDecodedFrames = false;
     this._clearTimer(this._hlsBannerAutoHideTimer);
@@ -3404,6 +3413,10 @@ class BoschCameraCard extends HTMLElement {
     this._lastEvaluatedSwitchState = curr;
     if (curr !== "on") {
       if (this._playGateActive) this._hidePlayGate();
+      return;
+    }
+    if (this._rewarmSkipGate) {
+      this._rewarmSkipGate = false;
       return;
     }
     if (prev === "on") return;
@@ -4315,6 +4328,7 @@ class BoschCameraCard extends HTMLElement {
     const video = this.shadowRoot.getElementById("cam-video");
     const img = this.shadowRoot.getElementById("cam-img");
     if (!video) return;
+    const gen = ++this._startGen;
     this._deadStreamRebuildPending = false;
     this._stopRefreshTimer();
     this._startingLiveVideo = true;
@@ -4352,7 +4366,9 @@ class BoschCameraCard extends HTMLElement {
           this._tryStartUnmute(video);
         }
         this._staleSourceSeen = false;
-        this._lastRewarmAt = 0;
+        if (!this._stallRecoveryTimestamps || this._stallRecoveryTimestamps.length === 0) {
+          this._lastRewarmAt = 0;
+        }
         this._streamDropCount = 0;
         this._deadStreamRecoveryStreak = 0;
         this._markLiveBadge();
@@ -4503,6 +4519,7 @@ class BoschCameraCard extends HTMLElement {
         type: "camera/stream",
         entity_id: this._entities.camera
       });
+      if (this._startGen !== gen) return;
       if (!result?.url) throw new Error("no url");
       video.muted = true;
       const startPlay = () => {
@@ -4557,6 +4574,7 @@ class BoschCameraCard extends HTMLElement {
       } catch (e) {
         console.warn("bosch-camera-card: hls.js load failed, will try native HLS:", e?.message);
       }
+      if (this._startGen !== gen) return;
       if (Hls && Hls.isSupported()) {
         if (this._hls) {
           this._hls.destroy();
@@ -4904,7 +4922,7 @@ class BoschCameraCard extends HTMLElement {
     });
     this._rewarmPending = true;
     this._rewarmSwitchEntity = sw;
-    this._rewarmTurnOnTimer = setTimeout(() => this._fireRewarmTurnOn(), REWARM_TURN_ON_DELAY_MS);
+    this._rewarmTurnOnTimer = this._armTimer(() => this._fireRewarmTurnOn(), REWARM_TURN_ON_DELAY_MS);
     return true;
   }
   _fireRewarmTurnOn() {
@@ -4914,6 +4932,7 @@ class BoschCameraCard extends HTMLElement {
     const sw = this._rewarmSwitchEntity;
     this._rewarmSwitchEntity = null;
     if (!sw) return;
+    this._rewarmSkipGate = true;
     this._callService("switch", "turn_on", {
       entity_id: sw
     });
@@ -4926,14 +4945,12 @@ class BoschCameraCard extends HTMLElement {
     if (!this._rewarmPending) return;
     const elapsed = Date.now() - this._lastRewarmAt;
     if (elapsed < REWARM_TURN_ON_DELAY_MS) {
-      if (this._rewarmTurnOnTimer) clearTimeout(this._rewarmTurnOnTimer);
-      this._rewarmTurnOnTimer = setTimeout(() => this._fireRewarmTurnOn(), REWARM_TURN_ON_DELAY_MS - elapsed);
+      this._clearTimer(this._rewarmTurnOnTimer);
+      this._rewarmTurnOnTimer = this._armTimer(() => this._fireRewarmTurnOn(), REWARM_TURN_ON_DELAY_MS - elapsed);
       return;
     }
-    if (this._rewarmTurnOnTimer) {
-      clearTimeout(this._rewarmTurnOnTimer);
-      this._rewarmTurnOnTimer = null;
-    }
+    this._clearTimer(this._rewarmTurnOnTimer);
+    this._rewarmTurnOnTimer = null;
     this._fireRewarmTurnOn();
   }
   _startLiveStallWorker() {
@@ -5163,6 +5180,15 @@ class BoschCameraCard extends HTMLElement {
     } else {
       this._deadStreamRecoveryStreak = 0;
     }
+    if (reason !== "quality changed") {
+      const nowForStall = Date.now();
+      this._stallRecoveryTimestamps = (this._stallRecoveryTimestamps || []).filter(t => nowForStall - t < STALL_RECOVERY_WINDOW_MS);
+      this._stallRecoveryTimestamps.push(nowForStall);
+      if (this._stallRecoveryTimestamps.length >= STALL_RECOVERY_THRESHOLD && this._maybeForceBackendRewarm()) {
+        this._stallRecoveryTimestamps = [];
+        return;
+      }
+    }
     console.warn("bosch-camera-card: live recovery (" + reason + ")");
     this._reconnectingLiveVideo = true;
     this._setLiveStalled(true);
@@ -5209,6 +5235,7 @@ class BoschCameraCard extends HTMLElement {
   }
   _stopLiveVideo() {
     this._stoppingLiveVideo = true;
+    this._startGen++;
     this._disarmAutoUnmute();
     if (this._hls) {
       this._hls.destroy();
