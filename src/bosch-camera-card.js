@@ -2976,12 +2976,14 @@ const BOSCH_BUFFER_PROFILES = {
 // abort/byte-range mechanics are inherited unchanged from the real loader,
 // so this can't regress ordinary (non-LL-HLS) playlist/fragment loading.
 function makeLLHlsStrippingPlaylistLoader(BaseLoader) {
+  let warnedOnce = false;
   return class BoschLLHlsStrippingLoader extends BaseLoader {
     load(context, config, callbacks) {
       const wrappedCallbacks = {
         ...callbacks,
         onSuccess: (response, stats, ctx, networkDetails) => {
           if (typeof response.data === "string") {
+            const before = response.data;
             // hls.js's blocking-reload directives fire on EITHER
             // canBlockReload OR canSkipUntil (base-playlist-controller.ts:
             // `details.canBlockReload || details.canSkipUntil`) — HA never
@@ -2994,6 +2996,13 @@ function makeLLHlsStrippingPlaylistLoader(BaseLoader) {
               .replace(/^#EXT-X-PRELOAD-HINT:.*$/gim, "")
               .replace(/^#EXT-X-PART-INF:.*$/gim, "")
               .replace(/^#EXT-X-SKIP:.*$/gim, "");
+            // console.warn (not .debug), once per Hls instance, so this is
+            // visible without enabling DevTools' Verbose level — confirms
+            // the pLoader is actually intercepting real manifest fetches.
+            if (!warnedOnce && response.data !== before) {
+              warnedOnce = true;
+              console.warn("bosch-camera-card: pLoader stripped LL-HLS advertisement from a real manifest fetch (url:", context.url, ")");
+            }
           }
           callbacks.onSuccess(response, stats, ctx, networkDetails);
         },
@@ -8231,6 +8240,13 @@ class BoschCameraCard extends HTMLElement {
         await this._startWebRTC(video, activateVideo);
         return; // WebRTC up
       } catch (webrtcErr) {
+        // This specific attempt was superseded by a newer one (see
+        // _startWebRTC's own abandonment guard) — its pc/unsub are already
+        // cleaned up locally there. Do NOT touch this._webrtcPc/_webrtcUnsub
+        // (they belong to the newer attempt now) and do NOT fall through to
+        // the HLS-fallback code below — the newer attempt already owns the
+        // video element and is handling its own outcome. 2026-08-09.
+        if (webrtcErr?.webrtcAbandoned) return;
         // The most common WebRTC rejection is "Camera does not support
         // WebRTC, frontend_stream_types={HLS}" which happens during the
         // ~3 s race window between stream-feature-flip and HA's auto-fired
@@ -8374,10 +8390,11 @@ class BoschCameraCard extends HTMLElement {
         // sees it, so it can never construct a blocking-reload URL at all.
         // LAN/.local/VPN clients are unaffected (keep real LL-HLS). 2026-08-09.
         const isExternal = this._isExternalHost();
-        if (isExternal) {
-          console.debug("bosch-camera-card: external host — stripping LL-HLS advertisement from fetched manifests (blocking-reload doesn't survive some reverse proxies/tunnels)");
-        }
-        console.debug("bosch-camera-card: HLS buffer profile", bufModeKey, bufProfile, "external:", isExternal);
+        // console.warn (not .debug) so this is visible without enabling
+        // DevTools' Verbose log level — this is exactly the signal needed to
+        // confirm the LL-HLS-stripping pLoader is actually engaging on a
+        // remote client's real connection. 2026-08-09.
+        console.warn("bosch-camera-card: HLS starting — external:", isExternal, "bufProfile:", bufModeKey, bufProfile);
         const hls = new Hls({
           enableWorker: true,
           ...bufProfile,
@@ -8648,6 +8665,20 @@ class BoschCameraCard extends HTMLElement {
     let webrtcReject = null;
     let webrtcTimeout = null;
     pc.ontrack = (ev) => {
+      // Stale-pc guard (matches the existing onmute/onunmute B1 fix below,
+      // which was never applied here): on a slow/lossy connection a WebRTC
+      // negotiation can still be in flight in the background well after we've
+      // given up on it and moved on (sticky HLS, a new reconnect cycle with a
+      // fresh pc, etc.) — if it then completes late, this handler used to
+      // unconditionally overwrite video.srcObject/_streamTransport back to
+      // "webrtc", hijacking the video element out from under an already-
+      // active HLS session and re-triggering the exact same dead transport's
+      // stall loop, endlessly, even though sticky-HLS was correctly telling
+      // _startLiveVideo not to retry WebRTC. Reported live 2026-08-09: HLS
+      // manifest fetches succeeded (pLoader confirmed stripping LL-HLS
+      // tags), yet the stream kept flapping — this stale ontrack firing on
+      // top of the working HLS attempt was the actual cause.
+      if (this._webrtcPc !== pc) return;
       remoteStream.addTrack(ev.track);
       // Video-track liveness (PiP-freeze fix 2026-06-19): when go2rtc stops
       // delivering media (the AlexxIT/WebRTC#121 background-tab WebSocket i/o
@@ -8746,7 +8777,8 @@ class BoschCameraCard extends HTMLElement {
     // pc fires `iceconnectionstatechange` with `failed` long before 5s, but
     // we'd otherwise stall the full timeout. Reject early so HLS fallback
     // kicks in fast.
-    await new Promise((resolve, reject) => {
+    try {
+      await new Promise((resolve, reject) => {
       webrtcResolve = resolve;
       webrtcReject = reject;
       // Default stays a flat 5 s for all paths. A remote/WireGuard user
@@ -8782,7 +8814,28 @@ class BoschCameraCard extends HTMLElement {
           reject(new Error("WebRTC: ICE failed"));
         }
       });
-    });
+      });
+    } catch (err) {
+      // Abandonment guard, same root cause as the pc.ontrack stale-pc fix
+      // above: if a NEWER attempt has since replaced this._webrtcPc (e.g.
+      // _stopLiveVideo() ran and a fresh _startLiveVideo() began while this
+      // attempt's timeout/ICE-failed reject was still pending), the caller's
+      // catch block used to clean up via `this._webrtcPc`/`this._webrtcUnsub`
+      // — which by now belong to the NEWER attempt, not this one. That closed
+      // the new, live pc out from under itself and then fell through to start
+      // a duplicate HLS session on top of it (verify-agent finding, 2026-08-09).
+      // Clean up only OUR OWN pc/unsub here, then throw a marked error so the
+      // caller does nothing further instead of touching shared state that no
+      // longer belongs to this attempt.
+      if (this._webrtcPc !== pc) {
+        try { pc.close(); } catch {}
+        if (typeof unsub === "function") { try { unsub(); } catch {} }
+        const abandoned = new Error("WebRTC attempt abandoned (superseded by a newer attempt)");
+        abandoned.webrtcAbandoned = true;
+        throw abandoned;
+      }
+      throw err;
+    }
   }
 
   _reconnectAfterStreamDrop() {

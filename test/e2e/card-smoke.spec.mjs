@@ -2609,6 +2609,54 @@ test("2026-06-22 bug-hunt fixes are wired: stale-pc guard, getStats oracle, HLS 
   expect(deadEndSlice).toMatch(/this\._startingLiveVideo\s*=\s*false;/);
 });
 
+test("pc.ontrack guards on pc identity like its sibling onmute/onunmute handlers (2026-08-09)", () => {
+  // Real-world report: with sticky-HLS correctly active and hls.js confirmed
+  // successfully fetching/playing the (LL-HLS-stripped) manifest, the stream
+  // STILL flapped forever. Root cause: pc.ontrack had NO staleness guard,
+  // unlike ev.track.onmute/onunmute right below it (the 2026-06-22 B1 fix) —
+  // on a slow/lossy connection, an EARLIER WebRTC negotiation attempt (already
+  // abandoned in favor of HLS) can complete asynchronously and fire ontrack
+  // late, unconditionally overwriting video.srcObject/_streamTransport back to
+  // "webrtc" and hijacking the video element out from under the working HLS
+  // session — re-triggering the exact same dead-transport stall loop forever,
+  // even though sticky-HLS correctly told _startLiveVideo not to retry WebRTC.
+  const idx = CARD_SRC.indexOf("pc.ontrack = (ev) => {");
+  expect(idx, "pc.ontrack handler found").toBeGreaterThan(-1);
+  const body = CARD_SRC.slice(idx, idx + 1500);
+  expect(body).toMatch(/pc\.ontrack\s*=\s*\(ev\)\s*=>\s*\{\s*(?:\/\/[^\n]*\n\s*)*if\s*\(this\._webrtcPc\s*!==\s*pc\)\s*return;/);
+});
+
+test("an abandoned _startWebRTC attempt cleans up its OWN pc, not a newer attempt's (2026-08-09)", () => {
+  // verify-agent finding on the ontrack fix above: with ontrack now correctly
+  // no-oping for a stale pc, an abandoned attempt's timeout/ICE-failed reject
+  // becomes reliably reachable (previously a late ontrack could silently
+  // resolve it instead). _startLiveVideo's catch block used to clean up via
+  // `this._webrtcPc`/`this._webrtcUnsub` — instance fields that, for an
+  // abandoned attempt, may already belong to a NEWER attempt (e.g. a
+  // _stopLiveVideo()+_startLiveVideo() cycle raced this one's pending
+  // timeout). That closed the new, LIVE pc out from under itself and then
+  // fell through to start a duplicate HLS session on top of it. Fixed by
+  // detecting the mismatch inside _startWebRTC itself (which still has its
+  // own local `pc`/`unsub` closure) and marking the thrown error so the
+  // caller does nothing further instead of touching state that no longer
+  // belongs to it.
+  const startIdx = CARD_SRC.indexOf("async _startWebRTC(");
+  expect(startIdx, "_startWebRTC exists").toBeGreaterThan(-1);
+  const webrtcBody = CARD_SRC.slice(startIdx, startIdx + 14000);
+  expect(webrtcBody).toMatch(/if\s*\(this\._webrtcPc\s*!==\s*pc\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*try\s*\{\s*pc\.close\(\);\s*\}\s*catch\s*\{\}/);
+  expect(webrtcBody.includes("abandoned.webrtcAbandoned = true;"),
+    "abandoned attempts are marked so the caller can distinguish them from a real failure").toBe(true);
+
+  const callerIdx = CARD_SRC.indexOf("await this._startWebRTC(video, activateVideo);");
+  expect(callerIdx, "_startWebRTC call site found").toBeGreaterThan(-1);
+  const callerBody = CARD_SRC.slice(callerIdx, callerIdx + 2600);
+  const abandonedCheckIdx = callerBody.indexOf("if (webrtcErr?.webrtcAbandoned) return;");
+  expect(abandonedCheckIdx, "caller checks the abandoned marker").toBeGreaterThan(-1);
+  const pcCleanupIdx = callerBody.indexOf("this._webrtcPc.close()");
+  expect(pcCleanupIdx, "caller's normal pc cleanup found").toBeGreaterThan(-1);
+  expect(abandonedCheckIdx, "abandoned check runs BEFORE the caller touches this._webrtcPc").toBeLessThan(pcCleanupIdx);
+});
+
 // 2026-06-22 runtime: the getStats() oracle returns "frozen" only when
 // framesDecoded stops advancing for >10s on a live WebRTC stream, and resets its
 // baseline as soon as frames advance again.
@@ -3611,7 +3659,7 @@ test("_startLiveVideo skips WebRTC entirely when disable_webrtc is configured", 
 test("_startWebRTC uses the configurable timeout, not a hardcoded 5000", () => {
   const start = CARD_SRC.indexOf("async _startWebRTC(");
   expect(start, "_startWebRTC exists").toBeGreaterThan(-1);
-  const body = CARD_SRC.slice(start, start + 11000);
+  const body = CARD_SRC.slice(start, start + 14000);
   expect(body.includes("const attemptMs = this._webrtcConnectTimeoutMs();"),
     "attemptMs is sourced from the configurable helper").toBe(true);
   expect(body.includes("const attemptMs = 5000;"),

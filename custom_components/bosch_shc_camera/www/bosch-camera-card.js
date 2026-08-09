@@ -2734,13 +2734,19 @@ const BOSCH_BUFFER_PROFILES = {
 };
 
 function makeLLHlsStrippingPlaylistLoader(BaseLoader) {
+  let warnedOnce = false;
   return class BoschLLHlsStrippingLoader extends BaseLoader {
     load(context, config, callbacks) {
       const wrappedCallbacks = {
         ...callbacks,
         onSuccess: (response, stats, ctx, networkDetails) => {
           if (typeof response.data === "string") {
+            const before = response.data;
             response.data = response.data.replace(/CAN-BLOCK-RELOAD=YES/gi, "CAN-BLOCK-RELOAD=NO").replace(/,?CAN-SKIP-UNTIL=[\d.]+/gi, "").replace(/^#EXT-X-PART:.*$/gim, "").replace(/^#EXT-X-PRELOAD-HINT:.*$/gim, "").replace(/^#EXT-X-PART-INF:.*$/gim, "").replace(/^#EXT-X-SKIP:.*$/gim, "");
+            if (!warnedOnce && response.data !== before) {
+              warnedOnce = true;
+              console.warn("bosch-camera-card: pLoader stripped LL-HLS advertisement from a real manifest fetch (url:", context.url, ")");
+            }
           }
           callbacks.onSuccess(response, stats, ctx, networkDetails);
         }
@@ -4466,6 +4472,7 @@ class BoschCameraCard extends HTMLElement {
         await this._startWebRTC(video, activateVideo);
         return;
       } catch (webrtcErr) {
+        if (webrtcErr?.webrtcAbandoned) return;
         const m = String(webrtcErr?.message || webrtcErr);
         const expectedRace = m.includes("does not support WebRTC") || m.includes("frontend_stream_types");
         if (expectedRace) {
@@ -4559,10 +4566,7 @@ class BoschCameraCard extends HTMLElement {
         const bufModeKey = camAttrsForBuf.live_buffer_mode || "balanced";
         const bufProfile = BOSCH_BUFFER_PROFILES[bufModeKey] || BOSCH_BUFFER_PROFILES.balanced;
         const isExternal = this._isExternalHost();
-        if (isExternal) {
-          console.debug("bosch-camera-card: external host — stripping LL-HLS advertisement from fetched manifests (blocking-reload doesn't survive some reverse proxies/tunnels)");
-        }
-        console.debug("bosch-camera-card: HLS buffer profile", bufModeKey, bufProfile, "external:", isExternal);
+        console.warn("bosch-camera-card: HLS starting — external:", isExternal, "bufProfile:", bufModeKey, bufProfile);
         const hls = new Hls({
           enableWorker: true,
           ...bufProfile,
@@ -4762,6 +4766,7 @@ class BoschCameraCard extends HTMLElement {
     let webrtcReject = null;
     let webrtcTimeout = null;
     pc.ontrack = ev => {
+      if (this._webrtcPc !== pc) return;
       remoteStream.addTrack(ev.track);
       if (ev.track.kind === "video") {
         ev.track.onunmute = () => {
@@ -4826,25 +4831,42 @@ class BoschCameraCard extends HTMLElement {
       offer: offer.sdp
     });
     this._webrtcUnsub = unsub;
-    await new Promise((resolve, reject) => {
-      webrtcResolve = resolve;
-      webrtcReject = reject;
-      const attemptMs = this._webrtcConnectTimeoutMs();
-      const timeout = setTimeout(() => reject(new Error("WebRTC: no track within " + attemptMs + "ms")), attemptMs);
-      webrtcTimeout = timeout;
-      if (video.srcObject === remoteStream) {
-        clearTimeout(timeout);
-        webrtcTimeout = null;
-        resolve();
-        return;
-      }
-      pc.addEventListener("iceconnectionstatechange", () => {
-        if (pc.iceConnectionState === "failed") {
+    try {
+      await new Promise((resolve, reject) => {
+        webrtcResolve = resolve;
+        webrtcReject = reject;
+        const attemptMs = this._webrtcConnectTimeoutMs();
+        const timeout = setTimeout(() => reject(new Error("WebRTC: no track within " + attemptMs + "ms")), attemptMs);
+        webrtcTimeout = timeout;
+        if (video.srcObject === remoteStream) {
           clearTimeout(timeout);
-          reject(new Error("WebRTC: ICE failed"));
+          webrtcTimeout = null;
+          resolve();
+          return;
         }
+        pc.addEventListener("iceconnectionstatechange", () => {
+          if (pc.iceConnectionState === "failed") {
+            clearTimeout(timeout);
+            reject(new Error("WebRTC: ICE failed"));
+          }
+        });
       });
-    });
+    } catch (err) {
+      if (this._webrtcPc !== pc) {
+        try {
+          pc.close();
+        } catch {}
+        if (typeof unsub === "function") {
+          try {
+            unsub();
+          } catch {}
+        }
+        const abandoned = new Error("WebRTC attempt abandoned (superseded by a newer attempt)");
+        abandoned.webrtcAbandoned = true;
+        throw abandoned;
+      }
+      throw err;
+    }
   }
   _reconnectAfterStreamDrop() {
     if (!this._isStreaming()) return;
