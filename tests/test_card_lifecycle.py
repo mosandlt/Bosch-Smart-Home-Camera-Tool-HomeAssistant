@@ -255,17 +255,33 @@ def test_remote_skip_webrtc_excludes_lan(card_source: str) -> None:
     and localhost so a phone on home WiFi keeps using WebRTC. Pinned
     here so a future refactor can't accidentally widen the skip path
     to LAN and break the desktop-LAN low-latency case.
+
+    2026-08-09: the hostname check itself was extracted into a shared
+    ``_isExternalHost()`` helper (also used to gate hls.js low-latency
+    mode for external hosts) — ``_remoteSkipWebRTC`` now just calls it
+    instead of inlining the regexes, so this test checks both that the
+    gate delegates to the helper and that the helper still has every
+    exclusion pattern.
     """
     gate_idx = card_source.find("this._remoteSkipWebRTC = (() =>")
     assert gate_idx > 0
-    gate_body = card_source[gate_idx : gate_idx + 1500]
+    gate_body = card_source[gate_idx : gate_idx + 800]
+    assert "this._isExternalHost()" in gate_body, (
+        "_remoteSkipWebRTC no longer delegates to the shared "
+        "_isExternalHost() helper — hostname-exclusion checks may have "
+        "been duplicated or dropped"
+    )
+
+    helper_idx = card_source.find("_isExternalHost() {")
+    assert helper_idx > 0
+    helper_body = card_source[helper_idx : helper_idx + 700]
     # All LAN-exclusion patterns must be present (regex-escaped form in source).
-    assert "127.0.0.1" in gate_body, "localhost exclusion missing"
-    assert ".local" in gate_body, "mDNS .local exclusion missing"
-    assert r"192\.168\." in gate_body, "RFC1918 192.168/16 exclusion missing"
-    assert r"^10\." in gate_body, "RFC1918 10/8 exclusion missing"
-    assert r"172\." in gate_body, "RFC1918 172.16/12 exclusion missing"
-    assert "fe80" in gate_body, "IPv6 link-local fe80::/10 exclusion missing"
+    assert "127.0.0.1" in helper_body, "localhost exclusion missing"
+    assert ".local" in helper_body, "mDNS .local exclusion missing"
+    assert r"192\.168\." in helper_body, "RFC1918 192.168/16 exclusion missing"
+    assert r"^10\." in helper_body, "RFC1918 10/8 exclusion missing"
+    assert r"172\." in helper_body, "RFC1918 172.16/12 exclusion missing"
+    assert "fe80" in helper_body, "IPv6 link-local fe80::/10 exclusion missing"
 
 
 def test_card_version_matches_const_py() -> None:

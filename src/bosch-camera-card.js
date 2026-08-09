@@ -2960,6 +2960,49 @@ const BOSCH_BUFFER_PROFILES = {
   stable:   { liveSyncDurationCount: 6, liveMaxLatencyDurationCount: 12, maxBufferLength: 22, maxMaxBufferLength: 28, lowLatencyMode: true },
 };
 
+// Wraps hls.js's own default XHR loader class (passed in as `BaseLoader`,
+// e.g. Hls.DefaultConfig.loader) so it can be used as `pLoader` (playlist
+// loader only — fragment loads are untouched). Strips the LL-HLS
+// advertisement from every fetched .m3u8 BEFORE hls.js's M3U8Parser ever
+// sees it, so hls.js can never attempt a blocking-reload
+// (`_HLS_msn`/`_HLS_part`) request in the first place — regardless of the
+// `lowLatencyMode` config flag, which does NOT reliably suppress these
+// requests once a manifest advertises CAN-BLOCK-RELOAD (a known hls.js
+// quirk across versions, video-dev/hls.js#3566; confirmed live 2026-08-09:
+// setting `lowLatencyMode: false` alone did not stop hls.js from sending
+// `_HLS_msn`/`_HLS_part`, which then 404/400'd repeatedly through a
+// Cloudflare-tunneled remote connection while the same camera stayed
+// stable over LAN). Only the response TEXT is touched — all retry/timeout/
+// abort/byte-range mechanics are inherited unchanged from the real loader,
+// so this can't regress ordinary (non-LL-HLS) playlist/fragment loading.
+function makeLLHlsStrippingPlaylistLoader(BaseLoader) {
+  return class BoschLLHlsStrippingLoader extends BaseLoader {
+    load(context, config, callbacks) {
+      const wrappedCallbacks = {
+        ...callbacks,
+        onSuccess: (response, stats, ctx, networkDetails) => {
+          if (typeof response.data === "string") {
+            // hls.js's blocking-reload directives fire on EITHER
+            // canBlockReload OR canSkipUntil (base-playlist-controller.ts:
+            // `details.canBlockReload || details.canSkipUntil`) — HA never
+            // emits CAN-SKIP-UNTIL/EXT-X-SKIP today (verify-agent, 2026-08-09),
+            // so this is defensive-only, not a fix for an observed request.
+            response.data = response.data
+              .replace(/CAN-BLOCK-RELOAD=YES/gi, "CAN-BLOCK-RELOAD=NO")
+              .replace(/,?CAN-SKIP-UNTIL=[\d.]+/gi, "")
+              .replace(/^#EXT-X-PART:.*$/gim, "")
+              .replace(/^#EXT-X-PRELOAD-HINT:.*$/gim, "")
+              .replace(/^#EXT-X-PART-INF:.*$/gim, "")
+              .replace(/^#EXT-X-SKIP:.*$/gim, "");
+          }
+          callbacks.onSuccess(response, stats, ctx, networkDetails);
+        },
+      };
+      super.load(context, config, wrappedCallbacks);
+    }
+  };
+}
+
 class BoschCameraCard extends HTMLElement {
   constructor() {
     super();
@@ -3036,15 +3079,7 @@ class BoschCameraCard extends HTMLElement {
       const isAndroid = /Android/i.test(ua);
       const isMobileBrowser = !isCompanion && (isIOS || isAndroid);
       if (!isCompanion && !isMobileBrowser) return false;
-      const h = (location.hostname || "").toLowerCase();
-      if (!h) return false;
-      if (h === "localhost" || h === "127.0.0.1" || h === "::1") return false;
-      if (h.endsWith(".local")) return false;
-      if (/^10\./.test(h)) return false;
-      if (/^192\.168\./.test(h)) return false;
-      if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
-      if (/^fe80:/i.test(h)) return false;
-      return true;
+      return this._isExternalHost();
     })();
     // On Android WebView the autoplay policy (mediaPlaybackRequiresUserGesture)
     // can block even muted play. Start with audio muted regardless of the HA
@@ -3064,12 +3099,17 @@ class BoschCameraCard extends HTMLElement {
     this._hlsNetworkErrorCount = 0;    // consecutive fatal HLS NETWORK_ERROR retries before escalating to a reconnect (B3 fix)
     this._waitForStreamRetryTimer = null; // tracked 30s re-poll timer after _waitForStreamReady gives up (B6 fix) — prevents stacked chains
     this._streamTransport    = null;  // "webrtc" | "hls" — active transport; gates the HLS-mode banner
+    this._HLS_BANNER_AUTO_HIDE_MS = 180000; // 3 min — how long the HLS-mode banner stays visible before self-dismissing
+    this._hlsBannerAutoHideTimer = null; // auto-dismiss timer for the HLS-mode banner (hides it a few minutes after it first shows so it doesn't linger over the video)
+    this._hlsBannerDismissed = false; // set once the auto-hide timer fires; reset whenever the banner goes hidden again so a later HLS fallback re-shows it fresh
     this._preferHlsThisSession = false; // sticky: once a WebRTC probe connected but delivered ZERO frames (the iOS/CGNAT "VERBINDE" hang — track present, framesDecoded stays 0, HA-core #158178), re-attempting WebRTC just loops the same dark transport. Skip WebRTC → HLS for the rest of this mount. Reset in connectedCallback. 2026-06-23
     this._webrtcFirstFrameTimer = null; // dead-track watchdog timer (getStats poll after a WebRTC track activates). 2026-06-23
     this._nativeHlsLoadTimer = null;  // iOS native-HLS load watchdog (AVPlayer can hang at load with no `playing`). 2026-06-23
     this._webrtcStatsPrev    = null;  // {frames,bytes} baseline for the dead-track watchdog. 2026-06-23
     this._webrtcDeadPolls    = 0;     // consecutive getStats polls with bytes flowing but framesDecoded flat (decoder stall). 2026-06-23
     this._webrtcRecoveryStreak = 0;   // consecutive live WebRTC recoveries with no healthy frame in between → escalate to sticky HLS. Reset by the rVFC onFrame. 2026-06-23
+    this._deadStreamRecoveryStreak = 0; // consecutive recoveries (ANY transport) with no rendered frame in between → backs off the rebuild delay instead of hammering a source that never delivers (e.g. HLS also failing after sticky-HLS escalation). Reset whenever a frame actually plays. 2026-08-09
+    this._deadStreamRebuildPending = false; // true from the moment a backed-off rebuild timer is armed until it fires or a start actually begins. _stopLiveVideo() clears _reconnectingLiveVideo/_waitingForStream/_liveVideoActive synchronously, so WITHOUT this flag the _update() auto-start gate (sees exactly that all-false state) restarts the stream on the very next hass push — long before the backoff delay elapses, making the backoff a no-op (verify-agent finding, 2026-08-09).
     this._statsCachePc       = null;  // pc identity the cached getStats() snapshot belongs to (dead-track watchdog + freeze oracle share one poll). 2026-07-13
     this._statsCacheAt       = 0;     // performance.now() the cached snapshot was taken
     this._statsCachePromise  = null;  // in-flight/last pc.getStats() Promise for the TTL window above
@@ -3129,7 +3169,11 @@ class BoschCameraCard extends HTMLElement {
     // (the user may have moved back onto a WebRTC-capable LAN). 2026-06-23.
     this._preferHlsThisSession = false;
     this._webrtcRecoveryStreak = 0;
+    this._deadStreamRecoveryStreak = 0;
+    this._deadStreamRebuildPending = false;
     this._hasEverDecodedFrames = false;
+    this._clearTimer(this._hlsBannerAutoHideTimer); this._hlsBannerAutoHideTimer = null;
+    this._hlsBannerDismissed = false;
     this._visibilityHandler = () => this._onVisibilityChange();
     document.addEventListener("visibilitychange", this._visibilityHandler);
     // Mobile reload fix: iOS Safari + HA Companion App (WKWebView) do NOT
@@ -3693,6 +3737,28 @@ class BoschCameraCard extends HTMLElement {
   // `external_auth=1` in the URL + the iOS webkit `getExternalAuth` bridge are the
   // authoritative Companion signals (HA iOS source); `window.externalApp` is
   // Android-Companion-only; UA covers plain mobile browsers. 2026-06-23.
+  // True when the page is being loaded through a host that is NOT
+  // localhost/.local/RFC1918/link-local — i.e. some external path (reverse
+  // proxy, Cloudflare Tunnel, Nabu Casa) sits between the browser and HA,
+  // regardless of device type. Extracted from _remoteSkipWebRTC's hostname
+  // check (which additionally gates on companion/mobile) so the HLS
+  // low-latency-mode decision below can use the SAME external-host signal
+  // for desktop browsers too — LL-HLS's blocking-reload requests
+  // (`_HLS_msn`/`_HLS_part`) are exactly the kind of long-held request many
+  // reverse proxies/tunnels mishandle (404s reported 2026-08-09 through a
+  // Cloudflare-tunneled desktop-remote connection, not just mobile). 2026-08-09.
+  _isExternalHost() {
+    const h = (location.hostname || "").toLowerCase();
+    if (!h) return false;
+    if (h === "localhost" || h === "127.0.0.1" || h === "::1") return false;
+    if (h.endsWith(".local")) return false;
+    if (/^10\./.test(h)) return false;
+    if (/^192\.168\./.test(h)) return false;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+    if (/^fe80:/i.test(h)) return false;
+    return true;
+  }
+
   _isMobileClient() {
     const ua = navigator.userAgent || "";
     const isCompanion = /Home\s?Assistant\//i.test(ua)
@@ -7798,6 +7864,14 @@ class BoschCameraCard extends HTMLElement {
     const img   = this.shadowRoot.getElementById("cam-img");
     if (!video) return;
 
+    // A start is actually beginning (whichever path triggered it) — any
+    // still-pending dead-stream backoff bookkeeping is moot now: either this
+    // succeeds (clearOverlay resets the streak on a real frame) or it fails
+    // (a fresh _scheduleLiveRecovery call re-arms backoff with the correct
+    // streak). Clearing here prevents the flag getting stuck true and
+    // permanently blocking _update()'s auto-start gate. 2026-08-09.
+    this._deadStreamRebuildPending = false;
+
     this._stopRefreshTimer();
     this._startingLiveVideo = true;
 
@@ -7867,6 +7941,10 @@ class BoschCameraCard extends HTMLElement {
         // consecutive-drop counter so only genuinely repeated failures escalate
         // to a backend rewarm. 2026-06-18 (HLS-reconnect-loop fix).
         this._streamDropCount = 0;
+        // Also reset the transport-agnostic dead-stream backoff — a frame
+        // actually played, so the source is alive again regardless of which
+        // transport got there. 2026-08-09.
+        this._deadStreamRecoveryStreak = 0;
         // Flip the badge to Live now — the first frame is on screen. Don't wait
         // for the next hass push (stream_status sensor can lag 10s+). 2026-05-30.
         this._markLiveBadge();
@@ -8280,10 +8358,33 @@ class BoschCameraCard extends HTMLElement {
         const camAttrsForBuf = this._hass?.states?.[this._entities.camera]?.attributes || {};
         const bufModeKey = camAttrsForBuf.live_buffer_mode || "balanced";
         const bufProfile = BOSCH_BUFFER_PROFILES[bufModeKey] || BOSCH_BUFFER_PROFILES.balanced;
-        console.debug("bosch-camera-card: HLS buffer profile", bufModeKey, bufProfile);
+        // LL-HLS's blocking-playlist-reload requests (`_HLS_msn`/`_HLS_part` query
+        // params) hold the connection open until that exact part is ready — a
+        // pattern many reverse proxies/tunnels (Cloudflare Tunnel, Nabu Casa,
+        // nginx with default proxy_buffering) don't pass through cleanly, and
+        // one repeatedly 404/400'd through such a path (reported 2026-08-09: HLS
+        // fallback flapped nonstop through a Cloudflare-tunneled remote
+        // connection while LAN stayed rock-solid). `lowLatencyMode: false` alone
+        // does NOT reliably stop this (confirmed live: same requests still went
+        // out, just with a different error code) — hls.js keeps honoring a
+        // manifest's own CAN-BLOCK-RELOAD advertisement somewhat independently
+        // of that config flag across versions (video-dev/hls.js#3566). The
+        // `pLoader` override is the actual fix: it strips the LL-HLS
+        // advertisement from every fetched manifest before hls.js's parser ever
+        // sees it, so it can never construct a blocking-reload URL at all.
+        // LAN/.local/VPN clients are unaffected (keep real LL-HLS). 2026-08-09.
+        const isExternal = this._isExternalHost();
+        if (isExternal) {
+          console.debug("bosch-camera-card: external host — stripping LL-HLS advertisement from fetched manifests (blocking-reload doesn't survive some reverse proxies/tunnels)");
+        }
+        console.debug("bosch-camera-card: HLS buffer profile", bufModeKey, bufProfile, "external:", isExternal);
         const hls = new Hls({
           enableWorker: true,
           ...bufProfile,
+          ...(isExternal ? { lowLatencyMode: false } : {}),
+          ...(isExternal && Hls.DefaultConfig?.loader
+            ? { pLoader: makeLLHlsStrippingPlaylistLoader(Hls.DefaultConfig.loader) }
+            : {}),
           // Aggressive recovery: reload manifest on stall
           manifestLoadingMaxRetry: 10,
           levelLoadingMaxRetry: 10,
@@ -9169,6 +9270,20 @@ class BoschCameraCard extends HTMLElement {
         this._preferHlsThisSession = true;
       }
     }
+    // Transport-agnostic backoff: if recoveries keep happening with NO frame ever
+    // rendered — even after escalating to sticky HLS — the source itself is dead
+    // (or unreachable on this network), not just WebRTC. Without this, a remote
+    // client on a link where HLS also never decodes hammers a full teardown+
+    // rebuild every ~1s forever (reported 2026-08-09: stream flips "Live"↔
+    // "Connecting" continuously on a remote/no-VPN connection). Back off the
+    // rebuild delay exponentially instead — still self-heals once the source
+    // recovers, just without thrashing the network/backend in the meantime.
+    // Reset the instant a frame actually plays (see clearOverlay).
+    if (neverRendered) {
+      this._deadStreamRecoveryStreak = (this._deadStreamRecoveryStreak || 0) + 1;
+    } else {
+      this._deadStreamRecoveryStreak = 0;
+    }
     console.warn("bosch-camera-card: live recovery (" + reason + ")");
     this._reconnectingLiveVideo = true;
     this._setLiveStalled(true); // badge → "connecting" for the rebuild window
@@ -9189,12 +9304,38 @@ class BoschCameraCard extends HTMLElement {
       // SERVER side (its own ICE/DTLS teardown + session-slot release), which
       // a synchronous JS-side close() says nothing about. No safe "already
       // torn down" detection exists at this layer, so left at the fixed 1000ms
-      // rather than risk reintroducing the B4 regression.
+      // rather than risk reintroducing the B4 regression. That 1000ms floor
+      // still applies to the common case (healthy stream, transient blip).
+      // Only a source that keeps failing to ever render a frame — tracked by
+      // _deadStreamRecoveryStreak above — backs off beyond it, doubling per
+      // consecutive dead cycle up to a 16s cap. 2026-08-09.
+      const rebuildDelay = this._deadStreamRecoveryStreak > 1
+        ? Math.min(1000 * 2 ** Math.min(this._deadStreamRecoveryStreak - 1, 4), 16000)
+        : 1000;
+      // _stopLiveVideo() above already cleared _reconnectingLiveVideo/
+      // _waitingForStream/_liveVideoActive synchronously — WITHOUT a flag that
+      // survives that, _update()'s auto-start gate sees exactly that all-false
+      // state and calls _waitForStreamReady()/_startLiveVideo() on the very next
+      // hass push, restarting the stream long before rebuildDelay elapses and
+      // making the backoff above a no-op. _deadStreamRebuildPending is that
+      // flag; _update() checks it too. (verify-agent finding, 2026-08-09)
+      this._deadStreamRebuildPending = true;
       this._armTimer(() => {
+        this._deadStreamRebuildPending = false;
         this._reconnectingLiveVideo = false;
-        if (this.isConnected && !this._liveVideoActive) this._startLiveVideo();
-      }, 1000);
+        // Re-check the start guards (not just _liveVideoActive): on a long
+        // backoff window, a tab-return/PiP-exit resume can already have started
+        // (or be mid-start of) a new session, or the tab can have gone hidden in
+        // the meantime — starting again here would open a second, untracked
+        // Bosch session slot, or start a stream nobody can see while hidden.
+        // (verify-agent finding, 2026-08-09)
+        if (this.isConnected && !this._liveVideoActive && !this._startingLiveVideo
+            && !this._waitingForStream && document.visibilityState !== "hidden") {
+          this._startLiveVideo();
+        }
+      }, rebuildDelay);
     } else {
+      this._deadStreamRebuildPending = false;
       this._reconnectingLiveVideo = false;
     }
   }
@@ -9532,18 +9673,33 @@ class BoschCameraCard extends HTMLElement {
     // Sync HLS-mode banner visibility with the ACTIVE transport — show it only
     // when the remote/mobile path actually fell back to HLS, hide it when the
     // short WebRTC attempt connected (e.g. over VPN). Always managed so it never
-    // lingers from a previous HLS session after a WebRTC reconnect.
+    // lingers from a previous HLS session after a WebRTC reconnect. The banner
+    // also auto-dismisses itself a few minutes after first appearing (it's an
+    // informational one-time note, not something that needs to sit over the
+    // video for the whole session) — a fresh HLS fallback later re-arms it.
+    // 2026-08-09.
     {
       const banner = this.shadowRoot?.getElementById("ios-hls-banner");
       if (banner) {
         const showHls = (this._remoteSkipWebRTC || this._preferHlsThisSession || this._isMobileClient())
           && this._streamTransport === "hls"
           && !!this._liveVideoActive;
-        if (showHls) {
+        if (showHls && !this._hlsBannerAutoHideTimer && !this._hlsBannerDismissed) {
+          this._hlsBannerAutoHideTimer = this._armTimer(() => {
+            this._hlsBannerAutoHideTimer = null;
+            this._hlsBannerDismissed = true;
+            banner.classList.remove("visible");
+          }, this._HLS_BANNER_AUTO_HIDE_MS);
+        } else if (!showHls) {
+          this._clearTimer(this._hlsBannerAutoHideTimer); this._hlsBannerAutoHideTimer = null;
+          this._hlsBannerDismissed = false;
+        }
+        const displayHls = showHls && !this._hlsBannerDismissed;
+        if (displayHls) {
           const bt = banner.querySelector("#ios-hls-banner-text");
           if (bt) bt.textContent = `ℹ ${this._t("hls_mode_banner")}`;
         }
-        banner.classList.toggle("visible", showHls);
+        banner.classList.toggle("visible", displayHls);
       }
     }
 
@@ -9973,7 +10129,8 @@ class BoschCameraCard extends HTMLElement {
       this._waitingForStream = false;
       return;
     }
-    if ((shouldVideo || backendWaiting) && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
+    if ((shouldVideo || backendWaiting) && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream
+        && !this._deadStreamRebuildPending) {
       this._waitingForStream = true;
       // snapshot_during_warmup: fetch current snapshot so the last known image
       // shows as background under the semi-transparent overlay instead of black.

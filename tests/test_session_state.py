@@ -164,3 +164,45 @@ class TestLiveOpenedAtView:
 
     def test_len_empty(self):
         assert len(LiveOpenedAtView({})) == 0
+
+
+class TestFieldViewNamesMatchDataclassFields:
+    """Every BoolFieldView/FloatFieldView/CacheFieldView wired up in
+    BoschCameraCoordinator.__init__ names a CameraSessionState field by
+    string literal — a typo or an incomplete field migration there raises
+    AttributeError only at runtime, on first access, and only for that one
+    field (silently caught+logged in some callers, e.g. fcm.py's FCM push
+    handler). Real incident 2026-08-09 (v16.1.8-beta-4): coordinator.py and
+    fcm.py wired up "nvr_motion_clip_blocked_warned" but the field was never
+    added to CameraSessionState — it fired an AttributeError on every FCM
+    push event for the affected camera, every existing test used a
+    stub coordinator (`coord._nvr_motion_clip_blocked_warned = set()`) that
+    bypassed CameraSessionState entirely and never caught it. This test
+    reads coordinator.py's actual source and checks every such field-view
+    name against the real dataclass, so a future typo/incomplete-field-add
+    fails at test time instead of shipping."""
+
+    def test_every_field_view_name_exists_on_camerasessionstate(self):
+        import dataclasses
+        import inspect
+        import re
+
+        from custom_components.bosch_shc_camera import coordinator as coordinator_module
+
+        source = inspect.getsource(coordinator_module.BoschCameraCoordinator.__init__)
+        names = re.findall(
+            r'(?:BoolFieldView|FloatFieldView|CacheFieldView)\(\s*self\._sessions,\s*"([a-zA-Z_][a-zA-Z0-9_]*)"',
+            source,
+        )
+        assert len(names) > 10, (
+            "sanity check: the regex should match dozens of FieldView wirings — "
+            "if it matches almost none, the pattern likely drifted from the "
+            "real source formatting and this test is silently not checking anything"
+        )
+        valid_fields = {f.name for f in dataclasses.fields(CameraSessionState)}
+        missing = sorted(set(names) - valid_fields)
+        assert not missing, (
+            f"coordinator.py wires up a FieldView for field(s) {missing} that "
+            "do not exist on CameraSessionState — every access raises "
+            "AttributeError at runtime (session_state.py)"
+        )

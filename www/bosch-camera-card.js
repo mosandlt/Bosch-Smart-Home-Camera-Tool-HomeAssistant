@@ -2733,6 +2733,23 @@ const BOSCH_BUFFER_PROFILES = {
   }
 };
 
+function makeLLHlsStrippingPlaylistLoader(BaseLoader) {
+  return class BoschLLHlsStrippingLoader extends BaseLoader {
+    load(context, config, callbacks) {
+      const wrappedCallbacks = {
+        ...callbacks,
+        onSuccess: (response, stats, ctx, networkDetails) => {
+          if (typeof response.data === "string") {
+            response.data = response.data.replace(/CAN-BLOCK-RELOAD=YES/gi, "CAN-BLOCK-RELOAD=NO").replace(/,?CAN-SKIP-UNTIL=[\d.]+/gi, "").replace(/^#EXT-X-PART:.*$/gim, "").replace(/^#EXT-X-PRELOAD-HINT:.*$/gim, "").replace(/^#EXT-X-PART-INF:.*$/gim, "").replace(/^#EXT-X-SKIP:.*$/gim, "");
+          }
+          callbacks.onSuccess(response, stats, ctx, networkDetails);
+        }
+      };
+      super.load(context, config, wrappedCallbacks);
+    }
+  };
+}
+
 class BoschCameraCard extends HTMLElement {
   constructor() {
     super();
@@ -2779,15 +2796,7 @@ class BoschCameraCard extends HTMLElement {
       const isAndroid = /Android/i.test(ua);
       const isMobileBrowser = !isCompanion && (isIOS || isAndroid);
       if (!isCompanion && !isMobileBrowser) return false;
-      const h = (location.hostname || "").toLowerCase();
-      if (!h) return false;
-      if (h === "localhost" || h === "127.0.0.1" || h === "::1") return false;
-      if (h.endsWith(".local")) return false;
-      if (/^10\./.test(h)) return false;
-      if (/^192\.168\./.test(h)) return false;
-      if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
-      if (/^fe80:/i.test(h)) return false;
-      return true;
+      return this._isExternalHost();
     })();
     this._androidAudioMuted = /Android/i.test(navigator.userAgent || "");
     this._lastAudioState = null;
@@ -2802,12 +2811,17 @@ class BoschCameraCard extends HTMLElement {
     this._hlsNetworkErrorCount = 0;
     this._waitForStreamRetryTimer = null;
     this._streamTransport = null;
+    this._HLS_BANNER_AUTO_HIDE_MS = 18e4;
+    this._hlsBannerAutoHideTimer = null;
+    this._hlsBannerDismissed = false;
     this._preferHlsThisSession = false;
     this._webrtcFirstFrameTimer = null;
     this._nativeHlsLoadTimer = null;
     this._webrtcStatsPrev = null;
     this._webrtcDeadPolls = 0;
     this._webrtcRecoveryStreak = 0;
+    this._deadStreamRecoveryStreak = 0;
+    this._deadStreamRebuildPending = false;
     this._statsCachePc = null;
     this._statsCacheAt = 0;
     this._statsCachePromise = null;
@@ -2853,7 +2867,12 @@ class BoschCameraCard extends HTMLElement {
     _boschPipCards.add(this);
     this._preferHlsThisSession = false;
     this._webrtcRecoveryStreak = 0;
+    this._deadStreamRecoveryStreak = 0;
+    this._deadStreamRebuildPending = false;
     this._hasEverDecodedFrames = false;
+    this._clearTimer(this._hlsBannerAutoHideTimer);
+    this._hlsBannerAutoHideTimer = null;
+    this._hlsBannerDismissed = false;
     this._visibilityHandler = () => this._onVisibilityChange();
     document.addEventListener("visibilitychange", this._visibilityHandler);
     this._pagehideHandler = () => {
@@ -3127,6 +3146,17 @@ class BoschCameraCard extends HTMLElement {
   _isIOS() {
     const ua = navigator.userAgent || "";
     return /iPhone|iPod|iPad/i.test(ua) || /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+  }
+  _isExternalHost() {
+    const h = (location.hostname || "").toLowerCase();
+    if (!h) return false;
+    if (h === "localhost" || h === "127.0.0.1" || h === "::1") return false;
+    if (h.endsWith(".local")) return false;
+    if (/^10\./.test(h)) return false;
+    if (/^192\.168\./.test(h)) return false;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+    if (/^fe80:/i.test(h)) return false;
+    return true;
   }
   _isMobileClient() {
     const ua = navigator.userAgent || "";
@@ -4279,6 +4309,7 @@ class BoschCameraCard extends HTMLElement {
     const video = this.shadowRoot.getElementById("cam-video");
     const img = this.shadowRoot.getElementById("cam-img");
     if (!video) return;
+    this._deadStreamRebuildPending = false;
     this._stopRefreshTimer();
     this._startingLiveVideo = true;
     const audioOn = this._getEffectiveState(this._entities.audio) === "on";
@@ -4317,6 +4348,7 @@ class BoschCameraCard extends HTMLElement {
         this._staleSourceSeen = false;
         this._lastRewarmAt = 0;
         this._streamDropCount = 0;
+        this._deadStreamRecoveryStreak = 0;
         this._markLiveBadge();
         video.removeEventListener("playing", clearOverlay);
       };
@@ -4526,10 +4558,20 @@ class BoschCameraCard extends HTMLElement {
         const camAttrsForBuf = this._hass?.states?.[this._entities.camera]?.attributes || {};
         const bufModeKey = camAttrsForBuf.live_buffer_mode || "balanced";
         const bufProfile = BOSCH_BUFFER_PROFILES[bufModeKey] || BOSCH_BUFFER_PROFILES.balanced;
-        console.debug("bosch-camera-card: HLS buffer profile", bufModeKey, bufProfile);
+        const isExternal = this._isExternalHost();
+        if (isExternal) {
+          console.debug("bosch-camera-card: external host — stripping LL-HLS advertisement from fetched manifests (blocking-reload doesn't survive some reverse proxies/tunnels)");
+        }
+        console.debug("bosch-camera-card: HLS buffer profile", bufModeKey, bufProfile, "external:", isExternal);
         const hls = new Hls({
           enableWorker: true,
           ...bufProfile,
+          ...isExternal ? {
+            lowLatencyMode: false
+          } : {},
+          ...isExternal && Hls.DefaultConfig?.loader ? {
+            pLoader: makeLLHlsStrippingPlaylistLoader(Hls.DefaultConfig.loader)
+          } : {},
           manifestLoadingMaxRetry: 10,
           levelLoadingMaxRetry: 10,
           fragLoadingMaxRetry: 10
@@ -5094,16 +5136,27 @@ class BoschCameraCard extends HTMLElement {
         this._preferHlsThisSession = true;
       }
     }
+    if (neverRendered) {
+      this._deadStreamRecoveryStreak = (this._deadStreamRecoveryStreak || 0) + 1;
+    } else {
+      this._deadStreamRecoveryStreak = 0;
+    }
     console.warn("bosch-camera-card: live recovery (" + reason + ")");
     this._reconnectingLiveVideo = true;
     this._setLiveStalled(true);
     this._stopLiveVideo();
     if (this.isConnected && this._isStreaming && this._isStreaming()) {
+      const rebuildDelay = this._deadStreamRecoveryStreak > 1 ? Math.min(1e3 * 2 ** Math.min(this._deadStreamRecoveryStreak - 1, 4), 16e3) : 1e3;
+      this._deadStreamRebuildPending = true;
       this._armTimer(() => {
+        this._deadStreamRebuildPending = false;
         this._reconnectingLiveVideo = false;
-        if (this.isConnected && !this._liveVideoActive) this._startLiveVideo();
-      }, 1e3);
+        if (this.isConnected && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream && document.visibilityState !== "hidden") {
+          this._startLiveVideo();
+        }
+      }, rebuildDelay);
     } else {
+      this._deadStreamRebuildPending = false;
       this._reconnectingLiveVideo = false;
     }
   }
@@ -5355,11 +5408,23 @@ class BoschCameraCard extends HTMLElement {
       const banner = this.shadowRoot?.getElementById("ios-hls-banner");
       if (banner) {
         const showHls = (this._remoteSkipWebRTC || this._preferHlsThisSession || this._isMobileClient()) && this._streamTransport === "hls" && !!this._liveVideoActive;
-        if (showHls) {
+        if (showHls && !this._hlsBannerAutoHideTimer && !this._hlsBannerDismissed) {
+          this._hlsBannerAutoHideTimer = this._armTimer(() => {
+            this._hlsBannerAutoHideTimer = null;
+            this._hlsBannerDismissed = true;
+            banner.classList.remove("visible");
+          }, this._HLS_BANNER_AUTO_HIDE_MS);
+        } else if (!showHls) {
+          this._clearTimer(this._hlsBannerAutoHideTimer);
+          this._hlsBannerAutoHideTimer = null;
+          this._hlsBannerDismissed = false;
+        }
+        const displayHls = showHls && !this._hlsBannerDismissed;
+        if (displayHls) {
           const bt = banner.querySelector("#ios-hls-banner-text");
           if (bt) bt.textContent = `ℹ ${this._t("hls_mode_banner")}`;
         }
-        banner.classList.toggle("visible", showHls);
+        banner.classList.toggle("visible", displayHls);
       }
     }
     for (const [entityId, optState] of Object.entries(this._optimistic)) {
@@ -5591,7 +5656,7 @@ class BoschCameraCard extends HTMLElement {
       this._waitingForStream = false;
       return;
     }
-    if ((shouldVideo || backendWaiting) && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
+    if ((shouldVideo || backendWaiting) && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream && !this._deadStreamRebuildPending) {
       this._waitingForStream = true;
       if (this._config.snapshot_during_warmup && !this._imageLoaded && !this._awaitingFresh) {
         this._triggerFreshSnapshot();

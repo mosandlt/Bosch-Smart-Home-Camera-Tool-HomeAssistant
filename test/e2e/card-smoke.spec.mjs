@@ -3808,6 +3808,123 @@ test("sticky HLS is reset on a fresh mount (connectedCallback)", () => {
   expect(body.includes("this._webrtcRecoveryStreak = 0;"), "streak reset on mount").toBe(true);
 });
 
+test("_isExternalHost detects non-RFC1918/.local hostnames (2026-08-09)", () => {
+  const start = CARD_SRC.indexOf("_isExternalHost() {");
+  const body = CARD_SRC.slice(start, CARD_SRC.indexOf("_isMobileClient() {", start));
+  expect(start, "_isExternalHost method exists").toBeGreaterThan(-1);
+  for (const needle of ['h === "localhost"', 'h.endsWith(".local")', "/^10\\./", "/^192\\.168\\./",
+    "/^172\\.(1[6-9]|2\\d|3[01])\\./", "/^fe80:/i"]) {
+    expect(body.includes(needle), `_isExternalHost excludes ${needle}`).toBe(true);
+  }
+});
+
+test("_remoteSkipWebRTC reuses _isExternalHost instead of duplicating the hostname check (2026-08-09)", () => {
+  const start = CARD_SRC.indexOf("this._remoteSkipWebRTC = (() => {");
+  const body = CARD_SRC.slice(start, start + 800);
+  expect(body.includes("this._isExternalHost()"), "reuses the shared helper").toBe(true);
+  expect(body.includes('h === "localhost"'), "no longer duplicates the raw hostname regexes here").toBe(false);
+});
+
+test("external host's HLS pLoader strips LL-HLS advertisement from the real manifest text (2026-08-09)", async ({ page }) => {
+  // Regression: lowLatencyMode:false alone did NOT stop hls.js from sending
+  // blocking-reload (_HLS_msn/_HLS_part) requests in production (confirmed
+  // live 2026-08-09 — same requests still fired, just with a different
+  // error code through the reverse proxy). The pLoader override is the
+  // actual fix: it must rewrite the manifest text BEFORE hls.js's parser
+  // ever sees it, so hls.js can never construct a blocking-reload URL in
+  // the first place. This exercises the real makeLLHlsStrippingPlaylistLoader
+  // function against a real LL-HLS sample manifest, via the real
+  // _startLiveVideo() HLS code path (WebRTC skipped via sticky-HLS so the
+  // test doesn't need to mock RTCPeerConnection).
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const LL_HLS_SAMPLE = [
+      "#EXTM3U",
+      "#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,CAN-SKIP-UNTIL=6.0,PART-HOLD-BACK=1.5",
+      "#EXT-X-PART-INF:PART-TARGET=0.75",
+      "#EXT-X-SKIP:SKIPPED-SEGMENTS=2",
+      "#EXTINF:2.0,",
+      "seg1.m4s",
+      "#EXT-X-PART:DURATION=0.75,URI=\"part1.m4s\"",
+      "#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"part2.m4s\"",
+      "",
+    ].join("\n");
+
+    class FakeBaseLoader {
+      constructor(config) { this.config = config; }
+      destroy() {}
+      abort() {}
+      load(context, config, callbacks) {
+        callbacks.onSuccess({ url: context.url, data: LL_HLS_SAMPLE }, {}, context, null);
+      }
+    }
+    let capturedPlaylistData = null;
+    window.Hls = class FakeHls {
+      static isSupported() { return true; }
+      static get Events() {
+        return { MANIFEST_PARSED: "m", FRAG_LOADED: "f", FRAG_BUFFERED: "b", ERROR: "e" };
+      }
+      static get ErrorTypes() { return { NETWORK_ERROR: "net", MEDIA_ERROR: "media" }; }
+      static get DefaultConfig() { return { loader: FakeBaseLoader }; }
+      constructor(config) {
+        if (config.pLoader) {
+          const loader = new config.pLoader(config);
+          loader.load({ url: "https://remote-example.invalid/api/hls/x/playlist.m3u8" }, {}, {
+            onSuccess: (response) => { capturedPlaylistData = response.data; },
+          });
+        }
+      }
+      on() {}
+      loadSource() {}
+      attachMedia() {}
+      destroy() {}
+    };
+
+    const base = { config: {}, language: "de", localize: (k) => k, callService: () => {}, callApi: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = {
+      ...base,
+      callWS: async () => ({ url: "https://remote-example.invalid/api/hls/x/playlist.m3u8" }),
+      states: { "camera.test": { state: "streaming", attributes: {}, last_updated: "2026-01-01T00:00:00Z" } },
+    };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    card._isExternalHost = () => true;
+    card._preferHlsThisSession = true; // skip WebRTC negotiation entirely, go straight to the HLS branch
+    card._liveVideoActive = false;
+    await card._startLiveVideo();
+    await new Promise((res) => setTimeout(res, 50));
+    card.remove();
+    return { capturedPlaylistData };
+  });
+  expect(r.capturedPlaylistData, "pLoader ran and captured the sanitized manifest").not.toBeNull();
+  expect(r.capturedPlaylistData.includes("CAN-BLOCK-RELOAD=YES"), "CAN-BLOCK-RELOAD=YES rewritten to NO").toBe(false);
+  expect(r.capturedPlaylistData.includes("CAN-BLOCK-RELOAD=NO"), "CAN-BLOCK-RELOAD explicitly disabled").toBe(true);
+  expect(r.capturedPlaylistData.includes("#EXT-X-PART:"), "#EXT-X-PART lines stripped").toBe(false);
+  expect(r.capturedPlaylistData.includes("#EXT-X-PRELOAD-HINT:"), "#EXT-X-PRELOAD-HINT lines stripped").toBe(false);
+  expect(r.capturedPlaylistData.includes("#EXT-X-PART-INF:"), "#EXT-X-PART-INF lines stripped").toBe(false);
+  expect(r.capturedPlaylistData.includes("CAN-SKIP-UNTIL"), "CAN-SKIP-UNTIL attribute stripped (canSkipUntil is the other blocking-reload gate)").toBe(false);
+  expect(r.capturedPlaylistData.includes("#EXT-X-SKIP:"), "#EXT-X-SKIP lines stripped").toBe(false);
+  expect(r.capturedPlaylistData.includes("#EXTINF:2.0,"), "unrelated manifest lines left untouched").toBe(true);
+});
+
+test("HLS falls back to plain (non-low-latency) mode on an external host (2026-08-09)", () => {
+  // Real-world report: LL-HLS blocking-reload requests (_HLS_msn/_HLS_part)
+  // 404ed repeatedly through a remote/tunneled connection while the exact
+  // same camera stayed rock-solid over LAN — the reverse proxy/tunnel doesn't
+  // reliably serve that long-held request pattern. Force plain HLS reload for
+  // any external host regardless of device type (desktop included).
+  const idx = CARD_SRC.indexOf("const hls = new Hls({");
+  expect(idx, "hls.js constructor call found").toBeGreaterThan(-1);
+  const before = CARD_SRC.slice(CARD_SRC.lastIndexOf("const isExternal = this._isExternalHost();", idx), idx);
+  expect(before.length, "isExternal computed before the Hls() call").toBeGreaterThan(0);
+  const ctorBody = CARD_SRC.slice(idx, idx + 300);
+  expect(ctorBody.includes("...(isExternal ? { lowLatencyMode: false } : {})"),
+    "lowLatencyMode explicitly disabled for external hosts").toBe(true);
+});
+
 test("HLS-mode banner shows for a mobile client on HLS (not just the remote-skip case)", () => {
   // _update() banner gate + activateVideo banner — both must include the mobile +
   // sticky-HLS conditions, not only _remoteSkipWebRTC.
@@ -3859,6 +3976,42 @@ test("HLS-mode banner does not overlap the title-pill/status-badge row (2026-07-
   expect(r.bTop, "banner starts at/below the title-pill row's bottom edge (no overlap)").toBeGreaterThanOrEqual(r.tBottom);
 });
 
+test("HLS-mode banner auto-hides a few minutes after first showing (2026-08-09)", async ({ page }) => {
+  // Feature: the banner is an informational one-time note, not something that
+  // should sit over the video for the whole session — it self-dismisses via
+  // _HLS_BANNER_AUTO_HIDE_MS after first appearing.
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "de", localize: (k) => (k === "hls_mode_banner" ? "HLS-Modus, höhere Latenz" : k), callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", apple_style: true });
+    card.hass = { ...base, states: { "camera.test": { state: "streaming", attributes: { friendly_name: "Innenbereich" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    card._isMobileClient = () => true;
+    card._streamTransport = "hls";
+    card._liveVideoActive = true;
+    card._HLS_BANNER_AUTO_HIDE_MS = 0; // fire on next tick instead of waiting the real 3 min
+    card._update();
+    const banner = card.shadowRoot.getElementById("ios-hls-banner");
+    const visibleBefore = banner.classList.contains("visible");
+    await new Promise((res) => setTimeout(res, 50));
+    const visibleAfterTimeout = banner.classList.contains("visible");
+    const dismissedFlag = card._hlsBannerDismissed;
+    // Transport leaving HLS must reset the dismissed flag so a later fallback re-shows it.
+    card._streamTransport = "webrtc";
+    card._update();
+    const resetAfterLeavingHls = card._hlsBannerDismissed;
+    card.remove();
+    return { visibleBefore, visibleAfterTimeout, dismissedFlag, resetAfterLeavingHls };
+  });
+  expect(r.visibleBefore, "banner shows immediately when HLS fallback starts").toBe(true);
+  expect(r.visibleAfterTimeout, "banner hides itself after the auto-hide timeout").toBe(false);
+  expect(r.dismissedFlag, "dismissed flag set once the timer fires").toBe(true);
+  expect(r.resetAfterLeavingHls, "dismissed flag resets once transport leaves HLS").toBe(false);
+});
+
 test("_stopLiveVideo clears the dead-track watchdog timer + resets its baseline", () => {
   const start = CARD_SRC.indexOf("_stopLiveVideo() {");
   const body = CARD_SRC.slice(start, CARD_SRC.indexOf("_onSnapshotClick()", start));
@@ -3895,6 +4048,138 @@ test("recovery streak only counts when the dying stream never rendered (no 60-mi
   // _hasEverDecodedFrames (set by getStats in the dead-track watchdog) is the fallback.
   expect(recBody.includes("_hasEverDecodedFrames"), "neverRendered has iOS fallback via _hasEverDecodedFrames").toBe(true);
   expect(recBody.includes("&& neverRendered"), "streak increment requires neverRendered").toBe(true);
+});
+
+test("dead-stream recovery backs off instead of hammering rebuilds forever (2026-08-09)", async ({ page }) => {
+  // Real-world report: on a remote connection with no VPN, WebRTC never rendered
+  // a frame, escalated to sticky HLS, but HLS ALSO never rendered a frame — the
+  // generic stall checker (transport-agnostic) kept calling _scheduleLiveRecovery
+  // every ~15s forever with a fixed 1000ms rebuild delay, visibly flapping
+  // "Live"/"Connecting" without end. _deadStreamRecoveryStreak must back off the
+  // rebuild delay exponentially when NO transport ever renders a frame, and reset
+  // to a fast 1000ms retry the instant a frame actually plays.
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "de", localize: (k) => k, callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { ...base, states: { "camera.test": { state: "streaming", attributes: { friendly_name: "Test" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    const delays = [];
+    card._armTimer = (fn, delay) => { delays.push(delay); return 0; };
+    card._stopLiveVideo = () => {};
+    card._liveVideoActive = true;
+    for (let i = 0; i < 5; i++) {
+      card._reconnectingLiveVideo = false;
+      card._scheduleLiveRecovery("test cycle " + i);
+    }
+    const streakAfterFailures = card._deadStreamRecoveryStreak;
+    // A stream that renders a frame between recoveries must drop straight back
+    // to the fast retry, same as a one-off blip. Exercise the REAL neverRendered
+    // gate here (not a manual streak reset) — set the same iOS-fallback flag the
+    // dead-track watchdog sets on a confirmed frame, matching the exact
+    // condition _scheduleLiveRecovery reads (verify-agent finding, 2026-08-09:
+    // an earlier version of this test reset the streak manually and never
+    // actually exercised this branch).
+    card._hasEverDecodedFrames = true;
+    card._reconnectingLiveVideo = false;
+    card._scheduleLiveRecovery("test cycle after recovery");
+    const streakAfterRealFrame = card._deadStreamRecoveryStreak;
+    const delayAfterRealFrame = delays[delays.length - 1];
+    card.remove();
+    return { delays, streakAfterFailures, streakAfterRealFrame, delayAfterRealFrame };
+  });
+  expect(r.delays[0], "first dead-stream recovery still uses the fast 1000ms delay").toBe(1000);
+  expect(r.delays[1], "second consecutive dead-stream recovery backs off").toBeGreaterThan(1000);
+  expect(r.delays[4], "delay keeps growing across consecutive dead cycles").toBeGreaterThan(r.delays[1]);
+  expect(Math.max(...r.delays), "backoff is capped at 16s").toBeLessThanOrEqual(16000);
+  expect(r.streakAfterFailures, "streak accumulated across the 5 dead cycles").toBe(5);
+  expect(r.streakAfterRealFrame, "neverRendered=false (a confirmed frame) resets the streak for real").toBe(0);
+  expect(r.delayAfterRealFrame, "delay is back to the fast 1000ms once the streak resets").toBe(1000);
+});
+
+test("dead-stream backoff does not defeat itself via _update()'s auto-start gate (2026-08-09 regression)", async ({ page }) => {
+  // verify-agent finding: _stopLiveVideo() (called from _scheduleLiveRecovery)
+  // synchronously clears _reconnectingLiveVideo/_waitingForStream/_liveVideoActive
+  // — exactly the all-false state _update()'s auto-start gate looks for. Without
+  // _deadStreamRebuildPending, a hass push arriving during the backoff window
+  // (near-certain — the teardown itself churns stream_status) restarts the
+  // stream immediately, making the whole backoff a no-op.
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "de", localize: (k) => k, callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { ...base, states: { "camera.test": { state: "streaming", attributes: { friendly_name: "Test" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    let startCalls = 0;
+    card._startLiveVideo = async () => { startCalls++; };
+    const capturedCallbacks = [];
+    card._armTimer = (fn) => { capturedCallbacks.push(fn); return 0; };
+    card._liveVideoActive = true;
+    // Build a real backoff (streak > 1) via genuine never-rendered cycles.
+    for (let i = 0; i < 3; i++) {
+      card._reconnectingLiveVideo = false;
+      card._liveVideoActive = true;
+      card._scheduleLiveRecovery("cycle " + i);
+    }
+    const pendingAfterSchedule = card._deadStreamRebuildPending;
+    // Simulate a hass push landing mid-backoff — this is the exact call site
+    // (_update()'s auto-start gate) that used to restart the stream early.
+    card._update();
+    const startCallsWhilePending = startCalls;
+    // Now let the backoff timer itself fire.
+    capturedCallbacks[capturedCallbacks.length - 1]();
+    const pendingAfterCallback = card._deadStreamRebuildPending;
+    const startCallsAfterCallback = startCalls;
+    card.remove();
+    return { pendingAfterSchedule, startCallsWhilePending, pendingAfterCallback, startCallsAfterCallback };
+  });
+  expect(r.pendingAfterSchedule, "backoff flag set once a rebuild timer is armed").toBe(true);
+  expect(r.startCallsWhilePending, "_update() must NOT restart the stream while backoff is pending").toBe(0);
+  expect(r.pendingAfterCallback, "backoff flag clears once the timer fires").toBe(false);
+  expect(r.startCallsAfterCallback, "the timer's own callback performs the restart once it fires").toBe(1);
+});
+
+test("dead-stream rebuild callback does not start a stream while the tab is hidden (2026-08-09)", async ({ page }) => {
+  // verify-agent finding: on a long backoff window the tab can go hidden before
+  // the timer fires; starting a stream nobody can see leaks an untracked
+  // session (the same class of bug the 2026-07-19 hidden-tab guard elsewhere
+  // in this file exists to prevent).
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const base = { config: {}, language: "de", localize: (k) => k, callService: () => {}, callApi: async () => ({}), callWS: async () => ({}) };
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test" });
+    card.hass = { ...base, states: { "camera.test": { state: "streaming", attributes: { friendly_name: "Test" }, last_updated: "2026-01-01T00:00:00Z" } } };
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 300));
+    let startCalls = 0;
+    card._startLiveVideo = async () => { startCalls++; };
+    let capturedCallback = null;
+    card._armTimer = (fn) => { capturedCallback = fn; return 0; };
+    card._liveVideoActive = true;
+    card._scheduleLiveRecovery("hidden-tab test");
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    capturedCallback();
+    const startCallsWhileHidden = startCalls;
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    card.remove();
+    return { startCallsWhileHidden };
+  });
+  expect(r.startCallsWhileHidden, "rebuild callback must not start a stream while the tab is hidden").toBe(0);
+});
+
+test("dead-stream backoff streak is reset once a frame actually renders (2026-08-09)", () => {
+  const start = CARD_SRC.indexOf("const clearOverlay = () => {");
+  const body = CARD_SRC.slice(start, CARD_SRC.indexOf("video.addEventListener(\"playing\", clearOverlay", start));
+  expect(body.includes("this._deadStreamRecoveryStreak = 0;"),
+    "a rendered frame resets the dead-stream backoff streak").toBe(true);
 });
 
 test("dead-track watchdog sets _hasEverDecodedFrames when getStats sees frames (iOS rVFC fallback)", () => {
