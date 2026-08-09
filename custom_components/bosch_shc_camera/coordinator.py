@@ -851,6 +851,14 @@ class BoschCameraCoordinator(
         self._nvr_preroll_first_segment_logged = BoolFieldView(
             self._sessions, "nvr_preroll_first_segment_logged"
         )
+        # Tracks cam_ids for which the "motion clip not created" one-time
+        # WARNING has already been logged (fcm.py). Cleared as soon as a
+        # clip is next successfully scheduled for that camera, so the
+        # warning re-fires if it starts failing again later rather than
+        # going silent forever after the first occurrence.
+        self._nvr_motion_clip_blocked_warned = BoolFieldView(
+            self._sessions, "nvr_motion_clip_blocked_warned"
+        )
         self.privacy_set_at = FloatFieldView(
             self._sessions, "privacy_set_at"
         )  # privacy write timestamp

@@ -2456,6 +2456,7 @@ def _make_coord():
         stop_remote_viewing_front_door=AsyncMock(),
         unregister_go2rtc_stream=AsyncMock(),
         nvr_processes={},
+        nvr_preroll_processes={},
         nvr_user_intent={},
         stop_recorder=AsyncMock(),
     )
@@ -3641,6 +3642,11 @@ def _make_coord_stream_lifecycle(stream_obj=None):
         # Mini-NVR Phase 1 — tear_down_live_stream stops the recorder before
         # the proxy goes away. Empty dict = no recorder running, branch skipped.
         nvr_processes={},
+        # event_buffered-mode sibling of nvr_processes (2026-08-09 fix): a
+        # camera in that mode only ever populates this dict, never
+        # nvr_processes — tear_down_live_stream's stop_recorder gate and
+        # has_active_consumer must check both.
+        nvr_preroll_processes={},
         nvr_user_intent={},
         stop_recorder=AsyncMock(),
     )
@@ -4275,12 +4281,13 @@ class TestSpawnTracked:
 
 
 class TestHasActiveConsumer:
-    def _coord(self, *, token, go2rtc_count, nvr=False):
+    def _coord(self, *, token, go2rtc_count, nvr=False, preroll=False):
         stream = SimpleNamespace(access_token=token) if token else None
         cam_entity = SimpleNamespace(stream=stream, entity_id="camera.bosch_test")
         return SimpleNamespace(
             camera_entities={CAM: cam_entity},
             nvr_processes={CAM: object()} if nvr else {},
+            nvr_preroll_processes={CAM: object()} if preroll else {},
             go2rtc_consumer_count=AsyncMock(return_value=go2rtc_count),
             frigate_runner=None,
         )
@@ -4293,6 +4300,21 @@ class TestHasActiveConsumer:
         with patch(f"{MOD}.cf_unbuffer.hls_access_age") as age:
             assert await BoschCameraCoordinator.has_active_consumer(c, CAM) is True
             age.assert_not_called()  # NVR short-circuits before HLS
+        c.go2rtc_consumer_count.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_true_when_preroll_ring_active_without_polling_anything(self):
+        """2026-08-09 fix (GitHub #64 follow-up): a camera in `event_buffered`
+        Mini-NVR mode only ever populates `nvr_preroll_processes`, never
+        `nvr_processes` — the pre-roll ring must count as a consumer too, or
+        the idle reaper tears down the LOCAL session (and TLS proxy) a
+        perfectly healthy ring depends on after nobody's watched the live
+        view for a while, orphaning the ring to crash-loop against the dead
+        proxy with no live viewer ever required to keep NVR recording alive."""
+        c = self._coord(token=None, go2rtc_count=0, preroll=True)
+        with patch(f"{MOD}.cf_unbuffer.hls_access_age") as age:
+            assert await BoschCameraCoordinator.has_active_consumer(c, CAM) is True
+            age.assert_not_called()  # short-circuits before HLS, same as nvr_processes
         c.go2rtc_consumer_count.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -4347,6 +4369,7 @@ class TestHasActiveConsumer:
         c = SimpleNamespace(
             camera_entities={},
             nvr_processes={},
+            nvr_preroll_processes={},
             go2rtc_consumer_count=AsyncMock(return_value=1),
             frigate_runner=None,
         )
@@ -6850,6 +6873,7 @@ async def test_has_active_consumer_true_when_recorder_connected() -> None:
     """A recorder on the front-door must keep the session alive (no reaping)."""
     c = SimpleNamespace(
         nvr_processes={},
+        nvr_preroll_processes={},
         camera_entities={CAM_ID: SimpleNamespace(stream=None)},
         frigate_runner=SimpleNamespace(active_count=lambda _c: 1),
         go2rtc_consumer_count=AsyncMock(return_value=0),
@@ -12327,6 +12351,7 @@ class TestRefreshLocalCredsFromHeartbeat:
             hw_version={CAM_A: "CAMERA_EYES"},
             camera_entities={CAM_A: cam_entity},
             nvr_processes={},
+            nvr_preroll_processes={},
             nvr_user_intent={},
             # bg_tasks: set used by tracked background-task lifecycle bookkeeping.
             bg_tasks=set(),
@@ -14586,6 +14611,7 @@ def _make_coord_async_methods(**overrides):
         renewal_tasks={},
         bg_tasks=set(),
         nvr_processes={},
+        nvr_preroll_processes={},
         nvr_user_intent={},
         rcp_lan_ip_cache={},
         local_creds_cache={},
@@ -16741,6 +16767,7 @@ class TestRefreshLocalCredsDebugLog:
             },
             camera_entities={CAM_A: cam_entity},
             nvr_processes={},
+            nvr_preroll_processes={},
         )
 
         resp_text = json.dumps({"user": "new_user", "password": "new_pass"})
@@ -16915,6 +16942,7 @@ class TestTearDownLiveStream_sprint_j1:
 
         coord = _make_coord_sprint_j1(
             nvr_processes={},
+            nvr_preroll_processes={},
             renewal_tasks={},
             reaper_tasks={},
             camera_entities={CAM_A: cam_entity},
@@ -16948,6 +16976,7 @@ class TestTearDownLiveStream_sprint_j1:
 
         coord = _make_coord_sprint_j1(
             nvr_processes={},
+            nvr_preroll_processes={},
             renewal_tasks={},
             reaper_tasks={},
             camera_entities={CAM_A: cam_entity},
@@ -17446,6 +17475,7 @@ def _make_coord_sprint_j2(**overrides):
         camera_entities={},
         live_connections={},
         nvr_processes={},
+        nvr_preroll_processes={},
         nvr_user_intent={},
         _proxy_url_cache={},
         _rcp_099e_probe_failed_until={},
@@ -21325,6 +21355,7 @@ def _make_coord_sprint_kb(**overrides):
         renewal_tasks={},
         bg_tasks=set(),
         nvr_processes={},
+        nvr_preroll_processes={},
         nvr_user_intent={},
         rcp_session_cache={},
         # ── mocked collaborators ─────────────────────────────────────────────
@@ -23476,6 +23507,7 @@ def _make_coord_sprint_kd(**overrides):
         # NVR
         nvr_user_intent={},
         nvr_processes={},
+        nvr_preroll_processes={},
         # Collaborator mocks
         async_local_tcp_ping=AsyncMock(return_value=False),
         start_tls_proxy=AsyncMock(return_value=12345),
@@ -29743,6 +29775,123 @@ class TestNvrSidecarRemote:
             f"async_create_task with name 'bosch_nvr_stop_*' must be called for REMOTE+NVR+running recorder, got: {task_calls}"
         )
 
+    @pytest.mark.asyncio
+    async def test_nvr_sidecar_remote_stops_preroll_ring(self):
+        """2026-08-09 fix (GitHub #64 follow-up): an `event_buffered`-mode
+        camera only ever populates `nvr_preroll_processes`, never
+        `nvr_processes` — a LOCAL→REMOTE transition must still stop that
+        ring instead of leaving it running against the superseded proxy."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        task_calls = []
+
+        def _create_task(coro, **kwargs):
+            import inspect
+
+            if inspect.iscoroutine(coro):
+                coro.close()
+            task_calls.append(kwargs.get("name", ""))
+            return MagicMock()
+
+        coord = _make_coord_live(
+            entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "remote"},
+            ),
+            start_tls_proxy=AsyncMock(return_value=54321),
+            nvr_user_intent={CAM_A: True},  # NVR intent set
+            nvr_processes={},  # no CONTINUOUS-mode recorder
+            nvr_preroll_processes={CAM_A: MagicMock()},  # ring IS running
+        )
+        coord.hass = SimpleNamespace(
+            async_create_task=_create_task,
+            async_add_executor_job=AsyncMock(),
+            data={},
+            bus=SimpleNamespace(async_listen_once=MagicMock()),
+        )
+        coord.replace_renewal_task = lambda cam_id, coro: _create_task(coro)
+        coord.replace_reaper_task = lambda cam_id, coro: _create_task(coro)
+
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
+        resp = _put_resp(200, remote_body)
+        session_mock = MagicMock()
+        session_mock.close = AsyncMock()
+        session_mock.put = AsyncMock(return_value=resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            await try_live_connection_inner(coord, CAM_A)
+
+        nvr_stop_calls = [n for n in task_calls if "nvr_stop" in n]
+        assert nvr_stop_calls, (
+            "async_create_task with name 'bosch_nvr_stop_*' must be called "
+            f"for REMOTE+NVR+running preroll ring, got: {task_calls}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_nvr_sidecar_remote_no_stop_when_neither_recorder_running(self):
+        """Neither `nvr_processes` nor `nvr_preroll_processes` has an entry
+        — nothing to stop, no stray task."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        task_calls = []
+
+        def _create_task(coro, **kwargs):
+            import inspect
+
+            if inspect.iscoroutine(coro):
+                coro.close()
+            task_calls.append(kwargs.get("name", ""))
+            return MagicMock()
+
+        coord = _make_coord_live(
+            entry=SimpleNamespace(
+                data={"bearer_token": "tok-A"},
+                options={"stream_connection_type": "remote"},
+            ),
+            start_tls_proxy=AsyncMock(return_value=54321),
+            nvr_user_intent={CAM_A: True},
+            nvr_processes={},
+            nvr_preroll_processes={},
+        )
+        coord.hass = SimpleNamespace(
+            async_create_task=_create_task,
+            async_add_executor_job=AsyncMock(),
+            data={},
+            bus=SimpleNamespace(async_listen_once=MagicMock()),
+        )
+        coord.replace_renewal_task = lambda cam_id, coro: _create_task(coro)
+        coord.replace_reaper_task = lambda cam_id, coro: _create_task(coro)
+
+        remote_body = json.dumps(
+            {
+                "urls": ["proxy-01.live.cbs.boschsecurity.com:42090/hashXXX"],
+                "bufferingTime": 1000,
+            }
+        )
+        resp = _put_resp(200, remote_body)
+        session_mock = MagicMock()
+        session_mock.close = AsyncMock()
+        session_mock.put = AsyncMock(return_value=resp)
+
+        with (
+            patch("aiohttp.TCPConnector", return_value=MagicMock()),
+            patch("aiohttp.ClientSession", return_value=session_mock),
+        ):
+            await try_live_connection_inner(coord, CAM_A)
+
+        nvr_stop_calls = [n for n in task_calls if "nvr_stop" in n]
+        assert not nvr_stop_calls, (
+            f"no recorder running — must not create a stop task, got: {task_calls}"
+        )
+
 
 # Coverage targets in __init__.py:
 # 1905       – _fetch returns non-200 status (not exception, not 200)
@@ -30431,6 +30580,7 @@ def _make_coord_live_sprint_mc(**overrides):
         renewal_tasks={},
         nvr_user_intent={},
         nvr_processes={},
+        nvr_preroll_processes={},
         async_local_tcp_ping=AsyncMock(return_value=False),
         start_tls_proxy=AsyncMock(return_value=12345),
         stop_tls_proxy=AsyncMock(),

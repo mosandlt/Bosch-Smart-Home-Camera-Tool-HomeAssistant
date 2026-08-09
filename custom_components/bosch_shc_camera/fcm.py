@@ -1324,28 +1324,77 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
                 # treat "no Mini-NVR support on this stub" as "nothing to do"
                 # rather than raising.
                 _get_nvr_mode = getattr(coordinator, "get_nvr_mode", None)
-                if (
-                    event_type in ("MOVEMENT", "PERSON")
-                    and callable(_get_nvr_mode)
-                    and _get_nvr_mode(cam_id) == "event_buffered"
-                ):
-                    _nvr_opts = coordinator.options
-                    if (
-                        _nvr_opts.get("enable_nvr")
-                        and (
+                if event_type in ("MOVEMENT", "PERSON") and callable(_get_nvr_mode):
+                    _nvr_mode = _get_nvr_mode(cam_id)
+                    _nvr_mode_ok = _nvr_mode == "event_buffered"
+                    # The three NVR-specific checks are only meaningful (and
+                    # only computed — short-circuiting, not just skipped in
+                    # the final condition) when the mode check already
+                    # passed: `should_record()` reads coordinator.options/
+                    # nvr_user_intent/live_connections/is_camera_online,
+                    # which a minimal test-fixture coordinator defining only
+                    # `get_nvr_mode` may not have (bug-hunt finding,
+                    # 2026-08-09) — mirrors the original inline `and`
+                    # chain's short-circuit instead of evaluating eagerly.
+                    _nvr_enabled: bool | None = None
+                    _nvr_secs_ok: bool | None = None
+                    _nvr_should_record: bool | None = None
+                    if _nvr_mode_ok:
+                        _nvr_opts = coordinator.options
+                        _nvr_enabled = bool(_nvr_opts.get("enable_nvr"))
+                        _nvr_secs_ok = (
                             int(_nvr_opts.get("nvr_preroll_seconds") or 0) > 0
                             or int(_nvr_opts.get("nvr_postroll_seconds") or 0) > 0
                         )
-                    ) and should_record(
-                        coordinator,
-                        cam_id,
-                        switch_on=coordinator.nvr_user_intent.get(cam_id, False),
+                        _nvr_should_record = should_record(
+                            coordinator,
+                            cam_id,
+                            switch_on=coordinator.nvr_user_intent.get(cam_id, False),
+                        )
+                    if (
+                        _nvr_mode_ok
+                        and _nvr_enabled
+                        and _nvr_secs_ok
+                        and _nvr_should_record
                     ):
                         _clip_task = coordinator.hass.async_create_task(
                             assemble_and_ship_motion_clip(coordinator, cam_id)
                         )
                         coordinator.bg_tasks.add(_clip_task)
                         _clip_task.add_done_callback(coordinator.bg_tasks.discard)
+                        coordinator._nvr_motion_clip_blocked_warned.discard(cam_id)
+                    elif cam_id not in coordinator._nvr_motion_clip_blocked_warned:
+                        # Previously zero log trace here at all (GitHub #64
+                        # follow-up, 2026-08-09: the pre-roll ring confirmed
+                        # running+writing, but no motion clip was ever
+                        # produced — same "silent skip, no diagnostic"
+                        # pattern that made every earlier part of that issue
+                        # hard to pin down without live debug captures).
+                        # WARNING (not DEBUG) and one-time-per-camera —
+                        # matches the established `nvr_preroll_seconds==0`
+                        # pattern elsewhere in this integration, and this
+                        # issue thread has already cost the reporter many
+                        # rounds of "please enable debug logging and
+                        # recapture"; this should be visible without that.
+                        # `_nvr_mode` is included so a mode that silently
+                        # isn't `event_buffered` (e.g. a startup-restore
+                        # race reverting to the global default) is surfaced
+                        # too, not just the sub-conditions past that gate.
+                        coordinator._nvr_motion_clip_blocked_warned.add(cam_id)
+                        _LOGGER.warning(
+                            "NVR motion clip not created for %s: mode=%s "
+                            "(need 'event_buffered'), enable_nvr=%s, "
+                            "preroll/postroll seconds configured=%s, "
+                            "should_record=%s (needs: LOCAL session + "
+                            "camera online + NVR recording switch on). "
+                            "This warning fires once per camera until a "
+                            "clip is next successfully scheduled.",
+                            cam_id[:8],
+                            _nvr_mode,
+                            _nvr_enabled,
+                            _nvr_secs_ok,
+                            _nvr_should_record,
+                        )
 
                 # Check notification switches before sending alert.
                 # Master switch (switch.bosch_{name}_notifications) must be ON,

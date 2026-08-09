@@ -2456,6 +2456,15 @@ def _make_nvr_push_coord(
     coord.nvr_user_intent = {CAM_ID: switch_on}
     coord.live_connections = {CAM_ID: {"_connection_type": conn_type}}
     coord.is_camera_online = MagicMock(return_value=online)
+    # 2026-08-09: real BoschCameraCoordinator always has this (BoolFieldView
+    # in __init__) — a bare `set()` here matches production shape so tests
+    # exercise the real "not scheduled" branch instead of silently relying
+    # on fcm.py's broad `except Exception` (event-fetch error handler) to
+    # swallow an AttributeError from a stub missing this field, which was
+    # masking that the new diagnostic WARNING never actually fired in any
+    # existing test (bug-hunt finding).
+    if not hasattr(coord, "_nvr_motion_clip_blocked_warned"):
+        coord._nvr_motion_clip_blocked_warned = set()
     return coord
 
 
@@ -2607,6 +2616,58 @@ class TestNvrEventBufferedClipDispatch:
         ) as mock_assemble:
             await self._fire_movement(coord)
         mock_assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_blocked_clip_logs_warning_once_then_clears_on_success(
+        self, caplog
+    ) -> None:
+        """2026-08-09 fix (GitHub #64 follow-up, 3-agent bug-hunt): a blocked
+        clip must WARNING once per camera (not silently, and not DEBUG —
+        this issue's reporter already burned many rounds needing debug
+        logging enabled just to diagnose the pre-roll ring itself), then
+        the dedup flag clears as soon as a clip is next successfully
+        scheduled so the warning can re-fire if it starts failing again."""
+        coord = _make_nvr_push_coord(
+            switch_on=False,  # should_record() blocks — clip not scheduled
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={},
+        )
+        with (
+            patch(
+                f"{MODULE}.assemble_and_ship_motion_clip",
+                MagicMock(return_value="stub-coro"),
+            ),
+            caplog.at_level("WARNING", logger="custom_components.bosch_shc_camera.fcm"),
+        ):
+            await self._fire_movement(coord)
+            # _fire_movement always fetches the same fixed event id
+            # ("new-evt") — clear the per-event-id dedup cache too, or the
+            # 2nd call would `continue` on the "already sent" check before
+            # ever reaching the NVR gate, not because it was re-blocked.
+            coord.alert_sent_ids.clear()
+            coord.last_event_ids[CAM_ID] = "old-evt-2"  # allow a 2nd dispatch
+            await self._fire_movement(coord)
+
+        blocked_logs = [
+            r for r in caplog.records if "NVR motion clip not created" in r.message
+        ]
+        assert len(blocked_logs) == 1, (
+            "must warn exactly once across repeated blocked attempts, "
+            f"got {len(blocked_logs)}"
+        )
+        assert CAM_ID in coord._nvr_motion_clip_blocked_warned
+
+        # Now let it succeed — the dedup flag must clear.
+        coord.nvr_user_intent[CAM_ID] = True
+        coord.alert_sent_ids.clear()
+        coord.last_event_ids[CAM_ID] = "old-evt-3"
+        with patch(
+            f"{MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)
+        mock_assemble.assert_called_once_with(coord, CAM_ID)
+        assert CAM_ID not in coord._nvr_motion_clip_blocked_warned
 
     @pytest.mark.asyncio
     async def test_missing_get_nvr_mode_on_stub_coordinator_no_crash(self) -> None:

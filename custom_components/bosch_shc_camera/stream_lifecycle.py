@@ -172,7 +172,21 @@ async def tear_down_live_stream(
         # but AFTER the visible state is corrected. Keep user-intent set
         # so the recorder auto-restarts when the LAN session comes back.
         # Concept §2.
-        if cam_id in coordinator.nvr_processes:
+        #
+        # `nvr_processes` alone misses `event_buffered`-mode cameras, whose
+        # only running process lives in `nvr_preroll_processes` — a
+        # teardown that reaches here for a legitimate reason (privacy on,
+        # user pressed stop) would otherwise skip `stop_recorder()`
+        # entirely, leaving the pre-roll ring orphaned to crash against the
+        # TLS proxy this function kills two lines below, instead of being
+        # cleanly stopped (`stop_recorder()` already calls
+        # `stop_preroll_recorder()` first regardless of mode). Same
+        # `has_active_consumer()` gap, same GitHub #64 follow-up fix
+        # (2026-08-09).
+        if (
+            cam_id in coordinator.nvr_processes
+            or cam_id in coordinator.nvr_preroll_processes
+        ):
             try:
                 await coordinator.stop_recorder(
                     cam_id, clear_intent=False, reason="LAN session torn down"
@@ -457,8 +471,9 @@ async def has_active_consumer(coordinator: BoschCameraCoordinator, cam_id: str) 
 
     Three signals, in cheap-to-expensive order:
       1. An active Mini-NVR recorder — it reads the TLS proxy DIRECTLY (not
-         via HLS/go2rtc, see nvr_processes), so it must be checked
-         explicitly or the reaper would tear a recording's session down.
+         via HLS/go2rtc, see nvr_processes/nvr_preroll_processes), so it
+         must be checked explicitly or the reaper would tear a recording's
+         session down.
       2. A live HLS viewer — a playlist/segment was fetched within
          STREAM_HLS_FRESH_SEC (clients refetch every few seconds; tracked by
          cf_unbuffer). HA's `Stream.available` is deliberately NOT used: it
@@ -473,7 +488,23 @@ async def has_active_consumer(coordinator: BoschCameraCoordinator, cam_id: str) 
     """
     from .cf_unbuffer import hls_access_age
 
-    if cam_id in coordinator.nvr_processes:
+    # `nvr_processes` only ever holds an entry for `continuous` Mini-NVR
+    # mode — a camera in `event_buffered` mode never populates it, only
+    # `nvr_preroll_processes` (the pre-roll ring). Checking `nvr_processes`
+    # alone meant the idle reaper never recognized a perfectly healthy
+    # pre-roll ring as a consumer, and tore its LOCAL session (and TLS
+    # proxy) down after STREAM_IDLE_REAP_SEC of nobody watching the live
+    # view — even though NVR recording was explicitly on and doesn't need a
+    # live viewer. The ring then crash-looped against the dead proxy and
+    # was blocked from auto-respawning by its own connection-type gate
+    # (recorder.py's `_spawn_preroll_recorder_locked`), producing exactly
+    # the reported symptom: ring confirmed alive+writing right after
+    # startup, but motion events never produce clips going forward (GitHub
+    # #64 follow-up, 2026-08-09 — 3-agent bug-hunt finding).
+    if (
+        cam_id in coordinator.nvr_processes
+        or cam_id in coordinator.nvr_preroll_processes
+    ):
         return True
     cam_entity = coordinator.camera_entities.get(cam_id)
     stream = getattr(cam_entity, "stream", None) if cam_entity is not None else None

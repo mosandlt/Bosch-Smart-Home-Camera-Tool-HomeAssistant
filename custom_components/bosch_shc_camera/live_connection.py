@@ -993,9 +993,23 @@ async def try_live_connection_inner(
                                 ),
                                 name=f"bosch_nvr_start_{cam_id[:8]}",
                             )
-                        elif (
-                            type_val == "REMOTE" and cam_id in coordinator.nvr_processes
+                        elif type_val == "REMOTE" and (
+                            cam_id in coordinator.nvr_processes
+                            or cam_id in coordinator.nvr_preroll_processes
                         ):
+                            # `nvr_preroll_processes` (2026-08-09 fix, GitHub #64
+                            # follow-up): an `event_buffered`-mode camera only
+                            # ever populates this dict, never `nvr_processes` —
+                            # missing it here meant a LOCAL→REMOTE transition
+                            # never stopped the pre-roll ring, which kept
+                            # running against the now-superseded TLS proxy.
+                            # Same bug class as stream_lifecycle.py's
+                            # has_active_consumer()/tear_down_live_stream(),
+                            # found in the same 3-agent bug-hunt — and made
+                            # WORSE by that fix alone, since has_active_consumer()
+                            # now treats this orphaned ring as a real consumer,
+                            # blocking the idle reaper from ever cleaning it up
+                            # either.
                             coordinator.hass.async_create_task(
                                 nvr_recorder.stop_recorder(
                                     coordinator,

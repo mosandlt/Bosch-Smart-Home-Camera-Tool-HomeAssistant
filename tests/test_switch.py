@@ -2171,6 +2171,7 @@ def _nvr_coord(**overrides):
         data={CAM_ID: {"info": _base_info()}},
         nvr_user_intent={},
         nvr_processes={},
+        nvr_preroll_processes={},
         nvr_error_state={},
         live_connections={},
         last_update_success=True,
@@ -4750,6 +4751,7 @@ class TestTeardownClearsIntent:
             stop_remote_viewing_front_door=AsyncMock(),
             unregister_go2rtc_stream=AsyncMock(),
             nvr_processes={},
+            nvr_preroll_processes={},
             nvr_user_intent={},
             stop_recorder=AsyncMock(),
         )
