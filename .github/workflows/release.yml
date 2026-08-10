@@ -45,6 +45,25 @@ jobs:
         with:
           fetch-depth: 0
 
+      # HACS zip_release (hacs.json): ground-truthed against HACS's own
+      # async_download_zip_file (custom_components/hacs/repositories/base.py)
+      # — it downloads this exact asset and does a PLAIN zipfile.extractall()
+      # straight into the final /config/custom_components/<domain>/ path, with
+      # NO prefix-stripping (unlike the full-repo-zip fallback path, which
+      # does strip the repo-root and content_in_root prefixes). So the zip's
+      # root must contain the integration's files directly — manifest.json
+      # etc. at the top level, NOT nested under custom_components/<domain>/.
+      # filename is a static name reused every release (the version comes
+      # from the release tag in the download URL, not the filename itself).
+      - name: Build HACS zip release asset
+        run: |
+          cd custom_components/bosch_shc_camera
+          zip -r "$GITHUB_WORKSPACE/bosch_shc_camera.zip" . \
+            -x '*.pyc' -x '__pycache__/*' -x '*/__pycache__/*' -x '.gitignore' -x '.DS_Store'
+          cd "$GITHUB_WORKSPACE"
+          echo "--- zip contents ---"
+          unzip -l bosch_shc_camera.zip | head -20
+
       - name: Resolve tag and release channel
         id: tag
         env:
@@ -205,3 +224,13 @@ jobs:
               "${CHANNEL_FLAGS[@]}" \
               --notes-file /tmp/release-notes.md
           fi
+
+      - name: Upload HACS zip release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # --clobber so a tag re-point (fixed-CI re-release onto the same
+          # tag) replaces the asset instead of failing on an existing one.
+          gh release upload "$TAG" bosch_shc_camera.zip \
+            --repo "$GITHUB_REPOSITORY" --clobber

@@ -1,6 +1,8 @@
 {
   "name": "Bosch Smart Home Camera",
   "content_in_root": false,
+  "zip_release": true,
+  "filename": "bosch_shc_camera.zip",
   "homeassistant": "2026.7.0",
   "hacs": "2.0.0"
 }
