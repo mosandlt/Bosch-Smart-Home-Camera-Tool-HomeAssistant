@@ -1275,7 +1275,14 @@ class TestCreateMotionClip:
 
     @pytest.mark.asyncio
     async def test_no_preroll_segments_returns_false(self):
-        """list_preroll_files returns [] → create_motion_clip returns False."""
+        """list_preroll_files returns [] → create_motion_clip returns False.
+
+        The first occurrence for a camera logs a one-time WARNING (GitHub
+        #64 follow-up: this exact no-op used to be DEBUG-only, invisible by
+        default, and outside the fcm.py outer-gate warning's coverage). A
+        second occurrence for the SAME camera before any clip has shipped
+        must fall back to DEBUG rather than re-warning every event.
+        """
         from custom_components.bosch_shc_camera import recorder
 
         coord = _make_phase_coord()
@@ -1283,7 +1290,12 @@ class TestCreateMotionClip:
 
         with patch.object(recorder, "list_preroll_files", return_value=[]):
             result = await recorder.create_motion_clip(coord, cam_id, "/tmp/out.mp4")
-        assert result is False
+            assert result is False
+            assert cam_id in coord._nvr_motion_clip_no_segments_warned
+
+            # Second occurrence, same camera, still not shipped — DEBUG only.
+            result2 = await recorder.create_motion_clip(coord, cam_id, "/tmp/out.mp4")
+        assert result2 is False
 
     @pytest.mark.asyncio
     async def test_success_returns_true(self):
@@ -8273,15 +8285,26 @@ class TestAssembleAndShipMotionClip:
     async def test_lock_already_held_skips(self, tmp_path: Path):
         """A concurrent assembly in progress for the same camera → skip,
         don't queue (issue #43 follow-up: bursty motion events must not
-        pile up overlapping ffmpeg concats)."""
+        pile up overlapping ffmpeg concats).
+
+        The first occurrence for a camera logs a one-time WARNING (GitHub
+        #64 follow-up: this exact no-op used to be DEBUG-only). A second
+        occurrence for the SAME camera while still locked must fall back
+        to DEBUG rather than re-warning every event.
+        """
         coord = _make_assembly_coord(tmp_path)
         lock = coord.get_nvr_clip_assembly_lock(CAM_ID)
         await lock.acquire()
         try:
             result = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
+            assert result is False
+            assert CAM_ID in coord._nvr_motion_clip_assembly_busy_warned
+
+            # Second occurrence, same camera, still locked — DEBUG only.
+            result2 = await recorder.assemble_and_ship_motion_clip(coord, CAM_ID)
         finally:
             lock.release()
-        assert result is False
+        assert result2 is False
 
     @pytest.mark.asyncio
     async def test_staging_dir_makedirs_oserror_returns_false(self, tmp_path: Path):
