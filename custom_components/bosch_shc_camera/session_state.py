@@ -154,6 +154,8 @@ class CameraSessionState:
     nvr_preroll_zero_warned: bool = False
     nvr_preroll_first_segment_logged: bool = False
     nvr_motion_clip_blocked_warned: bool = False
+    nvr_motion_clip_no_segments_warned: bool = False
+    nvr_motion_clip_assembly_busy_warned: bool = False
     # ── Per-cam caches without cross-camera access ──────────────────────
     # All default to the `_UNSET` sentinel (see `_Unset` above) — matches
     # the `cam_id not in old_dict` semantics of the dicts they replace.

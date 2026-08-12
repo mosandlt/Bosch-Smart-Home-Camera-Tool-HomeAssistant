@@ -1240,7 +1240,20 @@ async def create_motion_clip(
 
     paths = staged_paths
     if not paths:
-        _LOGGER.debug("NVR motion clip: no pre-roll segments for %s", cam_id[:8])
+        if cam_id not in coordinator._nvr_motion_clip_no_segments_warned:
+            coordinator._nvr_motion_clip_no_segments_warned.add(cam_id)
+            _LOGGER.warning(
+                "NVR motion clip not created for %s: no usable pre-roll "
+                "segments were available yet (list_preroll_files() always "
+                "drops the newest, possibly still-mid-write segment — a "
+                "motion event arriving before the ring has written a "
+                "second segment yields none at all). This warning fires "
+                "once per camera until a clip is next successfully "
+                "assembled.",
+                cam_id[:8],
+            )
+        else:
+            _LOGGER.debug("NVR motion clip: no pre-roll segments for %s", cam_id[:8])
         if stage_dir is not None:
             await coordinator.hass.async_add_executor_job(_cleanup_stage_dir, stage_dir)
         return False
@@ -1363,10 +1376,21 @@ async def assemble_and_ship_motion_clip(
 
     lock = coordinator.get_nvr_clip_assembly_lock(cam_id)
     if lock.locked():
-        _LOGGER.debug(
-            "NVR motion clip: assembly already in progress for %s, skipping",
-            cam_id[:8],
-        )
+        if cam_id not in coordinator._nvr_motion_clip_assembly_busy_warned:
+            coordinator._nvr_motion_clip_assembly_busy_warned.add(cam_id)
+            _LOGGER.warning(
+                "NVR motion clip: assembly already in progress for %s, "
+                "skipping this event. This warning fires once per camera "
+                "until a clip is next successfully assembled — if it keeps "
+                "recurring, a prior assembly may be stuck (e.g. a hung "
+                "ffmpeg process).",
+                cam_id[:8],
+            )
+        else:
+            _LOGGER.debug(
+                "NVR motion clip: assembly already in progress for %s, skipping",
+                cam_id[:8],
+            )
         return False
 
     async with lock:
@@ -1508,6 +1532,8 @@ async def assemble_and_ship_motion_clip(
                 await restart_preroll_recorder_after_finalize(coordinator, cam_id)
 
         if shipped:
+            coordinator._nvr_motion_clip_no_segments_warned.discard(cam_id)
+            coordinator._nvr_motion_clip_assembly_busy_warned.discard(cam_id)
             _LOGGER.info(
                 "NVR motion clip assembled for %s -> %s (postroll=%ds, "
                 "finalize_ring_segments=%s)",

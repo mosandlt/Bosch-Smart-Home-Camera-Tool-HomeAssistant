@@ -892,6 +892,8 @@ def _make_preroll_coord(tmp_path, *, cam_title: str = CAM_TITLE) -> SimpleNamesp
         _nvr_last_preroll_prune={CAM_ID: float("-inf")},
         _nvr_preroll_last_crash={},
         _nvr_recorder_locks={},
+        _nvr_motion_clip_no_segments_warned=set(),
+        _nvr_motion_clip_assembly_busy_warned=set(),
     )
     coord.hass = SimpleNamespace(
         async_add_executor_job=_run_executor,
@@ -937,6 +939,8 @@ def _make_phase_coord(opts=None, cam_title="Terrasse", cam_id=CAM_ID_SHORT):
         _nvr_recorder_locks={},
         _nvr_preroll_zero_warned=set(),
         _nvr_preroll_first_segment_logged=set(),
+        _nvr_motion_clip_no_segments_warned=set(),
+        _nvr_motion_clip_assembly_busy_warned=set(),
         hass=MagicMock(),
         async_update_listeners=MagicMock(),
     )
@@ -8233,6 +8237,8 @@ def _make_assembly_coord(
         _nvr_clip_assembly_locks={},
         _nvr_event_clip_enabled={CAM_ID: event_clip_enabled},
         _nvr_recorder_locks={},
+        _nvr_motion_clip_no_segments_warned=set(),
+        _nvr_motion_clip_assembly_busy_warned=set(),
         nvr_preroll_processes=({CAM_ID: MagicMock()} if ring_running else {}),
     )
     coord.hass = SimpleNamespace(async_add_executor_job=_run_executor)

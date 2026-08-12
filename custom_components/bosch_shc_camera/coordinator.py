@@ -859,6 +859,27 @@ class BoschCameraCoordinator(
         self._nvr_motion_clip_blocked_warned = BoolFieldView(
             self._sessions, "nvr_motion_clip_blocked_warned"
         )
+        # Tracks cam_ids for which the "no pre-roll segments available"/
+        # "assembly already in progress" one-time WARNINGs have already been
+        # logged (recorder.py: assemble_and_ship_motion_clip /
+        # create_motion_clip). These no-ops happen INSIDE the gate the
+        # fcm.py warning above checks, so that warning never fires for them
+        # (GitHub #64 follow-up, 2026-08-11: gate fully satisfied, task
+        # created, then a same-second motion event raced the ring's very
+        # first segment — list_preroll_files() always drops the newest,
+        # in-progress segment, so exactly one existing segment yields an
+        # empty list — total silence, no clip, no warning). Two SEPARATE
+        # flags (bug-hunt finding, 2026-08-12): these are different root
+        # causes with different remediations, and sharing one flag let
+        # whichever fired first for a camera silently suppress the other
+        # down to DEBUG until the next successful ship. Each is cleared as
+        # soon as a clip is next successfully assembled for that camera.
+        self._nvr_motion_clip_no_segments_warned = BoolFieldView(
+            self._sessions, "nvr_motion_clip_no_segments_warned"
+        )
+        self._nvr_motion_clip_assembly_busy_warned = BoolFieldView(
+            self._sessions, "nvr_motion_clip_assembly_busy_warned"
+        )
         self.privacy_set_at = FloatFieldView(
             self._sessions, "privacy_set_at"
         )  # privacy write timestamp
