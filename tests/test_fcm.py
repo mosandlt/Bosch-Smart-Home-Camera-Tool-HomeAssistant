@@ -7309,6 +7309,32 @@ class TestAsyncHandleFcmPushNewEvent:
             "must still seed the baseline even when skipping dispatch"
         )
 
+    def test_event_predates_session_missing_timestamp_is_not_stale(self):
+        """No/too-short timestamp on the event → can't evaluate staleness,
+        so `_event_predates_session` must fail open (False) rather than
+        block a genuinely new event just because Bosch's payload was
+        missing the field this time."""
+        from custom_components.bosch_shc_camera.fcm import _event_predates_session
+
+        coord = SimpleNamespace(_download_started_at=1_800_000_000.0)
+        assert _event_predates_session(coord, {"timestamp": ""}) is False
+        assert _event_predates_session(coord, {}) is False
+        assert _event_predates_session(coord, {"timestamp": "2027"}) is False
+
+    def test_event_predates_session_unparseable_timestamp_is_not_stale(self):
+        """A timestamp that doesn't match Bosch's expected ISO shape must
+        not raise out of the FCM dispatch path — fail open (False), same
+        as the missing-timestamp case above."""
+        from custom_components.bosch_shc_camera.fcm import _event_predates_session
+
+        coord = SimpleNamespace(_download_started_at=1_800_000_000.0)
+        # 19 chars (passes the length gate) but not a valid date/time, so
+        # time.strptime() raises ValueError.
+        assert (
+            _event_predates_session(coord, {"timestamp": "2027-13-45T99:99:99"})
+            is False
+        )
+
     @pytest.mark.asyncio
     async def test_same_event_id_as_prev_does_not_fire(self):
         """newest_id == prev_id → neither if nor elif branch → no bus fire."""
