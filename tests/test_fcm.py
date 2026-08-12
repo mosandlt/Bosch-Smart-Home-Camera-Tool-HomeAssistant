@@ -853,7 +853,10 @@ async def test_handle_push_retries_when_http200_but_no_new_event() -> None:
     coord = SimpleNamespace()
     coord.token = "bearer_tok"
     coord.data = {"cam1": {"info": {"title": "Cam1"}}}
-    coord.last_event_ids = {}  # prev_id=None → no dispatch, but _any_fetch_ok=True
+    # prev_id == newest_id → no *new* event, but _any_fetch_ok=True.
+    # (Not prev_id=None: since the GitHub #64 fix, a None baseline now
+    # legitimately dispatches — see test_first_push_after_restart_dispatches.)
+    coord.last_event_ids = {"cam1": "evt1"}
     coord.alert_sent_ids = {}
     coord.fcm_running = True  # enables the retry branch
     coord.options = {}
@@ -2506,6 +2509,26 @@ class TestNvrEventBufferedClipDispatch:
             await self._fire_movement(coord)
         mock_assemble.assert_called_once_with(coord, CAM_ID)
         coord.hass.async_create_task.assert_any_call("stub-coro")
+
+    @pytest.mark.asyncio
+    async def test_first_push_after_restart_still_schedules_assembly(self) -> None:
+        """GitHub #64 root cause: no `last_event_ids` baseline yet for this
+        camera (e.g. the ~60-90s window right after HA restart, before the
+        coordinator's own polling tick seeds it — see event_dispatch.py's
+        bootstrap comment). The old `prev_id is not None` guard treated
+        this exactly like polling's "avoid replaying historical backlog"
+        case and silently swallowed the event — no dispatch, no log line,
+        no clip. Unlike polling, an FCM push is inherently real-time (Bosch
+        only pushes because something just happened), so it must never be
+        dropped just because no baseline exists yet."""
+        coord = _make_nvr_push_coord(last_event_ids={}, camera_entities={})
+        with patch(
+            f"{MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)
+        mock_assemble.assert_called_once_with(coord, CAM_ID)
+        assert coord.last_event_ids[CAM_ID] == "new-evt"
 
     @pytest.mark.asyncio
     async def test_continuous_mode_not_scheduled(self) -> None:
@@ -7222,8 +7245,15 @@ class TestAsyncHandleFcmPushNewEvent:
         )
 
     @pytest.mark.asyncio
-    async def test_elif_newest_id_only_updates_last_event_id(self):
-        """prev_id is None (first push) → elif branch: just store newest_id, no bus fire."""
+    async def test_first_push_no_baseline_still_fires(self):
+        """prev_id is None (first push after restart, no baseline seeded
+        yet by the coordinator's own polling tick) → GitHub #64: must still
+        fire the bus event, not silently swallow it. An FCM push only ever
+        arrives for a genuinely new, real-time event — unlike polling's
+        historical-backlog concern, there's nothing here to guard against
+        by staying silent on a missing baseline. The `if` branch must be
+        taken (and set last_event_ids as its own side effect), not the
+        `elif`."""
         from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={})  # no prev_id
@@ -7235,12 +7265,48 @@ class TestAsyncHandleFcmPushNewEvent:
             new=AsyncMock(return_value=session),
         ):
             await async_handle_fcm_push(coord)
-        (
-            coord.hass.bus.async_fire.assert_not_called(),
-            "elif branch (no prev_id) must not fire HA events — only record the id",
-        )
+        coord.hass.bus.async_fire.assert_called_once()
         assert coord.last_event_ids.get(CAM_ID) == "first-id", (
-            "elif branch must store newest_id in last_event_ids"
+            "dispatch (if) branch must also record the new id"
+        )
+
+    @pytest.mark.asyncio
+    async def test_first_push_no_baseline_but_stale_event_does_not_fire(self):
+        """Counterpart to test_first_push_no_baseline_still_fires: no
+        baseline yet, but the event itself predates this HA session by
+        well over the 60s slack window (e.g. a queued/redelivered FCM push,
+        or the first push after a fresh install surfacing pre-existing
+        cloud history). Firing here would trade GitHub #64's silent
+        non-delivery for a false alert/clip on an old event instead of
+        actually fixing it — must stay silent (bootstrap-only), same as
+        the pre-fix `elif` fallback did for every case, not just this
+        one."""
+        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+
+        coord = _make_push_coord3(last_event_ids={})  # no prev_id
+        coord._download_started_at = 1_800_000_000.0  # 2027-01-15T08:00:00Z
+        stale_events = [
+            {
+                "id": "old-id",
+                "eventType": "MOVEMENT",
+                "eventTags": [],
+                # Hours before _download_started_at above.
+                "timestamp": "2027-01-15T00:00:00Z",
+                "imageUrl": "",
+                "videoClipUrl": "",
+                "videoClipUploadStatus": "",
+            }
+        ]
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm_push(200, json_data=stale_events))
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await async_handle_fcm_push(coord)
+        coord.hass.bus.async_fire.assert_not_called()
+        assert coord.last_event_ids.get(CAM_ID) == "old-id", (
+            "must still seed the baseline even when skipping dispatch"
         )
 
     @pytest.mark.asyncio

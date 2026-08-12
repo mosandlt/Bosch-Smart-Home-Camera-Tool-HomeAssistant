@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import binascii
+import calendar
 import logging
 import os
 import ssl
@@ -1154,6 +1155,33 @@ def _on_fcm_push(
     coordinator.hass.loop.call_soon_threadsafe(_spawn_fcm_handler)
 
 
+def _event_predates_session(coordinator: Any, ev: dict[str, Any]) -> bool:
+    """True if ``ev``'s Bosch-cloud timestamp is older than this
+    coordinator session's start (minus 60s clock-skew/processing slack).
+
+    Same staleness test `smb.py`'s `sync_local_save` already uses against
+    `coordinator._download_started_at` — reused here so a queued/redelivered
+    FCM push (Google MCS resends unacked messages on reconnect, see the
+    async_handle_fcm_push docstring) or the first push after a fresh
+    install (which can surface pre-existing cloud events, not just ones
+    that just happened) doesn't get treated as a brand-new real-time event.
+    Only meaningful when no `last_event_ids` baseline exists yet for the
+    camera — once a baseline exists, `newest_id != prev_id` already proves
+    genuine forward progress and no timestamp check is needed.
+    """
+    ts = ev.get("timestamp", "")
+    if not ts or len(ts) < 19:
+        return False
+    started_at = getattr(coordinator, "_download_started_at", 0.0)
+    if not started_at:
+        return False
+    try:
+        ev_epoch = calendar.timegm(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S"))
+    except Exception:  # unparseable timestamp — don't block on it
+        return False
+    return ev_epoch < started_at - 60
+
+
 async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
     """Handle an FCM push — fetch fresh events for all cameras and fire HA events.
 
@@ -1221,7 +1249,44 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
                 for _k in [k for k, v in _sent.items() if v < _cutoff]:
                     del _sent[_k]
 
-            if prev_id is not None and newest_id and newest_id != prev_id:
+            # `prev_id is None` means no baseline has been established yet
+            # for this camera (e.g. within the ~60-90s after HA restart
+            # before the coordinator's own polling tick seeds
+            # `last_event_ids` — see event_dispatch.py's bootstrap
+            # comment). Unlike that polling path, an FCM push only ever
+            # arrives because Bosch's cloud just observed a genuinely new,
+            # real-time event — there is no "historical backlog" to guard
+            # against here, so it must never be silently dropped. The old
+            # `prev_id is not None` guard treated this exactly like the
+            # polling bootstrap case (seed the baseline, don't dispatch,
+            # see the `elif newest_id:` below) and swallowed the very
+            # first motion event after every restart with zero log trace —
+            # root cause of GitHub #64: reporter consistently reproduced
+            # by restarting HA and triggering exactly one motion event per
+            # test round, which is exactly the event this ate every time.
+            if (
+                prev_id is None
+                and newest_id
+                and _event_predates_session(coordinator, events[0])
+            ):
+                # No baseline yet AND the event itself predates this HA
+                # session — not a genuinely new real-time event (a queued/
+                # redelivered push, or a fresh install surfacing
+                # pre-existing cloud history). Seed the baseline like the
+                # `elif newest_id:` fallback below would, but skip
+                # dispatch — firing here would trade GitHub #64's silent
+                # non-delivery for a false alert/clip instead of fixing it.
+                coordinator.last_event_ids[cam_id] = newest_id
+                _LOGGER.debug(
+                    "FCM push: skipping stale first-seen event for %s id=%s "
+                    "(predates this session's start, no baseline yet — "
+                    "seeding last_event_ids without dispatch)",
+                    cam_id,
+                    newest_id[:8],
+                )
+                continue
+
+            if newest_id and newest_id != prev_id:
                 _dispatched_new = True
                 # Record alert dispatch ASAP so a concurrent handler sees it
                 _sent[newest_id] = _now
