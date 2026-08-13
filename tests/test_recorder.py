@@ -147,6 +147,39 @@ class TestShouldRecord:
         assert should_record(coord, CAM_ID, switch_on=False) is False
 
 
+class TestSecondsSinceEvent:
+    """`_seconds_since_event` — GitHub #64 follow-up (2026-08-13): backs the
+    polling-path staleness guard in `maybe_schedule_nvr_motion_clip`. Same
+    fail-open-on-bad-input shape as fcm.py's sibling
+    `_event_predates_session`."""
+
+    def test_empty_timestamp_returns_none(self):
+        from custom_components.bosch_shc_camera.recorder import _seconds_since_event
+
+        assert _seconds_since_event("") is None
+
+    def test_too_short_timestamp_returns_none(self):
+        from custom_components.bosch_shc_camera.recorder import _seconds_since_event
+
+        assert _seconds_since_event("2027") is None
+
+    def test_unparseable_timestamp_returns_none(self):
+        """19 chars (passes the length gate) but not a valid date/time, so
+        `time.strptime()` raises ValueError — must fail open (None), not
+        raise, so a malformed Bosch payload never crashes event dispatch."""
+        from custom_components.bosch_shc_camera.recorder import _seconds_since_event
+
+        assert _seconds_since_event("2027-13-45T99:99:99") is None
+
+    def test_recent_timestamp_returns_small_age(self):
+        from custom_components.bosch_shc_camera.recorder import _seconds_since_event
+
+        recent = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+        age = _seconds_since_event(recent)
+        assert age is not None
+        assert 0 <= age < 5
+
+
 class TestBuildFfmpegArgs:
     """The exact ffmpeg argv is the contract surface against ffmpeg upstream
     behavior; pinning it catches accidental regressions like dropping

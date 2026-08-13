@@ -23,6 +23,7 @@ Architecture choice (`docs/mini-nvr-concept.md` §10): in-integration via
 from __future__ import annotations
 
 import asyncio
+import calendar
 import datetime
 import logging
 import math
@@ -1545,6 +1546,167 @@ async def assemble_and_ship_motion_clip(
                 else 0,
             )
         return shipped
+
+
+def maybe_schedule_nvr_motion_clip(
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    event_type: str,
+    *,
+    event_timestamp: str = "",
+    source: str = "unknown",
+) -> None:
+    """On a genuinely new movement/person event, schedule Mini-NVR clip
+    assembly for a camera in `event_buffered` mode with the NVR switch on
+    and a LOCAL session — or log why not, once per camera.
+
+    Shared between `fcm.py`'s push handler and `event_dispatch.py`'s
+    polling path (GitHub #64): clip assembly used to be wired into the FCM
+    push handler ONLY. The polling path already has its own "FCM push
+    never delivered this event" delivery-death detector and independently
+    fires the HA bus event + alert for a genuinely new event it discovers
+    first — but never triggered a native clip, so an installation where
+    FCM push is slow/unreliable got alerts and automations firing
+    correctly while the native Mini-NVR clip silently never appeared, with
+    none of this integration's own NVR diagnostics ever getting a chance
+    to run (they all live downstream of this gate). Both call sites share
+    `coordinator.last_event_ids`/`alert_sent_ids` dedup bookkeeping, so
+    only whichever path discovers a given event ID first ever reaches
+    here for it — no double-assembly risk for the SAME event ID (a
+    batched Bosch MOVEMENT+PERSON pair with two distinct IDs can still
+    independently reach here twice — pre-existing, mitigated by
+    `assemble_and_ship_motion_clip`'s own busy-lock skip).
+
+    ``source`` ("fcm_push" or "polling") is only used for logging — makes
+    which path actually triggered a given clip (or a given diagnostic
+    line) greppable without needing full unfiltered logs (GitHub #64:
+    reporters have repeatedly filtered their log excerpts to lines
+    containing "nvr", which misses fcm.py's own "FCM push received"/"FCM
+    push -> new event" lines entirely and made several rounds of this
+    issue impossible to fully diagnose from the log alone).
+
+    Defensive against minimal test-fixture coordinators (no `__init__`)
+    that don't define `get_nvr_mode`: treat "no Mini-NVR support on this
+    stub" as "nothing to do" rather than raising.
+    """
+    _get_nvr_mode = getattr(coordinator, "get_nvr_mode", None)
+    if event_type not in ("MOVEMENT", "PERSON") or not callable(_get_nvr_mode):
+        return
+
+    _nvr_mode = _get_nvr_mode(cam_id)
+    _nvr_mode_ok = _nvr_mode == "event_buffered"
+    # The three NVR-specific checks are only meaningful (and only
+    # computed — short-circuiting, not just skipped in the final
+    # condition) when the mode check already passed: `should_record()`
+    # reads coordinator.options/nvr_user_intent/live_connections/
+    # is_camera_online, which a minimal test-fixture coordinator defining
+    # only `get_nvr_mode` may not have.
+    _nvr_enabled: bool | None = None
+    _nvr_secs_ok: bool | None = None
+    _nvr_should_record: bool | None = None
+    _preroll_secs = 0
+    if _nvr_mode_ok:
+        _nvr_opts = coordinator.options
+        _nvr_enabled = bool(_nvr_opts.get("enable_nvr"))
+        _preroll_secs = int(_nvr_opts.get("nvr_preroll_seconds") or 0)
+        _nvr_secs_ok = (
+            _preroll_secs > 0 or int(_nvr_opts.get("nvr_postroll_seconds") or 0) > 0
+        )
+        _nvr_should_record = should_record(
+            coordinator,
+            cam_id,
+            switch_on=coordinator.nvr_user_intent.get(cam_id, False),
+        )
+
+    if _nvr_mode_ok and _nvr_enabled and _nvr_secs_ok and _nvr_should_record:
+        # Staleness guard (bug-hunt finding, 2026-08-13): assembly always
+        # takes whatever the ring currently holds, on the assumption the
+        # event just happened. That's true for FCM (arrives seconds after
+        # the event — no check applied here, `source="fcm_push"` is
+        # exempt) but not for `source="polling"` — the coordinator's poll
+        # interval (up to 300s when FCM is healthy, per `interval_events`)
+        # can discover an event long after the ring's own
+        # `nvr_preroll_seconds` window has rotated it out, shipping a clip
+        # of unrelated later footage instead of silently doing nothing
+        # useful. `_PREROLL_SEGMENT_SECONDS` margin matches the same
+        # "always drop the newest, possibly mid-write segment" slack used
+        # elsewhere in this module.
+        _event_age = (
+            _seconds_since_event(event_timestamp) if source == "polling" else None
+        )
+        if _event_age is not None and _event_age > _preroll_secs + (
+            2 * _PREROLL_SEGMENT_SECONDS
+        ):
+            _LOGGER.warning(
+                "NVR motion clip not created for %s: event is %.0fs old "
+                "(source=%s) but the pre-roll ring only retains ~%ds — "
+                "the actual motion has already rotated out of the ring, "
+                "so no clip was assembled to avoid shipping unrelated "
+                "later footage.",
+                cam_id[:8],
+                _event_age,
+                source,
+                _preroll_secs,
+            )
+            return
+        _LOGGER.debug(
+            "NVR motion clip: scheduling assembly for %s (source=%s)",
+            cam_id[:8],
+            source,
+        )
+        coordinator.spawn_tracked(
+            assemble_and_ship_motion_clip(coordinator, cam_id),
+            name=f"bosch_shc_camera_nvr_motion_clip_{cam_id[:8]}",
+        )
+        coordinator._nvr_motion_clip_blocked_warned.discard(cam_id)
+    elif not bool(getattr(coordinator, "options", {}).get("enable_nvr")):
+        # Mini-NVR isn't enabled at all for this install — nothing was
+        # ever going to happen here, and warning about it would just be
+        # noise for the majority of installs that never touched Mini-NVR
+        # (bug-hunt finding, 2026-08-13: this WARNING used to only be
+        # reachable via FCM push; wiring in the polling path made it
+        # reachable for every install on its first polled motion event,
+        # including ones that never asked for Mini-NVR).
+        pass
+    elif cam_id not in coordinator._nvr_motion_clip_blocked_warned:
+        # WARNING (not DEBUG) and one-time-per-camera — this issue thread
+        # has already cost reporters many rounds of "please enable debug
+        # logging and recapture"; this should be visible without that.
+        # `_nvr_mode` is included so a mode that silently isn't
+        # `event_buffered` (e.g. a startup-restore race reverting to the
+        # global default) is surfaced too, not just the sub-conditions
+        # past that gate.
+        coordinator._nvr_motion_clip_blocked_warned.add(cam_id)
+        _LOGGER.warning(
+            "NVR motion clip not created for %s (source=%s): mode=%s "
+            "(need 'event_buffered'), enable_nvr=%s, "
+            "preroll/postroll seconds configured=%s, "
+            "should_record=%s (needs: LOCAL session + "
+            "camera online + NVR recording switch on). "
+            "This warning fires once per camera until a "
+            "clip is next successfully scheduled.",
+            cam_id[:8],
+            source,
+            _nvr_mode,
+            _nvr_enabled,
+            _nvr_secs_ok,
+            _nvr_should_record,
+        )
+
+
+def _seconds_since_event(event_timestamp: str) -> float | None:
+    """Return seconds elapsed since a Bosch cloud event's own timestamp, or
+    None if unparseable/empty. Same parsing approach as
+    `fcm.py`'s `_event_predates_session`."""
+    if not event_timestamp or len(event_timestamp) < 19:
+        return None
+    try:
+        ev_epoch = calendar.timegm(
+            time.strptime(event_timestamp[:19], "%Y-%m-%dT%H:%M:%S")
+        )
+    except ValueError:
+        return None
+    return time.time() - ev_epoch
 
 
 def should_record(

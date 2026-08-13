@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.util import dt as dt_util
 
 from .const import FCM_DELIVERY_DEAD_AFTER_SEC
+from .recorder import maybe_schedule_nvr_motion_clip
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator
@@ -219,6 +220,26 @@ async def build_data_and_dispatch(
                         coordinator.hass.bus.async_fire(
                             "bosch_shc_camera_person", event_payload
                         )
+
+                    # Mini-NVR event_buffered clip assembly (GitHub #64
+                    # follow-up, 2026-08-13): this poll tick just proved it
+                    # discovered the event first (the newest_id != prev_id
+                    # dedup above only reaches here for an event no other
+                    # path already claimed) — e.g. FCM push was slow/dead
+                    # for this event, matching the delivery-death detector
+                    # above. Without this call, such an installation would
+                    # get its automations/alerts firing correctly via this
+                    # exact path while the native clip silently never
+                    # appeared — see `maybe_schedule_nvr_motion_clip`'s
+                    # docstring for the full history.
+                    maybe_schedule_nvr_motion_clip(
+                        coordinator,
+                        cam_id,
+                        event_type,
+                        event_timestamp=newest_event.get("timestamp", ""),
+                        source="polling",
+                    )
+
                     coordinator.spawn_tracked(
                         coordinator.async_send_alert(
                             cam_name,

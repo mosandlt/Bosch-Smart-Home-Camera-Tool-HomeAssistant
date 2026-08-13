@@ -45,6 +45,7 @@ from custom_components.bosch_shc_camera.fcm import (
 from tests.source_match import assert_in_source
 
 MODULE = "custom_components.bosch_shc_camera.fcm"
+RECORDER_MODULE = "custom_components.bosch_shc_camera.recorder"
 SMB_MODULE = "custom_components.bosch_shc_camera.smb"
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x42" * 400  # 404 B -- real-looking snapshot
@@ -2323,6 +2324,11 @@ def _make_push_coord(**overrides: Any) -> Any:
         options={},
     )
     coord.async_update_listeners = MagicMock()
+    # Mirrors BoschCameraCoordinator.spawn_tracked closely enough for these
+    # direct-module unit tests — routes through hass.async_create_task
+    # (already asserted on directly in several tests) instead of needing a
+    # real bg_tasks/add_done_callback dance on this stub.
+    coord.spawn_tracked = lambda coro, **kw: coord.hass.async_create_task(coro, **kw)
     for k, v in overrides.items():
         setattr(coord, k, v)
     return coord
@@ -2503,12 +2509,14 @@ class TestNvrEventBufferedClipDispatch:
             last_event_ids={CAM_ID: "old-evt"}, camera_entities={}
         )
         with patch(
-            f"{MODULE}.assemble_and_ship_motion_clip",
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
             MagicMock(return_value="stub-coro"),
         ) as mock_assemble:
             await self._fire_movement(coord)
         mock_assemble.assert_called_once_with(coord, CAM_ID)
-        coord.hass.async_create_task.assert_any_call("stub-coro")
+        coord.hass.async_create_task.assert_any_call(
+            "stub-coro", name=f"bosch_shc_camera_nvr_motion_clip_{CAM_ID[:8]}"
+        )
 
     @pytest.mark.asyncio
     async def test_first_push_after_restart_still_schedules_assembly(self) -> None:
@@ -2523,7 +2531,7 @@ class TestNvrEventBufferedClipDispatch:
         dropped just because no baseline exists yet."""
         coord = _make_nvr_push_coord(last_event_ids={}, camera_entities={})
         with patch(
-            f"{MODULE}.assemble_and_ship_motion_clip",
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
             MagicMock(return_value="stub-coro"),
         ) as mock_assemble:
             await self._fire_movement(coord)
@@ -2538,7 +2546,7 @@ class TestNvrEventBufferedClipDispatch:
             mode="continuous", last_event_ids={CAM_ID: "old-evt"}, camera_entities={}
         )
         with patch(
-            f"{MODULE}.assemble_and_ship_motion_clip",
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
             MagicMock(return_value="stub-coro"),
         ) as mock_assemble:
             await self._fire_movement(coord)
@@ -2552,7 +2560,7 @@ class TestNvrEventBufferedClipDispatch:
             camera_entities={},
         )
         with patch(
-            f"{MODULE}.assemble_and_ship_motion_clip",
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
             MagicMock(return_value="stub-coro"),
         ) as mock_assemble:
             await self._fire_movement(coord)
@@ -2570,11 +2578,56 @@ class TestNvrEventBufferedClipDispatch:
             camera_entities={},
         )
         with patch(
-            f"{MODULE}.assemble_and_ship_motion_clip",
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
             MagicMock(return_value="stub-coro"),
         ) as mock_assemble:
             await self._fire_movement(coord)
         mock_assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_enable_nvr_false_no_warning_noise(self, caplog) -> None:
+        """Same warning-suppression fix as event_dispatch.py's polling
+        path — must also hold for FCM push, since `enable_nvr=False`
+        means there's nothing to diagnose regardless of which path
+        discovered the event."""
+        coord = _make_nvr_push_coord(
+            enable_nvr=False,
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={},
+        )
+        with (
+            patch(
+                f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
+                MagicMock(return_value="stub-coro"),
+            ),
+            caplog.at_level(
+                "WARNING", logger="custom_components.bosch_shc_camera.recorder"
+            ),
+        ):
+            await self._fire_movement(coord)
+        blocked_logs = [
+            r for r in caplog.records if "NVR motion clip not created" in r.message
+        ]
+        assert blocked_logs == []
+
+    @pytest.mark.asyncio
+    async def test_fcm_push_exempt_from_staleness_guard(self) -> None:
+        """The staleness guard added for the polling path (GitHub #64
+        follow-up, 2026-08-13) must NOT apply to FCM push — push always
+        arrives seconds after the real event, so a fixed/old test
+        timestamp here (`_one_event` hardcodes "2026-05-15T10:00:00Z")
+        must not be mistaken for a genuinely stale poll-discovered event."""
+        coord = _make_nvr_push_coord(
+            preroll_seconds=30,
+            last_event_ids={CAM_ID: "old-evt"},
+            camera_entities={},
+        )
+        with patch(
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await self._fire_movement(coord)
+        mock_assemble.assert_called_once_with(coord, CAM_ID)
 
     @pytest.mark.asyncio
     async def test_preroll_and_postroll_both_zero_not_scheduled(self) -> None:
@@ -2587,7 +2640,7 @@ class TestNvrEventBufferedClipDispatch:
             camera_entities={},
         )
         with patch(
-            f"{MODULE}.assemble_and_ship_motion_clip",
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
             MagicMock(return_value="stub-coro"),
         ) as mock_assemble:
             await self._fire_movement(coord)
@@ -2604,7 +2657,7 @@ class TestNvrEventBufferedClipDispatch:
             camera_entities={},
         )
         with patch(
-            f"{MODULE}.assemble_and_ship_motion_clip",
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
             MagicMock(return_value="stub-coro"),
         ) as mock_assemble:
             await self._fire_movement(coord)
@@ -2620,7 +2673,7 @@ class TestNvrEventBufferedClipDispatch:
             camera_entities={},
         )
         with patch(
-            f"{MODULE}.assemble_and_ship_motion_clip",
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
             MagicMock(return_value="stub-coro"),
         ) as mock_assemble:
             await self._fire_movement(coord)
@@ -2634,7 +2687,7 @@ class TestNvrEventBufferedClipDispatch:
             camera_entities={},
         )
         with patch(
-            f"{MODULE}.assemble_and_ship_motion_clip",
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
             MagicMock(return_value="stub-coro"),
         ) as mock_assemble:
             await self._fire_movement(coord)
@@ -2657,10 +2710,12 @@ class TestNvrEventBufferedClipDispatch:
         )
         with (
             patch(
-                f"{MODULE}.assemble_and_ship_motion_clip",
+                f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
                 MagicMock(return_value="stub-coro"),
             ),
-            caplog.at_level("WARNING", logger="custom_components.bosch_shc_camera.fcm"),
+            caplog.at_level(
+                "WARNING", logger="custom_components.bosch_shc_camera.recorder"
+            ),
         ):
             await self._fire_movement(coord)
             # _fire_movement always fetches the same fixed event id
@@ -2685,7 +2740,7 @@ class TestNvrEventBufferedClipDispatch:
         coord.alert_sent_ids.clear()
         coord.last_event_ids[CAM_ID] = "old-evt-3"
         with patch(
-            f"{MODULE}.assemble_and_ship_motion_clip",
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
             MagicMock(return_value="stub-coro"),
         ) as mock_assemble:
             await self._fire_movement(coord)
@@ -2700,7 +2755,7 @@ class TestNvrEventBufferedClipDispatch:
         coord = _make_push_coord(last_event_ids={CAM_ID: "old-evt"}, camera_entities={})
         assert not hasattr(coord, "get_nvr_mode")
         with patch(
-            f"{MODULE}.assemble_and_ship_motion_clip",
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
             MagicMock(return_value="stub-coro"),
         ) as mock_assemble:
             await self._fire_movement(coord)  # must not raise

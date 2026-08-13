@@ -10,7 +10,7 @@ import contextlib
 import logging
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -18,6 +18,7 @@ from custom_components.bosch_shc_camera.event_dispatch import build_data_and_dis
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 NOW = 1000.0
+RECORDER_MODULE = "custom_components.bosch_shc_camera.recorder"
 
 
 def _make_coord(**overrides):
@@ -300,6 +301,185 @@ class TestNewEventDispatch:
         coord.async_mark_events_read = AsyncMock(side_effect=asyncio.CancelledError())
         with pytest.raises(asyncio.CancelledError):
             await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)
+
+
+def _make_nvr_coord(
+    *,
+    mode: str = "event_buffered",
+    switch_on: bool = True,
+    preroll_seconds: int = 30,
+    postroll_seconds: int = 0,
+    conn_type: str = "LOCAL",
+    online: bool = True,
+    enable_nvr: bool = True,
+    **overrides,
+):
+    """`_make_coord` extended with the Mini-NVR fields
+    `maybe_schedule_nvr_motion_clip` reads (GitHub #64 follow-up,
+    2026-08-13: clip assembly used to be reachable only via fcm.py's push
+    handler — the polling path never scheduled a clip even when it was the
+    one that discovered the event)."""
+    coord = _make_coord(**overrides)
+    coord.options = {
+        "enable_nvr": enable_nvr,
+        "nvr_preroll_seconds": preroll_seconds,
+        "nvr_postroll_seconds": postroll_seconds,
+        **overrides.get("options", {}),
+    }
+    coord.get_nvr_mode = MagicMock(return_value=mode)
+    coord.nvr_user_intent = {CAM_A: switch_on}
+    coord.live_connections = {CAM_A: {"_connection_type": conn_type}}
+    coord.is_camera_online = MagicMock(return_value=online)
+    coord.bg_tasks = set()
+    coord._nvr_motion_clip_blocked_warned = set()
+    coord.hass.async_create_task = MagicMock(
+        return_value=MagicMock(add_done_callback=MagicMock())
+    )
+    return coord
+
+
+class TestNvrClipViaPolling:
+    """The coordinator's own polling tick can discover a genuinely new
+    event before FCM push does (e.g. push delivery is slow/dead — this
+    module already has a delivery-death detector for exactly that case,
+    see TestFcmDeliveryDeathWatchdog below). Mini-NVR event_buffered clip
+    assembly must not depend solely on FCM push ever reaching the event —
+    the polling path must schedule it too, or Bosch's own automations/HA
+    events fire correctly while the native clip silently never appears
+    (GitHub #64, reporter Lawyer82, 2026-08-06..13)."""
+
+    @pytest.mark.asyncio
+    async def test_polling_discovers_new_event_schedules_clip(self):
+        coord = _make_nvr_coord(
+            cached_events={
+                CAM_A: [{"id": "ev2", "eventType": "MOVEMENT", "timestamp": "t"}]
+            },
+            last_event_ids={CAM_A: "ev1"},
+        )
+        with patch(
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)
+        mock_assemble.assert_called_once_with(coord, CAM_A)
+
+    @pytest.mark.asyncio
+    async def test_continuous_mode_not_scheduled_via_polling(self):
+        coord = _make_nvr_coord(
+            mode="continuous",
+            cached_events={CAM_A: [{"id": "ev2", "eventType": "MOVEMENT"}]},
+            last_event_ids={CAM_A: "ev1"},
+        )
+        with patch(
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)
+        mock_assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stale_polling_event_skips_clip(self):
+        """Bug-hunt finding (2026-08-13): a poll tick can discover an event
+        long after the ring's pre-roll window has already rotated past it
+        (e.g. FCM was unhealthy and the poll interval is 300s while the
+        ring only keeps 30s) — assembling a clip anyway would ship
+        unrelated later footage instead of the actual motion. Must skip,
+        not schedule a misleading clip."""
+        old_ts = "2020-01-01T00:00:00"  # far outside any realistic ring window
+        coord = _make_nvr_coord(
+            preroll_seconds=30,
+            cached_events={
+                CAM_A: [{"id": "ev2", "eventType": "MOVEMENT", "timestamp": old_ts}]
+            },
+            last_event_ids={CAM_A: "ev1"},
+        )
+        with patch(
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)
+        mock_assemble.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_recent_polling_event_still_schedules_clip(self):
+        """Sanity counterpart to the staleness test above — a genuinely
+        recent event (well within the pre-roll window) must still be
+        scheduled via polling, not accidentally caught by the guard."""
+        recent_ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+        coord = _make_nvr_coord(
+            preroll_seconds=30,
+            cached_events={
+                CAM_A: [{"id": "ev2", "eventType": "MOVEMENT", "timestamp": recent_ts}]
+            },
+            last_event_ids={CAM_A: "ev1"},
+        )
+        with patch(
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)
+        mock_assemble.assert_called_once_with(coord, CAM_A)
+
+    @pytest.mark.asyncio
+    async def test_enable_nvr_false_no_warning_noise(self, caplog):
+        """Bug-hunt finding (2026-08-13): wiring clip assembly into the
+        polling path made the "NVR motion clip not created" WARNING
+        reachable on every install's first polled motion event, including
+        installs that never turned Mini-NVR on at all (mode defaults to
+        'continuous', so the gate always failed for them). Must stay
+        silent when `enable_nvr` is off system-wide — there is nothing to
+        diagnose for an install that never asked for this feature."""
+        coord = _make_nvr_coord(
+            enable_nvr=False,
+            cached_events={CAM_A: [{"id": "ev2", "eventType": "MOVEMENT"}]},
+            last_event_ids={CAM_A: "ev1"},
+        )
+        with (
+            patch(
+                f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
+                MagicMock(return_value="stub-coro"),
+            ),
+            caplog.at_level(
+                "WARNING", logger="custom_components.bosch_shc_camera.recorder"
+            ),
+        ):
+            await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)
+        blocked_logs = [
+            r for r in caplog.records if "NVR motion clip not created" in r.message
+        ]
+        assert blocked_logs == []
+
+    @pytest.mark.asyncio
+    async def test_missing_get_nvr_mode_no_crash(self):
+        """A bare `_make_coord()` stub (most of this file's tests) has no
+        `get_nvr_mode` at all — must no-op, not raise."""
+        coord = _make_coord(
+            cached_events={CAM_A: [{"id": "ev2", "eventType": "MOVEMENT"}]},
+            last_event_ids={CAM_A: "ev1"},
+        )
+        assert not hasattr(coord, "get_nvr_mode")
+        data = await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)
+        assert data[CAM_A]["events"][0]["id"] == "ev2"
+
+    @pytest.mark.asyncio
+    async def test_already_claimed_event_not_double_scheduled(self):
+        """If FCM already dispatched this exact event id (alert_sent_ids
+        already carries it within the dedup window), the polling tick that
+        finds the same id must NOT schedule a second clip assembly — the
+        shared dedup bookkeeping that already prevents a double alert must
+        also prevent a double clip."""
+        now_mono = time.monotonic()
+        coord = _make_nvr_coord(
+            cached_events={CAM_A: [{"id": "ev2", "eventType": "MOVEMENT"}]},
+            last_event_ids={CAM_A: "ev1"},
+            alert_sent_ids={"ev2": now_mono},
+        )
+        with patch(
+            f"{RECORDER_MODULE}.assemble_and_ship_motion_clip",
+            MagicMock(return_value="stub-coro"),
+        ) as mock_assemble:
+            await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)
+        mock_assemble.assert_not_called()
 
 
 class TestDedupSkip:
