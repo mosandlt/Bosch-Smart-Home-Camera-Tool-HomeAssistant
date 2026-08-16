@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.20";
+const CARD_VERSION = "14.1.21";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
@@ -4410,7 +4410,7 @@ class BoschCameraCard extends HTMLElement {
           video._boschLastFrameAt = performance.now();
           this._webrtcRecoveryStreak = 0;
           if (this._liveStreamStalled) this._setLiveStalled(false);
-          if (this._liveVideoActive && video.srcObject) {
+          if (this._liveVideoActive && (video.srcObject || video.currentSrc || video.getAttribute("src"))) {
             video._boschRvfcHandle = video.requestVideoFrameCallback(onFrame);
           } else {
             video._boschRvfcHandle = null;

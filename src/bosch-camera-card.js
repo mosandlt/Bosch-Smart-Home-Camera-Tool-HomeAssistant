@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.20";
+const CARD_VERSION = "14.1.21";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -8098,7 +8098,17 @@ class BoschCameraCard extends HTMLElement {
           // _setLiveStalled no-ops when already false, so this is cheap per-frame.
           // 2026-06-22.
           if (this._liveStreamStalled) this._setLiveStalled(false);
-          if (this._liveVideoActive && video.srcObject) {
+          // Re-arm whenever the element still has ANY active source, not just
+          // a WebRTC MediaStream (`srcObject`). REMOTE-mode sessions mostly
+          // play via HLS/MSE (`.src`/`currentSrc`), which never sets
+          // `srcObject` — gating the rearm on it alone meant the heartbeat
+          // fired exactly once on HLS's first frame and then died, leaving
+          // `_boschLastFrameAt` stale forever. ~10s later the frameFrozen
+          // check below tripped `_setLiveStalled(true)` permanently even
+          // though HLS kept decoding fine — a stuck "Verbinde" badge over a
+          // healthy stream. 2026-08-16 (REMOTE-HLS stuck-badge fix).
+          if (this._liveVideoActive
+              && (video.srcObject || video.currentSrc || video.getAttribute("src"))) {
             video._boschRvfcHandle = video.requestVideoFrameCallback(onFrame);
           } else {
             video._boschRvfcHandle = null;
@@ -9603,7 +9613,8 @@ class BoschCameraCard extends HTMLElement {
       }
       // Cancel the rVFC liveness heartbeat — re-armed by activateVideo on the next
       // start. Leaving it running against a src-cleared element is harmless (it
-      // self-stops when srcObject is null) but tidy up the handle. 2026-06-19.
+      // self-stops once srcObject/currentSrc/src are all cleared below) but tidy
+      // up the handle. 2026-06-19.
       if (video._boschRvfcHandle != null && typeof video.cancelVideoFrameCallback === "function") {
         try { video.cancelVideoFrameCallback(video._boschRvfcHandle); } catch {}
       }
