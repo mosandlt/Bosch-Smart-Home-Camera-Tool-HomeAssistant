@@ -4829,20 +4829,27 @@ class TestDrainStderrLive:
     `proc.wait()` never returns — a completely silent hang, exactly the
     reported symptom (cache dir stays empty forever, no crash, no log)."""
 
+    # Shared by the positive/negative pair below so they stay a genuine A/B
+    # control. Must reliably exceed the combined OS-pipe-buffer +
+    # asyncio-StreamReader-limit capacity (~64KB each) — 200KB was too
+    # close to that ~128KB combined ceiling and flaked on some CI runners.
+    _UNDRAINED_HANG_BYTES = 20_000_000
+
     @pytest.mark.asyncio
     async def test_drains_large_output_without_hanging(self):
         """Proves the real deadlock scenario against a REAL OS pipe: spawn a
-        python3 subprocess that writes more than the ~64KB default pipe
-        buffer to stderr in one burst, THEN exits. Without a live reader,
-        `proc.wait()` never returns (write() blocks on the full pipe) —
-        this test asserts the whole drain+wait sequence completes well
-        within a bounded timeout, i.e. it does NOT hang."""
+        python3 subprocess that writes far more than the combined pipe/
+        StreamReader buffer capacity to stderr in one burst, THEN exits.
+        Without a live reader, `proc.wait()` never returns (write() blocks
+        on the full pipe) — this test asserts the whole drain+wait sequence
+        completes well within a bounded timeout, i.e. it does NOT hang."""
         from custom_components.bosch_shc_camera import recorder
 
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
             "-c",
-            "import sys; sys.stderr.write('x' * 200000); sys.stderr.flush()",
+            f"import sys; sys.stderr.buffer.write(b'x' * {self._UNDRAINED_HANG_BYTES}); "
+            "sys.stderr.flush()",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -4874,7 +4881,8 @@ class TestDrainStderrLive:
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
             "-c",
-            "import sys; sys.stderr.write('x' * 200000); sys.stderr.flush()",
+            f"import sys; sys.stderr.buffer.write(b'x' * {self._UNDRAINED_HANG_BYTES}); "
+            "sys.stderr.flush()",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -4882,12 +4890,15 @@ class TestDrainStderrLive:
             with pytest.raises(TimeoutError):
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
         finally:
-            # Cleanup: kill + drain now so the test doesn't leak a hung
-            # child process/pipe past this test.
+            # Cleanup: kill, then drain via communicate() rather than a bare
+            # wait() — with stderr still full/undrained and its reader
+            # paused, asyncio's subprocess transport never reaches EOF on
+            # that pipe even after SIGKILL, so a bare wait() burns its full
+            # timeout every time instead of returning once the child dies.
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(proc.wait(), timeout=5.0)
+                await asyncio.wait_for(proc.communicate(), timeout=5.0)
 
     @pytest.mark.asyncio
     async def test_returns_on_none_stderr(self):
