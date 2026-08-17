@@ -89,6 +89,54 @@ class TestSafePathSegment:
         assert "\\" not in _safe_path_segment("..\\..\\windows")
 
 
+class TestUrlsafeB64DecodePadded:
+    """_urlsafe_b64decode_padded() — GitHub #68 root-cause fix: RFC 8291
+    crypto-key/salt headers arrive without base64 '=' padding."""
+
+    def test_decodes_unpadded_input(self) -> None:
+        import base64
+
+        from custom_components.bosch_shc_camera.fcm import _urlsafe_b64decode_padded
+
+        raw = b"hello world, this is test data!"
+        padded = base64.urlsafe_b64encode(raw)
+        unpadded = padded.rstrip(b"=").decode("ascii")
+        assert len(unpadded) % 4 != 0  # genuinely needs padding restored
+
+        assert _urlsafe_b64decode_padded(unpadded) == raw
+
+    def test_already_padded_input_still_decodes(self) -> None:
+        """Input that happens to already be a multiple of 4 (no padding
+        needed) must still decode correctly — the padding math (-len % 4)
+        must be a no-op in that case."""
+        import base64
+
+        from custom_components.bosch_shc_camera.fcm import _urlsafe_b64decode_padded
+
+        raw = b"12 bytes!!!!"  # 12 bytes -> exactly 16 b64 chars, no padding
+        encoded = base64.urlsafe_b64encode(raw).decode("ascii")
+        assert len(encoded) % 4 == 0
+        assert not encoded.endswith("=")
+
+        assert _urlsafe_b64decode_padded(encoded) == raw
+
+    def test_raises_on_input_still_invalid_after_padding(self) -> None:
+        """`urlsafe_b64decode` is non-strict: illegal characters (spaces,
+        `!`) are silently discarded rather than rejected outright, so this
+        does NOT verify general input validation — e.g. `"$$$$"` decodes to
+        `b""` without raising, and some garbage strings decode to garbage
+        bytes without raising at all. It only pins that `_urlsafe_b64decode_padded`
+        propagates `binascii.Error` rather than swallowing it when the
+        padding it restores still isn't enough to make the (cleaned) input
+        valid."""
+        import binascii
+
+        from custom_components.bosch_shc_camera.fcm import _urlsafe_b64decode_padded
+
+        with pytest.raises(binascii.Error):
+            _urlsafe_b64decode_padded("not valid base64!!!")
+
+
 def _make_supervisor_coord(
     entry_data: dict, *, force_hard: bool = False
 ) -> SimpleNamespace:
@@ -1493,6 +1541,11 @@ class _FakeFcmPushClient:
     async def _listen(self) -> None:
         """Required signature: only `self`."""
 
+    @staticmethod
+    def _decrypt_raw_data(credentials, crypto_key_str, salt_str, raw_data) -> bytes:
+        """Required signature: credentials, crypto_key_str, salt_str, raw_data."""
+        return b""
+
     async def _connect_with_retry(self) -> bool:
         return True
 
@@ -1626,6 +1679,261 @@ class TestPatchedClassCreation:
 
         assert result is None, (
             "_patch_class must return None when _listen signature changed"
+        )
+
+    def test_patch_class_degrades_gracefully_if_decrypt_raw_data_signature_changed(
+        self,
+    ):
+        """If _decrypt_raw_data() gains/loses parameters (library upgrade),
+        _patch_class must NOT return None — the GitHub #68 padding override is
+        independent of the issue #33 _listen fix, so only the override itself
+        should degrade (fall back to vanilla, unpadded _decrypt_raw_data) while
+        _listen keeps working. Returning None here would silently lose the
+        issue #33 fix too over an unrelated, narrower signature drift."""
+        _install_firebase_module()
+        original = _FakeFcmPushClient._decrypt_raw_data
+
+        @staticmethod
+        def _decrypt_raw_data_with_extra(
+            credentials, crypto_key_str, salt_str, raw_data, extra
+        ) -> bytes:
+            return b""
+
+        _FakeFcmPushClient._decrypt_raw_data = _decrypt_raw_data_with_extra
+
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        try:
+            result = fcm_mod._QuietFcmPushClient._patch_class()
+        finally:
+            _FakeFcmPushClient._decrypt_raw_data = original
+
+        assert result is not None, (
+            "_patch_class must still return a patched class (with the issue "
+            "#33 _listen fix) when only _decrypt_raw_data's signature changed"
+        )
+        assert "_decrypt_raw_data" not in result.__dict__, (
+            "the padding override must NOT be attached when the upstream "
+            "signature no longer matches — falls back to inherited (vanilla) "
+            "_decrypt_raw_data instead of risking a mismatched override"
+        )
+        assert "_listen" in result.__dict__, (
+            "the issue #33 _listen fix must still be present"
+        )
+
+    def test_patch_class_returns_none_if_decrypt_raw_data_missing_entirely(self):
+        """If _decrypt_raw_data() is removed entirely (not just reshaped),
+        _build_decrypt_raw_data_override's getattr(..., None) guard must not
+        raise AttributeError — same graceful-degradation outcome as a
+        signature mismatch."""
+        _install_firebase_module()
+        original = _FakeFcmPushClient._decrypt_raw_data
+        del _FakeFcmPushClient._decrypt_raw_data
+
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        try:
+            result = fcm_mod._QuietFcmPushClient._patch_class()
+        finally:
+            _FakeFcmPushClient._decrypt_raw_data = original
+
+        assert result is not None
+        assert "_decrypt_raw_data" not in result.__dict__
+
+    def test_patch_class_result_has_decrypt_raw_data_override(self):
+        """The _Patched subclass must define its own `_decrypt_raw_data`
+        (not inherited) — this is the GitHub #68 padding fix itself."""
+        _install_firebase_module()
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+
+        patched = fcm_mod._QuietFcmPushClient._patch_class()
+        assert patched is not None
+        assert "_decrypt_raw_data" in patched.__dict__, (
+            "_Patched must define its own _decrypt_raw_data (not inherit vanilla)"
+        )
+
+
+class TestBuildDecryptRawDataOverrideImportFailures:
+    """_build_decrypt_raw_data_override()'s two independent ImportError
+    fallback branches — http_ece and cryptography are both real installed
+    dependencies in this venv, so failure is simulated via the documented
+    `sys.modules[name] = None` sentinel (forces ImportError on the next
+    `import`/`from ... import` of that exact module)."""
+
+    def test_returns_none_and_binascii_only_if_http_ece_missing(self) -> None:
+        import binascii
+        import sys
+
+        from custom_components.bosch_shc_camera.fcm import (
+            _build_decrypt_raw_data_override,
+        )
+
+        _sentinel = object()
+        orig = sys.modules.get("http_ece", _sentinel)
+        sys.modules["http_ece"] = None  # type: ignore[assignment]
+        try:
+            override, skip_exceptions = _build_decrypt_raw_data_override(object)
+        finally:
+            if orig is _sentinel:
+                sys.modules.pop("http_ece", None)
+            else:
+                sys.modules["http_ece"] = orig
+
+        assert override is None
+        assert skip_exceptions == (binascii.Error,), (
+            "ECEException can't be part of skip_exceptions when http_ece "
+            "itself is unimportable"
+        )
+
+    def test_returns_none_but_keeps_ece_exception_if_cryptography_missing(
+        self,
+    ) -> None:
+        """http_ece imports fine (so ECEException IS still available for
+        skip_exceptions), but cryptography is missing — only the override
+        itself must be unavailable."""
+        import binascii
+        import sys
+
+        from http_ece import ECEException
+
+        from custom_components.bosch_shc_camera.fcm import (
+            _build_decrypt_raw_data_override,
+        )
+
+        _sentinel = object()
+        orig = sys.modules.get("cryptography.hazmat.backends", _sentinel)
+        sys.modules["cryptography.hazmat.backends"] = None  # type: ignore[assignment]
+        try:
+            override, skip_exceptions = _build_decrypt_raw_data_override(object)
+        finally:
+            if orig is _sentinel:
+                sys.modules.pop("cryptography.hazmat.backends", None)
+            else:
+                sys.modules["cryptography.hazmat.backends"] = orig
+
+        assert override is None
+        assert skip_exceptions == (binascii.Error, ECEException)
+
+
+class TestPatchedDecryptRawData:
+    """End-to-end correctness of the GitHub #68 padding fix: a real
+    ECDH-encrypted payload, with the crypto-key/salt headers passed in their
+    genuine RFC-8291 UNPADDED wire form, must decrypt successfully via the
+    `_Patched._decrypt_raw_data` override — this is what upstream
+    sdb9696/firebase-messaging#37 fixes and our vanilla-library copy (0.4.5)
+    doesn't have yet."""
+
+    def setup_method(self):
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        self._orig = fcm_mod._QuietFcmPushClient._patched_class
+        fcm_mod._QuietFcmPushClient._patched_class = False
+
+    def teardown_method(self):
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = self._orig
+        _uninstall_firebase_module()
+
+    def _get_patched_decrypt(self):
+        _install_firebase_module()
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        patched = fcm_mod._QuietFcmPushClient._patch_class()
+        assert patched is not None
+        return patched._decrypt_raw_data
+
+    def test_decrypts_unpadded_crypto_key_and_salt(self):
+        import base64
+
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from http_ece import encrypt as http_ece_encrypt
+
+        def b64url_unpadded(data: bytes) -> str:
+            return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+        # Receiver = this integration's stored FCM registration keys.
+        receiver_priv = ec.generate_private_key(ec.SECP256R1(), default_backend())
+        receiver_priv_der = receiver_priv.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        receiver_pub_bytes = receiver_priv.public_key().public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint,
+        )
+        auth_secret = os.urandom(16)
+        salt = os.urandom(16)
+
+        # Sender = Bosch's cloud, encrypting a push exactly like http_ece
+        # web-push encryption does — ephemeral key + the receiver's public
+        # key, matching the real ECDH handshake this decrypts against.
+        sender_priv = ec.generate_private_key(ec.SECP256R1(), default_backend())
+        sender_pub_bytes = sender_priv.public_key().public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint,
+        )
+
+        raw_data = b'{"foo": "bar"}'
+        encrypted = http_ece_encrypt(
+            raw_data,
+            salt=salt,
+            private_key=sender_priv,
+            dh=receiver_pub_bytes,
+            version="aesgcm",
+            auth_secret=auth_secret,
+        )
+
+        credentials = {
+            "keys": {
+                "private": b64url_unpadded(receiver_priv_der),
+                "secret": b64url_unpadded(auth_secret),
+            }
+        }
+        crypto_key_str = b64url_unpadded(sender_pub_bytes)
+        salt_str = b64url_unpadded(salt)
+        # Genuinely unpadded — a P-256 uncompressed point (65 bytes) and a
+        # 16-byte salt both produce non-multiple-of-4 base64 lengths once
+        # stripped, matching the real RFC 8291 wire format this fix targets.
+        assert len(crypto_key_str) % 4 != 0
+        assert len(salt_str) % 4 != 0
+
+        decrypt = self._get_patched_decrypt()
+        result = decrypt(credentials, crypto_key_str, salt_str, encrypted)
+
+        assert result == raw_data
+
+    def test_raises_on_genuinely_corrupt_credentials(self):
+        """A corrupt/malformed stored private key must raise a plain
+        ValueError from load_der_private_key — specifically NOT a
+        binascii.Error, even though binascii.Error is itself a ValueError
+        subclass. _listen()'s except clause in fcm.py deliberately catches
+        only binascii.Error/ECEException (not all ValueError) so THIS
+        client-wide credential fault still propagates to trigger the
+        supervisor's hard-heal, instead of being silently skipped as a
+        one-off bad message. A regression that made this raise
+        binascii.Error instead would defeat that distinction while still
+        passing a bare `pytest.raises(Exception)`."""
+        import binascii
+
+        decrypt = self._get_patched_decrypt()
+        credentials = {"keys": {"private": "not-a-valid-der-key", "secret": "AAAA"}}
+
+        with pytest.raises(ValueError) as exc_info:
+            decrypt(credentials, "AAAA", "AAAA", b"irrelevant")
+
+        assert not isinstance(exc_info.value, binascii.Error), (
+            "must be load_der_private_key's ValueError, not a base64 "
+            "padding/decode error — this is the exact distinction "
+            "_listen()'s except clause relies on"
         )
 
 
@@ -2062,6 +2370,57 @@ class TestPatchedListenBody:
             "every reconnect since it's never acked) instead of an unbounded "
             "warning"
         )
+
+    @pytest.mark.asyncio
+    async def test_undecryptable_ciphertext_skipped_not_terminated(self):
+        """GitHub #68 follow-up: once the padded _decrypt_raw_data() override
+        makes crypto-key/salt header decoding succeed, a message whose
+        headers pad fine but whose ciphertext BODY is genuinely corrupt (bit
+        flip, message meant for a different subtype, stale key after a
+        registration rotation) now reaches http_ece.decrypt() and raises
+        ECEException — a bare Exception, not a binascii.Error, not a
+        ValueError. Before the padding fix this path was unreachable in
+        practice (every message failed earlier at the unpadded-header decode
+        step). Must be skipped like any other single bad message, not
+        terminate the whole FcmPushClient.
+        """
+        from http_ece import ECEException
+
+        instance = self._make_instance()
+
+        terminate_calls = []
+        instance._terminate = lambda: terminate_calls.append(1)
+
+        warn_calls = []
+        instance._log_warn_with_limit = lambda *a, **k: warn_calls.append((a, k))
+
+        handled = []
+
+        async def _handle_message(msg):
+            handled.append(msg)
+            if len(handled) == 1:
+                raise ECEException("Decryption error: InvalidTag()")
+            instance.do_listen = False
+
+        instance._handle_message = _handle_message
+
+        call_count = [0]
+
+        async def _recv():
+            call_count[0] += 1
+            return {"msg": call_count[0]}
+
+        instance._receive_msg = _recv
+
+        await instance._listen()
+
+        assert len(handled) == 2, (
+            "Must continue receiving messages after an ECEException"
+        )
+        assert not terminate_calls, (
+            "A single undecryptable-ciphertext message must not terminate FcmPushClient"
+        )
+        assert warn_calls
 
     @pytest.mark.asyncio
     async def test_corrupt_credentials_value_error_still_terminates(self):

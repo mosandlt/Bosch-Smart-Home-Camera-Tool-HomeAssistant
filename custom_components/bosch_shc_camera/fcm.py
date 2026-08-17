@@ -14,12 +14,14 @@ Handles:
 from __future__ import annotations
 
 import asyncio
+import base64
 import binascii
 import calendar
 import logging
 import os
 import ssl
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import aiohttp
@@ -270,6 +272,119 @@ def _install_fcm_noise_filter() -> None:
     _LOGGER.addFilter(shared_filter)
 
 
+def _urlsafe_b64decode_padded(data: str) -> bytes:
+    """Decode urlsafe base64 that may be missing its '=' padding.
+
+    Webpush keys and the crypto-key/salt headers (RFC 8291) are transmitted
+    without padding; Python's ``urlsafe_b64decode`` requires it and raises
+    ``binascii.Error`` on unpadded input. Root cause of GitHub #68's delayed
+    notifications: matches upstream sdb9696/firebase-messaging#37 (open,
+    unmerged as of 2026-08).
+    """
+    return base64.urlsafe_b64decode(data.encode("ascii") + b"=" * (-len(data) % 4))
+
+
+_DecryptRawData = Callable[[dict[str, dict[str, str]], str, str, bytes], bytes]
+
+
+def _build_decrypt_raw_data_override(
+    fcm_push_client_cls: type,
+) -> tuple[_DecryptRawData | None, tuple[type[Exception], ...]]:
+    """Build the GitHub #68 padded-decrypt override, plus the tuple of
+    exception types ``_listen()`` should treat as "skip this one message".
+
+    Returns ``(override_or_None, skip_exceptions)``. Deliberately independent
+    of the ``_listen`` signature guard in ``_patch_class()``: if a future
+    firebase-messaging upgrade renames/reshapes ``_decrypt_raw_data``, only
+    this override degrades (falls back to the upstream, unpadded version) —
+    the issue #33 ``_listen`` fix must keep working regardless. ``skip_exceptions``
+    is likewise built independently of whether the override itself succeeds:
+    even the vanilla (unpadded) ``_decrypt_raw_data`` can still reach
+    ``http_ece.decrypt()`` and raise ``ECEException`` whenever a message's
+    crypto-key/salt headers happen to already be a multiple of 4 in length
+    (no padding needed) — worth catching either way.
+    """
+    skip_exceptions: tuple[type[Exception], ...] = (binascii.Error,)
+    try:
+        from http_ece import ECEException
+    except ImportError:
+        _LOGGER.debug(
+            "FCM subclass: http_ece unavailable — GitHub #68 padding fix not "
+            "applied (issue #33 fix still active)"
+        )
+        return None, skip_exceptions
+    skip_exceptions = (binascii.Error, ECEException)
+
+    try:
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives.serialization import (
+            load_der_private_key,
+        )
+        from http_ece import decrypt as http_ece_decrypt
+    except ImportError:
+        _LOGGER.debug(
+            "FCM subclass: cryptography unavailable — GitHub #68 padding fix "
+            "not applied (issue #33 fix still active)"
+        )
+        return None, skip_exceptions
+
+    import inspect
+
+    decrypt_method = getattr(fcm_push_client_cls, "_decrypt_raw_data", None)
+    if decrypt_method is None or list(inspect.signature(decrypt_method).parameters) != [
+        "credentials",
+        "crypto_key_str",
+        "salt_str",
+        "raw_data",
+    ]:
+        _LOGGER.debug(
+            "FCM subclass: upstream _decrypt_raw_data() missing or its "
+            "signature changed — GitHub #68 padding fix not applied "
+            "(issue #33 fix still active)"
+        )
+        return None, skip_exceptions
+
+    def _decrypt_raw_data(
+        credentials: dict[str, dict[str, str]],
+        crypto_key_str: str,
+        salt_str: str,
+        raw_data: bytes,
+    ) -> bytes:
+        """Decrypt an FCM data message, tolerating unpadded base64.
+
+        Root cause of GitHub #68's delayed notifications: the upstream
+        version decodes crypto_key_str/salt_str/the stored private+secret
+        keys with plain ``urlsafe_b64decode``, which raises
+        ``binascii.Error`` on RFC-8291-legal unpadded input. The caller
+        (``_handle_data_message``) lets that propagate, and this
+        integration's own ``_listen`` override (issue #65) only
+        caught-and-skipped it — silently dropping the push and leaving
+        the event to surface ~2-3 minutes later via the coordinator's
+        slower poll fallback instead of near-instantly via push. Padding
+        correctly here lets decryption actually succeed, matching
+        upstream PR sdb9696/firebase-messaging#37 (open, unmerged as of
+        2026-08).
+        """
+        crypto_key = _urlsafe_b64decode_padded(crypto_key_str)
+        salt = _urlsafe_b64decode_padded(salt_str)
+        der_data = _urlsafe_b64decode_padded(credentials["keys"]["private"])
+        secret = _urlsafe_b64decode_padded(credentials["keys"]["secret"])
+        privkey = load_der_private_key(
+            der_data, password=None, backend=default_backend()
+        )
+        decrypted: bytes = http_ece_decrypt(
+            raw_data,
+            salt=salt,
+            private_key=privkey,
+            dh=crypto_key,
+            version="aesgcm",
+            auth_secret=secret,
+        )
+        return decrypted
+
+    return _decrypt_raw_data, skip_exceptions
+
+
 class _QuietFcmPushClient:
     """FcmPushClient subclass that fixes the upstream state-machine bug described in
     github.com/sdb9696/firebase-messaging#33.
@@ -327,8 +442,20 @@ class _QuietFcmPushClient:
             )
             return None
 
+        # The GitHub #68 padded-decrypt override is independent of the _listen
+        # fix above and deliberately NOT allowed to gate it: if a future
+        # firebase-messaging upgrade renames/reshapes _decrypt_raw_data, we still
+        # want the issue #33 fix (and the skip-one-message safety net) to keep
+        # working — only the #68 padding improvement itself should degrade, not
+        # the whole patched class. See _build_decrypt_raw_data_override().
+        decrypt_override, skip_exceptions = _build_decrypt_raw_data_override(
+            FcmPushClient
+        )
+
         class _Patched(FcmPushClient):  # type: ignore[misc]
-            """FcmPushClient with the run_state-before-log fix for issue #33."""
+            """FcmPushClient with the run_state-before-log fix for issue #33 and
+            (when decrypt_override is not None) the padded-base64-decode fix for
+            GitHub #68 / upstream sdb9696/firebase-messaging#37."""
 
             async def _listen(self) -> None:
                 """Override _listen to set RESETTING state before the error-log decision.
@@ -352,27 +479,47 @@ class _QuietFcmPushClient:
                             elif msg := await self._receive_msg():
                                 try:
                                     await self._handle_message(msg)
-                                except binascii.Error as decode_ex:
-                                    # FIX for issue #65 / upstream
-                                    # sdb9696/firebase-messaging#40+#37 (unmerged):
-                                    # a push message's crypto-key/salt headers can
-                                    # legitimately arrive without base64 padding
-                                    # (RFC 8291-valid); _decrypt_raw_data() decodes
-                                    # them raw and raises binascii.Error. Skip just
-                                    # this message instead of letting it hit the
-                                    # broad `except Exception` below, which would
-                                    # terminate the whole FcmPushClient over one
-                                    # undecryptable message. Deliberately narrower
-                                    # than ValueError: _decrypt_raw_data() also
-                                    # raises plain ValueError from corrupt *stored*
-                                    # credentials (load_der_private_key/http_decrypt)
-                                    # — a client-wide fault that must still hit the
-                                    # broad except below to trigger the supervisor's
-                                    # hard-heal (credential purge + re-registration),
-                                    # not be masked as a one-off bad message.
-                                    # Google MCS redelivers this message on every
-                                    # reconnect (never acked), so rate-limit like the
-                                    # OSError path above instead of a raw warning.
+                                except skip_exceptions as decode_ex:
+                                    # binascii.Error: defense-in-depth only as of
+                                    # GitHub #68 (when decrypt_override is active)
+                                    # — the padded _decrypt_raw_data() override
+                                    # (upstream sdb9696/firebase-messaging#37) now
+                                    # handles the common unpadded-crypto-key/salt
+                                    # case by actually decrypting successfully, so
+                                    # this half should rarely fire anymore. Kept
+                                    # for any other binascii.Error.
+                                    # ECEException (when http_ece is importable):
+                                    # added alongside the padding fix — every
+                                    # failure path inside
+                                    # http_ece.decrypt() (bad padding, truncated
+                                    # message, decrypt-tag mismatch on a message
+                                    # meant for a different subtype/app_id — the
+                                    # library warns-but-still-attempts-decrypt on
+                                    # a subtype mismatch) raises ECEException, a
+                                    # bare Exception, not a ValueError. Before the
+                                    # padding fix this was unreachable in practice
+                                    # (every message failed earlier at the
+                                    # unpadded-header decode step, always as
+                                    # binascii.Error); now that headers decode
+                                    # successfully, a single message with a
+                                    # genuinely bad/mismatched ciphertext body
+                                    # would otherwise fall through to the broad
+                                    # `except Exception` below and tear down the
+                                    # whole FcmPushClient over one bad payload.
+                                    # Skip just this message instead — same
+                                    # reasoning as the binascii.Error case.
+                                    # Deliberately still narrower than ValueError:
+                                    # _decrypt_raw_data() also raises plain
+                                    # ValueError from corrupt *stored* credentials
+                                    # (load_der_private_key on a malformed private
+                                    # key) — a client-wide fault that must still
+                                    # hit the broad except below to trigger the
+                                    # supervisor's hard-heal (credential purge +
+                                    # re-registration), not be masked as a one-off
+                                    # bad message. Google MCS redelivers an
+                                    # unacked message on every reconnect, so
+                                    # rate-limit like the OSError path above
+                                    # instead of a raw warning.
                                     self._log_warn_with_limit(
                                         "Skipping undecryptable FCM push message: %s",
                                         decode_ex,
@@ -446,6 +593,9 @@ class _QuietFcmPushClient:
                     self._terminate()
                 finally:
                     await self._do_writer_close()
+
+        if decrypt_override is not None:
+            _Patched._decrypt_raw_data = staticmethod(decrypt_override)
 
         return _Patched
 

@@ -23,6 +23,7 @@ module = [
     "voluptuous.*",
     "aiohttp.*",
     "firebase_messaging.*",
+    "http_ece.*",
     "smbprotocol.*",
     "smbclient",
     "smbclient.*",
