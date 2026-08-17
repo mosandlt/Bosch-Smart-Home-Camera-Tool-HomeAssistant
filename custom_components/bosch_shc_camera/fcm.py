@@ -223,34 +223,50 @@ async def async_start_fcm_push(coordinator: Any) -> None:
 
 
 def _install_fcm_noise_filter() -> None:
-    """Install the noise filter on both relevant loggers once.
+    """Install the noise filter on all relevant loggers once.
 
-    Two loggers can emit "Unexpected exception during read":
+    Three loggers matter here:
       1. ``firebase_messaging.fcmpushclient`` — the vanilla library path (when
-         ``_QuietFcmPushClient`` is not used or the patch falls back).
-      2. ``custom_components.bosch_shc_camera.fcm`` (``_LOGGER``) — the
+         ``_QuietFcmPushClient`` is not used or the patch falls back); emits
+         "Unexpected exception during read" connectivity noise.
+      2. ``firebase_messaging.fcmregister`` — where ``gcm_register()`` /
+         ``gcm_check_in()`` actually log ``PHONE_REGISTRATION_ERROR`` and the
+         other _CREDS_STALENESS_MARKERS (GitHub #68). This is a SIBLING of
+         ``fcmpushclient`` in the logger hierarchy, not a descendant — a
+         `logging.Filter` attached to one logger is only consulted for
+         records that logger itself emits, never for a sibling's records
+         propagating through a shared ancestor. Without this, staleness
+         markers from the real failure path were silently never recorded and
+         ``get_recent_fcm_creds_staleness_count()`` stayed 0 forever in
+         production.
+      3. ``custom_components.bosch_shc_camera.fcm`` (``_LOGGER``) — the
          ``_QuietFcmPushClient._listen()`` override also logs via ``_LOGGER``
          in its fallback ``else`` branch (for non-ConnectionReset OSErrors or
          if the run_state guard does not fire).
 
-    A single shared ``_FCMNoiseFilter`` instance is installed on BOTH loggers so
-    ``_last_passed`` and ``_SHARED_ERROR_TIMESTAMPS`` are identical regardless of
-    which logger emits the record — the 300 s dedup window spans both sources.
+    A single shared ``_FCMNoiseFilter`` instance is installed on all three so
+    ``_last_passed`` and ``_SHARED_STALENESS_TIMESTAMPS`` are identical
+    regardless of which logger emits the record — the 300 s dedup window
+    spans all three sources.
 
     Idempotent: re-running finds the existing instance and returns early.
     """
     # Find or create the shared filter instance.
     lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
+    register_logger = logging.getLogger("firebase_messaging.fcmregister")
     for f in lib_logger.filters:
         if isinstance(f, _FCMNoiseFilter):
-            # Already installed on the library logger.  Make sure the bosch
-            # logger also carries it (handles reload after a partial install).
+            # Already installed on the library logger.  Make sure the other
+            # two also carry it (handles reload after a partial install).
+            if f not in register_logger.filters:
+                register_logger.addFilter(f)
             if f not in _LOGGER.filters:
                 _LOGGER.addFilter(f)
             return
 
     shared_filter = _FCMNoiseFilter()
     lib_logger.addFilter(shared_filter)
+    register_logger.addFilter(shared_filter)
     _LOGGER.addFilter(shared_filter)
 
 
@@ -892,7 +908,14 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
     entire lifetime of the HA config entry. On each iteration it:
       1. Decides whether a hard-heal (credential purge + fresh registration)
          is needed (delivery-death flag, 3+ consecutive soft-only restarts,
-         or PHONE_REGISTRATION_ERROR in the creds-staleness window).
+         or PHONE_REGISTRATION_ERROR in the creds-staleness window). For the
+         two CONFIRMED-problem reasons (delivery-death flag, creds
+         staleness), if the previous such heal also failed to bring back a
+         push, backs off through FCM_SUPERVISOR_BACKOFF_SEC before purging
+         again instead of retrying at the same speed indefinitely (GitHub
+         #68). The two benign reasons (soft-restart threshold, fresh
+         install) never feed this backoff — a quiet house with no motion to
+         push has no way to prove a benign heal actually worked.
       2. Starts the FCM listener inside the start-lock.
       3. Polls `is_started()` every FCM_SUPERVISOR_POLL_SEC seconds.
       4. When the listener dies, waits FCM_SUPERVISOR_BACKOFF_SEC[failures]
@@ -904,6 +927,9 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
     """
     failures = 0  # consecutive restarts WITHOUT a push received
     soft_streak = 0  # consecutive soft-only restarts (no hard-heal between)
+    # Consecutive CONFIRMED-problem hard-heals with no push since the prior one.
+    hard_heal_streak: int = 0
+    push_ts_at_last_hard_heal: float = coordinator.fcm_last_push
 
     _LOGGER.debug("FCM supervisor started")
 
@@ -923,16 +949,62 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
             coordinator.fcm_force_hard_heal = False
 
         if needs_hard:
+            # Reason (and whether it's a CONFIRMED problem, vs. a benign
+            # trigger) decided upfront so both the streak logic below and the
+            # log line use the same, pre-sleep-accurate value.
+            confirmed_problem: bool
             if force_hard:
                 reason = "polling confirmed delivery dead"
+                confirmed_problem = True
             elif soft_streak >= FCM_SUPERVISOR_SOFT_HEAL_MAX:
                 reason = (
                     f"{soft_streak} soft-restarts without a push — delivery likely dead"
                 )
+                # NOT confirmed: a quiet house (no motion → no push to prove
+                # anything) can hit this threshold from ordinary WAN blips
+                # whose re-registration already succeeded. Must not feed the
+                # streak below, or a benign night keeps escalating backoff
+                # toward FCM_SUPERVISOR_BACKOFF_SEC's 30-min ceiling for a
+                # problem that was never actually still there.
+                confirmed_problem = False
             elif get_recent_fcm_creds_staleness_count(600.0) > 0:
                 reason = "PHONE_REGISTRATION_ERROR in last 10 min — creds stale"
+                confirmed_problem = True
             else:
                 reason = "no persisted credentials"
+                confirmed_problem = False  # fresh install, not a recurring failure
+
+            # A hard-heal purge+re-registration didn't restore delivery if no
+            # push has arrived since the previous CONFIRMED-problem heal —
+            # repeating it at the same near-immediate cadence just re-hits
+            # Bosch/Google's registration endpoint indefinitely (GitHub #68:
+            # PHONE_REGISTRATION_ERROR recurring), which can itself look like
+            # abuse and get the client throttled further. Escalate backoff
+            # across consecutive unsuccessful CONFIRMED heals instead of
+            # always retrying at the same speed. Benign-reason heals neither
+            # feed nor reset this streak — they're unrelated to it either way.
+            if confirmed_problem:
+                if push_ts_before > push_ts_at_last_hard_heal:
+                    hard_heal_streak = 0
+                hard_heal_streak += 1
+                push_ts_at_last_hard_heal = push_ts_before
+
+                if hard_heal_streak > 1:
+                    heal_delay = FCM_SUPERVISOR_BACKOFF_SEC[
+                        min(hard_heal_streak - 2, len(FCM_SUPERVISOR_BACKOFF_SEC) - 1)
+                    ]
+                    _LOGGER.info(
+                        "FCM supervisor: hard-heal streak %d (no push since "
+                        "the last one) — waiting %.0fs before purging "
+                        "credentials again",
+                        hard_heal_streak,
+                        heal_delay,
+                    )
+                    try:
+                        await asyncio.sleep(heal_delay)
+                    except asyncio.CancelledError:
+                        break
+
             _LOGGER.info("FCM supervisor: hard-heal (%s) — purging credentials", reason)
 
             try:

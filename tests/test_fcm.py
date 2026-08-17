@@ -398,6 +398,218 @@ async def test_supervisor_hard_heal_reason_no_credentials(
     assert not any("PHONE_REGISTRATION_ERROR" in msg for msg in hard_heal_logs)
 
 
+async def test_supervisor_hard_heal_backoff_escalates_when_delivery_stays_dead(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """GitHub #68: if a CONFIRMED-problem hard-heal's purge+re-registration
+    doesn't restore delivery (no push received since), repeating it
+    immediately just re-hits Bosch/Google's registration endpoint at the
+    same cadence as a fresh problem — plausibly worsening the reporter's
+    recurring PHONE_REGISTRATION_ERROR. The second consecutive creds-staleness
+    hard-heal with no push in between must wait FCM_SUPERVISOR_BACKOFF_SEC[0]
+    before purging again. Uses the creds-staleness trigger (not force_hard)
+    since it's deterministic without a running listener/poll cycle; the
+    staleness-reset is patched to a no-op so the trigger keeps firing exactly
+    like an unresolved PHONE_REGISTRATION_ERROR would in production."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.append(time.monotonic())
+    coord = _make_supervisor_coord_with_lock(
+        {"fcm_credentials": {"gcm": "x"}}, force_hard=False
+    )
+
+    sleep_calls: list[float] = []
+
+    async def _sleep(secs: float, *_a: object, **_k: object) -> None:
+        sleep_calls.append(secs)
+
+    start_calls = 0
+
+    async def _start(_coord: object) -> bool:
+        nonlocal start_calls
+        start_calls += 1
+        if start_calls >= 2:
+            raise asyncio.CancelledError()
+        return False  # registration fails again, no push
+
+    try:
+        with (
+            patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),  # no-op
+            patch("asyncio.sleep", new=_sleep),
+            caplog.at_level("INFO", logger=MODULE),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert task.done()
+        assert start_calls == 2
+        streak_logs = [
+            r.getMessage()
+            for r in caplog.records
+            if "hard-heal streak" in r.getMessage()
+        ]
+        assert any("hard-heal streak 2" in msg for msg in streak_logs), streak_logs
+        assert fcm.FCM_SUPERVISOR_BACKOFF_SEC[0] in sleep_calls
+    finally:
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+
+
+async def test_supervisor_hard_heal_streak_resets_once_push_arrives(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A push arriving between two CONFIRMED-problem hard-heals means the
+    first one actually worked — the streak (and its backoff) must reset
+    instead of treating the next, unrelated hard-heal as a continuation of
+    the old one."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.append(time.monotonic())
+    coord = _make_supervisor_coord_with_lock(
+        {"fcm_credentials": {"gcm": "x"}}, force_hard=False
+    )
+
+    start_calls = 0
+
+    async def _start(_coord: object) -> bool:
+        nonlocal start_calls
+        start_calls += 1
+        if start_calls == 1:
+            coord.fcm_last_push = time.monotonic()  # this heal DID restore delivery
+            return False
+        if start_calls >= 2:
+            raise asyncio.CancelledError()
+        return False
+
+    try:
+        with (
+            patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),  # no-op
+            patch("asyncio.sleep", new=AsyncMock()),
+            caplog.at_level("INFO", logger=MODULE),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert task.done()
+        streak_logs = [
+            r.getMessage()
+            for r in caplog.records
+            if "hard-heal streak" in r.getMessage()
+        ]
+        assert not streak_logs, streak_logs
+    finally:
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+
+
+async def test_supervisor_cancelled_during_hard_heal_streak_backoff_sleep_breaks() -> (
+    None
+):
+    """Cancellation arriving during the pre-purge streak-backoff sleep (added
+    for GitHub #68) must break the loop cleanly, same as the other backoff
+    sleeps in this function, instead of propagating uncaught."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.append(time.monotonic())
+    coord = _make_supervisor_coord_with_lock(
+        {"fcm_credentials": {"gcm": "x"}}, force_hard=False
+    )
+
+    start_calls = 0
+
+    async def _start(_coord: object) -> bool:
+        nonlocal start_calls
+        start_calls += 1
+        return False  # never restores delivery
+
+    sleep_calls = 0
+
+    async def _sleep(*_a: object, **_k: object) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls == 2:
+            # 2nd sleep call is the pre-purge streak-backoff sleep on the
+            # 2nd consecutive hard-heal.
+            raise asyncio.CancelledError()
+
+    try:
+        with (
+            patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),  # no-op
+            patch("asyncio.sleep", new=_sleep),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            await task  # must complete normally (break), not raise
+
+        assert task.done()
+        assert not task.cancelled()
+        assert start_calls == 1
+    finally:
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+
+
+async def test_supervisor_hard_heal_streak_ignores_benign_repeats(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A quiet house (no motion → no push ever) hitting the BENIGN
+    "no persisted credentials" hard-heal reason repeatedly must never
+    escalate the streak backoff — only the two CONFIRMED-problem reasons
+    (delivery-death flag, creds staleness) may. Otherwise a perfectly benign
+    fresh-install/no-creds retry loop would grow toward the 30-min backoff
+    ceiling for a "problem" that resolves on the very first attempt."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    # No fcm_credentials → needs_hard is True every iteration via the benign
+    # "no persisted credentials" reason, deterministic.
+    coord = _make_supervisor_coord_with_lock({}, force_hard=False)
+
+    start_calls = 0
+
+    async def _start(_coord: object) -> bool:
+        nonlocal start_calls
+        start_calls += 1
+        if start_calls >= 3:
+            raise asyncio.CancelledError()
+        return False  # registration keeps "failing" (never persists creds)
+
+    with (
+        patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+        patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+        patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+        patch("asyncio.sleep", new=AsyncMock()),
+        caplog.at_level("INFO", logger=MODULE),
+    ):
+        task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert task.done()
+    assert start_calls >= 2  # at least 2 hard-heals happened
+    streak_logs = [
+        r.getMessage() for r in caplog.records if "hard-heal streak" in r.getMessage()
+    ]
+    assert not streak_logs, streak_logs
+
+
 async def test_supervisor_creates_lock_when_absent_and_breaks_on_cancelled() -> None:
     """A missing fcm_start_lock is lazily created; CancelledError from the
     start call makes the supervisor break out and return normally."""
@@ -3541,7 +3753,11 @@ class TestInstallFcmNoiseFilter:
     def test_installs_once(self):
         # Strip any pre-existing filters from previous test
         log = logging.getLogger("firebase_messaging.fcmpushclient")
+        register_log = logging.getLogger("firebase_messaging.fcmregister")
         log.filters = [f for f in log.filters if not isinstance(f, _FCMNoiseFilter)]
+        register_log.filters = [
+            f for f in register_log.filters if not isinstance(f, _FCMNoiseFilter)
+        ]
         _install_fcm_noise_filter()
         count_after_first = sum(
             1 for f in log.filters if isinstance(f, _FCMNoiseFilter)
@@ -3559,28 +3775,73 @@ class TestInstallFcmNoiseFilter:
 
 
 class TestInstallNoiseFilter:
-    def test_install_adds_filter_to_both_loggers(self):
+    def test_install_adds_filter_to_all_three_loggers(self):
+        """Regression (GitHub #68): `firebase_messaging.fcmregister` — where
+        gcm_register()/gcm_check_in() actually log PHONE_REGISTRATION_ERROR —
+        is a SIBLING of fcmpushclient in the logger hierarchy, not a
+        descendant. A `logging.Filter` attached to one logger is never
+        consulted for a sibling's own records, so without this the creds-
+        staleness markers from the real failure path were silently never
+        recorded and get_recent_fcm_creds_staleness_count() stayed 0 forever
+        in production."""
         lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
+        register_logger = logging.getLogger("firebase_messaging.fcmregister")
         bosch_logger = logging.getLogger("custom_components.bosch_shc_camera.fcm")
         lib_logger.filters[:] = []
+        register_logger.filters[:] = []
         bosch_logger.filters[:] = []
         _install_fcm_noise_filter()
         assert any(isinstance(f, _FCMNoiseFilter) for f in lib_logger.filters)
+        assert any(isinstance(f, _FCMNoiseFilter) for f in register_logger.filters), (
+            "filter must be installed on firebase_messaging.fcmregister — "
+            "PHONE_REGISTRATION_ERROR is logged there, not on fcmpushclient"
+        )
         assert any(isinstance(f, _FCMNoiseFilter) for f in bosch_logger.filters)
 
     def test_install_repairs_partial_install(self):
-        """If the lib logger has the filter but the bosch logger lost it
-        (e.g. after a partial reload), a second call must re-attach to the
-        bosch logger without creating a second `_FCMNoiseFilter` instance."""
+        """If the lib logger has the filter but the register/bosch loggers
+        lost it (e.g. after a partial reload), a second call must re-attach
+        to both without creating a second `_FCMNoiseFilter` instance."""
         lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
+        register_logger = logging.getLogger("firebase_messaging.fcmregister")
         bosch_logger = logging.getLogger("custom_components.bosch_shc_camera.fcm")
         f = _FCMNoiseFilter()
         lib_logger.filters[:] = [f]
+        register_logger.filters[:] = []
         bosch_logger.filters[:] = []
         _install_fcm_noise_filter()
+        assert f in register_logger.filters
         assert f in bosch_logger.filters
+        register_fcm = [
+            g for g in register_logger.filters if isinstance(g, _FCMNoiseFilter)
+        ]
         bosch_fcm = [g for g in bosch_logger.filters if isinstance(g, _FCMNoiseFilter)]
+        assert register_fcm == [f]
         assert bosch_fcm == [f]
+
+    def test_register_logger_records_real_phone_registration_error(self):
+        """End-to-end (not the direct-.filter()-call unit tests in
+        TestFailureMarkers): a PHONE_REGISTRATION_ERROR logged through the
+        REAL `firebase_messaging.fcmregister` logger, via normal Python
+        logging propagation, must reach the installed filter and record a
+        staleness timestamp — this is exactly what GitHub #68 needed and
+        what the sibling-logger gap silently broke."""
+        lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
+        register_logger = logging.getLogger("firebase_messaging.fcmregister")
+        bosch_logger = logging.getLogger("custom_components.bosch_shc_camera.fcm")
+        lib_logger.filters[:] = []
+        register_logger.filters[:] = []
+        bosch_logger.filters[:] = []
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+        try:
+            _install_fcm_noise_filter()
+            register_logger.warning(
+                "GCM register request attempt 1 out of 2 has failed with "
+                "Error=PHONE_REGISTRATION_ERROR"
+            )
+            assert len(_FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS) == 1
+        finally:
+            _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
 
 
 class TestCredsStatenessHelpers:
