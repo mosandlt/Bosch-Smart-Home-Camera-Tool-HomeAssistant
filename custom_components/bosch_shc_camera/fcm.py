@@ -28,6 +28,7 @@ import aiohttp
 from bosch_shc_camera_client.media_transfer import (
     is_safe_bosch_url as _is_safe_bosch_url,
 )
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
 from .cloud_ssl import async_get_bosch_cloud_session
@@ -284,6 +285,48 @@ def _urlsafe_b64decode_padded(data: str) -> bytes:
     return base64.urlsafe_b64decode(data.encode("ascii") + b"=" * (-len(data) % 4))
 
 
+def _decode_message_header(data: str) -> bytes:
+    """Decode a per-message crypto-key/salt header (GitHub #68 live-deploy
+    finding, 2026-08-18).
+
+    ``crypto-key``/``encryption`` are proto3 ``string`` fields, so RFC
+    8291-legal content can legitimately include non-ASCII bytes — but
+    ``_urlsafe_b64decode_padded``'s ``.encode("ascii")`` raises
+    ``UnicodeEncodeError`` (a ``ValueError`` subclass, not a
+    ``binascii.Error``) for those, which isn't in ``_listen()``'s
+    ``skip_exceptions`` and would otherwise escape to the broad ``except
+    Exception`` and terminate the whole client over one bad message — the
+    same crash-loop class as the "Invalid EC key." incident, just triggered
+    by a different malformed header. Normalize to ``binascii.Error`` so any
+    header-decode failure is uniformly treated as a single-message fault.
+    """
+    try:
+        return _urlsafe_b64decode_padded(data)
+    except UnicodeEncodeError as ex:
+        raise binascii.Error(str(ex)) from ex
+
+
+def _decode_credential_material(data: str) -> bytes:
+    """Decode OUR OWN stored credential material (private/secret keys)
+    (GitHub #68 live-deploy finding, 2026-08-18).
+
+    Uses the same padding math as ``_decode_message_header``, but a decode
+    failure here means our STORED credentials are corrupt — a client-wide
+    fault that must propagate to trigger the supervisor's hard-heal, never
+    be silently skip-and-acked forever like a single bad message. Without
+    this, a credential whose base64 length happened to land on ``% 4 == 1``
+    raised ``binascii.Error`` — which IS in ``skip_exceptions`` — so every
+    push was silently skipped-and-acked with zero self-recovery, permanently
+    degrading to the slow poll fallback. Re-raising as a plain ``ValueError``
+    matches what ``load_der_private_key`` already raises for other forms of
+    credential corruption, so both are handled identically downstream.
+    """
+    try:
+        return _urlsafe_b64decode_padded(data)
+    except (binascii.Error, UnicodeEncodeError) as ex:
+        raise ValueError(f"corrupt stored credential material: {ex}") from ex
+
+
 _DecryptRawData = Callable[[dict[str, dict[str, str]], str, str, bytes], bytes]
 
 
@@ -366,10 +409,10 @@ def _build_decrypt_raw_data_override(
         upstream PR sdb9696/firebase-messaging#37 (open, unmerged as of
         2026-08).
         """
-        crypto_key = _urlsafe_b64decode_padded(crypto_key_str)
-        salt = _urlsafe_b64decode_padded(salt_str)
-        der_data = _urlsafe_b64decode_padded(credentials["keys"]["private"])
-        secret = _urlsafe_b64decode_padded(credentials["keys"]["secret"])
+        crypto_key = _decode_message_header(crypto_key_str)
+        salt = _decode_message_header(salt_str)
+        der_data = _decode_credential_material(credentials["keys"]["private"])
+        secret = _decode_credential_material(credentials["keys"]["secret"])
         # load_der_private_key() failing here means our OWN stored
         # credentials are corrupt — a client-wide fault, deliberately left
         # unguarded so its ValueError propagates to _listen()'s broad
@@ -510,6 +553,62 @@ class _QuietFcmPushClient:
                             if self.run_state == FcmPushClientRunState.RESETTING:  # type: ignore[has-type]  # external FcmPushClient attr (untyped base)
                                 await asyncio.sleep(1)
                             elif msg := await self._receive_msg():
+
+                                async def _skip_and_ack(exc: Exception) -> None:
+                                    # persistent_id logged alongside the error
+                                    # (GitHub #68 follow-up, 2026-08-18): a
+                                    # DISTINCT id each occurrence means this is
+                                    # a genuinely new message from Bosch's
+                                    # cloud each time (their bug, harmless
+                                    # here regardless) — the SAME id repeating
+                                    # would instead mean our ack below isn't
+                                    # durably reaching Google, worth
+                                    # investigating further if seen.
+                                    #
+                                    # Logged via our OWN module logger, not
+                                    # self._log_warn_with_limit() (GitHub #68
+                                    # live-deploy finding, 2026-08-18):
+                                    # upstream's rate limiter caps at
+                                    # config.log_warn_limit (default 5)
+                                    # occurrences PER FORMAT STRING PER
+                                    # FcmPushClient INSTANCE, never reset on
+                                    # reconnect — so the diagnostic added
+                                    # specifically to answer "does this same
+                                    # id keep recurring?" went silent after
+                                    # the 5th skip, for the rest of that
+                                    # client's lifetime, defeating its own
+                                    # purpose.
+                                    persistent_id = getattr(msg, "persistent_id", None)
+                                    _LOGGER.warning(
+                                        "Skipping undecryptable FCM push message "
+                                        "(id=%s): %s",
+                                        persistent_id,
+                                        exc,
+                                    )
+                                    # Mark it delivered anyway. Upstream's
+                                    # _handle_message() only appends to
+                                    # persistent_ids / sends the selective ack
+                                    # AFTER _handle_data_message() returns
+                                    # (fcmpushclient.py) — our exception above
+                                    # aborted before either ran, so without
+                                    # this the message is never acked and
+                                    # Google MCS redelivers it (harmlessly,
+                                    # but indefinitely — one rate-limited
+                                    # warning per reconnect forever) since it
+                                    # thinks we never received it.
+                                    # Live-deploy finding (GitHub #68 follow-up,
+                                    # 2026-08-18): `persistent_id` truthiness,
+                                    # not `is not None` — the real protobuf
+                                    # field defaults to `""`, never `None`, so
+                                    # `is not None` was always true and could
+                                    # append/ack a meaningless empty id.
+                                    if persistent_id:
+                                        self.persistent_ids.append(persistent_id)
+                                        if self.config.send_selective_acknowledgements:
+                                            await self._send_selective_ack(
+                                                persistent_id
+                                            )
+
                                 try:
                                     await self._handle_message(msg)
                                 except skip_exceptions as decode_ex:
@@ -544,48 +643,49 @@ class _QuietFcmPushClient:
                                     # Deliberately still narrower than ValueError:
                                     # _decrypt_raw_data() also raises plain
                                     # ValueError from corrupt *stored* credentials
-                                    # (load_der_private_key on a malformed private
-                                    # key) — a client-wide fault that must still
-                                    # hit the broad except below to trigger the
-                                    # supervisor's hard-heal (credential purge +
-                                    # re-registration), not be masked as a one-off
-                                    # bad message. Google MCS redelivers an
-                                    # unacked message on every reconnect, so
+                                    # (load_der_private_key /
+                                    # _decode_credential_material on a malformed
+                                    # private key) — a client-wide fault that must
+                                    # still hit the broad except below to trigger
+                                    # the supervisor's hard-heal (credential purge
+                                    # + re-registration), not be masked as a
+                                    # one-off bad message. Google MCS redelivers
+                                    # an unacked message on every reconnect, so
                                     # rate-limit like the OSError path above
                                     # instead of a raw warning.
-                                    # persistent_id logged alongside the error
-                                    # (GitHub #68 follow-up, 2026-08-18): a
-                                    # DISTINCT id each occurrence means this is
-                                    # a genuinely new message from Bosch's
-                                    # cloud each time (their bug, harmless
-                                    # here regardless) — the SAME id repeating
-                                    # would instead mean our ack below isn't
-                                    # durably reaching Google, worth
-                                    # investigating further if seen.
-                                    persistent_id = getattr(msg, "persistent_id", None)
-                                    self._log_warn_with_limit(
-                                        "Skipping undecryptable FCM push message "
-                                        "(id=%s): %s",
-                                        persistent_id,
-                                        decode_ex,
-                                    )
-                                    # Mark it delivered anyway. Upstream's
-                                    # _handle_message() only appends to
-                                    # persistent_ids / sends the selective ack
-                                    # AFTER _handle_data_message() returns
-                                    # (fcmpushclient.py) — our exception above
-                                    # aborted before either ran, so without
-                                    # this the message is never acked and
-                                    # Google MCS redelivers it (harmlessly,
-                                    # but indefinitely — one rate-limited
-                                    # warning per reconnect forever) since it
-                                    # thinks we never received it.
-                                    if persistent_id is not None:
-                                        self.persistent_ids.append(persistent_id)
-                                        if self.config.send_selective_acknowledgements:
-                                            await self._send_selective_ack(
-                                                persistent_id
-                                            )
+                                    await _skip_and_ack(decode_ex)
+                                except RuntimeError as app_data_ex:
+                                    # Live-deploy finding (GitHub #68 follow-up,
+                                    # 2026-08-18): upstream's
+                                    # _handle_data_message() (fcmpushclient.py)
+                                    # only special-cases message_type ==
+                                    # "deleted_messages" before unconditionally
+                                    # looking up the "crypto-key"/"encryption"
+                                    # app_data entries via _app_data_by_key(),
+                                    # which raises a bare
+                                    # RuntimeError(f"couldn't find in app_data
+                                    # {key}") when either is absent — e.g. any
+                                    # non-webpush control/diagnostic message
+                                    # Bosch/Google sends, or (per RFC 8291) an
+                                    # aes128gcm-encoded message, which carries
+                                    # no separate crypto-key/salt headers at
+                                    # all. That RuntimeError isn't in
+                                    # skip_exceptions, so it used to reach the
+                                    # broad except Exception below and
+                                    # terminate the whole client over one
+                                    # malformed/unsupported message — the same
+                                    # crash-loop class as the EC-key incident.
+                                    # Deliberately match ONLY this specific
+                                    # message shape (not every RuntimeError —
+                                    # a RuntimeError from somewhere else, e.g.
+                                    # _send_selective_ack failing, is not a
+                                    # single-message-scoped fault and must
+                                    # still propagate).
+                                    if "couldn't find in app_data" not in str(
+                                        app_data_ex
+                                    ):
+                                        raise
+                                    await _skip_and_ack(app_data_ex)
 
                         except (OSError, EOFError) as osex:
                             # FIX for issue #33: advance state to RESETTING here,
@@ -601,7 +701,7 @@ class _QuietFcmPushClient:
                             ):
                                 self.run_state = FcmPushClientRunState.RESETTING
 
-                            if (
+                            quiet_reset = (
                                 isinstance(
                                     osex,
                                     (
@@ -612,7 +712,8 @@ class _QuietFcmPushClient:
                                     ),
                                 )
                                 and self.run_state == FcmPushClientRunState.RESETTING
-                            ):
+                            )
+                            if quiet_reset:
                                 if (
                                     isinstance(osex, ssl.SSLError)
                                     and osex.reason
@@ -629,21 +730,48 @@ class _QuietFcmPushClient:
                                     )
                             else:
                                 _LOGGER.exception("Unexpected exception during read\n")
-                                # Import ErrorType lazily — it is a private enum in
-                                # the library module, not exported via __all__.
-                                # If the import fails (future refactor) we skip the
-                                # error counter; the self-heal watchdog still fires.
-                                try:
-                                    from firebase_messaging.fcmpushclient import (
-                                        ErrorType as _ErrorType,
-                                    )
 
-                                    if self._try_increment_error_count(
-                                        _ErrorType.CONNECTION
-                                    ):
-                                        await self._reset()
-                                except ImportError:
+                            # Live-deploy finding (GitHub #68 follow-up,
+                            # 2026-08-18): upstream's OWN quiet branch never
+                            # calls _reset() either — only its else/loud
+                            # branch does. That's fine upstream, because
+                            # run_state only becomes RESETTING *inside*
+                            # _reset() itself, so the quiet branch is only
+                            # ever reached on the SECOND+ error of an
+                            # already-in-progress reset. Our issue #33 fix
+                            # sets run_state = RESETTING pre-emptively
+                            # (above, before this except block) purely to
+                            # route the FIRST error to the quiet log path
+                            # too — but that pre-emptive flag now makes the
+                            # quiet branch reachable on the FIRST error of
+                            # EVERY routine WAN blip / MCS disconnect too,
+                            # and since nothing else ever calls _reset() for
+                            # it, _listen() just spun on
+                            # `if run_state == RESETTING: sleep(1)` forever
+                            # instead of reconnecting — recovery only came
+                            # from the supervisor's outer teardown+rebuild,
+                            # a full fresh Google registration instead of a
+                            # cheap in-place reconnect. Call _reset() from
+                            # both branches now (idempotent: guarded by
+                            # reset_lock, a no-op if a reset is already
+                            # under way) so the quiet logging fix no longer
+                            # disables recovery.
+                            # Import ErrorType lazily — it is a private enum
+                            # in the library module, not exported via
+                            # __all__. If the import fails (future refactor)
+                            # we skip the error counter; the self-heal
+                            # watchdog still fires.
+                            try:
+                                from firebase_messaging.fcmpushclient import (
+                                    ErrorType as _ErrorType,
+                                )
+
+                                if self._try_increment_error_count(
+                                    _ErrorType.CONNECTION
+                                ):
                                     await self._reset()
+                            except ImportError:
+                                await self._reset()
                 except Exception as ex:
                     import traceback as _tb
 
@@ -742,7 +870,39 @@ async def async_stop_fcm_supervisor(coordinator: Any) -> None:
         sup.cancel()
         try:
             await sup
-        except (asyncio.CancelledError, Exception):  # noqa: S110 — intentional silent cancel
+        except asyncio.CancelledError:
+            # GitHub #68 live-deploy finding, 2026-08-18: only swallow the
+            # cancellation when it's genuinely the supervisor's OWN (i.e.
+            # the sup.cancel() call just above — the expected/normal case)
+            # — not a cancellation of the CALLER (this coroutine's own
+            # task, e.g. HA's shutdown deadline cancelling __init__.py's
+            # teardown while it happens to be suspended right here on
+            # `await sup`). __init__.py's _async_cancel_coordinator_tasks
+            # explicitly documents that async_stop_fcm_push "explicitly
+            # re-raises asyncio.CancelledError" and builds its own
+            # cleanup-continuation tracking (_cancelled_during_cleanup) on
+            # that contract — a bare `except (asyncio.CancelledError,
+            # Exception): pass` here broke it, silently discarding a real
+            # shutdown-deadline cancellation instead of letting it
+            # propagate as promised.
+            #
+            # `sup.cancelled()` is NOT a usable signal here: asyncio's Task
+            # machinery cancels the future a task is currently awaiting as
+            # PART of delivering a cancellation to that task (`_fut_waiter.
+            # cancel()`), so cancelling the CALLER while it's suspended on
+            # `await sup` cancels `sup` too either way — both cases end up
+            # with `sup.cancelled() is True`. The reliable distinguishing
+            # signal is whether the CURRENT task itself was ever the
+            # cancellation's target: `Task.cancelling()` (Python 3.11+)
+            # counts pending cancel() requests against THIS task
+            # specifically — calling `sup.cancel()` on a different task
+            # object doesn't touch it. It stays 0 for our own expected
+            # self-inflicted stop; it's >0 only when something explicitly
+            # cancelled the task running this coroutine.
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling() > 0:
+                raise
+        except Exception:  # noqa: S110 — the supervisor's own failure, not ours to raise
             pass
         coordinator.fcm_supervisor_task = None
     await async_stop_fcm_push(coordinator)
@@ -871,6 +1031,19 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> bool:
             "fcm_config": fcm_config,
             "credentials": saved_fcm_creds,
             "credentials_updated_callback": _on_creds_updated,
+            # GitHub #68 live-deploy finding, 2026-08-18: without this,
+            # FcmRegister (inside checkin_or_register()) lazily creates and
+            # owns its OWN aiohttp.ClientSession, closed only on the SUCCESS
+            # path (fcmpushclient.py) — a failed registration (the whole
+            # point of the retry loop this file's supervisor runs) leaked
+            # one session per attempt, compounding badly with a tight
+            # retry cadence during an outage. Passing HA's shared session
+            # means FcmRegister never owns a session to leak: its `_session`
+            # property returns this one directly and its `close()` only
+            # ever touches a lazily-created `_local_session`, which stays
+            # None here — so it's also safe to pass on the SUCCESS path,
+            # never closing HA's shared session out from under other users.
+            "http_client_session": async_get_clientsession(coordinator.hass),
         }
         if FcmPushClientConfig is not None:
             fcm_kwargs["config"] = FcmPushClientConfig(
@@ -1142,6 +1315,13 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
     # Consecutive CONFIRMED-problem hard-heals with no push since the prior one.
     hard_heal_streak: int = 0
     push_ts_at_last_hard_heal: float = coordinator.fcm_last_push
+    # Live-deploy finding (GitHub #68 follow-up, 2026-08-18): whether this
+    # supervisor has ever completed a hard-heal purge. Distinguishes a truly
+    # fresh install (never purged, benign) from "we already purged and
+    # re-registration still isn't restoring credentials" (the SAME ongoing
+    # failure hard_heal_streak exists to detect) for the "no persisted
+    # credentials" reason below.
+    has_ever_hard_healed = False
 
     _LOGGER.debug("FCM supervisor started")
 
@@ -1184,7 +1364,22 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                 confirmed_problem = True
             else:
                 reason = "no persisted credentials"
-                confirmed_problem = False  # fresh install, not a recurring failure
+                # A truly fresh install (never hard-healed yet) is benign —
+                # nothing to escalate about. But once we've ALREADY purged
+                # at least once this supervisor lifetime and credentials
+                # still haven't come back, this is the SAME ongoing
+                # registration failure hard_heal_streak exists to detect
+                # (live-deploy finding, GitHub #68 follow-up 2026-08-18):
+                # re-registration can keep failing without ever emitting one
+                # of the three PHONE_REGISTRATION_ERROR markers (e.g. a
+                # plain FCM-install RuntimeError, or a WAN/quota outage
+                # during checkin) — without this, confirmed_problem stayed
+                # False forever on this path, bypassing the backoff
+                # entirely and pinning retries at FCM_SUPERVISOR_BACKOFF_SEC[0]
+                # (5s) indefinitely, hammering Google's registration
+                # endpoint exactly like the storm the backoff was built to
+                # prevent.
+                confirmed_problem = has_ever_hard_healed
 
             # A hard-heal purge+re-registration didn't restore delivery if no
             # push has arrived since the previous CONFIRMED-problem heal —
@@ -1237,6 +1432,7 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                         purged,
                     )
                 reset_fcm_creds_staleness_counter()
+                has_ever_hard_healed = True
                 soft_streak = 0
                 # A hard-heal purge+re-registration is exactly the fix for a
                 # credential-related failure, so also reset the backoff-delay
@@ -1974,12 +2170,32 @@ async def async_send_alert(
     info_svcs = get_alert_services(coordinator, "information")
     _has_local_save = bool(opts.get("enable_local_save") and opts.get("download_path"))
     _has_smb_upload = bool(opts.get("enable_smb_upload") and opts.get("smb_server"))
+    # GitHub #68 live-deploy finding, 2026-08-18: this guard only checked
+    # "information" services (with alert_notify_service as its fallback) —
+    # a user configuring ONLY alert_notify_screenshot/alert_notify_video (a
+    # natural "just send me the picture" setup, no information/default
+    # service set) had the ENTIRE alert silently no-op here, with zero log
+    # line, before steps 2/3 ever ran. "screenshot"/"video" deliberately
+    # don't fall back to alert_notify_service (see get_alert_services'
+    # docstring), so they must be checked here explicitly, the same way
+    # steps 2/3 already look them up individually. The extra
+    # get_alert_services() calls are inline (not pre-computed) so they stay
+    # lazily short-circuited exactly like the pre-existing `info_svcs`
+    # check — the common case (information services configured) still does
+    # only the one lookup already done above.
     if (
         not info_svcs
+        and not get_alert_services(coordinator, "screenshot")
+        and not get_alert_services(coordinator, "video")
         and not _is_trouble
         and not _has_local_save
         and not _has_smb_upload
     ):
+        _LOGGER.debug(
+            "async_send_alert: nothing configured for %s (no notify "
+            "services, no local save, no SMB upload) — skipping",
+            event_type,
+        )
         return  # Nothing to do (no notifications, no local save, no SMB upload)
 
     # alert_save_snapshots is the sole authority over whether files in
@@ -2046,6 +2262,20 @@ async def async_send_alert(
         `bool(services)` check would be true whenever anything was
         CONFIGURED, even if every single call failed — misreporting
         "attempted" as "delivered".
+
+        `blocking=True` (GitHub #68 live-deploy finding, 2026-08-18): HA
+        core's `ServiceRegistry.async_call` defaults to `blocking=False`,
+        which schedules the handler as a fire-and-forget background task and
+        returns immediately — any exception from the actual notify handler
+        (SMTP down, a rejected push, a Signal/Telegram API error) is caught
+        and logged entirely inside HA core's own wrapper, never reaching the
+        `except Exception` below. Without blocking, `delivered` and every
+        "Alert step N sent" log downstream is true whenever the service
+        merely EXISTS, regardless of whether it actually delivered —
+        exactly the attempted-vs-delivered distinction this docstring
+        promises. Blocking trades a little latency (this is an
+        event-triggered alert path, not a hot loop) for that guarantee
+        actually holding.
         """
         services = get_alert_services(coordinator, type_key)
         delivered = False
@@ -2053,7 +2283,9 @@ async def async_send_alert(
             try:
                 domain, service = svc.split(".", 1)
                 call_data = build_notify_data(svc, message, file_path)
-                await coordinator.hass.services.async_call(domain, service, call_data)
+                await coordinator.hass.services.async_call(
+                    domain, service, call_data, blocking=True
+                )
                 delivered = True
             except Exception as err:
                 _LOGGER.warning("Alert send failed for %s (%s): %s", svc, type_key, err)

@@ -137,6 +137,83 @@ class TestUrlsafeB64DecodePadded:
             _urlsafe_b64decode_padded("not valid base64!!!")
 
 
+class TestDecodeMessageHeader:
+    """_decode_message_header() — GitHub #68 live-deploy finding, 2026-08-18:
+    non-ASCII bytes in a per-message crypto-key/salt header (RFC 8291-legal,
+    proto3 string fields) must be treated as a skippable single-message
+    fault, not escape as an unhandled UnicodeEncodeError."""
+
+    def test_normalizes_unicode_encode_error_to_binascii_error(self) -> None:
+        import binascii
+
+        from custom_components.bosch_shc_camera.fcm import _decode_message_header
+
+        with pytest.raises(binascii.Error):
+            _decode_message_header("AAé")
+
+    def test_valid_input_still_decodes(self) -> None:
+        import base64
+
+        from custom_components.bosch_shc_camera.fcm import _decode_message_header
+
+        raw = b"a valid header value"
+        encoded = base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+        assert _decode_message_header(encoded) == raw
+
+
+class TestDecodeCredentialMaterial:
+    """_decode_credential_material() — GitHub #68 live-deploy finding,
+    2026-08-18: a corrupt STORED credential whose base64 length happens to
+    land on len%4==1 raised binascii.Error via the same padding helper used
+    for message headers — which IS in skip_exceptions — silently
+    skip-and-acking every push forever instead of triggering hard-heal."""
+
+    def test_normalizes_binascii_error_to_value_error(self) -> None:
+        """A genuine SECP256R1 PKCS8 DER key, base64'd then truncated by 3
+        chars (len%4==1 after truncation), must raise ValueError — NOT
+        binascii.Error — from this helper, so it's classified as a
+        client-wide credential fault, never silently skipped."""
+        import base64
+        import binascii
+
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        from custom_components.bosch_shc_camera.fcm import (
+            _decode_credential_material,
+        )
+
+        priv = ec.generate_private_key(ec.SECP256R1(), default_backend())
+        der = priv.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        encoded = base64.urlsafe_b64encode(der).rstrip(b"=").decode("ascii")
+        truncated = encoded[:-3]
+        assert len(truncated) % 4 == 1, "precondition: this is the misrouted case"
+
+        with pytest.raises(ValueError) as exc_info:
+            _decode_credential_material(truncated)
+
+        assert not isinstance(exc_info.value, binascii.Error), (
+            "must be reclassified as a plain ValueError so it propagates to "
+            "hard-heal instead of being silently skip-and-acked forever"
+        )
+
+    def test_valid_input_still_decodes(self) -> None:
+        import base64
+
+        from custom_components.bosch_shc_camera.fcm import (
+            _decode_credential_material,
+        )
+
+        raw = b"some credential bytes"
+        encoded = base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+        assert _decode_credential_material(encoded) == raw
+
+
 def _make_supervisor_coord(
     entry_data: dict, *, force_hard: bool = False
 ) -> SimpleNamespace:
@@ -257,6 +334,134 @@ async def test_stop_supervisor_cancels_running_task_and_calls_stop_push() -> Non
     assert coord.fcm_supervisor_task is None
     mock_stop.assert_called_once_with(coord)
     assert running.done()
+
+
+async def test_stop_supervisor_reraises_callers_own_cancellation() -> None:
+    """GitHub #68 live-deploy finding, 2026-08-18: a bare
+    `except (asyncio.CancelledError, Exception): pass` around `await sup`
+    swallowed a cancellation of the CALLER (this function's own task, e.g.
+    HA's shutdown deadline), not just the supervisor's own.
+
+    Note `sup.cancelled()` alone can't distinguish the two cases: cancelling
+    the caller while it's suspended on `await sup` cancels `sup` too, as
+    part of how asyncio delivers the cancellation (`Task._fut_waiter.
+    cancel()`) — both the self-inflicted case (our own `sup.cancel()` call)
+    and the caller-cancelled case end up with `sup.cancelled() is True`. The
+    fix instead checks `Task.cancelling()` on the CURRENT task, which only
+    counts cancel() requests against THAT task specifically — cancelling
+    `sup` (a different task object) never touches it.
+    """
+    from custom_components.bosch_shc_camera import fcm
+
+    supervisor_started = asyncio.Event()
+
+    async def _supervisor_hangs() -> None:
+        supervisor_started.set()
+        await asyncio.sleep(9999)
+
+    sup = asyncio.create_task(_supervisor_hangs())
+    await supervisor_started.wait()
+
+    coord = SimpleNamespace(fcm_supervisor_task=sup, fcm_client=None, fcm_running=False)
+
+    outer_task = asyncio.create_task(fcm.async_stop_fcm_supervisor(coord))
+    await asyncio.sleep(0)  # let it reach `sup.cancel()` + start awaiting sup
+    outer_task.cancel()  # cancel the CALLER, not the supervisor directly
+
+    with pytest.raises(asyncio.CancelledError):
+        await outer_task
+
+    assert outer_task.cancelled()
+
+
+async def test_stop_supervisor_swallows_supervisor_own_exception() -> None:
+    """If the supervisor task itself raised a genuine (non-CancelledError)
+    exception, that's the supervisor's own failure to have already handled
+    internally — async_stop_fcm_supervisor must still swallow it and
+    proceed with the rest of teardown, not propagate it to the caller."""
+    from custom_components.bosch_shc_camera import fcm
+
+    supervisor_started = asyncio.Event()
+
+    async def _supervisor_raises() -> None:
+        supervisor_started.set()
+        try:
+            await asyncio.sleep(9999)
+        except asyncio.CancelledError:
+            # Raise something else in response to our sup.cancel() below,
+            # instead of letting the cancellation itself propagate — this
+            # is the "supervisor's own genuine failure" case this branch
+            # exists to swallow.
+            raise RuntimeError("supervisor's own unrelated failure") from None
+
+    sup = asyncio.create_task(_supervisor_raises())
+    await supervisor_started.wait()
+    coord = SimpleNamespace(fcm_supervisor_task=sup, fcm_client=None, fcm_running=False)
+
+    with patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()) as mock_stop:
+        await fcm.async_stop_fcm_supervisor(coord)  # must not raise
+
+    assert coord.fcm_supervisor_task is None
+    mock_stop.assert_called_once_with(coord)
+
+
+async def test_start_fcm_push_passes_shared_http_session_to_avoid_leak() -> None:
+    """GitHub #68 live-deploy finding, 2026-08-18: without http_client_session,
+    FcmRegister lazily creates and owns its own aiohttp.ClientSession, only
+    closed on the checkin_or_register() SUCCESS path — a failed registration
+    leaked one session per attempt. FcmPushClient must be constructed with
+    HA's shared session so FcmRegister never owns one to leak."""
+    _install_firebase_module()
+    import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+    fcm_mod._QuietFcmPushClient._patched_class = False
+
+    shared_session = object()
+    captured_kwargs: dict[str, object] = {}
+
+    class _CapturingFcmPushClient(_FakeFcmPushClient):
+        def __init__(self, **kwargs: object) -> None:
+            captured_kwargs.update(kwargs)
+
+        async def checkin_or_register(self) -> str:
+            raise RuntimeError("registration failed")
+
+    import sys
+
+    sys.modules["firebase_messaging"].FcmPushClient = _CapturingFcmPushClient
+
+    coord = SimpleNamespace(
+        options={"enable_fcm_push": True},
+        entry=SimpleNamespace(data={}),
+        hass=SimpleNamespace(loop=MagicMock(), config_entries=MagicMock()),
+        fcm_running=False,
+    )
+
+    with (
+        patch(
+            f"{MODULE}.async_get_clientsession",
+            return_value=shared_session,
+        ),
+        patch.object(
+            fcm_mod,
+            "fetch_firebase_config",
+            new=AsyncMock(
+                return_value={
+                    "project_id": "p",
+                    "app_id": "a",
+                    "api_key": "k",
+                }
+            ),
+        ),
+    ):
+        try:
+            await fcm_mod._async_start_fcm_push_locked(coord)
+        finally:
+            _uninstall_firebase_module()
+
+    assert captured_kwargs.get("http_client_session") is shared_session, (
+        "FcmPushClient must be constructed with HA's shared clientsession"
+    )
 
 
 async def test_supervisor_hard_heal_reason_soft_streak(
@@ -611,21 +816,59 @@ async def test_supervisor_cancelled_during_hard_heal_streak_backoff_sleep_breaks
         _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
 
 
-async def test_supervisor_hard_heal_streak_ignores_benign_repeats(
+async def test_supervisor_fresh_install_no_credentials_first_occurrence_is_benign(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A quiet house (no motion → no push ever) hitting the BENIGN
-    "no persisted credentials" hard-heal reason repeatedly must never
-    escalate the streak backoff — only the two CONFIRMED-problem reasons
-    (delivery-death flag, creds staleness) may. Otherwise a perfectly benign
-    fresh-install/no-creds retry loop would grow toward the 30-min backoff
-    ceiling for a "problem" that resolves on the very first attempt."""
+    """A genuinely fresh install (no fcm_credentials, never hard-healed yet)
+    hitting the "no persisted credentials" reason for the FIRST time must
+    stay benign — no streak escalation. This is not a recurring failure yet,
+    just a brand-new client that hasn't registered."""
     from custom_components.bosch_shc_camera import fcm
     from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
-    # No fcm_credentials → needs_hard is True every iteration via the benign
-    # "no persisted credentials" reason, deterministic.
+    coord = _make_supervisor_coord_with_lock({}, force_hard=False)
+
+    async def _start(_coord: object) -> bool:
+        raise asyncio.CancelledError()
+
+    with (
+        patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+        patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+        patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+        patch("asyncio.sleep", new=AsyncMock()),
+        caplog.at_level("INFO", logger=MODULE),
+    ):
+        task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert task.done()
+    streak_logs = [
+        r.getMessage() for r in caplog.records if "hard-heal streak" in r.getMessage()
+    ]
+    assert not streak_logs, streak_logs
+
+
+async def test_supervisor_no_credentials_after_purge_escalates_backoff(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """GitHub #68 live-deploy follow-up: once we've ALREADY hard-healed
+    (purged credentials) at least once, a subsequent "no persisted
+    credentials" occurrence is the SAME ongoing registration failure —
+    re-registration can keep failing (e.g. a plain FCM-install error or a
+    WAN outage) without ever emitting a PHONE_REGISTRATION_ERROR marker,
+    which previously meant confirmed_problem stayed False forever and the
+    backoff was bypassed entirely, pinning retries at 5s indefinitely. The
+    SECOND+ hard-heal via this reason must now escalate like any other
+    confirmed-problem streak.
+    """
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock({}, force_hard=False)
 
     start_calls = 0
@@ -655,7 +898,7 @@ async def test_supervisor_hard_heal_streak_ignores_benign_repeats(
     streak_logs = [
         r.getMessage() for r in caplog.records if "hard-heal streak" in r.getMessage()
     ]
-    assert not streak_logs, streak_logs
+    assert any("hard-heal streak 2" in msg for msg in streak_logs), streak_logs
 
 
 async def test_supervisor_creates_lock_when_absent_and_breaks_on_cancelled() -> None:
@@ -1226,7 +1469,7 @@ class TestStep1Failure:
         # internal try (e.g. asyncio.CancelledError, which is intentionally
         # NOT caught by `except Exception` since 3.8).
 
-        async def _raising_call(domain, service, data):
+        async def _raising_call(domain, service, data, **kw):
             # CancelledError propagates past _notify_type's `except Exception`
             # (which doesn't catch BaseException-derived in 3.8+).
             raise asyncio.CancelledError("HA shutting down")
@@ -2270,7 +2513,13 @@ class TestPatchedListenBody:
         instance._connect_with_retry = _ok_connect
 
         instance.persistent_ids = []
-        instance.config = SimpleNamespace(send_selective_acknowledgements=False)
+        # Test-coverage finding (GitHub #68 follow-up, 2026-08-18): True
+        # matches the REAL FcmPushClientConfig default, which production's
+        # _async_start_fcm_push_locked never overrides — production always
+        # has acks on. The old False default here silently meant most tests
+        # exercised the acks-DISABLED branch production never takes; any
+        # test that genuinely needs acks off sets this explicitly itself.
+        instance.config = SimpleNamespace(send_selective_acknowledgements=True)
 
         async def _noop_ack(persistent_id):
             pass
@@ -2306,14 +2555,36 @@ class TestPatchedListenBody:
 
     @pytest.mark.asyncio
     async def test_quiet_path_connection_reset_error(self):
-        """ConnectionResetError + run_state=RESETTING → _log_verbose (quiet path)."""
+        """ConnectionResetError + run_state=RESETTING → _log_verbose (quiet path)
+        AND _reset() must actually be called.
+
+        Live-deploy finding (GitHub #68 follow-up, 2026-08-18): the issue #33
+        fix (pre-setting run_state=RESETTING to route the FIRST error to the
+        quiet log path too) had a side effect nothing here used to catch —
+        upstream's own quiet branch never calls _reset(), only its loud/else
+        branch does. Since our fix makes routine WAN blips take the quiet
+        path from the very first error, _reset() was never being called for
+        them at all: _listen() just spun sleeping 1s forever instead of
+        reconnecting, and recovery only ever came from the supervisor's
+        outer teardown+rebuild (a full fresh Google registration) instead of
+        a cheap in-place reconnect. This test would have caught that
+        regression — the OLD (buggy) code passed the previous, weaker
+        version of this test (which only asserted the log call) while
+        reset_calls stayed empty.
+        """
         instance = self._make_instance()
         instance.run_state = _FakeRunState.STARTED
 
         verbose_calls = []
-        instance._log_verbose = lambda *a, **k: (
-            verbose_calls.append(a) or setattr(instance, "do_listen", False)
-        )
+        instance._log_verbose = lambda *a, **k: verbose_calls.append(a)
+
+        reset_calls = []
+
+        async def _reset():
+            reset_calls.append(1)
+            instance.do_listen = False
+
+        instance._reset = _reset
 
         call_count = [0]
 
@@ -2327,10 +2598,61 @@ class TestPatchedListenBody:
         instance._receive_msg = _recv
 
         await instance._listen()
-        # ConnectionResetError → state set to RESETTING before check → verbose path
-        assert verbose_calls or not instance.do_listen, (
-            "ConnectionResetError must route to _log_verbose"
+
+        assert verbose_calls, "ConnectionResetError must route to _log_verbose"
+        assert reset_calls, (
+            "_reset() must actually be called for the quiet path too, or a "
+            "routine WAN blip never reconnects and just spins forever"
         )
+
+    async def _assert_quiet_path_calls_reset(self, exc: Exception) -> None:
+        instance = self._make_instance()
+        instance.run_state = _FakeRunState.STARTED
+
+        reset_calls: list[int] = []
+
+        async def _reset() -> None:
+            reset_calls.append(1)
+            instance.do_listen = False
+
+        instance._reset = _reset
+        instance._log_verbose = lambda *a, **k: None
+        instance._log_warn_with_limit = lambda *a, **k: None
+
+        call_count = [0]
+
+        async def _recv():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise exc
+            instance.do_listen = False
+            return None
+
+        instance._receive_msg = _recv
+
+        await instance._listen()
+
+        assert reset_calls, (
+            f"_reset() must be called for quiet-path {type(exc).__name__}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_quiet_path_calls_reset_connection_reset_error(self):
+        await self._assert_quiet_path_calls_reset(ConnectionResetError("x"))
+
+    @pytest.mark.asyncio
+    async def test_quiet_path_calls_reset_timeout_error(self):
+        await self._assert_quiet_path_calls_reset(TimeoutError("x"))
+
+    @pytest.mark.asyncio
+    async def test_quiet_path_calls_reset_incomplete_read_error(self):
+        await self._assert_quiet_path_calls_reset(asyncio.IncompleteReadError(b"", 10))
+
+    @pytest.mark.asyncio
+    async def test_quiet_path_calls_reset_ssl_error(self):
+        ssl_err = ssl.SSLError()
+        ssl_err.reason = "APPLICATION_DATA_AFTER_CLOSE_NOTIFY"
+        await self._assert_quiet_path_calls_reset(ssl_err)
 
     @pytest.mark.asyncio
     async def test_outer_exception_calls_terminate(self):
@@ -2379,7 +2701,9 @@ class TestPatchedListenBody:
         assert slept == [1], "Must sleep 1s while RESETTING"
 
     @pytest.mark.asyncio
-    async def test_undecryptable_message_skipped_not_terminated(self):
+    async def test_undecryptable_message_skipped_not_terminated(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Regression test for GitHub issue #65.
 
         Upstream firebase_messaging's _handle_message() can raise
@@ -2394,9 +2718,6 @@ class TestPatchedListenBody:
 
         terminate_calls = []
         instance._terminate = lambda: terminate_calls.append(1)
-
-        warn_calls = []
-        instance._log_warn_with_limit = lambda *a, **k: warn_calls.append((a, k))
 
         handled = []
 
@@ -2416,7 +2737,8 @@ class TestPatchedListenBody:
 
         instance._receive_msg = _recv
 
-        await instance._listen()
+        with caplog.at_level("WARNING", logger=MODULE):
+            await instance._listen()
 
         assert len(handled) == 2, (
             "Must continue receiving messages after a decode failure"
@@ -2424,14 +2746,19 @@ class TestPatchedListenBody:
         assert not terminate_calls, (
             "A single undecryptable message must not terminate FcmPushClient"
         )
-        assert warn_calls, (
-            "Must log via the rate-limited path (message is redelivered on "
-            "every reconnect since it's never acked) instead of an unbounded "
-            "warning"
+        assert any(
+            "Skipping undecryptable FCM push message" in r.getMessage()
+            for r in caplog.records
+        ), (
+            "Must log via our own module logger (GitHub #68 follow-up, "
+            "2026-08-18: not the upstream rate-limited helper, which caps "
+            "at 5 occurrences per instance and would go silent)"
         )
 
     @pytest.mark.asyncio
-    async def test_undecryptable_ciphertext_skipped_not_terminated(self):
+    async def test_undecryptable_ciphertext_skipped_not_terminated(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """GitHub #68 follow-up: once the padded _decrypt_raw_data() override
         makes crypto-key/salt header decoding succeed, a message whose
         headers pad fine but whose ciphertext BODY is genuinely corrupt (bit
@@ -2449,9 +2776,6 @@ class TestPatchedListenBody:
 
         terminate_calls = []
         instance._terminate = lambda: terminate_calls.append(1)
-
-        warn_calls = []
-        instance._log_warn_with_limit = lambda *a, **k: warn_calls.append((a, k))
 
         handled = []
 
@@ -2471,7 +2795,8 @@ class TestPatchedListenBody:
 
         instance._receive_msg = _recv
 
-        await instance._listen()
+        with caplog.at_level("WARNING", logger=MODULE):
+            await instance._listen()
 
         assert len(handled) == 2, (
             "Must continue receiving messages after an ECEException"
@@ -2479,7 +2804,106 @@ class TestPatchedListenBody:
         assert not terminate_calls, (
             "A single undecryptable-ciphertext message must not terminate FcmPushClient"
         )
-        assert warn_calls
+        assert any(
+            "Skipping undecryptable FCM push message" in r.getMessage()
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_missing_app_data_key_runtime_error_skipped_not_terminated(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Live-deploy finding (GitHub #68 follow-up, 2026-08-18): upstream's
+        _handle_data_message() only special-cases message_type ==
+        "deleted_messages" before unconditionally looking up the
+        "crypto-key"/"encryption" app_data entries — missing either raises a
+        bare RuntimeError("couldn't find in app_data ...") that isn't in
+        skip_exceptions. A non-webpush control/diagnostic message (or an
+        aes128gcm-encoded message, which carries no separate headers at all)
+        must be skipped like any other single bad message, not terminate the
+        whole FcmPushClient. Uses a real message object with a genuine
+        persistent_id (proto3-shaped, not a plain dict) so the ack half of
+        _skip_and_ack is actually exercised via THIS except branch too, not
+        just via the skip_exceptions branch."""
+        instance = self._make_instance()
+        instance.config = SimpleNamespace(send_selective_acknowledgements=True)
+
+        ack_calls = []
+
+        async def _send_selective_ack(persistent_id):
+            ack_calls.append(persistent_id)
+
+        instance._send_selective_ack = _send_selective_ack
+
+        terminate_calls = []
+        instance._terminate = lambda: terminate_calls.append(1)
+
+        handled = []
+
+        async def _handle_message(msg):
+            handled.append(msg)
+            if len(handled) == 1:
+                raise RuntimeError("couldn't find in app_data crypto-key")
+            instance.do_listen = False
+
+        instance._handle_message = _handle_message
+
+        call_count = [0]
+
+        async def _recv():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return SimpleNamespace(persistent_id="missing-header-msg-id")
+            return {"msg": call_count[0]}
+
+        instance._receive_msg = _recv
+
+        with caplog.at_level("WARNING", logger=MODULE):
+            await instance._listen()
+
+        assert len(handled) == 2, (
+            "Must continue receiving messages after a missing-app_data-key RuntimeError"
+        )
+        assert not terminate_calls, (
+            "A single message missing its crypto-key/encryption header must "
+            "not terminate FcmPushClient"
+        )
+        assert any(
+            "Skipping undecryptable FCM push message" in r.getMessage()
+            for r in caplog.records
+        )
+        assert instance.persistent_ids == ["missing-header-msg-id"], (
+            "the RuntimeError branch must ack the skipped message too, not "
+            "just the skip_exceptions branch"
+        )
+        assert ack_calls == ["missing-header-msg-id"]
+
+    @pytest.mark.asyncio
+    async def test_unrelated_runtime_error_still_terminates(self):
+        """Only the SPECIFIC "couldn't find in app_data" RuntimeError shape
+        is skippable — any other RuntimeError (e.g. from a totally different
+        code path) is not single-message-scoped and must still terminate
+        FcmPushClient so the supervisor's hard-heal can run."""
+        instance = self._make_instance()
+
+        terminate_calls = []
+        instance._terminate = lambda: terminate_calls.append(1)
+
+        async def _handle_message(msg):
+            raise RuntimeError("some unrelated failure")
+
+        instance._handle_message = _handle_message
+
+        async def _recv():
+            return {"msg": 1}
+
+        instance._receive_msg = _recv
+
+        await instance._listen()
+
+        assert terminate_calls, (
+            "An unrelated RuntimeError must still terminate FcmPushClient"
+        )
 
     @pytest.mark.asyncio
     async def test_skipped_message_still_acked_to_stop_redelivery(self):
@@ -2548,6 +2972,43 @@ class TestPatchedListenBody:
         await instance._listen()  # must not raise
 
         assert instance.persistent_ids == []
+
+    @pytest.mark.asyncio
+    async def test_skipped_message_empty_persistent_id_not_acked(self):
+        """Live-deploy finding (GitHub #68 follow-up, 2026-08-18): the real
+        protobuf DataMessageStanza.persistent_id field defaults to ''
+        (never None) — so `if persistent_id is not None:` was always true
+        and appended/acked a meaningless empty string. A message with a
+        genuinely empty id must be logged but NOT appended/acked."""
+        import binascii
+
+        instance = self._make_instance()
+        instance.config = SimpleNamespace(send_selective_acknowledgements=True)
+
+        ack_calls = []
+
+        async def _send_selective_ack(persistent_id):
+            ack_calls.append(persistent_id)
+
+        instance._send_selective_ack = _send_selective_ack
+
+        async def _handle_message(msg):
+            instance.do_listen = False
+            raise binascii.Error("Incorrect padding")
+
+        instance._handle_message = _handle_message
+
+        async def _recv():
+            return SimpleNamespace(persistent_id="")  # real proto3 default
+
+        instance._receive_msg = _recv
+
+        await instance._listen()
+
+        assert instance.persistent_ids == [], (
+            "an empty persistent_id must not be appended"
+        )
+        assert ack_calls == [], "an empty persistent_id must not be acked"
 
     @pytest.mark.asyncio
     async def test_corrupt_credentials_value_error_still_terminates(self):
@@ -5609,6 +6070,39 @@ class TestQuietFcmPushClient:
             "override must not be the same function object as the base"
         )
 
+    def test_patched_class_has_decrypt_raw_data_override_against_real_library(self):
+        """Test-coverage finding (GitHub #68 follow-up, 2026-08-18): every
+        prior assertion that the padding-fix override attaches ran against
+        the hand-rolled `_FakeFcmPushClient` (whose `_decrypt_raw_data`
+        signature was written by hand to match what our signature-guard
+        expects) — never against the REAL installed firebase_messaging
+        library, unlike the sibling `_listen` override test above. A future
+        firebase-messaging upgrade that reshapes `_decrypt_raw_data` would
+        silently fall back to the unpadded vanilla version (debug-logged
+        only) and regress #68's "notifications always late" fix, with this
+        suite staying green and 100%-coverage the whole time. This test
+        would fail that scenario immediately."""
+        pytest.importorskip("firebase_messaging")
+        from firebase_messaging import FcmPushClient
+
+        from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
+
+        _QuietFcmPushClient._patched_class = False
+        cls = _QuietFcmPushClient._patch_class()
+        assert cls is not None
+        assert "_decrypt_raw_data" in cls.__dict__, (
+            "the GitHub #68 padded-decrypt override must attach against the "
+            "REAL installed firebase_messaging.FcmPushClient, not just the "
+            "test's own hand-rolled fake — if this fails, the real "
+            "library's _decrypt_raw_data signature has changed and the "
+            "signature guard in _build_decrypt_raw_data_override() is "
+            "(correctly) refusing to attach a mismatched override"
+        )
+        assert (
+            cls.__dict__["_decrypt_raw_data"]
+            is not FcmPushClient.__dict__["_decrypt_raw_data"]
+        ), "override must not be the same function object as the base"
+
     def test_get_fcm_push_client_class_returns_nonnone(self):
         """_get_fcm_push_client_class() returns a usable class when the library is present."""
         pytest.importorskip("firebase_messaging")
@@ -7556,6 +8050,129 @@ def _run_send_alert(
     return _run()
 
 
+class TestAsyncSendAlertScreenshotVideoOnlyConfig:
+    """GitHub #68 live-deploy finding, 2026-08-18: async_send_alert's early
+    return guard only checked "information" services (with alert_notify_service
+    as its fallback) — a screenshot/video-only config (no information/default
+    service) had the whole alert silently no-op, with zero log line, before
+    steps 2/3 ever ran."""
+
+    @pytest.mark.asyncio
+    async def test_screenshot_only_config_does_not_early_return(self):
+        coord = _make_alert_coord4(
+            options={
+                "alert_notify_service": "",
+                "alert_notify_information": "",
+                "alert_notify_screenshot": "notify.screenshot_svc",
+                "alert_notify_video": "",
+                "alert_save_snapshots": True,
+            }
+        )
+
+        session = MagicMock()
+        session.get = MagicMock(
+            return_value=_resp_cm_alert(
+                200, body=b"\xff\xd8snap", content_type="image/jpeg"
+            )
+        )
+
+        async def _run():
+            from custom_components.bosch_shc_camera.fcm import async_send_alert
+
+            with (
+                patch(
+                    f"{MODULE}.async_get_bosch_cloud_session",
+                    new=AsyncMock(return_value=session),
+                ),
+                patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock),
+                patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()),
+                patch(f"{SMB_MODULE}.sync_local_save", MagicMock()),
+            ):
+                await async_send_alert(
+                    coord,
+                    "Terrasse",
+                    "MOVEMENT",
+                    "2026-05-07T10:00:00.000Z",
+                    image_url="https://residential.cbs.boschsecurity.com/img.jpg",
+                )
+
+        await _run()
+
+        calls = [str(c) for c in coord.hass.services.async_call.call_args_list]
+        assert any("screenshot_svc" in s for s in calls), (
+            "a screenshot-only config must not be silently skipped by the "
+            f"top-of-function guard; calls were {calls}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_video_only_config_does_not_early_return(self):
+        coord = _make_alert_coord4(
+            options={
+                "alert_notify_service": "",
+                "alert_notify_information": "",
+                "alert_notify_screenshot": "",
+                "alert_notify_video": "notify.video_svc",
+                "alert_save_snapshots": True,
+            }
+        )
+
+        session = MagicMock()
+        session.get = MagicMock(
+            return_value=_resp_cm_alert(200, body=b"x" * 2048, content_type="video/mp4")
+        )
+
+        async def _run():
+            from custom_components.bosch_shc_camera.fcm import async_send_alert
+
+            with (
+                patch(
+                    f"{MODULE}.async_get_bosch_cloud_session",
+                    new=AsyncMock(return_value=session),
+                ),
+                patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock),
+                patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()),
+                patch(f"{SMB_MODULE}.sync_local_save", MagicMock()),
+            ):
+                await async_send_alert(
+                    coord,
+                    "Terrasse",
+                    "MOVEMENT",
+                    "2026-05-07T10:00:00.000Z",
+                    image_url="",
+                    clip_url="https://residential.cbs.boschsecurity.com/clip.mp4",
+                    clip_status="Done",
+                )
+
+        await _run()
+
+        calls = [str(c) for c in coord.hass.services.async_call.call_args_list]
+        assert any("video_svc" in s for s in calls), (
+            "a video-only config must not be silently skipped by the "
+            f"top-of-function guard; calls were {calls}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_nothing_configured_still_returns_early_with_debug_log(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The guard must still correctly no-op when genuinely nothing is
+        configured — now with a debug log explaining why, instead of the
+        previous silent return."""
+        coord = _make_alert_coord4(
+            options={
+                "alert_notify_service": "",
+                "alert_notify_information": "",
+                "alert_notify_screenshot": "",
+                "alert_notify_video": "",
+            }
+        )
+        with caplog.at_level("DEBUG", logger=MODULE):
+            await _run_send_alert(coord, event_type="MOVEMENT")
+
+        assert coord.hass.services.async_call.call_args_list == []
+        assert any("nothing configured" in r.getMessage() for r in caplog.records)
+
+
 class TestInstallFcmNoiseFilterIdempotent:
     """_install_fcm_noise_filter must be idempotent: repeated calls never add
     a second filter instance to the firebase_messaging logger."""
@@ -8733,6 +9350,33 @@ class TestStep1TextAlert:
         )
 
     @pytest.mark.asyncio
+    async def test_notify_call_uses_blocking_true(self):
+        """GitHub #68 live-deploy finding, 2026-08-18: hass.services.async_call
+        must be called with blocking=True — HA core's default blocking=False
+        makes it fire-and-forget, so a real downstream delivery failure
+        (SMTP down, push rejected, ...) is caught inside HA core's own
+        wrapper and never reaches _notify_type's except Exception, meaning
+        `delivered`/the "Alert step N sent" log would claim success even
+        when the notify silently failed."""
+        coord = _make_alert_coord4(
+            options={
+                "alert_notify_service": "notify.signal",
+                "alert_notify_information": "notify.info_svc",
+            }
+        )
+        await _run_send_alert(
+            coord,
+            event_type="MOVEMENT",
+            image_url="https://residential.cbs.boschsecurity.com/img.jpg",
+        )
+        calls = coord.hass.services.async_call.call_args_list
+        assert calls, "expected at least one notify call"
+        for c in calls:
+            assert c.kwargs.get("blocking") is True, (
+                f"async_call must be invoked with blocking=True, got call: {c}"
+            )
+
+    @pytest.mark.asyncio
     async def test_trouble_connect_step1_calls_system_service(self):
         """TROUBLE_CONNECT → routes to 'system' key → system service called."""
         coord = _make_alert_coord4(
@@ -8780,7 +9424,7 @@ class TestStep1TextAlert:
         coord = _make_alert_coord4()
         captured_calls = []
         coord.hass.services.async_call = AsyncMock(
-            side_effect=lambda d, s, data: captured_calls.append(
+            side_effect=lambda d, s, data, **kw: captured_calls.append(
                 data.get("message", "")
             )
         )
