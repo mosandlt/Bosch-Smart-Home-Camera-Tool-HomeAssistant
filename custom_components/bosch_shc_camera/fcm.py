@@ -553,8 +553,20 @@ class _QuietFcmPushClient:
                                     # unacked message on every reconnect, so
                                     # rate-limit like the OSError path above
                                     # instead of a raw warning.
+                                    # persistent_id logged alongside the error
+                                    # (GitHub #68 follow-up, 2026-08-18): a
+                                    # DISTINCT id each occurrence means this is
+                                    # a genuinely new message from Bosch's
+                                    # cloud each time (their bug, harmless
+                                    # here regardless) — the SAME id repeating
+                                    # would instead mean our ack below isn't
+                                    # durably reaching Google, worth
+                                    # investigating further if seen.
+                                    persistent_id = getattr(msg, "persistent_id", None)
                                     self._log_warn_with_limit(
-                                        "Skipping undecryptable FCM push message: %s",
+                                        "Skipping undecryptable FCM push message "
+                                        "(id=%s): %s",
+                                        persistent_id,
                                         decode_ex,
                                     )
                                     # Mark it delivered anyway. Upstream's
@@ -568,7 +580,6 @@ class _QuietFcmPushClient:
                                     # but indefinitely — one rate-limited
                                     # warning per reconnect forever) since it
                                     # thinks we never received it.
-                                    persistent_id = getattr(msg, "persistent_id", None)
                                     if persistent_id is not None:
                                         self.persistent_ids.append(persistent_id)
                                         if self.config.send_selective_acknowledgements:
