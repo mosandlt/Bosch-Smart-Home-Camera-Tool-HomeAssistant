@@ -1911,6 +1911,57 @@ class TestPatchedDecryptRawData:
 
         assert result == raw_data
 
+    def test_message_crypto_key_invalid_ec_point_reraises_as_ece_exception(self):
+        """Live-deploy finding (GitHub #68, 2026-08-18): a single message's
+        crypto-key header can pad and base64-decode fine but still not
+        represent a valid point on the P-256 curve (observed live: a message
+        redelivered by Google MCS on every reconnect since it was never
+        acked, crashing the whole FcmPushClient on each redelivery for
+        hours). http_ece.decrypt()'s own EC-point parsing
+        (EllipticCurvePublicKey.from_encoded_point) raises a raw
+        ValueError("Invalid EC key.") that is NOT normalized to
+        ECEException the way AEAD/tag-mismatch failures are — reproduced
+        here with a correctly-formatted (0x04-prefixed, 65-byte) but
+        mathematically-invalid point. Must be re-raised as ECEException (a
+        single-message fault _listen() already skips), not left to escape
+        as an unhandled ValueError that reads as a stored-credentials
+        fault it isn't — load_der_private_key succeeds fine here, proving
+        the credentials themselves are valid."""
+        import base64
+        import os
+
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from http_ece import ECEException
+
+        def b64url_unpadded(data: bytes) -> str:
+            return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+        receiver_priv = ec.generate_private_key(ec.SECP256R1(), default_backend())
+        receiver_priv_der = receiver_priv.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        credentials = {
+            "keys": {
+                "private": b64url_unpadded(receiver_priv_der),
+                "secret": b64url_unpadded(os.urandom(16)),
+            }
+        }
+        # 0x04 (uncompressed-point format marker) + 64 bytes of garbage
+        # coordinates: passes the format/length check, fails actual curve
+        # point validation deep inside the cryptography library.
+        bad_crypto_key = b"\x04" + os.urandom(64)
+        crypto_key_str = b64url_unpadded(bad_crypto_key)
+        salt_str = b64url_unpadded(os.urandom(16))
+
+        decrypt = self._get_patched_decrypt()
+
+        with pytest.raises(ECEException):
+            decrypt(credentials, crypto_key_str, salt_str, b"irrelevant-ciphertext")
+
     def test_raises_on_genuinely_corrupt_credentials(self):
         """A corrupt/malformed stored private key must raise a plain
         ValueError from load_der_private_key — specifically NOT a
@@ -2218,6 +2269,14 @@ class TestPatchedListenBody:
 
         instance._connect_with_retry = _ok_connect
 
+        instance.persistent_ids = []
+        instance.config = SimpleNamespace(send_selective_acknowledgements=False)
+
+        async def _noop_ack(persistent_id):
+            pass
+
+        instance._send_selective_ack = _noop_ack
+
         return instance
 
     @pytest.mark.asyncio
@@ -2421,6 +2480,74 @@ class TestPatchedListenBody:
             "A single undecryptable-ciphertext message must not terminate FcmPushClient"
         )
         assert warn_calls
+
+    @pytest.mark.asyncio
+    async def test_skipped_message_still_acked_to_stop_redelivery(self):
+        """GitHub #68 live-deploy follow-up: upstream's _handle_message()
+        only appends to persistent_ids / sends the selective ack AFTER
+        _handle_data_message() returns successfully — our skip-logic above
+        aborts before either runs, so without this fix Google MCS would
+        treat the skipped message as never received and redeliver it
+        (harmlessly, but indefinitely — one warning per reconnect forever).
+        The skip path must append persistent_id itself and send the ack when
+        the client has selective acks enabled.
+        """
+        import binascii
+
+        instance = self._make_instance()
+        instance.config = SimpleNamespace(send_selective_acknowledgements=True)
+
+        ack_calls = []
+
+        async def _send_selective_ack(persistent_id):
+            ack_calls.append(persistent_id)
+
+        instance._send_selective_ack = _send_selective_ack
+
+        async def _handle_message(msg):
+            instance.do_listen = False
+            raise binascii.Error("Incorrect padding")
+
+        instance._handle_message = _handle_message
+
+        async def _recv():
+            return SimpleNamespace(persistent_id="poisoned-msg-id-123")
+
+        instance._receive_msg = _recv
+
+        await instance._listen()
+
+        assert instance.persistent_ids == ["poisoned-msg-id-123"], (
+            "the skipped message's persistent_id must be recorded so it "
+            "isn't replayed again at the next login"
+        )
+        assert ack_calls == ["poisoned-msg-id-123"], (
+            "must send the selective ack when the client has it enabled"
+        )
+
+    @pytest.mark.asyncio
+    async def test_skipped_message_ack_skipped_when_no_persistent_id(self):
+        """A msg object without a persistent_id attribute (e.g. a test
+        double, or a future message type) must not raise AttributeError —
+        the ack-append is a best-effort addition, not a hard requirement."""
+        import binascii
+
+        instance = self._make_instance()
+
+        async def _handle_message(msg):
+            instance.do_listen = False
+            raise binascii.Error("Incorrect padding")
+
+        instance._handle_message = _handle_message
+
+        async def _recv():
+            return {"msg": "no persistent_id attribute on a plain dict"}
+
+        instance._receive_msg = _recv
+
+        await instance._listen()  # must not raise
+
+        assert instance.persistent_ids == []
 
     @pytest.mark.asyncio
     async def test_corrupt_credentials_value_error_still_terminates(self):

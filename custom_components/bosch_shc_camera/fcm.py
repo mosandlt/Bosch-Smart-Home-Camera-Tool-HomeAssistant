@@ -317,6 +317,7 @@ def _build_decrypt_raw_data_override(
 
     try:
         from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives.asymmetric import ec
         from cryptography.hazmat.primitives.serialization import (
             load_der_private_key,
         )
@@ -369,14 +370,46 @@ def _build_decrypt_raw_data_override(
         salt = _urlsafe_b64decode_padded(salt_str)
         der_data = _urlsafe_b64decode_padded(credentials["keys"]["private"])
         secret = _urlsafe_b64decode_padded(credentials["keys"]["secret"])
+        # load_der_private_key() failing here means our OWN stored
+        # credentials are corrupt — a client-wide fault, deliberately left
+        # unguarded so its ValueError propagates to _listen()'s broad
+        # except and triggers the supervisor's hard-heal.
         privkey = load_der_private_key(
             der_data, password=None, backend=default_backend()
         )
+        # GitHub #68 live-deploy finding: http_ece.decrypt()'s own EC point
+        # parsing of THIS MESSAGE's crypto-key bytes (inside derive_dh,
+        # called deep within decrypt()) is NOT wrapped into ECEException the
+        # way the AEAD/tag-mismatch path is — it raises a raw
+        # ValueError("Invalid EC key.") straight out of the cryptography
+        # library whenever a single message's (correctly padded,
+        # successfully decoded) crypto-key bytes don't represent a valid
+        # point on the curve (e.g. a subtype-mismatched message). Google MCS
+        # then redelivers that exact poisoned message on every reconnect
+        # since it's never acked, and — observed live — this crashed the
+        # whole FcmPushClient on every single redelivery, escalating through
+        # the hard-heal backoff for hours despite the fault being a single
+        # bad message, not our credentials (which just loaded successfully
+        # above). Pre-parse the point ourselves and convert ONLY that
+        # failure to ECEException — deliberately NOT a broad try/except
+        # around the whole decrypt() call below, which would also catch
+        # ValueError from decrypt()'s OTHER internal calls that use OUR
+        # stored private key (e.g. a non-EC or wrong-curve stored key
+        # raising "format is invalid with this key" / "Error computing
+        # shared key.") and silently mask that as a skippable one-off
+        # message forever instead of a client-wide fault needing hard-heal.
+        try:
+            crypto_key_point = ec.EllipticCurvePublicKey.from_encoded_point(
+                ec.SECP256R1(), crypto_key
+            )
+        except ValueError as ex:
+            raise ECEException(str(ex)) from ex
+
         decrypted: bytes = http_ece_decrypt(
             raw_data,
             salt=salt,
             private_key=privkey,
-            dh=crypto_key,
+            dh=crypto_key_point,
             version="aesgcm",
             auth_secret=secret,
         )
@@ -524,6 +557,24 @@ class _QuietFcmPushClient:
                                         "Skipping undecryptable FCM push message: %s",
                                         decode_ex,
                                     )
+                                    # Mark it delivered anyway. Upstream's
+                                    # _handle_message() only appends to
+                                    # persistent_ids / sends the selective ack
+                                    # AFTER _handle_data_message() returns
+                                    # (fcmpushclient.py) — our exception above
+                                    # aborted before either ran, so without
+                                    # this the message is never acked and
+                                    # Google MCS redelivers it (harmlessly,
+                                    # but indefinitely — one rate-limited
+                                    # warning per reconnect forever) since it
+                                    # thinks we never received it.
+                                    persistent_id = getattr(msg, "persistent_id", None)
+                                    if persistent_id is not None:
+                                        self.persistent_ids.append(persistent_id)
+                                        if self.config.send_selective_acknowledgements:
+                                            await self._send_selective_ack(
+                                                persistent_id
+                                            )
 
                         except (OSError, EOFError) as osex:
                             # FIX for issue #33: advance state to RESETTING here,
