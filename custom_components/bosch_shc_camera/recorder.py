@@ -23,7 +23,6 @@ Architecture choice (`docs/mini-nvr-concept.md` §10): in-integration via
 from __future__ import annotations
 
 import asyncio
-import calendar
 import datetime
 import logging
 import math
@@ -62,6 +61,7 @@ from .const import (
     TIMEOUT_RECORDER_SEGMENT_PROBE,
 )
 from .smb import _safe_name
+from .time_utils import parse_bosch_timestamp
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator
@@ -1696,17 +1696,17 @@ def maybe_schedule_nvr_motion_clip(
 
 def _seconds_since_event(event_timestamp: str) -> float | None:
     """Return seconds elapsed since a Bosch cloud event's own timestamp, or
-    None if unparseable/empty. Same parsing approach as
-    `fcm.py`'s `_event_predates_session`."""
+    None if unparseable/empty. Same timezone-correct parsing approach as
+    `fcm.py`'s `_event_predates_session` (bug fix: the previous `[:19]` +
+    calendar.timegm(time.strptime(...)) discarded Bosch's real timezone
+    offset and re-labelled local wall-clock time as UTC — see
+    time_utils.py's docstring)."""
     if not event_timestamp or len(event_timestamp) < 19:
         return None
-    try:
-        ev_epoch = calendar.timegm(
-            time.strptime(event_timestamp[:19], "%Y-%m-%dT%H:%M:%S")
-        )
-    except ValueError:
+    ev_dt = parse_bosch_timestamp(event_timestamp)
+    if ev_dt is None:
         return None
-    return time.time() - ev_epoch
+    return time.time() - ev_dt.timestamp()
 
 
 def should_record(

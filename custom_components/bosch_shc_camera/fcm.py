@@ -16,13 +16,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-import calendar
 import contextlib
 import json
 import logging
 import os
 import ssl
 import time
+import urllib.parse
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -30,17 +30,26 @@ import aiohttp
 from bosch_shc_camera_client.media_transfer import (
     is_safe_bosch_url as _is_safe_bosch_url,
 )
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
 from .cloud_ssl import async_get_bosch_cloud_session
+from .const import DOMAIN
 from .recorder import maybe_schedule_nvr_motion_clip
 from .snapshot_store import save_snapshot
+from .time_utils import parse_bosch_timestamp
 
 # `_is_safe_bosch_url` was previously a byte-identical copy duplicated across
 # fcm.py/smb.py/coordinator.py — now a single shared implementation in
 # bosch_shc_camera_client.media_transfer, aliased here to keep the private
 # name every call site in this file already uses.
+
+# Max bytes accepted for an alert video clip download (Area 5, item 3 bug
+# fix). 100 MB is generous for a Mini-NVR/Bosch event clip (typically low
+# single-digit MB) while still guarding against a malformed/oversized
+# response allocating unboundedly in the event-loop process.
+_CLIP_MAX_BYTES = 100 * 1024 * 1024
 
 # Event types that carry image data and warrant a live-snapshot refresh (Path A).
 # Status-only types (connectivity events) are excluded — they carry no image
@@ -92,6 +101,13 @@ FCM_SUPERVISOR_POLL_SEC = 10.0
 # After this many consecutive soft-restarts WITHOUT a real push arriving, the
 # next restart escalates to a hard-heal (credential purge + re-register).
 FCM_SUPERVISOR_SOFT_HEAL_MAX = 3
+
+# How long a listener must stay continuously up (is_started()=True) before the
+# `failures` backoff counter is reset just from uptime, even with zero pushes
+# received — a quiet house shouldn't keep the backoff ladder pinned at a
+# stale escalated value forever. 10 min matches the creds-staleness window
+# used elsewhere in this file.
+FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC = 600.0
 
 # Proactive Bosch-CBS re-registration cadence. Without this, the integration
 # would skip the POST /v11/devices forever as long as the FCM token was
@@ -156,32 +172,46 @@ class _FCMNoiseFilter(logging.Filter):
 
     def __init__(self) -> None:
         super().__init__()
-        self._last_passed = float("-inf")  # monotonic ts of last record we let through
+        # Separate dedup clocks per failure class (bug fix): connectivity
+        # noise and creds-staleness diagnostics are unrelated failure
+        # classes. A shared clock let a connectivity WARNING suppress a
+        # later creds-rejection ERROR (or vice versa) even though neither
+        # is a duplicate of the other.
+        self._last_passed_connectivity = float("-inf")
+        self._last_passed_creds = float("-inf")
 
     def filter(self, record: logging.LogRecord) -> bool:
         # Only target known failure markers; other firebase_messaging logs
         # (INFO start/stop, debug traces) pass through untouched so we keep
         # diagnostic visibility.
         msg = record.getMessage() if hasattr(record, "getMessage") else str(record.msg)
-        if not any(marker in msg for marker in self._FAILURE_MARKERS):
+        is_creds = any(marker in msg for marker in self._CREDS_STALENESS_MARKERS)
+        is_connectivity = any(marker in msg for marker in self._CONNECTIVITY_MARKERS)
+        if not (is_creds or is_connectivity):
             return True
-        # Drop the multi-thousand-line traceback unconditionally — the
-        # message itself is the diagnostic, the trace is library-internal
-        # recursion that doesn't help triage.
-        record.exc_info = None
-        record.exc_text = None
         now = time.monotonic()
-        # Track creds-rejection markers so the supervisor can decide
-        # soft (preserve creds) vs hard (purge + re-register) —
-        # PHONE_REGISTRATION_ERROR in the window means creds are genuinely
-        # stale, otherwise it's a connectivity-only blip.
-        if any(marker in msg for marker in self._CREDS_STALENESS_MARKERS):
+        if is_creds:
+            # Track creds-rejection markers so the supervisor can decide
+            # soft (preserve creds) vs hard (purge + re-register) —
+            # PHONE_REGISTRATION_ERROR in the window means creds are
+            # genuinely stale, otherwise it's a connectivity-only blip.
             self._SHARED_STALENESS_TIMESTAMPS.append(now)
             del self._SHARED_STALENESS_TIMESTAMPS[:-10]
-        # Then de-dupe.
-        if (now - self._last_passed) < self._DEDUP_WINDOW_SECONDS:
+            # Creds-staleness lines are a once-per-give-up diagnostic, not
+            # the multi-thousand-line recursive connectivity trace this
+            # filter exists to tame — keep their traceback intact.
+            if (now - self._last_passed_creds) < self._DEDUP_WINDOW_SECONDS:
+                return False
+            self._last_passed_creds = now
+            return True
+        # Connectivity noise: drop the multi-thousand-line traceback
+        # unconditionally — the message itself is the diagnostic, the
+        # trace is library-internal recursion that doesn't help triage.
+        record.exc_info = None
+        record.exc_text = None
+        if (now - self._last_passed_connectivity) < self._DEDUP_WINDOW_SECONDS:
             return False
-        self._last_passed = now
+        self._last_passed_connectivity = now
         return True
 
 
@@ -256,23 +286,31 @@ def _install_fcm_noise_filter() -> None:
 
     Idempotent: re-running finds the existing instance and returns early.
     """
-    # Find or create the shared filter instance.
+    # Find or create the shared filter instance. Bug fix: the original
+    # idempotency guard only inspected `lib_logger.filters` — if HA's
+    # `logger` integration reload cleared filters asymmetrically (e.g. only
+    # the library logger, not the other two), a second _FCMNoiseFilter
+    # instance got installed on the still-populated loggers, double-counting
+    # _SHARED_STALENESS_TIMESTAMPS. Check all three loggers up front instead.
     lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
     register_logger = logging.getLogger("firebase_messaging.fcmregister")
-    for f in lib_logger.filters:
-        if isinstance(f, _FCMNoiseFilter):
-            # Already installed on the library logger.  Make sure the other
-            # two also carry it (handles reload after a partial install).
-            if f not in register_logger.filters:
-                register_logger.addFilter(f)
-            if f not in _LOGGER.filters:
-                _LOGGER.addFilter(f)
-            return
+    loggers = (lib_logger, register_logger, _LOGGER)
 
-    shared_filter = _FCMNoiseFilter()
-    lib_logger.addFilter(shared_filter)
-    register_logger.addFilter(shared_filter)
-    _LOGGER.addFilter(shared_filter)
+    shared_filter: _FCMNoiseFilter | None = None
+    for logger_ in loggers:
+        for f in logger_.filters:
+            if isinstance(f, _FCMNoiseFilter):
+                shared_filter = f
+                break
+        if shared_filter is not None:
+            break
+
+    if shared_filter is None:
+        shared_filter = _FCMNoiseFilter()
+
+    for logger_ in loggers:
+        if shared_filter not in logger_.filters:
+            logger_.addFilter(shared_filter)
 
 
 def _urlsafe_b64decode_padded(data: str) -> bytes:
@@ -675,6 +713,29 @@ class _QuietFcmPushClient:
         except ImportError:
             return None
 
+        try:
+            return _QuietFcmPushClient._build_patched_class(
+                FcmPushClient, FcmPushClientRunState
+            )
+        except Exception:
+            # Defense-in-depth: any unexpected failure while building the
+            # patched subclass (e.g. inspect.signature() raising ValueError
+            # on a future library's callable shape, or a genuinely malformed
+            # library internals) must degrade to the vanilla FcmPushClient,
+            # matching every other guard in this class — not re-raise and
+            # break the supervisor on every cycle.
+            _LOGGER.exception(
+                "FCM subclass: unexpected error building patched FcmPushClient — "
+                "falling back to vanilla FcmPushClient (issue#33 noise may recur)"
+            )
+            return None
+
+    @staticmethod
+    def _build_patched_class(
+        FcmPushClient: Any, FcmPushClientRunState: Any
+    ) -> type | None:
+        """Build the patched subclass. Raises on unexpected internal failures;
+        callers (``_patch_class``) are responsible for the broad fallback."""
         import inspect
 
         # Safety guard: if the upstream _listen() signature ever changes (e.g.
@@ -756,12 +817,28 @@ class _QuietFcmPushClient:
                                     # client's lifetime, defeating its own
                                     # purpose.
                                     persistent_id = getattr(msg, "persistent_id", None)
-                                    _LOGGER.warning(
-                                        "Skipping undecryptable FCM push message "
-                                        "(id=%s): %s",
-                                        persistent_id,
-                                        exc,
+                                    # Rate-limited (not self._log_warn_with_limit(),
+                                    # deliberately — see the comment above this
+                                    # method about that helper's own 5-occurrence-
+                                    # forever cap): this can fire for routine
+                                    # non-webpush traffic on every reconnect, so an
+                                    # unbounded warning here would be its own noise
+                                    # source. A time-windowed limiter (like
+                                    # _FCMNoiseFilter's dedup) naturally recovers
+                                    # after a quiet period instead of going silent
+                                    # forever after N occurrences.
+                                    _skip_warn_now = time.monotonic()
+                                    _last_skip_warn = getattr(
+                                        self, "_bosch_skip_warn_last_ts", float("-inf")
                                     )
+                                    if (_skip_warn_now - _last_skip_warn) >= 300.0:
+                                        self._bosch_skip_warn_last_ts = _skip_warn_now
+                                        _LOGGER.warning(
+                                            "Skipping undecryptable FCM push message "
+                                            "(id=%s): %s",
+                                            persistent_id,
+                                            exc,
+                                        )
                                     # Mark it delivered anyway. Upstream's
                                     # _handle_message() only appends to
                                     # persistent_ids / sends the selective ack
@@ -782,9 +859,33 @@ class _QuietFcmPushClient:
                                     if persistent_id:
                                         self.persistent_ids.append(persistent_id)
                                         if self.config.send_selective_acknowledgements:
-                                            await self._send_selective_ack(
-                                                persistent_id
-                                            )
+                                            # Bug fix: `_send_selective_ack` ->
+                                            # upstream `_send_msg` does
+                                            # `self.writer.write(buf)` with no
+                                            # None-guard. If a concurrent
+                                            # `_reset()`/`_do_writer_close()`
+                                            # already cleared `self.writer` (a
+                                            # mid-reset race on this exact
+                                            # message), this raises
+                                            # AttributeError — not in
+                                            # skip_exceptions/RuntimeError/
+                                            # (OSError, EOFError) — which would
+                                            # otherwise escape to the broad
+                                            # `except Exception` below and crash
+                                            # the whole client over one in-flight
+                                            # ack. Skip cleanly instead; Google
+                                            # MCS redelivers an unacked message
+                                            # on the next reconnect.
+                                            if (
+                                                getattr(self, "writer", None)
+                                                is not None
+                                            ):
+                                                try:
+                                                    await self._send_selective_ack(
+                                                        persistent_id
+                                                    )
+                                                except AttributeError:
+                                                    pass
 
                                 try:
                                     await self._handle_message(msg)
@@ -1033,6 +1134,15 @@ async def async_ensure_fcm_supervisor(coordinator: Any) -> None:
     """
     if not coordinator.options.get("enable_fcm_push", False):
         return
+    # Bug fix: the coordinator tick schedules this as a bare task with no
+    # "shutting down" guard. If that task runs AFTER async_stop_fcm_supervisor
+    # already set fcm_supervisor_task=None during unload (e.g. a reload race),
+    # it could resurrect a new supervisor against a dead/unloading config
+    # entry. `nvr_shutting_down` is set at the very start of the coordinator
+    # teardown (__init__.py), before async_stop_fcm_push is even awaited —
+    # reuse it here as the general "this config entry is unloading" signal.
+    if getattr(coordinator, "nvr_shutting_down", False):
+        return
     sup = getattr(coordinator, "fcm_supervisor_task", None)
     if sup is not None and not sup.done():
         return
@@ -1186,9 +1296,23 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> bool:
                         "stale/replaced client"
                     )
                     return
-                coordinator.hass.async_create_task(
-                    _async_persist_fcm_creds(coordinator, creds)
-                )
+                # Bug fix (F1): pass `_this_client` through so the persist
+                # function re-checks identity right before the write (not
+                # just here at schedule time) — closes the race where a
+                # hard-heal purge lands between scheduling and the task
+                # actually running. Also use spawn_tracked (not a bare
+                # hass.async_create_task) so this is cancelled/awaited on
+                # unload like other background tasks in this codebase.
+                spawn = getattr(coordinator, "spawn_tracked", None)
+                if spawn is not None:
+                    spawn(
+                        _async_persist_fcm_creds(coordinator, creds, _this_client),
+                        name="bosch_shc_camera_fcm_persist_creds",
+                    )
+                else:  # pragma: no cover — defensive fallback for stub coordinators
+                    coordinator.hass.async_create_task(
+                        _async_persist_fcm_creds(coordinator, creds, _this_client)
+                    )
 
             coordinator.hass.loop.call_soon_threadsafe(_persist)
 
@@ -1258,12 +1382,35 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> bool:
                 err_type,
                 err_short,
             )
+            # Bug fix (F3): the client object was already created above
+            # (holds a socket/connection + background resources) — discarding
+            # the reference without stop() leaks an undrained client that
+            # logs "Unexpected exception during read" every ~63s forever.
+            failed_client = coordinator.fcm_client
             coordinator.fcm_client = None
+            if failed_client is not None:
+                with contextlib.suppress(Exception):
+                    await failed_client.stop()
             return False
 
         # Register FCM token with Bosch CBS API. coordinator.fcm_push_mode is
         # still "unknown" at this point (set to "auto" only after client.start()).
-        await register_fcm_with_bosch(coordinator)
+        # Bug fix (F2): the result was previously discarded — on a
+        # registration failure (timeout/401/500) Bosch never actually has our
+        # push token, so listening would still succeed and fcm_healthy would
+        # get set True with zero pushes ever arriving and no visible failure
+        # signal. Treat a failed Bosch registration as a start failure so the
+        # normal retry/backoff ladder applies instead.
+        if not await register_fcm_with_bosch(coordinator):
+            _LOGGER.warning(
+                "FCM: Bosch CBS device registration failed — not starting listener"
+            )
+            failed_client = coordinator.fcm_client
+            coordinator.fcm_client = None
+            if failed_client is not None:
+                with contextlib.suppress(Exception):
+                    await failed_client.stop()
+            return False
 
         # Start listening for pushes
         try:
@@ -1279,8 +1426,15 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> bool:
             return True
         except Exception as err:
             _LOGGER.warning("FCM push listener failed to start: %s", err)
+            # Bug fix (F3): stop() the client before discarding it on this
+            # failure path too — same leak as the checkin/register failure
+            # above.
+            failed_client = coordinator.fcm_client
             with coordinator.fcm_lock:
                 coordinator.fcm_client = None
+            if failed_client is not None:
+                with contextlib.suppress(Exception):
+                    await failed_client.stop()
             return False
 
     # Install once before any FCM client is created so the very first WAN
@@ -1434,8 +1588,15 @@ async def async_stop_fcm_push(coordinator: Any) -> None:
     """
     with coordinator.fcm_lock:
         client = coordinator.fcm_client
-        running = coordinator.fcm_running
-    if client and running:
+    # Bug fix (F4): the old guard required `running` to also be True. If
+    # cancellation happens WHILE `await client.start()` is in flight (e.g.
+    # HA shutdown racing FCM startup), the supervisor can end up with
+    # fcm_client set but fcm_running still False — a subsequent stop then
+    # no-oped and the listener survived unload as an orphan. Attempt to
+    # stop/close any existing client object regardless of the running flag;
+    # stop() itself is idempotent/safe to call on a not-yet-fully-started
+    # client (guarded by the try/except below either way).
+    if client:
         try:
             await client.stop()
         except asyncio.CancelledError:
@@ -1505,6 +1666,22 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
     _LOGGER.debug("FCM supervisor started")
 
     while True:
+        # Bug fix (F8): when fcm_push_mode="polling" (push deliberately
+        # disabled by the user) with enable_fcm_push still True,
+        # `_async_start_fcm_push_locked` always returns False — without this
+        # short-circuit, the loop below would count that as a failure and,
+        # after FCM_SUPERVISOR_SOFT_HEAL_MAX restarts, hard-heal (purge +
+        # rewrite entry.data) forever, on every iteration up to the 1800s
+        # backoff ceiling, for a mode the user explicitly chose. Skip the
+        # heal/start machinery entirely and just re-check periodically in
+        # case the user switches back to "auto".
+        if coordinator.options.get("fcm_push_mode", "auto") == "polling":
+            try:
+                await asyncio.sleep(FCM_SUPERVISOR_POLL_SEC)
+            except asyncio.CancelledError:
+                break
+            continue
+
         push_ts_before = coordinator.fcm_last_push
 
         # ── Decide heal strategy ────────────────────────────────────────────
@@ -1516,8 +1693,13 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
             or not coordinator.entry.data.get("fcm_credentials")
         )
 
-        if force_hard:
-            coordinator.fcm_force_hard_heal = False
+        # Bug fix (F6): the flag used to be cleared HERE, before the purge
+        # block below runs. If the purge itself raised, the `continue`
+        # re-entered the loop with the flag already gone, silently dropping a
+        # confirmed delivery-death-triggered heal (force_hard would not be
+        # observed again next iteration). Clear it only after the purge+
+        # re-registration attempt completes (success or failure) — see the
+        # `finally`-equivalent clearing further below.
 
         if needs_hard:
             # Reason (and whether it's a CONFIRMED problem, vs. a benign
@@ -1622,6 +1804,8 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                 # and could wait up to 30 minutes despite the root cause
                 # having just been fixed.
                 failures = 0
+                if force_hard:
+                    coordinator.fcm_force_hard_heal = False
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -1635,6 +1819,11 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                     "FCM supervisor: hard-heal purge raised an exception — "
                     "retrying next iteration"
                 )
+                # Bug fix (F6): only clear the flag if the purge genuinely
+                # completed — on failure, leave it set so the NEXT iteration
+                # still observes needs_hard=True and retries the heal instead
+                # of silently dropping a confirmed delivery-death-triggered
+                # request.
                 try:
                     await asyncio.sleep(FCM_SUPERVISOR_BACKOFF_SEC[0])
                 except asyncio.CancelledError:
@@ -1678,12 +1867,34 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
             "FCM supervisor: listener up — polling every %.0fs", FCM_SUPERVISOR_POLL_SEC
         )
         forced_heal = False
+        # Bug fix (F5): `failures` was previously only reset by an actual
+        # push arriving, never just by uptime — a listener healthy for days
+        # in a quiet house (zero pushes to prove it) could keep the backoff
+        # ladder pinned at its LAST recorded failure count (up to 1800s)
+        # even though every start since then has succeeded. Reset it once
+        # the listener has stayed up for a sustained period, independent of
+        # whether a push ever arrived.
+        listener_start_ts = time.monotonic()
+        failures_reset_for_uptime = False
         try:
             while True:
                 await asyncio.sleep(FCM_SUPERVISOR_POLL_SEC)
                 fcm_client = coordinator.fcm_client
                 if fcm_client is None or not fcm_client.is_started():
                     break
+                if (
+                    not failures_reset_for_uptime
+                    and failures > 0
+                    and (time.monotonic() - listener_start_ts)
+                    >= FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC
+                ):
+                    _LOGGER.info(
+                        "FCM supervisor: listener sustained for %.0fs without "
+                        "dying — resetting failure/backoff counter",
+                        FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC,
+                    )
+                    failures = 0
+                    failures_reset_for_uptime = True
                 if getattr(coordinator, "fcm_force_hard_heal", False):
                     # Silent-delivery-death: the poll-based fallback detected a
                     # camera event FCM never delivered while is_started() still
@@ -1765,8 +1976,29 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
     _LOGGER.debug("FCM supervisor stopped")
 
 
-async def _async_persist_fcm_creds(coordinator: Any, creds: dict[str, Any]) -> None:
-    """Write FCM credentials into the config entry (must run in event loop)."""
+async def _async_persist_fcm_creds(
+    coordinator: Any, creds: dict[str, Any], expected_client: Any = None
+) -> None:
+    """Write FCM credentials into the config entry (must run in event loop).
+
+    Bug fix (F1): the caller previously checked "is this client still
+    current" only at SCHEDULE time (before queuing this as a task), not
+    here at actual-write time. Race: old client's callback checks identity
+    (passes, still current) -> task queued -> BEFORE it runs, the
+    supervisor's hard-heal purges all `fcm_*` keys -> the stale queued task
+    then re-writes the old/stale credentials, undoing the purge. Re-check
+    identity right before the write, not just at schedule time.
+
+    ``expected_client`` is optional (defaults to None = no re-check) so
+    direct/legacy callers that don't have a client reference to compare
+    against still persist unconditionally.
+    """
+    if expected_client is not None and coordinator.fcm_client is not expected_client:
+        _LOGGER.debug(
+            "FCM: skipping credentials persist — client was replaced/purged "
+            "between schedule and write (stale callback)"
+        )
+        return
     try:
         coordinator.hass.config_entries.async_update_entry(
             coordinator.entry,
@@ -1834,10 +2066,18 @@ def _event_predates_session(coordinator: Any, ev: dict[str, Any]) -> bool:
     started_at = getattr(coordinator, "_download_started_at", 0.0)
     if not started_at:
         return False
-    try:
-        ev_epoch = calendar.timegm(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S"))
-    except Exception:  # unparseable timestamp — don't block on it
+    # Bug fix (B1): the previous `ts[:19]` + calendar.timegm(time.strptime(...))
+    # discarded Bosch's real timezone offset (e.g.
+    # "2026-06-18T06:06:30.499+02:00[Europe/Berlin]") and re-labelled local
+    # wall-clock time as UTC. In CEST (+2h), a genuinely brand-new event was
+    # computed as 7200s in the past — right after any HA restart the FIRST
+    # real motion event got silently dropped as "stale". Use the shared,
+    # timezone-correct parser instead (see time_utils.py's own docstring for
+    # the full incident history).
+    ev_dt = parse_bosch_timestamp(ts)
+    if ev_dt is None:  # unparseable timestamp — don't block on it
         return False
+    ev_epoch = ev_dt.timestamp()
     return ev_epoch < started_at - 60
 
 
@@ -1861,7 +2101,11 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
     session = await async_get_bosch_cloud_session(coordinator.hass)
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
-    _dispatched_new = False
+    # Bug fix (B3): was a single flag shared across ALL cameras in one
+    # push-fetch cycle — if camera A's event dispatched but camera B's
+    # hadn't landed in the cloud index yet, B's retry got suppressed too,
+    # delaying B's alert to the next 300s poll. Scope it per-camera.
+    _dispatched_new: dict[str, bool] = {}
     _any_fetch_ok = False  # B1 fix: track if ≥1 camera fetch returned HTTP 200
     for cam_id in list(coordinator.data.keys()):
         try:
@@ -1869,6 +2113,29 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
             async with asyncio.timeout(10):
                 async with session.get(url, headers=headers) as r:
                     if r.status != 200:
+                        # Bug fix (B2): the non-200 status was previously
+                        # dropped with zero logging and no distinction
+                        # between a transient blip and a 401 (expired
+                        # token, which would otherwise make every push a
+                        # silent no-op until the next 300s poll). Log it,
+                        # and for a 401 specifically trigger the same
+                        # token-refresh path async_put_camera uses.
+                        _LOGGER.warning(
+                            "FCM push: events fetch for %s returned HTTP %d",
+                            cam_id,
+                            r.status,
+                        )
+                        if r.status == 401:
+                            try:
+                                token = await coordinator.ensure_valid_token(token)
+                                headers["Authorization"] = f"Bearer {token}"
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception:
+                                _LOGGER.debug(
+                                    "FCM push: token refresh after 401 failed",
+                                    exc_info=True,
+                                )
                         continue
                     events = await r.json()
             _any_fetch_ok = True  # HTTP 200 received — cloud is reachable
@@ -1946,7 +2213,7 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
                 continue
 
             if newest_id and newest_id != prev_id:
-                _dispatched_new = True
+                _dispatched_new[cam_id] = True
                 # Record alert dispatch ASAP so a concurrent handler sees it
                 _sent[newest_id] = _now
                 # Update last event ID FIRST to prevent polling from
@@ -2053,43 +2320,55 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
                 )
 
                 # Check notification switches before sending alert.
-                # Master switch (switch.bosch_{name}_notifications) must be ON,
-                # AND the type-specific switch must be ON for this event type.
+                # Master switch must be ON, AND the type-specific switch must
+                # be ON for this event type.
+                #
+                # Bug fix (B5): the entity_id used to be hand-rebuilt from
+                # `cam_name` (spaces + ä/ö/ü only) instead of resolved via
+                # the entity registry — on non-trivial camera names (other
+                # punctuation, non-German special chars) the lookup missed,
+                # `_alert_blocked` silently stayed False, and alerts fired
+                # even with the master notifications switch OFF (fail-open,
+                # privacy-relevant). Resolve the real entity_ids by unique_id
+                # instead — same unique_id scheme switch.py itself registers
+                # (NOTIFICATIONS_DESCRIPTION / BoschNotificationTypeSwitch).
                 _alert_blocked = False
-                _base = (
-                    cam_name.lower()
-                    .replace(" ", "_")
-                    .replace("ä", "ae")
-                    .replace("ö", "oe")
-                    .replace("ü", "ue")
+                _ent_reg = er.async_get(coordinator.hass)
+                _master_eid = _ent_reg.async_get_entity_id(
+                    "switch", DOMAIN, f"bosch_shc_notifications_{cam_id.lower()}"
                 )
-                _master_eid = f"switch.bosch_{_base}_notifications"
-                _master_state = coordinator.hass.states.get(_master_eid)
-                if _master_state and _master_state.state == "off":
-                    _LOGGER.debug("Alert suppressed: %s is OFF", _master_eid)
-                    _alert_blocked = True
-                # Type-specific check
-                # Map raw event types to the notification-switch slug used by
-                # BoschNotificationTypeSwitch (switch.bosch_{base}_{slug}_notifications).
-                # TROUBLE_CONNECT + TROUBLE_DISCONNECT both follow the `trouble` switch —
-                # they're system events and can be silenced together without affecting
-                # motion/person alerts.
+                if _master_eid:
+                    _master_state = coordinator.hass.states.get(_master_eid)
+                    if _master_state and _master_state.state == "off":
+                        _LOGGER.debug("Alert suppressed: %s is OFF", _master_eid)
+                        _alert_blocked = True
+                # Type-specific check. Map raw event types to the `ntype`
+                # value BoschNotificationTypeSwitch uses in its own
+                # unique_id (`bosch_shc_camera_{cam_id}_notif_{ntype}`) —
+                # NOTE this is the camelCase API-native form ("cameraAlarm"),
+                # not a snake_case slug. TROUBLE_CONNECT + TROUBLE_DISCONNECT
+                # both follow the `trouble` switch — they're system events
+                # and can be silenced together without affecting motion/
+                # person alerts.
                 _type_map = {
                     "MOVEMENT": "movement",
                     "PERSON": "person",
                     "AUDIO_ALARM": "audio",
-                    "CAMERA_ALARM": "camera_alarm",
+                    "CAMERA_ALARM": "cameraAlarm",
                     "TROUBLE": "trouble",
                     "TROUBLE_CONNECT": "trouble",
                     "TROUBLE_DISCONNECT": "trouble",
                 }
                 _type_key = _type_map.get(event_type)
                 if _type_key and not _alert_blocked:
-                    _type_eid = f"switch.bosch_{_base}_{_type_key}_notifications"
-                    _type_state = coordinator.hass.states.get(_type_eid)
-                    if _type_state and _type_state.state == "off":
-                        _LOGGER.debug("Alert suppressed: %s is OFF", _type_eid)
-                        _alert_blocked = True
+                    _type_eid = _ent_reg.async_get_entity_id(
+                        "switch", DOMAIN, f"bosch_shc_camera_{cam_id}_notif_{_type_key}"
+                    )
+                    if _type_eid:
+                        _type_state = coordinator.hass.states.get(_type_eid)
+                        if _type_state and _type_state.state == "off":
+                            _LOGGER.debug("Alert suppressed: %s is OFF", _type_eid)
+                            _alert_blocked = True
 
                 if not _alert_blocked:
                     # Send alert notification (3-step: text + snapshot + video).
@@ -2137,7 +2416,19 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
                     # notification snapshot — no extra camera-side TLS request needed.
                     # Skip Path A entirely when is_streaming=True; Path B is sufficient.
                     # Source: knowledge-base/stream-freeze-on-motion-event-contention.md
-                    if getattr(cam_entity, "is_streaming", False):
+                    #
+                    # Bug fix (B4, second half): Path B (alert step-2) only
+                    # runs when the alert isn't `_alert_blocked` (user has
+                    # notifications off). Skipping Path A purely on
+                    # `is_streaming` — without checking whether Path B will
+                    # actually run — left a streaming user with
+                    # notifications off with NO snapshot refresh at all on a
+                    # real event. The two skip-conditions must not both
+                    # apply simultaneously.
+                    if (
+                        getattr(cam_entity, "is_streaming", False)
+                        and not _alert_blocked
+                    ):
                         _LOGGER.debug(
                             "FCM Path A: skipped for %s (%s) — camera is streaming, "
                             "Path B will update cache",
@@ -2263,8 +2554,17 @@ def build_notify_data(
     if "mobile_app" in svc:
         # HA Companion App — image URL served without auth from /config/www/
         # Files deleted within seconds when alert_save_snapshots=False
+        #
+        # Bug fix (BUG2): `fname` embeds the cloud-provided camera title
+        # (only lightly sanitised by `_safe_path_segment` — path separators
+        # are stripped but `#`/`?`/`%`/spaces are not) and was previously
+        # placed into this URL unencoded, producing a broken URL in the push
+        # notification even though the file exists on disk correctly under
+        # that exact name. URL-encode only here, at URL-construction time —
+        # the filesystem path itself (used for the actual file I/O above)
+        # must stay as-is.
         notify_data: dict[str, Any] = {
-            "image": f"/local/bosch_alerts/{fname}",
+            "image": f"/local/bosch_alerts/{urllib.parse.quote(fname)}",
             "push": {"sound": "default"},  # iOS: play sound; Android ignores this key
         }
         data["data"] = notify_data
@@ -2332,6 +2632,17 @@ async def async_send_alert(
                 _resolved_cam_id = _cid
                 break
 
+    # Bug fix (Area 5, item 2): capture the event_id THIS alert call is for
+    # ONCE, here, at the very start. The flow below runs for up to ~90s
+    # (clip-ready polling); re-deriving a missing event_id from
+    # `coordinator.last_event_ids` at each later point risked picking up a
+    # NEWER, different, un-alerted event that had advanced in the meantime —
+    # marking the wrong event read and using the wrong id for the clip
+    # lookup/SMB path. Every later use of `event_id` in this function must
+    # read this same captured value, never re-read the coordinator's cache.
+    if not event_id and _resolved_cam_id:
+        event_id = coordinator.last_event_ids.get(_resolved_cam_id, "")
+
     # Capture privacy state NOW (at push-receipt time, start of coroutine).
     # Path B runs up to ~30 s later; re-reading the live cache at that point
     # can pick up a post-privacy-off value and write a pre-privacy frame into
@@ -2342,6 +2653,14 @@ async def async_send_alert(
         if _resolved_cam_id
         else False
     )
+    # Bug fix (B4, first half): Path A (live-snap refresh) and Path B (this
+    # coroutine's event-driven cache write, below) can race — Path B could
+    # unconditionally overwrite the cache with an OLDER Bosch event frame
+    # after Path A already wrote a FRESHER live frame. Capture "now" at
+    # coroutine start so the Path B write below can detect whether a newer
+    # frame (from Path A or anything else) landed in the cache while this
+    # alert was in flight, and skip the stale overwrite if so.
+    _pb_started_at: float = time.monotonic()
 
     # Per-type service routing: information/screenshot/video each fall back to alert_notify_service.
     # TROUBLE events use "system" — check that before bailing on missing information services.
@@ -2510,6 +2829,12 @@ async def async_send_alert(
     # — but it's unnecessary there too since Bosch's image is already ready if
     # the URL was provided). Move the sleep inside the empty-URL branch so the
     # fast path (URL known upfront) skips the 5s stall entirely.
+    # Default False — only set True on an actually-delivered notify call.
+    # Referenced by the "mark event read" gate at the end of this function
+    # (Area 5, item 1 bug fix), which must see False, not an
+    # UnboundLocalError, when step 2/3 never ran or never delivered.
+    _step2_sent = False
+    _step3_sent = False
     _image_url_was_empty = not image_url
     if _image_url_was_empty:
         # Use the stable cam_id resolved at push-receipt time (B04-BUG-2 fix).
@@ -2578,136 +2903,200 @@ async def async_send_alert(
             f"{_safe_path_segment(cam_name)}_{_safe_path_segment(ts_safe)}"
             f"_{_safe_path_segment(event_type)}.jpg",
         )
+        # Bug fix (BUG1): the download (bounded, must stay inside
+        # asyncio.timeout(15)) is now isolated from everything that follows
+        # it (AI description, notify, cleanup registration, Path B) — see
+        # the AI-description comment below for the full incident this
+        # closes.
+        data: bytes | None = None
+        _snap_status: int | None = None
+        _snap_content_type = ""
         try:
             async with asyncio.timeout(15):
                 async with session.get(image_url, headers=headers) as resp:
                     _snap_content_type = resp.headers.get("Content-Type", "")
-                    if resp.status != 200 or "image" not in _snap_content_type:
-                        # No else-branch below (the 200+image body is large and
-                        # deeply nested) — log here instead so an expired/404/
-                        # 410 snapshot URL doesn't skip step 2 with zero trace,
-                        # making delivery failures undiagnosable.
-                        _LOGGER.debug(
-                            "Alert step 2 (screenshot) skipped for %s: HTTP %s "
-                            "content-type=%r",
-                            cam_name,
-                            resp.status,
-                            _snap_content_type,
-                        )
+                    _snap_status = resp.status
                     if resp.status == 200 and "image" in _snap_content_type:
                         data = await resp.read()
-                        if data:
-                            # Capture bytes for SMB/FTP upload (avoid re-download).
-                            _prefetched_snapshot = data
-                            await coordinator.hass.async_add_executor_job(
-                                _write_file, snap_path, data
-                            )
-                            caption = f"\U0001f4f8 {cam_name} Snapshot ({ts_short})"
-                            # F2: optionally append an AI description of the
-                            # snapshot to the push. Rate-limited + daily-budgeted
-                            # in async_generate_ai_description; wrapped here so a
-                            # failure can never break the screenshot notification.
-                            if opts.get("ai_notify_include_description"):
-                                try:
-                                    # Use stable cam_id resolved at push-receipt
-                                    # time (B04-BUG-2: title-match fails on rename).
-                                    _ai_cid: str | None = _resolved_cam_id
-                                    if _ai_cid:
-                                        _desc = await coordinator.async_generate_ai_description(
-                                            _ai_cid
-                                        )
-                                        if _desc:
-                                            _desc = _desc[:200].rstrip()
-                                            caption = f"{caption}\n\U0001f916 {_desc}"
-                                except Exception as _ai_err:
-                                    _LOGGER.debug(
-                                        "AI notify-include failed: %s", _ai_err
-                                    )
-                            _step2_sent = await _notify_type(
-                                "screenshot",
-                                caption,
-                                snap_path,
-                            )
-                            if _step2_sent:
+        except Exception as err:
+            _LOGGER.warning("Alert step 2 (screenshot) download failed: %s", err)
+            data = None
+
+        if _snap_status is not None and not (
+            _snap_status == 200 and "image" in _snap_content_type
+        ):
+            # No else-branch below (the 200+image body is large and deeply
+            # nested) — log here instead so an expired/404/410 snapshot URL
+            # doesn't skip step 2 with zero trace, making delivery failures
+            # undiagnosable.
+            _LOGGER.debug(
+                "Alert step 2 (screenshot) skipped for %s: HTTP %s content-type=%r",
+                cam_name,
+                _snap_status,
+                _snap_content_type,
+            )
+
+        if data:
+            try:
+                # Capture bytes for SMB/FTP upload (avoid re-download).
+                _prefetched_snapshot = data
+                try:
+                    await coordinator.hass.async_add_executor_job(
+                        _write_file, snap_path, data
+                    )
+                except Exception:
+                    # Bug fix (Area 5, item 5): a write failure partway
+                    # through (e.g. ENOSPC) can still leave a partial file
+                    # on disk — check for and register it before
+                    # re-raising, so it doesn't leak forever even with
+                    # cleanup enabled. The success path below registers
+                    # unconditionally (no need to stat the file we just
+                    # wrote successfully ourselves).
+                    if (
+                        not save_snapshots
+                        and await coordinator.hass.async_add_executor_job(
+                            os.path.exists, snap_path
+                        )
+                    ):
+                        files_to_cleanup.append(snap_path)
+                    raise
+                if not save_snapshots:
+                    files_to_cleanup.append(snap_path)
+                # Bug fix (BUG1): cleanup is now registered unconditionally
+                # right after the write (above), regardless of anything
+                # downstream (AI description, notify calls). Previously it
+                # only happened after those steps, ALL still nested inside
+                # the SAME asyncio.timeout(15) as the download — if the AI
+                # call (own 20s internal timeout, longer than what was left
+                # of the outer 15s budget after the download) ran long, the
+                # outer timeout fired first and cleanup registration was
+                # never reached, leaking the already-written JPG forever
+                # (still served unauthenticated at /local/bosch_alerts/...).
+
+                caption = f"\U0001f4f8 {cam_name} Snapshot ({ts_short})"
+                # F2: optionally append an AI description of the snapshot to
+                # the push. Rate-limited + daily-budgeted in
+                # async_generate_ai_description.
+                #
+                # Bug fix (BUG1): this used to run INSIDE the download's
+                # asyncio.timeout(15) block. A slow AI call could let the
+                # OUTER timeout fire first (a TimeoutError from cancellation,
+                # not caught by the narrower `except Exception` around just
+                # the AI call at the time), propagating past step 2 entirely
+                # — text alert sent, screenshot never delivered. Give the AI
+                # call its own independent timeout budget, entirely outside
+                # the download's timeout scope and after cleanup is already
+                # registered above, so it can never affect screenshot
+                # delivery or its cleanup registration.
+                if opts.get("ai_notify_include_description"):
+                    try:
+                        # Use stable cam_id resolved at push-receipt time
+                        # (B04-BUG-2: title-match fails on rename).
+                        _ai_cid: str | None = _resolved_cam_id
+                        if _ai_cid:
+                            async with asyncio.timeout(20):
+                                _desc = await coordinator.async_generate_ai_description(
+                                    _ai_cid
+                                )
+                            if _desc:
+                                _desc = _desc[:200].rstrip()
+                                caption = f"{caption}\n\U0001f916 {_desc}"
+                    except Exception as _ai_err:
+                        _LOGGER.debug("AI notify-include failed: %s", _ai_err)
+                _step2_sent = await _notify_type(
+                    "screenshot",
+                    caption,
+                    snap_path,
+                )
+                if _step2_sent:
+                    _LOGGER.debug("Alert step 2 (screenshot) sent: %s", snap_path)
+                else:
+                    _LOGGER.debug(
+                        "Alert step 2 (screenshot) NOT delivered: "
+                        "either alert_notify_screenshot is unset "
+                        "(no fallback to alert_notify_service for "
+                        "this step), or the configured service "
+                        "call(s) failed (see any 'Alert send "
+                        "failed' warning above): %s",
+                        snap_path,
+                    )
+
+                # Path B — push the Bosch event image (with AI overlay /
+                # motion box) into the camera entity cache so the image
+                # entity gets a second update ~5-30 s after Path A's snap.
+                #
+                # Fixes applied here:
+                #   W-imageflip-BUG-2: use _push_time_priv (captured at
+                #     coroutine start) instead of re-reading the live cache.
+                #     Re-reading can see privacy=False if privacy was turned
+                #     off after the event arrived, writing a pre-privacy
+                #     frame into cache.
+                #   B04-BUG-1: use byte-identity (_existing != data) not
+                #     byte-length (len mismatch) for dedup.  Same-length
+                #     different-content images (same scene, same quality)
+                #     would be incorrectly skipped with len comparison.
+                #   B04-BUG-2: use _resolved_cam_id (stable, push-time)
+                #     instead of title-lookup that fails on rename.
+                #
+                # Wrapped in try/except so any error here never affects
+                # the alert pipeline (cleanup, clip download, etc.).
+                try:
+                    _cam_id_for_b: str | None = _resolved_cam_id
+                    if _cam_id_for_b:
+                        _cam_entities = getattr(coordinator, "camera_entities", {})
+                        _cam_b = _cam_entities.get(_cam_id_for_b)
+                        # Use privacy state captured at push-receipt time
+                        # (W-imageflip-BUG-2 fix — not re-read from cache).
+                        if _cam_b and not _push_time_priv:
+                            _existing = _cam_b.cached_image
+                            # Bug fix (B4, first half): a newer
+                            # frame (Path A or another update)
+                            # may have landed in the cache while
+                            # this alert's own image download was
+                            # in flight — don't clobber it with
+                            # our older event-time frame.
+                            _cached_ts = getattr(_cam_b, "last_image_fetch", 0.0)
+                            if _cached_ts > _pb_started_at:
                                 _LOGGER.debug(
-                                    "Alert step 2 (screenshot) sent: %s", snap_path
+                                    "FCM Path B: skipping %s — a "
+                                    "newer frame was already "
+                                    "cached since this alert "
+                                    "started",
+                                    cam_name,
+                                )
+                            # Byte-identity dedup (B04-BUG-1 fix):
+                            # len equality is NOT image equality.
+                            elif _existing is None or _existing != data:
+                                _cam_b.cached_image = data
+                                _cam_b.last_image_fetch = time.monotonic()
+                                await save_snapshot(
+                                    coordinator.hass, _cam_id_for_b, data
+                                )
+                                _img_entities = getattr(
+                                    coordinator, "image_entities", {}
+                                )
+                                _img_ent = _img_entities.get(_cam_id_for_b)
+                                if _img_ent is not None:
+                                    await _img_ent.async_notify_refreshed()
+                                _LOGGER.debug(
+                                    "FCM Path B: event image pushed to %s cache (%d B)",
+                                    cam_name,
+                                    len(data),
                                 )
                             else:
                                 _LOGGER.debug(
-                                    "Alert step 2 (screenshot) NOT delivered: "
-                                    "either alert_notify_screenshot is unset "
-                                    "(no fallback to alert_notify_service for "
-                                    "this step), or the configured service "
-                                    "call(s) failed (see any 'Alert send "
-                                    "failed' warning above): %s",
-                                    snap_path,
-                                )
-                            if not save_snapshots:
-                                files_to_cleanup.append(snap_path)
-
-                            # Path B — push the Bosch event image (with AI overlay /
-                            # motion box) into the camera entity cache so the image
-                            # entity gets a second update ~5-30 s after Path A's snap.
-                            #
-                            # Fixes applied here:
-                            #   W-imageflip-BUG-2: use _push_time_priv (captured at
-                            #     coroutine start) instead of re-reading the live cache.
-                            #     Re-reading can see privacy=False if privacy was turned
-                            #     off after the event arrived, writing a pre-privacy
-                            #     frame into cache.
-                            #   B04-BUG-1: use byte-identity (_existing != data) not
-                            #     byte-length (len mismatch) for dedup.  Same-length
-                            #     different-content images (same scene, same quality)
-                            #     would be incorrectly skipped with len comparison.
-                            #   B04-BUG-2: use _resolved_cam_id (stable, push-time)
-                            #     instead of title-lookup that fails on rename.
-                            #
-                            # Wrapped in try/except so any error here never affects
-                            # the alert pipeline (cleanup, clip download, etc.).
-                            try:
-                                _cam_id_for_b: str | None = _resolved_cam_id
-                                if _cam_id_for_b:
-                                    _cam_entities = getattr(
-                                        coordinator, "camera_entities", {}
-                                    )
-                                    _cam_b = _cam_entities.get(_cam_id_for_b)
-                                    # Use privacy state captured at push-receipt time
-                                    # (W-imageflip-BUG-2 fix — not re-read from cache).
-                                    if _cam_b and not _push_time_priv:
-                                        _existing = _cam_b.cached_image
-                                        # Byte-identity dedup (B04-BUG-1 fix):
-                                        # len equality is NOT image equality.
-                                        if _existing is None or _existing != data:
-                                            _cam_b.cached_image = data
-                                            _cam_b.last_image_fetch = time.monotonic()
-                                            await save_snapshot(
-                                                coordinator.hass, _cam_id_for_b, data
-                                            )
-                                            _img_entities = getattr(
-                                                coordinator, "image_entities", {}
-                                            )
-                                            _img_ent = _img_entities.get(_cam_id_for_b)
-                                            if _img_ent is not None:
-                                                await _img_ent.async_notify_refreshed()
-                                            _LOGGER.debug(
-                                                "FCM Path B: event image pushed to %s cache (%d B)",
-                                                cam_name,
-                                                len(data),
-                                            )
-                                        else:
-                                            _LOGGER.debug(
-                                                "FCM Path B: skipping %s — bytes identical (%d B)",
-                                                cam_name,
-                                                len(data),
-                                            )
-                            except Exception as _pb_err:
-                                _LOGGER.warning(
-                                    "FCM Path B: failed to update %s cache: %s",
+                                    "FCM Path B: skipping %s — bytes identical (%d B)",
                                     cam_name,
-                                    _pb_err,
+                                    len(data),
                                 )
-        except Exception as err:
-            _LOGGER.warning("Alert step 2 failed: %s", err)
+                except Exception as _pb_err:
+                    _LOGGER.warning(
+                        "FCM Path B: failed to update %s cache: %s",
+                        cam_name,
+                        _pb_err,
+                    )
+            except Exception as err:
+                _LOGGER.warning("Alert step 2 failed: %s", err)
 
     # -- Step 3: Video clip — poll until ready, then download + send -------
     # Bosch uploads clips asynchronously. The event initially has
@@ -2731,10 +3120,23 @@ async def async_send_alert(
             "Accept": "application/json",
         }
         found_clip_url = clip_url if (clip_url and clip_status == "Done") else ""
+        # Bug fix (Area 5, item 9): the probe below is NOT a HEAD request —
+        # it's a full GET, and aiohttp's ClientResponse.release() (called
+        # implicitly when the `async with` block exits without the body
+        # being read) reads and discards the ENTIRE body anyway to reuse the
+        # keep-alive connection, so the clip was effectively downloaded and
+        # thrown away here, then downloaded a SECOND time below. Bosch's API
+        # has no documented HEAD support and no other call site in this
+        # codebase uses one, so read+cache the body here instead (same
+        # `_prefetched_snapshot`-style pattern already used for the
+        # screenshot) and reuse it below rather than re-fetching.
+        _prefetched_clip: bytes | None = None
 
         # Try direct clip.mp4 download first (faster than polling)
         if not found_clip_url:
-            event_id = event_id or coordinator.last_event_ids.get(_clip_cam_id, "")
+            # Bug fix (Area 5, item 2): use the event_id captured once at
+            # the start of this coroutine — do not re-derive from
+            # coordinator.last_event_ids here, it may have advanced since.
             if event_id:
                 try:
                     async with asyncio.timeout(10):
@@ -2748,13 +3150,19 @@ async def async_send_alert(
                             if r.status == 200 and "video" in r.headers.get(
                                 "Content-Type", ""
                             ):
+                                _probe_body = await r.read()
+                                if _probe_body and len(_probe_body) <= _CLIP_MAX_BYTES:
+                                    _prefetched_clip = _probe_body
                                 found_clip_url = (
                                     f"{CLOUD_API}/v11/events/{event_id}/clip.mp4"
                                 )
                                 _LOGGER.debug(
-                                    "Alert: direct clip.mp4 available for %s", cam_name
+                                    "Alert: direct clip.mp4 available for %s "
+                                    "(%d bytes, cached)",
+                                    cam_name,
+                                    len(_probe_body),
                                 )
-                except Exception:  # noqa: S110 # best-effort HEAD probe for direct clip URL; failure falls through to poll path
+                except Exception:  # noqa: S110 # best-effort direct-clip GET; failure falls through to poll path
                     pass
 
         if not found_clip_url and clip_status == "Unavailable":
@@ -2815,66 +3223,150 @@ async def async_send_alert(
                 except Exception:  # noqa: S112 # resilient poll loop, transient network error on one attempt should not abort all retries
                     continue
 
+        async def _process_downloaded_clip(clip_data: bytes | None) -> None:
+            """Write the downloaded/prefetched clip bytes to disk, register
+            cleanup, and send the video notify step.
+
+            Shared by both the prefetched-probe path and the normal
+            download path (Area 5, item 9 bug fix) so the write/cleanup/
+            notify logic exists exactly once instead of being duplicated.
+            """
+            nonlocal _step3_sent
+            if not (clip_data and len(clip_data) > 1000):
+                return
+            try:
+                await coordinator.hass.async_add_executor_job(
+                    _write_file, clip_path, clip_data
+                )
+            except Exception:
+                # Bug fix (Area 5, item 5): a write failure partway through
+                # (e.g. ENOSPC) can still leave a partial file on disk —
+                # check for and register it before re-raising, so it
+                # doesn't leak forever even with alert_save_snapshots off.
+                # The success path below registers unconditionally.
+                if not save_snapshots and await coordinator.hass.async_add_executor_job(
+                    os.path.exists, clip_path
+                ):
+                    files_to_cleanup.append(clip_path)
+                raise
+            if not save_snapshots:
+                files_to_cleanup.append(clip_path)
+            size_kb = len(clip_data) // 1024
+            vcaption = f"\U0001f3ac {cam_name} Video ({ts_short}, {size_kb} KB)"
+            _step3_sent = await _notify_type(
+                "video",
+                vcaption,
+                clip_path,
+            )
+            if _step3_sent:
+                _LOGGER.info(
+                    "Alert step 3 (video) sent: %s (%d KB)",
+                    clip_path,
+                    size_kb,
+                )
+            else:
+                _LOGGER.info(
+                    "Alert step 3 (video) downloaded but NOT"
+                    " delivered — either alert_notify_video"
+                    " is unset (no fallback to"
+                    " alert_notify_service for this step),"
+                    " or the configured service call(s)"
+                    " failed (see any 'Alert send failed'"
+                    " warning above): %s (%d KB)",
+                    clip_path,
+                    size_kb,
+                )
+
         if found_clip_url and _is_safe_bosch_url(found_clip_url):
             try:
-                dl_headers = {
-                    "Authorization": f"Bearer {coordinator.token}",
-                    "Accept": "*/*",
-                }
-                async with asyncio.timeout(60):
-                    async with session.get(found_clip_url, headers=dl_headers) as resp:
-                        if resp.status == 200:
-                            data = await resp.read()
-                            if data and len(data) > 1000:
-                                await coordinator.hass.async_add_executor_job(
-                                    _write_file, clip_path, data
-                                )
-                                size_kb = len(data) // 1024
-                                vcaption = f"\U0001f3ac {cam_name} Video ({ts_short}, {size_kb} KB)"
-                                _step3_sent = await _notify_type(
-                                    "video",
-                                    vcaption,
-                                    clip_path,
-                                )
-                                if _step3_sent:
-                                    _LOGGER.info(
-                                        "Alert step 3 (video) sent: %s (%d KB)",
-                                        clip_path,
-                                        size_kb,
+                if _prefetched_clip is not None:
+                    # Bug fix (Area 5, item 9): reuse the body already read
+                    # by the direct-clip probe above instead of downloading
+                    # the identical URL a second time.
+                    data = _prefetched_clip
+                    await _process_downloaded_clip(data)
+                else:
+                    dl_headers = {
+                        "Authorization": f"Bearer {coordinator.token}",
+                        "Accept": "*/*",
+                    }
+                    async with asyncio.timeout(60):
+                        async with session.get(
+                            found_clip_url, headers=dl_headers
+                        ) as resp:
+                            if resp.status == 200:
+                                # Bug fix (Area 5, item 3): no size cap
+                                # previously — a large/malformed response
+                                # could allocate unboundedly via a plain
+                                # `await resp.read()`. Fast-reject on a
+                                # reported Content-Length first (cheap, and
+                                # avoids even attempting the read for an
+                                # honestly-declared oversized response), then
+                                # enforce the same cap on the actual byte
+                                # count after reading (covers a missing or
+                                # lying Content-Length header too).
+                                _content_length = resp.headers.get("Content-Length")
+                                _clip_oversized = False
+                                if _content_length is not None:
+                                    try:
+                                        _clip_oversized = (
+                                            int(_content_length) > _CLIP_MAX_BYTES
+                                        )
+                                    except ValueError:
+                                        pass
+                                data = None
+                                if not _clip_oversized:
+                                    data = await resp.read()
+                                    if data and len(data) > _CLIP_MAX_BYTES:
+                                        _clip_oversized = True
+                                        data = None
+                                if _clip_oversized:
+                                    _LOGGER.warning(
+                                        "Alert step 3 (video): clip for %s "
+                                        "exceeded the %d MB size cap — "
+                                        "aborting download",
+                                        cam_name,
+                                        _CLIP_MAX_BYTES // (1024 * 1024),
                                     )
-                                else:
-                                    _LOGGER.info(
-                                        "Alert step 3 (video) downloaded but NOT"
-                                        " delivered — either alert_notify_video"
-                                        " is unset (no fallback to"
-                                        " alert_notify_service for this step),"
-                                        " or the configured service call(s)"
-                                        " failed (see any 'Alert send failed'"
-                                        " warning above): %s (%d KB)",
-                                        clip_path,
-                                        size_kb,
-                                    )
-                                if not save_snapshots:
-                                    files_to_cleanup.append(clip_path)
+                                await _process_downloaded_clip(data)
             except Exception as err:
                 _LOGGER.warning("Alert step 3 (video) failed: %s", err)
         else:
-            _LOGGER.debug("Alert: video clip not ready after 90s for %s", cam_name)
+            _LOGGER.debug(
+                "Alert: no usable video clip URL for %s (either the clip "
+                "never became ready within the 90s poll window, its URL "
+                "failed the safe-Bosch-host check, or Bosch reported the "
+                "clip as Unavailable)",
+                cam_name,
+            )
 
     # -- Mark event as read ------------------------------------------------
-    if _clip_cam_id and coordinator.options.get("mark_events_read", False):
-        event_id = event_id or coordinator.last_event_ids.get(_clip_cam_id, "")
-        if event_id:
-            try:
-                await async_mark_events_read(coordinator, [event_id])
-            except Exception:  # noqa: S110 # best-effort cloud housekeeping; alert delivery already complete
-                pass
+    # Bug fix (Area 5, item 2): use the event_id captured once at the start
+    # of this coroutine, not a fresh re-read of coordinator.last_event_ids
+    # (which could have advanced to a different, un-alerted event by now).
+    # Bug fix (Area 5, item 1): only mark read if at least one delivery step
+    # actually succeeded — otherwise a misconfigured/failed alert would
+    # silently mark the event read on Bosch's side while the user was never
+    # notified, and the poll-fallback path wouldn't re-surface it either.
+    if (
+        _clip_cam_id
+        and event_id
+        and coordinator.options.get("mark_events_read", False)
+        and (_step1_sent or _step2_sent or _step3_sent)
+    ):
+        try:
+            await async_mark_events_read(coordinator, [event_id])
+        except Exception:  # noqa: S110 # best-effort cloud housekeeping; alert delivery already complete
+            pass
 
     # -- SMB upload (immediate, alongside alert) ---------------------------
     if opts.get("enable_smb_upload") and opts.get("smb_server") and _clip_cam_id:
         try:
             # Build a minimal data dict for sync_smb_upload with just this event
-            ev_id = event_id or coordinator.last_event_ids.get(_clip_cam_id, "unknown")
+            # Bug fix (Area 5, item 2): use the event_id captured once
+            # at the start of this coroutine, never re-derived from
+            # coordinator.last_event_ids mid-flow.
+            ev_id = event_id or "unknown"
             ev_data = {
                 "timestamp": timestamp,
                 "eventType": event_type,
@@ -2936,7 +3428,10 @@ async def async_send_alert(
     # -- Local save (FCM-triggered, alongside SMB) -------------------------
     if opts.get("enable_local_save") and opts.get("download_path") and _clip_cam_id:
         try:
-            ev_id = event_id or coordinator.last_event_ids.get(_clip_cam_id, "unknown")
+            # Bug fix (Area 5, item 2): use the event_id captured once
+            # at the start of this coroutine, never re-derived from
+            # coordinator.last_event_ids mid-flow.
+            ev_id = event_id or "unknown"
             ev_data = {
                 "timestamp": timestamp,
                 "eventType": event_type,
@@ -2961,7 +3456,16 @@ async def async_send_alert(
     # alert_save_snapshots is OFF (see the two `if not save_snapshots:`
     # append sites above), so that alone already decides deletion (#53 fix).
     if files_to_cleanup:
-        await asyncio.sleep(5)  # give Signal time to read the files
+        # Bug fix (Area 5, item 7): 5s was tuned for Signal's fetch pattern,
+        # but mobile_app/other services may fetch the URL lazily (user opens
+        # the notification later), 404ing after the old 5s window. 30s is a
+        # judgment-call middle ground: long enough to cover a user opening
+        # the notification shortly after it lands (the common "saw it,
+        # tapped it" case), while still keeping the unauthenticated exposure
+        # window (item 8) short and not meaningfully regressing Signal's
+        # original fast-fetch behavior (Signal fetches near-immediately on
+        # push receipt, well under either value).
+        await asyncio.sleep(30)
         for fpath in files_to_cleanup:
             try:
                 await coordinator.hass.async_add_executor_job(os.remove, fpath)
@@ -2991,7 +3495,19 @@ async def async_mark_events_read(coordinator: Any, event_ids: list[str]) -> bool
         "Content-Type": "application/json",
     }
 
+    # Bug fix (Area 5, item 6): `success = any(...)` semantics are kept
+    # (best-effort, never raises) but a partial failure — and specifically a
+    # 401 — must no longer be entirely silent. A 401 here means the token
+    # was rejected for this write; the coordinator's other 401 handling
+    # (e.g. async_put_camera) refreshes proactively on the next call, but at
+    # minimum this must be visible in logs rather than swallowed identically
+    # to a transient network blip.
+    # NOTE: intentionally still serial (one HTTP call per event id) — not
+    # parallelized in this pass; a real (if minor) improvement would be
+    # asyncio.gather over event_ids, flagged here as a possible follow-up.
     success = False
+    failed = 0
+    saw_401 = False
     for eid in event_ids:
         try:
             async with asyncio.timeout(5):
@@ -3002,8 +3518,28 @@ async def async_mark_events_read(coordinator: Any, event_ids: list[str]) -> bool
                 ) as resp:
                     if resp.status in (200, 201, 204):
                         success = True
-        except Exception:  # noqa: S110 # best-effort mark-read; caller logs success/failure via return value
-            pass
+                    else:
+                        failed += 1
+                        if resp.status == 401:
+                            saw_401 = True
+        except Exception as err:
+            failed += 1
+            _LOGGER.debug("Mark-events-read request failed for %s: %s", eid[:8], err)
+
+    if saw_401:
+        _LOGGER.warning(
+            "Mark-events-read: Bosch cloud rejected the token (HTTP 401) for "
+            "%d/%d event(s) — will retry with a fresh token on the next call",
+            failed,
+            len(event_ids),
+        )
+    elif failed:
+        _LOGGER.debug(
+            "Mark-events-read: %d/%d event(s) failed (partial failure — not "
+            "retried by this call)",
+            failed,
+            len(event_ids),
+        )
 
     if success:
         _LOGGER.debug("Marked %d events as read", len(event_ids))
@@ -3064,8 +3600,15 @@ class FCMCoordinatorMixin:
         clip_url: str = "",
         clip_status: str = "",
         event_id: str = "",
+        cam_id: str = "",
     ) -> None:
-        """Send a 3-step alert (delegated to async_send_alert)."""
+        """Send a 3-step alert (delegated to async_send_alert).
+
+        Bug fix (minor, Area 3): `cam_id` was previously omitted from this
+        delegator, so any future caller through the mixin silently lost the
+        Path B cache-push behavior (which requires the stable cam_id, not
+        just the mutable display title).
+        """
         return await async_send_alert(
             self,
             cam_name,
@@ -3075,6 +3618,7 @@ class FCMCoordinatorMixin:
             clip_url,
             clip_status,
             event_id=event_id,
+            cam_id=cam_id,
         )
 
     async def async_mark_events_read(self, event_ids: list[str]) -> bool:

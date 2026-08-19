@@ -23,6 +23,7 @@ import sys
 import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from threading import Lock, RLock
@@ -2915,6 +2916,14 @@ class TestPatchedListenBody:
         instance = object.__new__(cls)
         instance.run_state = _FakeRunState.STARTED
         instance.do_listen = True
+        # Bug fix regression context (Area 1, item 3): `_skip_and_ack` now
+        # guards `_send_selective_ack` on `self.writer` being non-None (a
+        # concurrent `_reset()`/`_do_writer_close()` can clear it mid-message
+        # and the upstream `_send_msg` has no None-guard). A real client's
+        # `self.writer` is always set after `_connect_with_retry()` succeeds
+        # — set a sentinel here so tests exercising the normal/happy ack
+        # path aren't accidentally exercising the "writer torn down" branch.
+        instance.writer = MagicMock()
 
         async def _noop() -> None: ...
         async def _noop_recv():
@@ -4949,25 +4958,38 @@ class TestFCMNoiseFilter:
         """After the dedup window elapses, another message gets through."""
         f = _FCMNoiseFilter()
         f.filter(_make_record("Unexpected exception during read"))
-        # Backdate past the dedup window so the next record passes
-        f._last_passed = time.monotonic() - (
+        # Backdate past the dedup window so the next record passes.
+        # Bug fix (Area 1, item 2): the dedup clock is now split per
+        # failure class — "Unexpected exception during read" is a
+        # _CONNECTIVITY_MARKERS entry, so it uses _last_passed_connectivity.
+        f._last_passed_connectivity = time.monotonic() - (
             _FCMNoiseFilter._DEDUP_WINDOW_SECONDS + 10.0
         )
         rec = _make_record("Unexpected exception during read")
         assert f.filter(rec) is True
 
     def test_initial_last_passed_is_sentinel(self):
-        """_last_passed must be float('-inf'), not 0.0.
+        """Both per-class dedup clocks must be float('-inf'), not 0.0.
 
         SENTINEL_RULE: CI VMs boot with time.monotonic() < 60 s. With 0.0,
         now - 0.0 < 60 → the very first FCM noise record would be
         suppressed instead of passing through. float('-inf') ensures the
         first call always passes regardless of VM uptime.
+
+        Bug fix (Area 1, item 2): the single shared `_last_passed` clock was
+        split into `_last_passed_connectivity` / `_last_passed_creds` so a
+        connectivity WARNING can no longer suppress an unrelated later
+        creds-rejection ERROR (or vice versa). Both still need the
+        SENTINEL_RULE float('-inf') init.
         """
         f = _FCMNoiseFilter()
-        assert f._last_passed == float("-inf"), (
-            "SENTINEL_RULE violation: _last_passed=0.0 silently drops the first "
-            "FCM noise record on CI VMs with uptime < 60 s"
+        assert f._last_passed_connectivity == float("-inf"), (
+            "SENTINEL_RULE violation: _last_passed_connectivity=0.0 silently "
+            "drops the first FCM noise record on CI VMs with uptime < 60 s"
+        )
+        assert f._last_passed_creds == float("-inf"), (
+            "SENTINEL_RULE violation: _last_passed_creds=0.0 silently drops "
+            "the first FCM creds-staleness record on CI VMs with uptime < 60 s"
         )
 
 
@@ -5031,8 +5053,10 @@ class TestFcmNoiseFilterAdditional:
         the log."""
         f = _FCMNoiseFilter()
         f.filter(_make_record_ext("Unexpected exception during read"))
-        # Force the internal timestamp past the dedup window
-        f._last_passed = time.monotonic() - (
+        # Force the internal timestamp past the dedup window. Bug fix
+        # (Area 1, item 2): "Unexpected exception during read" is a
+        # connectivity marker, dedup'd via _last_passed_connectivity.
+        f._last_passed_connectivity = time.monotonic() - (
             _FCMNoiseFilter._DEDUP_WINDOW_SECONDS + 10.0
         )
         rec = _make_record_ext("Unexpected exception during read")
@@ -6814,16 +6838,27 @@ class TestFCMNoiseFilterDualLogger:
     """
 
     def setup_method(self) -> None:
-        """Remove any existing _FCMNoiseFilter from both loggers before each test."""
+        """Remove any existing _FCMNoiseFilter from all three loggers before
+        each test.
+
+        Bug fix (Area 1, item 5) context: `_install_fcm_noise_filter()` now
+        checks ALL THREE loggers (including
+        `firebase_messaging.fcmregister`, not just the two this class used
+        to clean) for an existing installed filter instance before creating
+        a new one — reusing a stale instance found there (with its own
+        already-elapsed dedup clock from a PRIOR test) if this fixture
+        didn't also clear it, causing order-dependent flakiness.
+        """
         import logging
 
         import custom_components.bosch_shc_camera.fcm as fcm_mod
         from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
 
         lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
+        register_logger = logging.getLogger("firebase_messaging.fcmregister")
         bosch_logger = fcm_mod._LOGGER
 
-        for logger in (lib_logger, bosch_logger):
+        for logger in (lib_logger, register_logger, bosch_logger):
             logger.filters = [
                 f for f in logger.filters if not isinstance(f, _FCMNoiseFilter)
             ]
@@ -13146,7 +13181,12 @@ class TestStaleClientCredsCallbackIgnoredAfterHardHeal:
 
         persisted: list[dict[str, Any]] = []
 
-        async def _fake_persist(_coord: object, creds: dict[str, Any]) -> None:
+        async def _fake_persist(
+            _coord: object, creds: dict[str, Any], _expected_client: object = None
+        ) -> None:
+            # Bug fix (Area 2, F1): the real call site now also passes the
+            # client identity it captured at schedule time as a 3rd
+            # positional arg, so this stub must accept it too.
             persisted.append(creds)
 
         with (
@@ -14810,4 +14850,1788 @@ class TestFcmAlertSentIdsSentinel:
         src = inspect.getsource(fcm_mod)
         assert '_sent.get(newest_id, float("-inf")) > _now - 60.0' in src, (
             "fcm.py must use float('-inf') so dedup only fires for IDs sent within 60s"
+        )
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 5-agent adversarial bug-hunt round (2026-08-19): 25 real, independently
+# verified bugs across fcm.py's decrypt/patch layer, supervisor/lifecycle,
+# push event dispatch, and the alert pipeline. Each class below pins one
+# specific bug's failure scenario -> corrected behavior (TEST_EVERY_BUG).
+# ═════════════════════════════════════════════════════════════════════════
+
+
+class TestNoiseFilterCredsMarkerKeepsTraceback:
+    """Area 1, item 1: `_FAILURE_MARKERS` blanking `exc_info`/`exc_text` used
+    to apply to ALL markers including creds-staleness ones — blanking the
+    traceback on a once-per-give-up diagnostic line ("Unable to complete gcm
+    auth request"), not routine connectivity noise. Only connectivity
+    markers may have their traceback stripped."""
+
+    def test_creds_marker_traceback_preserved(self):
+        f = _FCMNoiseFilter()
+        record = _make_record("Unable to complete gcm auth request", with_exc=True)
+        assert f.filter(record) is True
+        assert record.exc_info is not None, (
+            "creds-staleness diagnostic must keep its traceback — it's a "
+            "once-per-give-up line, not the recursive connectivity trace"
+        )
+        assert record.exc_text is not None
+
+    def test_connectivity_marker_traceback_still_stripped(self):
+        """Sanity: the connectivity-noise path must be unaffected."""
+        f = _FCMNoiseFilter()
+        record = _make_record("Unexpected exception during read", with_exc=True)
+        assert f.filter(record) is True
+        assert record.exc_info is None
+        assert record.exc_text is None
+
+
+class TestNoiseFilterPerClassDedupClock:
+    """Area 1, item 2: a single shared `_last_passed` dedup clock let a
+    connectivity WARNING at t=0 suppress an unrelated creds-rejection ERROR
+    at t=+10s. Each failure class must have its own dedup clock."""
+
+    def test_connectivity_record_does_not_suppress_creds_record(self):
+        f = _FCMNoiseFilter()
+        # Connectivity marker passes and would (with a shared clock) start
+        # the dedup window for everything.
+        assert f.filter(_make_record("Unexpected exception during read")) is True
+        # An UNRELATED creds-staleness marker immediately after must still
+        # pass — it's a different failure class.
+        creds_record = _make_record("PHONE_REGISTRATION_ERROR")
+        assert f.filter(creds_record) is True
+
+    def test_creds_record_does_not_suppress_connectivity_record(self):
+        f = _FCMNoiseFilter()
+        assert f.filter(_make_record("PHONE_REGISTRATION_ERROR")) is True
+        connectivity_record = _make_record("Unexpected exception during read")
+        assert f.filter(connectivity_record) is True
+
+
+class TestSkipAndAckWriterNoneGuard:
+    """Area 1, item 3: `_skip_and_ack` called `_send_selective_ack` with no
+    guard on `self.writer` being None (upstream `_send_msg` does
+    `self.writer.write(buf)` unconditionally). If a concurrent
+    `_reset()`/`_do_writer_close()` already cleared `self.writer`, this used
+    to raise AttributeError — not in skip_exceptions/RuntimeError/(OSError,
+    EOFError) — escaping to the broad `except Exception` and crashing the
+    whole client over one message."""
+
+    @pytest.mark.asyncio
+    async def test_writer_none_does_not_crash_client(self):
+        helper = TestPatchedListenBody()
+        instance = helper._make_instance()
+        # Simulate a concurrent reset already having torn down the writer.
+        instance.writer = None
+
+        async def _send_ack_would_crash(persistent_id):
+            # Mirrors upstream `_send_msg`: `self.writer.write(buf)` with no
+            # guard — would raise AttributeError if actually called with
+            # writer=None. The guard in fcm.py must prevent this from ever
+            # being invoked when writer is None.
+            raise AttributeError("'NoneType' object has no attribute 'write'")
+
+        instance._send_selective_ack = _send_ack_would_crash
+
+        terminate_calls = []
+        instance._terminate = lambda: terminate_calls.append(1)
+
+        async def _handle_message(msg):
+            raise RuntimeError("couldn't find in app_data crypto-key")
+
+        instance._handle_message = _handle_message
+
+        call_count = [0]
+
+        async def _recv():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return SimpleNamespace(persistent_id="mid-reset-msg-id")
+            instance.do_listen = False
+            return {"msg": 2}
+
+        instance._receive_msg = _recv
+
+        # Must complete without raising and without terminating the client.
+        await instance._listen()
+
+        assert not terminate_calls, (
+            "a writer=None race during ack must not crash/terminate the client"
+        )
+        # The message is still recorded as processed even though the ack
+        # itself was skipped.
+        assert instance.persistent_ids == ["mid-reset-msg-id"]
+
+
+class TestAppDataWarningRateLimited:
+    """Area 1, item 4: the "couldn't find in app_data"/skip-message WARNING
+    had zero rate-limiting — unbounded for what may be routine non-webpush
+    traffic on every reconnect. Must be time-windowed like the noise
+    filter's own dedup."""
+
+    @pytest.mark.asyncio
+    async def test_repeated_skip_warning_rate_limited(self, caplog):
+        helper = TestPatchedListenBody()
+        instance = helper._make_instance()
+
+        async def _handle_message(msg):
+            raise RuntimeError("couldn't find in app_data crypto-key")
+
+        instance._handle_message = _handle_message
+
+        call_count = [0]
+
+        async def _recv():
+            call_count[0] += 1
+            if call_count[0] > 3:
+                instance.do_listen = False
+                return {"msg": call_count[0]}
+            return SimpleNamespace(persistent_id=f"msg-{call_count[0]}")
+
+        instance._receive_msg = _recv
+
+        with caplog.at_level("WARNING", logger=MODULE):
+            await instance._listen()
+
+        warn_count = sum(
+            1
+            for r in caplog.records
+            if "Skipping undecryptable FCM push message" in r.getMessage()
+        )
+        assert warn_count == 1, (
+            f"expected exactly 1 rate-limited warning for 3 rapid skips, got "
+            f"{warn_count}"
+        )
+        # But every message must still be acked/recorded regardless of
+        # whether the warning was rate-limited.
+        assert instance.persistent_ids == ["msg-1", "msg-2", "msg-3"]
+
+
+class TestInstallNoiseFilterIdempotentAcrossAllThreeLoggers:
+    """Area 1, item 5: the idempotency guard only checked
+    `lib_logger.filters` — if a logger reload cleared filters
+    asymmetrically, a second `_FCMNoiseFilter` instance got installed,
+    double-counting `_SHARED_STALENESS_TIMESTAMPS`."""
+
+    def setup_method(self) -> None:
+        for name in (
+            "firebase_messaging.fcmpushclient",
+            "firebase_messaging.fcmregister",
+            MODULE.rsplit(".", 1)[0] + ".fcm",
+        ):
+            logger = logging.getLogger(name)
+            logger.filters = [
+                f for f in logger.filters if not isinstance(f, _FCMNoiseFilter)
+            ]
+
+    teardown_method = setup_method
+
+    def test_asymmetric_clear_reuses_existing_instance(self):
+        _install_fcm_noise_filter()
+        lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
+        register_logger = logging.getLogger("firebase_messaging.fcmregister")
+        bosch_logger = fcm._LOGGER
+
+        original = next(
+            f for f in register_logger.filters if isinstance(f, _FCMNoiseFilter)
+        )
+
+        # Simulate an asymmetric partial clear: only the library logger's
+        # filter list got reset (e.g. HA's logger integration reload).
+        lib_logger.filters = [
+            f for f in lib_logger.filters if not isinstance(f, _FCMNoiseFilter)
+        ]
+        assert not any(isinstance(f, _FCMNoiseFilter) for f in lib_logger.filters)
+
+        _install_fcm_noise_filter()
+
+        # Must have re-attached the SAME instance to lib_logger, not created
+        # a brand-new second one.
+        lib_filters = [f for f in lib_logger.filters if isinstance(f, _FCMNoiseFilter)]
+        assert len(lib_filters) == 1
+        assert lib_filters[0] is original, (
+            "must reuse the instance still found on register_logger/bosch "
+            "logger, not create a second instance that would double-count "
+            "_SHARED_STALENESS_TIMESTAMPS"
+        )
+        bosch_filters = [
+            f for f in bosch_logger.filters if isinstance(f, _FCMNoiseFilter)
+        ]
+        assert len(bosch_filters) == 1
+        assert bosch_filters[0] is original
+
+
+class TestPatchClassBroadFallback:
+    """Area 1, item 6: `_get_fcm_push_client_class`/`_patch_class` had no
+    exception guard around the whole patching attempt — an unexpected
+    failure (e.g. `inspect.signature()` raising on a future library shape)
+    used to re-raise instead of degrading to the vanilla FcmPushClient."""
+
+    def test_unexpected_exception_falls_back_to_none_not_raise(self):
+        from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
+
+        with patch.object(
+            _QuietFcmPushClient,
+            "_build_patched_class",
+            side_effect=ValueError("simulated unexpected internal failure"),
+        ):
+            with patch.dict(sys.modules, {"firebase_messaging": _mock_fcm_module()[0]}):
+                # Must NOT raise.
+                result = _QuietFcmPushClient._patch_class()
+        assert result is None, (
+            "an unexpected exception while building the patched subclass "
+            "must degrade to None (vanilla FcmPushClient fallback), not "
+            "propagate and break the supervisor on every cycle"
+        )
+
+
+class TestPersistFcmCredsRecheckAtWriteTime:
+    """Area 2, F1 (highest): the "is this client still current" identity
+    check used to happen only at SCHEDULE time (in the caller), not inside
+    `_async_persist_fcm_creds` itself. Race: old client's callback passes
+    the schedule-time check -> task queued -> a hard-heal purges fcm_* keys
+    before the queued task runs -> stale creds get re-written, undoing the
+    purge. Fix: re-check identity right before the actual write."""
+
+    @pytest.mark.asyncio
+    async def test_stale_client_at_write_time_skips_persist(self):
+        coord = _stub_coord(entry=SimpleNamespace(data={"existing": "v"}))
+        current_client = object()
+        stale_client = object()
+        coord.fcm_client = current_client  # purge already replaced the client
+
+        await fcm._async_persist_fcm_creds(
+            coord, {"refresh_token": "stale"}, stale_client
+        )
+
+        coord.hass.config_entries.async_update_entry.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_matching_client_at_write_time_persists(self):
+        coord = _stub_coord(entry=SimpleNamespace(data={"existing": "v"}))
+        current_client = object()
+        coord.fcm_client = current_client
+
+        await fcm._async_persist_fcm_creds(
+            coord, {"refresh_token": "fresh"}, current_client
+        )
+
+        coord.hass.config_entries.async_update_entry.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_expected_client_arg_persists_unconditionally(self):
+        """Backward-compat: legacy/direct callers without a client reference
+        (expected_client=None, the default) still persist unconditionally —
+        matches the pre-existing tests in TestAsyncPersistFcmCreds."""
+        coord = _stub_coord(entry=SimpleNamespace(data={}))
+        await fcm._async_persist_fcm_creds(coord, {"x": 1})
+        coord.hass.config_entries.async_update_entry.assert_called_once()
+
+
+class TestPersistFcmCredsUsesSpawnTracked:
+    """Area 2, F1 (second half): `_on_creds_updated`'s inner `_persist` must
+    use `coordinator.spawn_tracked` (tracked in bg_tasks, cancelled on
+    unload) instead of a bare `hass.async_create_task` — matching the
+    pattern used elsewhere in this file/repo for background tasks."""
+
+    @pytest.mark.asyncio
+    async def test_spawn_tracked_used_when_available(self):
+        _StubFcmClient.instances = []
+        coord = _make_creds_race_coord()
+        spawn_calls: list[Any] = []
+
+        def _spawn_tracked(coro, *, name):
+            spawn_calls.append(name)
+            return asyncio.get_event_loop().create_task(coro)
+
+        coord.spawn_tracked = _spawn_tracked
+
+        with (
+            patch.object(
+                fcm, "_get_fcm_push_client_class", return_value=_StubFcmClient
+            ),
+            patch.object(
+                fcm, "register_fcm_with_bosch", new=AsyncMock(return_value=True)
+            ),
+            patch.object(fcm, "_async_persist_fcm_creds", new=AsyncMock()),
+        ):
+            started = await fcm._async_start_fcm_push_locked(coord)
+            assert started is True
+            gen1 = _StubFcmClient.instances[0]
+            gen1.creds_cb({"gen": 1})
+            await asyncio.sleep(0)  # let the queued task run
+
+        assert spawn_calls == ["bosch_shc_camera_fcm_persist_creds"], (
+            "credentials_updated_callback must schedule the persist via "
+            "coordinator.spawn_tracked, not a bare hass.async_create_task"
+        )
+
+
+class TestRegisterFcmFailureDoesNotMarkHealthy:
+    """Area 2, F2: `register_fcm_with_bosch`'s result was discarded at its
+    call site — on failure (timeout/401/500) the listener still started and
+    fcm_healthy got set True even though Bosch never has the push token.
+    Must treat a failed Bosch registration as a start failure."""
+
+    @pytest.mark.asyncio
+    async def test_bosch_registration_failure_prevents_start(self):
+        mock_fcm, mock_client = _mock_fcm_module()
+        coord = _fcm_coord(
+            "auto",
+            entry_data={
+                "fcm_config": {"api_key": "k", "project_id": "p", "app_id": "a"}
+            },
+        )
+
+        with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
+            with patch(f"{MODULE}._install_fcm_noise_filter"):
+                with patch(
+                    f"{MODULE}.register_fcm_with_bosch",
+                    new=AsyncMock(return_value=False),
+                ):
+                    started = await fcm._async_start_fcm_push_locked(coord)
+
+        assert started is False, (
+            "a failed Bosch CBS registration must fail the whole start "
+            "attempt, not silently proceed to 'started' with fcm_healthy=True"
+        )
+        assert coord.fcm_running is False
+        assert coord.fcm_healthy is False
+        mock_client.start.assert_not_called()
+
+
+class TestFailedClientStopCalledOnFailurePaths:
+    """Area 2, F3: on a failed `client.start()` or failed
+    `checkin_or_register()`, `client.stop()` was never called before
+    discarding the reference — leaking an undrained client that logs
+    "Unexpected exception during read" every ~63s forever."""
+
+    @pytest.mark.asyncio
+    async def test_checkin_failure_stops_client(self):
+        mock_fcm, mock_client = _mock_fcm_module(checkin_raises=True)
+        mock_client.stop = AsyncMock()
+        coord = _fcm_coord(
+            "auto",
+            entry_data={
+                "fcm_config": {"api_key": "k", "project_id": "p", "app_id": "a"}
+            },
+        )
+
+        with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
+            with patch(f"{MODULE}._install_fcm_noise_filter"):
+                started = await fcm._async_start_fcm_push_locked(coord)
+
+        assert started is False
+        mock_client.stop.assert_called_once()
+        assert coord.fcm_client is None
+
+    @pytest.mark.asyncio
+    async def test_start_failure_stops_client(self):
+        mock_fcm, mock_client = _mock_fcm_module(start_raises=True)
+        mock_client.stop = AsyncMock()
+        coord = _fcm_coord(
+            "auto",
+            entry_data={
+                "fcm_config": {"api_key": "k", "project_id": "p", "app_id": "a"}
+            },
+        )
+
+        with patch.dict(sys.modules, {"firebase_messaging": mock_fcm}):
+            with patch(f"{MODULE}._install_fcm_noise_filter"):
+                with patch(
+                    f"{MODULE}.register_fcm_with_bosch",
+                    new=AsyncMock(return_value=True),
+                ):
+                    started = await fcm._async_start_fcm_push_locked(coord)
+
+        assert started is False
+        mock_client.stop.assert_called_once()
+        assert coord.fcm_client is None
+
+
+class TestStopFcmPushIdempotentWithoutRunning:
+    """Area 2, F4: `async_stop_fcm_push`'s guard was `if client and running` —
+    if cancellation happened while `await client.start()` was in flight, the
+    supervisor could end up with fcm_client set but fcm_running=False, and a
+    subsequent stop would no-op, leaving the listener orphaned. The stop
+    must attempt to close any existing client regardless of `running`."""
+
+    @pytest.mark.asyncio
+    async def test_stop_closes_client_even_when_not_running(self):
+        from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+
+        client = MagicMock(spec=["stop", "tasks"])
+        client.stop = AsyncMock()
+        client.tasks = []
+        coord = _stub_coord(fcm_client=client, fcm_running=False)
+
+        await async_stop_fcm_push(coord)
+
+        client.stop.assert_called_once()
+        assert coord.fcm_client is None
+
+
+class TestSupervisorForceHardHealClearedAfterPurge:
+    """Area 2, F6: `fcm_force_hard_heal` was cleared BEFORE the purge block —
+    if the purge itself raised, the loop's `continue` re-entered with the
+    flag already gone, silently dropping a confirmed delivery-death-
+    triggered heal. Must only clear after the purge attempt completes."""
+
+    async def test_flag_stays_set_when_purge_raises(self) -> None:
+        coord = _make_heal_coord({"fcm_credentials": {"gcm": "x"}}, force_hard=True)
+        # Make the purge itself raise (async_update_entry inside the purge
+        # try/except).
+        coord.hass.config_entries.async_update_entry = MagicMock(
+            side_effect=RuntimeError("entry busy")
+        )
+
+        with (
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert coord.fcm_force_hard_heal is True, (
+            "a purge that raised must leave fcm_force_hard_heal SET so the "
+            "next iteration retries the heal instead of silently dropping it"
+        )
+
+    async def test_flag_cleared_after_successful_purge(self) -> None:
+        coord = _make_heal_coord({"fcm_credentials": {"gcm": "x"}}, force_hard=True)
+        with (
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+            patch.object(
+                fcm, "_async_start_fcm_push_locked", new=AsyncMock(return_value=False)
+            ),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert coord.fcm_force_hard_heal is False
+
+
+class TestEnsureFcmSupervisorShuttingDownGuard:
+    """Area 2, F7: the coordinator tick schedules `async_ensure_fcm_supervisor`
+    with no "shutting down" guard — a task that runs after
+    `async_stop_fcm_supervisor` already set `fcm_supervisor_task=None` during
+    unload could resurrect a new supervisor. Must no-op when
+    `nvr_shutting_down` is set (the general unload-in-progress signal)."""
+
+    @pytest.mark.asyncio
+    async def test_no_supervisor_spawned_while_shutting_down(self):
+        from custom_components.bosch_shc_camera.fcm import async_ensure_fcm_supervisor
+
+        coord = _stub_coord(options={"enable_fcm_push": True}, nvr_shutting_down=True)
+        await async_ensure_fcm_supervisor(coord)
+        assert getattr(coord, "fcm_supervisor_task", None) is None, (
+            "must not spawn a new supervisor task while nvr_shutting_down=True"
+        )
+
+    @pytest.mark.asyncio
+    async def test_supervisor_spawned_normally_when_not_shutting_down(self):
+        from custom_components.bosch_shc_camera.fcm import async_ensure_fcm_supervisor
+
+        coord = _stub_coord(options={"enable_fcm_push": True}, nvr_shutting_down=False)
+        with patch.object(
+            fcm, "_async_run_fcm_supervisor", new=AsyncMock(return_value=None)
+        ):
+            await async_ensure_fcm_supervisor(coord)
+            assert coord.fcm_supervisor_task is not None
+            coord.fcm_supervisor_task.cancel()
+            try:
+                await coord.fcm_supervisor_task
+            except asyncio.CancelledError:
+                pass
+
+
+class TestSupervisorPollingModeShortCircuit:
+    """Area 2, F8: with `fcm_push_mode="polling"` (push deliberately disabled)
+    and `enable_fcm_push=True`, `_async_start_fcm_push_locked` always
+    returned False -> after 3 failures the supervisor hard-healed (purged +
+    rewrote entry.data) forever, for a mode the user explicitly chose. The
+    supervisor must short-circuit entirely for "polling" mode."""
+
+    async def test_polling_mode_never_purges_or_starts(self) -> None:
+        coord = _make_heal_coord({"fcm_credentials": {"gcm": "x"}}, force_hard=False)
+        coord.options = {"enable_fcm_push": True, "fcm_push_mode": "polling"}
+
+        with (
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()) as mock_stop,
+            patch.object(
+                fcm, "_async_start_fcm_push_locked", new=AsyncMock()
+            ) as mock_start,
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        mock_start.assert_not_called()
+        coord.hass.config_entries.async_update_entry.assert_not_called()
+        assert mock_stop.await_count == 0
+
+    async def test_polling_mode_loops_back_to_top_via_continue(self) -> None:
+        """Cover the `continue` after a completed (not cancelled) polling-mode
+        sleep — the loop must re-check the mode on every pass, not just the
+        first."""
+        coord = _make_heal_coord({"fcm_credentials": {"gcm": "x"}}, force_hard=False)
+        coord.options = {"enable_fcm_push": True, "fcm_push_mode": "polling"}
+
+        sleep_calls = [0]
+
+        async def _fake_sleep(delay: float) -> None:
+            sleep_calls[0] += 1
+            if sleep_calls[0] >= 3:
+                raise asyncio.CancelledError()
+
+        with (
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(
+                fcm, "_async_start_fcm_push_locked", new=AsyncMock()
+            ) as mock_start,
+            patch(f"{MODULE}.asyncio.sleep", new=_fake_sleep),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+            except (asyncio.CancelledError, TimeoutError):
+                pass
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        assert sleep_calls[0] >= 3, "expected multiple polling-mode loop passes"
+        mock_start.assert_not_called()
+
+
+class TestSupervisorFailuresResetOnSustainedUptime:
+    """Area 2, F5: `failures` was never reset just by uptime — a listener
+    healthy for a long stretch with zero pushes (quiet house) kept the
+    backoff ladder pinned at its LAST recorded failure count. Must reset
+    after FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC of continuous is_started()=True,
+    independent of whether a push ever arrived.
+
+    Drives the real supervisor loop: 1st start attempt fails (failures=1),
+    2nd succeeds and stays "up" long enough (mocked monotonic clock) to trip
+    the sustained-uptime reset, then dies again with zero pushes. If the
+    reset fired, this second death is failure #1 (backoff[0]=5s); if it
+    didn't, it's failure #2 (backoff[1]=30s) — the chosen delay proves which
+    happened.
+    """
+
+    async def test_failures_counter_resets_after_sustained_healthy_uptime(
+        self,
+    ) -> None:
+        coord = _make_heal_coord({"fcm_credentials": {"gcm": "x"}}, force_hard=False)
+        coord.options = {"enable_fcm_push": True, "fcm_push_mode": "auto"}
+        coord.fcm_client = MagicMock()
+
+        start_calls = [0]
+
+        async def _fake_start(_coord: Any) -> bool:
+            start_calls[0] += 1
+            return start_calls[0] != 1  # 1st attempt fails, then succeeds
+
+        is_started_calls = [0]
+
+        def _fake_is_started() -> bool:
+            is_started_calls[0] += 1
+            # Stay "up" for the first 4 polls (enough for the mocked clock
+            # below to cross the sustained-uptime threshold), then die.
+            return is_started_calls[0] <= 4
+
+        coord.fcm_client.is_started = _fake_is_started
+
+        clock = [0.0]
+
+        def _fake_monotonic() -> float:
+            clock[0] += 200.0
+            return clock[0]
+
+        # Expected call sequence: [5.0 (backoff after 1st failed start),
+        # 10, 10, 10, 10 (four poll waits while "up"), <final backoff>].
+        # Deterministically stop the task right after recording the 6th
+        # (final) value — self-cancelling inside the mock avoids any
+        # dependence on real-time event-loop scheduling.
+        sleep_calls: list[float] = []
+
+        async def _fake_sleep(delay: float) -> None:
+            sleep_calls.append(delay)
+            if len(sleep_calls) >= 7:
+                raise asyncio.CancelledError()
+
+        with (
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "_async_start_fcm_push_locked", new=_fake_start),
+            patch(f"{MODULE}.asyncio.sleep", new=_fake_sleep),
+            patch(f"{MODULE}.time.monotonic", side_effect=_fake_monotonic),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+            except (asyncio.CancelledError, TimeoutError):
+                pass
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        assert len(sleep_calls) >= 7, (
+            f"supervisor did not reach the expected 7th sleep call — got {sleep_calls}"
+        )
+        final_backoff = sleep_calls[6]
+        assert final_backoff == fcm.FCM_SUPERVISOR_BACKOFF_SEC[0], (
+            f"expected the post-sustained-uptime death to be treated as "
+            f"failure #1 (backoff={fcm.FCM_SUPERVISOR_BACKOFF_SEC[0]}s) "
+            f"because `failures` should have reset after "
+            f"FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC of healthy uptime — got "
+            f"{final_backoff}s, meaning the stale failure count from the "
+            f"FIRST failed start was still in effect. Full sequence: "
+            f"{sleep_calls}"
+        )
+
+
+class TestEventPredatesSessionUsesTimezoneCorrectParser:
+    """Area 3, B1 (highest): `_event_predates_session` used
+    `calendar.timegm(time.strptime(ts[:19], ...))`, discarding Bosch's real
+    timezone offset and re-labelling local wall-clock time as UTC. In CEST
+    (+02:00), a genuinely brand-new event was computed as ~7200s in the
+    past, silently dropped as "stale" — root cause of the FIRST real motion
+    event being eaten after every HA restart."""
+
+    def test_now_event_with_offset_is_not_predated(self):
+        now_utc = time.time()
+        local_wall_clock = datetime.fromtimestamp(now_utc, tz=UTC) + timedelta(hours=2)
+        ts = local_wall_clock.strftime("%Y-%m-%dT%H:%M:%S") + "+02:00"
+        coord = SimpleNamespace(_download_started_at=now_utc)
+        ev = {"timestamp": ts}
+
+        assert fcm._event_predates_session(coord, ev) is False, (
+            "a genuinely brand-new event expressed with a +02:00 offset "
+            "must NOT be treated as predating this session's start"
+        )
+
+    def test_genuinely_old_event_is_predated(self):
+        coord = SimpleNamespace(_download_started_at=time.time())
+        ev = {"timestamp": "2000-01-01T00:00:00Z"}
+        assert fcm._event_predates_session(coord, ev) is True
+
+    def test_no_baseline_started_at_returns_false(self):
+        coord = SimpleNamespace(_download_started_at=0.0)
+        ev = {"timestamp": "2000-01-01T00:00:00Z"}
+        assert fcm._event_predates_session(coord, ev) is False
+
+    def test_unparseable_timestamp_returns_false(self):
+        coord = SimpleNamespace(_download_started_at=time.time())
+        ev = {"timestamp": "not-a-real-timestamp-at-all"}
+        assert fcm._event_predates_session(coord, ev) is False
+
+
+class TestHandleFcmPush401TriggersTokenRefresh:
+    """Area 3, B2: a non-200 events-fetch response was silently `continue`d
+    with zero logging and no distinction between a transient blip and a 401
+    (expired token — every push then a silent no-op until the next 300s
+    poll). Must log the status and, for 401 specifically, trigger the
+    coordinator's token-refresh path."""
+
+    @pytest.mark.asyncio
+    async def test_401_logs_and_refreshes_token(self, caplog):
+        coord = _make_push_coord_motion()
+        coord.ensure_valid_token = AsyncMock(return_value="fresh-token")
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm_motion(401))
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.timeout", new=asynccontextmanager(_noop_timeout)),
+            caplog.at_level("WARNING", logger=MODULE),
+        ):
+            await async_handle_fcm_push(coord)
+
+        coord.ensure_valid_token.assert_called_once_with("tok-test")
+        assert any(
+            "401" in r.getMessage() and "events fetch" in r.getMessage()
+            for r in caplog.records
+        ), "a 401 events-fetch response must be logged, not silently continued"
+
+    @pytest.mark.asyncio
+    async def test_non_401_non_200_still_logged_no_refresh(self, caplog):
+        """A generic non-200 (e.g. 500) must be logged too, but must NOT
+        trigger a token refresh — only a 401 means the token was rejected."""
+        coord = _make_push_coord_motion()
+        coord.ensure_valid_token = AsyncMock(return_value="fresh-token")
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm_motion(500))
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.timeout", new=asynccontextmanager(_noop_timeout)),
+            caplog.at_level("WARNING", logger=MODULE),
+        ):
+            await async_handle_fcm_push(coord)
+
+        coord.ensure_valid_token.assert_not_called()
+        assert any("500" in r.getMessage() for r in caplog.records)
+
+
+class TestDispatchedNewScopedPerCamera:
+    """Area 3, B3: `_dispatched_new` was a single flag shared across ALL
+    cameras in one push-fetch cycle — camera A dispatching could suppress
+    camera B's retry even though B's own event just hadn't landed in the
+    cloud index yet. Must be scoped per-camera (a dict keyed by cam_id)."""
+
+    def test_dispatched_new_is_a_dict_not_a_bool(self):
+        import inspect
+
+        src = inspect.getsource(fcm.async_handle_fcm_push)
+        assert "_dispatched_new: dict[str, bool] = {}" in src, (
+            "_dispatched_new must be a per-camera dict, not one shared bool "
+            "— a shared bool lets camera A's dispatch suppress camera B's "
+            "own independent retry"
+        )
+        assert "_dispatched_new = False" not in src
+
+    def test_dispatched_new_keyed_by_cam_id_on_dispatch(self):
+        import inspect
+
+        src = inspect.getsource(fcm.async_handle_fcm_push)
+        assert "_dispatched_new[cam_id] = True" in src
+
+
+def _noop_timeout(_seconds: float):
+    async def _cm():
+        yield
+
+    return _cm()
+
+
+class TestPathAFiresWhenAlertBlockedEvenIfStreaming:
+    """Area 3, B4 (second half): Path A was skipped whenever
+    `is_streaming=True`, on the assumption Path B (alert step-2) would cover
+    the cache refresh — but Path B doesn't run when `_alert_blocked` (user
+    has notifications off). A streaming user with notifications off
+    previously got NO snapshot refresh at all on a real event."""
+
+    @pytest.mark.asyncio
+    async def test_path_a_fires_when_streaming_and_notifications_off(self):
+        coord = _make_push_coord_motion(is_streaming=True)
+        cam_entity = coord.camera_entities[CAM_ID]
+
+        master_state = SimpleNamespace(state="off")
+        fake_registry = MagicMock()
+        fake_registry.async_get_entity_id = MagicMock(
+            return_value="switch.bosch_innenbereich_notifications"
+        )
+        coord.hass.states.get = MagicMock(return_value=master_state)
+
+        session = MagicMock()
+        session.get = MagicMock(
+            return_value=_resp_cm_motion(200, json_data=_one_movement_event("new-evt"))
+        )
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(
+                f"{MODULE}.asyncio.timeout",
+                new=asynccontextmanager(_noop_timeout),
+            ),
+            patch(f"{MODULE}.er.async_get", return_value=fake_registry),
+        ):
+            await async_handle_fcm_push(coord)
+
+        # async_trigger_image_refresh is scheduled via hass.async_create_task
+        # in this codebase, not awaited directly — check it was scheduled.
+        scheduled = [c for c in coord.hass.async_create_task.call_args_list]
+        assert scheduled, (
+            "Path A must still schedule a live-snap refresh when streaming "
+            "AND notifications are off — Path B won't run to cover it"
+        )
+
+
+class TestPathBSkipsStaleOverwrite:
+    """Area 3, B4 (first half): Path A (live-snap refresh) and Path B
+    (event-driven cache write) can race — Path B used to unconditionally
+    overwrite the cache with an OLDER Bosch event frame even after Path A
+    already wrote a FRESHER live frame. Must compare against a tracked
+    cached-image timestamp and skip a stale overwrite."""
+
+    @pytest.mark.asyncio
+    async def test_newer_cached_frame_not_clobbered_by_older_event_frame(self):
+        coord = _make_alert_coord(options={"alert_notify_service": "notify.test"})
+        cam_entity = SimpleNamespace(
+            cached_image=b"FRESH_PATH_A_FRAME",
+            last_image_fetch=0.0,
+        )
+
+        async def _notify_refreshed():
+            return None
+
+        cam_entity.async_notify_refreshed = _notify_refreshed
+        coord.camera_entities = {CAM_ID: cam_entity}
+
+        session = MagicMock()
+
+        def _get_side(url, headers=None, **kwargs):
+            if "img.jpg" in url:
+                # Path A "wins the race": bump last_image_fetch to AFTER
+                # this alert's own coroutine start, simulating a fresher
+                # frame landing while Path B's download is in flight.
+                cam_entity.last_image_fetch = time.monotonic() + 1000.0
+                return _resp_cm(
+                    200, body=b"OLDER_EVENT_FRAME", content_type="image/jpeg"
+                )
+            return _resp_cm(404)
+
+        session.get = MagicMock(side_effect=_get_side)
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock),
+            patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()),
+            patch(f"{SMB_MODULE}.sync_local_save", MagicMock()),
+        ):
+            await async_send_alert(
+                coord,
+                "Terrasse",
+                "MOVEMENT",
+                "2026-05-07T10:00:00.000Z",
+                image_url="https://residential.cbs.boschsecurity.com/img.jpg",
+                clip_url="",
+                clip_status="",
+                event_id="evt-race-001",
+                cam_id=CAM_ID,
+            )
+
+        assert cam_entity.cached_image == b"FRESH_PATH_A_FRAME", (
+            "Path B must not clobber a frame that became newer than the "
+            "cached image while its own download was in flight"
+        )
+
+
+class TestNotificationSwitchLookupUsesEntityRegistry:
+    """Area 3, B5: the notification-switch entity_id lookup used to
+    hand-rebuild `switch.bosch_{base}_notifications` from `cam_name` with
+    only partial special-char handling (spaces, äöü) — a camera name with
+    other punctuation missed the lookup, `_alert_blocked` silently stayed
+    False, and alerts fired even with the master notifications switch OFF
+    (fail-open, privacy-relevant). Must resolve via the real entity
+    registry by unique_id, matching what switch.py itself registers."""
+
+    @pytest.mark.asyncio
+    async def test_special_char_camera_name_still_blocks_when_off(self):
+        """A camera name with punctuation the old hand-rebuilt slug logic
+        never handled (e.g. an apostrophe) must still correctly resolve to
+        the real switch entity and honor its OFF state."""
+        coord = _make_push_coord_motion()
+        coord.data = {CAM_ID: {"info": {"title": "Tom's Garage-Cam!"}, "events": []}}
+
+        fake_registry = MagicMock()
+        fake_registry.async_get_entity_id = MagicMock(
+            return_value="switch.bosch_toms_garage_cam_notifications"
+        )
+        coord.hass.states.get = MagicMock(
+            side_effect=lambda eid: (
+                SimpleNamespace(state="off")
+                if eid == "switch.bosch_toms_garage_cam_notifications"
+                else None
+            )
+        )
+
+        session = MagicMock()
+        session.get = MagicMock(
+            return_value=_resp_cm_motion(200, json_data=_one_movement_event("new-evt"))
+        )
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.timeout", new=asynccontextmanager(_noop_timeout)),
+            patch(f"{MODULE}.er.async_get", return_value=fake_registry),
+        ):
+            await async_handle_fcm_push(coord)
+
+        fake_registry.async_get_entity_id.assert_any_call(
+            "switch", "bosch_shc_camera", f"bosch_shc_notifications_{CAM_ID.lower()}"
+        )
+        # Master switch resolved to OFF -> the alert must have been
+        # suppressed, meaning async_send_alert was never scheduled.
+        alert_scheduled = any(
+            call.args and getattr(call.args[0], "__name__", "") == "async_send_alert"
+            for call in coord.hass.async_create_task.call_args_list
+        )
+        assert not alert_scheduled, (
+            "a camera name the old hand-rebuilt slug couldn't resolve must "
+            "still correctly suppress the alert via entity-registry lookup"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_registered_entity_does_not_block(self):
+        """A camera whose switch isn't in the entity registry at all (e.g.
+        never set up) must not be treated as blocked — matches prior
+        behavior where a missing entity_id meant states.get() returned
+        None."""
+        coord = _make_push_coord_motion()
+        fake_registry = MagicMock()
+        fake_registry.async_get_entity_id = MagicMock(return_value=None)
+
+        session = MagicMock()
+        session.get = MagicMock(
+            return_value=_resp_cm_motion(200, json_data=_one_movement_event("new-evt"))
+        )
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.timeout", new=asynccontextmanager(_noop_timeout)),
+            patch(f"{MODULE}.er.async_get", return_value=fake_registry),
+        ):
+            await async_handle_fcm_push(coord)
+
+        alert_scheduled = any(
+            call.args and getattr(call.args[0], "__name__", "") == "async_send_alert"
+            for call in coord.hass.async_create_task.call_args_list
+        )
+        assert alert_scheduled
+
+
+class TestFCMCoordinatorMixinPassesThroughCamId:
+    """Area 3, Minor: `FCMCoordinatorMixin.async_send_alert` omitted the
+    `cam_id` kwarg the free function accepts — any caller through the mixin
+    silently lost the Path B cache-push behavior (which needs the stable
+    cam_id, not just the mutable display title)."""
+
+    @pytest.mark.asyncio
+    async def test_mixin_forwards_cam_id(self):
+        from custom_components.bosch_shc_camera.fcm import FCMCoordinatorMixin
+
+        captured: dict[str, Any] = {}
+
+        async def _fake_async_send_alert(
+            self_coord,
+            cam_name,
+            event_type,
+            timestamp,
+            image_url,
+            clip_url="",
+            clip_status="",
+            event_id="",
+            cam_id="",
+        ):
+            captured["cam_id"] = cam_id
+
+        class _Coord(FCMCoordinatorMixin):
+            pass
+
+        coord = _Coord()
+
+        with patch.object(fcm, "async_send_alert", new=_fake_async_send_alert):
+            await coord.async_send_alert(
+                "Terrasse",
+                "MOVEMENT",
+                "2026-05-07T10:00:00.000Z",
+                "https://x/img.jpg",
+                cam_id=CAM_ID,
+            )
+
+        assert captured["cam_id"] == CAM_ID, (
+            "FCMCoordinatorMixin.async_send_alert must forward cam_id to "
+            "the free function, not silently drop it"
+        )
+
+
+class TestAiDescriptionIndependentTimeoutBudget:
+    """Area 4, BUG1 (high): the AI-description append used to run INSIDE
+    the download's `asyncio.timeout(15)` block — `async_generate_ai_description`
+    has its OWN 20s internal timeout, longer than what's left of the outer
+    15s budget after the image download, so a slow AI call let the OUTER
+    timeout fire first, propagating past step 2 entirely (screenshot never
+    delivered, and the already-written JPG never registered for cleanup).
+    Must have its own independent timeout scope, entirely outside the
+    download's, with cleanup already registered beforehand."""
+
+    def test_ai_timeout_is_a_separate_scope_from_download_timeout(self):
+        """Structural pin: the source must show TWO distinct
+        `asyncio.timeout(...)` context managers for download vs AI, with
+        the AI one nested under its own `try/except` (not the download's),
+        and cleanup registration textually preceding the AI block."""
+        import inspect
+
+        src = inspect.getsource(fcm.async_send_alert)
+        timeout_15_idx = src.index("asyncio.timeout(15)")
+        timeout_20_idx = src.index("asyncio.timeout(20)")
+        cleanup_idx = src.index("files_to_cleanup.append(snap_path)")
+        ai_call_idx = src.index("async_generate_ai_description")
+
+        assert timeout_15_idx < cleanup_idx < ai_call_idx, (
+            "cleanup registration must happen (textually, and in execution "
+            "order) between the download and the AI call"
+        )
+        assert cleanup_idx < timeout_20_idx, (
+            "the AI call's own timeout(20) must be established AFTER "
+            "cleanup is already registered, not before"
+        )
+
+    @pytest.mark.asyncio
+    async def test_ai_failure_still_delivers_screenshot(self):
+        """A failing/raising AI call must not prevent the screenshot notify
+        from being delivered — the core regression this fix closes."""
+        coord = _make_alert_coord_misc14(
+            options={
+                "ai_notify_include_description": True,
+                "alert_save_snapshots": False,
+                "alert_delete_after_send": True,
+            }
+        )
+        coord.async_generate_ai_description = AsyncMock(
+            side_effect=TimeoutError("AI call exceeded its own budget")
+        )
+
+        notify_calls: list = []
+
+        async def _fake_svc_call(domain, service, service_data=None, **kw):
+            notify_calls.append((domain, service, service_data))
+
+        coord.hass.services.async_call = AsyncMock(side_effect=_fake_svc_call)
+
+        image_resp = _resp_cm_misc14(
+            200, body=b"\xff\xd8\xff" + b"\x00" * 100, content_type="image/jpeg"
+        )
+        session = MagicMock()
+        session.get = MagicMock(return_value=image_resp)
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock),
+            patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()),
+            patch(f"{SMB_MODULE}.sync_local_save", MagicMock()),
+        ):
+            await async_send_alert(
+                coord,
+                "Terrasse",
+                "MOVEMENT",
+                "2026-05-07T10:00:00.000Z",
+                "https://media.boschsecurity.com/image.jpg",
+                cam_id=CAM_ID,
+            )
+
+        assert notify_calls, (
+            "the screenshot notify must still be delivered even when the "
+            "AI-description call fails/times out"
+        )
+
+
+class TestAlertImageUrlEncoded:
+    """Area 4, BUG2: the `/local/` image URL built in `build_notify_data`
+    was never URL-encoded — a camera title containing `#`/`?`/`%`/spaces
+    (only lightly sanitized by `_safe_path_segment`) produced a broken URL
+    in the push notification even though the file exists on disk correctly
+    under that exact name."""
+
+    def test_special_char_filename_is_percent_encoded_in_url(self):
+        from custom_components.bosch_shc_camera.fcm import build_notify_data
+
+        out = build_notify_data(
+            "notify.mobile_app_iphone",
+            "Bewegung",
+            file_path="/config/www/bosch_alerts/Garten Kamera #1_snap.jpg",
+        )
+        url = out["data"]["image"]
+        assert url == "/local/bosch_alerts/Garten%20Kamera%20%231_snap.jpg"
+        assert " " not in url
+        assert "#" not in url
+
+    def test_plain_filename_unaffected(self):
+        from custom_components.bosch_shc_camera.fcm import build_notify_data
+
+        out = build_notify_data(
+            "notify.mobile_app_iphone",
+            "Bewegung",
+            file_path="/config/www/bosch_alerts/Terrasse_snap.jpg",
+        )
+        assert out["data"]["image"] == "/local/bosch_alerts/Terrasse_snap.jpg"
+
+
+class TestMarkEventsReadOnlyOnDeliverySuccess:
+    """Area 5, item 1: `async_mark_events_read` used to be called regardless
+    of whether ANY notification step actually succeeded — a misconfigured
+    alert (no services resolve) marked the event read on Bosch's side even
+    though the user was never notified, and the poll-fallback wouldn't
+    re-surface it. Must only mark read if at least one step delivered."""
+
+    @pytest.mark.asyncio
+    async def test_all_steps_undelivered_skips_mark_read(self):
+        """No notify services configured at all -> nothing delivered ->
+        mark_events_read must NOT be called even though the option is on."""
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "",
+                "alert_notify_information": "",
+                "alert_notify_screenshot": "",
+                "alert_notify_video": "",
+                "alert_notify_system": "",
+                "mark_events_read": True,
+            }
+        )
+
+        mark_read_calls = []
+
+        async def _fake_mark(c, ids):
+            mark_read_calls.append(ids)
+
+        with patch(f"{MODULE}.async_mark_events_read", side_effect=_fake_mark):
+            await _run_alert2(coord, event_type="MOVEMENT", image_url="", clip_url="")
+
+        assert mark_read_calls == [], (
+            "mark_events_read must not fire when nothing was actually "
+            "delivered to the user"
+        )
+
+    @pytest.mark.asyncio
+    async def test_step1_delivered_still_marks_read(self):
+        """Sanity: when at least step 1 (text) delivers, the existing
+        mark-read behavior is unaffected."""
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "mark_events_read": True,
+            }
+        )
+
+        mark_read_calls = []
+
+        async def _fake_mark(c, ids):
+            mark_read_calls.append(ids)
+
+        with patch(f"{MODULE}.async_mark_events_read", side_effect=_fake_mark):
+            await _run_alert2(coord, event_type="MOVEMENT")
+
+        assert len(mark_read_calls) >= 1
+
+
+class TestEventIdCapturedOnceAtStart:
+    """Area 5, item 2: `event_id = event_id or coordinator.last_event_ids.get(...)`
+    was re-derived at multiple separate points across the ~90s-long alert
+    flow (direct-clip probe, mark-read, SMB, local-save) — by the time later
+    call sites ran, `last_event_ids` could have already advanced to a NEWER,
+    different, un-alerted event, causing the wrong event to be marked read
+    and the wrong id used in the clip lookup/SMB path. Must capture ONCE at
+    the start and never re-read the coordinator's cache mid-flow."""
+
+    @pytest.mark.asyncio
+    async def test_last_event_ids_advancing_mid_flow_does_not_leak_into_smb(self):
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.mobile_app",
+                "enable_smb_upload": True,
+                "smb_server": "nas.local",
+                "smb_share": "cameras",
+                "mark_events_read": True,
+            }
+        )
+        coord.last_event_ids[CAM_ID] = "SHOULD-NEVER-BE-USED"
+
+        mark_read_calls: list = []
+
+        async def _fake_mark(c, ids):
+            mark_read_calls.append(list(ids))
+            # Simulate a concurrent later push advancing last_event_ids
+            # WHILE this pipeline is still mid-flow.
+            coord.last_event_ids[CAM_ID] = "NEWER-CONCURRENT-EVENT"
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm(404))
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock),
+            patch(f"{MODULE}.async_mark_events_read", side_effect=_fake_mark),
+            patch(f"{SMB_MODULE}.sync_smb_upload") as mock_smb,
+            patch(f"{SMB_MODULE}.sync_local_save", MagicMock()),
+        ):
+            await async_send_alert(
+                coord,
+                "Terrasse",
+                "MOVEMENT",
+                "2026-05-07T10:00:00.000Z",
+                image_url="",
+                clip_url="",
+                clip_status="",
+                event_id="",  # not passed explicitly — must fall back ONCE
+                cam_id=CAM_ID,
+            )
+
+        # mark_events_read must have used the ORIGINAL captured id.
+        assert mark_read_calls == [["SHOULD-NEVER-BE-USED"]]
+
+        # SMB's event id must ALSO be the original — never the concurrently
+        # advanced one that _fake_mark wrote mid-flow.
+        smb_ev_id = None
+        for c in coord.hass.async_add_executor_job.call_args_list:
+            if c.args and c.args[0] is mock_smb:
+                smb_data = c.args[2]
+                for cam_data in smb_data.values():
+                    for ev in cam_data.get("events", []):
+                        smb_ev_id = ev.get("id")
+        assert smb_ev_id == "SHOULD-NEVER-BE-USED", (
+            f"SMB must use the event_id captured at pipeline start, not a "
+            f"value that changed mid-flow — got {smb_ev_id!r}"
+        )
+
+
+class TestClipDownloadSizeCap:
+    """Area 5, item 3: no size cap on the clip download — a large/malformed
+    response could allocate unboundedly via a plain `await resp.read()`.
+    Must reject via Content-Length when present, and via the actual byte
+    count otherwise."""
+
+    @pytest.mark.asyncio
+    async def test_oversized_content_length_aborts_before_reading(self):
+        coord = _make_alert_coord()
+        CLIP_URL = "https://residential.cbs.boschsecurity.com/clip.mp4"
+
+        oversized = fcm._CLIP_MAX_BYTES + 1
+        resp = MagicMock()
+        resp.status = 200
+        resp.headers = {"Content-Length": str(oversized)}
+        resp.read = AsyncMock(
+            side_effect=AssertionError("must not read body past the size cap")
+        )
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=resp)
+        cm.__aexit__ = AsyncMock(return_value=None)
+
+        def _get_side(url, **kwargs):
+            if str(url) == CLIP_URL:
+                return cm
+            return _resp_cm(404)
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=_get_side)
+
+        await _run_alert2(
+            coord,
+            event_type="MOVEMENT",
+            image_url="",
+            clip_url=CLIP_URL,
+            clip_status="Done",
+            session_override=session,
+        )
+
+        resp.read.assert_not_called()
+        write_calls = [
+            c
+            for c in coord.hass.async_add_executor_job.call_args_list
+            if c.args
+            and callable(c.args[0])
+            and getattr(c.args[0], "__name__", "") == "_write_file"
+        ]
+        assert not write_calls, "oversized clip must never reach _write_file"
+
+    @pytest.mark.asyncio
+    async def test_oversized_actual_body_without_content_length_rejected(self):
+        """No Content-Length header (or it lies) -> the actual byte count
+        after reading must still be enforced."""
+        coord = _make_alert_coord()
+        CLIP_URL = "https://residential.cbs.boschsecurity.com/clip.mp4"
+        oversized_body = b"X" * (fcm._CLIP_MAX_BYTES + 1)
+
+        def _get_side(url, **kwargs):
+            if str(url) == CLIP_URL:
+                return _resp_cm(200, body=oversized_body, content_type="video/mp4")
+            return _resp_cm(404)
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=_get_side)
+
+        await _run_alert2(
+            coord,
+            event_type="MOVEMENT",
+            image_url="",
+            clip_url=CLIP_URL,
+            clip_status="Done",
+            session_override=session,
+        )
+
+        write_calls = [
+            c
+            for c in coord.hass.async_add_executor_job.call_args_list
+            if c.args
+            and callable(c.args[0])
+            and getattr(c.args[0], "__name__", "") == "_write_file"
+        ]
+        assert not write_calls, (
+            "a body exceeding the cap must be rejected even without an "
+            "(honest) Content-Length header"
+        )
+
+
+class TestAsyncMarkEventsRead401Visible:
+    """Area 5, item 6: `async_mark_events_read` was serial (fine) but
+    silently swallowed a 401 identically to a transient network blip, and
+    `success = any(...)` reported overall success on a partial failure with
+    no visibility. A 401 must be logged distinctly."""
+
+    @pytest.mark.asyncio
+    async def test_401_logged_distinctly(self, caplog):
+        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+
+        coord = _stub_coord(token="tok-A")
+        session = MagicMock()
+        session.put = MagicMock(return_value=_resp_cm(401))
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            caplog.at_level("WARNING", logger=MODULE),
+        ):
+            result = await async_mark_events_read(coord, ["evt-1", "evt-2"])
+
+        assert result is False
+        assert any(
+            "401" in r.getMessage() and "Mark-events-read" in r.getMessage()
+            for r in caplog.records
+        ), "a 401 on mark-events-read must be logged distinctly, not swallowed"
+
+    @pytest.mark.asyncio
+    async def test_partial_failure_visible_via_debug_log(self, caplog):
+        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+
+        coord = _stub_coord(token="tok-A")
+        call_count = [0]
+
+        def _put_side(url, headers=None, json=None, **kwargs):
+            call_count[0] += 1
+            return _resp_cm(200) if call_count[0] == 1 else _resp_cm(500)
+
+        session = MagicMock()
+        session.put = MagicMock(side_effect=_put_side)
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            caplog.at_level("DEBUG", logger=MODULE),
+        ):
+            result = await async_mark_events_read(coord, ["evt-ok", "evt-fail"])
+
+        # `any()` semantics preserved: overall success True since 1/2 worked.
+        assert result is True
+        assert any("partial failure" in r.getMessage() for r in caplog.records), (
+            "a partial failure must be visible in the logs even though "
+            "success overall is True"
+        )
+
+
+class TestAlertCleanupDelayExtended:
+    """Area 5, item 7: files were deleted 5s after notify — tuned for
+    Signal's fetch pattern, but mobile_app/other services may fetch the URL
+    lazily (user opens the notification later), 404ing after the old 5s
+    window. Extended to a safer margin."""
+
+    def test_sleep_duration_is_30s_not_5s(self):
+        import inspect
+
+        src = inspect.getsource(fcm.async_send_alert)
+        assert "await asyncio.sleep(30)" in src
+        assert "await asyncio.sleep(5)  # give Signal" not in src
+
+
+class TestClipDirectProbeCachedNotReDownloaded:
+    """Area 5, item 9: the direct clip.mp4 probe was mislabeled a "HEAD
+    probe" while actually performing a full GET (aiohttp's
+    `ClientResponse.release()` on an un-read body reads+discards the whole
+    thing anyway to reuse the connection) — the clip was downloaded once
+    and thrown away, then downloaded a SECOND time. Must read+cache the
+    body from the probe and reuse it instead of re-fetching."""
+
+    @pytest.mark.asyncio
+    async def test_clip_mp4_url_fetched_only_once(self):
+        coord = _make_alert_coord()
+        CLIP_URL = f"{fcm.CLOUD_API}/v11/events/evt-cached-001/clip.mp4"
+        clip_hits = [0]
+
+        def _get_side(url, headers=None, **kwargs):
+            if "/clip.mp4" in str(url):
+                clip_hits[0] += 1
+                return _resp_cm(200, body=b"x" * 2048, content_type="video/mp4")
+            return _resp_cm(404)
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=_get_side)
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock),
+            patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()),
+            patch(f"{SMB_MODULE}.sync_local_save", MagicMock()),
+        ):
+            await async_send_alert(
+                coord,
+                "Terrasse",
+                "MOVEMENT",
+                "2026-05-07T10:00:00.000Z",
+                image_url="",
+                clip_url="",
+                clip_status="",
+                event_id="evt-cached-001",
+                cam_id=CAM_ID,
+            )
+
+        assert clip_hits[0] == 1, (
+            f"the clip.mp4 URL must be fetched exactly once (probe result "
+            f"cached and reused), got {clip_hits[0]} fetches"
+        )
+        write_calls = [
+            c
+            for c in coord.hass.async_add_executor_job.call_args_list
+            if c.args
+            and callable(c.args[0])
+            and getattr(c.args[0], "__name__", "") == "_write_file"
+            and str(c.args[1]).endswith(".mp4")
+        ]
+        assert write_calls, "the cached probe body must still be written to disk"
+
+
+# ── Coverage-gap tests for the 25-bug-hunt round's new/changed branches ────
+
+
+class TestSkipAndAckAttributeErrorFromAckItselfSwallowed:
+    """Covers the `except AttributeError: pass` around
+    `_send_selective_ack` when `self.writer` IS set but the ack call itself
+    still raises AttributeError (a narrower race than writer being None
+    outright — e.g. torn down between the None-check and the call)."""
+
+    @pytest.mark.asyncio
+    async def test_ack_raising_attributeerror_does_not_propagate(self):
+        helper = TestPatchedListenBody()
+        instance = helper._make_instance()
+        instance.writer = MagicMock()  # non-None, passes the guard
+
+        async def _send_ack_raises(persistent_id):
+            raise AttributeError("torn down mid-call")
+
+        instance._send_selective_ack = _send_ack_raises
+
+        async def _handle_message(msg):
+            raise RuntimeError("couldn't find in app_data crypto-key")
+
+        instance._handle_message = _handle_message
+
+        call_count = [0]
+
+        async def _recv():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return SimpleNamespace(persistent_id="race-msg-id")
+            instance.do_listen = False
+            return {"msg": 2}
+
+        instance._receive_msg = _recv
+
+        # Must not raise.
+        await instance._listen()
+        assert instance.persistent_ids == ["race-msg-id"]
+
+
+class TestHandleFcmPush401RefreshCancelledPropagates:
+    """Covers `except asyncio.CancelledError: raise` inside the 401 handler
+    — a genuine task cancellation during the token refresh must propagate,
+    not be swallowed like a refresh failure."""
+
+    @pytest.mark.asyncio
+    async def test_cancelled_during_401_refresh_propagates(self):
+        coord = _make_push_coord_motion()
+        coord.ensure_valid_token = AsyncMock(side_effect=asyncio.CancelledError())
+
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm_motion(401))
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.timeout", new=asynccontextmanager(_noop_timeout)),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await async_handle_fcm_push(coord)
+
+
+class TestTypeSpecificNotificationSwitchBlocks:
+    """Covers the type-specific (per-event-type) notification switch OFF
+    branch — distinct from the master-switch-off branch already covered
+    elsewhere."""
+
+    @pytest.mark.asyncio
+    async def test_type_specific_switch_off_blocks_alert(self):
+        coord = _make_push_coord_motion()
+        fake_registry = MagicMock()
+
+        def _lookup(domain, dom, unique_id):
+            if "notif_movement" in unique_id:
+                return "switch.bosch_innenbereich_movement_notifications"
+            return "switch.bosch_innenbereich_notifications"  # master
+
+        fake_registry.async_get_entity_id = MagicMock(side_effect=_lookup)
+
+        def _states_get(eid):
+            if eid == "switch.bosch_innenbereich_notifications":
+                return SimpleNamespace(state="on")  # master is ON
+            if eid == "switch.bosch_innenbereich_movement_notifications":
+                return SimpleNamespace(state="off")  # type-specific is OFF
+            return None
+
+        coord.hass.states.get = MagicMock(side_effect=_states_get)
+
+        session = MagicMock()
+        session.get = MagicMock(
+            return_value=_resp_cm_motion(200, json_data=_one_movement_event("new-evt"))
+        )
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.timeout", new=asynccontextmanager(_noop_timeout)),
+            patch(f"{MODULE}.er.async_get", return_value=fake_registry),
+        ):
+            await async_handle_fcm_push(coord)
+
+        alert_scheduled = any(
+            call.args and getattr(call.args[0], "__name__", "") == "async_send_alert"
+            for call in coord.hass.async_create_task.call_args_list
+        )
+        assert not alert_scheduled, (
+            "master ON but type-specific (movement) switch OFF must still "
+            "block the alert"
+        )
+
+
+class TestScreenshotWriteFailureRegistersCleanupThenReraises:
+    """Covers the screenshot write's `except Exception:` branch (register
+    partial-file cleanup, then re-raise) and the outer
+    "Alert step 2 failed" catch it propagates into."""
+
+    @pytest.mark.asyncio
+    async def test_write_failure_registers_cleanup_and_logs(self, caplog):
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "alert_save_snapshots": False,
+            }
+        )
+        # os.path.exists must return True (partial file landed) for every
+        # executor job EXCEPT the _write_file call itself, which raises.
+        removed_paths: list[str] = []
+
+        async def _fake_executor(fn, *args):
+            if fn is fcm._write_file:
+                raise OSError("ENOSPC")
+            if fn is os.path.exists:
+                return True
+            if fn is os.remove:
+                removed_paths.append(args[0])
+                return None
+            return None
+
+        coord.hass.async_add_executor_job = AsyncMock(side_effect=_fake_executor)
+
+        session = MagicMock()
+        session.get = MagicMock(
+            return_value=_resp_cm(200, body=JPEG_BYTES, content_type="image/jpeg")
+        )
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock),
+            patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()),
+            patch(f"{SMB_MODULE}.sync_local_save", MagicMock()),
+            caplog.at_level("WARNING", logger=MODULE),
+        ):
+            await async_send_alert(
+                coord,
+                "Terrasse",
+                "MOVEMENT",
+                "2026-05-07T10:00:00.000Z",
+                image_url="https://residential.cbs.boschsecurity.com/img.jpg",
+                clip_url="",
+                clip_status="",
+                event_id="evt-write-fail",
+                cam_id=CAM_ID,
+            )
+
+        assert any("Alert step 2 failed" in r.getMessage() for r in caplog.records)
+        assert removed_paths, (
+            "the partial file left by the failed write must have been "
+            "registered for cleanup and removed"
+        )
+
+
+class TestClipWriteFailureRegistersCleanupThenReraises:
+    """Covers `_process_downloaded_clip`'s write-failure branch (register
+    partial-file cleanup, then re-raise) for the clip/video path."""
+
+    @pytest.mark.asyncio
+    async def test_clip_write_failure_registers_cleanup(self, caplog):
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_service": "notify.test",
+                "alert_save_snapshots": False,
+            }
+        )
+        removed_paths: list[str] = []
+
+        async def _fake_executor(fn, *args):
+            if fn is fcm._write_file:
+                raise OSError("ENOSPC")
+            if fn is os.path.exists:
+                return True
+            if fn is os.remove:
+                removed_paths.append(args[0])
+                return None
+            return None
+
+        coord.hass.async_add_executor_job = AsyncMock(side_effect=_fake_executor)
+
+        CLIP_URL = "https://residential.cbs.boschsecurity.com/clip.mp4"
+
+        def _get_side(url, **kwargs):
+            if str(url) == CLIP_URL:
+                return _resp_cm(200, body=b"x" * 2048, content_type="video/mp4")
+            return _resp_cm(404)
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=_get_side)
+
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock),
+            patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()),
+            patch(f"{SMB_MODULE}.sync_local_save", MagicMock()),
+            caplog.at_level("WARNING", logger=MODULE),
+        ):
+            await async_send_alert(
+                coord,
+                "Terrasse",
+                "MOVEMENT",
+                "2026-05-07T10:00:00.000Z",
+                image_url="",
+                clip_url=CLIP_URL,
+                clip_status="Done",
+                event_id="evt-clip-write-fail",
+                cam_id=CAM_ID,
+            )
+
+        assert any(
+            "Alert step 3 (video) failed" in r.getMessage() for r in caplog.records
+        )
+        assert removed_paths, (
+            "the partial .mp4 left by the failed write must have been "
+            "registered for cleanup and removed"
+        )
+
+
+class TestClipContentLengthValueErrorFallsThroughToRead:
+    """Covers the `except ValueError: pass` when the Content-Length header
+    is present but not a valid integer — must fall through to the actual
+    read-then-check path instead of crashing."""
+
+    @pytest.mark.asyncio
+    async def test_non_integer_content_length_falls_through(self):
+        coord = _make_alert_coord()
+        CLIP_URL = "https://residential.cbs.boschsecurity.com/clip.mp4"
+
+        resp = MagicMock()
+        resp.status = 200
+        resp.headers = {"Content-Length": "not-a-number"}
+        resp.read = AsyncMock(return_value=b"x" * 2048)
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=resp)
+        cm.__aexit__ = AsyncMock(return_value=None)
+
+        def _get_side(url, **kwargs):
+            if str(url) == CLIP_URL:
+                return cm
+            return _resp_cm(404)
+
+        session = MagicMock()
+        session.get = MagicMock(side_effect=_get_side)
+
+        await _run_alert2(
+            coord,
+            event_type="MOVEMENT",
+            image_url="",
+            clip_url=CLIP_URL,
+            clip_status="Done",
+            session_override=session,
+        )
+
+        write_calls = [
+            c
+            for c in coord.hass.async_add_executor_job.call_args_list
+            if c.args
+            and callable(c.args[0])
+            and getattr(c.args[0], "__name__", "") == "_write_file"
+        ]
+        assert write_calls, (
+            "an unparseable Content-Length must not block the download — "
+            "must fall through to reading + the actual byte-count check"
         )

@@ -609,3 +609,59 @@ class TestUseMjpegSnapshotDoc:
         assert "standardmäßig aus" in desc.lower(), (
             "de.json: must say 'Standardmäßig aus' to match DEFAULT_OPTIONS"
         )
+
+
+class TestAlertSaveSnapshotsExposureWording:
+    """Area 5, item 8 bug fix: `alert_save_snapshots` files are served
+    unauthenticated with predictable filenames from HA's `www/` — this is
+    inherent to HA's static file serving, not fixable in this integration,
+    but the options-flow description text must honestly disclose that
+    turning this ON keeps files permanently, unauthenticated-ly accessible.
+    The old wording only mentioned the OFF-side ("deleted within seconds")
+    and said nothing about the ON-side's exposure."""
+
+    def test_english_doc_discloses_unauthenticated_exposure(self) -> None:
+        text = (COMPONENT_DIR / "strings.json").read_text(encoding="utf-8")
+        data = json.loads(text)
+        desc = data["options"]["step"]["init"]["sections"]["fcm"]["data_description"][
+            "alert_save_snapshots"
+        ]
+        assert "without authentication" in desc.lower(), (
+            "strings.json: alert_save_snapshots doc must disclose that ON "
+            "means files stay permanently accessible without authentication"
+        )
+
+    def test_en_json_matches_strings_json(self) -> None:
+        strings_desc = json.loads(
+            (COMPONENT_DIR / "strings.json").read_text(encoding="utf-8")
+        )["options"]["step"]["init"]["sections"]["fcm"]["data_description"][
+            "alert_save_snapshots"
+        ]
+        en_desc = json.loads(
+            (TRANSLATIONS_DIR / "en.json").read_text(encoding="utf-8")
+        )["options"]["step"]["init"]["sections"]["fcm"]["data_description"][
+            "alert_save_snapshots"
+        ]
+        assert strings_desc == en_desc
+
+    @pytest.mark.parametrize(
+        "lang",
+        ["de", "fr", "nl", "pl", "uk", "es", "it", "zh-Hans", "pt", "ru"],
+    )
+    def test_every_locale_updated_the_wording(self, lang: str) -> None:
+        """Every locale (README_TABLES_SYNC-style parity — all 12 files
+        touched in the same round) must have moved past the old "deleted
+        within seconds" only wording — it must now also mention an
+        approximate duration AND the permanent/unauthenticated ON-side."""
+        path = TRANSLATIONS_DIR / f"{lang}.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        desc = data["options"]["step"]["init"]["sections"]["fcm"]["data_description"][
+            "alert_save_snapshots"
+        ]
+        # "30" appears in every locale's rewritten duration clause
+        # (e.g. "about 30 seconds" / "etwa 30 Sekunden" / "около 30 секунд").
+        assert "30" in desc, (
+            f"{lang}.json: alert_save_snapshots doc must mention the "
+            f"updated ~30s cleanup delay (item 7 bug fix), not the old "
+            f"unqualified 'within seconds'"
+        )

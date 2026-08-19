@@ -92,6 +92,7 @@ def _fake_smb() -> MagicMock:
     smb.stat = MagicMock(side_effect=OSError("missing"))
     smb.scandir = MagicMock(return_value=[])
     smb.remove = MagicMock()
+    smb.rename = MagicMock()
     return smb
 
 
@@ -516,6 +517,39 @@ class TestSyncLocalSaveTimestampGuards:
 
         # Old event must be skipped — no download
         mock_urlopen.assert_not_called()
+
+    def test_offset_timestamp_not_mislabeled_as_utc(self, tmp_path: Path) -> None:
+        """Bug fix (B1 cross-reference, fcm.py's `_event_predates_session`
+        found the same root cause here): the previous `[:19]` +
+        calendar.timegm(time.strptime(...)) discarded Bosch's real timezone
+        offset and re-labelled local wall-clock time as UTC. In CEST
+        (+02:00), a genuinely brand-new event (right after an HA restart)
+        was computed as ~7200s old and silently skipped as "predates
+        session start" — dropping the FIRST real motion event's local save
+        every time. A "right now" event expressed with a +02:00 offset must
+        NOT be skipped."""
+        from datetime import UTC, datetime, timedelta
+
+        from custom_components.bosch_shc_camera.smb import sync_local_save
+
+        coord = _coord({"download_path": str(tmp_path)})
+        coord._download_started_at = time.time()  # session just started
+
+        now_utc = datetime.now(UTC)
+        local_wall_clock = now_utc + timedelta(hours=2)
+        ts = local_wall_clock.strftime("%Y-%m-%dT%H:%M:%S") + "+02:00"
+        ev = {
+            "timestamp": ts,
+            "eventType": "MOVEMENT",
+            "id": "EVIDNEW1",
+            "imageUrl": "https://cdn.boschsecurity.com/snap.jpg",
+        }
+
+        resp = _urlopen_resp(200, b"JPEG")
+        with patch(URLOPEN, return_value=resp):
+            sync_local_save(coord, ev, "tok", "Terrasse")
+
+        resp.__enter__.assert_called()  # must NOT have been skipped as stale
 
 
 class TestSyncLocalSavePatternFormatErrors:
@@ -1165,10 +1199,16 @@ class TestSmbClipUpload:
             data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": [ev]}}
             sync_smb_upload(coord, data, "tok")
 
-        # open_file called for clip (.mp4)
+        # open_file called for clip. Bug fix (Area 5, item 4): the write now
+        # targets a `.mp4.part` temp name, renamed to the real `.mp4` name
+        # only after a successful full write — see TestSmbClipTempRename.
         assert fake_smb.open_file.call_count == 1
         call_path = fake_smb.open_file.call_args[0][0]
-        assert call_path.endswith(".mp4")
+        assert call_path.endswith(".mp4.part")
+        fake_smb.rename.assert_called_once()
+        rename_args = fake_smb.rename.call_args[0]
+        assert rename_args[0] == call_path
+        assert rename_args[1].endswith(".mp4") and not rename_args[1].endswith(".part")
 
     def test_clip_non200_logs_warning(self):
         """Clip: HTTP 503 → warning, open_file NOT called."""
@@ -1193,6 +1233,39 @@ class TestSmbClipUpload:
         # HTTP was called (to check clip) but file not written
         resp.__enter__.assert_called()
         fake_smb.open_file.assert_not_called()
+
+    def test_clip_open_file_failure_never_renamed(self):
+        """Bug fix (Area 5, item 4): a write failure (simulating a
+        network-abort mid-stream) must NOT call rename() — leaving the
+        partial data (if any) under the `.part` name, so `smb_stat` on the
+        real `.mp4` name still raises OSError on the NEXT sync pass and the
+        upload retries cleanly instead of treating the corrupt partial as
+        already-uploaded forever (the exact regression this fix closes)."""
+        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
+        coord = _smb_upload_coord()
+        fake_smb = _fake_smb()
+        fake_smb.stat.side_effect = OSError("not found")
+
+        fake_file = MagicMock()
+        fake_file.__enter__ = MagicMock(side_effect=OSError("connection aborted"))
+        fake_file.__exit__ = MagicMock(return_value=False)
+        fake_smb.open_file.return_value = fake_file
+
+        resp = _urlopen_resp(200, b"VIDDATA")
+
+        with (
+            patch.dict(sys.modules, {"smbclient": fake_smb}),
+            patch(f"{MODULE}.socket"),
+            patch(f"{MODULE}.smb_makedirs"),
+            patch(URLOPEN, return_value=resp),
+        ):
+            ev = _basic_event(image_url=None, clip_url="https://cdn.bosch.com/clip.mp4")
+            data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": [ev]}}
+            # Must not raise — the surrounding except logs and continues.
+            sync_smb_upload(coord, data, "tok")
+
+        fake_smb.rename.assert_not_called()
 
     def test_clip_urlopen_exception_logged_no_crash(self):
         """Timeout on clip urlopen → warning, no open_file for .mp4."""

@@ -14808,6 +14808,11 @@ class TestFcmWrappers:
                 "https://x/clip.mp4",
                 "ok",
                 event_id="",
+                # Bug fix (Area 3, minor): the mixin delegator now also
+                # forwards cam_id (was silently dropped before), so any
+                # future caller through it keeps the Path B cache-push
+                # behavior working.
+                cam_id="",
             )
 
     @pytest.mark.asyncio

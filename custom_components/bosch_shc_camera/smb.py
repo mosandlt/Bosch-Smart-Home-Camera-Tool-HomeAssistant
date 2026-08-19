@@ -6,7 +6,6 @@ All functions that previously used `self` now take a `coordinator` parameter.
 
 from __future__ import annotations
 
-import calendar
 import logging
 import os
 import socket
@@ -34,6 +33,8 @@ from bosch_shc_camera_client.media_transfer import (
 from bosch_shc_camera_client.media_transfer import (
     sync_http_get_to_file as _lib_sync_http_get_to_file,
 )
+
+from .time_utils import parse_bosch_timestamp
 
 if TYPE_CHECKING:
     from . import BoschCameraCoordinator
@@ -210,9 +211,16 @@ def sync_local_save(
     # Allow 60 s of slack for clock skew and network/processing delay.
     started_at = getattr(coordinator, "_download_started_at", 0.0)
     if started_at:
-        try:
-            struct = time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
-            ev_epoch = calendar.timegm(struct)
+        # Bug fix (B1, fcm.py cross-reference): the previous `ts[:19]` +
+        # calendar.timegm(time.strptime(...)) discarded the real timezone
+        # offset Bosch sends (e.g. "...+02:00[Europe/Berlin]") and
+        # re-labelled local wall-clock time as UTC. Use the shared,
+        # timezone-correct parser instead (see time_utils.py). Unparseable
+        # timestamp -> parse_bosch_timestamp returns None -> event proceeds
+        # without the age-filter, matching the prior behavior.
+        ev_dt = parse_bosch_timestamp(ts)
+        if ev_dt is not None:
+            ev_epoch = ev_dt.timestamp()
             if ev_epoch < started_at - 60:
                 _LOGGER.debug(
                     "Local save skipped: event %s predates session start (%.0fs old at startup)",
@@ -220,8 +228,6 @@ def sync_local_save(
                     started_at - ev_epoch,
                 )
                 return
-        except Exception:  # noqa: S110 # timestamp parse failure is non-actionable; event proceeds without age-filter
-            pass
 
     cam_safe = _safe_name(cam_name)
     date_str = ts[:10]
@@ -354,6 +360,7 @@ def sync_smb_upload(
         from smbclient import (
             open_file,
             register_session,
+            rename,
         )
         from smbclient import (
             stat as smb_stat,
@@ -387,7 +394,7 @@ def sync_smb_upload(
         socket.setdefaulttimeout(_SMB_TRANSFER_TIMEOUT)
         try:
             _sync_smb_upload_events(
-                coordinator, data, token, prefetched_image, open_file, smb_stat
+                coordinator, data, token, prefetched_image, open_file, smb_stat, rename
             )
         finally:
             socket.setdefaulttimeout(None)
@@ -400,6 +407,7 @@ def _sync_smb_upload_events(
     prefetched_image: bytes | None,
     open_file: Any,
     smb_stat: Any,
+    rename: Any,
 ) -> None:
     """Per-event SMB transfer loop, run under _SMB_TRANSFER_TIMEOUT.
 
@@ -527,6 +535,16 @@ def _sync_smb_upload_events(
                     smb_stat(smb_path)
                     _LOGGER.debug("SMB skip (exists): %s", file_base + ".mp4")
                 except OSError:
+                    # Bug fix (Area 5, item 4): a network abort mid-stream
+                    # used to leave a partial file directly at `smb_path` —
+                    # the `smb_stat(smb_path)` "already exists" skip-check
+                    # above then treated that corrupt partial as done on
+                    # every future retry, never repairing it. Write to a
+                    # `.part` temp name and rename-on-success instead: a
+                    # partial/aborted upload then never satisfies the
+                    # "exists" check under the real final name, forcing a
+                    # clean retry next time.
+                    tmp_path = f"{smb_path}.part"
                     try:
                         total = 0
                         req_obj = urllib.request.Request(  # noqa: S310 # Bosch cloud clip URL, https+bearer; guarded by _is_safe_bosch_url above
@@ -536,13 +554,14 @@ def _sync_smb_upload_events(
                             req_obj, context=_bosch_ssl_ctx(), timeout=60
                         ) as r:
                             if r.status == 200:
-                                with open_file(smb_path, mode="wb") as f:
+                                with open_file(tmp_path, mode="wb") as f:
                                     while True:
                                         chunk = r.read(65536)
                                         if not chunk:
                                             break
                                         f.write(chunk)
                                         total += len(chunk)
+                                rename(tmp_path, smb_path)
                                 _LOGGER.info(
                                     "SMB uploaded: %s (%d bytes)",
                                     file_base + ".mp4",

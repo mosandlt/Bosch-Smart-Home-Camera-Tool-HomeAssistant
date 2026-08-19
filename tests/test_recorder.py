@@ -179,6 +179,32 @@ class TestSecondsSinceEvent:
         assert age is not None
         assert 0 <= age < 5
 
+    def test_timezone_offset_not_mislabeled_as_utc(self):
+        """Bug fix (B1 cross-reference, fcm.py's `_event_predates_session`
+        found the same root cause): the previous `[:19]` +
+        calendar.timegm(time.strptime(...)) discarded Bosch's real timezone
+        offset and re-labelled local wall-clock time as UTC. In CEST
+        (+02:00), a genuinely brand-new event was computed as ~7200s old.
+        A timestamp carrying "now, expressed in +02:00" must compute an age
+        near 0, not near 7200."""
+        from datetime import UTC, datetime, timedelta
+
+        from custom_components.bosch_shc_camera.recorder import _seconds_since_event
+
+        now_utc = datetime.now(UTC)
+        # Same instant, but expressed in +02:00 local wall-clock time —
+        # matches Bosch's real live format
+        # "2026-06-18T06:06:30.499+02:00[Europe/Berlin]".
+        local_wall_clock = now_utc + timedelta(hours=2)
+        ts = local_wall_clock.strftime("%Y-%m-%dT%H:%M:%S") + "+02:00"
+
+        age = _seconds_since_event(ts)
+        assert age is not None
+        assert abs(age) < 5, (
+            f"expected age near 0 for a 'right now' event, got {age}s — "
+            "the +02:00 offset is being mislabeled as UTC again"
+        )
+
 
 class TestBuildFfmpegArgs:
     """The exact ffmpeg argv is the contract surface against ffmpeg upstream
