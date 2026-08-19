@@ -1805,6 +1805,24 @@ class _FakeFcmPushClient:
     def _try_increment_error_count(self, err_type) -> bool:
         return True
 
+    credentials: dict | None = None
+    callback = None
+    callback_context = None
+
+    def _app_data_by_key(self, p, key: str, do_not_raise: bool = False) -> str:
+        """Required signature: self, msg, key, do_not_raise=False."""
+        for x in p.app_data:
+            if x.key == key:
+                return x.value
+        if do_not_raise:
+            return ""
+        raise RuntimeError(f"couldn't find in app_data {key}")
+
+    def _handle_data_message(self, msg) -> None:
+        """Required signature: self, msg."""
+
+    def _reset_error_count(self, err_type) -> None: ...
+
 
 def _make_firebase_module() -> ModuleType:
     """Build a fake firebase_messaging module."""
@@ -1815,7 +1833,7 @@ def _make_firebase_module() -> ModuleType:
 
     # Sub-module for ErrorType
     sub = ModuleType("firebase_messaging.fcmpushclient")
-    sub.ErrorType = SimpleNamespace(CONNECTION="connection")
+    sub.ErrorType = SimpleNamespace(CONNECTION="connection", NOTIFY="notify")
     sys.modules["firebase_messaging.fcmpushclient"] = sub
 
     return mod
@@ -2229,6 +2247,414 @@ class TestPatchedDecryptRawData:
             "padding/decode error — this is the exact distinction "
             "_listen()'s except clause relies on"
         )
+
+
+class TestExtractCryptoHeader:
+    """_extract_crypto_header() — matches upstream sdb9696/firebase-messaging
+    #42 + #44 (both open, unmerged as of 2026-08): the blind header[3:]/
+    header[5:] slice in upstream's _handle_data_message() corrupts real
+    key bytes for header shapes it doesn't anticipate."""
+
+    def test_plain_prefixed_header(self):
+        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+
+        assert _extract_crypto_header("dh=AAAA", "dh=") == "AAAA"
+
+    def test_multi_segment_header_drops_trailing_vapid_segment(self):
+        """GitHub #44: a real Crypto-Key header can carry a trailing
+        p256ecdsa= (VAPID) segment separated by ';' — upstream's blind
+        slice leaves it appended to the key bytes."""
+        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+
+        assert _extract_crypto_header("dh=AAAA; p256ecdsa=BBBB", "dh=") == "AAAA"
+
+    def test_header_without_expected_prefix_passed_through(self):
+        """GitHub #42: a header not literally starting with 'dh='/'salt=' must
+        NOT be truncated by a blind slice — removeprefix() is a no-op when
+        the prefix is absent."""
+        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+
+        assert _extract_crypto_header("AAAA", "dh=") == "AAAA"
+
+    def test_whitespace_around_segment_stripped(self):
+        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+
+        assert _extract_crypto_header(" salt=AAAA ", "salt=") == "AAAA"
+
+    def test_prefix_segment_not_first_still_found(self):
+        """Bug-hunt finding (2026-08-19): RFC 8291/8188 do not fix segment
+        order — a VAPID p256ecdsa= segment (or an RFC 8188 rs=/keyid=
+        parameter) can legally precede dh=/salt=. A first-segment-only scan
+        silently returns the WRONG value (the VAPID key, not the real DH
+        key) instead of failing loudly."""
+        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+
+        assert _extract_crypto_header("p256ecdsa=BBBB;dh=AAAA", "dh=") == "AAAA"
+        assert _extract_crypto_header("rs=4096;salt=CCCC", "salt=") == "CCCC"
+        assert _extract_crypto_header("keyid=p256dh;salt=CCCC", "salt=") == "CCCC"
+
+    def test_comma_separated_element_list(self):
+        """Crypto-Key/Encryption are also ',' separated element lists per
+        RFC 8188's ABNF, not just ';' separated parameter lists — this is
+        the #44 corruption shape verbatim when the comma form is used."""
+        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+
+        assert _extract_crypto_header("dh=AAAA,p256ecdsa=BBBB", "dh=") == "AAAA"
+        assert _extract_crypto_header("p256ecdsa=BBBB,dh=AAAA", "dh=") == "AAAA"
+
+    def test_case_insensitive_prefix_match(self):
+        """Bug-hunt finding (2026-08-19): HTTP header parameter names are
+        case-insensitive; upstream's positional header[3:]/header[5:] slice
+        tolerated 'DH='/'Salt=' (wrong prefix text, but the slice offset is
+        purely positional). A literal-case-only removeprefix() would be a
+        REGRESSION versus upstream for this shape, not just an incomplete
+        fix."""
+        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+
+        assert _extract_crypto_header("DH=AAAA", "dh=") == "AAAA"
+        assert _extract_crypto_header("Salt=CCCC", "salt=") == "CCCC"
+
+    def test_whitespace_after_prefix_stripped(self):
+        """Bug-hunt finding (2026-08-19): a space between '=' and the value
+        (e.g. 'dh= AAAA') must not survive prefix removal — it would throw
+        off _decode_message_header's padding-length math (a2b_base64
+        discards the space but len() would still count it)."""
+        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+
+        assert _extract_crypto_header("dh= AAAA", "dh=") == "AAAA"
+
+    def test_no_matching_segment_falls_back_to_stripped_raw(self):
+        """When no segment matches the prefix at all, pass the whole
+        (stripped) raw string through unmodified rather than guessing which
+        segment might be intended."""
+        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+
+        assert (
+            _extract_crypto_header(" keyid=p256dh;p256ecdsa=BBBB ", "dh=")
+            == "keyid=p256dh;p256ecdsa=BBBB"
+        )
+
+
+class TestBuildHandleDataMessageOverride:
+    """_build_handle_data_message_override()'s signature-guard degradation
+    paths, mirroring TestPatchedClassCreation's coverage for the sibling
+    _decrypt_raw_data override."""
+
+    def setup_method(self):
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        self._orig = fcm_mod._QuietFcmPushClient._patched_class
+        fcm_mod._QuietFcmPushClient._patched_class = False
+
+    def teardown_method(self):
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = self._orig
+        _uninstall_firebase_module()
+
+    def test_patch_class_result_has_handle_data_message_override(self):
+        _install_firebase_module()
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        patched = fcm_mod._QuietFcmPushClient._patch_class()
+
+        assert patched is not None
+        assert "_handle_data_message" in patched.__dict__, (
+            "_Patched must define its own _handle_data_message (not inherit "
+            "upstream's blind header[3:]/header[5:] slice)"
+        )
+
+    def test_degrades_gracefully_if_signature_changed(self):
+        """If _handle_data_message() gains/loses parameters (library
+        upgrade), _patch_class must NOT return None — this override is
+        independent of _listen/_decrypt_raw_data, so only it should degrade."""
+        _install_firebase_module()
+        original = _FakeFcmPushClient._handle_data_message
+
+        def _handle_data_message_with_extra(self, msg, extra) -> None: ...
+
+        _FakeFcmPushClient._handle_data_message = _handle_data_message_with_extra
+
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        try:
+            result = fcm_mod._QuietFcmPushClient._patch_class()
+        finally:
+            _FakeFcmPushClient._handle_data_message = original
+
+        assert result is not None
+        assert "_handle_data_message" not in result.__dict__, (
+            "the header-extraction fix must NOT be attached when the "
+            "upstream signature no longer matches"
+        )
+        assert "_listen" in result.__dict__
+        assert "_decrypt_raw_data" in result.__dict__
+
+    def test_returns_none_if_handle_data_message_missing_entirely(self):
+        _install_firebase_module()
+        original = _FakeFcmPushClient._handle_data_message
+        del _FakeFcmPushClient._handle_data_message
+
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        try:
+            result = fcm_mod._QuietFcmPushClient._patch_class()
+        finally:
+            _FakeFcmPushClient._handle_data_message = original
+
+        assert result is not None
+        assert "_handle_data_message" not in result.__dict__
+
+    def test_returns_none_if_error_type_unimportable(self):
+        from custom_components.bosch_shc_camera.fcm import (
+            _build_handle_data_message_override,
+        )
+
+        _sentinel = object()
+        orig = sys.modules.get("firebase_messaging.fcmpushclient", _sentinel)
+        sys.modules["firebase_messaging.fcmpushclient"] = None  # type: ignore[assignment]
+        try:
+            override = _build_handle_data_message_override(_FakeFcmPushClient)
+        finally:
+            if orig is _sentinel:
+                sys.modules.pop("firebase_messaging.fcmpushclient", None)
+            else:
+                sys.modules["firebase_messaging.fcmpushclient"] = orig
+
+        assert override is None
+
+    def test_returns_none_if_dependent_helper_missing(self):
+        """Bug-hunt finding (2026-08-19): the replicated body depends on SIX
+        other private upstream methods beyond _handle_data_message's own
+        signature. If one of them (e.g. _app_data_by_key) is renamed/removed
+        by a future firebase_messaging release, the guard must catch that
+        too — not just _handle_data_message's own signature — else the
+        override would attach and AttributeError on the very first message,
+        escaping _listen()'s narrow skip_exceptions and reintroducing the
+        2026-08-18 crash-loop class."""
+        _install_firebase_module()
+        original = _FakeFcmPushClient._app_data_by_key
+        del _FakeFcmPushClient._app_data_by_key
+
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        try:
+            result = fcm_mod._QuietFcmPushClient._patch_class()
+        finally:
+            _FakeFcmPushClient._app_data_by_key = original
+
+        assert result is not None
+        assert "_handle_data_message" not in result.__dict__, (
+            "must not attach a body whose dependency is missing — would "
+            "AttributeError on the first real message"
+        )
+        assert "_listen" in result.__dict__
+        assert "_decrypt_raw_data" in result.__dict__
+
+    def test_returns_none_if_handle_data_message_is_coroutine_function(self):
+        """Bug-hunt finding (2026-08-19): our replica is deliberately sync.
+        If a future firebase_messaging release makes _handle_data_message an
+        `async def` (matching (self, msg) exactly, so the plain signature
+        check alone wouldn't catch it), installing our sync override would
+        TypeError on the next message instead of being awaited."""
+        _install_firebase_module()
+        original = _FakeFcmPushClient._handle_data_message
+
+        async def _handle_data_message_async(self, msg) -> None: ...
+
+        _FakeFcmPushClient._handle_data_message = _handle_data_message_async
+
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        try:
+            result = fcm_mod._QuietFcmPushClient._patch_class()
+        finally:
+            _FakeFcmPushClient._handle_data_message = original
+
+        assert result is not None
+        assert "_handle_data_message" not in result.__dict__
+
+
+class TestPatchedHandleDataMessage:
+    """End-to-end correctness of the crypto-key/salt header-extraction fix
+    (matches upstream sdb9696/firebase-messaging#42 + #44, both open as of
+    2026-08): the patched _handle_data_message must pass the CORRECTLY
+    extracted crypto_key/salt into _decrypt_raw_data, not upstream's
+    blindly-sliced (and, for these header shapes, corrupted) values."""
+
+    def setup_method(self):
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        self._orig = fcm_mod._QuietFcmPushClient._patched_class
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        _install_firebase_module()
+
+    def teardown_method(self):
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = self._orig
+        _uninstall_firebase_module()
+
+    def _make_msg(self, crypto_key: str, encryption: str, subtype: str = "app-1"):
+        return SimpleNamespace(
+            stream_id=1,
+            last_stream_id_received=1,
+            status=None,
+            persistent_id="msg-1",
+            raw_data=b"ciphertext",
+            app_data=[
+                SimpleNamespace(key="crypto-key", value=crypto_key),
+                SimpleNamespace(key="encryption", value=encryption),
+                SimpleNamespace(key="subtype", value=subtype),
+            ],
+        )
+
+    def test_multi_segment_crypto_key_decrypted_with_extracted_value(self):
+        """GitHub #44 reproduction: a real 'dh=<key>; p256ecdsa=<vapid>'
+        header must reach _decrypt_raw_data as just '<key>', not upstream's
+        corrupted blind-slice result."""
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        patched = fcm_mod._QuietFcmPushClient._patch_class()
+        assert patched is not None
+
+        client = patched.__new__(patched)
+        client.credentials = {"gcm": {"app_id": "app-1"}}
+        client.callback_context = None
+        recorded = {}
+
+        def _fake_decrypt(credentials, crypto_key_str, salt_str, raw_data):
+            recorded["crypto_key_str"] = crypto_key_str
+            recorded["salt_str"] = salt_str
+            return b'{"ok": true}'
+
+        client._decrypt_raw_data = _fake_decrypt
+
+        def _fake_callback(ret_val, persistent_id, context):
+            recorded["ret_val"] = ret_val
+
+        client.callback = _fake_callback
+
+        msg = self._make_msg("dh=AAAA; p256ecdsa=BBBB", "salt=CCCC")
+        patched._handle_data_message(client, msg)
+
+        assert recorded["crypto_key_str"] == "AAAA"
+        assert recorded["salt_str"] == "CCCC"
+        assert recorded["ret_val"] == {"ok": True}
+
+    def test_subtype_mismatch_logs_warning_but_still_decrypts(self):
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        patched = fcm_mod._QuietFcmPushClient._patch_class()
+        assert patched is not None
+
+        client = patched.__new__(patched)
+        client.credentials = {"gcm": {"app_id": "registered-app"}}
+        client.callback_context = None
+        client._decrypt_raw_data = lambda *a, **kw: b'{"ok": true}'
+        client.callback = MagicMock()
+        client._log_warn_with_limit = MagicMock()
+
+        msg = self._make_msg("dh=AAAA", "salt=CCCC", subtype="other-app")
+        patched._handle_data_message(client, msg)
+
+        assert client._log_warn_with_limit.called
+        client.callback.assert_called_once()
+
+    def test_undecryptable_payload_logs_warning(self):
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        patched = fcm_mod._QuietFcmPushClient._patch_class()
+        assert patched is not None
+
+        client = patched.__new__(patched)
+        client.credentials = {"gcm": {"app_id": "app-1"}}
+        client.callback_context = None
+        client._decrypt_raw_data = lambda *a, **kw: b"not-json-and-falsy-check"
+        client.callback = MagicMock()
+        client._log_warn_with_limit = MagicMock()
+
+        msg = self._make_msg("dh=AAAA", "salt=CCCC")
+        patched._handle_data_message(client, msg)
+
+        assert client._log_warn_with_limit.called
+
+    def test_non_dict_decrypted_json_wrapped_in_message_key(self):
+        """A JSON payload that decodes to a non-dict (e.g. a bare list) must
+        be wrapped as {"message": ...} before reaching the callback, matching
+        upstream's own contract with callers."""
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        patched = fcm_mod._QuietFcmPushClient._patch_class()
+        assert patched is not None
+
+        client = patched.__new__(patched)
+        client.credentials = {"gcm": {"app_id": "app-1"}}
+        client.callback_context = None
+        client._decrypt_raw_data = lambda *a, **kw: b"[1, 2, 3]"
+        recorded = {}
+        client.callback = lambda ret_val, *a, **kw: recorded.update(ret_val=ret_val)
+
+        msg = self._make_msg("dh=AAAA", "salt=CCCC")
+        patched._handle_data_message(client, msg)
+
+        assert recorded["ret_val"] == {"message": [1, 2, 3]}
+
+    def test_callback_exception_is_caught_and_logged(self):
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        patched = fcm_mod._QuietFcmPushClient._patch_class()
+        assert patched is not None
+
+        client = patched.__new__(patched)
+        client.credentials = {"gcm": {"app_id": "app-1"}}
+        client.callback_context = None
+        client._decrypt_raw_data = lambda *a, **kw: b'{"ok": true}'
+
+        def _raising_callback(*a, **kw):
+            raise RuntimeError("boom")
+
+        client.callback = _raising_callback
+        client._try_increment_error_count = MagicMock()
+
+        msg = self._make_msg("dh=AAAA", "salt=CCCC")
+        patched._handle_data_message(client, msg)  # must not raise
+
+        client._try_increment_error_count.assert_called_once()
+
+    def test_deleted_messages_short_circuits(self):
+        import custom_components.bosch_shc_camera.fcm as fcm_mod
+
+        fcm_mod._QuietFcmPushClient._patched_class = False
+        patched = fcm_mod._QuietFcmPushClient._patch_class()
+        assert patched is not None
+
+        client = patched.__new__(patched)
+        client.credentials = {"gcm": {"app_id": "app-1"}}
+        called = {"decrypt": False}
+        client._decrypt_raw_data = lambda *a, **kw: called.__setitem__("decrypt", True)
+
+        msg = SimpleNamespace(
+            stream_id=1,
+            last_stream_id_received=1,
+            status=None,
+            persistent_id="msg-1",
+            raw_data=b"",
+            app_data=[SimpleNamespace(key="message_type", value="deleted_messages")],
+        )
+        patched._handle_data_message(client, msg)
+
+        assert called["decrypt"] is False
 
 
 class TestGetFcmPushClientClassCachedPath:

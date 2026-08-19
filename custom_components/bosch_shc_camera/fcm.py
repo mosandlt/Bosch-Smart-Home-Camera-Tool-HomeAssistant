@@ -17,6 +17,8 @@ import asyncio
 import base64
 import binascii
 import calendar
+import contextlib
+import json
 import logging
 import os
 import ssl
@@ -461,6 +463,174 @@ def _build_decrypt_raw_data_override(
     return _decrypt_raw_data, skip_exceptions
 
 
+def _extract_crypto_header(raw: str, prefix: str) -> str:
+    """Extract a per-message crypto-key/salt header's value, tolerating the
+    real-world header shapes upstream's blind slice gets wrong.
+
+    Matches upstream sdb9696/firebase-messaging#42 + #44 (both open,
+    unmerged as of 2026-08). Upstream's ``_handle_data_message`` does
+    ``header[3:]``/``header[5:]`` assuming the ``crypto-key``/``encryption``
+    header ALWAYS starts with exactly ``"dh="``/``"salt="``, is the FIRST
+    (and only) ``;``-separated segment, and matches case-exactly. None of
+    that is guaranteed:
+    - ``Crypto-Key``/``Encryption`` are ``;``-separated parameter lists AND
+      (per RFC 8188's ABNF) ``,``-separated element lists — the wanted
+      parameter (``dh=``/``salt=``) is not required to come first; a VAPID
+      ``p256ecdsa=`` segment or an RFC-8188 ``rs=``/``keyid=`` parameter can
+      legally precede it in either separator form (#44's reported shape and
+      its generalizations). A first-segment-only scan silently returns the
+      WRONG value instead of the real key/salt bytes.
+    - HTTP header parameter names are case-insensitive; a producer emitting
+      ``DH=``/``Salt=`` is legal and upstream's positional slice tolerates
+      it, so a literal-case-only match here would be a regression versus
+      upstream, not just an incomplete fix (#42's more general framing).
+    - Whitespace can surround a ``;``-segment; after removing the prefix,
+      leftover whitespace between ``=`` and the value would throw off the
+      padding math in :func:`_decode_message_header` (base64 length
+      computed including a space `a2b_base64` itself discards).
+    All three corrupt the extracted bytes just enough to still base64-decode
+    but fail EC-point validation, surfacing live here as "Invalid EC key."
+    — our own padding/skip fixes above then correctly skip the message
+    instead of crashing the client, but the message is lost for no reason:
+    it was decryptable all along. Scans every segment across both
+    separators for a case-insensitive prefix match; falls back to the whole
+    (stripped) raw string, unmodified, if no segment matches at all —
+    passing an unexpected shape through rather than guessing.
+    """
+    for element in raw.split(","):
+        for segment in element.split(";"):
+            stripped = segment.strip()
+            if stripped.lower().startswith(prefix.lower()):
+                return stripped[len(prefix) :].strip()
+    return raw.strip()
+
+
+def _build_handle_data_message_override(
+    fcm_push_client_cls: type,
+) -> Callable[[Any, Any], None] | None:
+    """Build the corrected ``_handle_data_message()`` override, or ``None``
+    if the upstream signature no longer matches what this replicates.
+
+    Deliberately independent of the ``_listen``/``_decrypt_raw_data``
+    overrides: if this degrades, both of those keep working. The method
+    body below is byte-identical to the installed ``firebase_messaging``
+    version except the ``crypto_key``/``salt`` extraction lines, which use
+    :func:`_extract_crypto_header` instead of upstream's blind
+    ``header[3:]``/``header[5:]`` slice (see its docstring).
+
+    Unlike ``_build_decrypt_raw_data_override`` (a leaf function guarded by
+    its own signature alone), the replicated body here also calls SIX other
+    private upstream methods (``_app_data_by_key``, ``_log_warn_with_limit``,
+    ``_log_verbose``, ``_reset_error_count``, ``_try_increment_error_count``,
+    ``_decrypt_raw_data``) that a future ``firebase_messaging`` release could
+    rename/reshape/remove independently of ``_handle_data_message``'s own
+    signature — the guard below checks all of them are still present and
+    callable, not just the entry point, so an upstream change elsewhere in
+    that dependency set can't silently attach a body that AttributeErrors at
+    runtime (which would escape ``_listen``'s narrow ``skip_exceptions`` and
+    reintroduce the exact 2026-08-18 crash-loop class on a path that
+    couldn't fail that way before this override existed). Also rejects an
+    upstream ``_handle_data_message`` that became a coroutine function — our
+    replica is deliberately sync (matching every 0.4.x release), and
+    installing a sync override under a caller that now ``await``s the
+    result would TypeError on the very next message.
+    """
+    import inspect
+
+    handler = getattr(fcm_push_client_cls, "_handle_data_message", None)
+    required_helpers = (
+        "_app_data_by_key",
+        "_log_warn_with_limit",
+        "_log_verbose",
+        "_reset_error_count",
+        "_try_increment_error_count",
+        "_decrypt_raw_data",
+    )
+    if (
+        handler is None
+        or inspect.iscoroutinefunction(handler)
+        or list(inspect.signature(handler).parameters) != ["self", "msg"]
+        or not all(
+            callable(getattr(fcm_push_client_cls, name, None))
+            for name in required_helpers
+        )
+    ):
+        _LOGGER.debug(
+            "FCM subclass: upstream _handle_data_message() missing, async, "
+            "its signature changed, or a helper it depends on is missing — "
+            "crypto-key/salt header extraction fix not applied "
+            "(padding/skip fixes still active)"
+        )
+        return None
+
+    try:
+        from firebase_messaging.fcmpushclient import ErrorType as _ErrorType
+    except ImportError:
+        _LOGGER.debug(
+            "FCM subclass: firebase_messaging.ErrorType unavailable — "
+            "crypto-key/salt header extraction fix not applied"
+        )
+        return None
+
+    def _handle_data_message(self: Any, msg: Any) -> None:
+        _LOGGER.debug(
+            "Received data message Stream ID: %s, Last: %s, Status: %s",
+            msg.stream_id,
+            msg.last_stream_id_received,
+            msg.status,
+        )
+
+        if (
+            self._app_data_by_key(msg, "message_type", do_not_raise=True)
+            == "deleted_messages"
+        ):
+            # The deleted_messages message does not contain data.
+            return
+        crypto_key = _extract_crypto_header(
+            self._app_data_by_key(msg, "crypto-key"), "dh="
+        )
+        salt = _extract_crypto_header(self._app_data_by_key(msg, "encryption"), "salt=")
+        subtype = self._app_data_by_key(msg, "subtype")
+        if TYPE_CHECKING:
+            assert self.credentials
+        if subtype != self.credentials["gcm"]["app_id"]:
+            self._log_warn_with_limit(
+                "Subtype %s in data message does not match"
+                + "app id client was registered with %s",
+                subtype,
+                self.credentials["gcm"]["app_id"],
+            )
+        if not self.credentials:  # pragma: no cover — self.credentials[...] above
+            # already dereferences unconditionally; a falsy self.credentials
+            # crashes there first (matches upstream's own identical ordering,
+            # replicated as-is — not this fix's scope to change).
+            return
+        decrypted = self._decrypt_raw_data(
+            self.credentials, crypto_key, salt, msg.raw_data
+        )
+        decrypted_json = None
+        with contextlib.suppress(json.JSONDecodeError, ValueError):
+            decrypted_json = json.loads(decrypted.decode("utf-8"))
+
+        if not decrypted_json:
+            self._log_warn_with_limit(
+                "Failed to decrypt data for message %s", msg.persistent_id
+            )
+
+        ret_val = decrypted_json if decrypted_json else decrypted
+        self._log_verbose("Data for message %s is: %s", msg.persistent_id, ret_val)
+        try:
+            if not isinstance(ret_val, dict):
+                ret_val = {"message": ret_val}
+            self.callback(ret_val, msg.persistent_id, self.callback_context)
+            self._reset_error_count(_ErrorType.NOTIFY)
+        except Exception:
+            _LOGGER.exception("Unexpected exception calling notification callback\n")
+            self._try_increment_error_count(_ErrorType.NOTIFY)
+
+    return _handle_data_message
+
+
 class _QuietFcmPushClient:
     """FcmPushClient subclass that fixes the upstream state-machine bug described in
     github.com/sdb9696/firebase-messaging#33.
@@ -525,6 +695,13 @@ class _QuietFcmPushClient:
         # working — only the #68 padding improvement itself should degrade, not
         # the whole patched class. See _build_decrypt_raw_data_override().
         decrypt_override, skip_exceptions = _build_decrypt_raw_data_override(
+            FcmPushClient
+        )
+
+        # Likewise independent of the two overrides above: fixes upstream's
+        # blind crypto-key/salt header slice (sdb9696/firebase-messaging#42
+        # + #44). See _build_handle_data_message_override().
+        handle_data_message_override = _build_handle_data_message_override(
             FcmPushClient
         )
 
@@ -786,6 +963,8 @@ class _QuietFcmPushClient:
 
         if decrypt_override is not None:
             _Patched._decrypt_raw_data = staticmethod(decrypt_override)
+        if handle_data_message_override is not None:
+            _Patched._handle_data_message = handle_data_message_override
 
         return _Patched
 
