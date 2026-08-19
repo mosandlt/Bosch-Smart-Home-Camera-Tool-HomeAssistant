@@ -697,9 +697,6 @@
           "disabled": "Desactivado"
         }
       },
-      "unread_events": {
-        "name": "Eventos Não Lidos"
-      },
       "commissioned": {
         "name": "Estado de Comissionamento"
       },

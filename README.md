@@ -882,7 +882,6 @@ sequenceDiagram
 | Motion detected | `binary_sensor` | disabled by default |
 | Audio alarm detected | `binary_sensor` | disabled by default |
 | Person detected | `binary_sensor` | disabled by default |
-| Unread events count | `sensor` | disabled by default |
 | Privacy sound (360 only) | `switch` | enabled (config category) |
 | Commissioned status | `sensor` | diagnostic, disabled by default |
 | Trigger siren (Gen2 only) | `switch` | disabled by default — stateful ON/OFF via `PUT /panic_alarm`. Gen1 hardware has no integrated siren and gets no entity. |

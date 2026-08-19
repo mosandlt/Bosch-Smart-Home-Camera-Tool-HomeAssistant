@@ -298,7 +298,6 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
     assert isinstance(coord.fcm_lock, threading.Lock().__class__)
 
     # ── Misc caches ────────────────────────────────────────────────────
-    assert coord.unread_events_cache == {}
     assert coord.privacy_sound_cache == {}
     assert coord.commissioned_cache == {}
     assert coord.feature_flags == {}
@@ -20130,7 +20129,6 @@ def _make_coord_sprint_ka(**overrides):
         # Additional slow-tier caches (needed if do_slow=True)
         ambient_light_cache={},
         firmware_cache={},
-        unread_events_cache={},
         privacy_sound_cache={},
         timestamp_cache={},
         notifications_cache={},
@@ -22414,7 +22412,6 @@ def _make_coord_full(cam_id: str = CAM_A, **overrides):
         _event_dedup_cache={},
         alert_sent_ids={},
         firmware_cache={},
-        unread_events_cache={},
         privacy_sound_cache={},
         commissioned_cache={},
         timestamp_cache={},
@@ -23089,7 +23086,6 @@ class TestSlowTier:
                     "ambientLightSensorLevel": 0.5
                 },
                 f"/v11/video_inputs/{CAM_A}/recording_options": {},
-                f"/v11/video_inputs/{CAM_A}/unread_events_count": {"count": 0},
                 f"/v11/video_inputs/{CAM_A}/privacy_sound_override": {"result": False},
                 f"/v11/video_inputs/{CAM_A}/commissioned": {
                     "connected": True,
@@ -26802,7 +26798,6 @@ def _make_coord_sprint_lb(**overrides):
         pan_cache={},
         ambient_light_cache={},
         firmware_cache={},
-        unread_events_cache={},
         privacy_sound_cache={},
         timestamp_cache={},
         notifications_cache={},
@@ -28182,7 +28177,6 @@ def _make_coord_for_update_data(**overrides):
         # Slow-tier caches (populated by tests)
         ambient_light_cache={},
         firmware_cache={},
-        unread_events_cache={},
         privacy_sound_cache={},
         timestamp_cache={},
         notifications_cache={},
@@ -28278,7 +28272,6 @@ def _build_slow_tier_routes(cam_info: dict, extra_routes: dict | None = None) ->
         f"{cid}/audioAlarm": _make_resp_sprint_lc(200, {"sensitivity": 50}),
         f"{cid}/firmware": _make_resp_sprint_lc(200, {"version": "9.40.25"}),
         f"{cid}/recording_options": _make_resp_sprint_lc(200, {"enabled": False}),
-        f"{cid}/unread_events_count": _make_resp_sprint_lc(200, {"count": 0}),
         f"{cid}/commissioned": _make_resp_sprint_lc(200, {"connected": True}),
         f"{cid}/timestamp": _make_resp_sprint_lc(200, {"result": False}),
         f"{cid}/notifications": _make_resp_sprint_lc(200, []),
@@ -28570,32 +28563,6 @@ class TestSlowTierAudio:
 
         assert coord.audio_cache.get(CAM_A) == expected, (
             "audio_cache must be populated from audio endpoint response"
-        )
-
-
-class TestSlowTierUnreadEventsNumeric:
-    """Lines 1982-1983: unread_events_count is int/float (not dict) → cache = int(ep_data)."""
-
-    @pytest.mark.asyncio
-    async def test_slow_tier_unread_events_count_numeric(self):
-        """unread_events_count returns numeric 5 → unread_events_cache[cam] = 5."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
-
-        coord = _make_coord_for_update_data(
-            _last_slow=float("-inf"),
-            cached_status={CAM_A: "ONLINE"},
-        )
-
-        # Return a raw int-like response (numeric, not dict)
-        routes = _build_slow_tier_routes(CAM_GEN2_INDOOR)
-        routes[f"{CAM_A}/unread_events_count"] = _make_resp_sprint_lc(200, 5)
-        session = _make_session_fn(routes)
-
-        with patch(_PATCH_SESSION, new=AsyncMock(return_value=session)):
-            await BoschCameraCoordinator._async_update_data(coord)
-
-        assert coord.unread_events_cache.get(CAM_A) == 5, (
-            "unread_events_cache must be int(5) when endpoint returns numeric"
         )
 
 
@@ -30027,7 +29994,6 @@ def _make_coord_for_update_data_sprint_mc(**overrides):
         pan_cache={},
         ambient_light_cache={},
         firmware_cache={},
-        unread_events_cache={},
         privacy_sound_cache={},
         timestamp_cache={},
         notifications_cache={},
@@ -30113,7 +30079,6 @@ def _build_slow_tier_routes_sprint_mc(
         f"{cid}/audioAlarm": _make_resp_sprint_mc(200, {"sensitivity": 50}),
         f"{cid}/firmware": _make_resp_sprint_mc(200, {"version": "9.40.25"}),
         f"{cid}/recording_options": _make_resp_sprint_mc(200, {"enabled": False}),
-        f"{cid}/unread_events_count": _make_resp_sprint_mc(200, {"count": 0}),
         f"{cid}/commissioned": _make_resp_sprint_mc(200, {"connected": True}),
         f"{cid}/timestamp": _make_resp_sprint_mc(200, {"result": False}),
         f"{cid}/notifications": _make_resp_sprint_mc(200, []),
@@ -35899,7 +35864,6 @@ def _build_slow_tier_routes_scattered_coverage(
         f"{cid}/recording_options": _make_resp_scattered_coverage(
             200, {"enabled": False}
         ),
-        f"{cid}/unread_events_count": _make_resp_scattered_coverage(200, {"count": 0}),
         f"{cid}/commissioned": _make_resp_scattered_coverage(200, {"connected": True}),
         f"{cid}/timestamp": _make_resp_scattered_coverage(200, {"result": False}),
         f"{cid}/notifications": _make_resp_scattered_coverage(200, []),
@@ -35989,7 +35953,6 @@ def _make_update_data_coord(**overrides):
         pan_cache={},
         ambient_light_cache={},
         firmware_cache={},
-        unread_events_cache={},
         privacy_sound_cache={},
         timestamp_cache={},
         notifications_cache={},
@@ -36682,9 +36645,6 @@ class TestLanDiagnosticSensorsException:
                     "ambientLightSensorLevel": 0.5
                 },
                 f"/v11/video_inputs/{CAM_ID_coverage_gaps_v13}/recording_options": {},
-                f"/v11/video_inputs/{CAM_ID_coverage_gaps_v13}/unread_events_count": {
-                    "count": 0
-                },
                 f"/v11/video_inputs/{CAM_ID_coverage_gaps_v13}/privacy_sound_override": {
                     "result": False
                 },

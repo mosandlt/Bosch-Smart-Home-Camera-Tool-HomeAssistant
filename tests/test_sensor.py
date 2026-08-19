@@ -3939,7 +3939,6 @@ def _stub_coord_bugfixes(**overrides: object) -> SimpleNamespace:
         nvr_user_intent={},
         nvr_preroll_segment_counts={},
         nvr_preroll_processes={},
-        unread_events_cache={},
         rules_cache={},
         feature_flags={},
         rcp_onvif_scopes_cache={},
@@ -4395,7 +4394,6 @@ def _stub_coord_edge_cases(**overrides):
         stream_error_count={},
         ambient_lighting_cache={},
         rcp_dimmer_cache={},
-        unread_events_cache={},
         rules_cache={},
         rcp_alarm_catalog_cache={},
         rcp_motion_zones_cache={},
@@ -4871,7 +4869,7 @@ class TestAmbientLightScheduleAttributes:
 #   BoschClockOffsetSensor, BoschMotionSensitivitySensor, BoschAudioAlarmSensor,
 #   BoschLastEventTypeSensor, BoschMovementEventsTodaySensor,
 #   BoschAudioEventsTodaySensor, BoschFcmPushStatusSensor,
-#   BoschUnreadEventsCountSensor, BoschCommissionedSensor, BoschRulesCountSensor,
+#   BoschCommissionedSensor, BoschRulesCountSensor,
 #   BoschAlarmCatalogSensor, BoschMotionZonesSensor, BoschTlsCertSensor,
 #   BoschNetworkServicesSensor, BoschIvaCatalogSensor, BoschPrivateAreasSensor,
 #   BoschAmbientLightScheduleSensor, BoschAlarmStateSensor
@@ -4903,7 +4901,6 @@ def _make_broad_sensor_coord(**overrides):
         wifiinfo_cache={},
         ambient_light_cache={},
         rcp_dimmer_cache={},
-        unread_events_cache={},
         rules_cache={},
         rcp_alarm_catalog_cache={},
         rcp_motion_zones_cache={},
@@ -5531,26 +5528,6 @@ def test_fcm_status_extra_attrs_last_push():
     assert attrs["last_push_seconds_ago"] >= 28
 
 
-# ── BoschUnreadEventsCountSensor ─────────────────────────────────────────────
-
-
-def test_unread_events_none():
-    from custom_components.bosch_shc_camera.sensor import BoschUnreadEventsCountSensor
-
-    sw = _make_sensor_via_new(BoschUnreadEventsCountSensor)
-    assert sw.native_value is None
-    assert sw.available is False
-
-
-def test_unread_events_count():
-    from custom_components.bosch_shc_camera.sensor import BoschUnreadEventsCountSensor
-
-    c = _make_broad_sensor_coord(unread_events_cache={CAM_ID: 5})
-    sw = _make_sensor_via_new(BoschUnreadEventsCountSensor, c)
-    assert sw.native_value == 5
-    assert sw.available is True
-
-
 # ── BoschCommissionedSensor ───────────────────────────────────────────────────
 
 
@@ -5989,7 +5966,6 @@ def _stub_coord_phase2(**overrides):
         nvr_drain_state={},
         commissioned_cache={},
         firmware_cache={},
-        unread_events_cache={},
         fcm_running=False,
         fcm_healthy=True,
         fcm_push_mode="auto",
@@ -7168,7 +7144,6 @@ def _stub_coord_extra(**overrides):
         rcp_clock_offset_cache={},
         commissioned_cache={},
         rules_cache={},
-        unread_events_cache={},
         rcp_alarm_catalog_cache={},
         rcp_tls_cert_cache={},
         rcp_network_services_cache={},
@@ -7498,43 +7473,6 @@ class TestEventsTodaySensors:
         assert s.native_value == 0
 
 
-# ── BoschUnreadEventsCountSensor ────────────────────────────────────────
-
-
-class TestUnreadEventsCountSensor:
-    def test_native_value_from_cache(self, stub_entry: SimpleNamespace):
-        from custom_components.bosch_shc_camera.sensor import (
-            BoschUnreadEventsCountSensor,
-        )
-
-        coord = _stub_coord_extra(unread_events_cache={CAM_ID: 7})
-        s = BoschUnreadEventsCountSensor(coord, CAM_ID, stub_entry)
-        assert s.native_value == 7
-
-    def test_native_value_none_when_missing(
-        self, extra_sensor_coord: SimpleNamespace, stub_entry: SimpleNamespace
-    ):
-        from custom_components.bosch_shc_camera.sensor import (
-            BoschUnreadEventsCountSensor,
-        )
-
-        s = BoschUnreadEventsCountSensor(extra_sensor_coord, CAM_ID, stub_entry)
-        assert s.native_value is None
-
-    def test_zero_is_a_valid_value(self, stub_entry: SimpleNamespace):
-        """Cache may legitimately hold 0 (all read) — must NOT be
-        treated as unavailable. Pin so a `if not value` mistake doesn't
-        creep in."""
-        from custom_components.bosch_shc_camera.sensor import (
-            BoschUnreadEventsCountSensor,
-        )
-
-        coord = _stub_coord_extra(unread_events_cache={CAM_ID: 0})
-        s = BoschUnreadEventsCountSensor(coord, CAM_ID, stub_entry)
-        assert s.native_value == 0
-        assert s.available is True
-
-
 # ── BoschCommissionedSensor ─────────────────────────────────────────────
 
 
@@ -7770,7 +7708,6 @@ class TestSensorSetupAiDescriptionOption:
             nvr_drain_state={},
             commissioned_cache={},
             firmware_cache={},
-            unread_events_cache={},
             fcm_running=False,
             fcm_healthy=True,
             fcm_push_mode="auto",

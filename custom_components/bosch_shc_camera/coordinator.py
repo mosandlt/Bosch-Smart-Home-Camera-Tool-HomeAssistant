@@ -667,8 +667,6 @@ class BoschCameraCoordinator(
         # Lock serializing cross-thread FCM state writes.
         # _on_fcm_push fires in a Firebase thread; the event loop reads these fields.
         self.fcm_lock: threading.Lock = threading.Lock()
-        # Unread events count cache — keyed by cam_id, populated from GET /unread_events_count
-        self.unread_events_cache: dict[str, int] = {}
         # Privacy sound override cache — keyed by cam_id, populated from GET /privacy_sound_override
         self.privacy_sound_cache: dict[str, bool | None] = {}
         # Commissioned status cache — keyed by cam_id, populated from GET /commissioned
@@ -2242,7 +2240,6 @@ class BoschCameraCoordinator(
         "ai_analysis_camera_enabled",
         "ai_analysis_scene_context",
         "last_event_ids",
-        "unread_events_cache",
         "privacy_sound_cache",
         "commissioned_cache",
         "firmware_cache",

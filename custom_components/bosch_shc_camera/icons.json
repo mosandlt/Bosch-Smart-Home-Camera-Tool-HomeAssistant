@@ -203,9 +203,6 @@
       "cloud_maintenance": {
         "default": "mdi:cloud-alert"
       },
-      "unread_events": {
-        "default": "mdi:email-alert"
-      },
       "commissioned": {
         "default": "mdi:check-network"
       },

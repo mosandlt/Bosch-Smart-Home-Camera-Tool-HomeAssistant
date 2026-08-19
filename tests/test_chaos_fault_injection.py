@@ -298,7 +298,6 @@ def _make_coord(**overrides):
         privacy_sound_cache={},
         rules_cache={},
         timestamp_cache={},
-        unread_events_cache={},
         ensure_valid_token=AsyncMock(return_value="fresh-tok"),
         _async_update_shc_states=AsyncMock(),
         _async_update_rcp_data=AsyncMock(),

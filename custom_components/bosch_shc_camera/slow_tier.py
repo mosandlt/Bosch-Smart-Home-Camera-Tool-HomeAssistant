@@ -372,7 +372,7 @@ async def _poll_slow_tier_endpoints(
 ) -> None:
     """Slow-tier (~5-min interval) parallel endpoint fetch + result
     dispatch: wifiinfo, ambient light, motion, firmware, recording
-    options, unread-events count, commissioned, timestamp,
+    options, commissioned, timestamp,
     notifications, rules, zones/privateAreas or motion-sensitive-areas/
     privacy-masks, privacy-sound-override, autofollow, lighting-options,
     and (Gen2-only) ledlights/lens-elevation/audio/lighting-*/
@@ -425,7 +425,6 @@ async def _poll_slow_tier_endpoints(
         "motion",
         "firmware",
         "recording_options",
-        "unread_events_count",
         "commissioned",
         "timestamp",
         "notifications",
@@ -536,13 +535,6 @@ async def _poll_slow_tier_endpoints(
                 coordinator.firmware_cache[cam_id] = ep_data
         elif ep == "recording_options":
             data[cam_id]["recordingOptions"] = ep_data
-        elif ep == "unread_events_count":
-            if isinstance(ep_data, dict):
-                coordinator.unread_events_cache[cam_id] = int(
-                    ep_data.get("count", ep_data.get("result", 0)) or 0
-                )
-            elif isinstance(ep_data, (int, float)):
-                coordinator.unread_events_cache[cam_id] = int(ep_data)
         elif ep == "privacy_sound_override":
             # isinstance guard — see the "ambient_light_sensor_level" branch
             # above (chaos-fault-injection regression) for why this is

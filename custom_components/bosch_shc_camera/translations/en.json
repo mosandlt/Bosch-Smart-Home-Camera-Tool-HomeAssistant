@@ -708,9 +708,6 @@
           "idle": "No maintenance info"
         }
       },
-      "unread_events": {
-        "name": "Unread Events"
-      },
       "commissioned": {
         "name": "Commissioned"
       },

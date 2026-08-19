@@ -697,9 +697,6 @@
           "disabled": "Uitgeschakeld"
         }
       },
-      "unread_events": {
-        "name": "Ongelezen gebeurtenissen"
-      },
       "commissioned": {
         "name": "Inbedrijfstelling"
       },

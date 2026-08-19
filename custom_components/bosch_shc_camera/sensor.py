@@ -98,7 +98,6 @@ async def async_setup_entry(
             BoschLastEventTypeSensor(coordinator, cam_id, config_entry),
             BoschMovementEventsTodaySensor(coordinator, cam_id, config_entry),
             BoschAudioEventsTodaySensor(coordinator, cam_id, config_entry),
-            BoschUnreadEventsCountSensor(coordinator, cam_id, config_entry),
             BoschStreamStatusSensor(coordinator, cam_id, config_entry),
         ]
         # LED Dimmer via RCP — only for cameras with a physical light (featureSupport.light)
@@ -1046,45 +1045,6 @@ class BoschCloudMaintenanceSensor(BoschSensorEntity):
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
         super().__init__(coordinator, cam_id, entry, CLOUD_MAINTENANCE_DESCRIPTION)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-def _unread_events_value(entity: BoschSensorEntity) -> int | None:
-    return entity.coordinator.unread_events_cache.get(entity._cam_id)  # type: ignore[no-any-return]
-
-
-def _unread_events_available(entity: BoschSensorEntity) -> bool:
-    return (
-        entity.coordinator.last_update_success
-        and entity.coordinator.unread_events_cache.get(entity._cam_id) is not None
-    )
-
-
-UNREAD_EVENTS_DESCRIPTION = BoschSensorEntityDescription(
-    key="unread_events",
-    translation_key="unread_events",
-    native_unit_of_measurement="events",
-    state_class=SensorStateClass.MEASUREMENT,
-    entity_registry_enabled_default=False,
-    unique_id_fn=lambda cam_id: f"bosch_shc_camera_{cam_id}_unread_events",
-    value_fn=_unread_events_value,
-    available_fn=_unread_events_available,
-)
-
-
-class BoschUnreadEventsCountSensor(BoschSensorEntity):
-    """Sensor: number of unread events for this camera.
-
-    Data source: GET /v11/video_inputs/{id}/unread_events_count (fetched by coordinator, slow tier).
-    Disabled by default — enable in HA entity settings if needed.
-    """
-
-    entity_description = UNREAD_EVENTS_DESCRIPTION
-
-    def __init__(
-        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
-    ) -> None:
-        super().__init__(coordinator, cam_id, entry, UNREAD_EVENTS_DESCRIPTION)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

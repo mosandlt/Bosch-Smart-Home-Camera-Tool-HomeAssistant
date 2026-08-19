@@ -720,9 +720,6 @@
           "disabled": "Disabilitato"
         }
       },
-      "unread_events": {
-        "name": "Eventi non letti"
-      },
       "commissioned": {
         "name": "Messa in servizio"
       },

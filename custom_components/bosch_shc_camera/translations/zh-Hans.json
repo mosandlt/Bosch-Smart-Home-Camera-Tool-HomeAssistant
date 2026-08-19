@@ -697,9 +697,6 @@
           "disabled": "已禁用"
         }
       },
-      "unread_events": {
-        "name": "未读事件"
-      },
       "commissioned": {
         "name": "启用状态"
       },

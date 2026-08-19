@@ -772,9 +772,6 @@
           "idle": "Keine Wartungsinfo"
         }
       },
-      "unread_events": {
-        "name": "Ungelesene Ereignisse"
-      },
       "commissioned": {
         "name": "Inbetriebnahme-Status"
       },

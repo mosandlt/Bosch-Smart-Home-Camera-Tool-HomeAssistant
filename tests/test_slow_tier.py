@@ -701,7 +701,6 @@ def _make_slow_coord(**overrides):
         motion_set_at={},
         firmware_set_at={},
         firmware_cache={},
-        unread_events_cache={},
         privacy_sound_set_at={},
         privacy_sound_cache={},
         commissioned_cache={},
@@ -825,7 +824,6 @@ class TestPollSlowTierGen1AllEndpoints:
                 "motion": {"sensitivity": 5},
                 "firmware": {"upToDate": True},
                 "recording_options": {"enabled": True},
-                "unread_events_count": {"count": 3},
                 "commissioned": {"connected": True},
                 "timestamp": {"result": True},
                 "notifications": {"movement": True},
@@ -850,7 +848,6 @@ class TestPollSlowTierGen1AllEndpoints:
         assert data[CAM_A]["motion"] == {"sensitivity": 5}
         assert coord.firmware_cache[CAM_A] == {"upToDate": True}
         assert data[CAM_A]["recordingOptions"] == {"enabled": True}
-        assert coord.unread_events_cache[CAM_A] == 3
         assert coord.commissioned_cache[CAM_A] == {"connected": True}
         assert coord.timestamp_cache[CAM_A] is True
         assert coord.notifications_cache[CAM_A] == {"movement": True}
@@ -1341,15 +1338,6 @@ class TestPollSlowTierWriteLockSkips:
 
 
 class TestPollSlowTierNonDictFallbacks:
-    @pytest.mark.asyncio
-    async def test_unread_events_count_as_plain_int(self):
-        coord = _make_slow_coord()
-        session = _all_endpoints_session({"unread_events_count": 7})
-        await _poll_slow_tier_endpoints(
-            coord, CAM_A, {}, _slow_ctx(), {CAM_A: {}}, session, HEADERS, NOOP_INTRUSION
-        )
-        assert coord.unread_events_cache[CAM_A] == 7
-
     @pytest.mark.asyncio
     async def test_rules_non_list_defaults_empty(self):
         coord = _make_slow_coord()

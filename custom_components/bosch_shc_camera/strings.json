@@ -772,9 +772,6 @@
           "idle": "No maintenance info"
         }
       },
-      "unread_events": {
-        "name": "Unread events"
-      },
       "commissioned": {
         "name": "Commissioned"
       },

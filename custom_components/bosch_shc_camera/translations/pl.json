@@ -720,9 +720,6 @@
           "disabled": "Wyłączony"
         }
       },
-      "unread_events": {
-        "name": "Nieprzeczytane Zdarzenia"
-      },
       "commissioned": {
         "name": "Status Uruchomienia"
       },
