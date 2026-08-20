@@ -20,6 +20,7 @@ import contextlib
 import json
 import logging
 import os
+import secrets
 import ssl
 import time
 import urllib.parse
@@ -2730,10 +2731,17 @@ async def async_send_alert(
         "CAMERA_ALARM": "\U0001f6a8",  # 🚨
     }.get(event_type, "\u26a0\ufe0f")  # ⚠️ fallback
 
-    # www/bosch_alerts/ is served as /local/bosch_alerts/ — needed for mobile_app notifications
+    # www/bosch_alerts/ is served as /local/bosch_alerts/ with no auth — the HA
+    # mobile_app push handler fetches the notification image URL directly at
+    # the OS level, outside any HA session/auth context, so it cannot live
+    # behind an authenticated view. A 128-bit random token per alert (below)
+    # makes the served filename unguessable — HA's static file route doesn't
+    # expose directory listing, so without the token an attacker has nothing
+    # to enumerate or predict, unlike the previous camera-name+timestamp name.
     alert_dir = os.path.join(coordinator.hass.config.config_dir, "www", "bosch_alerts")
     await coordinator.hass.async_add_executor_job(os.makedirs, alert_dir, 0o755, True)
     ts_safe = timestamp[:19].replace(":", "-").replace("T", "_")
+    alert_token = secrets.token_urlsafe(16)
     session = await async_get_bosch_cloud_session(coordinator.hass)
     headers = {"Authorization": f"Bearer {coordinator.token}", "Accept": "*/*"}
     files_to_cleanup: list[str] = []
@@ -2901,7 +2909,7 @@ async def async_send_alert(
         snap_path = os.path.join(
             alert_dir,
             f"{_safe_path_segment(cam_name)}_{_safe_path_segment(ts_safe)}"
-            f"_{_safe_path_segment(event_type)}.jpg",
+            f"_{_safe_path_segment(event_type)}_{alert_token}.jpg",
         )
         # Bug fix (BUG1): the download (bounded, must stay inside
         # asyncio.timeout(15)) is now isolated from everything that follows
@@ -3113,7 +3121,7 @@ async def async_send_alert(
         clip_path = os.path.join(
             alert_dir,
             f"{_safe_path_segment(cam_name)}_{_safe_path_segment(ts_safe)}"
-            f"_{_safe_path_segment(event_type)}.mp4",
+            f"_{_safe_path_segment(event_type)}_{alert_token}.mp4",
         )
         auth_headers = {
             "Authorization": f"Bearer {coordinator.token}",

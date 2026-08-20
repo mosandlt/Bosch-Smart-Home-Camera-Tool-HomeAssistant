@@ -1030,9 +1030,12 @@ class BoschCameraCoordinator(
         # an active REMOTE-fallback stream onto LOCAL via Stream.update_source.
         # Prevents ping-pong if LAN is flapping in/out of reachability.
         self.local_promote_at: dict[str, float] = {}
-        # SSL context created lazily on first use (ssl.create_default_context
-        # is blocking I/O — must not run in the event loop)
-        self.tls_ssl_ctx: ssl.SSLContext | None = None
+        # SSL contexts created lazily on first use (ssl.create_default_context
+        # is blocking I/O — must not run in the event loop). LOCAL and CLOUD
+        # are cached separately since they use different verify_mode (see
+        # tls_proxy_wiring.create_ssl_ctx).
+        self.tls_ssl_ctx_local: ssl.SSLContext | None = None
+        self.tls_ssl_ctx_cloud: ssl.SSLContext | None = None
         # Shared, lazily-created plain-HTTP session for the localhost go2rtc
         # API (register/unregister/consumer-count). A completely different
         # trust domain from the Bosch-cloud TLS session in cloud_ssl.py, so
@@ -3511,9 +3514,14 @@ class BoschCameraCoordinator(
         await unregister_go2rtc_stream(self, cam_id)
 
     async def start_tls_proxy(
-        self, cam_id: str, cam_host: str, cam_port: int, is_renewal: bool = False
+        self,
+        cam_id: str,
+        cam_host: str,
+        cam_port: int,
+        is_renewal: bool = False,
+        is_cloud: bool = False,
     ) -> int:
-        """Start a local TCP→TLS proxy for a LOCAL RTSPS stream.
+        """Start a local TCP→TLS proxy for a LOCAL or cloud-proxied RTSPS stream.
 
         Thin dispatch to `tls_proxy_wiring.start_tls_proxy_wiring` — kept
         as a bound method because it is called from other coordinator-facing modules
@@ -3521,11 +3529,11 @@ class BoschCameraCoordinator(
         patched directly in tests via `AsyncMock()` /
         `BoschCameraCoordinator.start_tls_proxy(coord, ...)` unbound-style
         calls. See `tls_proxy_wiring.py` for the full docstring (died-callback
-        thread→event-loop hop, lazy SSL context init) — unchanged by this
-        move.
+        thread→event-loop hop, lazy SSL context init, LOCAL vs CLOUD trust
+        model) — unchanged by this move.
         """
         return await start_tls_proxy_wiring(
-            self, cam_id, cam_host, cam_port, is_renewal=is_renewal
+            self, cam_id, cam_host, cam_port, is_renewal=is_renewal, is_cloud=is_cloud
         )
 
     async def on_tls_proxy_died(self, cam_id: str) -> None:
@@ -3542,17 +3550,17 @@ class BoschCameraCoordinator(
         await on_tls_proxy_died(self, cam_id)
 
     @staticmethod
-    def create_ssl_ctx() -> ssl.SSLContext:
+    def create_ssl_ctx(is_cloud: bool = False) -> ssl.SSLContext:
         """Create SSL context for TLS proxy (blocking — runs in executor).
 
         Thin dispatch to `tls_proxy_wiring.create_ssl_ctx` — kept as a
         staticmethod on the class because `start_tls_proxy` calls it via
         `self.create_ssl_ctx` (patchable per-instance in tests) and tests
         also call `BoschCameraCoordinator.create_ssl_ctx()` directly. See
-        `tls_proxy_wiring.py` for the full docstring — unchanged by this
-        move.
+        `tls_proxy_wiring.py` for the full docstring (LOCAL vs CLOUD trust
+        model) — unchanged by this move.
         """
-        return create_ssl_ctx()
+        return create_ssl_ctx(is_cloud)
 
     async def stop_tls_proxy(self, cam_id: str) -> None:
         """Stop the TLS proxy for a camera.

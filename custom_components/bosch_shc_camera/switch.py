@@ -44,7 +44,7 @@ from urllib.parse import urlsplit, urlunsplit
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import ServiceValidationError, Unauthorized
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
@@ -139,6 +139,40 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
             cache[self._cam_id] = cache_value
             set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
+
+    async def _require_admin(self) -> None:
+        """Reject the call unless the calling user is an admin.
+
+        Only used by entities whose ON state has a physical/safety
+        consequence beyond the usual "toggle a camera setting" — the panic
+        siren and the intrusion-system arm/disarm switch. HA's own
+        per-entity permission model already lets an admin decide which
+        non-admin users may control a given entity at all, but for these
+        two the blast radius of a non-admin household member (or a
+        narrowly-scoped/compromised non-admin token) triggering them is
+        severe enough to require admin unconditionally, on top of that
+        grant. `self._context` is set by HA's entity-service dispatcher via
+        `async_set_context()` right before the service call reaches here,
+        so it reflects the actual calling user for this call — not stale
+        state.
+
+        A call with NO user_id (automations, scripts, other internal
+        callers) is allowed through: HA only lets admins create or edit
+        automations/scripts in the first place, so an internal call already
+        passed through an admin-gated surface before it ever got here —
+        unlike a direct frontend/voice-assistant service call, which
+        carries the actual calling user's context. A call that DOES carry
+        a user_id but resolves to a non-admin (or to no user at all, e.g. a
+        stale/deleted user) is rejected — that path fails closed rather
+        than silently passing.
+        """
+        context = self._context
+        user_id = context.user_id if context is not None else None
+        if user_id is None:
+            return
+        user = await self.hass.auth.async_get_user(user_id)
+        if user is None or not user.is_admin:
+            raise Unauthorized(context=context, entity_id=self.entity_id)
 
     def _warn_write_failed(self, feature: str, desired_label: str) -> None:
         """Log a total write failure the cloud setter otherwise swallows.
@@ -1627,6 +1661,7 @@ class BoschSwitchEntityDescription(SwitchEntityDescription):  # type: ignore[mis
     ) = None
     require_cache_for_available: bool = True
     extra_attributes_fn: Callable[[BoschSwitchEntity], dict[str, Any]] | None = None
+    requires_admin: bool = False
 
 
 class BoschSwitchEntity(_BoschSwitchBase):
@@ -1692,6 +1727,8 @@ class BoschSwitchEntity(_BoschSwitchBase):
 
     async def _apply(self, desired: bool) -> None:
         description = self.entity_description
+        if description.requires_admin:
+            await self._require_admin()
         if description.cache_fn is None or description.set_at_fn is None:
             raise NotImplementedError
         body = dict(description.on_body if desired else description.off_body)
@@ -1757,6 +1794,7 @@ ALARM_SYSTEM_ARM_DESCRIPTION = BoschSwitchEntityDescription(
     cache_fn=lambda c: c.arming_cache,
     set_at_fn=lambda c: c.arming_set_at,
     require_cache_for_available=False,
+    requires_admin=True,
     extra_attributes_fn=lambda entity: {
         "alarm_type": entity.coordinator.alarm_status_cache.get(entity._cam_id, {}).get(
             "alarmType"
@@ -2505,6 +2543,7 @@ class BoschPanicAlarmSwitch(_BoschSwitchBase):
         )
 
     async def _set(self, enabled: bool) -> None:
+        await self._require_admin()
         if not hasattr(self.coordinator, "panic_alarm_cache"):
             self.coordinator.panic_alarm_cache = {}  # lazy init for older coordinators
         # Privacy mode blocks /panic_alarm with HTTP 443 — warn the user explicitly

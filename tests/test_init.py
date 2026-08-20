@@ -383,7 +383,8 @@ async def test_all_documented_state_containers_initialised(hass: HomeAssistant) 
     assert coord.local_rescue_at == {}
     assert coord.lan_tcp_reachable == {}
     assert coord.local_promote_at == {}
-    assert coord.tls_ssl_ctx is None
+    assert coord.tls_ssl_ctx_local is None
+    assert coord.tls_ssl_ctx_cloud is None
 
     # ── Offline tracking ───────────────────────────────────────────────
     assert coord.offline_since == {}
@@ -5381,7 +5382,8 @@ class TestOnTlsProxyDied:
 
 def _coord_stub():
     coord = SimpleNamespace()
-    coord.tls_ssl_ctx = ssl.create_default_context()
+    coord.tls_ssl_ctx_local = ssl.create_default_context()
+    coord.tls_ssl_ctx_cloud = ssl.create_default_context()
     coord.tls_proxy_ports = {}
     coord.tls_proxy_servers = {}
     coord.on_tls_proxy_died = AsyncMock(return_value=None)
@@ -5997,7 +5999,8 @@ def _make_coord_go2rtc(**overrides):
         _rcp_state_cache={},
         tls_proxy_ports={},
         tls_proxy_servers={},
-        tls_ssl_ctx=None,
+        tls_ssl_ctx_local=None,
+        tls_ssl_ctx_cloud=None,
         last_schemes_refresh=0.0,
         _last_go2rtc_reload=float("-inf"),
         debug=False,
@@ -6325,13 +6328,47 @@ class TestSslContextAndStartTlsProxy:
         assert ctx.check_hostname is False
         assert ctx.verify_mode == ssl.CERT_NONE
 
+    def test_create_ssl_ctx_cloud_requires_valid_cert_chain(self):
+        """Cloud context (is_cloud=True) must still verify the certificate
+        chain — anchored to Bosch's own private CA (cloud_ssl.
+        BOSCH_CLOUD_CA_PEM), since Bosch's cloud/video-proxy hosts are NOT
+        on any public trust store (see cloud_ssl.py's module docstring) —
+        only hostname checking is skipped (Bosch's proxy-NN.live.* hostname
+        doesn't match its own cert's SAN). Regression test for the
+        hacs/default#8181 review finding: the shared LOCAL/CLOUD context
+        previously used CERT_NONE for both, accepting literally any
+        certificate — including an attacker's — for the cloud proxy.
+
+        A bare system-trust-store CERT_REQUIRED context (this test's first,
+        release-blocking version) would have rejected Bosch's own genuine
+        certificate and broken every REMOTE stream — caught by a 3-agent
+        bug-hunt before release, all three independently confirming via a
+        live TLS handshake that Bosch's cloud PKI is private, not public."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        ctx = BoschCameraCoordinator.create_ssl_ctx(is_cloud=True)
+        assert ctx.check_hostname is False
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.verify_flags & ssl.VERIFY_X509_PARTIAL_CHAIN
+        # The pinned Bosch CA must be loaded ON TOP OF the system roots, not
+        # just the system trust store alone — diff against a bare default
+        # context's CA set to prove the extra (Bosch) CA is really there.
+        loaded_ca_serials = {c["serialNumber"] for c in ctx.get_ca_certs()}
+        bare_serials = {
+            c["serialNumber"] for c in ssl.create_default_context().get_ca_certs()
+        }
+        assert loaded_ca_serials - bare_serials, (
+            "cloud context must load the pinned Bosch CA on top of system "
+            "roots, not just the system trust store alone"
+        )
+
     @pytest.mark.asyncio
     async def test_start_tls_proxy_creates_ssl_ctx_lazily(self):
         """First call must dispatch create_ssl_ctx via executor (it's
         blocking I/O) — subsequent calls reuse the cached context."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        coord = _make_coord_go2rtc(tls_ssl_ctx=None)
+        coord = _make_coord_go2rtc(tls_ssl_ctx_local=None)
         # Stub the staticmethod on the coord (it's accessed via self.create_ssl_ctx)
         coord.create_ssl_ctx = BoschCameraCoordinator.create_ssl_ctx
         coord.hass.async_add_executor_job = AsyncMock(return_value="MOCK_CTX")
@@ -6348,7 +6385,9 @@ class TestSslContextAndStartTlsProxy:
         assert port == 12345
         coord.hass.async_add_executor_job.assert_awaited_once()
         # Cached for next call
-        assert coord.tls_ssl_ctx == "MOCK_CTX"
+        assert coord.tls_ssl_ctx_local == "MOCK_CTX"
+        # LOCAL and CLOUD contexts are cached independently
+        assert coord.tls_ssl_ctx_cloud is None
 
     @pytest.mark.asyncio
     async def test_start_tls_proxy_refuses_after_teardown(self):
@@ -6358,7 +6397,7 @@ class TestSslContextAndStartTlsProxy:
         again — mirrors the go2rtc-session teardown guard."""
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        coord = _make_coord_go2rtc(tls_ssl_ctx=ssl.create_default_context())
+        coord = _make_coord_go2rtc(tls_ssl_ctx_local=ssl.create_default_context())
         coord.tls_proxy_teardown_done = True
         with pytest.raises(RuntimeError, match="shutting down"):
             await BoschCameraCoordinator.start_tls_proxy(
@@ -6372,7 +6411,7 @@ class TestSslContextAndStartTlsProxy:
     async def test_start_tls_proxy_reuses_cached_ssl_ctx(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
-        coord = _make_coord_go2rtc(tls_ssl_ctx="ALREADY_CACHED")
+        coord = _make_coord_go2rtc(tls_ssl_ctx_local="ALREADY_CACHED")
         coord.hass.async_add_executor_job = AsyncMock()
         with patch(
             "custom_components.bosch_shc_camera.tls_proxy_wiring.start_tls_proxy",
@@ -6385,6 +6424,37 @@ class TestSslContextAndStartTlsProxy:
                 443,
             )
         coord.hass.async_add_executor_job.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_start_tls_proxy_cloud_uses_separate_cached_ctx(self):
+        """is_cloud=True must build/cache tls_ssl_ctx_cloud independently
+        of tls_ssl_ctx_local, and pass is_cloud through to create_ssl_ctx
+        so the cloud context gets CERT_REQUIRED, not the LOCAL CERT_NONE
+        context reused by mistake."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_go2rtc(
+            tls_ssl_ctx_local="LOCAL_CTX", tls_ssl_ctx_cloud=None
+        )
+        coord.create_ssl_ctx = BoschCameraCoordinator.create_ssl_ctx
+        coord.hass.async_add_executor_job = AsyncMock(return_value="CLOUD_CTX")
+        with patch(
+            "custom_components.bosch_shc_camera.tls_proxy_wiring.start_tls_proxy",
+            return_value=54321,
+        ):
+            port = await BoschCameraCoordinator.start_tls_proxy(
+                coord,
+                CAM_A,
+                "proxy-01.live.cbs.boschsecurity.com",
+                443,
+                is_cloud=True,
+            )
+        assert port == 54321
+        coord.hass.async_add_executor_job.assert_awaited_once_with(
+            coord.create_ssl_ctx, True
+        )
+        assert coord.tls_ssl_ctx_cloud == "CLOUD_CTX"
+        assert coord.tls_ssl_ctx_local == "LOCAL_CTX"
 
     @pytest.mark.asyncio
     async def test_stop_tls_proxy_delegates_to_module(self):
@@ -36281,7 +36351,8 @@ class TestStartTlsProxyOnLoopIsStopping:
         bg_tasks: set = set()
 
         coord = SimpleNamespace(
-            tls_ssl_ctx=MagicMock(spec=_ssl.SSLContext),
+            tls_ssl_ctx_local=MagicMock(spec=_ssl.SSLContext),
+            tls_ssl_ctx_cloud=MagicMock(spec=_ssl.SSLContext),
             tls_proxy_ports={},
             tls_proxy_servers={},
             hass=SimpleNamespace(

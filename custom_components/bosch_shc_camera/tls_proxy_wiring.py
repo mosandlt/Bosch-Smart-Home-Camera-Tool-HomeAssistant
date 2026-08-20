@@ -33,17 +33,50 @@ from typing import TYPE_CHECKING
 
 from bosch_shc_camera_client.tls_proxy import start_tls_proxy, stop_tls_proxy
 
+from .cloud_ssl import BOSCH_CLOUD_CA_PEM
+
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def create_ssl_ctx() -> ssl.SSLContext:
-    """Create SSL context for TLS proxy (blocking — runs in executor)."""
+def create_ssl_ctx(is_cloud: bool = False) -> ssl.SSLContext:
+    """Create SSL context for TLS proxy (blocking — runs in executor).
+
+    Two distinct trust models, deliberately not shared:
+
+    - LOCAL (is_cloud=False): the camera on the LAN presents its own
+      self-signed certificate with no publicly-verifiable chain. There is
+      nothing a system trust store can validate here, so verification stays
+      off — the same posture as any LAN device with a self-signed cert.
+
+    - CLOUD (is_cloud=True): the peer is a fixed public-internet hostname
+      (`proxy-NN.live.cbs.boschsecurity.com`). Live video, not on any public
+      trust store: `cloud_ssl.py` documents (and this was independently
+      re-verified live) that Bosch's cloud/video-proxy hosts are served by a
+      *private* Bosch PKI (`Bosch ST Root CA` -> `Video CA 2A`), not a
+      publicly trusted CA — the system default trust store rejects it with
+      `CERTIFICATE_VERIFY_FAILED`. This pins the same `BOSCH_CLOUD_CA_PEM`
+      `cloud_ssl.py` already pins for the Bosch REST API, with
+      `VERIFY_X509_PARTIAL_CHAIN` since the pinned cert is an intermediate,
+      not a root. `check_hostname` stays off because the proxy-NN hostname
+      doesn't match the cert's SAN (`*.residential.connect.boschsecurity.
+      com` — go2rtc's Go RTSP client independently confirms this with `tls:
+      failed to verify certificate` when hostname checking is attempted).
+      Requiring the Bosch-CA-anchored chain closes the actual gap: an
+      attacker now needs a certificate chaining to Bosch's own private CA,
+      not literally any self-signed certificate as `CERT_NONE` previously
+      allowed.
+    """
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    if is_cloud:
+        ctx.load_verify_locations(cadata=BOSCH_CLOUD_CA_PEM)
+        ctx.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+        ctx.verify_mode = ssl.CERT_REQUIRED
+    else:
+        ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
 
@@ -53,8 +86,9 @@ async def start_tls_proxy_wiring(
     cam_host: str,
     cam_port: int,
     is_renewal: bool = False,
+    is_cloud: bool = False,
 ) -> int:
-    """Start a local TCP→TLS proxy for a LOCAL RTSPS stream."""
+    """Start a local TCP→TLS proxy for a LOCAL or cloud-proxied RTSPS stream."""
     if getattr(coordinator, "tls_proxy_teardown_done", False):
         # _async_cancel_coordinator_tasks already took its stop_all_proxies
         # snapshot (unload/HA-stop) — a straggler call racing that point
@@ -63,18 +97,22 @@ async def start_tls_proxy_wiring(
         # in go2rtc_client.py.
         raise RuntimeError("TLS proxy unavailable — coordinator is shutting down")
     # Lazy-init SSL context in executor (blocking I/O, must not run in event loop).
-    # Two cameras' first LOCAL start can race this check-then-act across the
-    # await (both see None, both schedule an executor job) — harmless in
-    # itself (both contexts are equivalent default CERT_NONE contexts), but
+    # LOCAL and CLOUD contexts are cached separately (different verify_mode,
+    # see create_ssl_ctx) so a REMOTE session can never accidentally reuse a
+    # LOCAL CERT_NONE context or vice versa.
+    # Two cameras' first start of the same kind can race this check-then-act
+    # across the await (both see None, both schedule an executor job) —
+    # harmless in itself (both contexts built are equivalent), but
     # re-checking after the await makes the cache genuinely single-flight
     # instead of silently discarding one of the two built contexts.
-    if coordinator.tls_ssl_ctx is None:
+    ctx_attr = "tls_ssl_ctx_cloud" if is_cloud else "tls_ssl_ctx_local"
+    if getattr(coordinator, ctx_attr) is None:
         new_ctx = await coordinator.hass.async_add_executor_job(
-            coordinator.create_ssl_ctx
+            coordinator.create_ssl_ctx, is_cloud
         )
-        if coordinator.tls_ssl_ctx is None:
-            coordinator.tls_ssl_ctx = new_ctx
-    ssl_ctx: ssl.SSLContext = coordinator.tls_ssl_ctx
+        if getattr(coordinator, ctx_attr) is None:
+            setattr(coordinator, ctx_attr, new_ctx)
+    ssl_ctx: ssl.SSLContext = getattr(coordinator, ctx_attr)
 
     # The circuit breaker fires on transient WiFi jitter; without this
     # signal the stream stays dead until the next heartbeat (up to 3600s

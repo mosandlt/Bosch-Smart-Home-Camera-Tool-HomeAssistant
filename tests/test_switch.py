@@ -2047,6 +2047,135 @@ class TestPanicAlarmSwitch:
         coord.async_put_camera.assert_not_called()
 
 
+class TestSafetyCriticalSwitchAdminGate:
+    """Regression tests for hacs/default#8181 review finding 3: panic-alarm
+    trigger and intrusion-system arm/disarm must reject a non-admin caller
+    instead of executing, while staying reachable from automations/scripts
+    (which carry no user_id — only admins can author those in the first
+    place)."""
+
+    def _panic(self, coord, entry):
+        from custom_components.bosch_shc_camera.switch import BoschPanicAlarmSwitch
+
+        return BoschPanicAlarmSwitch(coord, CAM_ID, entry)
+
+    def _arm(self, coord, entry):
+        from custom_components.bosch_shc_camera.switch import BoschAlarmSystemArmSwitch
+
+        return BoschAlarmSystemArmSwitch(coord, CAM_ID, entry)
+
+    @pytest.mark.asyncio
+    async def test_panic_alarm_rejects_non_admin_caller(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
+        from homeassistant.exceptions import Unauthorized
+
+        sw = self._panic(coord, entry)
+        _bind_hass_modepins(sw)
+        sw.hass.auth = SimpleNamespace(
+            async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=False))
+        )
+        sw._context = SimpleNamespace(user_id="non-admin-user")
+        with pytest.raises(Unauthorized):
+            await sw.async_turn_on()
+        coord.async_put_camera.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_panic_alarm_rejects_unresolvable_user(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
+        """A user_id that no longer resolves to a real user (stale/deleted)
+        must fail closed, not be treated as implicitly trusted."""
+        from homeassistant.exceptions import Unauthorized
+
+        sw = self._panic(coord, entry)
+        _bind_hass_modepins(sw)
+        sw.hass.auth = SimpleNamespace(async_get_user=AsyncMock(return_value=None))
+        sw._context = SimpleNamespace(user_id="deleted-user")
+        with pytest.raises(Unauthorized):
+            await sw.async_turn_on()
+        coord.async_put_camera.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_panic_alarm_allows_admin_caller(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
+        sw = self._panic(coord, entry)
+        _bind_hass_modepins(sw)
+        sw.hass.auth = SimpleNamespace(
+            async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+        )
+        sw._context = SimpleNamespace(user_id="admin-user")
+        await sw.async_turn_on()
+        coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID, "panic_alarm", {"status": "ON"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_panic_alarm_allows_automation_call_with_no_user(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
+        """No user_id (automation/script context) must pass through without
+        even touching hass.auth — only admins can author automations."""
+        sw = self._panic(coord, entry)
+        _bind_hass_modepins(sw)
+        sw._context = SimpleNamespace(user_id=None)
+        await sw.async_turn_on()
+        coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID, "panic_alarm", {"status": "ON"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_alarm_arm_rejects_non_admin_caller(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
+        from homeassistant.exceptions import Unauthorized
+
+        entity = self._arm(stub_coord_round9, stub_entry_round9)
+        entity.async_write_ha_state = MagicMock()
+        entity.hass = SimpleNamespace(
+            auth=SimpleNamespace(
+                async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=False))
+            )
+        )
+        entity._context = SimpleNamespace(user_id="non-admin-user")
+        with pytest.raises(Unauthorized):
+            await entity.async_turn_on()
+        assert CAM_ID not in stub_coord_round9.arming_cache
+
+    @pytest.mark.asyncio
+    async def test_alarm_arm_allows_admin_caller(
+        self, stub_coord_round9: SimpleNamespace, stub_entry_round9: SimpleNamespace
+    ):
+        stub_coord_round9.async_put_camera = AsyncMock(return_value=True)
+        entity = self._arm(stub_coord_round9, stub_entry_round9)
+        entity.async_write_ha_state = MagicMock()
+        entity.hass = SimpleNamespace(
+            auth=SimpleNamespace(
+                async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+            )
+        )
+        entity._context = SimpleNamespace(user_id="admin-user")
+        await entity.async_turn_on()
+        assert stub_coord_round9.arming_cache[CAM_ID] is True
+
+    @pytest.mark.asyncio
+    async def test_other_switches_are_not_admin_gated(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
+        """The admin gate is scoped to panic-alarm + arm/disarm only — an
+        ordinary switch (e.g. front light) must keep working for any caller
+        with entity access, matching normal HA per-entity permissions."""
+        from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch
+
+        sw = BoschFrontLightSwitch(coord, CAM_ID, entry)
+        _bind_hass_modepins(sw)
+        sw._context = SimpleNamespace(user_id="non-admin-user")
+        # No hass.auth configured at all — must not even be consulted.
+        await sw.async_turn_on()
+        coord.async_cloud_set_light_component.assert_awaited()
+
+
 class TestFrontLightSwitchModePins:
     def _make(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschFrontLightSwitch

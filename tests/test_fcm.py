@@ -10194,6 +10194,72 @@ class TestStep2SnapshotDownload:
         )
 
     @pytest.mark.asyncio
+    async def test_snap_filename_carries_unguessable_token(self):
+        """Regression test for hacs/default#8181 review finding 2: the
+        alert snapshot filename served unauthenticated at
+        /local/bosch_alerts/ must not be predictable from just
+        camera-name + timestamp + event-type — two alerts for the exact
+        same camera/timestamp/event_type must still get different
+        filenames, because each write path now includes a fresh 128-bit
+        random token."""
+        safe_img = "https://residential.cbs.boschsecurity.com/v11/events/abc/image.jpg"
+
+        @asynccontextmanager
+        async def _get(url, **kw):
+            resp = MagicMock()
+            resp.status = 200
+            resp.headers = {"Content-Type": "image/jpeg"}
+            resp.read = AsyncMock(return_value=b"\xff\xd8snap")
+            yield resp
+
+        session = MagicMock()
+        session.get = _get
+
+        async def _send_once():
+            coord = _make_alert_coord4(
+                options={
+                    "alert_notify_service": "notify.signal",
+                    "alert_notify_screenshot": "notify.signal",
+                    "alert_save_snapshots": True,
+                }
+            )
+            with patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ):
+                with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                    with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
+                        with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
+                            from custom_components.bosch_shc_camera.fcm import (
+                                async_send_alert,
+                            )
+
+                            await async_send_alert(
+                                coord,
+                                "Terrasse",
+                                "MOVEMENT",
+                                "2026-05-07T10:00:00.000Z",
+                                safe_img,
+                            )
+            write_jpg_calls = [
+                c.args[1]
+                for c in coord.hass.async_add_executor_job.call_args_list
+                if c.args
+                and len(c.args) >= 2
+                and isinstance(c.args[1], str)
+                and c.args[1].endswith(".jpg")
+            ]
+            assert write_jpg_calls, "must write a snapshot file"
+            return write_jpg_calls[0]
+
+        path_a = await _send_once()
+        path_b = await _send_once()
+        assert path_a != path_b, (
+            "identical camera/timestamp/event_type must still yield "
+            "different filenames (unguessable per-alert token)"
+        )
+
+    @pytest.mark.asyncio
     async def test_snap_200_empty_body_skips_write(self):
         """snap.jpg 200 + empty body → guard `if data:` prevents file write."""
         safe_img = "https://residential.cbs.boschsecurity.com/v11/events/abc/image.jpg"

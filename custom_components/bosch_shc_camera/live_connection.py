@@ -435,12 +435,15 @@ async def try_live_connection_inner(
                             # only covers *.residential.connect.boschsecurity.com —
                             # go2rtc's Go RTSP client refuses with `tls: failed to
                             # verify certificate`. The proxy terminates TLS in Python
-                            # (verify_mode=CERT_NONE, check_hostname=False) and re-
-                            # exports as plain RTSP on 127.0.0.1:N — both FFmpeg (HLS
-                            # path) and go2rtc (WebRTC path) consume without scheme
-                            # tricks. Falls back to direct rtsps:// if proxy startup
-                            # fails (HLS still works that way; WebRTC still cert-
-                            # blocked, identical to v10.3.24 behavior).
+                            # (is_cloud=True: verify_mode=CERT_REQUIRED anchored to
+                            # cloud_ssl.BOSCH_CLOUD_CA_PEM, Bosch's own private CA —
+                            # see tls_proxy_wiring.create_ssl_ctx; check_hostname stays
+                            # off for the SAN mismatch above) and re-exports as plain
+                            # RTSP on 127.0.0.1:N — both FFmpeg (HLS path) and go2rtc
+                            # (WebRTC path) consume without scheme tricks. Falls back
+                            # to direct rtsps:// if proxy startup fails (HLS still
+                            # works that way; WebRTC still cert-blocked, identical to
+                            # v10.3.24 behavior).
                             try:
                                 from urllib.parse import urlparse as _up
 
@@ -452,6 +455,7 @@ async def try_live_connection_inner(
                                     cam_id,
                                     parsed.hostname or "",
                                     parsed.port or 443,
+                                    is_cloud=True,
                                 )
                                 local_rtsp_url = f"rtsp://127.0.0.1:{proxy_port}{pq}"
                                 result["rtspsUrl"] = local_rtsp_url
