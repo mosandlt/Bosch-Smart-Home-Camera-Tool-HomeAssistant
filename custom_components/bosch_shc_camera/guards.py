@@ -9,15 +9,65 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, Unauthorized
 
 from .const import DOMAIN
 
+if TYPE_CHECKING:
+    from homeassistant.core import Context, HomeAssistant, ServiceCall
+
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_require_admin(hass: HomeAssistant, context: Context | None) -> None:
+    """Raise Unauthorized unless ``context`` resolves to an admin user.
+
+    Shared by the switch-entity admin gate (`_BoschSwitchBase._require_admin`)
+    and the account/destructive-action services in `services.py`
+    (hacs/default#8181 review, round 2). Fails closed unconditionally: no
+    context, no ``user_id``, an unresolvable ``user_id``, or a resolved
+    non-admin user are ALL rejected — including the no-user_id case
+    (automations/scripts), unlike HA core's own
+    `helpers.service.async_register_admin_service`, which treats a missing
+    user_id as implicitly trusted. That's deliberately stricter here: every
+    caller of an admin-gated service must be traceable to an actual admin
+    user, the same way a direct frontend call is.
+    """
+    user_id = context.user_id if context is not None else None
+    user = await hass.auth.async_get_user(user_id) if user_id else None
+    if user is None or not user.is_admin:
+        raise Unauthorized(context=context)
+
+
+def admin_only_service(
+    hass: HomeAssistant,
+    handler: Callable[[ServiceCall], Awaitable[Any]],
+) -> Callable[[ServiceCall], Awaitable[Any]]:
+    """Wrap a service handler so it rejects any non-admin caller.
+
+    Applied to every service this integration registers directly via
+    `hass.services.async_register` (`services.py`) — several of them are
+    account-level or destructive (`share_camera`, `invite_friend`,
+    `remove_friend`, `delete_event`, the `*_rule` set, …). Uses
+    `async_require_admin` rather than
+    `homeassistant.helpers.service.async_register_admin_service` because
+    that helper's default schema (`vol.Schema({}, extra=vol.PREVENT_EXTRA)`)
+    would reject every call carrying service data unless every handler's
+    schema were rebuilt to match — this wrapper leaves the existing
+    `hass.services.async_register` call (and its permissive default
+    schema) untouched.
+    """
+
+    async def _wrapped(call: ServiceCall) -> Any:
+        await async_require_admin(hass, call.context)
+        return await handler(call)
+
+    return _wrapped
+
 
 _GEN2_INDOOR_HW = {"HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"}
 _INDOOR_HW = {"INDOOR", "CAMERA_360", "HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"}

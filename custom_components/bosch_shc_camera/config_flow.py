@@ -136,6 +136,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "enable_green_it",
         "use_mjpeg_snapshot",
         "defer_diag_during_stream",
+        "cloudflare_tunnel_hls_unbuffer",
     ],
     "fcm": [
         "enable_fcm_push",
@@ -319,6 +320,7 @@ from .const import (
     CONF_AI_TASK_ENTITY,
     CONF_AI_VISITOR_DESCRIPTION,
     CONF_AI_VISITOR_NAME,
+    CONF_CLOUDFLARE_TUNNEL_HLS_UNBUFFER,
     CONF_DEFER_DIAG_DURING_STREAM,
     CONF_ENABLE_AI_DESCRIPTION,
     CONF_ENABLE_PTZ_CONTROLS,
@@ -1108,6 +1110,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 CONF_ENABLE_PTZ_CONTROLS,
                 "use_mjpeg_snapshot",
                 CONF_DEFER_DIAG_DURING_STREAM,
+                CONF_CLOUDFLARE_TUNNEL_HLS_UNBUFFER,
                 CONF_ENABLE_AI_DESCRIPTION,
                 CONF_AI_DESCRIBE_ON_MOTION,
                 CONF_AI_NOTIFY_INCLUDE_DESCRIPTION,
@@ -1389,6 +1392,12 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                                 CONF_DEFER_DIAG_DURING_STREAM,
                                 DEFAULT_DEFER_DIAG_DURING_STREAM,
                             )
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_CLOUDFLARE_TUNNEL_HLS_UNBUFFER,
+                        default=bool(
+                            opts.get(CONF_CLOUDFLARE_TUNNEL_HLS_UNBUFFER, False)
                         ),
                     ): bool,
                 }

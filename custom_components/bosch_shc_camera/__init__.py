@@ -979,10 +979,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Content-Type on /api/hls/* responses so cloudflared switches to
     # streaming mode instead of buffering each segment at the edge — fixes
     # the iOS Companion App on cellular ("HLS wird geladen…" hang).
+    # The actual REWRITE is opt-in, default OFF (hacs/default#8181 review,
+    # round 2): it patches HA-core's own HLS view CLASSES, so once enabled
+    # it affects EVERY camera's HLS stream on this HA instance, not just
+    # Bosch ones, for as long as the process lives — only meaningful behind
+    # a Cloudflare Tunnel. `register()` itself always runs regardless of the
+    # option: its wrappers are also the sole source of `hls_access_age()`
+    # (stream_lifecycle.has_active_consumer's HLS-viewer signal) — gating
+    # installation on the same option would silently break idle-session
+    # detection for every default (option-off) install, not just skip a
+    # cosmetic header rewrite.
     # See cf_unbuffer.py docstring + knowledge-base/cloudflared-tunnel-hls-buffering.md
     from . import cf_unbuffer
 
-    cf_unbuffer.register(hass)
+    cf_unbuffer.register(
+        hass, unbuffer_enabled=opts.get("cloudflare_tunnel_hls_unbuffer", False)
+    )
 
     # Listen on HA's stream component logger for worker-error events. This
     # catches the auto-restart cycle from Stream._run_worker() — which our

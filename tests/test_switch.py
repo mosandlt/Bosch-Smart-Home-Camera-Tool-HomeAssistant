@@ -322,6 +322,24 @@ def _bind_hass_modepins(sw):
     sw.async_write_ha_state = MagicMock()
 
 
+def _bind_admin_context(sw):
+    """Give an entity's _require_admin() gate a resolvable admin caller.
+
+    The panic-alarm and arm/disarm switches fail closed (hacs/default#8181
+    round 2) unless self._context.user_id resolves to an admin via
+    self.hass.auth.async_get_user — real production dispatch always sets
+    _context before invoking the entity, so tests exercising a real write
+    must set one up explicitly rather than relying on the class-level
+    _context=None default (which is now itself an Unauthorized case).
+    """
+    sw._context = SimpleNamespace(user_id="admin-user")
+    if not hasattr(sw, "hass") or sw.hass is None:
+        sw.hass = SimpleNamespace()
+    sw.hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
+
+
 class TestLiveStreamSwitch:
     def test_is_on_false_when_no_active_session(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
@@ -2011,6 +2029,7 @@ class TestPanicAlarmSwitch:
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
         _bind_hass_modepins(sw)
+        _bind_admin_context(sw)
         await sw.async_turn_on()
         coord.async_put_camera.assert_awaited_once_with(
             CAM_ID, "panic_alarm", {"status": "ON"}
@@ -2027,6 +2046,7 @@ class TestPanicAlarmSwitch:
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
         _bind_hass_modepins(sw)
+        _bind_admin_context(sw)
         await sw.async_turn_off()
         coord.async_put_camera.assert_awaited_once_with(
             CAM_ID, "panic_alarm", {"status": "OFF"}
@@ -2043,16 +2063,19 @@ class TestPanicAlarmSwitch:
         sw = self._make(coord, entry)
         sw.async_write_ha_state = MagicMock()
         _bind_hass_modepins(sw)
+        _bind_admin_context(sw)
         await sw.async_turn_on()
         coord.async_put_camera.assert_not_called()
 
 
 class TestSafetyCriticalSwitchAdminGate:
-    """Regression tests for hacs/default#8181 review finding 3: panic-alarm
-    trigger and intrusion-system arm/disarm must reject a non-admin caller
-    instead of executing, while staying reachable from automations/scripts
-    (which carry no user_id — only admins can author those in the first
-    place)."""
+    """Regression tests for hacs/default#8181 review finding 3 (rounds 1+2):
+    panic-alarm trigger and intrusion-system arm/disarm must reject any
+    caller that doesn't resolve to an admin user — including no context,
+    no user_id, or an unresolvable user_id — failing closed unconditionally
+    per the maintainer's round-2 follow-up (a missing user_id is NOT
+    treated as an implicitly-trusted automation/script call here, unlike
+    HA core's own `async_register_admin_service` convention)."""
 
     def _panic(self, coord, entry):
         from custom_components.bosch_shc_camera.switch import BoschPanicAlarmSwitch
@@ -2112,18 +2135,36 @@ class TestSafetyCriticalSwitchAdminGate:
         )
 
     @pytest.mark.asyncio
-    async def test_panic_alarm_allows_automation_call_with_no_user(
+    async def test_panic_alarm_rejects_call_with_no_user_id(
         self, coord: SimpleNamespace, entry: SimpleNamespace
     ):
-        """No user_id (automation/script context) must pass through without
-        even touching hass.auth — only admins can author automations."""
+        """A context with no user_id (automation/script) must now be
+        rejected too — round 2 of the review explicitly called out that
+        the previous pass-through behavior did not fail closed for the
+        case an unauthenticated/context-less caller produces."""
+        from homeassistant.exceptions import Unauthorized
+
         sw = self._panic(coord, entry)
         _bind_hass_modepins(sw)
         sw._context = SimpleNamespace(user_id=None)
-        await sw.async_turn_on()
-        coord.async_put_camera.assert_awaited_once_with(
-            CAM_ID, "panic_alarm", {"status": "ON"}
-        )
+        with pytest.raises(Unauthorized):
+            await sw.async_turn_on()
+        coord.async_put_camera.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_panic_alarm_rejects_no_context_at_all(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
+        """The class-level _context=None default (never explicitly set)
+        must also be rejected, not just an explicit user_id=None context."""
+        from homeassistant.exceptions import Unauthorized
+
+        sw = self._panic(coord, entry)
+        _bind_hass_modepins(sw)
+        assert sw._context is None
+        with pytest.raises(Unauthorized):
+            await sw.async_turn_on()
+        coord.async_put_camera.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_alarm_arm_rejects_non_admin_caller(
@@ -4403,6 +4444,7 @@ class TestArmingSwitchRecordsTimestamp:
 
         sw = BoschAlarmSystemArmSwitch(coord, CAM_ID, entry)
         sw.async_write_ha_state = lambda: None
+        _bind_admin_context(sw)
         await sw.async_turn_on()
         assert coord.arming_cache[CAM_ID] is True
         assert CAM_ID in coord.arming_set_at
@@ -4417,6 +4459,7 @@ class TestArmingSwitchRecordsTimestamp:
 
         sw = BoschAlarmSystemArmSwitch(coord, CAM_ID, entry)
         sw.async_write_ha_state = lambda: None
+        _bind_admin_context(sw)
         await sw.async_turn_on()
         assert CAM_ID not in coord.arming_cache
         assert CAM_ID not in coord.arming_set_at
@@ -4588,6 +4631,7 @@ async def test_turn_on_sends_status_on(stub_entry_gen2: SimpleNamespace) -> None
     coord = _make_coord_panic()
     entity = BoschPanicAlarmSwitch(coord, CAM_ID_GEN2, stub_entry_gen2)
     entity.async_write_ha_state = MagicMock()
+    _bind_admin_context(entity)
 
     await entity.async_turn_on()
 
@@ -4608,6 +4652,7 @@ async def test_turn_off_sends_status_off(stub_entry_gen2: SimpleNamespace) -> No
     coord.panic_alarm_cache[CAM_ID_GEN2] = True
     entity = BoschPanicAlarmSwitch(coord, CAM_ID_GEN2, stub_entry_gen2)
     entity.async_write_ha_state = MagicMock()
+    _bind_admin_context(entity)
 
     await entity.async_turn_off()
 
@@ -4640,6 +4685,7 @@ async def test_failed_put_does_not_set_cache_panic(
     coord.async_put_camera = AsyncMock(return_value=False)
     entity = BoschPanicAlarmSwitch(coord, CAM_ID_GEN2, stub_entry_gen2)
     entity.async_write_ha_state = MagicMock()
+    _bind_admin_context(entity)
 
     await entity.async_turn_on()
 
@@ -4676,6 +4722,7 @@ async def test_lazy_init_creates_cache_on_legacy_coordinator(
     assert not hasattr(coord, "panic_alarm_cache")
     entity = BoschPanicAlarmSwitch(coord, CAM_ID_GEN2, stub_entry_gen2)
     entity.async_write_ha_state = MagicMock()
+    _bind_admin_context(entity)
 
     await entity.async_turn_on()
 
@@ -6232,6 +6279,7 @@ def test_alarm_arm_extra_attrs():
 @pytest.mark.asyncio
 async def test_alarm_arm_turn_on():
     sw = _make_alarm_arm_switch()
+    _bind_admin_context(sw)
     await sw.async_turn_on()
     sw.coordinator.async_put_camera.assert_awaited_once_with(
         CAM_ID, "intrusionSystem/arming", {"arm": True}
@@ -6242,6 +6290,7 @@ async def test_alarm_arm_turn_on():
 @pytest.mark.asyncio
 async def test_alarm_arm_turn_off():
     sw = _make_alarm_arm_switch(arming_cache={CAM_ID: True})
+    _bind_admin_context(sw)
     await sw.async_turn_off()
     args = sw.coordinator.async_put_camera.call_args[0]
     assert args[2]["arm"] is False
@@ -7017,6 +7066,7 @@ class TestAlarmSystemArmSwitch:
         stub_coord_round9.async_put_camera = AsyncMock(return_value=True)
         entity = BoschAlarmSystemArmSwitch(stub_coord_round9, CAM_ID, stub_entry_round9)
         entity.async_write_ha_state = MagicMock()
+        _bind_admin_context(entity)
         await entity.async_turn_on()
         assert stub_coord_round9.arming_cache[CAM_ID] is True, (
             "Cache must be True after arm"
@@ -7032,6 +7082,7 @@ class TestAlarmSystemArmSwitch:
         stub_coord_round9.async_put_camera = AsyncMock(return_value=True)
         entity = BoschAlarmSystemArmSwitch(stub_coord_round9, CAM_ID, stub_entry_round9)
         entity.async_write_ha_state = MagicMock()
+        _bind_admin_context(entity)
         await entity.async_turn_off()
         assert stub_coord_round9.arming_cache[CAM_ID] is False, (
             "Cache must be False after disarm"
@@ -9707,6 +9758,7 @@ class TestPanicAlarmPrivacyGuardAndFailedPut:
         entity = BoschPanicAlarmSwitch(coord, CAM_ID, entry)
         entity.async_write_ha_state = MagicMock()
         entity.hass = _hass_stub_panic()
+        _bind_admin_context(entity)
         return entity
 
     @pytest.mark.asyncio

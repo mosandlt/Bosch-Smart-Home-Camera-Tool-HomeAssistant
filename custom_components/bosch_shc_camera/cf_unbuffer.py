@@ -172,6 +172,19 @@ async def _emit_segment_chunked(
 
 _PATCHED = False
 
+# Whether the actual Content-Type/Transfer-Encoding REWRITE runs — the
+# `cloudflare_tunnel_hls_unbuffer` option (hacs/default#8181 review, round
+# 2: instance-wide behavior change must be opt-in). The wrapper installation
+# itself (register(), below) stays unconditional regardless of this flag:
+# `_note_hls_access()` — called from both wrappers — is the ONLY source for
+# `hls_access_age()`, which `stream_lifecycle.has_active_consumer()` reads
+# to detect an actively-watched HLS viewer. Gating installation itself on
+# the same option would silently kill that detection for every install that
+# doesn't opt in (the default), making `idle_session_reaper` tear down a
+# session someone is actively watching over HLS. So: install always,
+# rewrite only when enabled.
+_UNBUFFER_ENABLED = False
+
 
 def _make_playlist_wrapper(orig_handle: Any) -> Any:
     @wraps(orig_handle)
@@ -179,6 +192,8 @@ def _make_playlist_wrapper(orig_handle: Any) -> Any:
         if args:
             _note_hls_access(args[0])  # args[0] is the aiohttp request
         response = await orig_handle(self, *args, **kwargs)
+        if not _UNBUFFER_ENABLED:
+            return response
         return _wrap_playlist_response(response)
 
     _wrapped._cf_wrapped = True  # type: ignore[attr-defined]
@@ -194,6 +209,8 @@ def _make_segment_wrapper(orig_handle: Any) -> Any:
         response = await orig_handle(self, request, *args, **kwargs)
         if response is None or not isinstance(response, web.Response):
             return response
+        if not _UNBUFFER_ENABLED:
+            return response
         try:
             return await _emit_segment_chunked(request, response)
         except Exception as exc:
@@ -204,8 +221,19 @@ def _make_segment_wrapper(orig_handle: Any) -> Any:
     return _wrapped
 
 
-def register(hass: HomeAssistant) -> None:
-    global _PATCHED
+def register(hass: HomeAssistant, unbuffer_enabled: bool = False) -> None:
+    """Install the HLS view wrappers (always) and set the rewrite flag.
+
+    `unbuffer_enabled` controls only whether the wrappers actually rewrite
+    Content-Type/Transfer-Encoding once installed — installation itself is
+    unconditional so `_note_hls_access()` keeps firing regardless (see
+    `_UNBUFFER_ENABLED`'s docstring above). Safe to call on every setup with
+    a possibly-changed value: the flag is re-applied even when `_PATCHED`
+    short-circuits the actual class patching (e.g. a reload after the user
+    toggled the option in the options flow).
+    """
+    global _PATCHED, _UNBUFFER_ENABLED
+    _UNBUFFER_ENABLED = unbuffer_enabled
     if _PATCHED:
         return
     try:

@@ -30,7 +30,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import get_options
-from .guards import wrap_service_errors
+from .guards import admin_only_service, wrap_service_errors
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1752,79 +1752,130 @@ def _register_services(hass: HomeAssistant) -> None:
             },
         )
 
+    # Every service below requires an admin caller (hacs/default#8181 review,
+    # round 2) — several are account-level or destructive (share_camera,
+    # invite_friend, remove_friend, delete_event, the *_rule set, …); the
+    # rest are gated the same way for consistency rather than judging each
+    # one's severity individually. See guards.admin_only_service.
+    #
+    # EXCEPTION: trigger_snapshot is NOT gated — the Lovelace card calls it
+    # automatically on page load / tab switch / a 60s timer for EVERY
+    # viewer (camera.py's own docstring documents this), so admin-gating it
+    # would break the card's live image refresh for any non-admin household
+    # user (a real regression caught by a bug-hunt on this exact change,
+    # before release). It is a read-only refresh trigger, not an
+    # account-level or destructive action.
     if not hass.services.has_service(DOMAIN, "trigger_snapshot"):
         hass.services.async_register(
             DOMAIN, "trigger_snapshot", handle_trigger_snapshot
         )
     if not hass.services.has_service(DOMAIN, "open_live_connection"):
         hass.services.async_register(
-            DOMAIN, "open_live_connection", handle_open_live_connection
+            DOMAIN,
+            "open_live_connection",
+            admin_only_service(hass, handle_open_live_connection),
         )
     if not hass.services.has_service(DOMAIN, "create_rule"):
-        hass.services.async_register(DOMAIN, "create_rule", handle_create_rule)
+        hass.services.async_register(
+            DOMAIN, "create_rule", admin_only_service(hass, handle_create_rule)
+        )
     if not hass.services.has_service(DOMAIN, "delete_rule"):
-        hass.services.async_register(DOMAIN, "delete_rule", handle_delete_rule)
+        hass.services.async_register(
+            DOMAIN, "delete_rule", admin_only_service(hass, handle_delete_rule)
+        )
     if not hass.services.has_service(DOMAIN, "delete_motion_zone"):
         hass.services.async_register(
-            DOMAIN, "delete_motion_zone", handle_delete_motion_zone
+            DOMAIN,
+            "delete_motion_zone",
+            admin_only_service(hass, handle_delete_motion_zone),
         )
     if not hass.services.has_service(DOMAIN, "get_lighting_schedule"):
         hass.services.async_register(
-            DOMAIN, "get_lighting_schedule", handle_get_lighting_schedule
+            DOMAIN,
+            "get_lighting_schedule",
+            admin_only_service(hass, handle_get_lighting_schedule),
         )
     if not hass.services.has_service(DOMAIN, "set_lighting_schedule"):
         hass.services.async_register(
-            DOMAIN, "set_lighting_schedule", handle_set_lighting_schedule
+            DOMAIN,
+            "set_lighting_schedule",
+            admin_only_service(hass, handle_set_lighting_schedule),
         )
     if not hass.services.has_service(DOMAIN, "get_privacy_masks"):
         hass.services.async_register(
-            DOMAIN, "get_privacy_masks", handle_get_privacy_masks
+            DOMAIN,
+            "get_privacy_masks",
+            admin_only_service(hass, handle_get_privacy_masks),
         )
     if not hass.services.has_service(DOMAIN, "set_privacy_masks"):
         hass.services.async_register(
-            DOMAIN, "set_privacy_masks", handle_set_privacy_masks
+            DOMAIN,
+            "set_privacy_masks",
+            admin_only_service(hass, handle_set_privacy_masks),
         )
     if not hass.services.has_service(DOMAIN, "update_rule"):
-        hass.services.async_register(DOMAIN, "update_rule", handle_update_rule)
+        hass.services.async_register(
+            DOMAIN, "update_rule", admin_only_service(hass, handle_update_rule)
+        )
     if not hass.services.has_service(DOMAIN, "set_motion_zones"):
         hass.services.async_register(
-            DOMAIN, "set_motion_zones", handle_set_motion_zones
+            DOMAIN,
+            "set_motion_zones",
+            admin_only_service(hass, handle_set_motion_zones),
         )
     if not hass.services.has_service(DOMAIN, "get_motion_zones"):
         hass.services.async_register(
-            DOMAIN, "get_motion_zones", handle_get_motion_zones
+            DOMAIN,
+            "get_motion_zones",
+            admin_only_service(hass, handle_get_motion_zones),
         )
     if not hass.services.has_service(DOMAIN, "share_camera"):
-        hass.services.async_register(DOMAIN, "share_camera", handle_share_camera)
+        hass.services.async_register(
+            DOMAIN, "share_camera", admin_only_service(hass, handle_share_camera)
+        )
     if not hass.services.has_service(DOMAIN, "rename_camera"):
-        hass.services.async_register(DOMAIN, "rename_camera", handle_rename_camera)
+        hass.services.async_register(
+            DOMAIN, "rename_camera", admin_only_service(hass, handle_rename_camera)
+        )
     if not hass.services.has_service(DOMAIN, "invite_friend"):
-        hass.services.async_register(DOMAIN, "invite_friend", handle_invite_friend)
+        hass.services.async_register(
+            DOMAIN, "invite_friend", admin_only_service(hass, handle_invite_friend)
+        )
     if not hass.services.has_service(DOMAIN, "list_friends"):
-        hass.services.async_register(DOMAIN, "list_friends", handle_list_friends)
+        hass.services.async_register(
+            DOMAIN, "list_friends", admin_only_service(hass, handle_list_friends)
+        )
     if not hass.services.has_service(DOMAIN, "remove_friend"):
-        hass.services.async_register(DOMAIN, "remove_friend", handle_remove_friend)
+        hass.services.async_register(
+            DOMAIN, "remove_friend", admin_only_service(hass, handle_remove_friend)
+        )
     if not hass.services.has_service(DOMAIN, "migrate_flat_events"):
         hass.services.async_register(
-            DOMAIN, "migrate_flat_events", handle_migrate_flat_events
+            DOMAIN,
+            "migrate_flat_events",
+            admin_only_service(hass, handle_migrate_flat_events),
         )
     if not hass.services.has_service(DOMAIN, "delete_event"):
-        hass.services.async_register(DOMAIN, "delete_event", handle_delete_event)
+        hass.services.async_register(
+            DOMAIN, "delete_event", admin_only_service(hass, handle_delete_event)
+        )
     if not hass.services.has_service(DOMAIN, "describe_snapshot"):
         hass.services.async_register(
             DOMAIN,
             "describe_snapshot",
-            handle_describe_snapshot,
+            admin_only_service(hass, handle_describe_snapshot),
             supports_response=SupportsResponse.OPTIONAL,
         )
     if not hass.services.has_service(DOMAIN, "analyze_camera_ai"):
         hass.services.async_register(
             DOMAIN,
             "analyze_camera_ai",
-            handle_analyze_camera_ai,
+            admin_only_service(hass, handle_analyze_camera_ai),
             supports_response=SupportsResponse.OPTIONAL,
         )
     if not hass.services.has_service(DOMAIN, "send_event_webhook"):
         hass.services.async_register(
-            DOMAIN, "send_event_webhook", handle_send_event_webhook
+            DOMAIN,
+            "send_event_webhook",
+            admin_only_service(hass, handle_send_event_webhook),
         )

@@ -397,6 +397,13 @@ DEFAULT_OPTIONS = {
     # Max simultaneous recorder clients per camera front-door (anti-flood).
     # Default 8 covers typical Frigate multi-sub-stream setups with headroom.
     "frigate_max_connections": 8,
+    # Rewrites Content-Type/Transfer-Encoding on HA-core's own HLS view
+    # classes (HlsMasterPlaylistView etc.) instance-wide — affects EVERY
+    # camera's HLS stream on this HA instance, not just Bosch ones, for as
+    # long as the process lives (hacs/default#8181 review, round 2). Off by
+    # default; only meaningful behind a Cloudflare Tunnel. See
+    # cf_unbuffer.py's module docstring for the full explanation.
+    "cloudflare_tunnel_hls_unbuffer": False,
 }
 
 # v2.16.0 dropped the historical "confirm" value (popup dialog) in favour
@@ -414,6 +421,7 @@ CONF_FRIGATE_TOKEN = "frigate_token"  # noqa: S105 # option key name, not a cred
 CONF_FRIGATE_BASIC_USER = "frigate_basic_user"
 CONF_FRIGATE_IDLE_TIMEOUT = "frigate_idle_timeout"
 CONF_FRIGATE_MAX_CONNECTIONS = "frigate_max_connections"
+CONF_CLOUDFLARE_TUNNEL_HLS_UNBUFFER = "cloudflare_tunnel_hls_unbuffer"
 FRIGATE_BIND_VALUES = ("127.0.0.1", "0.0.0.0")  # noqa: S104 # 0.0.0.0 is an explicit opt-in LAN-exposure choice
 FRIGATE_AUTH_VALUES = ("none", "path_token", "basic")
 

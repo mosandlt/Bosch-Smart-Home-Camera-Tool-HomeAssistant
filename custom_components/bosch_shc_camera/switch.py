@@ -56,7 +56,13 @@ from . import BoschCameraCoordinator, get_options
 from .cloud_ssl import async_get_bosch_cloud_session
 from .const import DOMAIN, STREAM_START_SKIPPED
 from .dynamic_devices import register_dynamic_camera_listener
-from .guards import _INDOOR_HW, _get_cam_lock, _is_gen2_indoor, _warn_if_privacy_on
+from .guards import (
+    _INDOOR_HW,
+    _get_cam_lock,
+    _is_gen2_indoor,
+    _warn_if_privacy_on,
+    async_require_admin,
+)
 from .session_state import FloatFieldView
 
 _LOGGER = logging.getLogger(__name__)
@@ -141,38 +147,38 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
         self.async_write_ha_state()
 
     async def _require_admin(self) -> None:
-        """Reject the call unless the calling user is an admin.
+        """Reject the call unless the calling user is a resolvable admin.
 
         Only used by entities whose ON state has a physical/safety
         consequence beyond the usual "toggle a camera setting" — the panic
-        siren and the intrusion-system arm/disarm switch. HA's own
-        per-entity permission model already lets an admin decide which
-        non-admin users may control a given entity at all, but for these
-        two the blast radius of a non-admin household member (or a
-        narrowly-scoped/compromised non-admin token) triggering them is
-        severe enough to require admin unconditionally, on top of that
-        grant. `self._context` is set by HA's entity-service dispatcher via
-        `async_set_context()` right before the service call reaches here,
-        so it reflects the actual calling user for this call — not stale
-        state.
+        siren and the intrusion-system arm/disarm switch. `self._context` is
+        set by HA's entity-service dispatcher via `async_set_context()`
+        right before the service call reaches here, so it reflects the
+        actual calling user for this call — not stale state.
 
-        A call with NO user_id (automations, scripts, other internal
-        callers) is allowed through: HA only lets admins create or edit
-        automations/scripts in the first place, so an internal call already
-        passed through an admin-gated surface before it ever got here —
-        unlike a direct frontend/voice-assistant service call, which
-        carries the actual calling user's context. A call that DOES carry
-        a user_id but resolves to a non-admin (or to no user at all, e.g. a
-        stale/deleted user) is rejected — that path fails closed rather
-        than silently passing.
+        Fails closed unconditionally (hacs/default#8181 review, round 2):
+        no context, no user_id, an unresolvable user_id, or a resolved
+        non-admin user are ALL rejected — including the no-user_id case
+        (automations/scripts), even though HA's own
+        `helpers.service.async_register_admin_service` treats a missing
+        user_id as implicitly trusted (automation/script-originated) and
+        lets it through. That's deliberately not good enough here: an
+        automation calling these two specifically should be traceable to an
+        admin the same way a direct call is, since the consequence is a
+        real physical siren or disarming the intrusion system, not a
+        config-style action. An automation that needs to arm/disarm or
+        trigger the siren still can — it just has to run as an admin
+        context (e.g. via a script/scene an admin owns), same as every
+        other admin-gated action in HA. Delegates to the shared
+        `guards.async_require_admin` (also used to gate the account/
+        destructive services in `services.py`) so both surfaces fail
+        closed the exact same way.
         """
-        context = self._context
-        user_id = context.user_id if context is not None else None
-        if user_id is None:
-            return
-        user = await self.hass.auth.async_get_user(user_id)
-        if user is None or not user.is_admin:
-            raise Unauthorized(context=context, entity_id=self.entity_id)
+        try:
+            await async_require_admin(self.hass, self._context)
+        except Unauthorized as err:
+            err.entity_id = self.entity_id
+            raise
 
     def _warn_write_failed(self, feature: str, desired_label: str) -> None:
         """Log a total write failure the cloud setter otherwise swallows.

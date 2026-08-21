@@ -42,11 +42,12 @@ from urllib.parse import urlparse
 import aiohttp
 import pytest
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     ServiceValidationError,
+    Unauthorized,
 )
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
@@ -691,6 +692,9 @@ def _make_hass(go2rtc_entries=None):
     hass.async_create_task = MagicMock()
     hass.async_create_background_task = MagicMock()
     hass.bus.async_listen_once = MagicMock(return_value=lambda: None)
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
     return hass
 
 
@@ -747,6 +751,63 @@ class TestGo2rtcAutoCreate:
             await async_setup_entry(hass, entry)
 
         hass.config_entries.flow.async_init.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cloudflare_tunnel_hls_unbuffer_disabled_by_default(self):
+        """Regression test for hacs/default#8181 review round 2:
+        cf_unbuffer.register is ALWAYS called (its wrapper installation is
+        what feeds hls_access_age()/has_active_consumer(), unrelated to the
+        opt-in rewrite) but with unbuffer_enabled=False by default — default
+        options carry no `cloudflare_tunnel_hls_unbuffer` key at all
+        (pre-existing installs upgrading from before this option existed),
+        which must read as False, not raise."""
+        from custom_components.bosch_shc_camera import async_setup_entry
+
+        hass = _make_hass(go2rtc_entries=[])
+        entry = _make_entry_setup_go2rtc(options={})
+        coord_stub = _make_coord_stub([])
+
+        ent_reg = MagicMock()
+        ent_reg.async_get_entity_id = MagicMock(return_value=None)
+
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.cf_unbuffer.register") as mock_register,
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        mock_register.assert_called_once_with(hass, unbuffer_enabled=False)
+
+    @pytest.mark.asyncio
+    async def test_cloudflare_tunnel_hls_unbuffer_enabled_registers_patch(self):
+        """`cloudflare_tunnel_hls_unbuffer=True` → cf_unbuffer.register IS
+        called (opt-in path)."""
+        from custom_components.bosch_shc_camera import async_setup_entry
+
+        hass = _make_hass(go2rtc_entries=[])
+        entry = _make_entry_setup_go2rtc(
+            options={"cloudflare_tunnel_hls_unbuffer": True}
+        )
+        coord_stub = _make_coord_stub([])
+
+        ent_reg = MagicMock()
+        ent_reg.async_get_entity_id = MagicMock(return_value=None)
+
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.cf_unbuffer.register") as mock_register,
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        mock_register.assert_called_once_with(hass, unbuffer_enabled=True)
 
     @pytest.mark.asyncio
     async def test_disabled_via_options_skips_flow_init(self):
@@ -1048,6 +1109,9 @@ def _make_hass_setup_lan_fallback(*, persisted_ips=None, stale_lan_ids=None):
     hass.async_create_task = MagicMock()
     hass.async_create_background_task = MagicMock()
     hass.bus.async_listen_once = MagicMock(return_value=lambda: None)
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
     return hass
 
 
@@ -1608,6 +1672,9 @@ def _make_hass_lovelace_resource(resources=None):
     hass.http.async_register_static_paths = AsyncMock()
     hass.services.has_service.return_value = True  # short-circuit _register_services
     hass.bus.async_listen_once = MagicMock()
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
     return hass
 
 
@@ -8509,6 +8576,9 @@ def _make_hass_services_round1(already_registered=False):
     hass.services.async_call = AsyncMock()
     hass.config_entries.async_loaded_entries.return_value = []
     hass.async_create_task = MagicMock()
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
     return hass
 
 
@@ -9912,6 +9982,9 @@ def _make_hass_services_filesystem():
     hass.services.async_register = MagicMock()
     hass.services.async_call = AsyncMock()
     hass.config_entries.async_loaded_entries.return_value = []
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
 
     async def _exec(func, *args, **kwargs):
         return func(*args, **kwargs)
@@ -10253,12 +10326,18 @@ INVALID_INPUT_CASES = [
 
 
 @pytest.fixture
-async def setup_services(hass: HomeAssistant) -> AsyncGenerator[None, None]:
+async def setup_services(
+    hass: HomeAssistant, hass_admin_user: Any
+) -> AsyncGenerator[None, None]:
     """Register the services without a coordinator (no cloud calls happen).
 
     The service handlers raise ServiceValidationError BEFORE iterating
     config entries, so we don't need a real coordinator for input-validation
-    tests.
+    tests. Depends on `hass_admin_user` so every test in this block can call
+    through the real `admin_only_service` gate as an admin (guards.py) —
+    without it the real `hass.auth`'s default/anonymous call context has no
+    resolvable admin user and every call raises `Unauthorized` before ever
+    reaching the input-validation logic under test.
     """
     from custom_components.bosch_shc_camera import _register_services
 
@@ -10270,13 +10349,20 @@ async def setup_services(hass: HomeAssistant) -> AsyncGenerator[None, None]:
 async def test_service_rejects_missing_argument(
     hass: HomeAssistant,
     setup_services: None,
+    hass_admin_user: Any,
     service_name: str,
     bad_data: dict,
     expected_key: str,
 ) -> None:
     """Bad input must raise ServiceValidationError with the expected translation_key."""
     with pytest.raises(ServiceValidationError) as exc_info:
-        await hass.services.async_call(DOMAIN, service_name, bad_data, blocking=True)
+        await hass.services.async_call(
+            DOMAIN,
+            service_name,
+            bad_data,
+            blocking=True,
+            context=Context(user_id=hass_admin_user.id),
+        )
     err = exc_info.value
     assert err.translation_domain == DOMAIN, (
         f"{service_name}: expected translation_domain={DOMAIN!r}, "
@@ -10289,7 +10375,7 @@ async def test_service_rejects_missing_argument(
 
 
 async def test_set_motion_zones_rejects_missing_field(
-    hass: HomeAssistant, setup_services: None
+    hass: HomeAssistant, setup_services: None, hass_admin_user: Any
 ) -> None:
     """Zone missing 'x' must raise the missing_field translation key."""
     with pytest.raises(ServiceValidationError) as exc_info:
@@ -10298,6 +10384,7 @@ async def test_set_motion_zones_rejects_missing_field(
             "set_motion_zones",
             {"camera_id": "abc", "zones": [{"y": 0.5, "w": 0.1, "h": 0.1}]},
             blocking=True,
+            context=Context(user_id=hass_admin_user.id),
         )
     assert exc_info.value.translation_key == "missing_field"
     placeholders = exc_info.value.translation_placeholders or {}
@@ -10306,7 +10393,7 @@ async def test_set_motion_zones_rejects_missing_field(
 
 
 async def test_set_motion_zones_rejects_out_of_range(
-    hass: HomeAssistant, setup_services: None
+    hass: HomeAssistant, setup_services: None, hass_admin_user: Any
 ) -> None:
     """Zone coord >1.0 must raise the value_out_of_range translation key."""
     with pytest.raises(ServiceValidationError) as exc_info:
@@ -10315,6 +10402,7 @@ async def test_set_motion_zones_rejects_out_of_range(
             "set_motion_zones",
             {"camera_id": "abc", "zones": [{"x": 1.5, "y": 0.5, "w": 0.1, "h": 0.1}]},
             blocking=True,
+            context=Context(user_id=hass_admin_user.id),
         )
     assert exc_info.value.translation_key == "value_out_of_range"
     placeholders = exc_info.value.translation_placeholders or {}
@@ -10323,7 +10411,7 @@ async def test_set_motion_zones_rejects_out_of_range(
 
 
 async def test_set_privacy_masks_rejects_missing_field(
-    hass: HomeAssistant, setup_services: None
+    hass: HomeAssistant, setup_services: None, hass_admin_user: Any
 ) -> None:
     """Mask missing 'h' must raise missing_field with kind=mask."""
     with pytest.raises(ServiceValidationError) as exc_info:
@@ -10332,6 +10420,7 @@ async def test_set_privacy_masks_rejects_missing_field(
             "set_privacy_masks",
             {"camera_id": "abc", "masks": [{"x": 0.1, "y": 0.1, "w": 0.1}]},
             blocking=True,
+            context=Context(user_id=hass_admin_user.id),
         )
     assert exc_info.value.translation_key == "missing_field"
     placeholders = exc_info.value.translation_placeholders or {}
@@ -10340,7 +10429,7 @@ async def test_set_privacy_masks_rejects_missing_field(
 
 
 async def test_delete_motion_zone_rejects_negative_index(
-    hass: HomeAssistant, setup_services: None
+    hass: HomeAssistant, setup_services: None, hass_admin_user: Any
 ) -> None:
     """Negative zone_index is treated as missing — argument_required."""
     with pytest.raises(ServiceValidationError) as exc_info:
@@ -10349,6 +10438,7 @@ async def test_delete_motion_zone_rejects_negative_index(
             "delete_motion_zone",
             {"camera_id": "abc", "zone_index": -1},
             blocking=True,
+            context=Context(user_id=hass_admin_user.id),
         )
     assert exc_info.value.translation_key == "argument_required"
 
@@ -12955,6 +13045,9 @@ def _make_hass_ai_describe_snapshot() -> MagicMock:
     hass.services.async_call = AsyncMock(return_value={"data": "A person is visible."})
     hass.states = MagicMock()
     hass.loop.time = MagicMock(return_value=1000.0)
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
     return hass
 
 
@@ -16063,6 +16156,9 @@ def _make_hass_remaining_lines():
     hass.services.async_register = MagicMock()
     hass.services.async_call = AsyncMock()
     hass.config_entries.async_loaded_entries.return_value = []
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
 
     async def _exec(func, *args, **kwargs):
         return func(*args, **kwargs)
@@ -18613,6 +18709,9 @@ def _make_hass_sprint_j3(already_registered=False):
     hass.services.async_call = AsyncMock()
     hass.config_entries.async_loaded_entries.return_value = []
     hass.async_create_task = MagicMock()
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
     return hass
 
 
@@ -31342,6 +31441,9 @@ def _make_hass_sprint_md() -> MagicMock:
     hass.services.has_service = MagicMock(return_value=False)
     hass.services.async_register = MagicMock()
     hass.states = MagicMock()
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
     return hass
 
 
@@ -32540,7 +32642,9 @@ class TestSetupEntrySendEventWebhookService:
             _register_services(hass)
             await async_setup_entry(hass, entry)
             handler = captured_handler[0] if captured_handler else None
-            call = SimpleNamespace(data=service_call_data)
+            call = SimpleNamespace(
+                data=service_call_data, context=SimpleNamespace(user_id="admin-user")
+            )
             if handler:
                 await handler(call)
 
@@ -34597,6 +34701,9 @@ def _make_hass_for_services(already_registered=False):
     hass.services.async_register = MagicMock()
     hass.config_entries.async_loaded_entries.return_value = []
     hass.async_create_task = MagicMock()
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
     return hass
 
 
@@ -36163,7 +36270,9 @@ class TestHandleRefreshImageEdgeCases:
     """Lines 8523 (list entity_id) and 8527 (None runtime_data)."""
 
     @pytest.mark.asyncio
-    async def test_entity_id_list_is_unwrapped(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
+    async def test_entity_id_list_is_unwrapped(
+        self, hass: HomeAssistant, hass_admin_user: Any
+    ) -> None:  # type: ignore[no-untyped-def]
         """Line 8523: entity_id arrives as a list → target[0] taken."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -36187,12 +36296,15 @@ class TestHandleRefreshImageEdgeCases:
             "trigger_snapshot",
             {"entity_id": ["camera.bosch_test"]},
             blocking=True,
+            context=Context(user_id=hass_admin_user.id),
         )
         # A create_task for the image refresh should have been called
         hass.async_create_task.assert_called()
 
     @pytest.mark.asyncio
-    async def test_none_runtime_data_is_skipped(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
+    async def test_none_runtime_data_is_skipped(
+        self, hass: HomeAssistant, hass_admin_user: Any
+    ) -> None:  # type: ignore[no-untyped-def]
         """Line 8527: entry.runtime_data is None/falsy → continue (no crash)."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -36209,10 +36321,13 @@ class TestHandleRefreshImageEdgeCases:
             "trigger_snapshot",
             {},
             blocking=True,
+            context=Context(user_id=hass_admin_user.id),
         )
 
     @pytest.mark.asyncio
-    async def test_empty_list_entity_id_becomes_none(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
+    async def test_empty_list_entity_id_becomes_none(
+        self, hass: HomeAssistant, hass_admin_user: Any
+    ) -> None:  # type: ignore[no-untyped-def]
         """Line 8523: entity_id=[] → target becomes None → all-camera refresh path."""
         from custom_components.bosch_shc_camera import _register_services
 
@@ -36233,6 +36348,7 @@ class TestHandleRefreshImageEdgeCases:
             "trigger_snapshot",
             {"entity_id": []},
             blocking=True,
+            context=Context(user_id=hass_admin_user.id),
         )
         # Coordinator-level refresh should be queued (target became None)
         hass.async_create_task.assert_called()
@@ -36242,7 +36358,9 @@ class TestSetMotionZonesCoordValueError:
     """Lines 8803-8804: float(z[key]) raises TypeError/ValueError → ServiceValidationError."""
 
     @pytest.mark.asyncio
-    async def test_zone_non_numeric_coord_raises(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
+    async def test_zone_non_numeric_coord_raises(
+        self, hass: HomeAssistant, hass_admin_user: Any
+    ) -> None:  # type: ignore[no-untyped-def]
         from homeassistant.exceptions import ServiceValidationError
 
         from custom_components.bosch_shc_camera import _register_services
@@ -36258,6 +36376,7 @@ class TestSetMotionZonesCoordValueError:
                     "zones": [{"x": "abc", "y": 0.5, "w": 0.1, "h": 0.1}],
                 },
                 blocking=True,
+                context=Context(user_id=hass_admin_user.id),
             )
         assert exc_info.value.translation_key == "value_out_of_range"
         placeholders = exc_info.value.translation_placeholders or {}
@@ -36265,7 +36384,9 @@ class TestSetMotionZonesCoordValueError:
         assert placeholders.get("field") == "x"
 
     @pytest.mark.asyncio
-    async def test_zone_none_coord_raises(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
+    async def test_zone_none_coord_raises(
+        self, hass: HomeAssistant, hass_admin_user: Any
+    ) -> None:  # type: ignore[no-untyped-def]
         from homeassistant.exceptions import ServiceValidationError
 
         from custom_components.bosch_shc_camera import _register_services
@@ -36281,6 +36402,7 @@ class TestSetMotionZonesCoordValueError:
                     "zones": [{"x": None, "y": 0.5, "w": 0.1, "h": 0.1}],
                 },
                 blocking=True,
+                context=Context(user_id=hass_admin_user.id),
             )
         assert exc_info.value.translation_key == "value_out_of_range"
         assert (exc_info.value.translation_placeholders or {}).get("kind") == "zone"
@@ -36290,7 +36412,9 @@ class TestSetPrivacyMasksCoordValueError:
     """Lines 9164-9165: float(m[key]) raises TypeError/ValueError → ServiceValidationError."""
 
     @pytest.mark.asyncio
-    async def test_mask_non_numeric_coord_raises(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
+    async def test_mask_non_numeric_coord_raises(
+        self, hass: HomeAssistant, hass_admin_user: Any
+    ) -> None:  # type: ignore[no-untyped-def]
         from homeassistant.exceptions import ServiceValidationError
 
         from custom_components.bosch_shc_camera import _register_services
@@ -36306,6 +36430,7 @@ class TestSetPrivacyMasksCoordValueError:
                     "masks": [{"x": "bad", "y": 0.5, "w": 0.1, "h": 0.1}],
                 },
                 blocking=True,
+                context=Context(user_id=hass_admin_user.id),
             )
         assert exc_info.value.translation_key == "value_out_of_range"
         placeholders = exc_info.value.translation_placeholders or {}
@@ -36313,7 +36438,9 @@ class TestSetPrivacyMasksCoordValueError:
         assert placeholders.get("field") == "x"
 
     @pytest.mark.asyncio
-    async def test_mask_none_coord_raises(self, hass: HomeAssistant) -> None:  # type: ignore[no-untyped-def]
+    async def test_mask_none_coord_raises(
+        self, hass: HomeAssistant, hass_admin_user: Any
+    ) -> None:  # type: ignore[no-untyped-def]
         from homeassistant.exceptions import ServiceValidationError
 
         from custom_components.bosch_shc_camera import _register_services
@@ -36329,6 +36456,7 @@ class TestSetPrivacyMasksCoordValueError:
                     "masks": [{"x": None, "y": 0.5, "w": 0.1, "h": 0.1}],
                 },
                 blocking=True,
+                context=Context(user_id=hass_admin_user.id),
             )
         assert exc_info.value.translation_key == "value_out_of_range"
         assert (exc_info.value.translation_placeholders or {}).get("kind") == "mask"
@@ -37237,7 +37365,10 @@ class TestSendEventWebhookNoLoadedEntries:
 
         with patch(f"{MODULE}.services._LOGGER") as mock_log:
             mock_log.warning.side_effect = lambda *a, **k: logged_warnings.append(a)
-            call = SimpleNamespace(data={"event_type": "MOVEMENT", "entity_id": ""})
+            call = SimpleNamespace(
+                data={"event_type": "MOVEMENT", "entity_id": ""},
+                context=SimpleNamespace(user_id="admin-user"),
+            )
             await handler(call)
 
         # Lines 6342-6343: warning logged, early return
@@ -37315,6 +37446,9 @@ def _make_hass_backend_round2_fixes(time_zone: str = "America/New_York"):
     hass.config_entries.async_loaded_entries.return_value = []
     hass.async_create_task = MagicMock()
     hass.config.time_zone = time_zone
+    hass.auth = SimpleNamespace(
+        async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=True))
+    )
     return hass
 
 
@@ -41262,3 +41396,113 @@ class TestSmbUnavailableRepairs:
 
         warn_msgs = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warn_msgs) == 2
+
+
+class TestServiceAdminGate:
+    """`guards.admin_only_service` rejects non-admin/unauthenticated callers
+    for services registered by `services.py::_register_services`
+    (hacs/default#8181 review, round 2). `create_rule`/`share_camera`/
+    `delete_event` are picked as representative handlers spanning three
+    different downstream side effects (cloud-rule POST, cloud-share POST,
+    local filesystem delete) — the gate must reject BEFORE any of them run,
+    proving `admin_only_service` wraps every registered handler, not just
+    the ones with a bespoke in-handler check.
+    """
+
+    async def _register_and_get_handler(
+        self, hass: MagicMock, service_name: str
+    ) -> Any:
+        from custom_components.bosch_shc_camera import _register_services
+
+        _register_services(hass)
+        return _get_handlers(hass)[service_name]
+
+    @pytest.mark.asyncio
+    async def test_create_rule_rejects_non_admin(self) -> None:
+        hass = _make_hass_services_round1()
+        hass.auth = SimpleNamespace(
+            async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=False))
+        )
+        handler = await self._register_and_get_handler(hass, "create_rule")
+
+        call = MagicMock()
+        call.data = {"camera_id": CAM_ID}
+        call.context = SimpleNamespace(user_id="non-admin-user")
+
+        with pytest.raises(Unauthorized):
+            await handler(call)
+
+        # The business logic (which reads loaded config entries to reach the
+        # cloud session) must never run for a rejected caller.
+        hass.config_entries.async_loaded_entries.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_share_camera_rejects_non_admin(self) -> None:
+        hass = _make_hass_services_round1()
+        hass.auth = SimpleNamespace(
+            async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=False))
+        )
+        handler = await self._register_and_get_handler(hass, "share_camera")
+
+        call = MagicMock()
+        call.data = {"friend_id": "fid", "camera_ids": [CAM_ID]}
+        call.context = SimpleNamespace(user_id="non-admin-user")
+
+        with pytest.raises(Unauthorized):
+            await handler(call)
+
+        hass.config_entries.async_loaded_entries.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_event_rejects_non_admin(self) -> None:
+        hass = _make_hass_services_round1()
+        hass.auth = SimpleNamespace(
+            async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=False))
+        )
+        handler = await self._register_and_get_handler(hass, "delete_event")
+
+        call = MagicMock()
+        call.data = {"camera": "terrasse"}
+        call.context = SimpleNamespace(user_id="non-admin-user")
+
+        with pytest.raises(Unauthorized):
+            await handler(call)
+
+        hass.config_entries.async_loaded_entries.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_missing_user_id_rejected_same_as_non_admin(self) -> None:
+        """A context with `user_id=None` (or no context at all) is rejected
+        the same way as a resolved non-admin user — this integration
+        deliberately does NOT treat a missing user_id as automation-trusted
+        for this gate, unlike HA core's own `async_register_admin_service`
+        (see guards.async_require_admin's docstring)."""
+        hass = _make_hass_services_round1()
+        # A user_id of None must never even reach hass.auth.async_get_user —
+        # if it did and that mock returned an admin, the gate would wrongly
+        # pass. Configure it to explode to catch that regression too.
+        hass.auth = SimpleNamespace(
+            async_get_user=AsyncMock(
+                side_effect=AssertionError(
+                    "async_get_user must not be called for a None user_id"
+                )
+            )
+        )
+        handler = await self._register_and_get_handler(hass, "create_rule")
+
+        call = MagicMock()
+        call.data = {"camera_id": CAM_ID}
+        call.context = SimpleNamespace(user_id=None)
+
+        with pytest.raises(Unauthorized):
+            await handler(call)
+
+        hass.config_entries.async_loaded_entries.assert_not_called()
+
+        # No context at all must be rejected identically.
+        call_no_context = MagicMock()
+        call_no_context.data = {"camera_id": CAM_ID}
+        call_no_context.context = None
+
+        with pytest.raises(Unauthorized):
+            await handler(call_no_context)

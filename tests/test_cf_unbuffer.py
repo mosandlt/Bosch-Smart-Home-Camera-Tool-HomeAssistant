@@ -296,7 +296,12 @@ class TestWrapperInvocation:
 
     @pytest.mark.asyncio
     async def test_playlist_wrapper_invokes_orig_and_rewrites_ct(self):
-        """Calling the wrapper must run orig_handle then pass result through _wrap_playlist_response."""
+        """Calling the wrapper must run orig_handle then pass result through
+        _wrap_playlist_response — only when unbuffer_enabled (the
+        cloudflare_tunnel_hls_unbuffer option) is on; the rewrite is opt-in
+        (hacs/default#8181 review round 2), unlike wrapper installation
+        itself, which stays unconditional."""
+        import custom_components.bosch_shc_camera.cf_unbuffer as cf_unbuffer_mod
         from custom_components.bosch_shc_camera.cf_unbuffer import (
             _make_playlist_wrapper,
         )
@@ -310,16 +315,39 @@ class TestWrapperInvocation:
             return resp
 
         wrapped = _make_playlist_wrapper(fake_handle)
-        result = await wrapped(MagicMock(), "request_arg")
+        with patch.object(cf_unbuffer_mod, "_UNBUFFER_ENABLED", True):
+            result = await wrapped(MagicMock(), "request_arg")
         assert captured_args, "orig_handle must be awaited inside the wrapper"
         ct = result.headers["Content-Type"]
         assert ct.startswith("text/event-stream")
 
     @pytest.mark.asyncio
+    async def test_playlist_wrapper_skips_rewrite_when_disabled(self):
+        """unbuffer_enabled=False (the default) → orig_handle still runs
+        (so hls_access stamping/downstream behavior is unaffected) but the
+        Content-Type must NOT be rewritten."""
+        import custom_components.bosch_shc_camera.cf_unbuffer as cf_unbuffer_mod
+        from custom_components.bosch_shc_camera.cf_unbuffer import (
+            _make_playlist_wrapper,
+        )
+
+        async def fake_handle(self, *args, **kwargs):
+            resp = MagicMock()
+            resp.headers = {"Content-Type": "application/vnd.apple.mpegurl"}
+            return resp
+
+        wrapped = _make_playlist_wrapper(fake_handle)
+        with patch.object(cf_unbuffer_mod, "_UNBUFFER_ENABLED", False):
+            result = await wrapped(MagicMock(), "request_arg")
+        assert result.headers["Content-Type"] == "application/vnd.apple.mpegurl"
+
+    @pytest.mark.asyncio
     async def test_segment_wrapper_invokes_orig_and_rewrites_to_chunked(self):
-        """Wrapper happy path: aiohttp.web.Response with a body → re-emitted as StreamResponse."""
+        """Wrapper happy path: aiohttp.web.Response with a body → re-emitted
+        as StreamResponse, only when unbuffer_enabled is on."""
         from aiohttp import web
 
+        import custom_components.bosch_shc_camera.cf_unbuffer as cf_unbuffer_mod
         from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
 
         async def fake_handle(self, request, *a, **kw):
@@ -336,13 +364,37 @@ class TestWrapperInvocation:
         stream_resp.write_eof = AsyncMock()
         stream_resp.headers = {}
 
-        with patch("custom_components.bosch_shc_camera.cf_unbuffer.web") as mock_web:
+        with (
+            patch("custom_components.bosch_shc_camera.cf_unbuffer.web") as mock_web,
+            patch.object(cf_unbuffer_mod, "_UNBUFFER_ENABLED", True),
+        ):
             mock_web.StreamResponse.return_value = stream_resp
             mock_web.Response = web.Response
             await wrapped(MagicMock(), request)
 
         assert stream_resp.prepare.called
         assert stream_resp.write.called
+
+    @pytest.mark.asyncio
+    async def test_segment_wrapper_skips_rewrite_when_disabled(self):
+        """unbuffer_enabled=False (the default) → the segment response must
+        NOT be re-emitted as chunked — passed through unchanged."""
+        from aiohttp import web
+
+        import custom_components.bosch_shc_camera.cf_unbuffer as cf_unbuffer_mod
+        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+
+        orig_resp = web.Response(
+            body=b"\x00" * 32, headers={"Content-Type": "video/mp4"}
+        )
+
+        async def fake_handle(self, request, *a, **kw):
+            return orig_resp
+
+        wrapped = _make_segment_wrapper(fake_handle)
+        with patch.object(cf_unbuffer_mod, "_UNBUFFER_ENABLED", False):
+            result = await wrapped(MagicMock(), MagicMock())
+        assert result is orig_resp
 
     @pytest.mark.asyncio
     async def test_segment_wrapper_passes_through_non_response(self):
@@ -371,9 +423,13 @@ class TestWrapperInvocation:
 
     @pytest.mark.asyncio
     async def test_segment_wrapper_swallows_emit_exception(self):
-        """If chunked re-emit raises, wrapper logs at DEBUG and returns the original response."""
+        """If chunked re-emit raises, wrapper logs at DEBUG and returns the
+        original response. Only reachable when unbuffer_enabled — with it
+        off (the default) the wrapper returns before ever attempting the
+        chunked re-emit, so this needs _UNBUFFER_ENABLED patched True."""
         from aiohttp import web
 
+        import custom_components.bosch_shc_camera.cf_unbuffer as cf_unbuffer_mod
         from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
 
         original = web.Response(body=b"x" * 16, headers={"Content-Type": "video/mp4"})
@@ -385,9 +441,12 @@ class TestWrapperInvocation:
             raise RuntimeError("simulated chunked emit failure")
 
         wrapped = _make_segment_wrapper(fake_handle)
-        with patch(
-            "custom_components.bosch_shc_camera.cf_unbuffer._emit_segment_chunked",
-            side_effect=boom,
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.cf_unbuffer._emit_segment_chunked",
+                side_effect=boom,
+            ),
+            patch.object(cf_unbuffer_mod, "_UNBUFFER_ENABLED", True),
         ):
             result = await wrapped(MagicMock(), MagicMock())
         assert result is original, (
