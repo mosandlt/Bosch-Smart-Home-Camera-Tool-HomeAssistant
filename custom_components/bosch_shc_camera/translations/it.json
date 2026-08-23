@@ -139,7 +139,8 @@
               "alert_notify_information": "Fase 1 — notifica testuale",
               "alert_notify_screenshot": "Fase 2 — immagine Snapshot",
               "alert_notify_video": "Fase 3 — clip video",
-              "alert_notify_system": "Alert di sistema (errore token, pulizia NAS)"
+              "alert_notify_system": "Alert di sistema (errore token, pulizia NAS)",
+              "alert_notify_live_preview": "Anteprima live della telecamera nelle notifiche"
             },
             "data_description": {
               "enable_fcm_push": "Ricevi eventi di movimento/audio in ~2 secondi tramite Firebase Cloud Messaging invece di effettuare polling ogni 5 minuti. Fallback automatico al polling se FCM non è disponibile. Consigliato!",
@@ -151,7 +152,8 @@
               "alert_notify_information": "Servizi per la fase 1 — notifica testuale immediata. Vuoto = fallback predefinito. Es.: notify.signal_messenger, notify.mobile_app_xxx.",
               "alert_notify_screenshot": "Servizi per la fase 2 — immagine Snapshot. Vuoto = fase ignorata (nessun fallback). Le app mobili (mobile_app_xxx) ricevono l'immagine inline; le altre come allegato.",
               "alert_notify_video": "Servizi per la fase 3 — clip video. Vuoto = fase ignorata (nessun fallback).",
-              "alert_notify_system": "Servizi per gli alert di sistema (token scaduto, disco pieno). Vuoto = utilizza il fallback predefinito sopra."
+              "alert_notify_system": "Servizi per gli alert di sistema (token scaduto, disco pieno). Vuoto = utilizza il fallback predefinito sopra.",
+              "alert_notify_live_preview": "Se attivo, le notifiche push inviate ai servizi della Companion App HA (mobile_app_*) includono l'entità della telecamera, così l'app recupera da sé una miniatura aggiornata alla consegna e apre un flusso live della telecamera all'interno della notifica quando viene espansa — il meccanismo di contenuto dinamico proprio della Companion App (solo iOS; su Android gli allegati delle notifiche supportano solo un'immagine statica, non questo meccanismo di flusso live). Si aggiunge allo scatto statico già allegato, non lo sostituisce. Disattivato di default: attivandolo, la Companion App interroga la telecamera a ogni consegna di avviso, per ogni dispositivo destinatario mobile_app_*. Nessun effetto sui servizi diversi da mobile_app (Signal, Telegram, email, ...)."
             }
           },
           "events_storage": {

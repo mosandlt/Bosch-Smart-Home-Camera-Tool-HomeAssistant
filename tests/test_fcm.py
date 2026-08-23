@@ -34,6 +34,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.bosch_shc_camera import fcm
+from custom_components.bosch_shc_camera.const import DOMAIN
 from custom_components.bosch_shc_camera.fcm import (
     _FCMNoiseFilter,
     _install_fcm_noise_filter,
@@ -5441,6 +5442,247 @@ class TestBuildNotifyDataExtras:
             file_path="/file.jpg",
         )
         assert data["data"] == {"attachments": ["/file.jpg"]}
+
+
+class TestBuildNotifyDataLivePreview:
+    """alert_notify_live_preview opt-in: camera_entity_id param.
+
+    PIN_EVERY_MODE — every combination of (mobile_app vs. other service) x
+    (file_path present vs. absent) x (camera_entity_id given vs. None)."""
+
+    def test_mobile_app_no_file_with_entity_id(self):
+        """Step 1 (text-only, no snapshot yet) still gets a live-preview
+        payload when the opt-in resolved an entity_id — the Companion App's
+        own dynamic-content fetch doesn't need our downloaded snapshot."""
+        from custom_components.bosch_shc_camera.fcm import build_notify_data
+
+        data = build_notify_data(
+            "notify.mobile_app_thomas_iphone",
+            "msg",
+            camera_entity_id="camera.bosch_terrasse",
+        )
+        # No push.sound here — this option must not silently start forcing
+        # a sound on step-1 text alerts that never had one before (bug-hunt
+        # finding: it previously did, as an unintended side effect).
+        assert data["data"] == {"entity_id": "camera.bosch_terrasse"}
+        assert "image" not in data["data"]
+
+    def test_mobile_app_with_file_and_entity_id(self):
+        """Step 2 (snapshot attached) keeps the static image AND adds the
+        live-preview entity_id — additive, not a replacement."""
+        from custom_components.bosch_shc_camera.fcm import build_notify_data
+
+        data = build_notify_data(
+            "notify.mobile_app_thomas_iphone",
+            "msg",
+            file_path="/tmp/snap.jpg",
+            camera_entity_id="camera.bosch_terrasse",
+        )
+        assert data["data"]["image"] == "/local/bosch_alerts/snap.jpg"
+        assert data["data"]["entity_id"] == "camera.bosch_terrasse"
+
+    def test_mobile_app_no_file_no_entity_id_unchanged(self):
+        """Default (opt-in off / unresolved): no `data` key at all when
+        there's neither a file nor an entity_id — matches pre-existing
+        behaviour exactly."""
+        from custom_components.bosch_shc_camera.fcm import build_notify_data
+
+        data = build_notify_data("notify.mobile_app_thomas_iphone", "msg")
+        assert "data" not in data
+
+    def test_mobile_app_with_file_no_entity_id_unchanged(self):
+        """Default (opt-in off): image-only payload, no entity_id key —
+        matches pre-existing behaviour exactly."""
+        from custom_components.bosch_shc_camera.fcm import build_notify_data
+
+        data = build_notify_data(
+            "notify.mobile_app_thomas_iphone",
+            "msg",
+            file_path="/tmp/snap.jpg",
+        )
+        assert data["data"]["image"] == "/local/bosch_alerts/snap.jpg"
+        assert "entity_id" not in data["data"]
+
+    def test_non_mobile_app_ignores_entity_id_with_file(self):
+        """Signal/Telegram/email never get entity_id — the dynamic-content
+        mechanism is a Companion-App-only feature."""
+        from custom_components.bosch_shc_camera.fcm import build_notify_data
+
+        data = build_notify_data(
+            "notify.signal_thomas",
+            "msg",
+            file_path="/x/y.mp4",
+            camera_entity_id="camera.bosch_terrasse",
+        )
+        assert data["data"] == {"attachments": ["/x/y.mp4"]}
+
+    def test_non_mobile_app_ignores_entity_id_without_file(self):
+        """Same as above with no file_path — must not spuriously add a
+        `data` key for a non-Companion-App service."""
+        from custom_components.bosch_shc_camera.fcm import build_notify_data
+
+        data = build_notify_data(
+            "notify.signal_thomas",
+            "msg",
+            camera_entity_id="camera.bosch_terrasse",
+        )
+        assert "data" not in data
+
+    def test_mobile_app_empty_string_entity_id_treated_as_falsy(self):
+        """Garbage input: an empty-string entity_id (e.g. a registry lookup
+        that returned "" instead of None) must not produce an empty
+        `entity_id` key."""
+        from custom_components.bosch_shc_camera.fcm import build_notify_data
+
+        data = build_notify_data(
+            "notify.mobile_app_thomas_iphone",
+            "msg",
+            file_path="/tmp/snap.jpg",
+            camera_entity_id="",
+        )
+        assert "entity_id" not in data["data"]
+
+
+class TestAsyncSendAlertLivePreviewWiring:
+    """async_send_alert must resolve the camera entity_id via the entity
+    registry only when alert_notify_live_preview is ON, using the same
+    unique_id scheme camera.py registers (`bosch_shc_cam_{cam_id.lower()}`),
+    and pass it through to every mobile_app_* notify call — except for
+    TROUBLE_CONNECT/TROUBLE_DISCONNECT (bug-hunt finding: a connectivity
+    alert has no meaningful live feed to offer, and DISCONNECT specifically
+    means the camera is unreachable)."""
+
+    @pytest.mark.asyncio
+    async def test_entity_id_resolved_and_passed_when_enabled(self):
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_information": "notify.mobile_app_thomas_iphone",
+                "alert_notify_live_preview": True,
+            }
+        )
+        fake_registry = MagicMock()
+        fake_registry.async_get_entity_id = MagicMock(
+            return_value="camera.bosch_terrasse"
+        )
+
+        with patch(f"{MODULE}.er.async_get", return_value=fake_registry):
+            await _run_send_alert(coord, event_type="MOVEMENT")
+
+        fake_registry.async_get_entity_id.assert_called_once_with(
+            "camera", DOMAIN, f"bosch_shc_cam_{CAM_ID.lower()}"
+        )
+        call_data = coord.hass.services.async_call.call_args_list[0].args[2]
+        assert call_data["data"]["entity_id"] == "camera.bosch_terrasse"
+
+    @pytest.mark.asyncio
+    async def test_entity_id_not_resolved_when_disabled(self):
+        """Default (opt-in off): the entity registry must not even be
+        queried — no wasted lookup on the hot alert path."""
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_information": "notify.mobile_app_thomas_iphone",
+                "alert_notify_live_preview": False,
+            }
+        )
+        fake_registry = MagicMock()
+        fake_registry.async_get_entity_id = MagicMock(
+            return_value="camera.bosch_terrasse"
+        )
+
+        with patch(f"{MODULE}.er.async_get", return_value=fake_registry):
+            await _run_send_alert(coord, event_type="MOVEMENT")
+
+        fake_registry.async_get_entity_id.assert_not_called()
+        call_data = coord.hass.services.async_call.call_args_list[0].args[2]
+        assert "entity_id" not in call_data.get("data", {})
+
+    @pytest.mark.asyncio
+    async def test_unresolved_entity_id_degrades_gracefully(self):
+        """The camera entity isn't registered yet (fresh setup) — the
+        registry legitimately returns None. Must not crash, must not add an
+        entity_id key."""
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_information": "notify.mobile_app_thomas_iphone",
+                "alert_notify_live_preview": True,
+            }
+        )
+        fake_registry = MagicMock()
+        fake_registry.async_get_entity_id = MagicMock(return_value=None)
+
+        with patch(f"{MODULE}.er.async_get", return_value=fake_registry):
+            await _run_send_alert(coord, event_type="MOVEMENT")
+
+        call_data = coord.hass.services.async_call.call_args_list[0].args[2]
+        assert "entity_id" not in call_data.get("data", {})
+
+    @pytest.mark.asyncio
+    async def test_trouble_connect_never_gets_entity_id_even_when_enabled(self):
+        """Bug-hunt finding: connectivity alerts must never carry a
+        live-preview entity_id, opt-in ON or not."""
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_system": "notify.mobile_app_thomas_iphone",
+                "alert_notify_live_preview": True,
+            }
+        )
+        fake_registry = MagicMock()
+        fake_registry.async_get_entity_id = MagicMock(
+            return_value="camera.bosch_terrasse"
+        )
+
+        with patch(f"{MODULE}.er.async_get", return_value=fake_registry):
+            await _run_send_alert(coord, event_type="TROUBLE_CONNECT")
+
+        fake_registry.async_get_entity_id.assert_not_called()
+        call_data = coord.hass.services.async_call.call_args_list[0].args[2]
+        assert "entity_id" not in call_data.get("data", {})
+
+    @pytest.mark.asyncio
+    async def test_trouble_disconnect_never_gets_entity_id_even_when_enabled(self):
+        """Same as CONNECT — DISCONNECT means the camera is by definition
+        unreachable, a live-preview offer would just fail on every device."""
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_system": "notify.mobile_app_thomas_iphone",
+                "alert_notify_live_preview": True,
+            }
+        )
+        fake_registry = MagicMock()
+        fake_registry.async_get_entity_id = MagicMock(
+            return_value="camera.bosch_terrasse"
+        )
+
+        with patch(f"{MODULE}.er.async_get", return_value=fake_registry):
+            await _run_send_alert(coord, event_type="TROUBLE_DISCONNECT")
+
+        fake_registry.async_get_entity_id.assert_not_called()
+        call_data = coord.hass.services.async_call.call_args_list[0].args[2]
+        assert "entity_id" not in call_data.get("data", {})
+
+    @pytest.mark.asyncio
+    async def test_entity_id_not_resolved_when_snapshots_disabled(self):
+        """Bug-hunt finding: no camera entity exists when enable_snapshots
+        is OFF (camera.py never registers one) — a leftover entity-registry
+        entry from a previous run must not be resolved/attached."""
+        coord = _make_alert_coord(
+            options={
+                "alert_notify_information": "notify.mobile_app_thomas_iphone",
+                "alert_notify_live_preview": True,
+                "enable_snapshots": False,
+            }
+        )
+        fake_registry = MagicMock()
+        fake_registry.async_get_entity_id = MagicMock(
+            return_value="camera.bosch_terrasse"
+        )
+
+        with patch(f"{MODULE}.er.async_get", return_value=fake_registry):
+            await _run_send_alert(coord, event_type="MOVEMENT")
+
+        fake_registry.async_get_entity_id.assert_not_called()
+        call_data = coord.hass.services.async_call.call_args_list[0].args[2]
+        assert "entity_id" not in call_data.get("data", {})
 
 
 class TestGetAlertServices:

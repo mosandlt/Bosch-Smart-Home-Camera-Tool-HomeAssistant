@@ -139,7 +139,8 @@
               "alert_notify_information": "Step 1 — text notification",
               "alert_notify_screenshot": "Step 2 — snapshot image",
               "alert_notify_video": "Step 3 — video clip",
-              "alert_notify_system": "System alerts (token failure, NAS cleanup)"
+              "alert_notify_system": "System alerts (token failure, NAS cleanup)",
+              "alert_notify_live_preview": "Live camera preview in notifications"
             },
             "data_description": {
               "enable_fcm_push": "Receive motion/audio events in ~2 seconds via Firebase Cloud Messaging instead of polling every 5 minutes. Automatic fallback to polling if FCM goes down. Recommended!",
@@ -151,7 +152,8 @@
               "alert_notify_information": "Services for step 1 — instant text notification. Empty = default fallback. e.g.: notify.signal_messenger, notify.mobile_app_xxx.",
               "alert_notify_screenshot": "Services for step 2 — snapshot image. Empty = skip this step (no fallback). Mobile apps (mobile_app_xxx) receive the image inline; others as file attachment.",
               "alert_notify_video": "Services for step 3 — video clip. Empty = skip this step (no fallback).",
-              "alert_notify_system": "Services for system alerts (token expired, disk full). Empty = uses default fallback above."
+              "alert_notify_system": "Services for system alerts (token expired, disk full). Empty = uses default fallback above.",
+              "alert_notify_live_preview": "When ON, push notifications sent to HA Companion App services (mobile_app_*) include the camera entity, so the app fetches a fresh thumbnail on delivery and opens a live camera feed inside the notification when you expand it — the Companion App's own dynamic-content mechanism (iOS only; Android's notification attachments only support a static image, not this live-stream mechanism). Additive to the static snapshot already attached, not a replacement. Off by default: enabling this makes the Companion App fetch from the camera on every alert delivery, for every mobile_app_* recipient device. No effect on non-mobile_app notify services (Signal, Telegram, email, ...)."
             }
           },
           "events_storage": {

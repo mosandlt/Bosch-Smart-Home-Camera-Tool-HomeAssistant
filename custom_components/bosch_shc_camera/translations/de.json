@@ -139,7 +139,8 @@
               "alert_notify_information": "Stufe 1 — Text-Benachrichtigung",
               "alert_notify_screenshot": "Stufe 2 — Snapshot-Bild",
               "alert_notify_video": "Stufe 3 — Videoclip",
-              "alert_notify_system": "System-Alerts (Token-Fehler, NAS-Bereinigung)"
+              "alert_notify_system": "System-Alerts (Token-Fehler, NAS-Bereinigung)",
+              "alert_notify_live_preview": "Live-Kameravorschau in Benachrichtigungen"
             },
             "data_description": {
               "enable_fcm_push": "Bewegungs-/Audio-Events in ~2 Sekunden empfangen statt alle 5 Minuten zu pollen. Automatischer Fallback auf Polling wenn FCM ausfällt. Empfohlen!",
@@ -151,7 +152,8 @@
               "alert_notify_information": "Dienste für Stufe 1 — sofortige Text-Benachrichtigung. Leer = Standard-Fallback. z.B.: notify.signal_messenger, notify.mobile_app_xxx.",
               "alert_notify_screenshot": "Dienste für Stufe 2 — Snapshot-Bild. Leer = Schritt wird übersprungen (kein Fallback). Mobile Apps (mobile_app_xxx) erhalten das Bild direkt in der Benachrichtigung; andere als Dateianhang.",
               "alert_notify_video": "Dienste für Stufe 3 — Videoclip. Leer = Schritt wird übersprungen (kein Fallback).",
-              "alert_notify_system": "Dienste für System-Alerts (Token abgelaufen, Speicher voll). Leer = verwendet Standard-Fallback oben."
+              "alert_notify_system": "Dienste für System-Alerts (Token abgelaufen, Speicher voll). Leer = verwendet Standard-Fallback oben.",
+              "alert_notify_live_preview": "Wenn AN, enthalten Push-Benachrichtigungen an die HA Companion App (mobile_app_*) die Kamera-Entität, sodass die App bei Zustellung selbst ein aktuelles Vorschaubild lädt und beim Aufklappen der Benachrichtigung einen Live-Feed der Kamera öffnet — der eigene Dynamic-Content-Mechanismus der Companion App (nur iOS; bei Android unterstützen Notification-Anhänge nur ein statisches Bild, nicht diesen Live-Stream-Mechanismus). Zusätzlich zum bereits angehängten Standbild, keine Ersetzung. Standardmäßig AUS: bei Aktivierung ruft die Companion App bei jeder Alarm-Zustellung selbst die Kamera ab, für jedes mobile_app_*-Empfängergerät. Keine Auswirkung auf Nicht-mobile_app-Dienste (Signal, Telegram, E-Mail, ...)."
             }
           },
           "events_storage": {

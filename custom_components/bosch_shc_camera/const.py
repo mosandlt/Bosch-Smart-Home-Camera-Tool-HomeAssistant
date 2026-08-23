@@ -236,6 +236,11 @@ DEFAULT_OPTIONS = {
     "alert_notify_video": "",
     "alert_save_snapshots": False,
     "alert_delete_after_send": True,
+    # Opt-in: adds the camera entity_id to mobile_app_* notify payloads so
+    # expanding an alert notification opens a live feed via the Companion
+    # App's own dynamic-content mechanism (WebRTC on builds that support it,
+    # e.g. iOS 2026.7+) instead of only the static snapshot.
+    "alert_notify_live_preview": False,
     "mark_events_read": False,
     "fcm_push_mode": "auto",
     "enable_intercom": False,

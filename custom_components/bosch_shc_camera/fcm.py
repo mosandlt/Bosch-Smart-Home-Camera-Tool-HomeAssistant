@@ -2539,20 +2539,42 @@ def build_notify_data(
     message: str,
     file_path: str | None = None,
     title: str | None = None,
+    camera_entity_id: str | None = None,
 ) -> dict[str, Any]:
     """Build notify service call data with correct attachment format per service type.
 
     mobile_app (iOS + Android HA Companion): image served from /local/bosch_alerts/
     telegram_bot: uses photo field
     All others (Signal, email, ...): file path in data.attachments
+
+    camera_entity_id: only honoured for mobile_app services, only when the
+    caller resolved one (alert_notify_live_preview opt-in). This is the
+    Companion App's own dynamic-content mechanism (documented for
+    `entity_id:` in HA's own notification docs, iOS only — the Android
+    Companion App's notification attachments only support a static
+    camera_proxy image, not this live-stream mechanism): the app fetches
+    its own fresh thumbnail on delivery and opens a live camera feed inside
+    the notification when the recipient expands it. Additive to `image`,
+    not a replacement — the static snapshot below is still attached and
+    still shows instantly. Deliberately doesn't set
+    `push.sound` here — that must stay exactly what it already was for the
+    plain-text (no snapshot) case (nothing, i.e. no `data` key at all)
+    unless a snapshot is also attached below; this option only adds a
+    preview, it must not silently start forcing a sound on step-1 text
+    alerts that never had one before.
     """
     data: dict[str, Any] = {"message": message}
     if title:
         data["title"] = title
+    is_mobile_app = "mobile_app" in svc
+
     if not file_path:
+        if is_mobile_app and camera_entity_id:
+            data["data"] = {"entity_id": camera_entity_id}
         return data
+
     fname = os.path.basename(file_path)
-    if "mobile_app" in svc:
+    if is_mobile_app:
         # HA Companion App — image URL served without auth from /config/www/
         # Files deleted within seconds when alert_save_snapshots=False
         #
@@ -2568,6 +2590,8 @@ def build_notify_data(
             "image": f"/local/bosch_alerts/{urllib.parse.quote(fname)}",
             "push": {"sound": "default"},  # iOS: play sound; Android ignores this key
         }
+        if camera_entity_id:
+            notify_data["entity_id"] = camera_entity_id
         data["data"] = notify_data
     elif "telegram" in svc.lower():
         data["data"] = {"photo": file_path, "caption": message}
@@ -2697,6 +2721,30 @@ async def async_send_alert(
         )
         return  # Nothing to do (no notifications, no local save, no SMB upload)
 
+    # alert_notify_live_preview opt-in: resolve the real camera entity_id via
+    # the entity registry (same unique_id scheme camera.py itself registers,
+    # `bosch_shc_cam_{cam_id.lower()}`) so mobile_app_* notify payloads below
+    # can carry it. None (default) means build_notify_data() falls back to
+    # its pre-existing image-only behaviour unchanged. Deliberately skipped
+    # for TROUBLE_CONNECT/TROUBLE_DISCONNECT (_is_trouble): a connectivity
+    # alert about a camera being unreachable has no meaningful live feed to
+    # offer, and for TROUBLE_DISCONNECT specifically the camera is by
+    # definition offline — attaching entity_id would just make every
+    # recipient device's app fail to fetch anything. Also skipped when
+    # enable_snapshots is OFF: no camera entity exists in that case (see
+    # camera.py's early return), so a leftover entity-registry entry from a
+    # previous run would resolve to a dead entity_id.
+    _live_preview_entity_id: str | None = None
+    if (
+        opts.get("alert_notify_live_preview")
+        and not _is_trouble
+        and opts.get("enable_snapshots", True)
+        and _resolved_cam_id
+    ):
+        _live_preview_entity_id = er.async_get(coordinator.hass).async_get_entity_id(
+            "camera", DOMAIN, f"bosch_shc_cam_{_resolved_cam_id.lower()}"
+        )
+
     # alert_save_snapshots is the sole authority over whether files in
     # www/bosch_alerts/ get deleted after sending — its own description
     # ("if OFF, files are deleted within seconds after sending") must hold
@@ -2788,7 +2836,9 @@ async def async_send_alert(
         for svc in services:
             try:
                 domain, service = svc.split(".", 1)
-                call_data = build_notify_data(svc, message, file_path)
+                call_data = build_notify_data(
+                    svc, message, file_path, camera_entity_id=_live_preview_entity_id
+                )
                 await coordinator.hass.services.async_call(
                     domain, service, call_data, blocking=True
                 )

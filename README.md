@@ -954,8 +954,11 @@ Steps 2 and 3 also include a clickable Media Browser link to that day's event fo
 | `Step 3 — video clip` | MP4 attachment | `notify.signal_messenger` |
 | `Save alert snapshots` | Keep files locally or delete after sending | OFF |
 | `Delete after send` | Cleanup local files after notification sent | ON |
+| `Live camera preview in notifications` (v16.2.0+, opt-in, iOS only) | Adds the camera entity to `mobile_app_*` notify payloads so the Companion App shows a live feed when you expand an alert | OFF |
 
 **iOS + Android Companion App** (`mobile_app_*`): snapshot appears directly inside the push notification as an inline image. Files are temporarily saved to `www/bosch_alerts/` (served as `/local/bosch_alerts/`) and auto-deleted within seconds after sending. Signal and others receive a file path attachment instead.
+
+**Live camera preview (v16.2.0+, opt-in, off by default, iOS only):** enabling `Live camera preview in notifications` adds `entity_id: camera.bosch_<name>` to every `mobile_app_*` alert payload, alongside the existing static snapshot — the Companion App's own dynamic-content mechanism (the same one HA's notification docs document for `entity_id:`). The app fetches its own fresh thumbnail on delivery and opens a live camera feed inside the notification when you expand it. Android's notification attachments only support a static image, not this live-stream mechanism, so today this only helps iOS. Additive, not a replacement: the static snapshot is still attached and still shows instantly. Off by default because it makes the Companion App query the camera on every alert delivery for every recipient device, not only on expand.
 
 **Notification switch guard (v7.9.1+):** Alerts respect the notification switches — if `switch.bosch_{name}_notifications` (master) is OFF, no alerts are sent. Type-specific switches (`movement_notifications`, `person_notifications`, `audio_notifications`) are also checked. The FCM push is still received (for event tracking), but the HA notification is suppressed.
 

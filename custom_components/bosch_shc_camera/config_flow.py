@@ -149,6 +149,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "alert_notify_screenshot",
         "alert_notify_video",
         "alert_notify_system",
+        "alert_notify_live_preview",
     ],
     "events_storage": [
         "folder_pattern",
@@ -1099,6 +1100,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 "enable_fcm_push",
                 "alert_save_snapshots",
                 "alert_delete_after_send",
+                "alert_notify_live_preview",
                 "mark_events_read",
                 "enable_intercom",
                 "enable_local_save",
@@ -1462,6 +1464,10 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                             "suggested_value": opts.get("alert_notify_system", "")
                         },
                     ): str,
+                    vol.Optional(
+                        "alert_notify_live_preview",
+                        default=bool(opts.get("alert_notify_live_preview", False)),
+                    ): bool,
                 }
             ),
             {"collapsed": True},

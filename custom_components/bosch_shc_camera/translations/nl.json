@@ -139,7 +139,8 @@
               "alert_notify_information": "Stap 1 — tekstmelding",
               "alert_notify_screenshot": "Stap 2 — snapshot-afbeelding",
               "alert_notify_video": "Stap 3 — videoclip",
-              "alert_notify_system": "Systeemwaarschuwingen (tokenfout, NAS-opruiming)"
+              "alert_notify_system": "Systeemwaarschuwingen (tokenfout, NAS-opruiming)",
+              "alert_notify_live_preview": "Live cameravoorbeeld in meldingen"
             },
             "data_description": {
               "enable_fcm_push": "Ontvang bewegings-/audiogebeurtenissen in ~2 seconden via Firebase Cloud Messaging in plaats van elke 5 minuten te pollen. Automatische fallback naar polling als FCM uitvalt. Aanbevolen!",
@@ -151,7 +152,8 @@
               "alert_notify_information": "Diensten voor stap 1 — directe tekstmelding. Leeg = standaard fallback. bijv.: notify.signal_messenger, notify.mobile_app_xxx.",
               "alert_notify_screenshot": "Diensten voor stap 2 — snapshot-afbeelding. Leeg = stap overgeslagen (geen fallback). Mobiele apps (mobile_app_xxx) ontvangen de afbeelding inline; anderen als bijlage.",
               "alert_notify_video": "Diensten voor stap 3 — videoclip. Leeg = stap overgeslagen (geen fallback).",
-              "alert_notify_system": "Diensten voor systeemwaarschuwingen (token verlopen, schijf vol). Leeg = gebruikt standaard fallback hierboven."
+              "alert_notify_system": "Diensten voor systeemwaarschuwingen (token verlopen, schijf vol). Leeg = gebruikt standaard fallback hierboven.",
+              "alert_notify_live_preview": "Indien AAN bevatten pushmeldingen naar de HA Companion App-diensten (mobile_app_*) de camera-entiteit, zodat de app zelf een actuele miniatuur ophaalt bij aflevering en een live camerabeeld in de melding opent zodra deze wordt uitgeklapt — het eigen dynamic-content-mechanisme van de Companion App (alleen iOS; op Android ondersteunen meldingsbijlagen alleen een statische afbeelding, niet dit live-streammechanisme). Aanvullend op de reeds bijgevoegde statische momentopname, geen vervanging. Standaard UIT: bij inschakelen haalt de Companion App bij elke waarschuwing zelf beeld op van de camera, voor elk mobile_app_*-ontvangertoestel. Geen effect op niet-mobile_app-diensten (Signal, Telegram, e-mail, ...)."
             }
           },
           "events_storage": {

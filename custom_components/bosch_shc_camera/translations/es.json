@@ -139,7 +139,8 @@
               "alert_notify_information": "Paso 1 — notificación de texto",
               "alert_notify_screenshot": "Paso 2 — imagen snapshot",
               "alert_notify_video": "Paso 3 — clip de vídeo",
-              "alert_notify_system": "Alertas del sistema (fallo de token, limpieza NAS)"
+              "alert_notify_system": "Alertas del sistema (fallo de token, limpieza NAS)",
+              "alert_notify_live_preview": "Vista previa en vivo en notificaciones"
             },
             "data_description": {
               "enable_fcm_push": "Recibir eventos de movimiento/audio en ~2 segundos mediante Firebase Cloud Messaging en lugar de consultar cada 5 minutos. Reserva automática a consulta si FCM deja de funcionar. ¡Recomendado!",
@@ -151,7 +152,8 @@
               "alert_notify_information": "Servicios para el paso 1 — notificación de texto instantánea. Vacío = reserva predeterminada. Ej.: notify.signal_messenger, notify.mobile_app_xxx.",
               "alert_notify_screenshot": "Servicios para el paso 2 — imagen snapshot. Vacío = se omite este paso (sin reserva). Las apps móviles (mobile_app_xxx) reciben la imagen integrada; las demás como archivo adjunto.",
               "alert_notify_video": "Servicios para el paso 3 — clip de vídeo. Vacío = se omite este paso (sin reserva).",
-              "alert_notify_system": "Servicios para alertas del sistema (token caducado, disco lleno). Vacío = usa la reserva predeterminada indicada arriba."
+              "alert_notify_system": "Servicios para alertas del sistema (token caducado, disco lleno). Vacío = usa la reserva predeterminada indicada arriba.",
+              "alert_notify_live_preview": "Si está activado, las notificaciones push enviadas a los servicios de la app Companion de HA (mobile_app_*) incluyen la entidad de la cámara, por lo que la app obtiene una miniatura actual al entregarse y abre una transmisión en vivo de la cámara dentro de la notificación al expandirla — el propio mecanismo de contenido dinámico de la Companion App (solo iOS; en Android los adjuntos de notificación solo admiten una imagen estática, no este mecanismo de transmisión en vivo). Adicional a la instantánea estática ya adjunta, no la reemplaza. Desactivado por defecto: al activarlo, la Companion App consulta la cámara en cada entrega de alerta, para cada dispositivo receptor mobile_app_*. Sin efecto en servicios distintos de mobile_app (Signal, Telegram, correo, ...)."
             }
           },
           "events_storage": {

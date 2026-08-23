@@ -139,7 +139,8 @@
               "alert_notify_information": "Passo 1 — notificação de texto",
               "alert_notify_screenshot": "Passo 2 — imagem snapshot",
               "alert_notify_video": "Passo 3 — clip de vídeo",
-              "alert_notify_system": "Alertas do sistema (falha de token, limpeza NAS)"
+              "alert_notify_system": "Alertas do sistema (falha de token, limpeza NAS)",
+              "alert_notify_live_preview": "Pré-visualização da câmera ao vivo nas notificações"
             },
             "data_description": {
               "enable_fcm_push": "Receber eventos de movimento/áudio em ~2 segundos via Firebase Cloud Messaging em vez de verificar a cada 5 minutos. Fallback automático para polling se o FCM falhar. Recomendado!",
@@ -151,7 +152,8 @@
               "alert_notify_information": "Serviços para o passo 1 — notificação de texto instantânea. Vazio = fallback predefinido. Ex.: notify.signal_messenger, notify.mobile_app_xxx.",
               "alert_notify_screenshot": "Serviços para o passo 2 — imagem snapshot. Vazio = ignorar este passo (sem fallback). Apps móveis (mobile_app_xxx) recebem a imagem inline; outros como anexo.",
               "alert_notify_video": "Serviços para o passo 3 — clip de vídeo. Vazio = ignorar este passo (sem fallback).",
-              "alert_notify_system": "Serviços para alertas do sistema (token expirado, disco cheio). Vazio = usa o fallback predefinido acima."
+              "alert_notify_system": "Serviços para alertas do sistema (token expirado, disco cheio). Vazio = usa o fallback predefinido acima.",
+              "alert_notify_live_preview": "Quando ATIVADO, as notificações push enviadas aos serviços do HA Companion App (mobile_app_*) incluem a entidade da câmera, de modo que o app busca sozinho uma miniatura atual na entrega e abre um feed da câmera ao vivo dentro da notificação ao expandi-la — o próprio mecanismo de conteúdo dinâmico do Companion App (somente iOS; no Android os anexos de notificação suportam apenas uma imagem estática, não esse mecanismo de transmissão ao vivo). Adicional ao instantâneo estático já anexado, não o substitui. Desativado por padrão: ao ativar, o Companion App consulta a câmera a cada entrega de alerta, para cada dispositivo destinatário mobile_app_*. Sem efeito em serviços que não sejam mobile_app (Signal, Telegram, e-mail, ...)."
             }
           },
           "events_storage": {

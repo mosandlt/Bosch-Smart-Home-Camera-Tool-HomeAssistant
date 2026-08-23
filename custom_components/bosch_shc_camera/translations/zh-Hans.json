@@ -139,7 +139,8 @@
               "alert_notify_information": "第 1 步 — 文字通知",
               "alert_notify_screenshot": "第 2 步 — 快照图片",
               "alert_notify_video": "第 3 步 — 视频片段",
-              "alert_notify_system": "系统报警（令牌失效、NAS 清理）"
+              "alert_notify_system": "系统报警（令牌失效、NAS 清理）",
+              "alert_notify_live_preview": "通知中的实时摄像头预览"
             },
             "data_description": {
               "enable_fcm_push": "通过 Firebase Cloud Messaging 在约 2 秒内接收运动/音频事件，而非每 5 分钟轮询一次。FCM 故障时自动回退至轮询。推荐！",
@@ -151,7 +152,8 @@
               "alert_notify_information": "第 1 步服务 — 即时文字通知。留空 = 使用默认备用。例如：notify.signal_messenger，notify.mobile_app_xxx。",
               "alert_notify_screenshot": "第 2 步服务 — 快照图片。留空 = 跳过此步（无备用）。移动应用（mobile_app_xxx）内联接收图片；其他以文件附件形式发送。",
               "alert_notify_video": "第 3 步服务 — 视频片段。留空 = 跳过此步（无备用）。",
-              "alert_notify_system": "系统报警服务（令牌过期、磁盘空间不足）。留空 = 使用上方默认备用。"
+              "alert_notify_system": "系统报警服务（令牌过期、磁盘空间不足）。留空 = 使用上方默认备用。",
+              "alert_notify_live_preview": "启用后，发送到 HA Companion App 服务（mobile_app_*）的推送通知会包含摄像头实体，因此应用会在通知送达时自行获取最新缩略图，并在展开通知时在其中打开摄像头实时画面 —— 这是 Companion App 自身的动态内容机制（仅限 iOS；在 Android 上，通知附件仅支持静态图片，不支持此实时流机制）。此为已附带的静态快照之外的补充，而非替代。默认关闭：启用后，Companion App 会在每次警报送达时向摄像头发起请求，对每个 mobile_app_* 接收设备均如此。对非 mobile_app 通知服务（Signal、Telegram、邮件等）无影响。"
             }
           },
           "events_storage": {

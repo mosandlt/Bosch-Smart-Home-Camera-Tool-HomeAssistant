@@ -139,7 +139,8 @@
               "alert_notify_information": "Krok 1 — powiadomienie tekstowe",
               "alert_notify_screenshot": "Krok 2 — obraz migawki",
               "alert_notify_video": "Krok 3 — klip wideo",
-              "alert_notify_system": "Alerty systemowe (błąd tokenu, czyszczenie NAS)"
+              "alert_notify_system": "Alerty systemowe (błąd tokenu, czyszczenie NAS)",
+              "alert_notify_live_preview": "Podgląd kamery na żywo w powiadomieniach"
             },
             "data_description": {
               "enable_fcm_push": "Otrzymuj zdarzenia ruchu/dźwięku w ~2 sekundy przez Firebase Cloud Messaging zamiast odpytywania co 5 minut. Automatyczny fallback do odpytywania przy awarii FCM. Zalecane!",
@@ -151,7 +152,8 @@
               "alert_notify_information": "Usługi dla kroku 1 — natychmiastowe powiadomienie tekstowe. Puste = domyślny fallback. np.: notify.signal_messenger, notify.mobile_app_xxx.",
               "alert_notify_screenshot": "Usługi dla kroku 2 — obraz migawki. Puste = pomiń ten krok (bez fallback). Aplikacje mobilne (mobile_app_xxx) otrzymują obraz inline; inne jako załącznik.",
               "alert_notify_video": "Usługi dla kroku 3 — klip wideo. Puste = pomiń ten krok (bez fallback).",
-              "alert_notify_system": "Usługi dla alertów systemowych (wygasły token, pełny dysk). Puste = używa domyślnego fallback powyżej."
+              "alert_notify_system": "Usługi dla alertów systemowych (wygasły token, pełny dysk). Puste = używa domyślnego fallback powyżej.",
+              "alert_notify_live_preview": "Gdy WŁ., powiadomienia push wysyłane do usług aplikacji HA Companion (mobile_app_*) zawierają encję kamery, dzięki czemu aplikacja sama pobiera aktualną miniaturę przy dostarczeniu i otwiera podgląd kamery na żywo wewnątrz powiadomienia po jego rozwinięciu — własny mechanizm dynamicznej zawartości aplikacji Companion (tylko iOS; na Androidzie załączniki powiadomień obsługują wyłącznie statyczny obraz, nie ten mechanizm transmisji na żywo). Dodatek do już dołączonego statycznego zdjęcia, a nie jego zamiennik. Domyślnie WYŁ.: włączenie sprawia, że aplikacja Companion pobiera obraz z kamery przy każdym dostarczeniu alertu, dla każdego urządzenia odbiorcy mobile_app_*. Brak wpływu na usługi inne niż mobile_app (Signal, Telegram, e-mail, ...)."
             }
           },
           "events_storage": {
