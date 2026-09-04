@@ -23,7 +23,7 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
 [commits-shield]: https://img.shields.io/github/commit-activity/y/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant.svg?style=for-the-badge
 [commits]: https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/commits/main
 [license-shield]: https://img.shields.io/github/license/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant.svg?style=for-the-badge
-[hacsbadge]: https://img.shields.io/badge/HACS-Custom-blue.svg?style=for-the-badge
+[hacsbadge]: https://img.shields.io/badge/HACS-Default-41BDF5.svg?style=for-the-badge
 [hacs]: https://hacs.xyz
 [maintenance-shield]: https://img.shields.io/badge/maintainer-%40mosandlt-blue.svg?style=for-the-badge
 [user_profile]: https://github.com/mosandlt
@@ -81,7 +81,7 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
 New here and just want a working camera? This is the only part of this README you *need* to read right now — everything else (Frigate, AI descriptions, SMB upload, …) is optional and you can ignore it until you actually want that feature.
 
 1. **Set the camera up in the official Bosch Smart Camera app first.** Pairing + the first firmware update can take up to an hour — see [Prerequisites](#prerequisites--setting-up-a-new-camera) if you haven't done this yet. Skipping this step is the #1 reason "nothing shows up" later.
-2. **Install via HACS.** Click the "Open HACS" button under [Installation](#installation), click **Download**, then **restart Home Assistant**.
+2. **Install via HACS.** In HACS go to **Integrations → + Explore & Download Repositories**, search **"Bosch Smart Home Camera"**, click **Download**, then **restart Home Assistant**. (Or use the "Open HACS" button under [Installation](#installation), which jumps straight there.)
 3. **Add the integration and log in.** Settings → Devices & Services → **+ Add Integration** → search **"Bosch Smart Home Camera"** → log in with the same account you use in the Bosch app. Home Assistant finds all your cameras automatically — there is nothing else to fill in at this point.
 4. **Add a camera to a dashboard.** Edit any dashboard → **+ Add card** → pick your camera entity (`camera.bosch_<name>`) → choose **"Bosch Camera Card"** from the Community section. You should see a live picture within a few seconds.
 5. **Ignore "Configure" for now.** The big settings screen (Step 2 in [Setup](#setup) below) covers optional features — notifications, SMB/NAS upload, AI snapshot descriptions, external recorders. None of it is required for a camera to work. Come back to it only when you specifically want one of those.
@@ -145,12 +145,12 @@ For more help with camera setup, see:
 
 [![Open HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mosandlt&repository=Bosch-Smart-Home-Camera-Tool-HomeAssistant&category=integration)
 
-1. Click the button above (it opens HACS pre-filled with this repo), or in HACS go to **Integrations → ⋮ → Custom repositories** and add `mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant` as type `Integration`.
+1. In HACS go to **Integrations → + Explore & Download Repositories**, search **"Bosch Smart Home Camera"**, and select it — or just click the button above, which opens HACS pre-filled with this repo.
 2. Click **Download** on the Bosch Smart Home Camera entry.
 3. Restart Home Assistant.
 4. Continue with [Setup](#setup) below.
 
-> **HACS Default listing.** A PR adding this integration to the HACS Default index is pending ([`hacs/default#8181`](https://github.com/hacs/default/pull/8181)). Once merged, the "Custom repositories" step disappears — the integration appears directly under HACS → Integrations → + Explore.
+> **HACS Default listing.** This integration is listed in the HACS Default index ([`hacs/default#8181`](https://github.com/hacs/default/pull/8181), merged 2026-08-25) — it appears directly under HACS → Integrations → + Explore & Download Repositories, no custom repository needed. If you added it as a custom repository before the merge, that still works fine (harmless, just unnecessary now) — no need to remove it.
 
 ### Manual Installation
 

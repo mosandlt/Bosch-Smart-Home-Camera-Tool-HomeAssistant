@@ -1573,6 +1573,59 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
     return False
 
 
+async def deregister_fcm_with_bosch(coordinator: Any, device_token: str) -> bool:
+    """Deregister a stale FCM device token from Bosch CBS.
+
+    Endpoint: PUT /v11/registration/logout?deviceToken=<token>. Response:
+    HTTP 204 on success. Best-effort — called right before a hard-heal purge
+    discards `device_token` for a fresh one, so Bosch's backend doesn't
+    accumulate an abandoned registration per purge (Bosch backend-load
+    request, 2026-09-04). Never raises; a failure here must not block the
+    purge/re-registration it's cleaning up after — including if the
+    coordinator has no bearer token available yet (e.g. very early startup).
+    """
+    bearer_token = getattr(coordinator, "token", None)
+    if not device_token or not bearer_token:
+        return False
+
+    session = await async_get_bosch_cloud_session(coordinator.hass)
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+
+    try:
+        async with asyncio.timeout(10):
+            async with session.put(
+                f"{CLOUD_API}/v11/registration/logout",
+                headers=headers,
+                params={"deviceToken": device_token},
+            ) as resp:
+                if resp.status in (200, 204):
+                    _LOGGER.debug(
+                        "FCM: deregistered stale device token with Bosch CBS (HTTP %d)",
+                        resp.status,
+                    )
+                    return True
+                resp_body = await resp.text()
+                _LOGGER.info(
+                    "FCM: stale device token deregistration failed (non-fatal): "
+                    "HTTP %d — %s",
+                    resp.status,
+                    resp_body[:200],
+                )
+    except Exception as err:  # see docstring: must NEVER raise.
+        # Bug-hunt finding (2026-09-04): this call sits INSIDE the hard-heal
+        # purge's fcm_start_lock, before entry.data is rewritten. The
+        # narrower `except (TimeoutError, aiohttp.ClientError)` this started
+        # with let anything else (e.g. a malformed `device_token`/response
+        # encoding edge case) escape into the purge's own broad
+        # `except Exception:` handler — which aborts the ENTIRE purge and
+        # retries at a fixed 5s cadence, silently blocking credential
+        # recovery instead of just skipping this best-effort cleanup step.
+        _LOGGER.info(
+            "FCM: stale device token deregistration error (non-fatal): %s", err
+        )
+    return False
+
+
 async def async_stop_fcm_push(coordinator: Any) -> None:
     """Stop the FCM push listener.
 
@@ -1656,6 +1709,18 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
     # Consecutive CONFIRMED-problem hard-heals with no push since the prior one.
     hard_heal_streak: int = 0
     push_ts_at_last_hard_heal: float = coordinator.fcm_last_push
+    # Consecutive soft-restart-threshold-triggered hard-heals with no
+    # SUSTAINED listener uptime since the previous one (Bosch backend-load
+    # finding, 2026-09-04: on a persistently flaky WAN/router, 3 push-less
+    # soft-restarts can recur every 1.5-5 min indefinitely — each one purges
+    # good credentials and mints a genuinely new Bosch device-token
+    # registration, since this benign-reason path deliberately skips the
+    # CONFIRMED-problem backoff below (see the comment at that branch).
+    # Uptime, not a push, is the recovery signal here — a quiet house has no
+    # push to prove anything either way, but FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC
+    # of continuous is_started()=True is still real evidence the last heal
+    # worked. Reset in the sustained-uptime block below.
+    soft_trigger_heal_streak: int = 0
     # Live-deploy finding (GitHub #68 follow-up, 2026-08-18): whether this
     # supervisor has ever completed a hard-heal purge. Distinguishes a truly
     # fresh install (never purged, benign) from "we already purged and
@@ -1721,6 +1786,35 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                 # toward FCM_SUPERVISOR_BACKOFF_SEC's 30-min ceiling for a
                 # problem that was never actually still there.
                 confirmed_problem = False
+                # Separate, lighter backoff (Bosch backend-load finding,
+                # 2026-09-04): does NOT require push confirmation like the
+                # CONFIRMED-problem streak below — it only requires the
+                # listener to have stayed up continuously for
+                # FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC since the last such
+                # heal (reset in the sustained-uptime block). Prevents a
+                # persistently flaky WAN from purging credentials + minting a
+                # new Bosch FCM device-token registration every 1.5-5 min
+                # indefinitely, without touching the deliberate "benign
+                # heals never feed the CONFIRMED backoff" design above.
+                soft_trigger_heal_streak += 1
+                if soft_trigger_heal_streak > 1:
+                    soft_heal_delay = FCM_SUPERVISOR_BACKOFF_SEC[
+                        min(
+                            soft_trigger_heal_streak - 2,
+                            len(FCM_SUPERVISOR_BACKOFF_SEC) - 1,
+                        )
+                    ]
+                    _LOGGER.info(
+                        "FCM supervisor: soft-restart-threshold heal streak %d "
+                        "(no sustained uptime since the last one) — waiting "
+                        "%.0fs before purging credentials again",
+                        soft_trigger_heal_streak,
+                        soft_heal_delay,
+                    )
+                    try:
+                        await asyncio.sleep(soft_heal_delay)
+                    except asyncio.CancelledError:
+                        break
             elif get_recent_fcm_creds_staleness_count(600.0) > 0:
                 reason = "PHONE_REGISTRATION_ERROR in last 10 min — creds stale"
                 confirmed_problem = True
@@ -1779,6 +1873,12 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
             try:
                 async with coordinator.fcm_start_lock:
                     await async_stop_fcm_push(coordinator)
+                    stale_token = coordinator.entry.data.get("fcm_registered_token")
+                    if stale_token:
+                        # Best-effort — clean up the about-to-be-abandoned
+                        # registration on Bosch's backend (Bosch backend-load
+                        # request, 2026-09-04). Never blocks/fails the purge.
+                        await deregister_fcm_with_bosch(coordinator, stale_token)
                     new_data = {
                         k: v
                         for k, v in coordinator.entry.data.items()
@@ -1877,6 +1977,7 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
         # whether a push ever arrived.
         listener_start_ts = time.monotonic()
         failures_reset_for_uptime = False
+        soft_trigger_reset_for_uptime = False
         try:
             while True:
                 await asyncio.sleep(FCM_SUPERVISOR_POLL_SEC)
@@ -1896,6 +1997,22 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                     )
                     failures = 0
                     failures_reset_for_uptime = True
+                # Independent of `failures` (which a hard-heal purge already
+                # zeroes) — sustained uptime is the recovery signal for the
+                # soft-restart-threshold backoff too, see its definition above.
+                if (
+                    not soft_trigger_reset_for_uptime
+                    and soft_trigger_heal_streak > 0
+                    and (time.monotonic() - listener_start_ts)
+                    >= FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC
+                ):
+                    _LOGGER.info(
+                        "FCM supervisor: listener sustained for %.0fs without "
+                        "dying — resetting soft-restart-threshold heal streak",
+                        FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC,
+                    )
+                    soft_trigger_heal_streak = 0
+                    soft_trigger_reset_for_uptime = True
                 if getattr(coordinator, "fcm_force_hard_heal", False):
                     # Silent-delivery-death: the poll-based fallback detected a
                     # camera event FCM never delivered while is_started() still
@@ -1949,6 +2066,15 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
             # Listener was delivering — transient drop; fast restart, reset counters.
             failures = 0
             soft_streak = 0
+            # Bug-hunt finding (2026-09-04): a received push is STRONGER
+            # evidence delivery works than FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC
+            # of mere uptime (the only other reset for this streak) — without
+            # this, a house where pushes reliably arrive but the listener
+            # itself restarts every <10 min (never reaching the uptime
+            # threshold) would still see this streak climb monotonically
+            # toward the 1800s ceiling, delaying benign heals despite proven
+            # delivery.
+            soft_trigger_heal_streak = 0
             delay = FCM_SUPERVISOR_BACKOFF_SEC[0]
             _LOGGER.info(
                 "FCM supervisor: transient drop (had pushes) — fast restart in %.0fs",

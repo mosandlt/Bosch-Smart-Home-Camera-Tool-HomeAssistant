@@ -31,6 +31,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 
 from custom_components.bosch_shc_camera import fcm
@@ -505,6 +506,297 @@ async def test_supervisor_hard_heal_reason_soft_streak(
     )
     assert not any("PHONE_REGISTRATION_ERROR" in msg for msg in hard_heal_logs)
     assert not any("no persisted credentials" in msg for msg in hard_heal_logs)
+
+
+async def test_supervisor_soft_trigger_heal_backoff_escalates_without_sustained_uptime(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Bosch backend-load finding (2026-09-04): a persistently flaky WAN can
+    hit the benign soft-restart-threshold hard-heal repeatedly without ever
+    achieving FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC of listener uptime in
+    between — each purge mints a genuinely new FCM device token and re-POSTs
+    v11/devices, since this reason deliberately does not feed the
+    CONFIRMED-problem backoff (see the comment on that branch). The second
+    consecutive soft-restart-threshold hard-heal with no sustained uptime
+    since the first must wait FCM_SUPERVISOR_BACKOFF_SEC[0] before purging
+    again — a separate, lighter backoff keyed off uptime (not a push, which
+    a quiet house never has either way)."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    coord = _make_supervisor_coord_with_lock(
+        {"fcm_credentials": {"gcm": "x"}}, force_hard=False
+    )
+
+    start_calls = 0
+
+    async def _start(_coord: object) -> bool:
+        nonlocal start_calls
+        start_calls += 1
+        if start_calls >= 3:
+            raise asyncio.CancelledError()
+        return False  # never starts, no push, no sustained uptime
+
+    try:
+        with (
+            patch.object(fcm, "FCM_SUPERVISOR_SOFT_HEAL_MAX", 1),
+            patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "deregister_fcm_with_bosch", new=AsyncMock()),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+            patch("asyncio.sleep", new=AsyncMock()),
+            caplog.at_level("INFO", logger=MODULE),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert task.done()
+        streak_logs = [
+            r.getMessage()
+            for r in caplog.records
+            if "soft-restart-threshold heal streak" in r.getMessage()
+        ]
+        assert any(
+            "soft-restart-threshold heal streak 2" in msg for msg in streak_logs
+        ), streak_logs
+    finally:
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+
+
+async def test_supervisor_cancelled_during_soft_trigger_heal_backoff_sleep_breaks() -> (
+    None
+):
+    """Cancellation arriving during the pre-purge soft-restart-threshold
+    backoff sleep must break the loop cleanly, same as every other backoff
+    sleep in this function, instead of propagating uncaught."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    coord = _make_supervisor_coord_with_lock(
+        {"fcm_credentials": {"gcm": "x"}}, force_hard=False
+    )
+
+    start_calls = 0
+
+    async def _start(_coord: object) -> bool:
+        nonlocal start_calls
+        start_calls += 1
+        return False  # never starts, no push, no sustained uptime
+
+    sleep_calls = 0
+
+    async def _sleep(*_a: object, **_k: object) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        # Call sequence with FCM_SUPERVISOR_SOFT_HEAL_MAX=1: #1 = ordinary
+        # start-fail retry sleep (iteration 1); #2 = start-fail retry sleep
+        # right after the FIRST (unbackoff'd) soft-triggered purge
+        # (iteration 2); #3 = the pre-purge soft-restart-threshold backoff
+        # sleep itself, on the 2nd consecutive soft-triggered heal
+        # (iteration 3) — the one this test targets.
+        if sleep_calls == 3:
+            raise asyncio.CancelledError()
+
+    try:
+        with (
+            patch.object(fcm, "FCM_SUPERVISOR_SOFT_HEAL_MAX", 1),
+            patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "deregister_fcm_with_bosch", new=AsyncMock()),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+            patch("asyncio.sleep", new=_sleep),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            await task  # must complete normally (break), not raise
+
+        assert task.done()
+        assert not task.cancelled()
+        assert start_calls == 2
+    finally:
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+
+
+async def test_supervisor_soft_trigger_heal_streak_resets_after_sustained_uptime(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Sustained listener uptime (not a push) is the recovery signal for the
+    soft-restart-threshold backoff — a quiet house has no push either way,
+    but FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC of continuous is_started()=True
+    is still real evidence the soft-triggered heal actually worked. Without
+    the reset, one successful long-running recovery followed by any later
+    blip would immediately look like a streak≥2 and start delaying purges
+    that no longer need delaying."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    coord = _make_supervisor_coord_with_lock(
+        {"fcm_credentials": {"gcm": "x"}}, force_hard=False
+    )
+    coord.fcm_client = MagicMock()
+
+    start_calls = [0]
+
+    async def _fake_start(_coord: object) -> bool:
+        start_calls[0] += 1
+        # #1 fails (soft_streak -> 1, triggering the first soft-threshold
+        # heal). #2 succeeds and stays "up" long enough (mocked monotonic)
+        # to cross the sustained-uptime threshold, resetting the streak.
+        # #3+ stops the test once the post-reset heal fires.
+        if start_calls[0] == 2:
+            return True
+        if start_calls[0] >= 3:
+            raise asyncio.CancelledError()
+        return False
+
+    is_started_calls = [0]
+
+    def _fake_is_started() -> bool:
+        is_started_calls[0] += 1
+        return is_started_calls[0] <= 4  # stays "up" for 4 polls, then dies
+
+    coord.fcm_client.is_started = _fake_is_started
+
+    clock = [0.0]
+
+    def _fake_monotonic() -> float:
+        clock[0] += 200.0
+        return clock[0]
+
+    try:
+        with (
+            patch.object(fcm, "FCM_SUPERVISOR_SOFT_HEAL_MAX", 1),
+            patch.object(fcm, "_async_start_fcm_push_locked", new=_fake_start),
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "deregister_fcm_with_bosch", new=AsyncMock()),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+            patch(f"{MODULE}.asyncio.sleep", new=AsyncMock()),
+            patch(f"{MODULE}.time.monotonic", side_effect=_fake_monotonic),
+            caplog.at_level("INFO", logger=MODULE),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+            except (asyncio.CancelledError, TimeoutError):
+                pass
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        reset_logs = [
+            r.getMessage()
+            for r in caplog.records
+            if "resetting soft-restart-threshold heal streak" in r.getMessage()
+        ]
+        assert reset_logs, (
+            "sustained uptime must reset the soft-restart-threshold heal streak"
+        )
+
+        backoff_logs = [
+            r.getMessage()
+            for r in caplog.records
+            if "soft-restart-threshold heal streak" in r.getMessage()
+            and "waiting" in r.getMessage()
+        ]
+        assert not backoff_logs, (
+            f"streak must not still look escalated right after a reset — got {backoff_logs}"
+        )
+    finally:
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+
+
+async def test_supervisor_soft_trigger_heal_streak_resets_on_push_received(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Bug-hunt finding (2026-09-04, found independently by two reviewers): a
+    received push is STRONGER evidence delivery works than mere sustained
+    uptime, but the streak was only ever reset by the uptime block. Without
+    this reset, a house where real pushes reliably arrive but the listener
+    itself keeps restarting (never reaching FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC
+    in one stretch) would still see the streak climb monotonically toward the
+    1800s ceiling across repeated benign episodes, despite proven delivery
+    each time.
+
+    Drives TWO full soft-restart-threshold episodes separated by one push
+    event. Without the fix, the 2nd episode's heal would be logged as
+    "streak 2" (escalated, with a "waiting ..." backoff); with the fix it
+    must be "streak 1" again (no backoff) both times, since the push
+    resets it, not just `soft_streak`/`failures` (which already reset,
+    pre-fix — this test isolates the streak specifically)."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    coord = _make_supervisor_coord_with_lock(
+        {"fcm_credentials": {"gcm": "x"}}, force_hard=False
+    )
+    coord.fcm_client = MagicMock()
+
+    start_calls = 0
+
+    async def _start(_coord: object) -> bool:
+        nonlocal start_calls
+        start_calls += 1
+        if start_calls == 1:
+            return False  # episode A: triggers the 1st soft-threshold heal
+        if start_calls == 2:
+            # episode A resolves: a real push arrives while "up".
+            coord.fcm_last_push = time.monotonic()
+            return True
+        if start_calls == 3:
+            return False  # episode B: triggers the 2nd soft-threshold heal
+        raise asyncio.CancelledError()
+
+    is_started_calls = 0
+
+    def _is_started() -> bool:
+        nonlocal is_started_calls
+        is_started_calls += 1
+        return is_started_calls == 1  # up for exactly one poll, then dies
+
+    coord.fcm_client.is_started = _is_started
+
+    try:
+        with (
+            patch.object(fcm, "FCM_SUPERVISOR_SOFT_HEAL_MAX", 1),
+            patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "deregister_fcm_with_bosch", new=AsyncMock()),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+            patch("asyncio.sleep", new=AsyncMock()),
+            caplog.at_level("INFO", logger=MODULE),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert task.done()
+        assert start_calls == 4, "test must reach episode B's post-heal start attempt"
+
+        streak_1_logs = [
+            r.getMessage()
+            for r in caplog.records
+            if "soft-restart-threshold heal streak" in r.getMessage()
+        ]
+        # Only the FIRST occurrence per episode logs (streak==1 never logs —
+        # only streak>1 does), so no streak log at all across BOTH episodes
+        # is exactly what proves neither one ever reached 2.
+        assert not streak_1_logs, (
+            f"push-received must reset the streak so episode B starts fresh "
+            f"at 1 (no log), not escalated to 2 — got {streak_1_logs}"
+        )
+    finally:
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
 
 
 async def test_supervisor_hard_heal_resets_failures_not_just_soft_streak(
@@ -3852,6 +4144,178 @@ async def test_drift_heal_f_server_401_returns_false_no_marker_written() -> None
         "after a failed POST would cause the skip-check to fire on next restart "
         "and silently leave FCM push broken."
     )
+
+
+def _make_session_put(resp_cm: MagicMock) -> MagicMock:
+    """Return a mock session whose .put() returns resp_cm."""
+    session = MagicMock()
+    session.put = MagicMock(return_value=resp_cm)
+    return session
+
+
+async def test_deregister_fcm_with_bosch_success_204() -> None:
+    """Bosch backend-load request (2026-09-04): PUT v11/registration/logout
+    with the stale deviceToken as a URL param, HTTP 204 -> True."""
+    coord = _make_register_coord(data={})
+    resp_cm = _make_mock_response(204)
+    session = _make_session_put(resp_cm)
+
+    with (
+        patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ),
+        patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
+    ):
+        from custom_components.bosch_shc_camera.fcm import deregister_fcm_with_bosch
+
+        result = await deregister_fcm_with_bosch(coord, "old-fcm-token")
+
+    assert result is True
+    call = session.put.call_args
+    assert call.args[0] == "https://api.bosch.example/v11/registration/logout"
+    assert call.kwargs["params"] == {"deviceToken": "old-fcm-token"}
+    assert call.kwargs["headers"]["Authorization"] == "Bearer bearer-abc"
+
+
+async def test_deregister_fcm_with_bosch_non_2xx_returns_false_never_raises() -> None:
+    """A rejected/failed deregistration must return False, not raise — the
+    caller (hard-heal purge) treats this as best-effort cleanup only."""
+    coord = _make_register_coord(data={})
+    resp_cm = _make_mock_response(400, body='{"code":"sh:bad.request"}')
+    session = _make_session_put(resp_cm)
+
+    with (
+        patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ),
+        patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
+    ):
+        from custom_components.bosch_shc_camera.fcm import deregister_fcm_with_bosch
+
+        result = await deregister_fcm_with_bosch(coord, "old-fcm-token")
+
+    assert result is False
+
+
+async def test_deregister_fcm_with_bosch_client_error_returns_false_never_raises() -> (
+    None
+):
+    """A network error talking to Bosch must not propagate — this call sits
+    right before a hard-heal purge and must never block it."""
+    coord = _make_register_coord(data={})
+    session = MagicMock()
+    session.put = MagicMock(side_effect=aiohttp.ClientConnectionError("boom"))
+
+    with (
+        patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ),
+        patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
+    ):
+        from custom_components.bosch_shc_camera.fcm import deregister_fcm_with_bosch
+
+        result = await deregister_fcm_with_bosch(coord, "old-fcm-token")
+
+    assert result is False
+
+
+async def test_deregister_fcm_with_bosch_no_token_or_no_bearer_returns_false() -> None:
+    """No device token to deregister, or no bearer token to authenticate
+    with, must short-circuit to False without attempting a request."""
+    coord = _make_register_coord(data={})
+    session = MagicMock()
+    session.put = MagicMock()
+
+    with patch(
+        f"{MODULE}.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
+    ):
+        from custom_components.bosch_shc_camera.fcm import deregister_fcm_with_bosch
+
+        assert await deregister_fcm_with_bosch(coord, "") is False
+        coord.token = None
+        assert await deregister_fcm_with_bosch(coord, "old-fcm-token") is False
+
+    session.put.assert_not_called()
+
+
+async def test_supervisor_hard_heal_purge_deregisters_stale_token_with_bosch() -> None:
+    """Bosch backend-load request (2026-09-04): before a hard-heal purge
+    discards the currently-registered FCM device token for a fresh one, the
+    stale token must be deregistered from Bosch's backend (best-effort) so
+    it doesn't accumulate an abandoned registration server-side."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    coord = _make_supervisor_coord_with_lock(
+        {
+            "fcm_credentials": {"gcm": "x"},
+            "fcm_registered_token": "stale-token-123",
+        },
+        force_hard=True,
+    )
+
+    dereg_mock = AsyncMock(return_value=True)
+
+    async def _start(_coord: object) -> bool:
+        raise asyncio.CancelledError()
+
+    try:
+        with (
+            patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "deregister_fcm_with_bosch", new=dereg_mock),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert task.done()
+        dereg_mock.assert_awaited_once_with(coord, "stale-token-123")
+    finally:
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+
+
+async def test_supervisor_hard_heal_purge_skips_deregister_when_no_stale_token() -> (
+    None
+):
+    """A fresh install (never registered with Bosch yet) has no stale token
+    to clean up — deregister_fcm_with_bosch must not be called at all."""
+    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+
+    _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
+    coord = _make_supervisor_coord_with_lock({}, force_hard=True)
+
+    dereg_mock = AsyncMock(return_value=True)
+
+    async def _start(_coord: object) -> bool:
+        raise asyncio.CancelledError()
+
+    try:
+        with (
+            patch.object(fcm, "_async_start_fcm_push_locked", new=_start),
+            patch.object(fcm, "async_stop_fcm_push", new=AsyncMock()),
+            patch.object(fcm, "deregister_fcm_with_bosch", new=dereg_mock),
+            patch.object(fcm, "reset_fcm_creds_staleness_counter"),
+        ):
+            task = asyncio.create_task(fcm._async_run_fcm_supervisor(coord))
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert task.done()
+        dereg_mock.assert_not_awaited()
+    finally:
+        _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
 
 
 # Noise filter, safe-URL validation, notify-data building, alert-service slot resolution, path A/B event handling + snapshot/dedup/ordering, creds-staleness helpers, _listen() branches, mode/pin migration (from: event-snapshot, extra coverage, filter helpers, general helpers, _listen branches, mode/pin)
