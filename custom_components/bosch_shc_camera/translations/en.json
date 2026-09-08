@@ -1062,6 +1062,10 @@
     "smb_unavailable": {
       "title": "Bosch Camera — SMB/NAS package not installed",
       "description": "**{features}** is configured to use an SMB/NAS network share, but the optional `smbprotocol` Python package is not installed, so uploads/recordings to the share are disabled.\n\nThis package is normally installed automatically from the integration's requirements — try restarting Home Assistant once. If it still won't install (e.g. an unsupported OS/CPU architecture), switch the storage target to **Local** or **FTP** in the integration options instead."
+    },
+    "nvr_enabled_not_recording": {
+      "title": "Bosch Camera — NVR enabled but not recording",
+      "description": "**Enable NVR** is turned on in the integration options, but no camera is actually recording.\n\nTurning on **Enable NVR** only creates the per-camera NVR entities — it does not start recording by itself.\n\n**How to fix:** Go to Settings → Devices & Services → Bosch Smart Home Camera → pick a camera device, then enable the **NVR Mode** select and **NVR Recording** switch entities (they may be disabled/hidden by default), and turn the **NVR Recording** switch on.\n\n**event_buffered** mode records only around motion/person events (matches \"local save of events\"); **continuous** mode always records. For **event_buffered** mode, the global **Preroll seconds** / **Postroll seconds** options must also be set above 0, or nothing will ever be captured even with the switch on."
     }
   },
   "system_health": {

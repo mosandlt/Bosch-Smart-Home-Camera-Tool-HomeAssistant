@@ -5870,6 +5870,7 @@ class TestNvrSwitchTurnOnOff:
             is_stream_warming=lambda cid: False,
             start_recorder=AsyncMock(),
             stop_recorder=AsyncMock(),
+            async_request_refresh=AsyncMock(),
         )
 
     @pytest.mark.asyncio
@@ -5881,8 +5882,42 @@ class TestNvrSwitchTurnOnOff:
         coord = self._stub_coord()
         sw = BoschNvrRecordingSwitch(coord, CAM_ID, self._stub_entry())
         sw.async_write_ha_state = MagicMock()
+
+        def _create_task(coro, **kwargs):
+            coro.close()  # never actually scheduled in this stub, avoid a leaked-coroutine warning
+            return MagicMock()
+
+        sw.hass = SimpleNamespace(async_create_task=MagicMock(side_effect=_create_task))
         await sw.async_turn_on()
         coord.start_recorder.assert_awaited_once_with(CAM_ID, reason="switch turned on")
+
+    @pytest.mark.asyncio
+    async def test_async_turn_on_requests_coordinator_refresh(self):
+        """GitHub #70 bug-hunt POLISH 2: turn_on must kick a coordinator
+        refresh so the 'NVR enabled but not recording' Repairs issue clears
+        promptly instead of waiting up to one scan_interval."""
+        from custom_components.bosch_shc_camera.switch import (
+            BoschNvrRecordingSwitch,
+        )
+
+        coord = self._stub_coord()
+        sw = BoschNvrRecordingSwitch(coord, CAM_ID, self._stub_entry())
+        sw.async_write_ha_state = MagicMock()
+
+        created_coros = []
+
+        def _create_task(coro, *args, **kwargs):
+            created_coros.append(coro)
+            return MagicMock()
+
+        sw.hass = SimpleNamespace(async_create_task=MagicMock(side_effect=_create_task))
+
+        await sw.async_turn_on()
+
+        sw.hass.async_create_task.assert_called_once()
+        assert len(created_coros) == 1
+        await created_coros[0]  # actually drive the coroutine to avoid a warning
+        coord.async_request_refresh.assert_awaited_once_with()
 
     @pytest.mark.asyncio
     async def test_async_turn_off_calls_stop_recorder(self):

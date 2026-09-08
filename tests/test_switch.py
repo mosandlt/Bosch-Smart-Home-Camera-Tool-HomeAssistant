@@ -2348,6 +2348,7 @@ def _nvr_coord(**overrides):
         is_camera_online=lambda cid: True,
         start_recorder=AsyncMock(),
         stop_recorder=AsyncMock(),
+        async_request_refresh=AsyncMock(),
         options={},
     )
     base.update(overrides)
@@ -9229,7 +9230,7 @@ class TestNvrRecordingSwitchRestoreState:
             "enable_nvr": True,
         }
         sw = BoschNvrRecordingSwitch(stub_coord_sprintma, CAM_ID, stub_entry_sprintma)
-        sw.async_write_ha_state = MagicMock()
+        _bind_hass(sw)
         await sw.async_turn_on()
         stub_coord_sprintma.start_recorder.assert_awaited_once_with(
             CAM_ID, reason="switch turned on"

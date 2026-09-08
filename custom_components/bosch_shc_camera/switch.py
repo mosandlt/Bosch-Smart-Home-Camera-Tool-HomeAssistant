@@ -2684,6 +2684,9 @@ class BoschNvrRecordingSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
         self.coordinator.nvr_user_intent[self._cam_id] = True
         await self.coordinator.start_recorder(self._cam_id, reason="switch turned on")
         self.async_write_ha_state()
+        # Clear the "NVR enabled but not recording" Repairs issue promptly
+        # instead of waiting up to one scan_interval (GitHub #70 bug-hunt).
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         _LOGGER.info("NVR OFF for %s", self._cam_title)

@@ -20,6 +20,7 @@ rationale (this module follows the same thin-wrapper convention).
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
@@ -285,3 +286,136 @@ def refresh_smb_unavailable_issue(coordinator: BoschCameraCoordinator) -> None:
     else:
         ir.async_delete_issue(coordinator.hass, DOMAIN, issue_id)
         coordinator._smb_unavailable_logged = False
+
+
+def _nvr_camera_will_record(coordinator: BoschCameraCoordinator, cam_id: str) -> bool:
+    """True if this camera's current settings would actually produce a recording.
+
+    `nvr_user_intent` truthy is necessary but NOT sufficient: a camera in
+    `event_buffered` mode also needs `nvr_preroll_seconds` or
+    `nvr_postroll_seconds` > 0 — see recorder.py's `_nvr_secs_ok` gate in
+    the real motion-clip-assembly path (GitHub #70 bug-hunt finding: a
+    camera left in event_buffered with both at their `const.py` default of
+    0 never produces a clip even with the switch ON). `continuous` mode has
+    no such extra requirement.
+    """
+    if not coordinator.nvr_user_intent.get(cam_id):
+        return False
+
+    get_nvr_mode = getattr(coordinator, "get_nvr_mode", None)
+    if not callable(get_nvr_mode) or get_nvr_mode(cam_id) != "event_buffered":
+        return True
+
+    opts = getattr(coordinator, "options", {})
+    preroll = int(opts.get("nvr_preroll_seconds") or 0)
+    postroll = int(opts.get("nvr_postroll_seconds") or 0)
+    return preroll > 0 or postroll > 0
+
+
+def refresh_nvr_not_recording_issue(coordinator: BoschCameraCoordinator) -> None:
+    """Create or clear a Repairs issue when NVR is enabled but nothing records.
+
+    Called once per coordinator tick (inside _async_update_data), same
+    idempotent create/delete pattern as refresh_notifications_disabled_issues
+    / refresh_firmware_update_issues / refresh_smb_unavailable_issue.
+
+    The "Enable NVR" integration option only creates the per-camera
+    NVR select/switch entities (`select.*_nvr_mode`,
+    `switch.*_nvr_recording`, `switch.*_nvr_event_clips`) — those entities
+    are `entity_registry_enabled_default=False` (hidden by default), and
+    the option itself does NOT start recording. A user who turns on
+    "Enable NVR" but never finds and enables/activates those hidden
+    entities gets zero recordings and zero visible error (GitHub #70:
+    "media section the folder is correct linked but no event is saved").
+    This issue is entry-wide (one issue for the whole config entry, not
+    per-camera) since it reflects "NVR is enabled globally but recording
+    on ANY camera" rather than a single camera's state.
+
+    A camera also needs event_buffered-mode preroll/postroll > 0 to count
+    as "will record" — see `_nvr_camera_will_record`.
+
+    Debounced by NVR_NOT_RECORDING_GRACE_SEC (`coordinator.py`) before the
+    issue is actually created, to avoid a false positive on the first tick
+    after an HA restart — `coordinator.data` is populated before platforms
+    (and their RestoreEntity-restored `nvr_user_intent`) are forwarded.
+
+    A no-op (and any existing issue deleted, timers reset) if `enable_nvr`
+    is off, or if `coordinator.data` hasn't been populated yet.
+
+    Deliberately does NOT check LOCAL/online live-connection state
+    (`should_record()`) — that would make this static "config gap" issue
+    flap on ordinary connection-state changes, unlike the sibling
+    `smb_unavailable`/`notifications_disabled` issues which also stay
+    connection-state-agnostic.
+    """
+    # Local import (not top-level): keeps unittest.mock.patch(
+    # "custom_components.bosch_shc_camera.ir", ...) working the same
+    # way it did before this check moved out of coordinator.py — matches
+    # the pattern already used in live_connection.py.
+    from . import ir as ir  # type: ignore[attr-defined]
+
+    issue_id = "nvr_enabled_not_recording"
+
+    def _clear() -> None:
+        ir.async_delete_issue(coordinator.hass, DOMAIN, issue_id)
+        coordinator._nvr_not_recording_logged = False
+        coordinator._nvr_not_recording_since = float("-inf")
+
+    if not bool(getattr(coordinator, "options", {}).get("enable_nvr")):
+        _clear()
+        return
+
+    if not coordinator.data:
+        # No data fetched yet — skip to avoid a startup false positive, but
+        # still clear a stale issue (e.g. entry mid-reconfigure/removal).
+        _clear()
+        return
+
+    any_recording = any(
+        _nvr_camera_will_record(coordinator, cam_id) for cam_id in coordinator.data
+    )
+
+    if any_recording:
+        _clear()
+        return
+
+    # Local import — see NVR_NOT_RECORDING_GRACE_SEC's own docstring for why
+    # this can't be a top-level import (coordinator.py imports this module
+    # at its own top level; matches announcements.py's identical pattern for
+    # CAMERA_OFFLINE_ANNOUNCE_GRACE_SEC).
+    from .coordinator import NVR_NOT_RECORDING_GRACE_SEC
+
+    now_mono = time.monotonic()
+    since = coordinator._nvr_not_recording_since
+    if since == float("-inf"):
+        # First tick the condition is observed true — start the grace timer,
+        # don't create the issue yet.
+        coordinator._nvr_not_recording_since = now_mono
+        return
+    if (now_mono - since) < NVR_NOT_RECORDING_GRACE_SEC:
+        return
+
+    ir.async_create_issue(
+        coordinator.hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=False,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="nvr_enabled_not_recording",
+        translation_placeholders={},
+    )
+    if not coordinator._nvr_not_recording_logged:
+        coordinator._nvr_not_recording_logged = True
+        _LOGGER.warning(
+            "Mini-NVR is enabled in the integration options, but no "
+            "camera is actually recording. The 'Enable NVR' option only "
+            "creates the per-camera NVR entities — it does not start "
+            "recording by itself. Go to Settings -> Devices & Services "
+            "-> Bosch Smart Home Camera -> pick a camera device, enable "
+            "the (hidden-by-default) NVR Mode select and NVR Recording "
+            "switch entities, then turn NVR Recording on. For "
+            "Event-Buffered mode, the global Preroll/Postroll seconds "
+            "options must also be non-zero, or nothing will ever be "
+            "captured even with the switch on."
+        )

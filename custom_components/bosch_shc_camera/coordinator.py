@@ -181,6 +181,17 @@ FCM_DOWN_EVENT_POLL_SEC = 60.0
 # is debounced.
 CAMERA_OFFLINE_ANNOUNCE_GRACE_SEC = 300.0  # 5 min
 
+# Grace before the "NVR enabled but nothing recording" Repairs issue fires.
+# coordinator.data becomes non-empty as soon as the coordinator's first
+# refresh completes — which happens before platforms (switch/select) are
+# forwarded and their RestoreEntity state (nvr_user_intent) restored. Without
+# this grace, a correctly-configured user sees a false-positive "not
+# recording" warning for up to one scan_interval after every HA restart
+# (GitHub #70 bug-hunt finding). Same idiom as CAMERA_OFFLINE_ANNOUNCE_GRACE_SEC.
+NVR_NOT_RECORDING_GRACE_SEC = (
+    300.0  # 5 min — avoid a restart/restore-race false positive (GitHub #70 bug-hunt)
+)
+
 # Read integration version once at import time (sync I/O at module level is fine — import
 # happens in the executor during HA startup, not inside the event loop).
 # Duplicated from __init__.py (both modules need it — __init__.py for the
@@ -694,6 +705,17 @@ class BoschCameraCoordinator(
         # log line has fired — avoids re-logging every coordinator tick while
         # the issue stays open. Reset to False once the issue clears.
         self._smb_unavailable_logged: bool = False
+        # True once the "NVR enabled but not recording" Repairs issue's
+        # WARNING log line has fired — avoids re-logging every coordinator
+        # tick while the issue stays open. Reset to False once the issue
+        # clears (a camera starts recording, or enable_nvr is turned off).
+        self._nvr_not_recording_logged: bool = False
+        # Monotonic timestamp of the first tick where "NVR enabled but
+        # nothing recording" was observed true (float('-inf') = never/not
+        # currently observed — SENTINEL_RULE, never 0.0). Used to debounce
+        # the Repairs issue by NVR_NOT_RECORDING_GRACE_SEC. Reset to
+        # float('-inf') as soon as the condition clears.
+        self._nvr_not_recording_since: float = float("-inf")
         # Token refresh failure tracking — alert once, not every 80s
         self._token_alert_sent: bool = False  # True after first alert sent
         self._token_fail_count: int = 0  # consecutive refresh failures
@@ -2002,6 +2024,17 @@ class BoschCameraCoordinator(
                     exc_info=True,
                 )
 
+            # Raise a Repairs issue when NVR is enabled globally but no
+            # camera is actually recording — see
+            # _refresh_nvr_not_recording_issue docstring.
+            try:
+                self._refresh_nvr_not_recording_issue()
+            except Exception:
+                _LOGGER.debug(
+                    "NVR-not-recording Repairs check failed (non-fatal)",
+                    exc_info=True,
+                )
+
             # Raise a Repairs issue when a firmware update is available for a
             # camera — see _refresh_firmware_update_issues docstring.
             try:
@@ -2045,6 +2078,13 @@ class BoschCameraCoordinator(
         unchanged.
         """
         repairs.refresh_notifications_disabled_issues(self)
+
+    def _refresh_nvr_not_recording_issue(self) -> None:
+        """Create or clear a Repairs issue when NVR is enabled but nothing records.
+
+        Thin delegator — see _refresh_notifications_disabled_issues docstring.
+        """
+        repairs.refresh_nvr_not_recording_issue(self)
 
     def _refresh_firmware_update_issues(self) -> None:
         """Create or clear Repairs issues for cameras with a firmware update available.
