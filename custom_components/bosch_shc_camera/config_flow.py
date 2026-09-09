@@ -1524,22 +1524,29 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
+                    # TextSelector (not bare `str`) — bare `str` fields that only carry
+                    # a suggested_value (no default=) are omitted by the frontend when
+                    # the user clears them, so an intentional clear round-trips as "field
+                    # absent" and the merge below (`merged = {**opts, **user_input}`)
+                    # silently keeps the old value forever (#70). TextSelector is the
+                    # pattern already proven to round-trip an explicit clear correctly —
+                    # see CONF_AI_ACTIVE_TIME_START/END below (issue #35).
                     vol.Optional(
                         "smb_server",
                         description={"suggested_value": opts.get("smb_server", "")},
-                    ): str,
+                    ): TextSelector(TextSelectorConfig()),
                     vol.Optional(
                         "smb_share",
                         description={"suggested_value": opts.get("smb_share", "")},
-                    ): str,
+                    ): TextSelector(TextSelectorConfig()),
                     vol.Optional(
                         "smb_username",
                         description={"suggested_value": opts.get("smb_username", "")},
-                    ): str,
+                    ): TextSelector(TextSelectorConfig()),
                     vol.Optional(
                         "smb_password",
                         description={"suggested_value": opts.get("smb_password", "")},
-                    ): str,
+                    ): TextSelector(TextSelectorConfig()),
                     vol.Optional(
                         "smb_base_path",
                         description={

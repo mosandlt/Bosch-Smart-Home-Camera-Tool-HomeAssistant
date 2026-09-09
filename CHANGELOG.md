@@ -7,6 +7,10 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v16.2.3] - 2026-09-09
+
+- **SMB share/server/username/password fields in the options flow could not be cleared** (GitHub [#70](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/70), seti1337). Root cause: `smb_server`/`smb_share`/`smb_username`/`smb_password` were declared as bare `str` schema entries carrying only a `suggested_value` (no `default=`) — for a plain text field, the frontend omits the key from the submitted section dict once the user clears it, so the options-flow's own `merged = {**opts, **user_input}` merge silently kept the old value forever. Switched all four to `TextSelector(TextSelectorConfig())`, the pattern already proven to round-trip a clear correctly for the AI active-time fields (issue #35). The "SMB Freigabename included in the FTP path" part of the same report was investigated and is not an actual bug — `_sync_ftp_upload` never reads `smb_share`; the field visually "sticking" due to the clear bug above was almost certainly the source of that confusion.
+
 ## [v16.2.2] - 2026-09-08
 
 - **New Repairs issue: "NVR enabled but not recording" (GitHub #64/#70 follow-up).** Investigated a report that local event recording produced nothing despite the media folder being correctly linked. Root cause: the "Enable NVR" integration option only creates the per-camera NVR entities (`select.*_nvr_mode`, `switch.*_nvr_recording`, `switch.*_nvr_event_clips`) — all `entity_registry_enabled_default=False` (hidden by default) — and does not itself start recording. A user who enables the global option but never finds and enables/activates those hidden entities got zero recordings with zero visible error. A new entry-wide Repairs issue now fires when `enable_nvr` is on but no camera is actually recording, pointing the user at the specific entities to enable — including flagging `event_buffered` mode cameras whose global Preroll/Postroll seconds options are both still at their `0` default (which alone silently prevents any clip from ever being captured, even with the switch on).

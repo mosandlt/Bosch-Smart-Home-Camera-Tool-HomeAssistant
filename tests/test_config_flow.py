@@ -3090,6 +3090,45 @@ class TestFullRoundTrip:
         assert data["enable_go2rtc"] is False  # non-submitted field preserved
 
     @pytest.mark.asyncio
+    async def test_smb_share_cleared_saves_empty(self) -> None:
+        """Regression (#70): clearing smb_share (previously non-empty) must persist
+        as "" rather than silently keeping the old value.
+
+        Before the fix, smb_server/smb_share/smb_username/smb_password were bare
+        `str` schema entries carrying only a `suggested_value` (no `default=`) —
+        the same shape that, for a plain text field, the frontend omits from the
+        submitted section dict once cleared, so async_step_init's
+        `merged = {**opts, **user_input}` silently kept the prior value forever.
+        Switching them to `TextSelector(TextSelectorConfig())` (the pattern
+        already proven to round-trip a clear correctly for CONF_AI_ACTIVE_TIME_START/
+        END, issue #35) fixes this. This test pins the round-trip at the
+        _submit/flatten/merge level: explicitly submitting "" must produce "".
+        """
+        prior = {
+            "smb_server": "192.168.2.25",
+            "smb_share": "bosch-events",
+            "smb_username": "nas_user",
+            "smb_password": "s3cret",
+        }
+        flow = BoschCameraOptionsFlow(_make_entry(options=prior))
+        data = await _submit(
+            flow,
+            {
+                "events_storage": {
+                    "smb_server": "192.168.2.25",
+                    "smb_share": "",
+                    "smb_username": "nas_user",
+                    "smb_password": "s3cret",
+                }
+            },
+        )
+        assert data["smb_share"] == ""
+        # Untouched sibling fields in the same submitted section survive as-is.
+        assert data["smb_server"] == "192.168.2.25"
+        assert data["smb_username"] == "nas_user"
+        assert data["smb_password"] == "s3cret"
+
+    @pytest.mark.asyncio
     async def test_suggested_value_field_preserved_when_user_does_not_edit(self):
         """Regression: smb_server (suggested_value-only, no default=) must NOT revert
         to '' when the user opens options and saves without touching the SMB section.
