@@ -1524,27 +1524,37 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
-                    # TextSelector (not bare `str`) — bare `str` fields that only carry
-                    # a suggested_value (no default=) are omitted by the frontend when
-                    # the user clears them, so an intentional clear round-trips as "field
-                    # absent" and the merge below (`merged = {**opts, **user_input}`)
-                    # silently keeps the old value forever (#70). TextSelector is the
-                    # pattern already proven to round-trip an explicit clear correctly —
-                    # see CONF_AI_ACTIVE_TIME_START/END below (issue #35).
+                    # #70 round 2: a `suggested_value`-only Optional field (no
+                    # `default=`) is what the frontend omits from the submitted
+                    # section dict once the user clears it — confirmed live by
+                    # the reporter that switching to TextSelector alone (v16.2.3-
+                    # beta-1) did NOT fix this. `events_storage` is `vol.Required`
+                    # at the top level, so the section itself is always submitted;
+                    # it's the individual field's own missing `default=` that lets
+                    # the field vanish from the section dict on clear, and the
+                    # merge below (`merged = {**opts, **user_input}`) then silently
+                    # keeps the old value forever. Adding an explicit `default=`
+                    # (equal to the persisted value, same idiom already used for
+                    # every boolean field in this section) forces the field to
+                    # always round-trip, including an explicit clear to "".
                     vol.Optional(
                         "smb_server",
+                        default=opts.get("smb_server", ""),
                         description={"suggested_value": opts.get("smb_server", "")},
                     ): TextSelector(TextSelectorConfig()),
                     vol.Optional(
                         "smb_share",
+                        default=opts.get("smb_share", ""),
                         description={"suggested_value": opts.get("smb_share", "")},
                     ): TextSelector(TextSelectorConfig()),
                     vol.Optional(
                         "smb_username",
+                        default=opts.get("smb_username", ""),
                         description={"suggested_value": opts.get("smb_username", "")},
                     ): TextSelector(TextSelectorConfig()),
                     vol.Optional(
                         "smb_password",
+                        default=opts.get("smb_password", ""),
                         description={"suggested_value": opts.get("smb_password", "")},
                     ): TextSelector(TextSelectorConfig()),
                     vol.Optional(

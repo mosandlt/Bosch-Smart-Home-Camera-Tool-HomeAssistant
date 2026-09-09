@@ -2301,6 +2301,68 @@ def _get_section_schema(section_name: str):
     raise KeyError(f"Section {section_name!r} not found in options schema")
 
 
+def _get_section_schema_for_entry(entry, section_name: str):
+    """Same as `_get_section_schema` but built against a caller-supplied entry,
+    so the schema's `default=`/`suggested_value` reflect specific prior options.
+
+    Needed to actually exercise voluptuous's own default-filling behavior
+    (issue #70 round 2) — `_submit()` calls `async_step_init` directly and
+    never runs the returned schema through real vol.Schema(...) validation,
+    so it cannot prove whether a field with a missing `default=` would be
+    dropped versus auto-filled when the key is absent from the submitted dict.
+    """
+    captured: dict = {}
+
+    def capture(**kw):
+        captured["schema"] = kw.get("data_schema")
+        return {"type": "form"}
+
+    flow = BoschCameraOptionsFlow(entry)
+    flow.async_show_form = capture
+    asyncio.get_event_loop().run_until_complete(flow.async_step_init(user_input=None))
+
+    outer = captured["schema"]
+    for key, val in outer.schema.items():
+        if str(key) == section_name:
+            inner = getattr(val, "schema", val)
+            return inner
+    raise KeyError(f"Section {section_name!r} not found in options schema")
+
+
+class TestSmbFieldsHaveExplicitDefault:
+    """Regression (#70 round 2): smb_server/share/username/password must carry
+    an explicit `default=` so voluptuous itself fills in the persisted value
+    when the frontend omits the key (untouched) and passes an explicit "" straight
+    through when the frontend DOES submit the key (cleared) — proving the fix at
+    the actual vol.Schema(...) validation layer, not just the flow-handler merge.
+    """
+
+    def test_missing_key_defaults_to_persisted_value(self) -> None:
+        entry = _make_entry(
+            options={
+                "smb_server": "192.168.2.25",
+                "smb_share": "bosch-events",
+                "smb_username": "nas_user",
+                "smb_password": "s3cret",
+            }
+        )
+        schema = _get_section_schema_for_entry(entry, "events_storage")
+        # smb_share key entirely absent from the submitted dict.
+        result = schema({"smb_server": "192.168.2.25"})
+        assert result["smb_share"] == "bosch-events"
+
+    def test_explicit_empty_string_clears(self) -> None:
+        entry = _make_entry(
+            options={
+                "smb_server": "192.168.2.25",
+                "smb_share": "bosch-events",
+            }
+        )
+        schema = _get_section_schema_for_entry(entry, "events_storage")
+        result = schema({"smb_server": "192.168.2.25", "smb_share": ""})
+        assert result["smb_share"] == ""
+
+
 class TestOptionsStepInitRender:
     """Smoke-cover the section-schema rendering branch (no user_input)."""
 
