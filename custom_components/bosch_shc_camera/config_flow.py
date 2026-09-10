@@ -162,6 +162,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "smb_share",
         "smb_username",
         "smb_password",
+        "clear_smb_credentials",
         "smb_base_path",
         "smb_retention_days",
     ],
@@ -1091,6 +1092,21 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
 
             force_relogin = user_input.pop("force_relogin", False)
             migrate_to_oss = user_input.pop("migrate_to_oss_client", False)
+            # #70 round 3: transient action flag, never persisted as an
+            # option itself — see the smb_server schema comment above for
+            # why a plain cleared text field can't reliably signal "clear"
+            # on its own. Forces the 4 SMB credential fields to "" below,
+            # overriding whatever the (possibly still-stale, per the
+            # upstream frontend limitation) text boxes submitted.
+            clear_smb_credentials = bool(user_input.pop("clear_smb_credentials", False))
+            if clear_smb_credentials:
+                for _smb_field in (
+                    "smb_server",
+                    "smb_share",
+                    "smb_username",
+                    "smb_password",
+                ):
+                    user_input[_smb_field] = ""
 
             for k in [
                 "enable_snapshots",
@@ -1524,39 +1540,59 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
-                    # #70 round 2: a `suggested_value`-only Optional field (no
-                    # `default=`) is what the frontend omits from the submitted
-                    # section dict once the user clears it — confirmed live by
-                    # the reporter that switching to TextSelector alone (v16.2.3-
-                    # beta-1) did NOT fix this. `events_storage` is `vol.Required`
-                    # at the top level, so the section itself is always submitted;
-                    # it's the individual field's own missing `default=` that lets
-                    # the field vanish from the section dict on clear, and the
-                    # merge below (`merged = {**opts, **user_input}`) then silently
-                    # keeps the old value forever. Adding an explicit `default=`
-                    # (equal to the persisted value, same idiom already used for
-                    # every boolean field in this section) forces the field to
-                    # always round-trip, including an explicit clear to "".
+                    # #70 round 3: rounds 1+2 both attacked the wrong layer.
+                    # Researched upstream (TWO_PATCH_RULE) — verified against
+                    # HA-frontend's actual `ha-selector-text` source, not just
+                    # inferred: on every value-changed event it runs
+                    # `if (value === "" && !this.required) value = undefined;`
+                    # — the box stays visibly empty, but the field's value in
+                    # the form's local state becomes `undefined`, which is
+                    # then dropped entirely when the submitted data object is
+                    # serialized. So a genuinely-cleared field and a
+                    # never-populated field are indistinguishable to the
+                    # Python side: both arrive as "key absent". Round 2's
+                    # *dynamic* `default=opts.get(...)` (the persisted value)
+                    # was exactly the wrong choice for that missing-key case —
+                    # it made voluptuous resurrect the OLD value, so a clear
+                    # could never actually take. A *populated* field's value
+                    # is never converted to `undefined` (only `===""`
+                    # triggers it), so it's always still included in the
+                    # submission regardless of the schema default — meaning a
+                    # STATIC `default=""` is safe for the untouched/populated
+                    # case (that path never even reaches the default) and
+                    # correct for the missing-key case (a genuine clear now
+                    # round-trips as ""). This alone fixes the natural
+                    # "clear the box and save" workflow. `clear_smb_credentials`
+                    # below is kept as a second, explicit, unambiguous switch
+                    # (a boolean selector's `checked` state is always a real
+                    # true/false, never `undefined` — it can't hit this class
+                    # of bug at all) — useful as a documented, guaranteed
+                    # fallback, and because two rounds of live-confirmed
+                    # failures warrant not trusting a single mechanism here.
                     vol.Optional(
                         "smb_server",
-                        default=opts.get("smb_server", ""),
+                        default="",
                         description={"suggested_value": opts.get("smb_server", "")},
                     ): TextSelector(TextSelectorConfig()),
                     vol.Optional(
                         "smb_share",
-                        default=opts.get("smb_share", ""),
+                        default="",
                         description={"suggested_value": opts.get("smb_share", "")},
                     ): TextSelector(TextSelectorConfig()),
                     vol.Optional(
                         "smb_username",
-                        default=opts.get("smb_username", ""),
+                        default="",
                         description={"suggested_value": opts.get("smb_username", "")},
                     ): TextSelector(TextSelectorConfig()),
                     vol.Optional(
                         "smb_password",
-                        default=opts.get("smb_password", ""),
+                        default="",
                         description={"suggested_value": opts.get("smb_password", "")},
                     ): TextSelector(TextSelectorConfig()),
+                    vol.Optional(
+                        "clear_smb_credentials",
+                        default=False,
+                    ): bool,
                     vol.Optional(
                         "smb_base_path",
                         description={

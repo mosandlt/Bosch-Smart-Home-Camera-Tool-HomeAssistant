@@ -2330,14 +2330,19 @@ def _get_section_schema_for_entry(entry, section_name: str):
 
 
 class TestSmbFieldsHaveExplicitDefault:
-    """Regression (#70 round 2): smb_server/share/username/password must carry
-    an explicit `default=` so voluptuous itself fills in the persisted value
-    when the frontend omits the key (untouched) and passes an explicit "" straight
-    through when the frontend DOES submit the key (cleared) — proving the fix at
-    the actual vol.Schema(...) validation layer, not just the flow-handler merge.
+    """Regression (#70 round 3): smb_server/share/username/password carry a
+    STATIC `default=""`, not the persisted value (round 2's approach, which
+    was itself the bug — see the schema comment in config_flow.py for the
+    verified HA-frontend mechanism: `ha-selector-text` converts an emptied
+    field's value to `undefined`, which is then dropped from the submitted
+    data entirely, so a genuinely-cleared field and a never-populated one
+    are indistinguishable "missing key" cases at the Python level; a
+    *populated* field is never converted this way, so it's always present in
+    the submission regardless of the schema default — a static "" default
+    only ever resolves the missing-key case, which should always mean "empty").
     """
 
-    def test_missing_key_defaults_to_persisted_value(self) -> None:
+    def test_missing_key_defaults_to_empty(self) -> None:
         entry = _make_entry(
             options={
                 "smb_server": "192.168.2.25",
@@ -2347,9 +2352,12 @@ class TestSmbFieldsHaveExplicitDefault:
             }
         )
         schema = _get_section_schema_for_entry(entry, "events_storage")
-        # smb_share key entirely absent from the submitted dict.
+        # smb_share key entirely absent from the submitted dict — this is
+        # exactly what a cleared TextSelector field looks like once it
+        # reaches Python, and must resolve to "", not the stale persisted
+        # value.
         result = schema({"smb_server": "192.168.2.25"})
-        assert result["smb_share"] == "bosch-events"
+        assert result["smb_share"] == ""
 
     def test_explicit_empty_string_clears(self) -> None:
         entry = _make_entry(
@@ -2361,6 +2369,20 @@ class TestSmbFieldsHaveExplicitDefault:
         schema = _get_section_schema_for_entry(entry, "events_storage")
         result = schema({"smb_server": "192.168.2.25", "smb_share": ""})
         assert result["smb_share"] == ""
+
+    def test_clear_smb_credentials_field_present_in_real_schema(self) -> None:
+        """Regression (#70 round 3): pins the `clear_smb_credentials` field at
+        the actual `vol.Schema(...)` validation layer — the exact gap that let
+        beta-1 ship broken (the flow-handler-level tests for it never exercise
+        real schema validation, so a typo'd/missing key in the schema build
+        would still pass those without this test catching it).
+        """
+        entry = _make_entry(options={})
+        schema = _get_section_schema_for_entry(entry, "events_storage")
+        # Defaults to False when omitted.
+        assert schema({})["clear_smb_credentials"] is False
+        # Round-trips True when explicitly submitted.
+        assert schema({"clear_smb_credentials": True})["clear_smb_credentials"] is True
 
 
 class TestOptionsStepInitRender:
@@ -3237,6 +3259,60 @@ class TestFullRoundTrip:
         assert data["download_path"] == "/config/my_events"
 
     @pytest.mark.asyncio
+    async def test_clear_smb_credentials_checkbox_forces_empty(self) -> None:
+        """Regression (#70 round 3): the `clear_smb_credentials` checkbox must
+        force all 4 SMB fields to "" even when the submitted text fields still
+        carry their old (frontend-cannot-reliably-empty-them) values — this is
+        the only reliable clear path; a bare cleared text field is not (see
+        the schema comment on the smb_server field in config_flow.py for the
+        full upstream-HA-frontend explanation).
+        """
+        prior = {
+            "smb_server": "192.168.2.25",
+            "smb_share": "bosch-events",
+            "smb_username": "nas_user",
+            "smb_password": "s3cret",
+        }
+        flow = BoschCameraOptionsFlow(_make_entry(options=prior))
+        data = await _submit(
+            flow,
+            {
+                "events_storage": {
+                    # Text fields still show the stale persisted values (as
+                    # they would in the real, still-broken frontend) — the
+                    # checkbox alone must be enough to force a real clear.
+                    "smb_server": "192.168.2.25",
+                    "smb_share": "bosch-events",
+                    "smb_username": "nas_user",
+                    "smb_password": "s3cret",
+                    "clear_smb_credentials": True,
+                }
+            },
+        )
+        assert data["smb_server"] == ""
+        assert data["smb_share"] == ""
+        assert data["smb_username"] == ""
+        assert data["smb_password"] == ""
+
+    @pytest.mark.asyncio
+    async def test_clear_smb_credentials_not_persisted_as_option(self) -> None:
+        """`clear_smb_credentials` is a transient action flag (same pattern as
+        force_relogin/migrate_to_oss_client) — it must never show up in the
+        saved options dict itself.
+        """
+        flow = BoschCameraOptionsFlow(_make_entry(options={"smb_server": "1.2.3.4"}))
+        data = await _submit(
+            flow,
+            {
+                "events_storage": {
+                    "smb_server": "1.2.3.4",
+                    "clear_smb_credentials": False,
+                }
+            },
+        )
+        assert "clear_smb_credentials" not in data
+
+    @pytest.mark.asyncio
     async def test_suggested_value_field_preserved_on_migrate_to_oss_path(self):
         """Regression: same merge must happen on the migrate_to_oss code path.
 
@@ -3326,6 +3402,8 @@ class TestDefaultOptionsCompleteness:
             # auth actions — not persistent state
             "force_relogin",
             "migrate_to_oss_client",
+            # #70 round 3 — transient action flag, popped before persisting
+            "clear_smb_credentials",
         }
         all_section_fields = {f for fields in OPTIONS_SECTIONS.values() for f in fields}
         missing_defaults = [
