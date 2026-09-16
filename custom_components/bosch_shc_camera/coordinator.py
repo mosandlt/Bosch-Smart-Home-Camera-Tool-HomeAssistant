@@ -2520,12 +2520,45 @@ class BoschCameraCoordinator(
             self.bg_tasks.add(t3)
             t3.add_done_callback(self.bg_tasks.discard)
 
+        # Captured BEFORE the generic pop loop below removes it, so the
+        # on-disk Store is only re-saved when there was actually something
+        # to drop for this cam_id — matters because this method is called
+        # for every purged camera, and an unconditional save would schedule
+        # a needless bg_task even when this camera never had NVR intent set.
+        # Uses a direct 3-arg `getattr` on the raw session (not
+        # `cam_id in self.nvr_user_intent`, which routes through
+        # `CacheFieldView.__contains__` → a 2-arg `getattr` that raises
+        # AttributeError instead of treating a missing field as absent, if
+        # `_sessions[cam_id]` is ever anything other than a real
+        # `CameraSessionState` — e.g. a non-standard value written directly
+        # by test/diagnostic code).
+        # `is True` (not a truthy `bool()`) because an unpopulated field on a
+        # real `CameraSessionState` holds the `_UNSET` sentinel object, which
+        # is truthy by default (no `__bool__` override) — a plain `bool()`
+        # would wrongly treat every real, never-toggled session as "had intent".
+        had_nvr_intent = (
+            getattr(self._sessions.get(cam_id), "nvr_user_intent", None) is True
+        )
         for attr_name in self._PURGE_CAM_DICT_ATTRS:
             attr = getattr(self, attr_name)
             attr.pop(cam_id, None)
         for attr_name in self._PURGE_CAM_SET_ATTRS:
             attr = getattr(self, attr_name)
             attr.discard(cam_id)
+        if had_nvr_intent:
+            # The generic loop above already popped `nvr_user_intent` from
+            # memory (it's a `CacheFieldView` over `_sessions`, the first
+            # entry in `_PURGE_CAM_DICT_ATTRS`, so popping `_sessions[cam_id]`
+            # covers it), but the on-disk Store still has this cam_id's
+            # `True` entry — without re-saving, __init__.py's loader
+            # recreates a phantom `CameraSessionState` for it on the next
+            # restart even though the camera is confirmed gone from the
+            # Bosch cloud account (GitHub #71 bug-hunt finding).
+            # `_purge_cam_id` itself is sync, so this is a background task,
+            # same pattern as the proxy/front-door cleanup above.
+            t4 = self.hass.async_create_task(self._save_nvr_user_intent())
+            self.bg_tasks.add(t4)
+            t4.add_done_callback(self.bg_tasks.discard)
         # Tuple-keyed by (cam_id, opcode_hex) — filter on the cam_id half.
         stale_lan_denied_keys = [
             key for key in self._rcp_lan_denied_until if key[0] == cam_id
@@ -2720,6 +2753,25 @@ class BoschCameraCoordinator(
             _LOGGER.debug("SMB cleanup background task error: %s", err)
 
     # ── Mini-NVR plumbing (delegate to recorder.py) ──────────────────────────
+    async def _save_nvr_user_intent(self) -> None:
+        """Persist `nvr_user_intent` to disk (GitHub #71).
+
+        `BoschNvrRecordingSwitch` restores its ON intent via `RestoreEntity`,
+        which only snapshots the entity's last RENDERED state — and that
+        state is `unavailable`, not `on`, whenever no LOCAL session exists
+        at shutdown (the switch's own `available` property). A restart that
+        happens to land while the camera is on REMOTE/offline therefore lost
+        the user's ON intent permanently, with no way back short of
+        manually flipping the switch again. This store is the source of
+        truth going forward — independent of the switch's availability at
+        shutdown — with `async_added_to_hass` still falling back to the old
+        RestoreEntity value for installs upgrading from before this fix.
+        """
+        store = getattr(self, "nvr_user_intent_store", None)
+        if store is None:
+            return
+        await store.async_save(dict(self.nvr_user_intent.items()))
+
     async def start_recorder(self, cam_id: str, *, reason: str = "unspecified") -> None:
         """Spawn the per-camera ffmpeg recorder if the LAN-only gate is open.
 
@@ -2732,6 +2784,7 @@ class BoschCameraCoordinator(
         """
         # User-intent flag (consulted by the watcher's respawn check).
         self.nvr_user_intent[cam_id] = True
+        await self._save_nvr_user_intent()
         if not nvr_recorder.should_record(self, cam_id, switch_on=True):
             conn_type = self.live_connections.get(cam_id, {}).get("_connection_type")
             if conn_type == "REMOTE":
@@ -2772,6 +2825,7 @@ class BoschCameraCoordinator(
         """
         if clear_intent:
             self.nvr_user_intent.pop(cam_id, None)
+            await self._save_nvr_user_intent()
         await nvr_recorder.stop_recorder(self, cam_id, reason=reason)
 
     async def run_nvr_cleanup_bg(self) -> None:

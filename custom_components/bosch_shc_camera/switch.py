@@ -2655,11 +2655,34 @@ class BoschNvrRecordingSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         last = await self.async_get_last_state()
-        if last is not None and last.state == "on":
+        # The persisted Store (loaded in __init__.py before platforms are
+        # set up) is the source of truth — it survives a restart even when
+        # this switch itself was `unavailable` at shutdown, unlike
+        # RestoreEntity's own last-rendered-state snapshot (GitHub #71).
+        # RestoreEntity is only consulted as a fallback for installs
+        # upgrading from before this fix, where the Store has nothing yet.
+        if self.coordinator.nvr_user_intent.get(self._cam_id, False) or (
+            last is not None and last.state == "on"
+        ):
             self.coordinator.nvr_user_intent[self._cam_id] = True
             _LOGGER.debug(
-                "NVR: restored ON for %s from previous state",
+                "NVR: restored ON for %s (persisted intent or previous state)",
                 self._cam_id[:8],
+            )
+            # Persist immediately — bug-hunt finding on the #71 fix itself:
+            # without this, an install upgrading from before this fix (Store
+            # empty, RestoreEntity says "on") only ever reaches the Store via
+            # `start_recorder` below, which only runs when a LOCAL session is
+            # ALREADY up at platform-setup time — essentially never. Left
+            # unpersisted, a second restart while the switch is `unavailable`
+            # (no LOCAL session yet) would lose the intent again, unchanged
+            # from the original bug. The later LOCAL-stream-up hook in
+            # `try_live_connection` starts the recorder via the module-level
+            # `nvr_recorder.start_recorder`, not this coordinator wrapper, so
+            # it would not have persisted it either.
+            self.hass.async_create_task(
+                self.coordinator._save_nvr_user_intent(),
+                name=f"bosch_nvr_persist_restored_intent_{self._cam_id[:8]}",
             )
             # If the LAN session is already up at this point, kick off the
             # recorder immediately. Otherwise the LOCAL-stream-up hook in

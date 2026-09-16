@@ -725,6 +725,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 len(_persisted_hw),
             )
 
+    # Load the persistent Mini-NVR recording-intent map (cam_id → True).
+    # RestoreEntity alone loses this permanently whenever the switch itself
+    # was `unavailable` at shutdown (no LOCAL session) — GitHub #71. Only
+    # a value that is literally `True` is ever loaded — a stray `False`
+    # (e.g. `async_turn_off` sets it before `stop_recorder` pops it, so a
+    # concurrent save mid-await could catch that transient state) is
+    # treated the same as a missing key, matching the CacheFieldView
+    # default elsewhere.
+    nvr_intent_store: Store = Store(hass, version=1, key=f"{DOMAIN}_nvr_user_intent")
+    coordinator.nvr_user_intent_store = nvr_intent_store
+    _persisted_nvr_intent = await nvr_intent_store.async_load() or {}
+    if isinstance(_persisted_nvr_intent, dict):
+        _loaded_intent = 0
+        for _cid, _intent in _persisted_nvr_intent.items():
+            if isinstance(_cid, str) and _intent is True:
+                coordinator.nvr_user_intent[_cid] = True
+                _loaded_intent += 1
+        if _loaded_intent:
+            _LOGGER.info(
+                "Loaded %d persisted Mini-NVR recording intent flag(s)",
+                _loaded_intent,
+            )
+
     # Load persisted LOCAL Digest creds (cam_id → {user, password, host, port}).
     # Bosch cycles these creds on every PUT /connection LOCAL — typically valid
     # for the lifetime of a session, occasionally beyond. Persisting lets the
@@ -1543,10 +1566,13 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Delete every integration-owned on-disk file when the entry is removed.
 
     Called only on full config-entry removal — never on a reload/unload,
-    which must leave this state intact. Without this, the four Store files
+    which must leave this state intact. Without this, the five Store files
     (cloud-outage-notified flag, LAN IPs, hardware versions, LOCAL Digest
-    credentials) and the persisted-snapshot JPEG directory all retained LAN
-    credentials and camera images indefinitely after removal.
+    credentials, Mini-NVR recording intent) and the persisted-snapshot JPEG
+    directory all retained LAN credentials, camera images, and recording
+    intent flags indefinitely after removal — GitHub #71: re-adding the same
+    account later would otherwise silently resurrect Mini-NVR recording via
+    a stale `True` entry nothing in the new entry's setup ever asked for.
     """
     from .snapshot_store import async_remove_all_snapshots
 
@@ -1555,6 +1581,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         f"{DOMAIN}_lan_ips",
         f"{DOMAIN}_hw_versions",
         f"{DOMAIN}_local_creds",
+        f"{DOMAIN}_nvr_user_intent",
     ):
         await Store(hass, version=1, key=key).async_remove()
     await async_remove_all_snapshots(hass)

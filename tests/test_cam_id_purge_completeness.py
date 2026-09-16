@@ -690,3 +690,62 @@ async def test_purge_cam_id_remote_viewing_front_door_repops_sticky_port_after_l
         "REGRESSION: a sticky-port entry re-inserted by a racing renewal "
         "must not survive a confirmed camera purge."
     )
+
+
+async def test_purge_cam_id_persists_removed_nvr_intent(hass: HomeAssistant) -> None:
+    """GitHub #71 bug-hunt finding: `_purge_cam_id` already drops
+    `nvr_user_intent[cam_id]` from memory (via the generic `_sessions` pop),
+    but without also re-saving the on-disk Store, __init__.py's loader would
+    recreate a phantom `CameraSessionState` for the removed camera — with
+    recording intent still True — on the very next HA restart, even though
+    the camera is confirmed gone from the Bosch cloud account."""
+    entry = _make_entry(hass)
+    coord = BoschCameraCoordinator(hass, entry)
+    store = AsyncMock()
+    coord.nvr_user_intent_store = store
+
+    coord.nvr_user_intent[TEST_CAM_ID] = True
+    coord.nvr_user_intent[OTHER_CAM_ID] = True
+
+    coord._purge_cam_id(TEST_CAM_ID)
+    assert len(coord.bg_tasks) == 1
+    await asyncio.gather(*coord.bg_tasks)
+
+    store.async_save.assert_awaited_once_with({OTHER_CAM_ID: True})
+
+
+async def test_purge_cam_id_no_save_task_when_no_nvr_intent(
+    hass: HomeAssistant,
+) -> None:
+    """A camera that never had `nvr_user_intent` set must not schedule a
+    needless Store-save background task on purge."""
+    entry = _make_entry(hass)
+    coord = BoschCameraCoordinator(hass, entry)
+    coord.nvr_user_intent_store = AsyncMock()
+
+    coord._purge_cam_id(TEST_CAM_ID)
+
+    assert len(coord.bg_tasks) == 0
+
+
+async def test_async_remove_entry_deletes_nvr_intent_store(hass: HomeAssistant) -> None:
+    """GitHub #71 bug-hunt finding: `async_remove_entry` deletes the other
+    four Store files but had not been updated to also delete the new
+    `{DOMAIN}_nvr_user_intent` Store — removing the integration and re-adding
+    the same Bosch account later would otherwise silently resurrect Mini-NVR
+    recording via a stale `True` entry nothing in the fresh entry ever set."""
+    from homeassistant.helpers.storage import Store
+
+    from custom_components.bosch_shc_camera import async_remove_entry
+
+    entry = _make_entry(hass)
+    await Store(hass, version=1, key=f"{DOMAIN}_nvr_user_intent").async_save(
+        {TEST_CAM_ID: True}
+    )
+
+    await async_remove_entry(hass, entry)
+
+    reloaded = await Store(
+        hass, version=1, key=f"{DOMAIN}_nvr_user_intent"
+    ).async_load()
+    assert reloaded is None

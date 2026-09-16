@@ -46,6 +46,7 @@ from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
+    HomeAssistantError,
     ServiceValidationError,
     Unauthorized,
 )
@@ -1240,6 +1241,87 @@ class TestPersistedLanIps:
         assert coord_stub.rcp_lan_ip_cache[CAM_A] == "192.0.2.10"
         assert "garbage" not in coord_stub.rcp_lan_ip_cache
         assert 123 not in coord_stub.rcp_lan_ip_cache
+
+
+class TestPersistedNvrUserIntent:
+    """GitHub #71: `nvr_user_intent_store` must be loaded into
+    `coordinator.nvr_user_intent` BEFORE platforms are set up, so
+    `BoschNvrRecordingSwitch.async_added_to_hass`'s OR-check (switch.py) has
+    something to see even when RestoreEntity's own last-known state was
+    `unavailable`."""
+
+    @pytest.mark.asyncio
+    async def test_persisted_true_entries_loaded_into_coordinator(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from custom_components.bosch_shc_camera import async_setup_entry
+
+        hass = _make_hass_setup_lan_fallback()
+        entry = _make_entry_setup_lan_fallback()
+        coord_stub = _make_coord_stub_setup_lan_fallback([])
+        coord_stub.nvr_user_intent = {}
+
+        ent_reg = MagicMock()
+        ent_reg.async_get_entity_id = MagicMock(return_value=None)
+
+        persisted = {
+            CAM_A: True,
+            "OTHERCAM": False,  # not literally True → must be skipped
+            "GARBAGECAM": "on",  # wrong type → must be skipped
+            123: True,  # wrong key type → must be skipped
+        }
+
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(
+                "custom_components.bosch_shc_camera.Store",
+                return_value=_FakeStore(persisted),
+            ),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+            caplog.at_level(logging.INFO),
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        assert coord_stub.nvr_user_intent[CAM_A] is True
+        assert "OTHERCAM" not in coord_stub.nvr_user_intent
+        assert "GARBAGECAM" not in coord_stub.nvr_user_intent
+        assert 123 not in coord_stub.nvr_user_intent
+        assert any(
+            "Loaded" in r.message and "Mini-NVR" in r.message for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_persisted_intent_no_log(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An empty/missing Store must not log the "Loaded N ..." line."""
+        from custom_components.bosch_shc_camera import async_setup_entry
+
+        hass = _make_hass_setup_lan_fallback()
+        entry = _make_entry_setup_lan_fallback()
+        coord_stub = _make_coord_stub_setup_lan_fallback([])
+        coord_stub.nvr_user_intent = {}
+
+        ent_reg = MagicMock()
+        ent_reg.async_get_entity_id = MagicMock(return_value=None)
+
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+            caplog.at_level(logging.INFO),
+        ):
+            await async_setup_entry(hass, entry)
+
+        assert coord_stub.nvr_user_intent == {}
+        assert not any("Mini-NVR recording intent" in r.message for r in caplog.records)
 
 
 class TestOptionsGatedBackgroundTasks:
@@ -14793,6 +14875,7 @@ def _make_coord_async_methods(**overrides):
         stop_tls_proxy=AsyncMock(),
         stop_viewing_front_door=AsyncMock(),
         stop_remote_viewing_front_door=AsyncMock(),
+        _save_nvr_user_intent=AsyncMock(),
         ensure_valid_token=AsyncMock(return_value="fresh-token"),
         try_live_connection=AsyncMock(return_value=None),
         record_stream_error=MagicMock(),
@@ -15827,6 +15910,88 @@ class TestRecorderWrappers:
         ):
             await BoschCameraCoordinator.stop_recorder(coord, CAM_A, clear_intent=False)
         assert coord.nvr_user_intent.get(CAM_A) is True
+
+
+class TestSaveNvrUserIntent:
+    """GitHub #71: `nvr_user_intent` must be persisted to a `Store`
+    independent of `RestoreEntity` — the switch's own last-rendered state is
+    `unavailable`, not `on`, whenever no LOCAL session exists at shutdown,
+    which otherwise loses the user's ON intent permanently."""
+
+    @pytest.mark.asyncio
+    async def test_no_store_configured_no_crash(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_async_methods(nvr_user_intent={CAM_A: True})
+        # No `nvr_user_intent_store` attribute at all (e.g. a stub/older
+        # coordinator) must not raise.
+        await BoschCameraCoordinator._save_nvr_user_intent(coord)
+
+    @pytest.mark.asyncio
+    async def test_saves_current_intent_dict(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        store = SimpleNamespace(async_save=AsyncMock())
+        coord = _make_coord_async_methods(
+            nvr_user_intent={CAM_A: True}, nvr_user_intent_store=store
+        )
+        await BoschCameraCoordinator._save_nvr_user_intent(coord)
+        store.async_save.assert_awaited_once_with({CAM_A: True})
+
+    @pytest.mark.asyncio
+    async def test_start_recorder_persists_intent(self):
+        """`start_recorder` must persist the flag it just set to True —
+        not just hold it in memory — so it survives a restart even if the
+        switch itself ends up `unavailable` before the next shutdown."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        store = SimpleNamespace(async_save=AsyncMock())
+        coord = _make_coord_async_methods(nvr_user_intent_store=store)
+        # Use the REAL _save_nvr_user_intent, not the base stub's no-op mock.
+        coord._save_nvr_user_intent = lambda: (
+            BoschCameraCoordinator._save_nvr_user_intent(coord)
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.nvr_recorder.should_record",
+            return_value=False,
+        ):
+            await BoschCameraCoordinator.start_recorder(coord, CAM_A)
+        store.async_save.assert_awaited_once_with({CAM_A: True})
+
+    @pytest.mark.asyncio
+    async def test_stop_recorder_persists_cleared_intent(self):
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        store = SimpleNamespace(async_save=AsyncMock())
+        coord = _make_coord_async_methods(
+            nvr_user_intent={CAM_A: True}, nvr_user_intent_store=store
+        )
+        coord._save_nvr_user_intent = lambda: (
+            BoschCameraCoordinator._save_nvr_user_intent(coord)
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.nvr_recorder.stop_recorder",
+            new=AsyncMock(),
+        ):
+            await BoschCameraCoordinator.stop_recorder(coord, CAM_A)
+        store.async_save.assert_awaited_once_with({})
+
+    @pytest.mark.asyncio
+    async def test_stop_recorder_no_persist_when_clear_intent_false(self):
+        """The LAN-drop path (`clear_intent=False`) doesn't change the
+        intent flag, so it must not re-save the store either."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        store = SimpleNamespace(async_save=AsyncMock())
+        coord = _make_coord_async_methods(
+            nvr_user_intent={CAM_A: True}, nvr_user_intent_store=store
+        )
+        with patch(
+            "custom_components.bosch_shc_camera.nvr_recorder.stop_recorder",
+            new=AsyncMock(),
+        ):
+            await BoschCameraCoordinator.stop_recorder(coord, CAM_A, clear_intent=False)
+        store.async_save.assert_not_awaited()
 
 
 class TestRcpSessionCache:
@@ -34620,7 +34785,7 @@ class TestAsyncRemoveEntry:
     (backported from the Core PR's Copilot review round 5, 2026-07-27)."""
 
     @pytest.mark.asyncio
-    async def test_removes_all_four_stores_and_snapshots(self):
+    async def test_removes_all_five_stores_and_snapshots(self):
         from custom_components.bosch_shc_camera import DOMAIN, async_remove_entry
 
         hass = MagicMock()
@@ -34648,6 +34813,7 @@ class TestAsyncRemoveEntry:
             f"{DOMAIN}_lan_ips",
             f"{DOMAIN}_hw_versions",
             f"{DOMAIN}_local_creds",
+            f"{DOMAIN}_nvr_user_intent",
         ]
         mock_remove_snapshots.assert_awaited_once_with(hass)
 
@@ -41506,3 +41672,37 @@ class TestServiceAdminGate:
 
         with pytest.raises(Unauthorized):
             await handler(call_no_context)
+
+    @pytest.mark.asyncio
+    async def test_open_live_connection_not_admin_gated(self) -> None:
+        """`open_live_connection` must NOT go through `admin_only_service`
+        (GitHub #71, realKim-dotcom): every HA automation/script context
+        carries `user_id: None`, which the gate rejects by design for the
+        account-level/destructive services — but automations are the
+        documented way to keep a 24/7 Mini-NVR pre-roll ring alive by
+        calling this service before `switch.turn_on`. A `user_id=None`
+        context (or no context at all, matching `automation.trigger`'s own
+        context per the issue) must reach the real handler instead of
+        raising Unauthorized — if `hass.auth.async_get_user` were called at
+        all here, that alone would prove the gate wrongly still wraps it."""
+        hass = _make_hass_services_round1()
+        hass.auth = SimpleNamespace(
+            async_get_user=AsyncMock(
+                side_effect=AssertionError(
+                    "async_get_user must not be called — open_live_connection "
+                    "is not admin-gated (GitHub #71)"
+                )
+            )
+        )
+        handler = await self._register_and_get_handler(hass, "open_live_connection")
+
+        call = MagicMock()
+        call.data = {"camera_id": CAM_ID}
+        call.context = SimpleNamespace(user_id=None, parent_id="automation-run-id")
+
+        # No loaded config entries → the real handler raises HomeAssistantError
+        # (not Unauthorized) once it actually runs — proving the gate was
+        # bypassed and the business logic was reached.
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await handler(call)
+        assert not isinstance(excinfo.value, Unauthorized)

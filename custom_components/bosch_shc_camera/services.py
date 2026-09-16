@@ -1765,15 +1765,28 @@ def _register_services(hass: HomeAssistant) -> None:
     # user (a real regression caught by a bug-hunt on this exact change,
     # before release). It is a read-only refresh trigger, not an
     # account-level or destructive action.
+    #
+    # EXCEPTION: open_live_connection is NOT gated either (GitHub #71,
+    # realKim-dotcom). Every HA automation/script context carries
+    # `user_id: None` — `async_require_admin` fails closed on that by
+    # design (v16.1.15), which is correct for the account-level/destructive
+    # services above but silently broke the documented way to keep a 24/7
+    # Mini-NVR pre-roll ring alive: an automation calling
+    # `open_live_connection` then `switch.turn_on` on the recording switch
+    # got `Unauthorized` on every run, the switch stayed `unavailable`
+    # (no LOCAL session ever opened), and — compounding it — the
+    # RestoreEntity-persisted user intent was then permanently lost on the
+    # next restart (see `BoschNvrRecordingSwitch.async_added_to_hass` /
+    # `coordinator._save_nvr_user_intent`). Like trigger_snapshot, this is
+    # a non-destructive session/connection action, not an account-level or
+    # destructive one — it only opens a proxy stream connection.
     if not hass.services.has_service(DOMAIN, "trigger_snapshot"):
         hass.services.async_register(
             DOMAIN, "trigger_snapshot", handle_trigger_snapshot
         )
     if not hass.services.has_service(DOMAIN, "open_live_connection"):
         hass.services.async_register(
-            DOMAIN,
-            "open_live_connection",
-            admin_only_service(hass, handle_open_live_connection),
+            DOMAIN, "open_live_connection", handle_open_live_connection
         )
     if not hass.services.has_service(DOMAIN, "create_rule"):
         hass.services.async_register(

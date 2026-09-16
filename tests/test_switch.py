@@ -293,6 +293,7 @@ def _stub_coord(**overrides):
         stop_viewing_front_door=AsyncMock(),
         stop_remote_viewing_front_door=AsyncMock(),
         start_recorder=AsyncMock(),
+        _save_nvr_user_intent=AsyncMock(),
         stop_recorder=AsyncMock(),
         async_add_listener=MagicMock(return_value=MagicMock()),
     )
@@ -2347,6 +2348,7 @@ def _nvr_coord(**overrides):
         last_update_success=True,
         is_camera_online=lambda cid: True,
         start_recorder=AsyncMock(),
+        _save_nvr_user_intent=AsyncMock(),
         stop_recorder=AsyncMock(),
         async_request_refresh=AsyncMock(),
         options={},
@@ -5629,6 +5631,7 @@ def _coord(
         async_request_refresh=AsyncMock(),
         async_update_listeners=MagicMock(),
         start_recorder=AsyncMock(),
+        _save_nvr_user_intent=AsyncMock(),
         stop_recorder=AsyncMock(),
         hass=SimpleNamespace(
             async_create_task=MagicMock(),
@@ -7739,6 +7742,7 @@ def _stub_coord_sprintma(**overrides):
         stop_viewing_front_door=AsyncMock(),
         stop_remote_viewing_front_door=AsyncMock(),
         start_recorder=AsyncMock(),
+        _save_nvr_user_intent=AsyncMock(),
         stop_recorder=AsyncMock(),
     )
     base.update(overrides)
@@ -9135,6 +9139,11 @@ class TestNvrRecordingSwitchRestoreState:
         with patch.object(type(sw).__bases__[0], "async_added_to_hass", AsyncMock()):
             await sw.async_added_to_hass()
         assert stub_coord_sprintma.nvr_user_intent.get(CAM_ID) is True
+        # GitHub #71 bug-hunt: the restored intent must be persisted to the
+        # Store too, not just held in memory — this is the ONLY way it ever
+        # reaches disk for an install upgrading from before this fix, since
+        # no LOCAL session is up yet at platform-setup time here.
+        sw.hass.async_create_task.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_restores_off_state_no_intent(
@@ -9175,6 +9184,40 @@ class TestNvrRecordingSwitchRestoreState:
         assert stub_coord_sprintma.nvr_user_intent.get(CAM_ID) is not True
 
     @pytest.mark.asyncio
+    async def test_persisted_intent_survives_unavailable_last_state(
+        self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
+    ):
+        """GitHub #71: RestoreEntity alone loses ON intent permanently once the
+        switch was `unavailable` at shutdown (no LOCAL session), since it only
+        ever snapshots the entity's last RENDERED state. The persisted
+        `nvr_user_intent_store` (loaded into `coordinator.nvr_user_intent`
+        BEFORE platforms are set up, in `__init__.py`) must take priority: a
+        pre-loaded True intent restores ON even when RestoreEntity's own
+        last-known state was `unavailable`, not `on`."""
+        from custom_components.bosch_shc_camera.switch import BoschNvrRecordingSwitch
+
+        stub_entry_sprintma.options = {
+            "enable_snapshot_button": True,
+            "enable_nvr": True,
+        }
+        # Simulate the Store already having loaded True for this camera
+        # before platform setup (as __init__.py does).
+        stub_coord_sprintma.nvr_user_intent[CAM_ID] = True
+        stub_coord_sprintma.live_connections[CAM_ID] = {"_connection_type": "LOCAL"}
+        sw = BoschNvrRecordingSwitch(stub_coord_sprintma, CAM_ID, stub_entry_sprintma)
+        _bind_hass(sw)
+        last_state = MagicMock()
+        last_state.state = "unavailable"
+        sw.async_get_last_state = AsyncMock(return_value=last_state)
+        with patch.object(type(sw).__bases__[0], "async_added_to_hass", AsyncMock()):
+            await sw.async_added_to_hass()
+        assert stub_coord_sprintma.nvr_user_intent.get(CAM_ID) is True
+        # Two tasks: persist the (already-True) intent, and — since LOCAL is
+        # already up — kick off the recorder immediately, same as the
+        # RestoreEntity "on" path.
+        assert sw.hass.async_create_task.call_count == 2
+
+    @pytest.mark.asyncio
     async def test_restores_on_and_kicks_recorder_when_live(
         self, stub_coord_sprintma: SimpleNamespace, stub_entry_sprintma: SimpleNamespace
     ):
@@ -9193,8 +9236,8 @@ class TestNvrRecordingSwitchRestoreState:
         sw.async_get_last_state = AsyncMock(return_value=last_state)
         with patch.object(type(sw).__bases__[0], "async_added_to_hass", AsyncMock()):
             await sw.async_added_to_hass()
-        # async_create_task must have been called to start the recorder
-        sw.hass.async_create_task.assert_called_once()
+        # Two tasks: persist the restored intent, and start the recorder.
+        assert sw.hass.async_create_task.call_count == 2
 
     @pytest.mark.asyncio
     async def test_restores_on_no_kick_when_remote(
@@ -9215,8 +9258,9 @@ class TestNvrRecordingSwitchRestoreState:
         sw.async_get_last_state = AsyncMock(return_value=last_state)
         with patch.object(type(sw).__bases__[0], "async_added_to_hass", AsyncMock()):
             await sw.async_added_to_hass()
-        # Recorder must NOT be kicked for REMOTE sessions
-        sw.hass.async_create_task.assert_not_called()
+        # Recorder must NOT be kicked for REMOTE sessions, but the intent
+        # must still be persisted — one task, not zero.
+        sw.hass.async_create_task.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_turn_on_starts_recorder(
