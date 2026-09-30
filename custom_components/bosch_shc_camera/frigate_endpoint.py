@@ -38,9 +38,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
 import hmac
 import ipaddress
 import logging
+import re
 import socket
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
@@ -70,6 +72,14 @@ AUTH_BASIC = "basic"
 QUALITY_HIGH = "high"
 QUALITY_LOW = "low"
 _QUALITY_INST = {QUALITY_HIGH: 1, QUALITY_LOW: 2}
+
+# Request URI of the client connection being resolved. `resolve_inner` only
+# receives the camera id, but a local-data-interface camera needs the `inst`
+# the recorder asked for to pick the high or low go2rtc stream.
+_REQUEST_URI: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "frigate_request_uri", default=""
+)
+_INST_RE = re.compile(r"[?&]inst=(\d+)")
 
 # Max time to wait for the inner proxy TCP connect before dropping the client.
 _INNER_CONNECT_TIMEOUT = 10.0
@@ -728,6 +738,7 @@ class _CameraServer:
             await _close_writer(writer)
             return
         _method, uri = parsed
+        _REQUEST_URI.set(uri)
 
         # ── Gate auth ────────────────────────────────────────────────────────
         cfg = self.config
@@ -872,8 +883,8 @@ async def _resolve_restream(coordinator: Any, cam_id: str) -> Any:
 
     Opens the local session when none is up, then makes sure go2rtc holds the
     camera's stream. None (the client gets a 503) when there is no session or
-    go2rtc is not serving it; the cloud is never used. Both quality switches
-    map to this single stream.
+    go2rtc is not serving it; the cloud is never used. A client asking for
+    `inst=2` (the low switch) gets the low stream, anything else the main one.
     """
     from .remote_viewing_front_door import RemoteTarget
 
@@ -881,7 +892,9 @@ async def _resolve_restream(coordinator: Any, cam_id: str) -> Any:
         await coordinator.try_live_connection(cam_id)
         if not coordinator.live_connections.get(cam_id, {}).get("_ldi"):
             return None
-    url = await ensure_ldi_stream(coordinator, cam_id)
+    match = _INST_RE.search(_REQUEST_URI.get())
+    low = match is not None and int(match[1]) == _QUALITY_INST[QUALITY_LOW]
+    url = await ensure_ldi_stream(coordinator, cam_id, low=low)
     if url is None:
         return None
     parts = urlsplit(url)

@@ -77,7 +77,8 @@ from .go2rtc_client import (
     ensure_go2rtc_schemes_fresh,
     unregister_go2rtc_stream,
 )
-from .ldi_local import ensure_ldi_stream, ldi_wanted
+from .ldi_local import ensure_ldi_stream, ldi_wanted, refresh_ldi_rest
+from .ldi_snapshot import fetch_snapshot as fetch_ldi_snapshot
 from .live_connection import try_live_connection_inner
 from .lock_utils import get_or_create_lock
 from .rcp import async_update_rcp_data
@@ -812,6 +813,10 @@ class BoschCameraCoordinator(
         self.ldi_open_status: dict[str, dict[str, Any]] = {}
         # go2rtc registration bookkeeping per camera (see ldi_go2rtc.py).
         self.ldi_go2rtc_state: dict[str, dict[str, Any]] = {}
+        # Local REST reads per camera (reachability, privacy state, firmware)
+        # and the shared snapshot frame (see ldi_local.py / ldi_snapshot.py).
+        self.ldi_rest_state: dict[str, dict[str, Any]] = {}
+        self.ldi_snapshot_state: dict[str, dict[str, Any]] = {}
         # Alarm settings cache — from GET /alarm_settings (Gen2 Indoor II only).
         # Contains: alarmMode, alarmDelayInSeconds, alarmActivationDelaySeconds,
         #          preAlarmMode, preAlarmDelayInSeconds
@@ -2063,6 +2068,7 @@ class BoschCameraCoordinator(
                 "_refresh_local_data_interface_auth_issue",
                 "_refresh_local_data_interface_password_hint",
                 "_ensure_ldi_go2rtc_streams",
+                "_poll_ldi_rest",
             ):
                 try:
                     getattr(self, _ldi_refresh)()
@@ -2140,6 +2146,20 @@ class BoschCameraCoordinator(
                 self.spawn_tracked(
                     ensure_ldi_stream(self, cam_id),
                     name=f"bosch_shc_camera_ldi_go2rtc_{cam_id[:8]}",
+                )
+
+    def _poll_ldi_rest(self) -> None:
+        """Read each local-only camera's REST interface (throttled per camera).
+
+        Only cameras reached over the local data interface are asked; a camera
+        on the cloud path never is. `refresh_ldi_rest` holds the once-a-minute
+        limit, so a tick that comes earlier does nothing.
+        """
+        for cam_id in list(self.data or {}):
+            if ldi_wanted(self, cam_id):
+                self.spawn_tracked(
+                    refresh_ldi_rest(self, cam_id),
+                    name=f"bosch_shc_camera_ldi_rest_{cam_id[:8]}",
                 )
 
     def _refresh_local_data_interface_password_hint(self) -> None:
@@ -2360,6 +2380,8 @@ class BoschCameraCoordinator(
         "local_data_interface_cache",
         "ldi_open_status",
         "ldi_go2rtc_state",
+        "ldi_rest_state",
+        "ldi_snapshot_state",
         "alarm_settings_cache",
         "alarm_status_cache",
         "_last_alarm_type",
@@ -2927,7 +2949,8 @@ class BoschCameraCoordinator(
         snap_jpeg_size = jpeg_size or JPEG_SIZE_FULL
 
         if ldi_wanted(self, cam_id):
-            return None  # local-only camera: no cloud proxy snapshot
+            # Local-only camera: the camera's own preview stream, never the cloud.
+            return await fetch_ldi_snapshot(self, cam_id)
         token = self.token
         if not token:
             return None

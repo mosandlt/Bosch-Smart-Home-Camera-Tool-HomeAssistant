@@ -87,6 +87,10 @@ def _argv_input(args: tuple[Any, ...]) -> str:
 
 
 async def _recorded_input(ldi: bool, quality: str, *, preroll: bool) -> str:
+    return _argv_input(await _recorded_argv(ldi, quality, preroll=preroll))
+
+
+async def _recorded_argv(ldi: bool, quality: str, *, preroll: bool) -> tuple[Any, ...]:
     coord = _make_phase_coord(
         opts={
             "nvr_base_path": "/config/bosch_nvr",
@@ -121,7 +125,7 @@ async def _recorded_input(ldi: bool, quality: str, *, preroll: bool) -> str:
         else:
             await nvr_recorder.start_recorder(coord, CAM_ID_SHORT)
     spawn.assert_called()
-    return _argv_input(spawn.call_args.args)
+    return tuple(spawn.call_args.args)
 
 
 class TestRecorderQuality:
@@ -144,6 +148,27 @@ class TestRecorderQuality:
     @pytest.mark.asyncio
     async def test_cloud_session_auto_unchanged(self) -> None:
         assert "inst=1" in await _recorded_input(False, "auto", preroll=False)
+
+
+class TestRecorderAudio:
+    """The restream now carries audio: record one video + the audio track."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("preroll", [False, True])
+    async def test_ldi_records_first_video_and_optional_audio_track(
+        self, preroll: bool
+    ) -> None:
+        argv = await _recorded_argv(True, "auto", preroll=preroll)
+        maps = [argv[i + 1] for i, a in enumerate(argv) if a == "-map"]
+        assert maps == ["0:v:0", "0:a:0?"]
+        assert argv[argv.index("-c") + 1] == "copy"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("preroll", [False, True])
+    async def test_cloud_session_keeps_map_all(self, preroll: bool) -> None:
+        argv = await _recorded_argv(False, "auto", preroll=preroll)
+        maps = [argv[i + 1] for i, a in enumerate(argv) if a == "-map"]
+        assert maps == ["0"]
 
 
 # ── consumer counting ───────────────────────────────────────────────────────

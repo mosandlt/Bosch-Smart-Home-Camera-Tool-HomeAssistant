@@ -30,7 +30,13 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
-from .ldi_local import RESULT_AUTH, RESULT_NO_GO2RTC, ldi_active, ldi_wanted
+from .ldi_local import (
+    RESULT_AUTH,
+    RESULT_NO_GO2RTC,
+    ldi_active,
+    ldi_privacy_on,
+    ldi_wanted,
+)
 from .local_data_interface import (
     STATE_ACTIVE,
     STATE_INACTIVE,
@@ -333,7 +339,7 @@ def refresh_local_data_interface_auth_issue(
     for cam_id, cam in (coordinator.data or {}).items():
         issue_id = f"local_data_interface_auth_{cam_id}"
         status = status_map.get(cam_id)
-        privacy = coordinator.shc_state_cache.get(cam_id, {}).get("privacy_mode")
+        privacy = ldi_privacy_on(coordinator, cam_id)
         reason: str | None = None
         if ldi_wanted(coordinator, cam_id) and privacy is not True:
             offline_since = coordinator.offline_since.get(cam_id)

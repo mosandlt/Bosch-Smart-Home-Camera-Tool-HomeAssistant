@@ -43,6 +43,8 @@ _BACKOFF_MAX_SEC = 60.0
 _MAX_FAILS = 16
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _STREAMS_PATH = "/api/streams"
+_FRAME_PATH = "/api/frame.jpeg"
+_FRAME_TIMEOUT = 8.0
 
 _URL_USERINFO_RE = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@")
 _ENCODED_USERINFO_RE = re.compile(
@@ -60,10 +62,15 @@ def redact_urls(text: str) -> str:
     return _ENCODED_USERINFO_RE.sub(r"\g<scheme>***@", text)
 
 
-def ldi_stream_name(cam_id: str) -> str:
-    """go2rtc stream name for a camera: `ldi_` + first 8 id characters."""
+def ldi_stream_name(cam_id: str, variant: str = "") -> str:
+    """go2rtc stream name: `ldi_` + first 8 id characters (+ `_<variant>`).
+
+    The main stream has no variant. `low` (second quality for an external
+    recorder) and `snap` (1 Hz preview for snapshots) are separate streams,
+    because each needs its own camera session.
+    """
     short = re.sub(r"[^0-9a-z]", "", cam_id[:8].lower())
-    return f"{STREAM_PREFIX}{short}"
+    return f"{STREAM_PREFIX}{short}_{variant}" if variant else f"{STREAM_PREFIX}{short}"
 
 
 @dataclass(frozen=True)
@@ -198,6 +205,27 @@ async def register_stream(
     return len(await _producers(endpoint, name) or []) == 1
 
 
+async def fetch_frame(
+    coordinator: BoschCameraCoordinator, cam_id: str, variant: str
+) -> bytes | None:
+    """One JPEG frame of a registered stream via go2rtc; None on any failure."""
+    endpoint = await resolve_endpoint(coordinator)
+    if endpoint is None:
+        return None
+    try:
+        async with asyncio.timeout(_FRAME_TIMEOUT):
+            async with endpoint.session.get(
+                endpoint.api.with_path(_FRAME_PATH),
+                params={"src": ldi_stream_name(cam_id, variant)},
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                body = await resp.read()
+    except _API_ERRORS:
+        return None
+    return body if body.startswith(b"\xff\xd8") else None
+
+
 async def consumer_count(endpoint: Go2rtcEndpoint, name: str) -> int | None:
     """Number of readers attached to a stream; None when go2rtc is unreachable."""
     try:
@@ -216,8 +244,25 @@ async def consumer_count(endpoint: Go2rtcEndpoint, name: str) -> int | None:
     return len(consumers) if isinstance(consumers, list) else 0
 
 
-def _state(coordinator: BoschCameraCoordinator, cam_id: str) -> dict[str, Any]:
-    """Per-camera registration state, created on first use."""
+def _new_state() -> dict[str, Any]:
+    return {
+        "fp": None,
+        "url": None,
+        "verified_at": float("-inf"),
+        "retry_at": float("-inf"),
+        "fails": 0,
+        "lock": asyncio.Lock(),
+    }
+
+
+def _state(
+    coordinator: BoschCameraCoordinator, cam_id: str, variant: str = ""
+) -> dict[str, Any]:
+    """Per-camera (and per-variant) registration state, created on first use.
+
+    Variants live inside the camera's own record (`variants`), so every
+    per-cam_id purge of `ldi_go2rtc_state` covers them too.
+    """
     store: dict[str, dict[str, Any]] | None = getattr(
         coordinator, "ldi_go2rtc_state", None
     )
@@ -226,16 +271,16 @@ def _state(coordinator: BoschCameraCoordinator, cam_id: str) -> dict[str, Any]:
         coordinator.ldi_go2rtc_state = store
     state = store.get(cam_id)
     if state is None:
-        state = {
-            "fp": None,
-            "url": None,
-            "verified_at": float("-inf"),
-            "retry_at": float("-inf"),
-            "fails": 0,
-            "lock": asyncio.Lock(),
-        }
+        state = _new_state()
         store[cam_id] = state
-    return state
+    if not variant:
+        return state
+    variants: dict[str, dict[str, Any]] = state.setdefault("variants", {})
+    sub = variants.get(variant)
+    if sub is None:
+        sub = _new_state()
+        variants[variant] = sub
+    return sub
 
 
 async def ensure_stream(
@@ -244,6 +289,7 @@ async def ensure_stream(
     source: str,
     *,
     force: bool = False,
+    variant: str = "",
 ) -> str | None:
     """Register `source` for the camera if needed; returns the restream URL.
 
@@ -252,7 +298,7 @@ async def ensure_stream(
     seconds, and failures back off exponentially (up to a minute) unless
     `force` (a session open the caller already bounds).
     """
-    state = _state(coordinator, cam_id)
+    state = _state(coordinator, cam_id, variant)
     async with state["lock"]:
         now = time.monotonic()
         fingerprint = hashlib.sha256(source.encode()).hexdigest()
@@ -263,7 +309,7 @@ async def ensure_stream(
             if fresh and state["url"] and state["fp"] == fingerprint:
                 return str(state["url"])
         endpoint = await resolve_endpoint(coordinator)
-        name = ldi_stream_name(cam_id)
+        name = ldi_stream_name(cam_id, variant)
         ok = endpoint is not None and await register_stream(
             endpoint, name, source, known=state["fp"] == fingerprint
         )
@@ -302,6 +348,8 @@ async def unregister_stream(coordinator: BoschCameraCoordinator, cam_id: str) ->
         endpoint = await resolve_endpoint(coordinator)
         if endpoint is not None:
             await _delete(endpoint, ldi_stream_name(cam_id))
+            for variant in state.get("variants", {}):
+                await _delete(endpoint, ldi_stream_name(cam_id, variant))
 
 
 async def unregister_all(coordinator: BoschCameraCoordinator) -> None:
@@ -328,7 +376,12 @@ def _claimed_names(coordinator: BoschCameraCoordinator) -> set[str]:
     for coord in coords:
         store = getattr(coord, "ldi_go2rtc_state", None)
         if isinstance(store, dict):
-            names.update(ldi_stream_name(cam_id) for cam_id in store)
+            for cam_id, state in store.items():
+                names.add(ldi_stream_name(cam_id))
+                names.update(
+                    ldi_stream_name(cam_id, variant)
+                    for variant in state.get("variants", {})
+                )
     return names
 
 

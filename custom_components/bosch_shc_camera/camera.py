@@ -64,7 +64,7 @@ from .const import (
     with_jpeg_size,
 )
 from .dynamic_devices import register_dynamic_camera_listener
-from .ldi_local import ensure_ldi_stream
+from .ldi_local import ensure_ldi_stream, ldi_privacy_on, ldi_wanted
 from .mjpeg_snapshot import fetch_mjpeg_snapshot
 from .models import (
     get_display_name,
@@ -1302,6 +1302,24 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         except (TimeoutError, aiohttp.ClientError, ValueError) as err:
             _LOGGER.debug("%s: LOCAL snap warm-up failed: %s", self._display_name, err)
 
+    async def _async_ldi_image(self) -> bytes | None:
+        """Snapshot of a local-only camera: its own preview stream, no cloud.
+
+        The previous frame is kept while a grab is unavailable (go2rtc
+        missing, camera busy) — but only while privacy is confirmed off:
+        with the privacy mode on, or not yet known, nothing is served.
+        """
+        fresh: bytes | None = await self.coordinator.async_fetch_live_snapshot(
+            self._cam_id
+        )
+        if fresh:
+            self.cached_image = fresh
+            self.last_image_fetch = time.monotonic()
+            return fresh
+        if ldi_privacy_on(self.coordinator, self._cam_id) is False:
+            return self.cached_image
+        return None
+
     async def _async_camera_image_impl(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
@@ -1347,6 +1365,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # instead.
         if self.coordinator.shc_state_cache.get(self._cam_id, {}).get("privacy_mode"):
             return None
+        if ldi_wanted(self.coordinator, self._cam_id):
+            return await self._async_ldi_image()
         # An unknown privacy state (e.g. a cloud-degraded restart, where
         # shc_state_cache starts empty, or a camera whose cloud payload
         # never carries privacyMode) must not silently trust a possibly-stale

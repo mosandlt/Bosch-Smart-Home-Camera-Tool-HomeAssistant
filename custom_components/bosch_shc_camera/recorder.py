@@ -320,6 +320,26 @@ def _build_ffmpeg_args(
     )
 
 
+def _single_av_tracks(args: list[str]) -> list[str]:
+    """Replace `-map 0` with the first video track and the first audio track.
+
+    A local data interface restream carries the camera's H.264 and H.265
+    offer plus AAC audio; `-map 0` would copy every offered track into one
+    mp4. The audio track is optional (`0:a:0?`), so a video-only restream
+    still records.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] == "-map" and i + 1 < len(args) and args[i + 1] == "0":
+            out += ["-map", "0:v:0", "-map", "0:a:0?"]
+            i += 2
+        else:
+            out.append(args[i])
+            i += 1
+    return out
+
+
 # ── Phase 4: pre-roll helpers ─────────────────────────────────────────────────
 
 
@@ -713,6 +733,8 @@ async def _spawn_preroll_recorder_locked(
     if live.get("_ldi"):
         quality = "auto"  # fixed restream, no per-quality encoder stream
     args = _build_preroll_ffmpeg_args(rtsp_url, pattern, quality=quality)
+    if live.get("_ldi"):
+        args = _single_av_tracks(args)
     _LOGGER.debug("NVR pre-roll starting for %s -> %s", cam_name, pattern)
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -1970,6 +1992,8 @@ async def _start_recorder_locked(
     args = _build_ffmpeg_args(
         fresh_rtsp_url, pattern, quality="auto" if live.get("_ldi") else quality
     )
+    if live.get("_ldi"):
+        args = _single_av_tracks(args)
     _LOGGER.debug(
         "NVR ffmpeg argv for %s: %s",
         cam_name,

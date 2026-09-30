@@ -45,6 +45,7 @@ from .const import (
     MOTION_ACTIVE_WINDOW_MIN,
 )
 from .dynamic_devices import register_dynamic_camera_listener
+from .ldi_local import ldi_local_firmware
 from .local_data_interface import STATE_ACTIVE
 from .time_utils import parse_bosch_timestamp
 
@@ -526,7 +527,11 @@ class BoschLocalDataInterfaceBinarySensor(BoschBinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         if self._ldi_state.get("state") != STATE_ACTIVE:
             return {}
-        return {"username": self._ldi_state.get("username", "")}
+        attrs: dict[str, Any] = {"username": self._ldi_state.get("username", "")}
+        firmware = ldi_local_firmware(self.coordinator, self._cam_id)
+        if firmware is not None:
+            attrs["local_firmware"] = firmware
+        return attrs
 
 
 AI_RECENT_ALERT_DESCRIPTION = BoschBinarySensorEntityDescription(

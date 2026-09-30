@@ -1,28 +1,30 @@
 """Local-only video source over the camera's local data interface.
 
 When a camera reports the local data interface as active and the user stored
-its password, the camera is read over its LAN address (RTSP over TLS, Digest
-auth) and never touches the Bosch cloud: no token check, no PUT /connection,
-no REMOTE fallback. go2rtc is the single upstream reader; the live view, the
-Mini-NVR recorder and the external-recorder endpoint all read its local
-restream (see ldi_go2rtc.py), because the camera serves only a few
-concurrent sessions. Without go2rtc there is no stream. Failure leaves the
-camera without a stream until the next local attempt.
+its password, the camera is read over its LAN address (RTSP over TLS on port
+9554, `rtsp_tunnel?line=1&inst=<N>&enableaudio=<0|1>`) and never touches the
+Bosch cloud: no token check, no PUT /connection, no REMOTE fallback. `inst` 1
+is the high and 2 the low stream (the camera's quality select), 3 a 1 Hz JPEG
+preview used for snapshots; audio is always requested, as on the cloud path
+(the audio switch only mutes the card). go2rtc is the single upstream reader;
+the live view, the Mini-NVR recorder and the external-recorder endpoint all
+read its local restream (see ldi_go2rtc.py), because the camera serves only a
+few concurrent sessions. Without go2rtc there is no stream. Failure leaves
+the camera without a stream until the next local attempt.
+
+Reachability, the password check and the privacy state come from the local
+REST interface (ldi_rest.py), polled at most once a minute per camera.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
-import ssl
 import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from bosch_shc_camera_client.tls_proxy import _digest_auth
-
-from . import ldi_go2rtc
+from . import ldi_go2rtc, ldi_rest
 from .local_data_interface import STATE_ACTIVE, firmware_supports_ldi
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
@@ -33,7 +35,15 @@ _LOGGER = logging.getLogger(__name__)
 LDI_RTSP_PORT = 9554
 LDI_USER = "localuser"
 LDI_PASSWORDS_OPTION = "local_passwords"
-LDI_STREAM_PATH = "/live"
+LDI_STREAM_PATH = "/rtsp_tunnel"
+LDI_INST_HIGH = 1
+LDI_INST_LOW = 2
+LDI_INST_PREVIEW = 3
+VARIANT_LOW = "low"
+VARIANT_SNAP = "snap"
+LDI_REST_POLL_SEC = 60.0
+_LDI_VERSION_POLL_SEC = 3600.0
+_LDI_VERSION_RETRIES = 3
 
 _STALE_STREAM_STOP_TIMEOUT = 5
 _PROBE_ATTEMPTS = 2
@@ -46,8 +56,6 @@ RESULT_AUTH = "auth"
 RESULT_UNREACHABLE = "unreachable"
 RESULT_NO_IP = "no_ip"
 RESULT_NO_GO2RTC = "no_go2rtc"
-
-_PROBE_STATUS_RE = re.compile(r"^RTSP/\d\.\d\s+(\d{3})")
 
 
 def ldi_active(coordinator: BoschCameraCoordinator, cam_id: str) -> bool:
@@ -152,72 +160,131 @@ def record_ldi_result(
     status[cam_id] = {"reason": result, "since": since}
 
 
-def _insecure_context() -> ssl.SSLContext:
-    """TLS context for the camera's self-signed certificate (no disk access)."""
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE  # camera serves a self-signed certificate
-    return ctx
+def ldi_inst_for_quality(quality: object) -> int:
+    """Camera stream for the quality select: low -> 2, high/auto -> 1."""
+    return LDI_INST_LOW if quality == "low" else LDI_INST_HIGH
 
 
-def ldi_source_url(ip: str, user: str, password: str) -> str:
+def _quality(coordinator: BoschCameraCoordinator, cam_id: str) -> str:
+    getter = getattr(coordinator, "get_quality", None)
+    value = getter(cam_id) if callable(getter) else "auto"
+    return value if isinstance(value, str) else "auto"
+
+
+def ldi_source_url(
+    ip: str,
+    user: str,
+    password: str,
+    *,
+    inst: int = LDI_INST_HIGH,
+    audio: bool = True,
+) -> str:
     """go2rtc source for the camera; userinfo is percent-encoded."""
     return (
         f"rtsps://{quote(user, safe='')}:{quote(password, safe='')}"
         f"@{ip}:{LDI_RTSP_PORT}{LDI_STREAM_PATH}"
+        f"?line=1&inst={inst}&enableaudio={int(audio)}"
     )
 
 
-async def _probe_describe_status(
-    ip: str, user: str, password: str, timeout: float
-) -> int | None:
-    """RTSP status of one authenticated DESCRIBE straight at the camera.
+def ldi_privacy_on(coordinator: BoschCameraCoordinator, cam_id: str) -> bool | None:
+    """Privacy state: the camera's own answer first, else the cloud/SHC cache."""
+    rest: dict[str, dict[str, Any]] = getattr(coordinator, "ldi_rest_state", None) or {}
+    local = (rest.get(cam_id) or {}).get("privacy_on")
+    if isinstance(local, bool):
+        return local
+    shc = (getattr(coordinator, "shc_state_cache", None) or {}).get(cam_id) or {}
+    cloud = shc.get("privacy_mode")
+    return cloud if isinstance(cloud, bool) else None
 
-    None = no answer. Only the status line is read; no media session is set up.
+
+def ldi_local_firmware(coordinator: BoschCameraCoordinator, cam_id: str) -> str | None:
+    """Firmware the camera itself reported over its local REST interface."""
+    rest: dict[str, dict[str, Any]] = getattr(coordinator, "ldi_rest_state", None) or {}
+    value = (rest.get(cam_id) or {}).get("firmware")
+    return value if isinstance(value, str) else None
+
+
+def _rest_entry(coordinator: BoschCameraCoordinator, cam_id: str) -> dict[str, Any]:
+    """Per-camera REST record, created on first use."""
+    store: dict[str, dict[str, Any]] | None = getattr(
+        coordinator, "ldi_rest_state", None
+    )
+    if store is None:
+        store = {}
+        coordinator.ldi_rest_state = store
+    return store.setdefault(
+        cam_id,
+        {
+            "checked_at": float("-inf"),
+            "version_at": float("-inf"),
+            "privacy_on": None,
+            "firmware": None,
+        },
+    )
+
+
+def _apply_probe(
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    probe: ldi_rest.LdiProbe,
+) -> None:
+    """Store a REST probe and mirror its reachability into the open status."""
+    entry = _rest_entry(coordinator, cam_id)
+    entry["result"] = probe.result
+    # Without an answer the privacy state is unknown again (the cloud flag
+    # takes over), so a stale "on" cannot hide an unreachable camera.
+    entry["privacy_on"] = (
+        probe.privacy_on if probe.result == ldi_rest.PROBE_OK else None
+    )
+    if probe.result == ldi_rest.PROBE_OK and probe.firmware is not None:
+        entry["firmware"] = probe.firmware
+    status: dict[str, dict[str, Any]] = (
+        getattr(coordinator, "ldi_open_status", None) or {}
+    )
+    reason = status.get(cam_id, {}).get("reason")
+    if probe.result == ldi_rest.PROBE_AUTH:
+        record_ldi_result(coordinator, cam_id, RESULT_AUTH)
+    elif probe.result in (ldi_rest.PROBE_UNREACHABLE, ldi_rest.PROBE_ERROR):
+        record_ldi_result(coordinator, cam_id, RESULT_UNREACHABLE)
+    elif reason in (RESULT_AUTH, RESULT_UNREACHABLE):
+        # The camera answers and accepts the password again.
+        status.pop(cam_id, None)
+
+
+async def refresh_ldi_rest(
+    coordinator: BoschCameraCoordinator, cam_id: str, *, force: bool = False
+) -> ldi_rest.LdiProbe | None:
+    """Ask the camera's local REST interface; at most once a minute per camera.
+
+    None when throttled or when the camera cannot be addressed. The firmware
+    is read once, then hourly. The stamp is taken before the request so
+    overlapping ticks cannot stack requests.
     """
-    uri = f"rtsps://{ip}:{LDI_RTSP_PORT}{LDI_STREAM_PATH}"
-    writer: asyncio.StreamWriter | None = None
-    try:
-        reader, conn = await asyncio.wait_for(
-            asyncio.open_connection(ip, LDI_RTSP_PORT, ssl=_insecure_context()),
-            timeout,
-        )
-        writer = conn
-        writer.write(
-            f"DESCRIBE {uri} RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\n\r\n".encode()
-        )
-        await writer.drain()
-        first = (await asyncio.wait_for(reader.read(4096), timeout)).decode(
-            "utf-8", errors="replace"
-        )
-        nonce = re.search(r'nonce="([^"]+)"', first)
-        realm = re.search(r'realm="([^"]+)"', first)
-        if not (nonce and realm):
-            match = _PROBE_STATUS_RE.match(first)
-            status = int(match.group(1)) if match else None
-            # A challenge without a parsable nonce (split read) is not a
-            # verdict on the password.
-            return None if status == 401 else status
-        auth = _digest_auth(user, password, "DESCRIBE", uri, realm[1], nonce[1])
-        writer.write(
-            f"DESCRIBE {uri} RTSP/1.0\r\nCSeq: 2\r\nAccept: application/sdp\r\n"
-            f"Authorization: {auth}\r\n\r\n".encode()
-        )
-        await writer.drain()
-        second = (await asyncio.wait_for(reader.read(4096), timeout)).decode(
-            "utf-8", errors="replace"
-        )
-        match = _PROBE_STATUS_RE.match(second)
-        return int(match.group(1)) if match else None
-    except (OSError, TimeoutError):
+    source = ldi_source(coordinator, cam_id)
+    if source is None:
         return None
-    finally:
-        if writer is not None:
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except OSError:  # best-effort close
-                pass
+    entry = _rest_entry(coordinator, cam_id)
+    now = time.monotonic()
+    if not force and now - entry["checked_at"] < LDI_REST_POLL_SEC:
+        return None
+    tries: int = entry.get("version_tries", 0)
+    # Unknown firmware is retried each poll a few times (transient miss); a
+    # model without the endpoint then falls back to the hourly read instead
+    # of a second request every minute.
+    want_version = (
+        entry["firmware"] is None and tries < _LDI_VERSION_RETRIES
+    ) or now - entry["version_at"] >= _LDI_VERSION_POLL_SEC
+    entry["checked_at"] = now
+    if want_version:
+        entry["version_at"] = now
+        entry["version_tries"] = 0 if entry["firmware"] is not None else tries + 1
+    ip, user, password = source
+    probe = await ldi_rest.probe_camera(
+        coordinator.hass, ip, user, password, want_version=want_version
+    )
+    _apply_probe(coordinator, cam_id, probe)
+    return probe
 
 
 async def _drop_stale_stream(coordinator: BoschCameraCoordinator, cam_id: str) -> None:
@@ -254,23 +321,48 @@ async def _abort(coordinator: BoschCameraCoordinator, cam_id: str) -> None:
 
 async def _probe_camera(
     coordinator: BoschCameraCoordinator, cam_id: str, ip: str, user: str, password: str
-) -> int | None:
-    """Probe the camera, retrying transient silence; 200/401 end the retries."""
-    timeout = float(coordinator.get_model_config(cam_id).describe_timeout)
-    status: int | None = None
+) -> ldi_rest.LdiProbe:
+    """Ask the camera over REST, retrying transient silence.
+
+    A definite answer (up, or password rejected) ends the retries. The result
+    also refreshes the cached local privacy state and firmware.
+    """
+    probe = ldi_rest.LdiProbe(ldi_rest.PROBE_UNREACHABLE)
     for attempt in range(_PROBE_ATTEMPTS):
-        status = await _probe_describe_status(ip, user, password, timeout)
-        if status in (200, 401):
+        probe = await ldi_rest.probe_camera(
+            coordinator.hass, ip, user, password, want_version=True
+        )
+        if probe.result in (ldi_rest.PROBE_OK, ldi_rest.PROBE_AUTH):
             break
         if attempt + 1 < _PROBE_ATTEMPTS:
             await asyncio.sleep(_PROBE_RETRY_WAIT)
-    return status
+    entry = _rest_entry(coordinator, cam_id)
+    entry["checked_at"] = time.monotonic()
+    _apply_probe(coordinator, cam_id, probe)
+    return probe
+
+
+def _main_source_url(
+    coordinator: BoschCameraCoordinator, cam_id: str, source: tuple[str, str, str]
+) -> str:
+    """Source of the main stream: stream and audio as the camera is set up."""
+    ip, user, password = source
+    return ldi_source_url(
+        ip,
+        user,
+        password,
+        inst=ldi_inst_for_quality(_quality(coordinator, cam_id)),
+    )
 
 
 async def ensure_ldi_stream(
-    coordinator: BoschCameraCoordinator, cam_id: str
+    coordinator: BoschCameraCoordinator, cam_id: str, *, low: bool = False
 ) -> str | None:
     """Restream URL of the camera's go2rtc stream, registering it if needed.
+
+    `low` asks for the low-quality stream (an external recorder's second
+    switch). When the main stream already is the low one it is reused;
+    otherwise it gets its own go2rtc stream, which is a second camera session.
 
     None means fail closed: no usable local source, or go2rtc is missing or
     not taking the stream. A go2rtc failure is tracked for the Repairs issue
@@ -280,8 +372,16 @@ async def ensure_ldi_stream(
     if source is None:
         return None
     ip, user, password = source
+    main_inst = ldi_inst_for_quality(_quality(coordinator, cam_id))
+    if low and main_inst != LDI_INST_LOW:
+        return await ldi_go2rtc.ensure_stream(
+            coordinator,
+            cam_id,
+            ldi_source_url(ip, user, password, inst=LDI_INST_LOW),
+            variant=VARIANT_LOW,
+        )
     url = await ldi_go2rtc.ensure_stream(
-        coordinator, cam_id, ldi_source_url(ip, user, password)
+        coordinator, cam_id, _main_source_url(coordinator, cam_id, source)
     )
     if url is None:
         record_ldi_result(coordinator, cam_id, RESULT_NO_GO2RTC)
@@ -308,11 +408,15 @@ async def open_ldi_connection(
     try:
         await _drop_stale_stream(coordinator, cam_id)
         await _stop_cloud_plumbing(coordinator, cam_id)
-        status = await _probe_camera(coordinator, cam_id, ip, user, password)
-        if status != 200:
-            if coordinator.shc_state_cache.get(cam_id, {}).get("privacy_mode") is True:
+        probe = await _probe_camera(coordinator, cam_id, ip, user, password)
+        if probe.result != ldi_rest.PROBE_OK or probe.privacy_on is True:
+            if (
+                probe.privacy_on is True
+                or coordinator.shc_state_cache.get(cam_id, {}).get("privacy_mode")
+                is True
+            ):
                 result_kind = RESULT_PRIVACY
-            elif status == 401:
+            elif probe.result == ldi_rest.PROBE_AUTH:
                 result_kind = RESULT_AUTH
             else:
                 result_kind = RESULT_UNREACHABLE
@@ -330,7 +434,10 @@ async def open_ldi_connection(
             return None
 
         restream = await ldi_go2rtc.ensure_stream(
-            coordinator, cam_id, ldi_source_url(ip, user, password), force=True
+            coordinator,
+            cam_id,
+            _main_source_url(coordinator, cam_id, (ip, user, password)),
+            force=True,
         )
         if restream is None:
             record_ldi_result(coordinator, cam_id, RESULT_NO_GO2RTC)
@@ -352,7 +459,14 @@ async def open_ldi_connection(
         }
         coordinator.live_connections[cam_id] = result
         coordinator.live_opened_at[cam_id] = time.monotonic()
-        coordinator._quality_effective_inst[cam_id] = 1
+        # Cloud-equivalent stream id (1 high, 4 low): the quality select reads
+        # an effective id of 2 as "low was clamped to the balanced stream",
+        # which is not the case here.
+        coordinator._quality_effective_inst[cam_id] = (
+            4
+            if ldi_inst_for_quality(_quality(coordinator, cam_id)) == LDI_INST_LOW
+            else 1
+        )
         coordinator.stream_warming.discard(cam_id)
         session.stream_ready_event.set()
         session.generation += 1

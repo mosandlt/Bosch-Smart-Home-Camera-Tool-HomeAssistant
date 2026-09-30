@@ -326,6 +326,21 @@ class TestEntity:
         coord.local_data_interface_cache[CAM_A] = {"state": "unsupported"}
         assert ent.available is False
 
+    @pytest.mark.asyncio
+    async def test_local_firmware_attribute_only_when_the_camera_reported_it(
+        self,
+    ) -> None:
+        coord = _entity_coord({CAM_A: {"state": "active", "username": "testuser"}})
+        captured, _ = await _setup(coord)
+        (ent,) = _ldi(captured)
+        ent.coordinator = coord
+        assert "local_firmware" not in ent.extra_state_attributes
+        coord.ldi_rest_state = {CAM_A: {"firmware": "9.40.0202"}}
+        assert ent.extra_state_attributes == {
+            "username": "testuser",
+            "local_firmware": "9.40.0202",
+        }
+
     def test_username_not_recorded(self) -> None:
         assert BoschLocalDataInterfaceBinarySensor._unrecorded_attributes == {
             "username"

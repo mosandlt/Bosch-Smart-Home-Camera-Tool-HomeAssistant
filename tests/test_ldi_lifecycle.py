@@ -26,7 +26,6 @@ from custom_components.bosch_shc_camera.ldi_local import (
     RESULT_OK,
     RESULT_PRIVACY,
     RESULT_UNREACHABLE,
-    _probe_describe_status,
     ldi_source,
     ldi_wanted,
     open_ldi_connection,
@@ -55,6 +54,7 @@ from tests.test_ldi_local import (
     RESTREAM,
     _coord,
     _no_probe_wait,
+    _probe,
 )
 
 MODULE = "custom_components.bosch_shc_camera"
@@ -171,7 +171,9 @@ class TestOpenClassification:
     async def _open(self, c: SimpleNamespace, *, probe: int | None) -> Any:
         with (
             patch.object(
-                ldi_local, "_probe_describe_status", new=AsyncMock(return_value=probe)
+                ldi_local.ldi_rest,
+                "probe_camera",
+                new=AsyncMock(return_value=_probe(probe)),
             ),
             patch.object(
                 ldi_local.ldi_go2rtc,
@@ -200,6 +202,26 @@ class TestOpenClassification:
         c = _coord(privacy=True)
         assert await self._open(c, probe=401) is None
         assert CAM not in c.ldi_open_status
+
+    @pytest.mark.asyncio
+    async def test_local_privacy_state_is_a_state_not_a_failure(self) -> None:
+        """The camera itself says privacy is on: no stream, no failure, and the
+        (stale or absent) cloud flag is not needed to know."""
+        c = _coord(privacy=False)
+        ok_privacy = ldi_local.ldi_rest.LdiProbe(ldi_local.ldi_rest.PROBE_OK, True)
+        ensure = AsyncMock(return_value=RESTREAM)
+        with (
+            patch.object(
+                ldi_local.ldi_rest,
+                "probe_camera",
+                new=AsyncMock(return_value=ok_privacy),
+            ),
+            patch.object(ldi_local.ldi_go2rtc, "ensure_stream", new=ensure),
+        ):
+            assert await open_ldi_connection(c, CAM, (IP, "localuser", PW)) is None  # type: ignore[arg-type]
+        ensure.assert_not_awaited()
+        assert CAM not in c.ldi_open_status
+        assert ldi_local.ldi_privacy_on(c, CAM) is True  # type: ignore[arg-type]
 
     @pytest.mark.asyncio
     async def test_success_clears_failure(self) -> None:
@@ -237,7 +259,9 @@ class TestOpenConsumers:
         start = AsyncMock()
         with (
             patch.object(
-                ldi_local, "_probe_describe_status", new=AsyncMock(return_value=200)
+                ldi_local.ldi_rest,
+                "probe_camera",
+                new=AsyncMock(return_value=_probe(200)),
             ),
             patch.object(
                 ldi_local.ldi_go2rtc,
@@ -258,7 +282,9 @@ class TestOpenConsumers:
         c.entry.options["enable_green_it"] = green
         with (
             patch.object(
-                ldi_local, "_probe_describe_status", new=AsyncMock(return_value=200)
+                ldi_local.ldi_rest,
+                "probe_camera",
+                new=AsyncMock(return_value=_probe(200)),
             ),
             patch.object(
                 ldi_local.ldi_go2rtc,
@@ -272,106 +298,6 @@ class TestOpenConsumers:
             c.idle_session_reaper.assert_called_once_with(
                 CAM, c.get_session(CAM).generation
             )
-
-
-# ── describe probe ──────────────────────────────────────────────────────────
-class _Reader:
-    def __init__(self, replies: list[bytes | BaseException]) -> None:
-        self._replies = replies
-
-    async def read(self, _n: int) -> bytes:
-        item = self._replies.pop(0)
-        if isinstance(item, BaseException):
-            raise item
-        return item
-
-
-class _Writer:
-    def __init__(self, close_error: bool = False) -> None:
-        self.sent: list[bytes] = []
-        self.closed = False
-        self._close_error = close_error
-
-    def write(self, data: bytes) -> None:
-        self.sent.append(data)
-
-    async def drain(self) -> None:
-        return None
-
-    def close(self) -> None:
-        self.closed = True
-
-    async def wait_closed(self) -> None:
-        if self._close_error:
-            raise OSError("reset")
-
-
-_CHALLENGE = b'RTSP/1.0 401 Unauthorized\r\nWWW-Authenticate: Digest realm="r", nonce="n"\r\n\r\n'
-
-
-class TestProbe:
-    async def _run(self, replies: list[Any], writer: _Writer | None = None) -> Any:
-        writer = writer or _Writer()
-        with patch(
-            "asyncio.open_connection",
-            new=AsyncMock(return_value=(_Reader(replies), writer)),
-        ) as opened:
-            result = await _probe_describe_status(IP, "localuser", PW, 1.0)
-        assert writer.closed
-        # straight at the camera's TLS port, certificate not verified
-        assert opened.await_args.args == (IP, 9554)
-        ctx = opened.await_args.kwargs["ssl"]
-        assert ctx.check_hostname is False
-        assert ctx.verify_mode == ssl.CERT_NONE
-        assert f"rtsps://{IP}:9554/live".encode() in writer.sent[0]
-        return result, writer
-
-    @pytest.mark.asyncio
-    async def test_authenticated_200(self) -> None:
-        result, writer = await self._run([_CHALLENGE, b"RTSP/1.0 200 OK\r\n\r\n"])
-        assert result == 200
-        assert b"Authorization: Digest" in writer.sent[1]
-        assert PW.encode() not in writer.sent[1]
-
-    @pytest.mark.asyncio
-    async def test_rejected_password_401(self) -> None:
-        result, _ = await self._run([_CHALLENGE, _CHALLENGE])
-        assert result == 401
-
-    @pytest.mark.asyncio
-    async def test_no_challenge_reports_plain_status(self) -> None:
-        result, _ = await self._run([b"RTSP/1.0 503 Service Unavailable\r\n\r\n"])
-        assert result == 503
-
-    @pytest.mark.asyncio
-    async def test_unparsable_challenge_is_not_a_password_verdict(self) -> None:
-        result, _ = await self._run([b"RTSP/1.0 401 Unauthorized\r\n"])
-        assert result is None
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "replies",
-        [
-            [b""],
-            [b"garbage"],
-            [_CHALLENGE, b""],
-            [TimeoutError()],
-            [_CHALLENGE, OSError()],
-        ],
-    )
-    async def test_no_usable_answer_is_none(self, replies: list[Any]) -> None:
-        result, _ = await self._run(replies)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_connect_refused_is_none(self) -> None:
-        with patch("asyncio.open_connection", new=AsyncMock(side_effect=OSError)):
-            assert await _probe_describe_status(IP, "u", PW, 1.0) is None
-
-    @pytest.mark.asyncio
-    async def test_close_error_swallowed(self) -> None:
-        result, _ = await self._run([b"RTSP/1.0 200 OK\r\n\r\n"], _Writer(True))
-        assert result == 200
 
 
 # ── Repairs lifecycle ───────────────────────────────────────────────────────

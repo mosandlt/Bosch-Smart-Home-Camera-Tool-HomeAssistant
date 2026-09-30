@@ -15,7 +15,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.components.diagnostics import async_redact_data
 
-from custom_components.bosch_shc_camera import BoschCameraCoordinator, ldi_local
+from custom_components.bosch_shc_camera import (
+    BoschCameraCoordinator,
+    ldi_local,
+    ldi_rest,
+)
 from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
 from custom_components.bosch_shc_camera.diagnostics import TO_REDACT
 from custom_components.bosch_shc_camera.ldi_local import (
@@ -41,6 +45,7 @@ IP = "10.0.0.50"
 PW = "fake-sticker-pw"
 RESTREAM = "rtsp://127.0.0.1:18554/ldi_11111111"
 LDI = "custom_components.bosch_shc_camera.ldi_local"
+_PATH_HIGH = "/rtsp_tunnel?line=1&inst=1&enableaudio=1"
 
 
 @pytest.fixture(autouse=True)
@@ -48,10 +53,28 @@ def _no_probe_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ldi_local, "_PROBE_RETRY_WAIT", 0)
 
 
-def _open_patches(status: int | None = 200, restream: str | None = RESTREAM):
+def _probe(status: int | None, privacy_on: bool | None = False) -> ldi_rest.LdiProbe:
+    """REST probe outcome for an HTTP status (None = no answer)."""
+    if status == 200:
+        return ldi_rest.LdiProbe(ldi_rest.PROBE_OK, privacy_on, "9.40.0202")
+    if status == 401:
+        return ldi_rest.LdiProbe(ldi_rest.PROBE_AUTH)
+    if status is None:
+        return ldi_rest.LdiProbe(ldi_rest.PROBE_UNREACHABLE)
+    return ldi_rest.LdiProbe(ldi_rest.PROBE_ERROR)
+
+
+def _open_patches(
+    status: int | None = 200,
+    restream: str | None = RESTREAM,
+    privacy_on: bool | None = False,
+):
     """Camera probe answer + go2rtc registration result for one open."""
     return (
-        patch(f"{LDI}._probe_describe_status", new=AsyncMock(return_value=status)),
+        patch(
+            f"{LDI}.ldi_rest.probe_camera",
+            new=AsyncMock(return_value=_probe(status, privacy_on)),
+        ),
         patch(f"{LDI}.ldi_go2rtc.ensure_stream", new=AsyncMock(return_value=restream)),
     )
 
@@ -169,7 +192,7 @@ class TestOpen:
         assert res is not None
         probe_mock.assert_awaited_once()
         ensure_mock.assert_awaited_once_with(
-            c, CAM, f"rtsps://localuser:{PW}@{IP}:9554/live", force=True
+            c, CAM, f"rtsps://localuser:{PW}@{IP}:9554{_PATH_HIGH}", force=True
         )
         assert res["_connection_type"] == "LOCAL"
         assert res["_ldi"] is True
@@ -216,13 +239,16 @@ class TestOpen:
         with probe, ensure as ensure_mock:
             await open_ldi_connection(c, CAM, (IP, LDI_USER, password))  # type: ignore[arg-type]
         src = ensure_mock.await_args.args[2]
-        assert src == f"rtsps://localuser:{quote(password, safe='')}@{IP}:9554/live"
+        assert (
+            src == f"rtsps://localuser:{quote(password, safe='')}@{IP}:9554{_PATH_HIGH}"
+        )
         assert src.count("@") == 1
 
     def test_source_url_quotes_user_too(self) -> None:
         assert (
             ldi_local.ldi_source_url("10.0.0.9", "a b", "p:w")
-            == "rtsps://a%20b:p%3Aw@10.0.0.9:9554/live"
+            == "rtsps://a%20b:p%3Aw@10.0.0.9:9554/rtsp_tunnel"
+            "?line=1&inst=1&enableaudio=1"
         )
 
     @pytest.mark.asyncio
@@ -275,7 +301,7 @@ class TestOpen:
         c = _coord()
         probe, _ = _open_patches()
         boom = AsyncMock(
-            side_effect=OSError(f"PUT rtsps://localuser:{PW}@{IP}:9554/live failed")
+            side_effect=OSError(f"PUT rtsps://localuser:{PW}@{IP}:9554/x failed")
         )
         with probe, patch(f"{LDI}.ldi_go2rtc.ensure_stream", new=boom):
             res = await open_ldi_connection(c, CAM, (IP, LDI_USER, PW))  # type: ignore[arg-type]
@@ -324,7 +350,7 @@ class TestEnsureLdiStream:
         ) as ensure:
             assert await ldi_local.ensure_ldi_stream(c, CAM) == RESTREAM  # type: ignore[arg-type]
         ensure.assert_awaited_once_with(
-            c, CAM, f"rtsps://localuser:{PW}@{IP}:9554/live"
+            c, CAM, f"rtsps://localuser:{PW}@{IP}:9554{_PATH_HIGH}"
         )
 
     @pytest.mark.asyncio

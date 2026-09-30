@@ -648,12 +648,20 @@ Gen2 cameras on firmware **9.40.105 or newer** have a camera-side **local data i
 
 ### How it behaves
 
-- **Active interface + stored password = local only.** The stream is opened on your LAN (RTSP over TLS, port 9554). No cloud stream session is opened, and cloud/LAN snapshot requests and the periodic cloud RCP fetch are skipped for that camera. If the camera is unreachable, the password is wrong or privacy mode is on, the stream stays unavailable instead of using the cloud.
-- **go2rtc is the single reader of the camera.** The camera allows only about 3 concurrent sessions, so the live view, **Mini-NVR** (including pre-roll) and the **Frigate / external-recorder endpoint** all read go2rtc's local restream instead of opening their own connections. This needs the go2rtc integration; without it the stream fails closed (no cloud) and a Repairs issue explains why.
-- **Video only.** The stream has no audio track, so audio features are unavailable for such a camera.
-- **Privacy mode:** the camera stops the stream while privacy mode is ON; this is treated as a normal closed state, not an error.
-- **Other cameras are unchanged.** A camera without a stored password, or whose interface is not active, behaves exactly as before (LOCAL / REMOTE / AUTO).
-- **Writes still use the cloud.** Privacy, light, notifications and other settings are still written through the Bosch cloud.
+| Topic | Behavior with an active interface + stored password |
+|---|---|
+| Stream | Opened on your LAN (RTSP over TLS, port 9554); no cloud stream session, no token check, no cloud fallback. If the camera is unreachable, the password is wrong or privacy mode is on, the stream stays unavailable. |
+| Audio | Available. The audio track is always part of the stream; the audio switch only mutes the card, as on the cloud path. |
+| Quality | The **Video quality** select applies: **High** (and **Auto**) read the camera's high stream, **Low** its low stream. Changing the select re-registers the go2rtc source and restarts the stream. |
+| Snapshots | Taken from the camera's 1-frame-per-second preview stream through go2rtc, never from the cloud. One frame is shared for a few seconds between everything asking (one short camera session), and a failed grab is not retried for ~15 s. Without go2rtc, or with privacy mode on, no new frame is taken and the last image is kept (nothing is shown while privacy mode is on or unknown). |
+| Reachability checks | Once a minute per camera the integration reads the camera's local REST interface (read-only): it tells "camera answers", "password rejected" and "privacy mode on" apart, and the camera's own firmware version is shown as the `local_firmware` attribute of the **Local data interface** sensor. Cameras without the interface are never asked. |
+| Mini-NVR / Frigate | Read go2rtc's restream (see below), with audio. Frigate **High** reads the main stream; **Low** reads a second go2rtc stream (`inst=2`) that is created on demand, so using Frigate **Low** adds a second camera session (the camera serves only a few at once). |
+| Privacy mode | The camera stops the stream while privacy mode is ON; this is a normal closed state, not an error. |
+| Writes | Privacy, light, notifications and other settings are still written through the Bosch cloud. |
+| Other cameras | A camera without a stored password, or whose interface is not active, behaves exactly as before (LOCAL / REMOTE / AUTO). |
+
+- **go2rtc is the single reader of the camera stream.** The camera allows only about 3 concurrent sessions, so the live view, **Mini-NVR** (including pre-roll) and the **Frigate / external-recorder endpoint** all read go2rtc's local restream instead of opening their own connections. This needs the go2rtc integration; without it the stream fails closed (no cloud) and a Repairs issue explains why.
+- **TLS.** The integration's own direct requests to the camera (the local REST checks) verify the certificate chain against the camera's device root certificate, which is pinned in the integration; the certificate name is the camera's MAC address, so the host name is not compared. go2rtc and ffmpeg read the stream with their library defaults: go2rtc offers no per-source certificate pinning.
 
 ### Repairs hints
 
@@ -667,8 +675,10 @@ Gen2 cameras on firmware **9.40.105 or newer** have a camera-side **local data i
 
 ### Limits
 
-- Snapshots: no live snapshot is fetched for a local-only camera (cloud and LAN snapshot requests are skipped), so cached images are used.
-- The Frigate endpoint's **High** and **Low** variants map to the same single go2rtc stream for such a camera.
+- The local REST interface is read-only: privacy, light and every other setting keep using the cloud.
+- Snapshots are a 1 Hz preview frame: they arrive with up to a few seconds of delay and need go2rtc.
+- Frigate **Low** for a camera whose main stream is **High** opens a second camera session (see above); with the select on **Low** both Frigate switches share the one low stream.
+- Some camera models do not offer every local REST path; an unavailable path is treated as "not on this model", never as an error.
 - Gen1 cameras and firmware older than 9.40.105 are never queried for this interface.
 
 ## External Recorders (Frigate / BlueIris / go2rtc / Synology Surveillance Station / any RTSP NVR)
