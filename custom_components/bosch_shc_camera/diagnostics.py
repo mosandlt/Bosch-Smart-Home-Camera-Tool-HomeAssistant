@@ -69,6 +69,9 @@ TO_REDACT = {
     # ntfy topics, HA long-lived-token webhooks) embed a secret token in
     # the URL path itself — leaked verbatim without this.
     "webhook_url",
+    # Per-camera local data interface passwords
+    "local_passwords",
+    "_local_password",
     # Stream / RTSP URLs (contain proxy session credentials)
     "rtspsUrl",
     "rtsps_url",

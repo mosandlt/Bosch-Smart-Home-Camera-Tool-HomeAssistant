@@ -39,6 +39,8 @@ from typing import TYPE_CHECKING
 import aiohttp
 from homeassistant.helpers import aiohttp_client
 
+from . import ldi_go2rtc
+
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator
 
@@ -218,7 +220,11 @@ async def unregister_go2rtc_stream(
     Name must match register_go2rtc_stream — prefer camera.entity_id
     (HA's bundled go2rtc provider uses this) and fall back to the legacy
     internal name when the entity is unavailable.
+
+    A local-data-interface camera also owns its own `ldi_*` stream, removed
+    here through core's authenticated go2rtc access.
     """
+    await ldi_go2rtc.unregister_stream(coordinator, cam_id)
     cam_entity = coordinator.camera_entities.get(cam_id)
     if cam_entity is not None and cam_entity.entity_id:
         stream_name = cam_entity.entity_id

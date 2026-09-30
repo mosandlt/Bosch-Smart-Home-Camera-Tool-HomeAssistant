@@ -27,6 +27,7 @@ import datetime
 import logging
 import math
 import os
+import re
 import shutil
 import signal
 import time
@@ -709,6 +710,8 @@ async def _spawn_preroll_recorder_locked(
 
     pattern = _preroll_pattern(cache_dir, cam_name)
     quality = (opts.get("nvr_quality") or "auto").strip().lower()
+    if live.get("_ldi"):
+        quality = "auto"  # fixed restream, no per-quality encoder stream
     args = _build_preroll_ffmpeg_args(rtsp_url, pattern, quality=quality)
     _LOGGER.debug("NVR pre-roll starting for %s -> %s", cam_name, pattern)
     try:
@@ -1962,8 +1965,16 @@ async def _start_recorder_locked(
     if live.get("_connection_type") != "LOCAL":
         return  # stream torn down while we were creating staging dirs
     fresh_rtsp_url = live.get("rtspsUrl") or live.get("rtspUrl") or rtsp_url
-    args = _build_ffmpeg_args(fresh_rtsp_url, pattern, quality=quality)
-    _LOGGER.debug("NVR ffmpeg argv for %s: %s", cam_name, " ".join(args))
+    # The local data interface restream is one fixed encoder stream; `inst=4`
+    # would only be a bogus query on it.
+    args = _build_ffmpeg_args(
+        fresh_rtsp_url, pattern, quality="auto" if live.get("_ldi") else quality
+    )
+    _LOGGER.debug(
+        "NVR ffmpeg argv for %s: %s",
+        cam_name,
+        re.sub(r"(://)[^/@\s]+@", r"\1***@", " ".join(args)),
+    )
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
@@ -2222,7 +2233,14 @@ async def _watch_recorder(
     if any(marker in err_lower for marker in _AUTH_MARKERS):
         retries = coordinator.nvr_auth_retry_count.get(cam_id, 0) + 1
         coordinator.nvr_auth_retry_count[cam_id] = retries
-        if retries > _MAX_CONSECUTIVE_AUTH_RETRIES:
+        # Local data interface credentials are static — no rotation race to
+        # wait out, so a repeated rejection is a wrong password.
+        max_auth_retries = (
+            1
+            if coordinator.live_connections.get(cam_id, {}).get("_ldi")
+            else _MAX_CONSECUTIVE_AUTH_RETRIES
+        )
+        if retries > max_auth_retries:
             _LOGGER.error(
                 "NVR ffmpeg rejected with auth failures %d times in a row for "
                 "%s — this is no longer consistent with a transient "
@@ -2242,7 +2260,7 @@ async def _watch_recorder(
             "crash-window give-up limit",
             cam_id[:8],
             retries,
-            _MAX_CONSECUTIVE_AUTH_RETRIES,
+            max_auth_retries,
         )
         await asyncio.sleep(_RESPAWN_DELAY_SECONDS)
         if not should_record(coordinator, cam_id, switch_on=last):

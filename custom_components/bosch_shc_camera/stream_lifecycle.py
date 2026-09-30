@@ -31,11 +31,14 @@ from .const import (
     STREAM_IDLE_REAP_SEC,
 )
 from .go2rtc_client import _go2rtc_client_session
+from .ldi_go2rtc import consumer_count, ldi_stream_name, resolve_endpoint
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+_LDI_REBUILD_MIN_INTERVAL_SEC = 30.0
 
 
 async def tear_down_live_stream(
@@ -361,7 +364,9 @@ async def handle_stream_worker_error(
             # rescue tears the stream down, no NEW stream-worker error fires
             # to retrigger us — so the burst must self-retry with backoff
             # instead of relying on another error to drive attempt 2.
-            _LOCAL_RESCUE_MAX_ATTEMPTS = 3
+            # Static local password: a rejected login is not a transient race,
+            # so retrying only repeats the failure.
+            _LOCAL_RESCUE_MAX_ATTEMPTS = 1 if live.get("_ldi") else 3
             _LOCAL_RESCUE_RETRY_DELAY = 5
             result = None
             for rescue_try in range(1, _LOCAL_RESCUE_MAX_ATTEMPTS + 1):
@@ -397,6 +402,20 @@ async def handle_stream_worker_error(
                     )
             return  # whatever try_live_connection produced is the new state
 
+        if live.get("_ldi"):
+            # Local-only source: a failing stream is rebuilt locally with a
+            # backoff, never escalated to the cloud REMOTE path.
+            last = coordinator.tls_proxy_rebuild_last.get(cam_id, float("-inf"))
+            if (now_mono - last) < _LDI_REBUILD_MIN_INTERVAL_SEC:
+                return
+            coordinator.tls_proxy_rebuild_last[cam_id] = now_mono
+            _LOGGER.warning(
+                "Stream worker errors exceed threshold for %s on the local "
+                "data interface — rebuilding locally",
+                cam_id[:8],
+            )
+            await coordinator.try_live_connection(cam_id, force_reset=True)
+            return
         if conn_type != "LOCAL":
             # Already on REMOTE (or no live session) — nothing to escalate
             # to. Counter stays saturated so a future LOCAL attempt would
@@ -439,7 +458,16 @@ async def go2rtc_consumer_count(
     in `consumers`. Returns the count, or None when go2rtc cannot be
     reached on any known port (HA-bundled 11984 / legacy 1984) — None means
     "unknown", which the idle reaper treats as "no confirmed consumer".
+
+    A local-only camera is counted on its own `ldi_*` stream, which every
+    reader of the camera (live view, recorder, external recorder) attaches to.
     """
+    live = (getattr(coordinator, "live_connections", None) or {}).get(cam_id) or {}
+    if live.get("_ldi"):
+        endpoint = await resolve_endpoint(coordinator)
+        if endpoint is None:
+            return None
+        return await consumer_count(endpoint, ldi_stream_name(cam_id))
     cam_entity = coordinator.camera_entities.get(cam_id)
     if cam_entity is not None and cam_entity.entity_id:
         stream_name = cam_entity.entity_id

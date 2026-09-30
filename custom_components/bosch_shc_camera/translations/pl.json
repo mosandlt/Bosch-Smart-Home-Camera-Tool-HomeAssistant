@@ -303,11 +303,13 @@
             "description": "Wymuś nowe logowanie przez przeglądarkę lub przejdź na klienta OSS OAuth.",
             "data": {
               "force_relogin": "Ponowne uwierzytelnienie (logowanie przez przeglądarkę)",
-              "migrate_to_oss_client": "Przełącz na klienta OSS OAuth"
+              "migrate_to_oss_client": "Przełącz na klienta OSS OAuth",
+              "configure_local_password": "Set local data interface passwords"
             },
             "data_description": {
               "force_relogin": "Zaznacz, aby ponownie uwierzytelnić się przez przeglądarkę. Potrzebne tylko gdy token odświeżania wygasł (bardzo rzadko).",
-              "migrate_to_oss_client": "Przełącz ze starszego klienta `residential_app` na dedykowany klient `oss_residential_app`, który Bosch udostępnia dla integracji open source. Włączenie spowoduje uruchomienie przepływu reauth — zostaniesz poproszony o jednorazowe zalogowanie przez Bosch SingleKey ID, a Twoje istniejące encje, automatyzacje i opcje zostaną zachowane."
+              "migrate_to_oss_client": "Przełącz ze starszego klienta `residential_app` na dedykowany klient `oss_residential_app`, który Bosch udostępnia dla integracji open source. Włączenie spowoduje uruchomienie przepływu reauth — zostaniesz poproszony o jednorazowe zalogowanie przez Bosch SingleKey ID, a Twoje istniejące encje, automatyzacje i opcje zostaną zachowane.",
+              "configure_local_password": "Stores the passwords printed on the cameras for their local data interface. Each camera has its own field in the next step."
             }
           },
           "ai_analysis": {
@@ -364,6 +366,16 @@
         "data_description": {
           "redirect_url": "Pełny URL z paska adresu przeglądarki po zalogowaniu (zawiera kod autoryzacji)",
           "diagnostic_cloud_api_override": "Pozostaw puste, chyba że wsparcie Bosch wyraźnie podało Ci inny bazowy URL API kamery do przetestowania — to nie włącza żadnego programu beta ani niczego nie odblokowuje, zmienia jedynie, z którym serwerem komunikuje się integracja."
+        }
+      },
+      "local_passwords": {
+        "title": "Local data interface passwords",
+        "description": "Enter the local data interface password printed on each camera. Leave a field empty to keep the stored password. With a stored password and an active local data interface, the live stream is opened directly on your network and never uses the cloud.\\n\\n{cameras}",
+        "data": {
+          "clear_password_for": "Remove stored password for"
+        },
+        "data_description": {
+          "clear_password_for": "Cameras selected here lose their stored password; this takes precedence over a value typed above."
         }
       }
     },
@@ -1039,6 +1051,22 @@
     "local_data_interface_available": {
       "title": "Bosch Camera — Lokalny interfejs danych dostępny",
       "description": "Lokalny interfejs danych można teraz włączyć dla {camera}. Otwórz aplikację kamery: Ustawienia kamery > Więcej > Lokalny interfejs danych."
+    },
+    "local_data_interface_wrong_password": {
+      "title": "Bosch Camera — Hasło lokalnego interfejsu danych odrzucone",
+      "description": "Lokalny interfejs danych kamery {camera} odrzucił zapisane hasło, więc transmisja na żywo pozostaje niedostępna (chmura nie jest używana). Sprawdź hasło z etykiety kamery w Konfiguruj > Uwierzytelnianie > hasło lokalne."
+    },
+    "local_data_interface_unreachable": {
+      "title": "Bosch Camera — Lokalny interfejs danych niedostępny",
+      "description": "Kamera {camera} jest niedostępna w sieci lokalnej od ponad 10 minut, więc transmisja na żywo pozostaje niedostępna (chmura nie jest używana). Sprawdź zasilanie i sieć kamery oraz zapisane hasło w Konfiguruj > Uwierzytelnianie > hasło lokalne."
+    },
+    "local_data_interface_no_go2rtc": {
+      "title": "Bosch Camera — do lokalnego interfejsu danych potrzebne jest go2rtc",
+      "description": "Kamera {camera} jest odczytywana przez lokalny interfejs danych, który wymaga go2rtc jako jedynego połączenia z kamerą (kamera obsługuje tylko kilka sesji naraz). go2rtc jest niedostępne, więc transmisja na żywo pozostaje niedostępna (chmura nie jest używana). Sprawdź, czy integracja go2rtc jest skonfigurowana i działa."
+    },
+    "local_data_interface_no_password": {
+      "title": "Bosch Camera — Lokalny interfejs danych wymaga hasła",
+      "description": "Lokalny interfejs danych jest włączony dla kamery {camera}. Wpisz hasło z naklejki w Konfiguruj > Uwierzytelnianie > hasło lokalne, aby przesyłać obraz w pełni lokalnie."
     }
   },
   "system_health": {

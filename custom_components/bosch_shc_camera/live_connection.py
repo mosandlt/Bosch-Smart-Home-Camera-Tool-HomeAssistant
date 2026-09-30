@@ -19,6 +19,13 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from .const import CLOUD_API, LAN_RECHECK_FORCE_INTERVAL_SEC, TIMEOUT_PUT_CONNECTION
+from .ldi_local import (
+    RESULT_NO_IP,
+    ldi_source,
+    ldi_wanted,
+    open_ldi_connection,
+    record_ldi_result,
+)
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator
@@ -67,6 +74,24 @@ async def try_live_connection_inner(
         coordinator.stream_warming.discard(cam_id)
         coordinator.get_session(cam_id).warming_started = float("-inf")
         await coordinator.stop_tls_proxy(cam_id)
+
+    # Local data interface: local-only source, never falls through to the
+    # cloud path below (no token, no PUT /connection, no REMOTE candidate).
+    if ldi_wanted(coordinator, cam_id):
+        ldi = ldi_source(coordinator, cam_id)
+        if ldi is None:
+            # No safe LAN address known yet: stay without a stream rather than
+            # open a cloud session.
+            record_ldi_result(coordinator, cam_id, RESULT_NO_IP)
+            _LOGGER.warning(
+                "Local data interface stream for %s: camera LAN address unknown",
+                cam_id[:8],
+            )
+            return None
+        return await open_ldi_connection(
+            coordinator, cam_id, ldi, is_renewal=is_renewal
+        )
+
     token = coordinator.token
     if not token:
         _LOGGER.warning("try_live_connection: no token available")

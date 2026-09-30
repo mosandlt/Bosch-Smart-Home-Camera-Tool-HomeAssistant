@@ -745,7 +745,17 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
                 - self.coordinator.stream_error_at.get(cam_id, float("-inf"))
             ) < 55
             is_final = idx == 1
-            if is_final:
+            live_now = self.coordinator.live_connections.get(cam_id, {})
+            if live_now.get("_ldi"):
+                # Local-only session: rebuild locally, never saturate the
+                # counter that would force a REMOTE session.
+                _LOGGER.warning(
+                    "Stream health watchdog: %s local data interface stream "
+                    "not healthy at %ds — rebuilding locally",
+                    cam_id[:8],
+                    delay,
+                )
+            elif is_final:
                 if recent_external_error:
                     _LOGGER.debug(
                         "Stream health watchdog: %s already recorded an "

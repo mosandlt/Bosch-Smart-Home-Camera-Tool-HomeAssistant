@@ -3402,6 +3402,7 @@ class TestDefaultOptionsCompleteness:
             # auth actions — not persistent state
             "force_relogin",
             "migrate_to_oss_client",
+            "configure_local_password",
             # #70 round 3 — transient action flag, popped before persisting
             "clear_smb_credentials",
         }

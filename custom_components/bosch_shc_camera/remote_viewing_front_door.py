@@ -83,6 +83,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -104,6 +105,7 @@ _LOGGER = logging.getLogger(__name__)
 # constants across modules (frigate_endpoint.py's are module-private).
 _INNER_CONNECT_TIMEOUT = 10.0
 _MAX_HEAD_BYTES = 64 * 1024
+_TRACK_RE = re.compile(r"/streamid=(\d{1,3})$")
 
 
 @dataclass(frozen=True)
@@ -115,6 +117,9 @@ class RemoteTarget:
 
     port: int
     path: str
+    # A go2rtc restream picks the track from a trailing ``streamid=N`` on each
+    # request URI (SETUP), so that one client-supplied token is carried over.
+    keep_track: bool = False
 
 
 class _PathRewriteRelay:
@@ -145,8 +150,15 @@ class _PathRewriteRelay:
         self._ir: asyncio.StreamReader | None = None
         self._iw: asyncio.StreamWriter | None = None
 
-    def _rewritten_uri(self) -> str:
-        return f"rtsp://127.0.0.1:{self._target.port}{self._target.path}"
+    def _rewritten_uri(self, request: bytes = b"") -> str:
+        uri = f"rtsp://127.0.0.1:{self._target.port}{self._target.path}"
+        if self._target.keep_track:
+            line = request.split(b"\r\n", 1)[0].decode("utf-8", errors="replace")
+            parts = line.split(" ")
+            match = _TRACK_RE.search(parts[1]) if len(parts) >= 3 else None
+            if match:
+                uri += f"/streamid={match.group(1)}"
+        return uri
 
     async def run(self) -> None:
         """Connect to the inner proxy, forward the first request rewritten,
@@ -157,7 +169,9 @@ class _PathRewriteRelay:
         )
         self._ir, self._iw = ir, iw
         try:
-            iw.write(_rewrite_request_uri(self._first, self._rewritten_uri()))
+            iw.write(
+                _rewrite_request_uri(self._first, self._rewritten_uri(self._first))
+            )
             await iw.drain()
             await asyncio.gather(
                 self._pipe_client_to_inner(),
@@ -210,7 +224,7 @@ class _PathRewriteRelay:
                 if len(buf) < body:
                     return req + buf  # body incomplete — wait for more
                 req, buf = req + buf[:body], buf[body:]
-            self._iw.write(_rewrite_request_uri(req, self._rewritten_uri()))
+            self._iw.write(_rewrite_request_uri(req, self._rewritten_uri(req)))
             await self._iw.drain()
         return b""
 

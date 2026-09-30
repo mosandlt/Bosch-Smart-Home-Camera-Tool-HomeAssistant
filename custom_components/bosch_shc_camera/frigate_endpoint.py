@@ -46,11 +46,14 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any, Protocol, TypeVar
 from urllib.parse import quote as _urlquote
+from urllib.parse import urlsplit
 
 from bosch_shc_camera_client.auth_utils import (
     _build_digest_header,
     _parse_digest_challenge,
 )
+
+from .ldi_local import ensure_ldi_stream, ldi_wanted
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -552,12 +555,19 @@ def _default_relay_factory(
     target: Any,
     first_request: bytes,
 ) -> Relay:
-    """The historical, only-ever relay: Digest-injecting `_Relay`.
+    """Digest-injecting `_Relay`, or a path-rewriting relay for a restream.
 
-    `FrontDoorRunner.start_server`'s default `relay_factory` — every
-    pre-existing caller (Frigate's own front-door, `viewing_front_door.py`)
-    keeps this behaviour unchanged.
+    `FrontDoorRunner.start_server`'s default `relay_factory`. A target that
+    names a go2rtc restream (local data interface cameras) needs no Digest
+    dance: the client is relayed to the restream path. Every other target
+    keeps the Digest-injecting behaviour unchanged.
     """
+    from .remote_viewing_front_door import RemoteTarget, _PathRewriteRelay
+
+    if isinstance(target, RemoteTarget):
+        return _PathRewriteRelay(
+            cam_id, client_reader, client_writer, target, first_request
+        )
     return _Relay(cam_id, client_reader, client_writer, target, first_request)
 
 
@@ -857,6 +867,29 @@ class FrontDoorRunner:
             self.stop_server(cam_id)
 
 
+async def _resolve_restream(coordinator: Any, cam_id: str) -> Any:
+    """Relay target for a local data interface camera: go2rtc's restream.
+
+    Opens the local session when none is up, then makes sure go2rtc holds the
+    camera's stream. None (the client gets a 503) when there is no session or
+    go2rtc is not serving it; the cloud is never used. Both quality switches
+    map to this single stream.
+    """
+    from .remote_viewing_front_door import RemoteTarget
+
+    if not coordinator.live_connections.get(cam_id, {}).get("_ldi"):
+        await coordinator.try_live_connection(cam_id)
+        if not coordinator.live_connections.get(cam_id, {}).get("_ldi"):
+            return None
+    url = await ensure_ldi_stream(coordinator, cam_id)
+    if url is None:
+        return None
+    parts = urlsplit(url)
+    if parts.port is None:
+        return None
+    return RemoteTarget(port=parts.port, path=parts.path, keep_track=True)
+
+
 class FrigateCoordinatorMixin:
     """Coordinator-facing Frigate/external-recorder front-door management.
 
@@ -926,8 +959,11 @@ class FrigateCoordinatorMixin:
         finally:
             sock.close()
 
-    async def _frigate_resolve_inner(self: Any, cam_id: str) -> InnerTarget | None:
+    async def _frigate_resolve_inner(self: Any, cam_id: str) -> Any:
         """Lazily ensure a LOCAL live session + inner TLS proxy for a recorder.
+
+        A local data interface camera has no proxy or Digest credentials: the
+        recorder is relayed to go2rtc's restream instead (`_resolve_restream`).
 
         Returns the inner proxy port + the session's rotating Digest creds, or
         None when no LOCAL session is available (e.g. REMOTE-only fallback,
@@ -940,6 +976,8 @@ class FrigateCoordinatorMixin:
         TLS proxy port every time a recorder reconnects.
         """
         live = self.live_connections.get(cam_id, {})
+        if live.get("_ldi") or ldi_wanted(self, cam_id):
+            return await _resolve_restream(self, cam_id)
         if live.get("_connection_type") != "LOCAL":
             await self.try_live_connection(cam_id)
             live = self.live_connections.get(cam_id, {})

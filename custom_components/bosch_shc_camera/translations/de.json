@@ -335,11 +335,13 @@
             "description": "Frische Browser-Anmeldung erzwingen oder zum OSS-OAuth-Client migrieren.",
             "data": {
               "force_relogin": "Neu anmelden (Browser-Login)",
-              "migrate_to_oss_client": "Zu OSS-OAuth-Client wechseln"
+              "migrate_to_oss_client": "Zu OSS-OAuth-Client wechseln",
+              "configure_local_password": "Passwörter der lokalen Datenschnittstelle setzen"
             },
             "data_description": {
               "force_relogin": "Aktivieren um sich neu über den Browser anzumelden. Nur nötig wenn der Refresh-Token abgelaufen ist (sehr selten).",
-              "migrate_to_oss_client": "Wechsle vom alten `residential_app`-Client zum dedizierten `oss_residential_app`-Client, den Bosch für Open-Source-Integrationen bereitstellt. Beim Aktivieren wird der Reauth-Flow gestartet — du musst dich einmalig über die Bosch SingleKey ID anmelden. Alle Entitäten, Automationen und Optionen bleiben erhalten."
+              "migrate_to_oss_client": "Wechsle vom alten `residential_app`-Client zum dedizierten `oss_residential_app`-Client, den Bosch für Open-Source-Integrationen bereitstellt. Beim Aktivieren wird der Reauth-Flow gestartet — du musst dich einmalig über die Bosch SingleKey ID anmelden. Alle Entitäten, Automationen und Optionen bleiben erhalten.",
+              "configure_local_password": "Speichert die auf den Kameras aufgedruckten Passwörter der lokalen Datenschnittstelle. Jede Kamera hat im nächsten Schritt ein eigenes Feld."
             }
           }
         }
@@ -364,6 +366,16 @@
         "data_description": {
           "redirect_url": "Komplette URL aus der Browser-Adressleiste (beginnt mit https://www.bosch.com/boschcam?code=...)",
           "diagnostic_cloud_api_override": "Leer lassen, außer der Bosch-Support hat dir ausdrücklich eine andere Kamera-API-Basis-URL zum Testen genannt — das aktiviert kein Beta-Programm und schaltet nichts frei, es ändert nur, mit welchem Server die Integration spricht."
+        }
+      },
+      "local_passwords": {
+        "title": "Passwörter der lokalen Datenschnittstelle",
+        "description": "Gib das auf jeder Kamera aufgedruckte Passwort der lokalen Datenschnittstelle ein. Ein leeres Feld behält das gespeicherte Passwort. Mit gespeichertem Passwort und aktiver lokaler Datenschnittstelle wird der Livestream direkt im Heimnetz geöffnet und nutzt nie die Cloud.\\n\\n{cameras}",
+        "data": {
+          "clear_password_for": "Gespeichertes Passwort entfernen für"
+        },
+        "data_description": {
+          "clear_password_for": "Hier gewählte Kameras verlieren ihr gespeichertes Passwort; das hat Vorrang vor einem oben eingegebenen Wert."
         }
       }
     },
@@ -1139,6 +1151,22 @@
     "local_data_interface_available": {
       "title": "Bosch Camera — Lokale Datenschnittstelle verfügbar",
       "description": "Die lokale Datenschnittstelle kann jetzt für {camera} aktiviert werden. Öffne die Kamera-App: Kamera-Einstellungen > Mehr > Lokale Datenschnittstelle."
+    },
+    "local_data_interface_wrong_password": {
+      "title": "Bosch Camera — Passwort der lokalen Datenschnittstelle abgelehnt",
+      "description": "Die lokale Datenschnittstelle von {camera} hat das gespeicherte Passwort abgelehnt, daher bleibt der Live-Stream nicht verfügbar (die Cloud wird nicht genutzt). Prüfe das Passwort auf dem Kamera-Etikett unter Konfigurieren > Authentifizierung > Passwörter der lokalen Datenschnittstelle setzen."
+    },
+    "local_data_interface_unreachable": {
+      "title": "Bosch Camera — Lokale Datenschnittstelle nicht erreichbar",
+      "description": "{camera} ist seit mehr als 10 Minuten im lokalen Netzwerk nicht erreichbar, daher bleibt der Live-Stream nicht verfügbar (die Cloud wird nicht genutzt). Prüfe Strom und Netzwerk der Kamera sowie das gespeicherte Passwort unter Konfigurieren > Authentifizierung > Passwörter der lokalen Datenschnittstelle setzen."
+    },
+    "local_data_interface_no_go2rtc": {
+      "title": "Bosch Camera — go2rtc für die lokale Datenschnittstelle nötig",
+      "description": "{camera} wird über die lokale Datenschnittstelle gelesen, dafür braucht es go2rtc als einzige Verbindung zur Kamera (die Kamera bedient nur wenige Sitzungen gleichzeitig). go2rtc ist nicht verfügbar, daher bleibt der Live-Stream nicht verfügbar (die Cloud wird nicht genutzt). Prüfe, dass die go2rtc-Integration eingerichtet ist und läuft."
+    },
+    "local_data_interface_no_password": {
+      "title": "Bosch Camera — Lokale Datenschnittstelle braucht ein Passwort",
+      "description": "Die lokale Datenschnittstelle ist für {camera} aktiviert. Gib das Passwort vom Aufkleber unter Konfigurieren > Authentifizierung > Passwörter der lokalen Datenschnittstelle setzen ein, um vollständig lokal zu streamen."
     }
   },
   "system_health": {

@@ -77,6 +77,7 @@ from .go2rtc_client import (
     ensure_go2rtc_schemes_fresh,
     unregister_go2rtc_stream,
 )
+from .ldi_local import ensure_ldi_stream, ldi_wanted
 from .live_connection import try_live_connection_inner
 from .lock_utils import get_or_create_lock
 from .rcp import async_update_rcp_data
@@ -806,6 +807,11 @@ class BoschCameraCoordinator(
         # Local data interface status (fw >= 9.40.105).
         # {"state": active|inactive|unsupported, "username"?: str}; absent = unknown.
         self.local_data_interface_cache: dict[str, dict[str, Any]] = {}
+        # Outcome of the last local-only stream open per camera:
+        # {"reason": auth|unreachable|no_ip, "since": monotonic}; absent = ok.
+        self.ldi_open_status: dict[str, dict[str, Any]] = {}
+        # go2rtc registration bookkeeping per camera (see ldi_go2rtc.py).
+        self.ldi_go2rtc_state: dict[str, dict[str, Any]] = {}
         # Alarm settings cache — from GET /alarm_settings (Gen2 Indoor II only).
         # Contains: alarmMode, alarmDelayInSeconds, alarmActivationDelaySeconds,
         #          preAlarmMode, preAlarmDelayInSeconds
@@ -858,6 +864,8 @@ class BoschCameraCoordinator(
         # so the INFO re-fires for the next update.
         self._fw_update_alerted = BoolFieldView(self._sessions, "fw_update_alerted")
         self._ldi_hint_alerted = BoolFieldView(self._sessions, "ldi_hint_alerted")
+        self._ldi_auth_alerted = BoolFieldView(self._sessions, "ldi_auth_alerted")
+        self._ldi_nopw_alerted = BoolFieldView(self._sessions, "ldi_nopw_alerted")
         # Tracks cam_ids for which a "event_buffered mode but preroll seconds
         # is 0" WARN has been logged (the ring silently never
         # spawns in this case). Cleared once nvr_preroll_seconds is set > 0
@@ -1921,6 +1929,7 @@ class BoschCameraCoordinator(
                     and do_slow_cam
                     and not local_stream_active
                     and not privacy_on
+                    and not ldi_wanted(self, cam_id_key)
                 ):
                     try:
                         # Pooled Bosch-cloud session (cloud_ssl.py) — this
@@ -2049,13 +2058,20 @@ class BoschCameraCoordinator(
                     exc_info=True,
                 )
 
-            try:
-                self._refresh_local_data_interface_issues()
-            except Exception:
-                _LOGGER.debug(
-                    "Local-data-interface Repairs check failed (non-fatal)",
-                    exc_info=True,
-                )
+            for _ldi_refresh in (
+                "_refresh_local_data_interface_issues",
+                "_refresh_local_data_interface_auth_issue",
+                "_refresh_local_data_interface_password_hint",
+                "_ensure_ldi_go2rtc_streams",
+            ):
+                try:
+                    getattr(self, _ldi_refresh)()
+                except Exception:
+                    _LOGGER.debug(
+                        "Local-data-interface Repairs check %s failed (non-fatal)",
+                        _ldi_refresh,
+                        exc_info=True,
+                    )
 
             # Raise a Repairs issue when an SMB-dependent feature is
             # configured but the optional smbprotocol package isn't
@@ -2108,6 +2124,27 @@ class BoschCameraCoordinator(
     def _refresh_local_data_interface_issues(self) -> None:
         """Hint that the local data interface can be enabled (thin delegator)."""
         repairs.refresh_local_data_interface_issues(self)
+
+    def _refresh_local_data_interface_auth_issue(self) -> None:
+        """Flag a wrong password / unreachable camera (thin delegator)."""
+        repairs.refresh_local_data_interface_auth_issue(self)
+
+    def _ensure_ldi_go2rtc_streams(self) -> None:
+        """Re-register the go2rtc stream of each local-only session.
+
+        go2rtc loses its streams when it restarts; the registration is
+        idempotent and throttled, so this is cheap on a healthy tick.
+        """
+        for cam_id, live in list(self.live_connections.items()):
+            if live.get("_ldi"):
+                self.spawn_tracked(
+                    ensure_ldi_stream(self, cam_id),
+                    name=f"bosch_shc_camera_ldi_go2rtc_{cam_id[:8]}",
+                )
+
+    def _refresh_local_data_interface_password_hint(self) -> None:
+        """Hint that an active interface has no stored password (thin delegator)."""
+        repairs.refresh_local_data_interface_password_hint(self)
 
     def _refresh_smb_unavailable_issue(self) -> None:
         """Create or clear a Repairs issue when smbprotocol is missing but needed.
@@ -2321,6 +2358,8 @@ class BoschCameraCoordinator(
         "intrusion_config_cache",
         "audio_detection_cache",
         "local_data_interface_cache",
+        "ldi_open_status",
+        "ldi_go2rtc_state",
         "alarm_settings_cache",
         "alarm_status_cache",
         "_last_alarm_type",
@@ -2371,7 +2410,7 @@ class BoschCameraCoordinator(
     #       timestamp_set_at / ledlights_set_at / arming_set_at /
     #       intrusion_config_set_at / audio_detection_set_at / motion_set_at /
     #       alarm_settings_set_at / lighting_options_set_at / firmware_set_at /
-    #       slow_tier_deferred / _notif_disabled_logged / _fw_update_alerted / _ldi_hint_alerted /
+    #       slow_tier_deferred / _notif_disabled_logged / _fw_update_alerted / _ldi_hint_alerted / _ldi_auth_alerted / _ldi_nopw_alerted /
     #       _nvr_preroll_zero_warned —
     #       thin FloatFieldView/BoolFieldView facades over _sessions (Session-
     #       State-Facade Slice 1, see session_state.py); purging _sessions
@@ -2887,6 +2926,8 @@ class BoschCameraCoordinator(
 
         snap_jpeg_size = jpeg_size or JPEG_SIZE_FULL
 
+        if ldi_wanted(self, cam_id):
+            return None  # local-only camera: no cloud proxy snapshot
         token = self.token
         if not token:
             return None
@@ -3327,6 +3368,8 @@ class BoschCameraCoordinator(
         ``jpeg_size`` behaves as in async_fetch_live_snapshot: ``None`` keeps
         the full-resolution frame the persisting callers expect.
         """
+        if ldi_wanted(self, cam_id):
+            return None  # local-only camera: the bootstrap PUT is a cloud call
         token = self.token
         if not token:
             return None
@@ -3437,6 +3480,8 @@ class BoschCameraCoordinator(
             return None
         conn_type = live.get("_connection_type")
         if conn_type == "LOCAL":
+            if live.get("_ldi"):
+                return None  # local data interface has no RCP endpoint on 443
             user = live.get("_local_user")
             pwd = live.get("_local_password")
             urls = live.get("urls", [])

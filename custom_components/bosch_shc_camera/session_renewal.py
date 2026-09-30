@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from .cloud_ssl import async_bosch_cloud_session_cm
 from .const import CLOUD_API, TIMEOUT_PUT_CONNECTION
+from .ldi_local import ldi_wanted
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator
@@ -68,6 +69,8 @@ async def refresh_local_creds_from_heartbeat(
         live = coordinator.live_connections.get(cam_id)
         if not live or live.get("_connection_type") != "LOCAL":
             return  # session torn down or already on REMOTE
+        if live.get("_ldi"):
+            return  # static local credentials, nothing rotates
         old_user = live.get("_local_user")
         old_pass = live.get("_local_password")
         if old_user == new_user and old_pass == new_pass:
@@ -237,11 +240,14 @@ async def auto_renew_local_session(
             if live.get("_connection_type") != "LOCAL":
                 _LOGGER.debug("Keepalive: not LOCAL for %s — stopping", cam_id[:8])
                 break
+            if live.get("_ldi"):
+                _LOGGER.debug("Keepalive: local-only session %s — stopping", cam_id[:8])
+                break
 
             elapsed = time.monotonic() - session_start
 
             # ── Full session renewal (proactive, time-based) ─────────
-            if elapsed >= renewal_interval:
+            if elapsed >= renewal_interval or ldi_wanted(coordinator, cam_id):
                 _LOGGER.info(
                     "Session renewal for %s after %.0fs (interval=%ds)",
                     cam_id[:8],

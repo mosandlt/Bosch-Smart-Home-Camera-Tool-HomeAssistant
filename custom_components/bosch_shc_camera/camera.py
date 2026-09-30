@@ -64,6 +64,7 @@ from .const import (
     with_jpeg_size,
 )
 from .dynamic_devices import register_dynamic_camera_listener
+from .ldi_local import ensure_ldi_stream
 from .mjpeg_snapshot import fetch_mjpeg_snapshot
 from .models import (
     get_display_name,
@@ -1023,6 +1024,14 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         live = self.coordinator.live_connections.get(self._cam_id, {})
         if not live:
             return None
+        if live.get("_ldi"):
+            # Local-only camera: go2rtc's restream is the single upstream
+            # reader. No stream while go2rtc is missing (no cloud fallback).
+            ldi_url = await ensure_ldi_stream(self.coordinator, self._cam_id)
+            if not ldi_url:
+                return None
+            self.stream_options = {"rtsp_transport": "tcp"}
+            return ldi_url
         url: str | None = live.get("rtspsUrl") or live.get("rtspUrl") or None
         if not url:
             return None

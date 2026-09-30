@@ -83,6 +83,7 @@ from homeassistant.components.application_credentials import (
 )
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.config_entry_oauth2_flow import (
     AbstractOAuth2FlowHandler,
@@ -101,6 +102,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
+    TextSelectorType,
 )
 
 from .cloud_ssl import async_get_bosch_cloud_session
@@ -229,6 +231,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
     "auth": [
         "force_relogin",
         "migrate_to_oss_client",
+        "configure_local_password",
     ],
 }
 
@@ -335,6 +338,9 @@ from .const import (
     MOTION_ACTIVE_WINDOW_MAX,
     MOTION_ACTIVE_WINDOW_MIN,
 )
+from .ldi_local import LDI_PASSWORDS_OPTION
+
+LDI_CLEAR_FIELD = "clear_password_for"
 from .smb import smb_available, smb_dependent_features
 
 _LOGGER = logging.getLogger(__name__)
@@ -1092,6 +1098,9 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
 
             force_relogin = user_input.pop("force_relogin", False)
             migrate_to_oss = user_input.pop("migrate_to_oss_client", False)
+            configure_local_password = bool(
+                user_input.pop("configure_local_password", False)
+            )
             # #70 round 3: transient action flag, never persisted as an
             # option itself — see the smb_server schema comment above for
             # why a plain cleared text field can't reliably signal "clear"
@@ -1233,6 +1242,10 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                         challenge, secrets.token_urlsafe(16)
                     )
                     return await self.async_step_relogin_show()
+
+                if configure_local_password:
+                    self._pending_options = merged
+                    return await self.async_step_local_passwords()
 
                 return self.async_create_entry(title="", data=merged)
 
@@ -2043,6 +2056,7 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
 
         auth_inner: dict[Any, Any] = {
             vol.Optional("force_relogin", default=False): bool,
+            vol.Optional("configure_local_password", default=False): bool,
         }
         if is_legacy_client:
             auth_inner[vol.Optional("migrate_to_oss_client", default=False)] = bool
@@ -2074,6 +2088,75 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                 # fails (Runde2 P3 #8) — empty string is harmless when unused.
                 "invalid_allowlist_token": invalid_allowlist_token,
             },
+        )
+
+    def _ldi_camera_labels(self) -> dict[str, str]:
+        """Map form-field label -> camera id for every camera of the account.
+
+        HA cannot translate dynamic field names, so the camera name itself is
+        the field key; a duplicate name gets an id suffix to stay unique.
+        """
+        coordinator = getattr(self._config_entry, "runtime_data", None)
+        labels: dict[str, str] = {}
+        for cam_id, cdata in (getattr(coordinator, "data", None) or {}).items():
+            title = str((cdata.get("info") or {}).get("title") or cam_id[:8])
+            if title in labels:
+                title = f"{title} ({str(cam_id)[:8]})"
+            labels[title] = str(cam_id)
+        return labels
+
+    async def async_step_local_passwords(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Set or clear the local data interface password of every camera.
+
+        Empty field keeps the stored password, non-empty overwrites it, and a
+        camera in ``clear_password_for`` is deleted (clear wins over a value
+        typed for the same camera). Stored values are never shown.
+        """
+        labels = self._ldi_camera_labels()
+        if not labels:
+            return self.async_create_entry(title="", data=self._pending_options)
+
+        if user_input is not None:
+            passwords = dict(self._pending_options.get(LDI_PASSWORDS_OPTION) or {})
+            known = set(labels.values())
+            for label, cam_id in labels.items():
+                value = str(user_input.get(label) or "").strip()
+                if value:
+                    passwords[cam_id] = value
+            for cam_id in user_input.get(LDI_CLEAR_FIELD) or []:
+                if str(cam_id) in known:
+                    passwords.pop(str(cam_id), None)
+            self._pending_options = {
+                **self._pending_options,
+                LDI_PASSWORDS_OPTION: passwords,
+            }
+            return self.async_create_entry(title="", data=self._pending_options)
+
+        coordinator = getattr(self._config_entry, "runtime_data", None)
+        cache = getattr(coordinator, "local_data_interface_cache", None) or {}
+        stored = self._pending_options.get(LDI_PASSWORDS_OPTION)
+        stored = stored if isinstance(stored, dict) else {}
+        lines: list[str] = []
+        schema: dict[Any, Any] = {}
+        for label, cam_id in labels.items():
+            entry = cache.get(cam_id)
+            active = isinstance(entry, dict) and entry.get("state") == "active"
+            lines.append(
+                f"- {label}: interface {'active' if active else 'not active'}, "
+                f"password {'set' if stored.get(cam_id) else 'not set'}"
+            )
+            schema[vol.Optional(label)] = TextSelector(
+                TextSelectorConfig(type=TextSelectorType.PASSWORD)
+            )
+        schema[vol.Optional(LDI_CLEAR_FIELD, default=[])] = cv.multi_select(
+            {cam_id: label for label, cam_id in labels.items()}
+        )
+        return self.async_show_form(
+            step_id="local_passwords",
+            data_schema=vol.Schema(schema),
+            description_placeholders={"cameras": "\n".join(lines)},
         )
 
     async def async_step_relogin_show(

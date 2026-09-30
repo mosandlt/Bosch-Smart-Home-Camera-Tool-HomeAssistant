@@ -303,11 +303,13 @@
             "description": "强制重新进行浏览器登录或迁移至 OSS OAuth 客户端。",
             "data": {
               "force_relogin": "重新认证（浏览器登录）",
-              "migrate_to_oss_client": "切换至 OSS OAuth 客户端"
+              "migrate_to_oss_client": "切换至 OSS OAuth 客户端",
+              "configure_local_password": "Set local data interface passwords"
             },
             "data_description": {
               "force_relogin": "勾选此项以通过浏览器重新认证。仅在刷新令牌过期时需要（极少发生）。",
-              "migrate_to_oss_client": "从旧版 `residential_app` 客户端切换至 Bosch 为开源集成提供的专用 `oss_residential_app` 客户端。启用后将触发重新认证流程 — 您需要通过 Bosch SingleKey ID 登录一次，现有实体、自动化和选项将被保留。"
+              "migrate_to_oss_client": "从旧版 `residential_app` 客户端切换至 Bosch 为开源集成提供的专用 `oss_residential_app` 客户端。启用后将触发重新认证流程 — 您需要通过 Bosch SingleKey ID 登录一次，现有实体、自动化和选项将被保留。",
+              "configure_local_password": "Stores the passwords printed on the cameras for their local data interface. Each camera has its own field in the next step."
             }
           },
           "ai_analysis": {
@@ -364,6 +366,16 @@
         "data_description": {
           "redirect_url": "登录后浏览器地址栏中的完整 URL（包含授权码）",
           "diagnostic_cloud_api_override": "除非 Bosch 支持人员明确告知您使用其他摄像头 API 基础 URL 进行测试，否则请留空——此选项不会启用任何测试计划，也不会解锁任何功能，仅更改集成与哪个服务器通信。"
+        }
+      },
+      "local_passwords": {
+        "title": "Local data interface passwords",
+        "description": "Enter the local data interface password printed on each camera. Leave a field empty to keep the stored password. With a stored password and an active local data interface, the live stream is opened directly on your network and never uses the cloud.\\n\\n{cameras}",
+        "data": {
+          "clear_password_for": "Remove stored password for"
+        },
+        "data_description": {
+          "clear_password_for": "Cameras selected here lose their stored password; this takes precedence over a value typed above."
         }
       }
     },
@@ -1039,6 +1051,22 @@
     "local_data_interface_available": {
       "title": "Bosch Camera — 本地数据接口可用",
       "description": "现在可以为 {camera} 启用本地数据接口。请打开摄像头应用：摄像头设置 > 更多 > 本地数据接口。"
+    },
+    "local_data_interface_wrong_password": {
+      "title": "Bosch Camera — 本地数据接口密码被拒绝",
+      "description": "{camera} 的本地数据接口拒绝了已保存的密码，因此实时视频保持不可用（不使用云端）。请在 配置 > 身份验证 > 本地密码 中核对摄像头标签上的密码。"
+    },
+    "local_data_interface_unreachable": {
+      "title": "Bosch Camera — 本地数据接口无法访问",
+      "description": "{camera} 在本地网络中已无法访问超过 10 分钟，因此实时视频保持不可用（不使用云端）。请检查摄像头的电源和网络，以及在 配置 > 身份验证 > 本地密码 中保存的密码。"
+    },
+    "local_data_interface_no_go2rtc": {
+      "title": "Bosch Camera — 本地数据接口需要 go2rtc",
+      "description": "{camera} 通过本地数据接口读取，需要 go2rtc 作为与摄像头的唯一连接（摄像头同时只能处理少量会话）。go2rtc 不可用，因此实时视频保持不可用（不使用云端）。请检查 go2rtc 集成是否已设置并正在运行。"
+    },
+    "local_data_interface_no_password": {
+      "title": "Bosch Camera — 本地数据接口需要密码",
+      "description": "已为 {camera} 启用本地数据接口。请在 配置 > 身份验证 > 本地密码 中输入标签上的密码，以完全本地化串流。"
     }
   },
   "system_health": {

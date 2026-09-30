@@ -7,6 +7,16 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v17.1.0] - 2026-09-30
+
+### Added
+
+- **Local-only video source via the local data interface.** When a camera reports its local data interface as active and you store its password (Configure → Authentication → "Set local data interface passwords": one password field per camera; an empty field keeps the stored password, and a camera can be selected to remove its password), the live stream opens directly on your network (RTSP over TLS, port 9554) and never uses the Bosch cloud: no token, no connection request, no REMOTE fallback. If the camera is unreachable, in privacy mode, or the password is wrong, the stream stays unavailable instead of falling back to the cloud. Switches, privacy and light writes continue to use the cloud. The video-only stream carries no audio.
+- **Local-only mode covers every stream consumer.** With the local data interface active and a password stored, no path opens a cloud stream session: a camera whose LAN address is not known yet (cold start) resolves it from the cached Wi-Fi status and otherwise stays unavailable instead of using the cloud; the periodic cloud RCP session and cloud snapshot fetches are skipped for these cameras; Mini-NVR recording and the pre-roll ring start with the local session, and the Frigate endpoint opens it on demand. The stream health watchdog and worker-error recovery rebuild locally (a rejected password is tried once, not repeatedly).
+- **Single camera connection via go2rtc.** For a camera on the local data interface, go2rtc is the only reader of the camera: the live view, the Mini-NVR recorder and pre-roll ring and the external-recorder endpoint all read go2rtc's local restream instead of opening their own connections (the camera serves only a few sessions at once). This needs the go2rtc integration; without it the stream stays unavailable with a Repairs issue and the cloud is never used.
+- **Repairs issue for a rejected password or unreachable camera.** Shown when the stored local data interface password is rejected, or the camera has been unreachable for more than 10 minutes while local-only mode is wanted; cleared by the next successful open and never raised while privacy mode is on.
+- **Repairs hint when the interface is enabled but no password is stored.** Shown per camera while the local data interface is active without a stored password; cleared once a password is set or the interface is disabled. The interface user name is fixed, so only the password is asked for.
+
 ## [v17.0.0] - 2026-09-30
 
 ### Added

@@ -54,7 +54,7 @@ from homeassistant.helpers.aiohttp_client import (
 )
 from homeassistant.helpers.storage import Store
 
-from . import ai_alert_store, ai_analysis, announcements
+from . import ai_alert_store, ai_analysis, announcements, ldi_go2rtc
 from . import recorder as nvr_recorder
 from .cloud_ssl import (
     async_get_bosch_cloud_session as async_get_bosch_cloud_session,  # re-export: mypy --no-implicit-reexport (services.py/live_connection.py/token_auth.py import it via `from . import`)
@@ -331,14 +331,21 @@ def _redact_creds(d: dict[str, Any]) -> dict[str, Any]:
     but still a credential — replacing it with a short prefix + length keeps
     the log line useful for diagnostics without exposing the secret.
     """
-    return {
-        k: (
-            f"{v[:3]}***({len(v)} chars)"
-            if k == "password" and isinstance(v, str)
-            else v
-        )
-        for k, v in d.items()
-    }
+    return {k: _redact_value(k, v) for k, v in d.items()}
+
+
+_URL_USERINFO_RE = _re_mod.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@")
+
+
+def _redact_value(key: str, value: Any) -> Any:
+    """Redact one live-connection field for logging."""
+    if key == "_local_password" and isinstance(value, str):
+        return "***"  # may be the user's permanent local password
+    if key == "password" and isinstance(value, str):
+        return f"{value[:3]}***({len(value)} chars)"
+    if isinstance(value, str) and "@" in value:
+        return _URL_USERINFO_RE.sub(r"\g<scheme>***@", value)
+    return value
 
 
 from .const import (
@@ -994,6 +1001,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # timer with no bound on how many could accumulate.
     coordinator.schedule_token_refresh()
 
+    # A persistent go2rtc can still hold streams from a previous run.
+    if opts.get("local_passwords"):
+        coordinator.spawn_tracked(
+            ldi_go2rtc.remove_leftovers(coordinator, set()),
+            name="bosch_shc_camera_ldi_go2rtc_cleanup",
+        )
+
     # Quench the camera-component log spam during stream pre-warm (idempotent).
     # See _StreamSupportNoiseFilter docstring for context.
     _install_stream_support_noise_filter()
@@ -1477,6 +1491,10 @@ async def _async_cancel_coordinator_tasks(coord: "BoschCameraCoordinator") -> No
     # from under every other integration still using it. `.close()` would
     # do exactly that (aiohttp.ClientSession owns/closes its connector by
     # default), so it must never be used for this session.
+    try:
+        await ldi_go2rtc.unregister_all(coord)
+    except Exception as err:
+        _LOGGER.debug("local data interface go2rtc cleanup on unload raised: %s", err)
     go2rtc_session = getattr(coord, "go2rtc_session", None)
     if go2rtc_session is not None and not go2rtc_session.closed:
         try:

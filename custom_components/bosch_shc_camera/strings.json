@@ -335,11 +335,13 @@
             "description": "Force a fresh browser login or migrate to the OSS OAuth client.",
             "data": {
               "force_relogin": "Re-authenticate (browser login)",
-              "migrate_to_oss_client": "Switch to OSS OAuth client"
+              "migrate_to_oss_client": "Switch to OSS OAuth client",
+              "configure_local_password": "Set local data interface passwords"
             },
             "data_description": {
               "force_relogin": "Check this to re-authenticate via browser. Only needed if the refresh token has expired (very rare).",
-              "migrate_to_oss_client": "Switch from the legacy `residential_app` client to the dedicated `oss_residential_app` client Bosch provides for open source integrations. Enabling this will trigger the reauth flow — you will be asked to log in once via Bosch SingleKey ID, and your existing entities, automations, and options will be preserved."
+              "migrate_to_oss_client": "Switch from the legacy `residential_app` client to the dedicated `oss_residential_app` client Bosch provides for open source integrations. Enabling this will trigger the reauth flow — you will be asked to log in once via Bosch SingleKey ID, and your existing entities, automations, and options will be preserved.",
+              "configure_local_password": "Stores the passwords printed on the cameras for their local data interface. Each camera has its own field in the next step."
             }
           }
         }
@@ -364,6 +366,16 @@
         "data_description": {
           "redirect_url": "Full URL from browser address bar after login (contains the authorization code)",
           "diagnostic_cloud_api_override": "Leave empty unless Bosch support has explicitly given you a different camera-API base URL to test — this does not enable a beta program or unlock anything, it only changes which server the integration talks to."
+        }
+      },
+      "local_passwords": {
+        "title": "Local data interface passwords",
+        "description": "Enter the local data interface password printed on each camera. Leave a field empty to keep the stored password. With a stored password and an active local data interface, the live stream is opened directly on your network and never uses the cloud.\\n\\n{cameras}",
+        "data": {
+          "clear_password_for": "Remove stored password for"
+        },
+        "data_description": {
+          "clear_password_for": "Cameras selected here lose their stored password; this takes precedence over a value typed above."
         }
       }
     },
@@ -1139,6 +1151,22 @@
     "local_data_interface_available": {
       "title": "Bosch Camera — Local data interface available",
       "description": "The local data interface can now be enabled for {camera}. Open the camera app: Camera settings > More > Local data interface."
+    },
+    "local_data_interface_wrong_password": {
+      "title": "Bosch Camera — Local data interface password rejected",
+      "description": "The local data interface of {camera} rejected the stored password, so the live stream stays unavailable (the cloud is not used). Check the password on the camera's label under Configure > Authentication > Set local data interface passwords."
+    },
+    "local_data_interface_unreachable": {
+      "title": "Bosch Camera — Local data interface unreachable",
+      "description": "{camera} has been unreachable on the local network for more than 10 minutes, so the live stream stays unavailable (the cloud is not used). Check the camera's power and network, and the stored password under Configure > Authentication > Set local data interface passwords."
+    },
+    "local_data_interface_no_go2rtc": {
+      "title": "Bosch Camera — go2rtc needed for the local data interface",
+      "description": "{camera} is read over its local data interface, which needs go2rtc as the single connection to the camera (the camera serves only a few sessions at once). go2rtc is not available, so the live stream stays unavailable (the cloud is not used). Check that the go2rtc integration is set up and running."
+    },
+    "local_data_interface_no_password": {
+      "title": "Bosch Camera — Local data interface needs a password",
+      "description": "The local data interface is enabled for {camera}. Enter the sticker password under Configure > Authentication > Set local data interface passwords to stream fully locally."
     }
   },
   "system_health": {

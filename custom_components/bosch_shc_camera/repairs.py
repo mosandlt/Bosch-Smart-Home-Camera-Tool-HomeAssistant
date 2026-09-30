@@ -30,6 +30,7 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
+from .ldi_local import RESULT_AUTH, RESULT_NO_GO2RTC, ldi_active, ldi_wanted
 from .local_data_interface import (
     STATE_ACTIVE,
     STATE_INACTIVE,
@@ -271,6 +272,113 @@ def refresh_local_data_interface_issues(coordinator: BoschCameraCoordinator) -> 
         elif not gated or state == STATE_ACTIVE:
             ir.async_delete_issue(coordinator.hass, DOMAIN, issue_id)
             coordinator._ldi_hint_alerted.discard(cam_id)
+
+
+LDI_UNREACHABLE_GRACE_SEC = 600.0
+LDI_NO_GO2RTC_GRACE_SEC = 120.0
+
+
+def refresh_local_data_interface_password_hint(
+    coordinator: BoschCameraCoordinator,
+) -> None:
+    """Hint that an enabled interface needs its password to stream locally.
+
+    Raised while the interface is active but no password is stored; cleared
+    once a password is set or the interface is no longer active. Idempotent,
+    called once per coordinator tick.
+    """
+    from . import ir as ir  # type: ignore[attr-defined]
+
+    for cam_id, cam in (coordinator.data or {}).items():
+        issue_id = f"local_data_interface_no_password_{cam_id}"
+        if ldi_active(coordinator, cam_id) and not ldi_wanted(coordinator, cam_id):
+            cam_title: str = cam.get("info", {}).get("title", cam_id)
+            ir.async_create_issue(
+                coordinator.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                is_persistent=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="local_data_interface_no_password",
+                translation_placeholders={"camera": cam_title},
+            )
+            if cam_id not in coordinator._ldi_nopw_alerted:
+                coordinator._ldi_nopw_alerted.add(cam_id)
+                _LOGGER.info(
+                    "Local data interface enabled for %r but no password stored",
+                    cam_title,
+                )
+        else:
+            ir.async_delete_issue(coordinator.hass, DOMAIN, issue_id)
+            coordinator._ldi_nopw_alerted.discard(cam_id)
+
+
+def refresh_local_data_interface_auth_issue(
+    coordinator: BoschCameraCoordinator,
+) -> None:
+    """Flag a local-only camera whose stream cannot be opened.
+
+    Raised when the interface is wanted (active + password stored) and the
+    last open was rejected with a wrong password, or the camera has been
+    unreachable for more than 10 minutes. Privacy mode is a legitimate closed
+    state and never raises it. Cleared by the next successful open.
+    """
+    from . import ir as ir  # type: ignore[attr-defined]
+
+    now = time.monotonic()
+    status_map: dict[str, dict[str, Any]] = (
+        getattr(coordinator, "ldi_open_status", None) or {}
+    )
+    for cam_id, cam in (coordinator.data or {}).items():
+        issue_id = f"local_data_interface_auth_{cam_id}"
+        status = status_map.get(cam_id)
+        privacy = coordinator.shc_state_cache.get(cam_id, {}).get("privacy_mode")
+        reason: str | None = None
+        if ldi_wanted(coordinator, cam_id) and privacy is not True:
+            offline_since = coordinator.offline_since.get(cam_id)
+            if status and status.get("reason") == RESULT_AUTH:
+                reason = "local_data_interface_wrong_password"
+            elif (
+                status
+                and status.get("reason") == RESULT_NO_GO2RTC
+                and now - status["since"] > LDI_NO_GO2RTC_GRACE_SEC
+            ):
+                reason = "local_data_interface_no_go2rtc"
+            elif (
+                offline_since is not None
+                and now - offline_since > LDI_UNREACHABLE_GRACE_SEC
+            ) or (
+                status
+                and cam_id not in coordinator.live_connections
+                and now - status["since"] > LDI_UNREACHABLE_GRACE_SEC
+            ):
+                reason = "local_data_interface_unreachable"
+        if reason is None:
+            ir.async_delete_issue(coordinator.hass, DOMAIN, issue_id)
+            coordinator._ldi_auth_alerted.discard(cam_id)
+            continue
+        cam_title: str = cam.get("info", {}).get("title", cam_id)
+        ir.async_create_issue(
+            coordinator.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key=reason,
+            translation_placeholders={"camera": cam_title},
+        )
+        if cam_id not in coordinator._ldi_auth_alerted:
+            coordinator._ldi_auth_alerted.add(cam_id)
+            _LOGGER.info(
+                "Local data interface stream unavailable for %r (%s)",
+                cam_title,
+                {
+                    "local_data_interface_wrong_password": "wrong password",
+                    "local_data_interface_no_go2rtc": "go2rtc unavailable",
+                }.get(reason, "unreachable"),
+            )
 
 
 def refresh_smb_unavailable_issue(coordinator: BoschCameraCoordinator) -> None:
