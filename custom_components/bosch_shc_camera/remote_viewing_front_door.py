@@ -105,7 +105,7 @@ _LOGGER = logging.getLogger(__name__)
 # constants across modules (frigate_endpoint.py's are module-private).
 _INNER_CONNECT_TIMEOUT = 10.0
 _MAX_HEAD_BYTES = 64 * 1024
-_TRACK_RE = re.compile(r"/streamid=(\d{1,3})$")
+_TRACK_RE = re.compile(r"/(streamid|trackID)=(\d{1,3})$")
 
 
 @dataclass(frozen=True)
@@ -117,8 +117,9 @@ class RemoteTarget:
 
     port: int
     path: str
-    # A go2rtc restream picks the track from a trailing ``streamid=N`` on each
-    # request URI (SETUP), so that one client-supplied token is carried over.
+    # A go2rtc restream picks the track from a trailing ``streamid=N`` or
+    # ``trackID=N`` (the SDP's own ``a=control:`` form, what ffmpeg sends) on
+    # each request URI (SETUP), so that one client-supplied token is carried over.
     keep_track: bool = False
 
 
@@ -157,7 +158,7 @@ class _PathRewriteRelay:
             parts = line.split(" ")
             match = _TRACK_RE.search(parts[1]) if len(parts) >= 3 else None
             if match:
-                uri += f"/streamid={match.group(1)}"
+                uri += f"/{match.group(1)}={match.group(2)}"
         return uri
 
     async def run(self) -> None:

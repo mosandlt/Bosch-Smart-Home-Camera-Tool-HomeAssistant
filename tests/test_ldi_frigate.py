@@ -124,6 +124,14 @@ class TestRelayFactory:
         base = "rtsp://127.0.0.1:18554/ldi_11111111"
         setup = b"SETUP rtsp://h:1/evil/../x/streamid=1 RTSP/1.0\r\n\r\n"
         assert relay._rewritten_uri(setup) == f"{base}/streamid=1"
+        # go2rtc's SDP advertises `a=control:trackID=N`, so ffmpeg-based
+        # recorders send that form, appended after the DESCRIBE query; it
+        # used to be dropped and go2rtc answered 400 to the bare path.
+        track = (
+            b"SETUP rtsp://127.0.0.1:1/rtsp_tunnel?inst=1&enableaudio=1"
+            b"/trackID=1 RTSP/1.0\r\n\r\n"
+        )
+        assert relay._rewritten_uri(track) == f"{base}/trackID=1"
         for req in (
             b"DESCRIBE rtsp://h:1/anything RTSP/1.0\r\n\r\n",
             b"SETUP rtsp://h:1/x/streamid=1/../../y RTSP/1.0\r\n\r\n",

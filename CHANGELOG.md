@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v17.1.1] - 2026-09-30
+
+### Fixed
+
+- **External-recorder endpoint for local-only cameras.** A recorder such as Frigate could not start a stream from the endpoint of a camera on the local data interface: its track setup request was answered with `400 Bad Request` because go2rtc's track identifier (`trackID=N`) was dropped on the way to the restream. Both track identifier forms are now passed through.
+
 ## [v17.1.0] - 2026-09-30
 
 ### Added
