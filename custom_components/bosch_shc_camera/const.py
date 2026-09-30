@@ -116,6 +116,50 @@ def jpeg_size_for_width(width: int | None) -> int | None:
     return JPEG_SIZE_MEDIUM
 
 
+# ── Snapshot size option (`snapshot_size`) ────────────────────────────────────
+# auto   — follow the width HA requests (card ?width=N), as before the option
+# small  — never wider than JPEG_SIZE_THUMB, whatever the request says
+# medium — never wider than JPEG_SIZE_MEDIUM
+# full   — never downscale, ignore the requested width
+SNAPSHOT_SIZE_AUTO = "auto"
+SNAPSHOT_SIZE_SMALL = "small"
+SNAPSHOT_SIZE_MEDIUM = "medium"
+SNAPSHOT_SIZE_FULL = "full"
+SNAPSHOT_SIZES = (
+    SNAPSHOT_SIZE_AUTO,
+    SNAPSHOT_SIZE_SMALL,
+    SNAPSHOT_SIZE_MEDIUM,
+    SNAPSHOT_SIZE_FULL,
+)
+
+
+def snapshot_size_limit(setting: object) -> int | None:
+    """Hard width cap in pixels for ``small``/``medium``, else ``None``."""
+    if setting == SNAPSHOT_SIZE_SMALL:
+        return JPEG_SIZE_THUMB
+    if setting == SNAPSHOT_SIZE_MEDIUM:
+        return JPEG_SIZE_MEDIUM
+    return None
+
+
+def effective_snapshot_width(setting: object, width: int | None) -> int | None:
+    """Width to drive the snapshot size selection with, given the option.
+
+    ``small`` forces the thumbnail size, ``medium`` caps the request at the
+    medium size (a smaller request stays smaller), ``full`` drops the request
+    so the full-resolution frame is used, anything else (``auto``, unknown
+    values) keeps the requested width untouched.
+    """
+    if setting == SNAPSHOT_SIZE_FULL:
+        return None
+    limit = snapshot_size_limit(setting)
+    if limit is None:
+        return width
+    if width is None or width <= 0:
+        return limit
+    return min(width, limit)
+
+
 def with_jpeg_size(url: str, size: int | None) -> str:
     """Return ``url`` with its ``JpegSize`` query parameter set to ``size``.
 
@@ -324,6 +368,10 @@ DEFAULT_OPTIONS = {
     # implemented, opt-in only — keeps the code path available for testing
     # and skips it for normal users so warn-spam stays out of the logs.
     "use_mjpeg_snapshot": False,
+    # Size of the still images served to dashboards (camera proxy): "auto"
+    # follows the requested width, "small" <=320 px, "medium" <=640 px,
+    # "full" never downscales. The persisted last snapshot stays full size.
+    "snapshot_size": "auto",
     # Defer slow-tier diagnostic cloud reads while a live stream is active.
     # Default ON: prevents TLS-channel contention → stream freeze on motion burst.
     # See stream-freeze-on-motion-event-contention.md.

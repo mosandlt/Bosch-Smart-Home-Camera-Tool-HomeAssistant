@@ -5457,6 +5457,22 @@ class TestFCMNoiseFilter:
             "the first FCM creds-staleness record on CI VMs with uptime < 60 s"
         )
 
+    def test_second_creds_record_inside_the_window_is_dropped(self) -> None:
+        """A repeat creds-staleness line within the dedup window is suppressed.
+
+        Pinned directly: it was only covered incidentally by timing-dependent
+        log traffic from other tests, so coverage varied with xdist scheduling.
+        """
+        f = _FCMNoiseFilter()
+        saved = list(_FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS)
+        try:
+            marker = f._CREDS_STALENESS_MARKERS[0]
+            rec = logging.LogRecord("t", logging.ERROR, "p", 1, marker, None, None)
+            assert f.filter(rec) is True
+            assert f.filter(rec) is False
+        finally:
+            _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS[:] = saved
+
 
 def _make_record_ext(msg: str, exc_info: Any = None) -> logging.LogRecord:
     rec = logging.LogRecord(

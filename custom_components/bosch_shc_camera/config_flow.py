@@ -137,6 +137,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "enable_go2rtc",
         "enable_green_it",
         "use_mjpeg_snapshot",
+        "snapshot_size",
         "defer_diag_during_stream",
         "cloudflare_tunnel_hls_unbuffer",
     ],
@@ -1416,6 +1417,29 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                         "use_mjpeg_snapshot",
                         default=bool(opts.get("use_mjpeg_snapshot", False)),
                     ): bool,
+                    vol.Optional(
+                        "snapshot_size",
+                        default=str(opts.get("snapshot_size", "auto")),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(
+                                    value="auto",
+                                    label="Automatisch (Standard)",
+                                ),
+                                SelectOptionDict(
+                                    value="small", label="Klein (max. 320 px)"
+                                ),
+                                SelectOptionDict(
+                                    value="medium", label="Mittel (max. 640 px)"
+                                ),
+                                SelectOptionDict(
+                                    value="full", label="Voll (keine Verkleinerung)"
+                                ),
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                     vol.Optional(
                         CONF_DEFER_DIAG_DURING_STREAM,
                         default=bool(

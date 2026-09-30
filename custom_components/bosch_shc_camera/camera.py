@@ -60,11 +60,14 @@ from .const import (
     LOCAL_SNAP_WARMUP_TIMEOUT_SEC,
     STREAM_START_SKIPPED,
     TIMEOUT_SNAP,
+    effective_snapshot_width,
     jpeg_size_for_width,
+    snapshot_size_limit,
     with_jpeg_size,
 )
 from .dynamic_devices import register_dynamic_camera_listener
 from .ldi_local import ensure_ldi_stream, ldi_privacy_on, ldi_wanted
+from .ldi_snapshot import downscale_jpeg
 from .mjpeg_snapshot import fetch_mjpeg_snapshot
 from .models import (
     get_display_name,
@@ -244,6 +247,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         self._cam_id = cam_id
         self._entry = entry
         self.cached_image: bytes | None = self._PLACEHOLDER_JPEG
+        # (limit, source frame, downscaled frame) of the last snapshot_size resize.
+        self._snapshot_size_memo: tuple[int, bytes, bytes] | None = None
         self._force_image_refresh: bool = False  # bypasses HA image cache once
         self.last_image_fetch: float = float(
             "-inf"
@@ -1198,6 +1203,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 if privacy_confirmed_safe
                 else self._PLACEHOLDER_JPEG
             )
+        if jpeg is not self._PLACEHOLDER_JPEG and jpeg:
+            jpeg = await self._async_cap_snapshot_width(jpeg)
         # Apply 180° rotation if the user enabled it via the Bild 180° drehen
         # switch (ceiling-mounted indoor cameras). Skip the placeholder JPEG.
         # [S5] Use None default instead of {} to avoid allocating a throwaway dict
@@ -1320,6 +1327,27 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             return self.cached_image
         return None
 
+    async def _async_cap_snapshot_width(self, jpeg: bytes) -> bytes:
+        """``jpeg`` capped to the ``snapshot_size`` option's width, if any.
+
+        Serves every source (cloud, LAN, local-interface frame, cached frame),
+        so ``small``/``medium`` hold even where the camera itself cannot scale
+        (local frames, a cached full-size image). ``cached_image`` and the
+        persisted snapshot are never touched — only the served copy shrinks.
+        The last resize is kept while the same frame keeps being served.
+        """
+        limit = snapshot_size_limit(get_options(self._entry).get("snapshot_size"))
+        if limit is None:
+            return jpeg
+        memo = self._snapshot_size_memo
+        if memo is not None and memo[0] == limit and memo[1] == jpeg:
+            return memo[2]
+        sized: bytes = await self.hass.async_add_executor_job(
+            downscale_jpeg, jpeg, limit
+        )
+        self._snapshot_size_memo = (limit, jpeg, sized)
+        return sized
+
     async def _async_camera_image_impl(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
@@ -1367,6 +1395,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             return None
         if ldi_wanted(self.coordinator, self._cam_id):
             return await self._async_ldi_image()
+        width = effective_snapshot_width(
+            get_options(self._entry).get("snapshot_size"), width
+        )
         # An unknown privacy state (e.g. a cloud-degraded restart, where
         # shc_state_cache starts empty, or a camera whose cloud payload
         # never carries privacyMode) must not silently trust a possibly-stale

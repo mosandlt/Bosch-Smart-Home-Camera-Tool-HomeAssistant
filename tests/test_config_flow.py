@@ -2645,6 +2645,13 @@ class TestStreamSection:
             assert data["live_buffer_mode"] == val
 
     @pytest.mark.asyncio
+    async def test_snapshot_size_saved(self):
+        flow = BoschCameraOptionsFlow(_make_entry())
+        for val in ["auto", "small", "medium", "full"]:
+            data = await _submit(flow, {"stream": {"snapshot_size": val}})
+            assert data["snapshot_size"] == val
+
+    @pytest.mark.asyncio
     async def test_enable_go2rtc_toggle(self):
         flow = BoschCameraOptionsFlow(_make_entry())
         data = await _submit(flow, {"stream": {"enable_go2rtc": False}})

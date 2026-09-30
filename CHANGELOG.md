@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v17.2.0] - 2026-09-30
+
+### Added
+
+- **Dashboard snapshot size option.** New `snapshot_size` setting (Configure > Live stream): `auto` (default, unchanged: follows the width the dashboard requests), `small` (at most 320 px wide), `medium` (at most 640 px) or `full` (never downscaled). It applies to every snapshot source, including cameras on the local data interface, whose full-resolution frame is now downscaled on the Home Assistant host (aspect ratio kept, never upscaled, original returned if it cannot be decoded). The camera frame is still fetched and shared once; the persisted last snapshot stays full resolution.
+
 ## [v17.1.1] - 2026-09-30
 
 ### Fixed

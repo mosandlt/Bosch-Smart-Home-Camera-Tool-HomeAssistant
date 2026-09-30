@@ -18,6 +18,7 @@ frame (None): the caller keeps its cached image and the cloud is never used.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -38,6 +39,32 @@ _LOGGER = logging.getLogger(__name__)
 
 SNAPSHOT_SHARE_SEC = 5.0
 SNAPSHOT_RETRY_SEC = 15.0
+DOWNSCALE_JPEG_QUALITY = 80
+
+
+def downscale_jpeg(data: bytes, max_width: int) -> bytes:
+    """``data`` scaled down to at most ``max_width`` px wide, aspect kept.
+
+    Blocking (Pillow decode/resize/encode): call from an executor. Never
+    upscales; the original bytes come back unchanged when the image is
+    already small enough, Pillow is unavailable or the bytes do not decode.
+    """
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as img:
+            width, height = img.size
+            if width <= max_width:
+                return data
+            new_height = max(1, round(height * max_width / width))
+            resized = img.convert("RGB").resize(
+                (max_width, new_height), Image.Resampling.LANCZOS
+            )
+        out = io.BytesIO()
+        resized.save(out, format="JPEG", quality=DOWNSCALE_JPEG_QUALITY)
+        return out.getvalue()
+    except Exception:
+        return data
 
 
 def _entry(coordinator: BoschCameraCoordinator, cam_id: str) -> dict[str, Any]:
