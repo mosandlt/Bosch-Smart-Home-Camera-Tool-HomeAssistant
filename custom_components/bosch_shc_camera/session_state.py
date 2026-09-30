@@ -150,6 +150,7 @@ class CameraSessionState:
     # ── "Already logged/deferred this cycle" flags ──────────────────────
     notif_disabled_logged: bool = False
     fw_update_alerted: bool = False
+    ldi_hint_alerted: bool = False
     slow_tier_deferred: bool = False
     nvr_preroll_zero_warned: bool = False
     nvr_preroll_first_segment_logged: bool = False

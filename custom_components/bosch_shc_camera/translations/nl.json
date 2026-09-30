@@ -624,6 +624,9 @@
       },
       "ai_recent_alert": {
         "name": "Recente AI-waarschuwing"
+      },
+      "local_data_interface": {
+        "name": "Lokale gegevensinterface"
       }
     },
     "update": {
@@ -1032,6 +1035,10 @@
     "smb_unavailable": {
       "title": "Bosch Camera — SMB/NAS-pakket niet geïnstalleerd",
       "description": "**{features}** is geconfigureerd voor een SMB/NAS-netwerkshare, maar het optionele Python-pakket `smbprotocol` is niet geïnstalleerd, waardoor uploads/opnames naar de share zijn uitgeschakeld.\n\nDit pakket wordt normaal automatisch geïnstalleerd vanuit de vereisten van de integratie — probeer Home Assistant eenmaal opnieuw te starten. Als installatie nog steeds mislukt (bijv. een niet-ondersteunde OS/CPU-architectuur), zet dan het opslagdoel in de integratieopties op **Lokaal** of **FTP**."
+    },
+    "local_data_interface_available": {
+      "title": "Bosch Camera — Lokale gegevensinterface beschikbaar",
+      "description": "De lokale gegevensinterface kan nu worden ingeschakeld voor {camera}. Open de camera-app: Camera-instellingen > Meer > Lokale gegevensinterface."
     }
   },
   "system_health": {

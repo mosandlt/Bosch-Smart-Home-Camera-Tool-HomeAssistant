@@ -95,6 +95,7 @@ def _make_coord(events: list | None = None) -> SimpleNamespace:
             }
         },
         async_add_listener=MagicMock(return_value=MagicMock()),
+        local_data_interface_cache={},
     )
 
 
@@ -558,6 +559,7 @@ class TestSetupEntry:
                 }
             },
             async_add_listener=MagicMock(return_value=MagicMock()),
+            local_data_interface_cache={},
         )
         entry = SimpleNamespace(
             entry_id="01E",
@@ -606,6 +608,7 @@ class TestSetupEntry:
                 }
             },
             async_add_listener=MagicMock(return_value=MagicMock()),
+            local_data_interface_cache={},
         )
         entry = SimpleNamespace(
             entry_id="01E",
@@ -630,7 +633,9 @@ class TestSetupEntry:
         from custom_components.bosch_shc_camera.binary_sensor import async_setup_entry
 
         coord = SimpleNamespace(
-            data={}, async_add_listener=MagicMock(return_value=MagicMock())
+            data={},
+            async_add_listener=MagicMock(return_value=MagicMock()),
+            local_data_interface_cache={},
         )
         entry = SimpleNamespace(
             entry_id="01E",
@@ -667,6 +672,7 @@ class TestSetupEntry:
                 }
             },
             async_add_listener=MagicMock(return_value=MagicMock()),
+            local_data_interface_cache={},
         )
         entry = SimpleNamespace(
             entry_id="01E",
@@ -681,8 +687,9 @@ class TestSetupEntry:
             config_entry=entry,
             async_add_entities=lambda e, update_before_add=False: captured.extend(e),
         )
-        coord.async_add_listener.assert_called_once()
-        entry.async_on_unload.assert_called_once()
+        # local-data-interface listener + dynamic-devices listener
+        assert coord.async_add_listener.call_count == 2
+        assert entry.async_on_unload.call_count == 2
         listener = coord.async_add_listener.call_args[0][0]
 
         captured.clear()
@@ -945,6 +952,7 @@ class TestBinarySensorSetupEntry:
             },
             options={"enable_binary_sensors": True},
             async_add_listener=MagicMock(return_value=MagicMock()),
+            local_data_interface_cache={},
         )
         entry = SimpleNamespace(
             runtime_data=coord,
@@ -984,6 +992,7 @@ class TestBinarySensorSetupEntry:
             },
             options={},
             async_add_listener=MagicMock(return_value=MagicMock()),
+            local_data_interface_cache={},
         )
         entry = SimpleNamespace(
             runtime_data=coord,

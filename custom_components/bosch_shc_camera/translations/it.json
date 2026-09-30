@@ -624,6 +624,9 @@
       },
       "ai_recent_alert": {
         "name": "Allerta IA recente"
+      },
+      "local_data_interface": {
+        "name": "Interfaccia dati locale"
       }
     },
     "update": {
@@ -1032,6 +1035,10 @@
     "smb_unavailable": {
       "title": "Bosch Camera — Pacchetto SMB/NAS non installato",
       "description": "**{features}** è configurato per utilizzare una condivisione di rete SMB/NAS, ma il pacchetto Python opzionale `smbprotocol` non è installato, quindi i caricamenti/le registrazioni sulla condivisione sono disabilitati.\n\nQuesto pacchetto viene normalmente installato automaticamente in base ai requisiti dell'integrazione — prova a riavviare Home Assistant una volta. Se continua a non installarsi (ad es. un'architettura OS/CPU non supportata), imposta la destinazione di archiviazione su **Locale** o **FTP** nelle opzioni dell'integrazione."
+    },
+    "local_data_interface_available": {
+      "title": "Bosch Camera — Interfaccia dati locale disponibile",
+      "description": "L'interfaccia dati locale può ora essere attivata per {camera}. Apri l'app della telecamera: Impostazioni telecamera > Altro > Interfaccia dati locale."
     }
   },
   "system_health": {

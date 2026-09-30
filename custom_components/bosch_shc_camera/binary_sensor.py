@@ -32,7 +32,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -45,6 +45,7 @@ from .const import (
     MOTION_ACTIVE_WINDOW_MIN,
 )
 from .dynamic_devices import register_dynamic_camera_listener
+from .local_data_interface import STATE_ACTIVE
 from .time_utils import parse_bosch_timestamp
 
 _LOGGER = logging.getLogger(__name__)
@@ -93,6 +94,34 @@ async def async_setup_entry(
     for cam_id in known_cam_ids:
         entities.extend(_build_entities_for_cam(cam_id))
     async_add_entities(entities, update_before_add=False)
+
+    # The local-data-interface sensor exists only while the interface is
+    # enabled, which is discovered by a slow-tier poll after setup — so it is
+    # added by its own listener rather than the per-camera builder above.
+    ldi_added: set[str] = set()
+
+    @callback  # type: ignore[untyped-decorator]
+    def _add_ldi_entities() -> None:
+        new: list[Any] = []
+        # Forget cameras that left coordinator.data: their entity was removed
+        # with the device, so a camera that returns must get a fresh sensor.
+        ldi_added.intersection_update(coordinator.data or {})
+        for cam_id in sorted(coordinator.data or {}):
+            if cam_id in ldi_added:
+                continue
+            state = coordinator.local_data_interface_cache.get(cam_id, {})
+            if state.get("state") == STATE_ACTIVE:
+                ldi_added.add(cam_id)
+                new.append(
+                    BoschLocalDataInterfaceBinarySensor(
+                        coordinator, cam_id, config_entry
+                    )
+                )
+        if new:
+            async_add_entities(new, update_before_add=False)
+
+    _add_ldi_entities()
+    config_entry.async_on_unload(coordinator.async_add_listener(_add_ldi_entities))
 
     # Quality-Scale Gold `dynamic-devices`.
     config_entry.async_on_unload(
@@ -453,6 +482,52 @@ class BoschLanReachableBinarySensor(BoschBinarySensorEntity):
 # the prompt-context window silently also changes how long this binary
 # sensor stays on. See task spec / ai-camera-analysis plan.
 AI_RECENT_ALERT_WINDOW_MINUTES = 10
+
+LOCAL_DATA_INTERFACE_DESCRIPTION = BoschBinarySensorEntityDescription(
+    key="local_data_interface",
+    entity_category=EntityCategory.DIAGNOSTIC,
+    translation_key="local_data_interface",
+    entity_registry_enabled_default=True,
+    unique_id_suffix="local_data_interface",
+)
+
+
+class BoschLocalDataInterfaceBinarySensor(BoschBinarySensorEntity):
+    """ON while the camera's local data interface is enabled (read-only).
+
+    Created only once a poll saw it enabled. When the interface is later
+    reported disabled/unsupported the entity turns unavailable and drops the
+    username; a failed poll leaves the last value in place.
+    """
+
+    _unrecorded_attributes = frozenset({"username"})
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry, LOCAL_DATA_INTERFACE_DESCRIPTION)
+
+    @property
+    def _ldi_state(self) -> dict[str, Any]:
+        return self.coordinator.local_data_interface_cache.get(self._cam_id, {})  # type: ignore[no-any-return]
+
+    @property
+    def available(self) -> bool:
+        return bool(super().available) and self._ldi_state.get("state") == STATE_ACTIVE
+
+    @property
+    def is_on(self) -> bool | None:
+        return True if self._ldi_state.get("state") == STATE_ACTIVE else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if self._ldi_state.get("state") != STATE_ACTIVE:
+            return {}
+        return {"username": self._ldi_state.get("username", "")}
+
 
 AI_RECENT_ALERT_DESCRIPTION = BoschBinarySensorEntityDescription(
     key="ai_recent_alert",

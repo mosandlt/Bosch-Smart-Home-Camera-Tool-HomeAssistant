@@ -624,6 +624,9 @@
       },
       "ai_recent_alert": {
         "name": "AI recent alert"
+      },
+      "local_data_interface": {
+        "name": "Local data interface"
       }
     },
     "update": {
@@ -1068,6 +1071,10 @@
     "nvr_enabled_not_recording": {
       "title": "Bosch Camera — NVR enabled but not recording",
       "description": "**Enable NVR** is turned on in the integration options, but no camera is actually recording.\n\nTurning on **Enable NVR** only creates the per-camera NVR entities — it does not start recording by itself.\n\n**How to fix:** Go to Settings → Devices & Services → Bosch Smart Home Camera → pick a camera device, then enable the **NVR Mode** select and **NVR Recording** switch entities (they may be disabled/hidden by default), and turn the **NVR Recording** switch on.\n\n**event_buffered** mode records only around motion/person events (matches \"local save of events\"); **continuous** mode always records. For **event_buffered** mode, the global **Preroll seconds** / **Postroll seconds** options must also be set above 0, or nothing will ever be captured even with the switch on."
+    },
+    "local_data_interface_available": {
+      "title": "Bosch Camera — Local data interface available",
+      "description": "The local data interface can now be enabled for {camera}. Open the camera app: Camera settings > More > Local data interface."
     }
   },
   "system_health": {

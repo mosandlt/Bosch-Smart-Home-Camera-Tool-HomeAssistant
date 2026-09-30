@@ -30,6 +30,11 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
+from .local_data_interface import (
+    STATE_ACTIVE,
+    STATE_INACTIVE,
+    firmware_supports_ldi,
+)
 from .smb import smb_available, smb_dependent_features
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
@@ -229,6 +234,43 @@ def refresh_firmware_update_issues(coordinator: BoschCameraCoordinator) -> None:
         else:
             ir.async_delete_issue(coordinator.hass, DOMAIN, issue_id)
             coordinator._fw_update_alerted.discard(cam_id)
+
+
+def refresh_local_data_interface_issues(coordinator: BoschCameraCoordinator) -> None:
+    """Hint that the local data interface can be enabled in the camera app.
+
+    Raised only on a clean "inactive" status for a camera whose firmware
+    passes the gate; cleared once the interface is active or the firmware no
+    longer qualifies. Unsupported/unknown status leaves any existing issue
+    untouched. Idempotent, called once per coordinator tick.
+    """
+    from . import ir as ir  # type: ignore[attr-defined]
+
+    for cam_id, cam in (coordinator.data or {}).items():
+        info = cam.get("info", {})
+        fw = coordinator.firmware_cache.get(cam_id, {}).get("current")
+        gated = firmware_supports_ldi(fw or info.get("firmwareVersion"))
+        state = coordinator.local_data_interface_cache.get(cam_id, {}).get("state")
+        issue_id = f"local_data_interface_available_{cam_id}"
+
+        if gated and state == STATE_INACTIVE:
+            cam_title: str = info.get("title", cam_id)
+            ir.async_create_issue(
+                coordinator.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                is_persistent=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="local_data_interface_available",
+                translation_placeholders={"camera": cam_title},
+            )
+            if cam_id not in coordinator._ldi_hint_alerted:
+                coordinator._ldi_hint_alerted.add(cam_id)
+                _LOGGER.info("Local data interface can be enabled for %r", cam_title)
+        elif not gated or state == STATE_ACTIVE:
+            ir.async_delete_issue(coordinator.hass, DOMAIN, issue_id)
+            coordinator._ldi_hint_alerted.discard(cam_id)
 
 
 def refresh_smb_unavailable_issue(coordinator: BoschCameraCoordinator) -> None:

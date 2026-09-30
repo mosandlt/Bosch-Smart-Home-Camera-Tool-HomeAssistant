@@ -7,6 +7,13 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v17.0.0] - 2026-09-30
+
+### Added
+
+- **Local data interface diagnostic binary sensor.** Cameras on firmware 9.40.105 or newer get a read-only `binary_sensor` (diagnostic) that is shown while the local data interface is enabled in the camera app, with the interface's `username` as an attribute (excluded from the recorder; no password is ever exposed). It turns unavailable if the interface is later disabled. Polled on the slow tier only; Gen1 and older firmware are never queried, and a failed poll keeps the last value.
+- **Repairs hint when the local data interface can be enabled.** For a camera that qualifies but has the interface switched off, a non-fixable Repairs entry points to Camera settings > More > Local data interface in the camera app. It clears automatically once the interface is enabled or the firmware no longer qualifies.
+
 ## [v16.2.3] - 2026-09-09
 
 - **SMB share/server/username/password fields in the options flow could not be cleared** (GitHub [#70](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/70), seti1337). `smb_server`/`smb_share`/`smb_username`/`smb_password` were declared as bare `str` schema entries carrying only a `suggested_value` (no `default=`). beta-1 switched them to `TextSelector(TextSelectorConfig())` alone, which the reporter confirmed live did **not** fix it. beta-2's fix (adding an explicit `default=<persisted value>` to all four fields) also did **not** fix it, confirmed live by the reporter across an update, a full reinstall and multiple browsers/apps — see the beta-3 entry below for the actual root cause and fix; beta-2's stated explanation at the time was incorrect. The "SMB Freigabename included in the FTP path" part of the same report was investigated and is not an actual bug — `_sync_ftp_upload` never reads `smb_share`; the field visually "sticking" due to the clear bug above was almost certainly the source of that confusion.

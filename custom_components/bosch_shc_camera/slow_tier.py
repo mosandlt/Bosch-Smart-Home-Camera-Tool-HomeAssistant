@@ -39,6 +39,11 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from .const import CLOUD_API, SLOW_TIER_MAX_DEFER_SEC
+from .local_data_interface import (
+    LDI_ENDPOINT,
+    firmware_supports_ldi,
+    state_from_response,
+)
 from .models import get_model_config
 
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
@@ -466,6 +471,14 @@ async def _poll_slow_tier_endpoints(
                 "audioDetectionConfig",
             ]
         )
+        fw_current = coordinator.firmware_cache.get(cam_id, {}).get("current")
+        if firmware_supports_ldi(fw_current or cam_raw.get("firmwareVersion")):
+            endpoints.append(LDI_ENDPOINT)
+        else:
+            # Firmware no longer qualifies (or version unreadable): drop the
+            # stale status so the sensor/Repairs hint don't outlive the gate.
+            # getattr: pre-existing SimpleNamespace coordinator stubs lack it.
+            getattr(coordinator, "local_data_interface_cache", {}).pop(cam_id, None)
     # Gen2 Indoor II-only endpoints (alarm system + power-LED).
     # privacy_sound_override is added above (same as Gen1 Indoor).
     if hw in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
@@ -487,6 +500,11 @@ async def _poll_slow_tier_endpoints(
         if isinstance(fetch_result, BaseException):
             continue
         ep, ep_status, ep_data = fetch_result
+        if ep == LDI_ENDPOINT:
+            ldi_state = state_from_response(ep_status, ep_data)
+            if ldi_state is not None:
+                coordinator.local_data_interface_cache[cam_id] = ldi_state
+            continue
         if ep_status != 200 or ep_data is None:
             continue
         if ep == "wifiinfo":

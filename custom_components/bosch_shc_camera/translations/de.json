@@ -688,6 +688,9 @@
       },
       "ai_recent_alert": {
         "name": "KI-Alarm kürzlich"
+      },
+      "local_data_interface": {
+        "name": "Lokale Datenschnittstelle"
       }
     },
     "update": {
@@ -1132,6 +1135,10 @@
     "nvr_enabled_not_recording": {
       "title": "Bosch Kamera — NVR aktiviert, aber keine Aufzeichnung",
       "description": "**NVR aktivieren** ist in den Integrationsoptionen eingeschaltet, aber keine Kamera zeichnet tatsächlich auf.\n\nDas Einschalten von **NVR aktivieren** legt nur die kameraspezifischen NVR-Entitäten an — es startet die Aufzeichnung nicht von selbst.\n\n**Lösung:** Gehe zu Einstellungen → Geräte & Dienste → Bosch Smart Home Camera → wähle ein Kamera-Gerät aus, aktiviere dann die Entitäten **NVR-Modus** (Auswahl) und **NVR-Aufzeichnung** (Schalter) — sie sind standardmäßig deaktiviert/ausgeblendet — und schalte den Schalter **NVR-Aufzeichnung** ein.\n\nDer Modus **event_buffered** zeichnet nur rund um Bewegungs-/Personenereignisse auf (entspricht \"lokales Speichern von Ereignissen\"); **continuous** zeichnet immer auf. Für den Modus **event_buffered** müssen zusätzlich die globalen Optionen **Preroll-Sekunden** / **Postroll-Sekunden** größer als 0 sein, sonst wird trotz eingeschaltetem Schalter nie etwas aufgezeichnet."
+    },
+    "local_data_interface_available": {
+      "title": "Bosch Camera — Lokale Datenschnittstelle verfügbar",
+      "description": "Die lokale Datenschnittstelle kann jetzt für {camera} aktiviert werden. Öffne die Kamera-App: Kamera-Einstellungen > Mehr > Lokale Datenschnittstelle."
     }
   },
   "system_health": {

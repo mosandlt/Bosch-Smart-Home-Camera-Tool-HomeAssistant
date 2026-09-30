@@ -803,6 +803,9 @@ class BoschCameraCoordinator(
         # Audio detection config cache — keyed by cam_id, from GET /audioDetectionConfig
         # (Gen2 Audio-Plus). Contains: detectGlassBreak, detectFireAlarm (both bool).
         self.audio_detection_cache: dict[str, dict[str, Any]] = {}
+        # Local data interface status (fw >= 9.40.105).
+        # {"state": active|inactive|unsupported, "username"?: str}; absent = unknown.
+        self.local_data_interface_cache: dict[str, dict[str, Any]] = {}
         # Alarm settings cache — from GET /alarm_settings (Gen2 Indoor II only).
         # Contains: alarmMode, alarmDelayInSeconds, alarmActivationDelaySeconds,
         #          preAlarmMode, preAlarmDelayInSeconds
@@ -854,6 +857,7 @@ class BoschCameraCoordinator(
         # logged. Cleared once the update installs (upToDate flips back to True)
         # so the INFO re-fires for the next update.
         self._fw_update_alerted = BoolFieldView(self._sessions, "fw_update_alerted")
+        self._ldi_hint_alerted = BoolFieldView(self._sessions, "ldi_hint_alerted")
         # Tracks cam_ids for which a "event_buffered mode but preroll seconds
         # is 0" WARN has been logged (the ring silently never
         # spawns in this case). Cleared once nvr_preroll_seconds is set > 0
@@ -2045,6 +2049,14 @@ class BoschCameraCoordinator(
                     exc_info=True,
                 )
 
+            try:
+                self._refresh_local_data_interface_issues()
+            except Exception:
+                _LOGGER.debug(
+                    "Local-data-interface Repairs check failed (non-fatal)",
+                    exc_info=True,
+                )
+
             # Raise a Repairs issue when an SMB-dependent feature is
             # configured but the optional smbprotocol package isn't
             # installed — see _refresh_smb_unavailable_issue docstring.
@@ -2092,6 +2104,10 @@ class BoschCameraCoordinator(
         Thin delegator — see _refresh_notifications_disabled_issues docstring.
         """
         repairs.refresh_firmware_update_issues(self)
+
+    def _refresh_local_data_interface_issues(self) -> None:
+        """Hint that the local data interface can be enabled (thin delegator)."""
+        repairs.refresh_local_data_interface_issues(self)
 
     def _refresh_smb_unavailable_issue(self) -> None:
         """Create or clear a Repairs issue when smbprotocol is missing but needed.
@@ -2304,6 +2320,7 @@ class BoschCameraCoordinator(
         "lighting_options_cache",
         "intrusion_config_cache",
         "audio_detection_cache",
+        "local_data_interface_cache",
         "alarm_settings_cache",
         "alarm_status_cache",
         "_last_alarm_type",
@@ -2354,7 +2371,7 @@ class BoschCameraCoordinator(
     #       timestamp_set_at / ledlights_set_at / arming_set_at /
     #       intrusion_config_set_at / audio_detection_set_at / motion_set_at /
     #       alarm_settings_set_at / lighting_options_set_at / firmware_set_at /
-    #       slow_tier_deferred / _notif_disabled_logged / _fw_update_alerted /
+    #       slow_tier_deferred / _notif_disabled_logged / _fw_update_alerted / _ldi_hint_alerted /
     #       _nvr_preroll_zero_warned —
     #       thin FloatFieldView/BoolFieldView facades over _sessions (Session-
     #       State-Facade Slice 1, see session_state.py); purging _sessions
