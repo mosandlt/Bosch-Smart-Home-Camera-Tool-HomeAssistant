@@ -49,6 +49,7 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
 - [Architecture](#architecture)
   - [Network Connectivity](#network-connectivity) — required ports, VLAN/subnet pitfalls
 - [Streaming & Reliability](#streaming--reliability)
+- [Local data interface (fully local video)](#local-data-interface-fully-local-video) — Gen2 firmware 9.40.105+: stream with no cloud at all
 - [External Recorders (Frigate / BlueIris / go2rtc / Synology Surveillance Station / any RTSP NVR)](#external-recorders-frigate--blueiris--go2rtc--synology-surveillance-station--any-rtsp-nvr) — persistent credential-free RTSP endpoint
 - [Quality Scale: Platinum](#quality-scale-platinum)
 - [Features](#features)
@@ -180,8 +181,8 @@ The integration leaves no orphan files in `/config/www/`, no leftover entries in
 
 This integration ships two release trains:
 
-- **Beta** (`vX.Y.Z-beta-N`, e.g. `v16.1.1-beta-1`) — released as fixes/features land, for anyone who wants updates sooner. Usually shipped in response to a GitHub issue so the reporter can confirm before it goes stable. Consecutive fixes for the same upcoming release increment `N` (`-beta-1`, `-beta-2`, ...) rather than bumping the patch version — the patch version only advances once that cycle actually goes stable. Goes through the exact same CI gate as stable (tests/quality/secret-scan all still have to pass) — the only differences are that it's marked as a GitHub **pre-release** and doesn't need a full CHANGELOG.md entry yet (a missing entry falls back to a generic beta note instead of failing the release).
-- **Stable** (`vX.Y.Z`, e.g. `v16.1.6`) — this one, the default channel every install gets. Promoted **manually by the maintainer** once a beta has had some real-world testing — there's no fixed schedule. Released after the full CI gate (tests, mypy --strict, quality checks, secret scan) is green and the change is documented in [CHANGELOG.md](CHANGELOG.md).
+- **Beta** (`vX.Y.Z-beta-N`, e.g. `v17.1.0-beta-1`) — released as fixes/features land, for anyone who wants updates sooner. Usually shipped in response to a GitHub issue so the reporter can confirm before it goes stable. Consecutive fixes for the same upcoming release increment `N` (`-beta-1`, `-beta-2`, ...) rather than bumping the patch version — the patch version only advances once that cycle actually goes stable. Goes through the exact same CI gate as stable (tests/quality/secret-scan all still have to pass) — the only differences are that it's marked as a GitHub **pre-release** and doesn't need a full CHANGELOG.md entry yet (a missing entry falls back to a generic beta note instead of failing the release).
+- **Stable** (`vX.Y.Z`, e.g. `v17.0.0`) — this one, the default channel every install gets. Promoted **manually by the maintainer** once a beta has had some real-world testing — there's no fixed schedule. Released after the full CI gate (tests, mypy --strict, quality checks, secret scan) is green and the change is documented in [CHANGELOG.md](CHANGELOG.md).
 
 **Promotion (beta → stable).** When a beta has accumulated enough real-world confirmation, the maintainer manually runs [`promote-beta.yml`](.github/workflows/promote-beta.yml), which promotes the newest open beta to a stable release, provided its required CI checks are green. The resulting stable release is a collection of everything shipped across that version's beta iterations, not just the single newest fix. If you're testing a beta and want your feedback to count before it ships stable, report back on the linked GitHub issue promptly — there's no fixed deadline, but earlier is better. (Operational note: unlike a beta, a stable release's CHANGELOG.md section is mandatory — if one goes to promote without a matching `## [vX.Y.Z]` entry already written, the promotion tags `main` but the actual GitHub Release publish step fails until the entry is added and the workflow is re-run.)
 
@@ -517,6 +518,8 @@ The integration supports three connection modes, configurable in **Settings → 
 | **Local** | Direct LAN only — no internet required. Uses a TLS proxy (TCP→TLS + RTSP transport rewrite) since FFmpeg can't handle RTSPS + Digest auth + self-signed cert natively. TCP keep-alive on all proxy sockets. |
 | **Remote** | Always via Bosch cloud proxy. Faster snapshots (~0.4–1.9 s). Sessions run for up to 60 minutes; restart with one tap from the live-stream switch. |
 
+A camera with an active [local data interface](#local-data-interface-fully-local-video) and a stored password ignores this setting: it always streams locally via go2rtc and never uses the cloud.
+
 ### Stream Status Sensor
 
 Every camera gets a `sensor.bosch_{name}_stream_status` entity that exposes the current live stream state as a persistent HA sensor:
@@ -632,6 +635,41 @@ The card's HLS.js configuration is tuned to prevent HA's stream component from k
 - **SRI integrity hash** — hls.js is loaded from jsdelivr with a pinned `hls.js@1.6.16` + matching `sha384`. Any drift (jsdelivr patch release) blocks the load instead of running an unverified bundle.
 
 The player buffer profile is independent of the **Response** info field on the card, which shows the Bosch-API server-side `bufferingTime` hint (~500 ms LOCAL, ~1000 ms REMOTE) and is unrelated to the client-side hls.js buffer.
+
+## Local data interface (fully local video)
+
+Gen2 cameras on firmware **9.40.105 or newer** have a camera-side **local data interface**, enabled per camera in the Bosch camera app (**Camera settings > More > Local data interface**). Once it is enabled and you have stored the camera's password in this integration, the camera streams **fully locally**: the live view never touches the Bosch cloud — no token, no connection request, no cloud session — and there is **no automatic fallback to the cloud**.
+
+### Set it up
+
+1. Enable **Local data interface** for the camera in the Bosch camera app. The integration shows a diagnostic `binary_sensor` (**Local data interface**, with the interface `username` as an attribute) while it is enabled; the password is never exposed.
+2. Read the interface password from the **sticker on the camera**.
+3. **Settings → Devices & Services → Bosch Smart Home Camera → Configure → Authentication → "Set local data interface passwords"**. One password field per camera: leave a field empty to keep the stored password; select a camera under "Remove stored password for" to delete its password. The username is fixed (`localuser`) and not configurable.
+
+### How it behaves
+
+- **Active interface + stored password = local only.** The stream is opened on your LAN (RTSP over TLS, port 9554). No cloud stream session is opened, and cloud/LAN snapshot requests and the periodic cloud RCP fetch are skipped for that camera. If the camera is unreachable, the password is wrong or privacy mode is on, the stream stays unavailable instead of using the cloud.
+- **go2rtc is the single reader of the camera.** The camera allows only about 3 concurrent sessions, so the live view, **Mini-NVR** (including pre-roll) and the **Frigate / external-recorder endpoint** all read go2rtc's local restream instead of opening their own connections. This needs the go2rtc integration; without it the stream fails closed (no cloud) and a Repairs issue explains why.
+- **Video only.** The stream has no audio track, so audio features are unavailable for such a camera.
+- **Privacy mode:** the camera stops the stream while privacy mode is ON; this is treated as a normal closed state, not an error.
+- **Other cameras are unchanged.** A camera without a stored password, or whose interface is not active, behaves exactly as before (LOCAL / REMOTE / AUTO).
+- **Writes still use the cloud.** Privacy, light, notifications and other settings are still written through the Bosch cloud.
+
+### Repairs hints
+
+| Repairs issue | Shown when | Clears when |
+|---|---|---|
+| Local data interface available | Camera qualifies (firmware 9.40.105+) but the interface is off — enable it in the camera app | Interface enabled or firmware no longer qualifies |
+| Needs a password | Interface is enabled but no password is stored | Password set, or interface disabled |
+| Password rejected | The camera rejected the stored password | Next successful open |
+| Unreachable | Camera unreachable for more than 10 minutes while local-only mode is wanted (not raised in privacy mode) | Next successful open |
+| go2rtc needed | go2rtc is unavailable for more than 2 minutes while local-only mode is wanted | go2rtc available and stream opens |
+
+### Limits
+
+- Snapshots: no live snapshot is fetched for a local-only camera (cloud and LAN snapshot requests are skipped), so cached images are used.
+- The Frigate endpoint's **High** and **Low** variants map to the same single go2rtc stream for such a camera.
+- Gen1 cameras and firmware older than 9.40.105 are never queried for this interface.
 
 ## External Recorders (Frigate / BlueIris / go2rtc / Synology Surveillance Station / any RTSP NVR)
 
@@ -2305,11 +2343,13 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest: **v16.1.7** — see the GitHub release page for full notes:
-[**v16.1.7 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v16.1.7)
+Latest stable: **v17.0.0** · latest beta: **v17.1.0-beta-1** — see the GitHub release page for full notes:
+[**v17.0.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v17.0.0)
 
 | Version | Highlights |
 |---|---|
+| **v17.1.0-beta-1** | **Fully local video via the local data interface (beta).** With the interface active and its password stored, a Gen2 camera streams over your LAN with no cloud use at all and no cloud fallback; go2rtc is the single reader feeding the live view, Mini-NVR (incl. pre-roll) and the external-recorder endpoint. New Repairs hints for a missing/rejected password, an unreachable camera and a missing go2rtc. See [Local data interface](#local-data-interface-fully-local-video). |
+| **v17.0.0** | **Local data interface status.** New diagnostic binary sensor on Gen2 cameras with firmware 9.40.105+ (shown while the interface is enabled in the camera app) plus a Repairs hint when it can be enabled. |
 | **v16.1.7** | **Mini-NVR pre-roll ring diagnostics + lowered minimum HA version.** GitHub [#64](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/64) follow-up: the pre-roll ring can still vanish silently minutes after spawning on some setups — added debug logging that traces exactly what stopped it and why, so the next report can pin down the real cause. Also lowered the minimum required Home Assistant version from `2026.7.1` to the actual floor the integration needs (`2026.7.0`). |
 | **v16.1.6** | **Mini-NVR pre-roll ring reliability fixes.** Fixes a case where the pre-roll ring's ffmpeg could exit immediately with `rc=234` ("unspecified size") and never write any cache segments — ffmpeg's default probe window was too small for the ring's own RTSP session (GitHub [#64](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/64)); also fixes a case where it could hang completely silently instead. Also fixes camera-light switches getting stuck showing the wrong on/off state, and a slow SMB media-source browse hang when the NAS is unreachable. |
 | **v16.1.5** | **Mini-NVR diagnostics + hardening.** Clearer warnings when "Event Buffered" mode is picked without a non-zero pre-roll duration, or when a startup platform-load race could leave the recorder running in the wrong mode. Fixes an FCM push-listener crash on newer Home Assistant/Python versions (upstream library bug, now handled gracefully), plus several defense-in-depth SSRF/security hardening fixes backported from the upstream Home Assistant Core submission review. |
@@ -2465,7 +2505,7 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v16.1.7** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v17.0.0** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.12.1** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.8.2** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.7.1** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
