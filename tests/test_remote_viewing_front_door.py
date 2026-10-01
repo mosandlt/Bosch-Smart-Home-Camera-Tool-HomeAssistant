@@ -654,6 +654,44 @@ class TestPathRewriteRelayUnit:
         assert b"rtsp://127.0.0.1:1/h/rtsp_tunnel" in relay._iw.written[0]
 
     @pytest.mark.asyncio
+    async def test_drain_requests_answers_udp_only_setup_with_461(self):
+        """A UDP-only SETUP gets 461 (client retries over TCP), never forwarded;
+        a TCP-interleaved SETUP right behind it is forwarded (GitHub #74)."""
+
+        class _Writer:
+            def __init__(self) -> None:
+                self.written: list[bytes] = []
+
+            def write(self, data: bytes) -> None:
+                self.written.append(data)
+
+            async def drain(self) -> None:
+                return None
+
+        relay = _PathRewriteRelay(
+            "camIIIIII",
+            client_reader=None,  # type: ignore[arg-type]
+            client_writer=_Writer(),  # type: ignore[arg-type]
+            target=RemoteTarget(port=1, path="/h/rtsp_tunnel"),
+            first_request=b"",
+        )
+        relay._iw = _Writer()  # type: ignore[assignment]
+        udp = (
+            b"SETUP rtsp://127.0.0.1/rtsp_tunnel/track1 RTSP/1.0\r\nCSeq: 4\r\n"
+            b"Transport: RTP/AVP;unicast;client_port=5000-5001\r\n\r\n"
+        )
+        tcp = (
+            b"SETUP rtsp://127.0.0.1/rtsp_tunnel/track1 RTSP/1.0\r\nCSeq: 5\r\n"
+            b"Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n"
+        )
+        assert await relay._drain_requests(udp + tcp) == b""
+        assert relay._cw.written == [  # type: ignore[attr-defined]
+            b"RTSP/1.0 461 Unsupported Transport\r\nCSeq: 4\r\n\r\n"
+        ]
+        assert len(relay._iw.written) == 1  # type: ignore[attr-defined]
+        assert b"CSeq: 5" in relay._iw.written[0]  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
     async def test_drain_requests_waits_for_full_body(self):
         """Content-Length body arriving in a separate chunk must not be
         forwarded until the full body has accumulated in buf."""

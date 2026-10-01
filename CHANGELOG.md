@@ -12,6 +12,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 ### Fixed
 
 - **Apple Home / HomeKit live view without an active session.** Opening a camera directly in Apple Home while no live session was running failed with `Camera has no stream source`, because HomeKit asks for the stream source before anything had opened the session. The camera now opens the live session on that request, like the existing play-stream and WebRTC paths, and waits for the local pre-warm. It stays passive while Home Assistant probes WebRTC providers (entity setup, go2rtc reload), so idle cameras do not open sessions at startup. Privacy mode still blocks it. GitHub #74.
+- **Local and remote viewing front-door for clients that ask for UDP.** A client that does not force TCP, such as the ffmpeg Apple Home / HomeKit starts, failed with `Nonmatching transport in server reply`: the camera side only serves TCP-interleaved RTP, so the reply did not match the client's UDP request. The front-door now answers a SETUP that offers no TCP option with RTSP 461, which makes the client retry over TCP. Clients that already use TCP (Frigate, go2rtc, Home Assistant's stream component) are unaffected. GitHub #74.
 
 ## [v17.2.0] - 2026-09-30
 

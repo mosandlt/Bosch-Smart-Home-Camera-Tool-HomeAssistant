@@ -96,6 +96,8 @@ from .frigate_endpoint import (
     _rewrite_request_uri,
     content_length,
     find_rtsp_message_end,
+    is_udp_only_setup,
+    unsupported_transport_reply,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -225,6 +227,13 @@ class _PathRewriteRelay:
                 if len(buf) < body:
                     return req + buf  # body incomplete — wait for more
                 req, buf = req + buf[:body], buf[body:]
+            if is_udp_only_setup(req):
+                # The inner TLS proxy answers every SETUP with TCP-interleaved
+                # (UDP→TCP rewrite), which a UDP-only client such as HomeKit's
+                # ffmpeg rejects as "Nonmatching transport". 461 makes it retry.
+                self._cw.write(unsupported_transport_reply(req))
+                await self._cw.drain()
+                continue
             self._iw.write(_rewrite_request_uri(req, self._rewritten_uri(req)))
             await self._iw.drain()
         return b""

@@ -200,6 +200,30 @@ def extract_header(buf: bytes, name: str) -> str | None:
     return None
 
 
+def is_udp_only_setup(request: bytes) -> bool:
+    """True for a SETUP whose Transport header offers no TCP-interleaved option.
+
+    The camera only serves TCP-interleaved RTP, so such a client (ffmpeg without
+    ``-rtsp_transport tcp``, e.g. HomeKit's) would get a reply that does not
+    match its UDP request and abort with "Nonmatching transport in server
+    reply". A SETUP without a Transport header is left alone.
+    """
+    parsed = parse_request_start_line(request)
+    if parsed is None or parsed[0] != "SETUP":
+        return False
+    transport = extract_header(request, "Transport")
+    if transport is None:
+        return False
+    offered = transport.lower()
+    return "interleaved" not in offered and "/tcp" not in offered
+
+
+def unsupported_transport_reply(request: bytes) -> bytes:
+    """RTSP 461 for ``request``: makes the client retry its SETUP over TCP."""
+    cseq = extract_header(request, "CSeq") or "0"
+    return f"RTSP/1.0 461 Unsupported Transport\r\nCSeq: {cseq}\r\n\r\n".encode()
+
+
 def has_authorization_header(buf: bytes) -> bool:
     """True if the request headers contain an ``Authorization:`` line."""
     return extract_header(buf, "Authorization") is not None
@@ -522,6 +546,12 @@ class _Relay:
                 if len(buf) < body:
                     return req + buf  # body incomplete — wait for more
                 req, buf = req + buf[:body], buf[body:]
+            if is_udp_only_setup(req):
+                # RTSP 461 makes the client retry the SETUP over TCP (ffmpeg and
+                # VLC both do), instead of failing on a mismatched reply.
+                self._cw.write(unsupported_transport_reply(req))
+                await self._cw.drain()
+                continue
             parsed = parse_request_start_line(req)
             if parsed and self._challenge:
                 method, uri = parsed

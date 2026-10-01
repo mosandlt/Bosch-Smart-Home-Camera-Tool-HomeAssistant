@@ -1545,3 +1545,81 @@ async def test_relay_run_awaits_wait_closed_on_both_writers() -> None:
 
     inner_writer.wait_closed.assert_awaited_once()
     relay._cw.wait_closed.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# UDP-only SETUP → 461 so the client retries over TCP (GitHub #74, HomeKit)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("transport", "udp_only"),
+    [
+        ("RTP/AVP/UDP;unicast;client_port=5000-5001", True),
+        ("RTP/AVP;unicast;client_port=5000-5001", True),
+        ("RTP/AVP/TCP;unicast;interleaved=0-1", False),
+        ("RTP/AVP/TCP;unicast", False),
+        ("RTP/AVP/TCP;interleaved=0-1,RTP/AVP;unicast;client_port=5000-5001", False),
+        (None, False),
+        ("rtp/avp;unicast;client_port=5000-5001", True),
+        ("RTP/AVP/TCP;UNICAST;INTERLEAVED=0-1", False),
+    ],
+)
+def test_is_udp_only_setup_transport_header(transport: str | None, udp_only: bool):
+    """Only a Transport header with no TCP option makes a SETUP UDP-only."""
+    header = f"Transport: {transport}\r\n" if transport else ""
+    req = f"SETUP rtsp://h/rtsp_tunnel/track1 RTSP/1.0\r\nCSeq: 3\r\n{header}\r\n"
+    assert fe.is_udp_only_setup(req.encode()) is udp_only
+
+
+def test_is_udp_only_setup_ignores_other_methods():
+    """A non-SETUP request is never rejected, whatever its headers say."""
+    req = (
+        b"DESCRIBE rtsp://h/x RTSP/1.0\r\nCSeq: 1\r\nTransport: RTP/AVP;unicast\r\n\r\n"
+    )
+    assert fe.is_udp_only_setup(req) is False
+    assert fe.is_udp_only_setup(b"not rtsp at all\r\n\r\n") is False
+
+
+async def test_udp_only_setup_answered_with_461_not_forwarded():
+    """A UDP-only SETUP gets 461 + its CSeq back and never reaches the camera."""
+    to_client: list[bytes] = []
+    to_camera: list[bytes] = []
+
+    class _Writer:
+        def __init__(self, sink: list[bytes]) -> None:
+            self._sink = sink
+
+        def write(self, data: bytes) -> None:
+            self._sink.append(data)
+
+        async def drain(self) -> None:
+            pass
+
+    relay = fe._Relay.__new__(fe._Relay)
+    relay._cam = "camXXXXXX"
+    relay._iw = _Writer(to_camera)
+    relay._cw = _Writer(to_client)
+    relay._challenge = None
+    relay._target = InnerTarget(9999, "user", "pass")
+
+    udp = (
+        b"SETUP rtsp://h/rtsp_tunnel/track1 RTSP/1.0\r\nCSeq: 7\r\n"
+        b"Transport: RTP/AVP/UDP;unicast;client_port=5000-5001\r\n\r\n"
+    )
+    tcp = (
+        b"SETUP rtsp://h/rtsp_tunnel/track1 RTSP/1.0\r\nCSeq: 8\r\n"
+        b"Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n"
+    )
+    assert await relay._drain_requests(udp + tcp) == b""
+
+    assert to_client == [b"RTSP/1.0 461 Unsupported Transport\r\nCSeq: 7\r\n\r\n"]
+    assert to_camera == [tcp]
+
+    to_client.clear()
+    no_cseq = (
+        b"SETUP rtsp://h/rtsp_tunnel/track1 RTSP/1.0\r\n"
+        b"TRANSPORT: RTP/AVP;unicast;client_port=5000-5001\r\n\r\n"
+    )
+    assert await relay._drain_requests(no_cseq) == b""
+    assert to_client == [b"RTSP/1.0 461 Unsupported Transport\r\nCSeq: 0\r\n\r\n"]
