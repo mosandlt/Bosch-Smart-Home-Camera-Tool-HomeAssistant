@@ -216,6 +216,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     # 1×1 black JPEG — prevents HTTP 500 when no cached image available
     _PLACEHOLDER_JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.' \",#\x1c\x1c(7),01444\x1f'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x08\x01\x01\x00\x00?\x00T\xdf\xb2\x80\x01\xff\xd9"
     _attr_has_entity_name = True
+    _probing_providers = False
     # The (redacted) stream/proxy URLs rotate on every reconnect, so recording
     # them churns the `state_attributes` table with no history value.
     # Keep them visible live; never historize them.
@@ -1013,6 +1014,43 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             offer_sdp, session_id, send_message
         )
 
+    async def async_refresh_providers(self, *, write_state: bool = True) -> None:
+        """Probe WebRTC providers without letting stream_source() open a session."""
+        self._probing_providers = True
+        try:
+            await super().async_refresh_providers(write_state=write_state)
+        finally:
+            self._probing_providers = False
+
+    async def _auto_open_live_connection(self, caller: str) -> bool:
+        """Open the live session for a caller that only asks for the source.
+
+        Returns False when no session can be had (privacy mode, failed start,
+        pre-warm timeout). Privacy mode returns False instead of raising: the
+        callers of stream_source() expect None, not an exception.
+        """
+        shc = self.coordinator.shc_state_cache.get(self._cam_id, {})
+        if shc.get("privacy_mode") is True:
+            return False
+        _LOGGER.debug(
+            "%s: %s — auto-opening live connection", self._display_name, caller
+        )
+        result = await self.coordinator.try_live_connection(self._cam_id)
+        if result is STREAM_START_SKIPPED:
+            _LOGGER.debug(
+                "%s: %s — coalescing into an in-progress start",
+                self._display_name,
+                caller,
+            )
+        elif not result:
+            _LOGGER.warning(
+                "%s: %s — live connection failed", self._display_name, caller
+            )
+            return False
+        else:
+            self.coordinator.async_update_listeners()
+        return await self._wait_for_prewarm(caller)
+
     async def stream_source(self) -> str | None:
         """Return RTSP URL when a live connection has been opened.
 
@@ -1020,10 +1058,22 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         FFmpeg can connect via plain TCP while the proxy handles TLS to the camera.
         REMOTE streams use rtsps:// directly (Bosch cloud proxy has valid certs).
 
-        Returns None when no live session is active (switch is OFF).
+        Opens the live session first when none is active (HomeKit asks for the
+        source cold). Returns None in privacy mode or when the start fails.
         Always reads from live_connections (real-time) instead of coordinator
         data cache to avoid stale URLs after session renewal or mode switch.
         """
+        # HomeKit (and any other caller of camera.async_get_stream_source) asks
+        # for the source directly, with no play_stream/WebRTC entry point that
+        # could open the session first — open it here, like those paths do.
+        # Not while HA core probes WebRTC providers: that runs on every entity
+        # add, go2rtc (re)load and OFFLINE→ONLINE flip, and would open a Bosch
+        # session for every idle camera.
+        if not self.coordinator.live_connections.get(self._cam_id):
+            if self._probing_providers or not await self._auto_open_live_connection(
+                "stream_source"
+            ):
+                return None
         # Read from live_connections (updated immediately) instead of
         # coordinator data cache (updated on next refresh cycle)
         live = self.coordinator.live_connections.get(self._cam_id, {})

@@ -2322,11 +2322,14 @@ class TestStreamSourceTransport:
     async def test_no_session_returns_none(
         self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
-        """No live_connections entry → None (HA sees stream_source==None
-        and returns 503 to the WebSocket caller, which is the documented
-        graceful behavior — see test_supported_features_always_advertises_stream)."""
+        """No live_connections entry and the auto-open fails → None (HA sees
+        stream_source==None and returns 503 to the WebSocket caller, which is the
+        documented graceful behavior — see
+        test_supported_features_always_advertises_stream)."""
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
+        stub_coord_extra.shc_state_cache = {}
+        stub_coord_extra.try_live_connection = AsyncMock(return_value=None)
         cam = BoschCamera(stub_coord_extra, CAM_ID, stub_entry_extra)
         url = await cam.stream_source()
         assert url is None
@@ -3886,6 +3889,8 @@ class TestStreamSourceR5:
         from custom_components.bosch_shc_camera.camera import BoschCamera
 
         entity = _stub_entity_r5()
+        entity._probing_providers = False
+        entity._auto_open_live_connection = AsyncMock(return_value=False)
         result = await BoschCamera.stream_source(entity)
         assert result is None, (
             "stream_source must return None when live_connections is empty"

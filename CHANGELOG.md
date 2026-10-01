@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v17.2.1] - 2026-10-01
+
+### Fixed
+
+- **Apple Home / HomeKit live view without an active session.** Opening a camera directly in Apple Home while no live session was running failed with `Camera has no stream source`, because HomeKit asks for the stream source before anything had opened the session. The camera now opens the live session on that request, like the existing play-stream and WebRTC paths, and waits for the local pre-warm. It stays passive while Home Assistant probes WebRTC providers (entity setup, go2rtc reload), so idle cameras do not open sessions at startup. Privacy mode still blocks it. GitHub #74.
+
 ## [v17.2.0] - 2026-09-30
 
 ### Added
