@@ -89,6 +89,7 @@ from typing import Any
 
 from .frigate_endpoint import (
     AUTH_NONE,
+    CSeqCompensation,
     FrontDoorConfig,
     FrontDoorRunner,
     Relay,
@@ -97,7 +98,6 @@ from .frigate_endpoint import (
     content_length,
     find_rtsp_message_end,
     is_udp_only_setup,
-    unsupported_transport_reply,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ class RemoteTarget:
     keep_track: bool = False
 
 
-class _PathRewriteRelay:
+class _PathRewriteRelay(CSeqCompensation):
     """Relays one downstream client <-> inner-proxy connection, rewriting
     every forwarded RTSP request's URI to the CURRENT session's hash path.
 
@@ -231,9 +231,10 @@ class _PathRewriteRelay:
                 # The inner TLS proxy answers every SETUP with TCP-interleaved
                 # (UDP→TCP rewrite), which a UDP-only client such as HomeKit's
                 # ffmpeg rejects as "Nonmatching transport". 461 makes it retry.
-                self._cw.write(unsupported_transport_reply(req))
+                self._cw.write(self._reject_udp_setup(req))
                 await self._cw.drain()
                 continue
+            req = self._shift_request(req)
             self._iw.write(_rewrite_request_uri(req, self._rewritten_uri(req)))
             await self._iw.drain()
         return b""
@@ -247,8 +248,9 @@ class _PathRewriteRelay:
                 chunk = await self._ir.read(65536)
                 if not chunk:
                     break
-                self._cw.write(chunk)
-                await self._cw.drain()
+                if data := self._shift_reply(chunk):
+                    self._cw.write(data)
+                    await self._cw.drain()
         except (ConnectionError, OSError):
             pass
         finally:

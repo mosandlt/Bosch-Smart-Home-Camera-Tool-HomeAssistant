@@ -224,6 +224,102 @@ def unsupported_transport_reply(request: bytes) -> bytes:
     return f"RTSP/1.0 461 Unsupported Transport\r\nCSeq: {cseq}\r\n\r\n".encode()
 
 
+_CSEQ_RE = re.compile(rb"^(cseq:[ \t]*)(\d+)", re.IGNORECASE | re.MULTILINE)
+
+
+def shift_cseq(message: bytes, delta: int) -> bytes:
+    """Add ``delta`` to the CSeq value in the head of an RTSP message."""
+    sep = message.find(b"\r\n\r\n")
+    head, rest = (message[:sep], message[sep:]) if sep >= 0 else (message, b"")
+    return (
+        _CSEQ_RE.sub(
+            lambda m: m.group(1) + str(max(int(m.group(2)) + delta, 0)).encode(),
+            head,
+            count=1,
+        )
+        + rest
+    )
+
+
+class _ReplyCSeqShifter:
+    """Add ``delta`` to the CSeq of every RTSP reply in a byte stream.
+
+    Interleaved ``$`` frames pass through untouched and are never buffered
+    beyond their 4-byte header. Anything that is neither a ``$`` frame nor an
+    RTSP reply is passed through as-is from then on.
+    """
+
+    def __init__(self, delta: int) -> None:
+        self.delta = delta
+        self._buf = b""
+        self._frame_left = 0
+        self._raw = False
+
+    def feed(self, chunk: bytes) -> bytes:
+        if self._raw:
+            return chunk
+        self._buf += chunk
+        out = bytearray()
+        while self._buf:
+            if self._frame_left:
+                take = self._buf[: self._frame_left]
+                out += take
+                self._buf = self._buf[len(take) :]
+                self._frame_left -= len(take)
+                continue
+            if self._buf[:1] == b"$":
+                if len(self._buf) < 4:
+                    break
+                self._frame_left = 4 + int.from_bytes(self._buf[2:4], "big")
+                continue
+            if not b"RTSP/".startswith(self._buf[:5]):
+                self._raw = True
+                out += self._buf
+                self._buf = b""
+                break
+            end = find_rtsp_message_end(self._buf)
+            if end < 0:
+                if len(self._buf) > _MAX_HEAD_BYTES:
+                    self._raw = True
+                    out += self._buf
+                    self._buf = b""
+                break
+            body = content_length(self._buf[:end])
+            if len(self._buf) < end + body:
+                break
+            out += shift_cseq(self._buf[:end], self.delta) + self._buf[end : end + body]
+            self._buf = self._buf[end + body :]
+        return bytes(out)
+
+
+class CSeqCompensation:
+    """Keep the CSeq sequence the camera side sees contiguous.
+
+    A request answered locally (the 461 for a UDP-only SETUP) never reaches the
+    camera, so the client's next request would arrive with a CSeq gap, which the
+    Bosch cloud proxy answers with a bare ``400 Bad Request``. Requests are
+    renumbered on the way in and replies on the way back, only after the first
+    swallowed request.
+    """
+
+    _swallowed = 0
+    _reply_shifter: _ReplyCSeqShifter | None = None
+
+    def _reject_udp_setup(self, request: bytes) -> bytes:
+        """Record a locally answered request and return the 461 reply for it."""
+        self._swallowed += 1
+        if self._reply_shifter is None:
+            self._reply_shifter = _ReplyCSeqShifter(self._swallowed)
+        self._reply_shifter.delta = self._swallowed
+        return unsupported_transport_reply(request)
+
+    def _shift_request(self, request: bytes) -> bytes:
+        return shift_cseq(request, -self._swallowed) if self._swallowed else request
+
+    def _shift_reply(self, chunk: bytes) -> bytes:
+        return self._reply_shifter.feed(chunk) if self._reply_shifter else chunk
+
+
 def has_authorization_header(buf: bytes) -> bool:
     """True if the request headers contain an ``Authorization:`` line."""
     return extract_header(buf, "Authorization") is not None
@@ -389,7 +485,7 @@ async def _close_writer(writer: asyncio.StreamWriter) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class _Relay:
+class _Relay(CSeqCompensation):
     """Handles one downstream client ↔ inner-proxy connection."""
 
     def __init__(
@@ -549,9 +645,10 @@ class _Relay:
             if is_udp_only_setup(req):
                 # RTSP 461 makes the client retry the SETUP over TCP (ffmpeg and
                 # VLC both do), instead of failing on a mismatched reply.
-                self._cw.write(unsupported_transport_reply(req))
+                self._cw.write(self._reject_udp_setup(req))
                 await self._cw.drain()
                 continue
+            req = self._shift_request(req)
             parsed = parse_request_start_line(req)
             if parsed and self._challenge:
                 method, uri = parsed
@@ -579,8 +676,9 @@ class _Relay:
                 chunk = await self._ir.read(65536)
                 if not chunk:
                     break
-                self._cw.write(chunk)
-                await self._cw.drain()
+                if data := self._shift_reply(chunk):
+                    self._cw.write(data)
+                    await self._cw.drain()
         except (ConnectionError, OSError):
             pass
         finally:

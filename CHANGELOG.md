@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v17.2.2] - 2026-10-02
+
+### Fixed
+
+- **Apple Home / HomeKit over a cloud (remote) connection.** The v17.2.1 fix made the viewing front-door reject a UDP-only SETUP with RTSP 461 so the client retries over TCP. The camera side then saw a gap in the request numbering (CSeq 1, 2, 4, 5) and answered the retry with a bare `400 Bad Request`, so ffmpeg still never reached PLAY. The front-door now keeps the numbering towards the camera contiguous after such a rejection and maps the replies back for the client. Clients that already use TCP are unaffected. Applies to the local and the remote front-door. GitHub #74.
+
 ## [v17.2.1] - 2026-10-01
 
 ### Fixed

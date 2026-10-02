@@ -1614,7 +1614,8 @@ async def test_udp_only_setup_answered_with_461_not_forwarded():
     assert await relay._drain_requests(udp + tcp) == b""
 
     assert to_client == [b"RTSP/1.0 461 Unsupported Transport\r\nCSeq: 7\r\n\r\n"]
-    assert to_camera == [tcp]
+    # The camera never saw CSeq 7, so the TCP retry (CSeq 8) is renumbered to 7.
+    assert to_camera == [tcp.replace(b"CSeq: 8", b"CSeq: 7")]
 
     to_client.clear()
     no_cseq = (
@@ -1623,3 +1624,160 @@ async def test_udp_only_setup_answered_with_461_not_forwarded():
     )
     assert await relay._drain_requests(no_cseq) == b""
     assert to_client == [b"RTSP/1.0 461 Unsupported Transport\r\nCSeq: 0\r\n\r\n"]
+
+
+def test_shift_cseq_only_touches_the_head():
+    """CSeq is renumbered once, in the head; a CSeq-looking body line is left alone."""
+    msg = b"ANNOUNCE rtsp://h/x RTSP/1.0\r\ncseq:  9\r\n\r\nCSeq: 9\r\n"
+    assert fe.shift_cseq(msg, -2) == (
+        b"ANNOUNCE rtsp://h/x RTSP/1.0\r\ncseq:  7\r\n\r\nCSeq: 9\r\n"
+    )
+    assert fe.shift_cseq(b"RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n", -5) == (
+        b"RTSP/1.0 200 OK\r\nCSeq: 0\r\n\r\n"
+    )
+    assert fe.shift_cseq(b"no cseq here\r\n\r\n", 1) == b"no cseq here\r\n\r\n"
+    assert fe.shift_cseq(b"CSeq: 4 no terminator", 1) == b"CSeq: 5 no terminator"
+
+
+def test_reply_shifter_renumbers_replies_and_passes_frames_through():
+    """Replies get +delta; interleaved frames are untouched, even split across chunks."""
+    shifter = fe._ReplyCSeqShifter(1)
+    reply = b"RTSP/1.0 200 OK\r\nCSeq: 3\r\nContent-Length: 4\r\n\r\nbody"
+    frame = b"$\x00\x00\x05hello"
+    stream = reply + frame + b"RTSP/1.0 200 OK\r\nCSeq: 4\r\n\r\n"
+    out = b""
+    for i in range(0, len(stream), 3):  # worst case: 3-byte chunks
+        out += shifter.feed(stream[i : i + 3])
+    assert out == (
+        b"RTSP/1.0 200 OK\r\nCSeq: 4\r\nContent-Length: 4\r\n\r\nbody"
+        + frame
+        + b"RTSP/1.0 200 OK\r\nCSeq: 5\r\n\r\n"
+    )
+
+
+def test_reply_shifter_falls_back_to_raw_on_non_rtsp_data():
+    """Data that is neither a frame nor an RTSP reply is passed through unchanged."""
+    shifter = fe._ReplyCSeqShifter(1)
+    assert shifter.feed(b"garbage CSeq: 3\r\n\r\n") == b"garbage CSeq: 3\r\n\r\n"
+    # ...and stays raw afterwards
+    assert shifter.feed(b"RTSP/1.0 200 OK\r\nCSeq: 3\r\n\r\n") == (
+        b"RTSP/1.0 200 OK\r\nCSeq: 3\r\n\r\n"
+    )
+
+
+def test_reply_shifter_raw_when_head_never_ends():
+    """An oversized head with no terminator is flushed raw instead of buffered forever."""
+    shifter = fe._ReplyCSeqShifter(1)
+    big = b"RTSP/1.0 200 OK\r\n" + b"X-Pad: a\r\n" * 7000
+    assert len(big) > fe._MAX_HEAD_BYTES
+    assert shifter.feed(big) == big
+
+
+def test_cseq_compensation_is_off_until_a_request_is_swallowed():
+    """Until a request is answered with 461, requests and replies pass through byte-for-byte."""
+
+    class _R(fe.CSeqCompensation):
+        pass
+
+    relay = _R()
+    req = b"OPTIONS rtsp://h/x RTSP/1.0\r\nCSeq: 1\r\n\r\n"
+    assert relay._shift_request(req) is req
+    assert relay._shift_reply(b"RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n") == (
+        b"RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n"
+    )
+    relay._reject_udp_setup(req)
+    relay._reject_udp_setup(req)
+    assert relay._shift_request(b"PLAY x RTSP/1.0\r\nCSeq: 6\r\n\r\n") == (
+        b"PLAY x RTSP/1.0\r\nCSeq: 4\r\n\r\n"
+    )
+    assert relay._shift_reply(b"RTSP/1.0 200 OK\r\nCSeq: 4\r\n\r\n") == (
+        b"RTSP/1.0 200 OK\r\nCSeq: 6\r\n\r\n"
+    )
+
+
+class _StrictCseqCamera:
+    """Camera that, like the Bosch cloud proxy, answers a CSeq gap with a bare 400."""
+
+    def __init__(self) -> None:
+        self.port = 0
+        self.seen: list[tuple[str, int]] = []
+        self._server: asyncio.AbstractServer | None = None
+
+    async def __aenter__(self) -> _StrictCseqCamera:
+        self._server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
+        self.port = self._server.sockets[0].getsockname()[1]
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        assert self._server is not None
+        self._server.close()
+        await self._server.wait_closed()
+
+    async def _handle(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        last = 0
+        try:
+            while True:
+                data = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 3.0)
+                method = data.split(b" ", 1)[0].decode()
+                cseq = int(extract_header(data, "CSeq") or 0)
+                self.seen.append((method, cseq))
+                if cseq != last + 1:
+                    writer.write(b"RTSP/1.0 400 Bad Request\r\n\r\n")
+                    await writer.drain()
+                    return
+                last = cseq
+                writer.write(f"RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\n\r\n".encode())
+                await writer.drain()
+        except (TimeoutError, ConnectionError, OSError, asyncio.IncompleteReadError):
+            pass
+        finally:
+            writer.close()
+
+
+async def test_udp_only_client_retry_over_tcp_keeps_cseq_contiguous(
+    runner: FrontDoorRunner,
+):
+    """After the 461 the camera must still see CSeq 1,2,3,4 and the client 1..5.
+
+    GitHub #74 (REMOTE): swallowing the UDP SETUP left a gap (1,2,4,5) that the
+    cloud proxy rejected with a bare 400, so ffmpeg never reached PLAY.
+    """
+    async with _StrictCseqCamera() as cam:
+        port = await runner.start_server(
+            "camSSSSSS",
+            FrontDoorConfig(),
+            _resolver(InnerTarget(cam.port, "user", "pass")),
+        )
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        try:
+
+            async def exchange(request: bytes) -> bytes:
+                writer.write(request)
+                await writer.drain()
+                return await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5.0)
+
+            uri = "rtsp://127.0.0.1/rtsp_tunnel"
+            assert b"CSeq: 1" in await exchange(
+                f"OPTIONS {uri} RTSP/1.0\r\nCSeq: 1\r\n\r\n".encode()
+            )
+            assert b"CSeq: 2" in await exchange(
+                f"DESCRIBE {uri} RTSP/1.0\r\nCSeq: 2\r\n\r\n".encode()
+            )
+            rejected = await exchange(
+                f"SETUP {uri}/t1 RTSP/1.0\r\nCSeq: 3\r\n"
+                "Transport: RTP/AVP/UDP;unicast;client_port=5000-5001\r\n\r\n".encode()
+            )
+            assert rejected.startswith(b"RTSP/1.0 461") and b"CSeq: 3" in rejected
+            retried = await exchange(
+                f"SETUP {uri}/t1 RTSP/1.0\r\nCSeq: 4\r\n"
+                "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n".encode()
+            )
+            assert retried.startswith(b"RTSP/1.0 200") and b"CSeq: 4" in retried
+            played = await exchange(f"PLAY {uri} RTSP/1.0\r\nCSeq: 5\r\n\r\n".encode())
+            assert played.startswith(b"RTSP/1.0 200") and b"CSeq: 5" in played
+        finally:
+            writer.close()
+
+        assert cam.seen == [("OPTIONS", 1), ("DESCRIBE", 2), ("SETUP", 3), ("PLAY", 4)]

@@ -2354,12 +2354,13 @@ Features investigated or intentionally parked — listed here so the direction i
 
 ## Releases
 
-Latest stable: **v17.2.1** — see the GitHub release page for full notes:
-[**v17.2.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v17.2.1)
+Latest stable: **v17.2.2** — see the GitHub release page for full notes:
+[**v17.2.2 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/tag/v17.2.2)
 
 | Version | Highlights |
 |---|---|
-| **v17.2.1** | **Apple Home / HomeKit live view.** Opening a camera in Apple Home without an active session now opens the live session, and the local and remote viewing front-doors answer a UDP-only SETUP with RTSP 461 so the client retries over TCP instead of failing with `Nonmatching transport in server reply`. |
+| **v17.2.2** | **Apple Home / HomeKit over a cloud connection.** The front-door keeps the request numbering contiguous after rejecting a UDP-only SETUP, so the TCP retry no longer fails with `400 Bad Request` (GitHub #74). |
+| v17.2.1 | **Apple Home / HomeKit live view.** Opening a camera in Apple Home without an active session now opens the live session, and the local and remote viewing front-doors answer a UDP-only SETUP with RTSP 461 so the client retries over TCP instead of failing with `Nonmatching transport in server reply`. |
 | v17.2.0 | **Snapshot size option.** New `snapshot_size` setting (Configure > Live stream): `auto` (unchanged), `small` (at most 320 px wide), `medium` (at most 640 px) or `full`, so dashboard previews can stay small. Works for cloud, LAN and local-data-interface cameras; the persisted last snapshot stays full resolution. |
 | **v17.1.1** | **External-recorder endpoint fix for local-only cameras.** A recorder such as Frigate got `400 Bad Request` on stream setup from a local-data-interface camera's endpoint; both track identifier forms are now passed through. |
 | **v17.1.0** | **Fully local video via the local data interface.** With the interface active and its password stored, a Gen2 camera streams over your LAN (audio, high/low quality, snapshots) with no cloud use at all and no cloud fallback; go2rtc is the single reader feeding the live view, Mini-NVR (incl. pre-roll) and the external-recorder endpoint. New Repairs hints for a missing/rejected password, an unreachable camera and a missing go2rtc. See [Local data interface](#local-data-interface-fully-local-video). |
@@ -2519,7 +2520,7 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v17.2.1** · HA Quality Scale **Platinum** · production-ready |
+| 🏆 **Home Assistant Integration** (this repo) | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v17.2.2** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.12.1** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.8.2** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera single-cam + BoschOverview multi-cam) |
 | 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.7.1** · cred-rotation · PTZ presets · TOFU cert pinning · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |

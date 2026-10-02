@@ -416,7 +416,96 @@ def relay_runner() -> Generator[FrontDoorRunner, None, None]:
     r.stop_all()
 
 
+class _StrictCseqInner:
+    """Inner proxy that, like the Bosch cloud proxy, answers a CSeq gap with a bare 400."""
+
+    def __init__(self) -> None:
+        self.port = 0
+        self.seen: list[tuple[str, int]] = []
+        self._server: asyncio.AbstractServer | None = None
+
+    async def __aenter__(self) -> _StrictCseqInner:
+        self._server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
+        self.port = self._server.sockets[0].getsockname()[1]
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        assert self._server is not None
+        self._server.close()
+        await self._server.wait_closed()
+
+    async def _handle(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        last = 0
+        try:
+            while True:
+                data = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 3.0)
+                cseq = int(data.split(b"CSeq:")[1].split(b"\r\n")[0])
+                self.seen.append((data.split(b" ", 1)[0].decode(), cseq))
+                if cseq != last + 1:
+                    writer.write(b"RTSP/1.0 400 Bad Request\r\n\r\n")
+                    await writer.drain()
+                    return
+                last = cseq
+                writer.write(f"RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\n\r\n".encode())
+                await writer.drain()
+        except (TimeoutError, ConnectionError, OSError, asyncio.IncompleteReadError):
+            pass
+        finally:
+            writer.close()
+
+
 class TestPathRewriteRelayEndToEnd:
+    async def test_udp_only_setup_retry_keeps_cseq_contiguous(self, relay_runner):
+        """GitHub #74 (REMOTE): the 461 for a UDP-only SETUP must not leave a CSeq
+        gap towards the cloud proxy, or its bare 400 makes ffmpeg give up."""
+        async with _StrictCseqInner() as inner:
+            target = RemoteTarget(port=inner.port, path="/hashCSEQ/rtsp_tunnel?inst=1")
+            port = await relay_runner.start_server(
+                "camBBBBBB",
+                FrontDoorConfig(),
+                _resolver(target),
+                relay_factory=_remote_relay_factory,
+            )
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            try:
+
+                async def exchange(request: bytes) -> bytes:
+                    writer.write(request)
+                    await writer.drain()
+                    return await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5.0)
+
+                uri = "rtsp://127.0.0.1/rtsp_tunnel?inst=1"
+                assert b"CSeq: 1" in await exchange(
+                    f"OPTIONS {uri} RTSP/1.0\r\nCSeq: 1\r\n\r\n".encode()
+                )
+                assert b"CSeq: 2" in await exchange(
+                    f"DESCRIBE {uri} RTSP/1.0\r\nCSeq: 2\r\n\r\n".encode()
+                )
+                rejected = await exchange(
+                    f"SETUP {uri} RTSP/1.0\r\nCSeq: 3\r\n"
+                    "Transport: RTP/AVP/UDP;unicast;client_port=5000-5001\r\n\r\n".encode()
+                )
+                assert rejected.startswith(b"RTSP/1.0 461") and b"CSeq: 3" in rejected
+                retried = await exchange(
+                    f"SETUP {uri} RTSP/1.0\r\nCSeq: 4\r\n"
+                    "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n".encode()
+                )
+                assert retried.startswith(b"RTSP/1.0 200") and b"CSeq: 4" in retried
+                played = await exchange(
+                    f"PLAY {uri} RTSP/1.0\r\nCSeq: 5\r\n\r\n".encode()
+                )
+                assert played.startswith(b"RTSP/1.0 200") and b"CSeq: 5" in played
+            finally:
+                writer.close()
+            assert inner.seen == [
+                ("OPTIONS", 1),
+                ("DESCRIBE", 2),
+                ("SETUP", 3),
+                ("PLAY", 4),
+            ]
+
     async def test_rewrites_uri_to_current_hash_path(self, relay_runner):
         async with FakeInnerProxy() as inner:
             target = RemoteTarget(
@@ -689,7 +778,8 @@ class TestPathRewriteRelayUnit:
             b"RTSP/1.0 461 Unsupported Transport\r\nCSeq: 4\r\n\r\n"
         ]
         assert len(relay._iw.written) == 1  # type: ignore[attr-defined]
-        assert b"CSeq: 5" in relay._iw.written[0]  # type: ignore[attr-defined]
+        # CSeq 4 never reached the camera, so the TCP retry (5) is renumbered to 4.
+        assert b"CSeq: 4" in relay._iw.written[0]  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_drain_requests_waits_for_full_body(self):
