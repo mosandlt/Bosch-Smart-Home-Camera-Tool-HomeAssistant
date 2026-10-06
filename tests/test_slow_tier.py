@@ -173,12 +173,38 @@ class TestDeferGate:
 
     def test_defers_when_stream_active_and_due(self):
         coord = _make_coord(live_connections={CAM_A: {"_connection_type": "LOCAL"}})
+        coord.slow_tier_ran_once = {CAM_A}  # caches already populated once
         ctx = _compute_cam_context(
             coord, CAM_A, _cam_raw(), {CAM_A: {"status": "ONLINE"}}, {}, True
         )
         assert ctx.do_slow_cam is False
         assert CAM_A in coord.slow_tier_deferred
         assert CAM_A in coord.slow_tier_defer_since
+
+    def test_first_fetch_after_startup_runs_despite_active_stream(self):
+        """Regression: with a continuously streaming NVR the diagnostic
+        entities stayed unavailable for up to 30 min after every restart,
+        because the very first slow-tier fetch was deferred too."""
+        coord = _make_coord(live_connections={CAM_A: {"_connection_type": "LOCAL"}})
+        ctx = _compute_cam_context(
+            coord, CAM_A, _cam_raw(), {CAM_A: {"status": "ONLINE"}}, {}, True
+        )
+        assert ctx.do_slow_cam is True
+        assert CAM_A not in coord.slow_tier_deferred
+        assert CAM_A in coord.slow_tier_ran_once
+        # Next due tick with the stream still active defers as before.
+        ctx = _compute_cam_context(
+            coord, CAM_A, _cam_raw(), {CAM_A: {"status": "ONLINE"}}, {}, True
+        )
+        assert ctx.do_slow_cam is False
+        assert CAM_A in coord.slow_tier_deferred
+
+    def test_offline_camera_not_marked_as_fetched(self):
+        coord = _make_coord(live_connections={CAM_A: {"_connection_type": "LOCAL"}})
+        _compute_cam_context(
+            coord, CAM_A, _cam_raw(), {CAM_A: {"status": "OFFLINE"}}, {}, True
+        )
+        assert CAM_A not in coord.slow_tier_ran_once
 
     def test_defer_disabled_via_option_runs_regardless_of_stream(self):
         coord = _make_coord(live_connections={CAM_A: {"_connection_type": "LOCAL"}})

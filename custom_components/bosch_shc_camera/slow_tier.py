@@ -128,6 +128,16 @@ def _compute_cam_context(
         coordinator.slow_tier_deferred = set()  # type: ignore[assignment]
     if not hasattr(coordinator, "slow_tier_defer_since"):
         coordinator.slow_tier_defer_since = {}
+    # Cameras whose slow tier has run at least once since startup. Until
+    # then their diagnostic caches are EMPTY, so deferring would leave those
+    # entities "unavailable" for up to SLOW_TIER_MAX_DEFER_SEC after every
+    # HA restart whenever something streams continuously (an NVR such as
+    # Synology Surveillance Station via the external-recorder endpoint).
+    # The first fetch therefore always runs; later ones defer as before.
+    slow_tier_ran: set[str] = getattr(coordinator, "slow_tier_ran_once", set())
+    if not hasattr(coordinator, "slow_tier_ran_once"):
+        coordinator.slow_tier_ran_once = slow_tier_ran
+    first_fetch_pending = cam_id not in slow_tier_ran
     stream_active = cam_id in coordinator.live_connections
     # Option: defer slow-tier when stream is active (default ON).
     # When OFF, slow-tier runs regardless — diagnostic sensors stay
@@ -147,7 +157,13 @@ def _compute_cam_context(
         or (cam_id in coordinator.slow_tier_deferred and not stream_active)
         or defer_bound_reached
     )
-    if _defer_diag and do_slow_cam and stream_active and not defer_bound_reached:
+    if (
+        _defer_diag
+        and do_slow_cam
+        and stream_active
+        and not defer_bound_reached
+        and not first_fetch_pending
+    ):
         # Defer: stream is live — adding to deferred set instead of running.
         coordinator.slow_tier_deferred.add(cam_id)
         coordinator.slow_tier_defer_since.setdefault(cam_id, time.monotonic())
@@ -170,6 +186,14 @@ def _compute_cam_context(
         )
     if do_slow_cam and not is_online:
         _LOGGER.debug("Slow-tier skipped for %s (%s)", cam_id, cam_status.lower())
+    elif do_slow_cam:
+        if first_fetch_pending and stream_active and _defer_diag:
+            _LOGGER.debug(
+                "Slow-tier first fetch for %s runs despite live stream "
+                "(diagnostic caches still empty)",
+                cam_id,
+            )
+        slow_tier_ran.add(cam_id)
 
     local_stream_active = (
         cam_id in coordinator.live_connections
