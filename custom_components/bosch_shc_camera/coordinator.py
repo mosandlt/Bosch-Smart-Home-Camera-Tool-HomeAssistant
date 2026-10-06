@@ -429,6 +429,10 @@ class BoschCameraCoordinator(
         # forever: once now - start >= SLOW_TIER_MAX_DEFER_SEC we force one read
         # despite the stream. Entry cleared whenever the deferred fetch runs.
         self.slow_tier_defer_since: dict[str, float] = {}
+        # Cams whose slow tier has had >=1 successful (HTTP 200) endpoint
+        # since startup; until then the defer gate never skips the fetch
+        # (diagnostic caches would otherwise stay empty up to the defer cap).
+        self.slow_tier_ran_once: set[str] = set()
         # Cached data for types that are not re-fetched this tick
         self.cached_status: dict[str, str] = {}
         # Per-cam time (monotonic) the cloud last returned HTTP 444 (session
@@ -2419,10 +2423,10 @@ class BoschCameraCoordinator(
         "nvr_drain_failures",
     )
     # `set[str]` attributes whose members are cam_id → `.discard()`.
-    # Empty since Slice 3: `user_intent_streams` (the last member) is now a
-    # BoolFieldView facade over `_sessions` — see the excluded-list comment
+    # Only `slow_tier_ran_once` remains: the other members became
+    # BoolFieldView facades over `_sessions` — see the excluded-list comment
     # block below.
-    _PURGE_CAM_SET_ATTRS: tuple[str, ...] = ()
+    _PURGE_CAM_SET_ATTRS: tuple[str, ...] = ("slow_tier_ran_once",)
     # Deliberately EXCLUDED (audited, not an oversight):
     #   rcp_session_cache / rcp_session_locks — keyed by proxy_hash, not cam_id.
     #   alert_sent_ids — keyed by event_id, not cam_id.

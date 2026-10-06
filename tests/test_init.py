@@ -36384,6 +36384,8 @@ class TestSlowTierDeferredAdd:
         # Ensure slow_tier_deferred is empty at start
         coord.slow_tier_deferred = set()
         coord.slow_tier_defer_since = {}
+        # Steady state: the first fetch after startup is never deferred.
+        coord.slow_tier_ran_once = {CAM_A}
         # Privacy-ON-while-streaming path schedules a teardown coroutine.
         coord.tear_down_live_stream = AsyncMock()
 

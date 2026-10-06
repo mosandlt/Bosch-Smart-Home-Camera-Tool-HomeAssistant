@@ -7,6 +7,10 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+### Fixed
+
+- **Diagnostic entities unavailable for up to 30 minutes after a restart.** With something streaming continuously, such as an NVR on the external-recorder endpoint, the defer-during-stream option also deferred the first diagnostic fetch after startup. Wi-Fi signal, ambient light, status LED and similar entities stayed unavailable until the 30-minute limit forced a read. The first fetch per camera now always runs, even while the stream is live (once per restart, and repeated until one endpoint answers successfully); later ones defer as before.
+
 ## [v17.2.2] - 2026-10-02
 
 ### Fixed
