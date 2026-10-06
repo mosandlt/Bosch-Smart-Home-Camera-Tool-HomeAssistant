@@ -191,7 +191,10 @@ class TestDeferGate:
         )
         assert ctx.do_slow_cam is True
         assert CAM_A not in coord.slow_tier_deferred
-        assert CAM_A in coord.slow_tier_ran_once
+        # Computing the context alone never spends the exemption: only a
+        # successful endpoint response does (see TestFirstFetchMarkedDone).
+        assert CAM_A not in coord.slow_tier_ran_once
+        coord.slow_tier_ran_once.add(CAM_A)
         # Next due tick with the stream still active defers as before.
         ctx = _compute_cam_context(
             coord, CAM_A, _cam_raw(), {CAM_A: {"status": "ONLINE"}}, {}, True
@@ -1459,3 +1462,102 @@ class TestPollSlowTierNon200AndExceptions:
         )
         assert CAM_A not in coord.wifiinfo_cache
         assert coord.ambient_light_cache[CAM_A] == 10
+
+
+class TestFirstFetchMarkedDone:
+    """`slow_tier_ran_once` is set only after >=1 endpoint answered 200, so a
+    failed first fetch (caches still empty) is not deferred again."""
+
+    @staticmethod
+    def _streaming_coord():
+        coord = _make_slow_coord(
+            live_connections={CAM_A: {"_connection_type": "LOCAL"}},
+            slow_tier_deferred=set(),
+            slow_tier_defer_since={},
+            slow_tier_ran_once=set(),
+        )
+        return coord
+
+    @staticmethod
+    def _ctx_for(coord, status="ONLINE", opts=None):
+        return _compute_cam_context(
+            coord,
+            CAM_A,
+            _cam_raw(),
+            {CAM_A: {"status": status}},
+            opts or {},
+            True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_all_endpoints_fail_does_not_mark_done(self):
+        coord = self._streaming_coord()
+        ctx = self._ctx_for(coord)
+        assert ctx.do_slow_cam is True
+        session = _all_endpoints_session({})  # every endpoint 404
+        await _poll_slow_tier_endpoints(
+            coord, CAM_A, {}, ctx, {CAM_A: {}}, session, HEADERS, NOOP_INTRUSION
+        )
+        assert CAM_A not in coord.slow_tier_ran_once
+        # Next tick still fetches instead of deferring.
+        ctx2 = self._ctx_for(coord)
+        assert ctx2.do_slow_cam is True
+        assert CAM_A not in coord.slow_tier_deferred
+
+    @pytest.mark.asyncio
+    async def test_network_exception_does_not_mark_done(self):
+        coord = self._streaming_coord()
+        ctx = self._ctx_for(coord)
+        session = MagicMock()
+        session.get = MagicMock(side_effect=OSError("boom"))
+        await _poll_slow_tier_endpoints(
+            coord, CAM_A, {}, ctx, {CAM_A: {}}, session, HEADERS, NOOP_INTRUSION
+        )
+        assert CAM_A not in coord.slow_tier_ran_once
+        assert self._ctx_for(coord).do_slow_cam is True
+
+    @pytest.mark.asyncio
+    async def test_one_endpoint_200_marks_done_then_defers(self):
+        coord = self._streaming_coord()
+        ctx = self._ctx_for(coord)
+        session = _all_endpoints_session({"wifiinfo": {"ssid": "x"}})
+        await _poll_slow_tier_endpoints(
+            coord, CAM_A, {}, ctx, {CAM_A: {}}, session, HEADERS, NOOP_INTRUSION
+        )
+        assert CAM_A in coord.slow_tier_ran_once
+        assert self._ctx_for(coord).do_slow_cam is False
+        assert CAM_A in coord.slow_tier_deferred
+
+    def test_defer_option_off_first_fetch_runs_and_is_not_deferred(self):
+        coord = self._streaming_coord()
+        ctx = self._ctx_for(coord, opts={"defer_diag_during_stream": False})
+        assert ctx.do_slow_cam is True
+        assert CAM_A not in coord.slow_tier_deferred
+        assert CAM_A not in coord.slow_tier_ran_once
+
+    @pytest.mark.asyncio
+    async def test_offline_first_then_online(self):
+        coord = self._streaming_coord()
+        session = _all_endpoints_session({"wifiinfo": {"ssid": "x"}})
+        ctx = self._ctx_for(coord, status="OFFLINE")
+        await _poll_slow_tier_endpoints(
+            coord, CAM_A, {}, ctx, {CAM_A: {}}, session, HEADERS, NOOP_INTRUSION
+        )
+        session.get.assert_not_called()
+        assert CAM_A not in coord.slow_tier_ran_once
+        # Camera comes online while still streaming: first fetch runs now.
+        ctx = self._ctx_for(coord, status="ONLINE")
+        assert ctx.do_slow_cam is True
+        await _poll_slow_tier_endpoints(
+            coord, CAM_A, {}, ctx, {CAM_A: {}}, session, HEADERS, NOOP_INTRUSION
+        )
+        assert CAM_A in coord.slow_tier_ran_once
+
+    def test_bare_stub_without_attribute_is_lazy_initialised(self):
+        coord = SimpleNamespace(
+            live_connections={},
+            slow_tier_deferred=set(),
+            slow_tier_defer_since={},
+        )
+        self._ctx_for(coord)
+        assert coord.slow_tier_ran_once == set()

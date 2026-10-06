@@ -134,10 +134,12 @@ def _compute_cam_context(
     # HA restart whenever something streams continuously (an NVR such as
     # Synology Surveillance Station via the external-recorder endpoint).
     # The first fetch therefore always runs; later ones defer as before.
-    slow_tier_ran: set[str] = getattr(coordinator, "slow_tier_ran_once", set())
+    # Marked done only once an endpoint actually answered 200 (see
+    # `_poll_slow_tier_endpoints`), so a failed first fetch is retried.
+    # (lazy-init only for bare test stubs, like `slow_tier_defer_since`.)
     if not hasattr(coordinator, "slow_tier_ran_once"):
-        coordinator.slow_tier_ran_once = slow_tier_ran
-    first_fetch_pending = cam_id not in slow_tier_ran
+        coordinator.slow_tier_ran_once = set()
+    first_fetch_pending = cam_id not in coordinator.slow_tier_ran_once
     stream_active = cam_id in coordinator.live_connections
     # Option: defer slow-tier when stream is active (default ON).
     # When OFF, slow-tier runs regardless — diagnostic sensors stay
@@ -193,7 +195,6 @@ def _compute_cam_context(
                 "(diagnostic caches still empty)",
                 cam_id,
             )
-        slow_tier_ran.add(cam_id)
 
     local_stream_active = (
         cam_id in coordinator.live_connections
@@ -524,6 +525,12 @@ async def _poll_slow_tier_endpoints(
         if isinstance(fetch_result, BaseException):
             continue
         ep, ep_status, ep_data = fetch_result
+        if ep_status == 200:
+            # At least one cache can now be populated: the first-fetch
+            # defer exemption is spent. All-fail leaves it pending.
+            if not hasattr(coordinator, "slow_tier_ran_once"):
+                coordinator.slow_tier_ran_once = set()
+            coordinator.slow_tier_ran_once.add(cam_id)
         if ep == LDI_ENDPOINT:
             ldi_state = state_from_response(ep_status, ep_data)
             if ldi_state is not None:

@@ -749,3 +749,24 @@ async def test_async_remove_entry_deletes_nvr_intent_store(hass: HomeAssistant) 
         hass, version=1, key=f"{DOMAIN}_nvr_user_intent"
     ).async_load()
     assert reloaded is None
+
+
+async def test_removed_and_readded_camera_gets_immediate_first_slow_fetch(
+    hass: HomeAssistant,
+) -> None:
+    """A purged camera forgets its `slow_tier_ran_once` mark, so on re-add the
+    first slow-tier fetch runs even while its stream is live (not deferred)."""
+    from custom_components.bosch_shc_camera.slow_tier import _compute_cam_context
+
+    coord = BoschCameraCoordinator(hass, _make_entry(hass))
+    assert coord.slow_tier_ran_once == set()
+    coord.slow_tier_ran_once.add(TEST_CAM_ID)
+    coord.live_connections[TEST_CAM_ID] = {"_connection_type": "LOCAL"}
+    args = (TEST_CAM_ID, {}, {TEST_CAM_ID: {"status": "ONLINE"}}, {}, True)
+    assert _compute_cam_context(coord, *args).do_slow_cam is False  # deferred
+
+    coord._purge_cam_id(TEST_CAM_ID)
+    assert TEST_CAM_ID not in coord.slow_tier_ran_once
+
+    coord.live_connections[TEST_CAM_ID] = {"_connection_type": "LOCAL"}
+    assert _compute_cam_context(coord, *args).do_slow_cam is True
