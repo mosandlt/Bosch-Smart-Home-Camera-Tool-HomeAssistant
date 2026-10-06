@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+### Fixed
+
+- **White mode for the top and bottom LEDs.** The LED groups now support colour temperature (2000–6500 K) alongside RGB. A white set in the Bosch app is shown as a white instead of a stale colour, a plain turn-on no longer replays that colour over it, and white picked in Home Assistant is sent as a real white instead of a violet-tinted `#FFFFFF`.
+- **Front light turned off when adjusting its white balance.** After switching the front light on via the switch entity, changing the white-balance number turned the lamp off, because the cached brightness was 0. The brightness is now kept or restored, a value set while the light is off is applied on the next turn-on, and the Gen2 intensity control changes only the front group instead of switching the top and bottom LEDs on.
+- **Preset white after a colour did nothing.** The camera ignores a colour-to-white switch when the target white balance equals the value it still holds, so a slightly offset value is written first.
+
 ## [v17.2.2] - 2026-10-02
 
 ### Fixed
