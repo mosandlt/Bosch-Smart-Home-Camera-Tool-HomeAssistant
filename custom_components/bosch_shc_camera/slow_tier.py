@@ -525,9 +525,11 @@ async def _poll_slow_tier_endpoints(
         if isinstance(fetch_result, BaseException):
             continue
         ep, ep_status, ep_data = fetch_result
-        if ep_status == 200:
-            # At least one cache can now be populated: the first-fetch
-            # defer exemption is spent. All-fail leaves it pending.
+        if ep_status != 0:
+            # The camera backend answered at least one endpoint (any real
+            # HTTP status, incl. 403/442): the first-fetch defer exemption is
+            # spent. Status 0 (timeout/network error) leaves it pending, so a
+            # failed first attempt retries instead of waiting out the defer.
             if not hasattr(coordinator, "slow_tier_ran_once"):
                 coordinator.slow_tier_ran_once = set()
             coordinator.slow_tier_ran_once.add(cam_id)

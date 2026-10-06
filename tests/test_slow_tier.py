@@ -1490,7 +1490,9 @@ class TestFirstFetchMarkedDone:
         )
 
     @pytest.mark.asyncio
-    async def test_all_endpoints_fail_does_not_mark_done(self):
+    async def test_all_endpoints_rejected_still_marks_done(self):
+        """Backend answered (403/404/442...) → exemption spent; a permanently
+        rejecting camera must not run the full slow tier every 5 min."""
         coord = self._streaming_coord()
         ctx = self._ctx_for(coord)
         assert ctx.do_slow_cam is True
@@ -1498,11 +1500,9 @@ class TestFirstFetchMarkedDone:
         await _poll_slow_tier_endpoints(
             coord, CAM_A, {}, ctx, {CAM_A: {}}, session, HEADERS, NOOP_INTRUSION
         )
-        assert CAM_A not in coord.slow_tier_ran_once
-        # Next tick still fetches instead of deferring.
-        ctx2 = self._ctx_for(coord)
-        assert ctx2.do_slow_cam is True
-        assert CAM_A not in coord.slow_tier_deferred
+        assert CAM_A in coord.slow_tier_ran_once
+        assert self._ctx_for(coord).do_slow_cam is False
+        assert CAM_A in coord.slow_tier_deferred
 
     @pytest.mark.asyncio
     async def test_network_exception_does_not_mark_done(self):
