@@ -709,13 +709,14 @@ class _BoschRgbLedLight(_BoschLightBase):
         # "cold white" preset (6500 K = -1.0) after a color when the group
         # was -1.0 before. Writing a nudged value first makes the second,
         # exact write a real change.
+        nudged = False
         if (
             mode == _MODE_WHITE
             and self._cached_mode() == _MODE_COLOR
             and isinstance(value, float)
         ):
             nudge = round(value + 0.01 if value <= 0 else value - 0.01, 2)
-            await self._put_lighting_switch(
+            nudge_ok = await self._put_lighting_switch(
                 {
                     self._led_key: {
                         "brightness": api_brightness,
@@ -724,6 +725,12 @@ class _BoschRgbLedLight(_BoschLightBase):
                     }
                 }
             )
+            if not nudge_ok:
+                # Nothing was written: skip the exact write instead of
+                # reporting a half-applied state.
+                self.async_write_ha_state()
+                return
+            nudged = True
 
         if mode == _MODE_COLOR:
             settings: dict[str, Any] = {
@@ -753,6 +760,11 @@ class _BoschRgbLedLight(_BoschLightBase):
             # camera_light/wallwasher cache against SHC/cloud correction for
             # the full WRITE_LOCK_SECS window (GitHub #66 bug-hunt finding).
             self._sync_wallwasher_cache()
+        elif nudged:
+            # The nudge already switched the LED on (at the nudged white);
+            # report that instead of a stale "off".
+            self._brightness = api_brightness
+            self._is_on = True
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:

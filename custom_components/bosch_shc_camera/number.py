@@ -737,6 +737,9 @@ async def _white_balance_set(entity: BoschNumberEntity, value: float) -> None:
                         cam_id, "lighting/switch/front", {"enabled": True}
                     )
                     if not enabled:
+                        # The group is still disabled: don't stamp the write
+                        # lock / optimistic state, let the next poll correct it.
+                        ok = False
                         _LOGGER.warning(
                             "Front light enable failed after white balance "
                             "write for %s",

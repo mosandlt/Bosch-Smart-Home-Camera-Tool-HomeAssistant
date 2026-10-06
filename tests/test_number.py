@@ -2943,6 +2943,16 @@ class TestWhiteBalanceSingleLockBlock:
         assert "Front light enable failed" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_enable_put_failure_does_not_stamp_write_lock(self):
+        """Group still disabled → no optimistic state / write lock; the next
+        poll must be free to correct it."""
+        coord, e = self._entity()
+        coord.light_set_at = {}
+        coord.async_put_camera = AsyncMock(side_effect=[True, False])
+        await e.async_set_native_value(0.0)
+        assert CAM_ID not in coord.light_set_at
+
+    @pytest.mark.asyncio
     async def test_failed_main_put_skips_enable(self):
         coord, e = self._entity()
         coord.async_put_camera = AsyncMock(return_value=False)

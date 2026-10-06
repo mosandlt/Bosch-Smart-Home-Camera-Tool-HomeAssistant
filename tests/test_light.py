@@ -2890,6 +2890,44 @@ class TestRgbLedColorToWhiteNudge:
         assert all(c["color"] is None for c in calls)
 
     @pytest.mark.asyncio
+    async def test_nudge_failure_skips_exact_write(self):
+        from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
+
+        entity = self._make(
+            {
+                "topLedLightSettings": {
+                    "brightness": 100,
+                    "color": "#FF0000",
+                    "whiteBalance": None,
+                }
+            }
+        )
+        entity._put_lighting_switch = AsyncMock(return_value=False)
+        await entity.async_turn_on(**{ATTR_COLOR_TEMP_KELVIN: 6500})
+        assert entity._put_lighting_switch.await_count == 1
+        entity._put_switch_endpoint.assert_not_awaited()
+        entity._sync_wallwasher_cache.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_exact_write_failure_after_nudge_reports_led_on(self):
+        from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
+
+        entity = self._make(
+            {
+                "topLedLightSettings": {
+                    "brightness": 100,
+                    "color": "#FF0000",
+                    "whiteBalance": None,
+                }
+            }
+        )
+        entity._put_lighting_switch = AsyncMock(side_effect=[True, False])
+        await entity.async_turn_on(**{ATTR_COLOR_TEMP_KELVIN: 6500})
+        assert entity._is_on is True
+        assert entity._brightness > 0
+        entity._put_switch_endpoint.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_white_to_white_single_write(self):
         from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
 
