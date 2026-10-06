@@ -2104,7 +2104,9 @@ class TestWhiteBalanceNumber:
 
     @pytest.mark.asyncio
     async def test_set_success_via_aiohttp_mock(self):
-        sw = _make_white_balance_r2()
+        sw = _make_white_balance_r2(
+            lighting_switch_cache={CAM_ID: {"frontLightSettings": {"brightness": 40}}}
+        )
         session = _mock_aiohttp_session(200)
         resp_json = {
             "frontLightSettings": {"brightness": 0, "whiteBalance": 0.2, "color": None}
@@ -2126,7 +2128,10 @@ class TestWhiteBalanceNumber:
     async def test_set_non_200_leaves_value_unchanged(self):
         """Write delegates to coordinator.async_put_camera (which owns the
         401-retry); a failed write must not optimistically update the value."""
-        sw = _make_white_balance_r2()
+        # Front light on (brightness > 0): the value goes to the camera.
+        sw = _make_white_balance_r2(
+            lighting_switch_cache={CAM_ID: {"frontLightSettings": {"brightness": 40}}}
+        )
         sw.coordinator.async_put_camera = AsyncMock(return_value=False)
         await sw.async_set_native_value(0.5)
         assert sw._wb_value is None
@@ -2158,7 +2163,9 @@ class TestWhiteBalanceNumber:
         Bearer PUT that silently failed on 401)."""
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
 
-        coord = _stub_coord_guards()
+        coord = _stub_coord_guards(
+            lighting_switch_cache={CAM_ID: {"frontLightSettings": {"brightness": 40}}}
+        )
         coord.async_put_camera = AsyncMock(return_value=True)
         e = _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
 
@@ -2179,7 +2186,12 @@ class TestWhiteBalanceNumber:
         from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord_guards(
-            lighting_switch_cache={CAM_ID: {"topLedLightSettings": {"brightness": 77}}}
+            lighting_switch_cache={
+                CAM_ID: {
+                    "frontLightSettings": {"brightness": 40},
+                    "topLedLightSettings": {"brightness": 77},
+                }
+            }
         )
         coord.async_put_camera = AsyncMock(return_value=True)
         e = _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
@@ -2189,6 +2201,89 @@ class TestWhiteBalanceNumber:
         cache = coord.lighting_switch_cache[CAM_ID]
         assert cache["frontLightSettings"]["whiteBalance"] == 0.5  # our write
         assert cache["topLedLightSettings"]["brightness"] == 77  # sibling kept
+
+    @pytest.mark.asyncio
+    async def test_keeps_front_brightness_in_put(self):
+        """The PUT must carry the front light's current brightness."""
+        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+
+        coord = _stub_coord_guards(
+            lighting_switch_cache={CAM_ID: {"frontLightSettings": {"brightness": 40}}}
+        )
+        coord.async_put_camera = AsyncMock(return_value=True)
+        e = _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
+        await e.async_set_native_value(0.0)
+        body = coord.async_put_camera.call_args_list[0].args[2]
+        assert body["frontLightSettings"]["brightness"] == 40
+        assert body["frontLightSettings"]["whiteBalance"] == 0.0
+        assert coord.async_put_camera.await_count == 1  # no extra /front call
+
+    @pytest.mark.asyncio
+    async def test_switch_on_with_zero_cache_restores_brightness(self):
+        """Regression (verified live on Eyes Outdoor II): front light switched
+        on via the front-light switch leaves cached brightness 0. The PUT
+        used to send that 0 and turned the lamp off."""
+        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+
+        coord = _stub_coord_guards(
+            lighting_switch_cache={CAM_ID: {"frontLightSettings": {"brightness": 0}}}
+        )
+        coord.shc_state_cache = {CAM_ID: {"front_light": True}}
+        coord.last_front_brightness = {CAM_ID: 20}
+        coord.async_put_camera = AsyncMock(return_value=True)
+        e = _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
+        await e.async_set_native_value(0.0)
+        first = coord.async_put_camera.call_args_list[0].args
+        assert first[1] == "lighting/switch"
+        assert first[2]["frontLightSettings"]["brightness"] == 20
+        second = coord.async_put_camera.call_args_list[1].args
+        assert second[1:] == ("lighting/switch/front", {"enabled": True})
+
+    @pytest.mark.asyncio
+    async def test_light_off_holds_value_without_put(self):
+        """The camera ignores whiteBalance at brightness 0 (verified live), so
+        a value set while the front light is off is held, not sent."""
+        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_shc_camera.shc import (
+            get_pending_front_white_balance,
+        )
+
+        coord = _stub_coord_guards(
+            lighting_switch_cache={
+                CAM_ID: {"frontLightSettings": {"brightness": 0, "whiteBalance": -0.3}}
+            }
+        )
+        coord.shc_state_cache = {CAM_ID: {"front_light": False}}
+        coord.async_put_camera = AsyncMock(return_value=True)
+        e = _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
+        await e.async_set_native_value(0.4)
+        coord.async_put_camera.assert_not_awaited()
+        assert get_pending_front_white_balance(coord, CAM_ID) == 0.4
+        assert e.native_value == 0.4
+
+    @pytest.mark.asyncio
+    async def test_pending_dropped_when_light_on_elsewhere(self):
+        """Bosch app turns the light on → the held value must not shadow the
+        camera's real white balance."""
+        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_shc_camera.shc import (
+            get_pending_front_white_balance,
+            set_pending_front_white_balance,
+        )
+
+        coord = _stub_coord_guards(
+            lighting_switch_cache={
+                CAM_ID: {"frontLightSettings": {"brightness": 0, "whiteBalance": -0.3}}
+            }
+        )
+        e = _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
+        set_pending_front_white_balance(coord, CAM_ID, 0.4)
+        coord.lighting_switch_cache[CAM_ID]["frontLightSettings"] = {
+            "brightness": 60,
+            "whiteBalance": -0.8,
+        }
+        assert e.native_value == -0.8
+        assert get_pending_front_white_balance(coord, CAM_ID) is None
 
 
 def _make_top_led_r2(lighting_switch_cache=None):
@@ -2804,3 +2899,62 @@ class TestBoschNumberEntityBareDescriptionGuards:
         entity = self._make_bare_entity()
         with pytest.raises(NotImplementedError):
             await entity.async_set_native_value(1.0)
+
+
+class TestWhiteBalanceSingleLockBlock:
+    """The decide + PUT + enable sequence must run under one lighting lock so
+    a concurrent front-light turn_off cannot be undone between the steps."""
+
+    def _entity(self):
+        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+
+        coord = _stub_coord_guards(
+            lighting_switch_cache={CAM_ID: {"frontLightSettings": {"brightness": 0}}}
+        )
+        coord.shc_state_cache = {CAM_ID: {"front_light": True}}
+        coord.last_front_brightness = {CAM_ID: 20}
+        return coord, _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
+
+    @pytest.mark.asyncio
+    async def test_enable_put_runs_while_lock_held(self):
+        from custom_components.bosch_shc_camera.shc import get_lighting_lock
+
+        coord, e = self._entity()
+        held: list[bool] = []
+
+        async def _put(cam_id, path, body):
+            held.append(get_lighting_lock(coord, cam_id).locked())
+            return True
+
+        coord.async_put_camera = AsyncMock(side_effect=_put)
+        await e.async_set_native_value(0.0)
+        assert [c.args[1] for c in coord.async_put_camera.call_args_list] == [
+            "lighting/switch",
+            "lighting/switch/front",
+        ]
+        assert held == [True, True]
+
+    @pytest.mark.asyncio
+    async def test_enable_put_failure_is_logged(self, caplog):
+        coord, e = self._entity()
+        coord.async_put_camera = AsyncMock(side_effect=[True, False])
+        with caplog.at_level("WARNING"):
+            await e.async_set_native_value(0.0)
+        assert "Front light enable failed" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_failed_main_put_skips_enable(self):
+        coord, e = self._entity()
+        coord.async_put_camera = AsyncMock(return_value=False)
+        await e.async_set_native_value(0.0)
+        assert coord.async_put_camera.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_success_stamps_write_lock_and_notifies_listeners(self):
+        coord, e = self._entity()
+        coord.light_set_at = {}
+        coord.async_update_listeners = MagicMock()
+        coord.async_put_camera = AsyncMock(return_value=True)
+        await e.async_set_native_value(0.0)
+        assert CAM_ID in coord.light_set_at
+        coord.async_update_listeners.assert_called_once()

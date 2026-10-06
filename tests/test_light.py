@@ -151,13 +151,27 @@ class TestTopLedLight:
     def test_extra_attrs_preserves_user_color(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        """If the user picked a color, that's what appears in last_rgb_color."""
+        """A picked color is kept in last_picked_rgb_color, and shown in
+        last_rgb_color while the camera reports the group in color mode."""
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
+        # stub_coord reports whiteBalance=-1.0 → the LED is white on the
+        # camera; the remembered color must not be shown as current.
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
         light._last_color_hex = "#FF0080"
         attrs = light.extra_state_attributes
+        assert attrs["last_picked_rgb_color"] == [255, 0, 128]
+        assert attrs["last_color_mode"] == "color_temp"
+        assert attrs["last_rgb_color"] != [255, 0, 128]
+
+        stub_coord.lighting_switch_cache[CAM_ID]["topLedLightSettings"] = {
+            "brightness": 0,
+            "color": "#FF0080",
+            "whiteBalance": None,
+        }
+        attrs = light.extra_state_attributes
         assert attrs["last_rgb_color"] == [255, 0, 128]
+        assert attrs["last_color_mode"] == "rgb"
 
     def test_extra_attrs_invalid_hex_does_not_raise(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
@@ -2523,3 +2537,466 @@ class TestLightUpdatingUnavailable:
         """Light writes go via cloud or LAN RCP — both fail mid-reboot."""
         light = self._mk_light(_coord_light_updating(is_updating_value=True))
         assert light.available is False
+
+
+# Section: Top/Bottom LED white mode (whiteBalance) — Bosch-app white presets
+#
+# Root cause: Top/Bottom LEDs were RGB-only. A white preset set in the Bosch
+# app ("Kaltweiß" → whiteBalance, color=None) could not be represented, HA
+# showed a stale remembered RGB color instead, and a plain turn_on replayed
+# that stale color over the active white setting. Picking "white" in HA sent
+# #FFFFFF as an RGB color, which the LEDs render with a violet tint, while
+# the app's whiteBalance white is calibrated by the camera.
+
+
+def _white_cache(
+    led_key: str = "topLedLightSettings", wb: float = -0.6, bri: int = 0
+) -> dict:
+    off_white = {"brightness": 0, "color": None, "whiteBalance": -1.0}
+    cache = {
+        "frontLightSettings": dict(off_white),
+        "topLedLightSettings": dict(off_white),
+        "bottomLedLightSettings": dict(off_white),
+    }
+    cache[led_key] = {"brightness": bri, "color": None, "whiteBalance": wb}
+    return cache
+
+
+class TestRgbLedWhiteMode:
+    def _make(self, cache, klass=None):
+        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
+        coord = _stub_coord_edge(lighting_switch_cache={CAM_ID: cache})
+        entity = (klass or BoschTopLedLight)(
+            coord, CAM_ID, SimpleNamespace(data={}, options={})
+        )
+        entity.async_write_ha_state = MagicMock()
+        entity._put_lighting_switch = AsyncMock(return_value=True)
+        entity._put_switch_endpoint = AsyncMock(return_value=True)
+        entity._sync_wallwasher_cache = MagicMock()
+        return entity
+
+    def test_supports_rgb_and_color_temp(self):
+        from homeassistant.components.light import ColorMode
+
+        from custom_components.bosch_shc_camera.light import (
+            BoschBottomLedLight,
+            BoschTopLedLight,
+        )
+
+        for klass in (BoschTopLedLight, BoschBottomLedLight):
+            assert self._make(_white_cache(), klass).supported_color_modes == {
+                ColorMode.RGB,
+                ColorMode.COLOR_TEMP,
+            }
+
+    def test_white_preset_from_app_reported_as_color_temp(self):
+        from homeassistant.components.light import ColorMode
+
+        entity = self._make(_white_cache(wb=-0.6))
+        entity._last_color_hex = "#FFC18D"  # stale color picked long ago
+        assert entity.color_mode == ColorMode.COLOR_TEMP
+        assert entity.color_temp_kelvin == 5600
+
+    def test_color_from_camera_reported_as_rgb(self):
+        from homeassistant.components.light import ColorMode
+
+        cache = _white_cache()
+        cache["topLedLightSettings"] = {
+            "brightness": 0,
+            "color": "#FF0080",
+            "whiteBalance": None,
+        }
+        entity = self._make(cache)
+        assert entity.color_mode == ColorMode.RGB
+        assert entity.rgb_color == (255, 0, 128)
+
+    @pytest.mark.asyncio
+    async def test_plain_turn_on_keeps_white_not_stale_color(self):
+        """Regression: toggle-on must not replay a remembered RGB color
+        over a white preset set in the Bosch app."""
+        entity = self._make(_white_cache(wb=-0.6))
+        entity._last_color_hex = "#FFC18D"
+        await entity.async_turn_on()
+        body = entity._put_lighting_switch.call_args[0][0]["topLedLightSettings"]
+        assert body["color"] is None
+        assert body["whiteBalance"] == -0.6
+
+    @pytest.mark.asyncio
+    async def test_plain_turn_on_restores_color_mode(self):
+        cache = _white_cache()
+        cache["topLedLightSettings"] = {
+            "brightness": 0,
+            "color": "#FF0080",
+            "whiteBalance": None,
+        }
+        entity = self._make(cache)
+        await entity.async_turn_on()
+        body = entity._put_lighting_switch.call_args[0][0]["topLedLightSettings"]
+        assert body == {"brightness": 100, "color": "#FF0080", "whiteBalance": None}
+
+    @pytest.mark.asyncio
+    async def test_color_temp_kelvin_sends_white_balance(self):
+        from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
+
+        entity = self._make(_white_cache(wb=0.2, bri=50))
+        await entity.async_turn_on(**{ATTR_COLOR_TEMP_KELVIN: 6500})
+        body = entity._put_lighting_switch.call_args[0][0]["topLedLightSettings"]
+        assert body["whiteBalance"] == -1.0
+        assert body["color"] is None
+
+    @pytest.mark.asyncio
+    async def test_bottom_led_keeps_white_too(self):
+        from custom_components.bosch_shc_camera.light import BoschBottomLedLight
+
+        entity = self._make(
+            _white_cache("bottomLedLightSettings", wb=-0.6), BoschBottomLedLight
+        )
+        entity._last_color_hex = "#FFC18D"
+        await entity.async_turn_on()
+        body = entity._put_lighting_switch.call_args[0][0]["bottomLedLightSettings"]
+        assert body["color"] is None
+        assert body["whiteBalance"] == -0.6
+
+    @pytest.mark.asyncio
+    async def test_preconfigured_color_survives_cache_reload(self):
+        """A color picked while off must be applied on the next toggle even
+        though the camera still reports white mode in the meantime."""
+        from homeassistant.components.light import ATTR_RGB_COLOR, ColorMode
+
+        entity = self._make(_white_cache(wb=-0.6))
+        await entity.async_turn_on(**{ATTR_RGB_COLOR: (0, 255, 0)})
+        entity._put_lighting_switch.assert_not_called()
+        assert entity.color_mode == ColorMode.RGB  # shows the pending pick
+        await entity.async_turn_on()
+        body = entity._put_lighting_switch.call_args[0][0]["topLedLightSettings"]
+        assert body["color"] == "#00FF00"
+        assert body["whiteBalance"] is None
+        assert entity._pending_mode is None
+
+    @pytest.mark.asyncio
+    async def test_preconfigured_kelvin_applied(self):
+        from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN, ColorMode
+
+        cache = _white_cache()
+        cache["topLedLightSettings"] = {
+            "brightness": 0,
+            "color": "#123456",
+            "whiteBalance": None,
+        }
+        entity = self._make(cache)
+        await entity.async_turn_on(**{ATTR_COLOR_TEMP_KELVIN: 4250})
+        entity._put_lighting_switch.assert_not_called()
+        assert entity.color_mode == ColorMode.COLOR_TEMP
+        await entity.async_turn_on()
+        body = entity._put_lighting_switch.call_args[0][0]["topLedLightSettings"]
+        assert body["whiteBalance"] == 0.0
+        assert body["color"] is None
+
+    @pytest.mark.asyncio
+    async def test_pending_dropped_when_switched_on_elsewhere(self):
+        from homeassistant.components.light import ATTR_RGB_COLOR, ColorMode
+
+        cache = _white_cache(wb=-0.6)
+        entity = self._make(cache)
+        await entity.async_turn_on(**{ATTR_RGB_COLOR: (1, 2, 3)})
+        cache["topLedLightSettings"]["brightness"] = 50  # Bosch app turned it on
+        assert entity.color_mode == ColorMode.COLOR_TEMP
+        assert entity._pending_mode is None
+
+    @pytest.mark.asyncio
+    async def test_failed_put_keeps_pending(self):
+        entity = self._make(_white_cache(wb=-0.6))
+        entity._put_lighting_switch = AsyncMock(return_value=False)
+        entity._pending_mode, entity._pending_value = "color", "#00FF00"
+        await entity.async_turn_on()
+        assert entity._pending_mode == "color"
+        assert entity._is_on is False
+
+    def test_attrs_show_white_not_stale_color(self):
+        entity = self._make(_white_cache(wb=-0.6))
+        entity._last_color_hex = "#FFC18D"
+        attrs = entity.extra_state_attributes
+        assert attrs["last_color_mode"] == "color_temp"
+        assert attrs["last_color_temp_kelvin"] == 5600
+        assert attrs["last_rgb_color"] != [255, 193, 141]
+        assert attrs["last_picked_rgb_color"] == [255, 193, 141]
+
+    @pytest.mark.asyncio
+    async def test_restore_ignores_white_display_color(self):
+        entity = self._make(_white_cache(wb=-0.6))
+        entity.async_get_last_state = AsyncMock(
+            return_value=SimpleNamespace(
+                attributes={
+                    "last_rgb_color": [255, 236, 224],
+                    "last_picked_rgb_color": [255, 193, 141],
+                    "last_color_mode": "color_temp",
+                    "last_white_balance": -0.6,
+                }
+            )
+        )
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                new=AsyncMock(),
+                create=True,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                new=AsyncMock(),
+                create=True,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                new=AsyncMock(),
+                create=True,
+            ),
+        ):
+            await entity.async_added_to_hass()
+        assert entity._last_color_hex == "#FFC18D"
+
+    @pytest.mark.asyncio
+    async def test_cold_start_after_restart_keeps_white(self):
+        """Until the first /lighting/switch poll the cache is empty — the
+        restored mode must keep a white LED white on turn_on."""
+        from homeassistant.components.light import ColorMode
+
+        entity = self._make({})
+        entity.coordinator.lighting_switch_cache = {}
+        entity.async_get_last_state = AsyncMock(
+            return_value=SimpleNamespace(
+                attributes={
+                    "last_rgb_color": [255, 236, 224],
+                    "last_picked_rgb_color": [255, 193, 141],
+                    "last_color_mode": "color_temp",
+                    "last_white_balance": -0.6,
+                }
+            )
+        )
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                new=AsyncMock(),
+                create=True,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                new=AsyncMock(),
+                create=True,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                new=AsyncMock(),
+                create=True,
+            ),
+        ):
+            await entity.async_added_to_hass()
+        assert entity.color_mode == ColorMode.COLOR_TEMP
+        await entity.async_turn_on()
+        body = entity._put_lighting_switch.call_args[0][0]["topLedLightSettings"]
+        assert body["color"] is None
+        assert body["whiteBalance"] == -0.6
+
+    @pytest.mark.asyncio
+    async def test_display_default_not_restored_as_picked_color(self):
+        """[255,180,100] is the display-only default — restoring it as a
+        picked color would later be sent to the camera as #FFB464."""
+        for attributes in (
+            {"last_rgb_color": [255, 180, 100]},
+            {"last_rgb_color": [255, 180, 100], "last_color_mode": "rgb"},
+        ):
+            entity = self._make({})
+            entity.async_get_last_state = AsyncMock(
+                return_value=SimpleNamespace(attributes=attributes)
+            )
+            with (
+                patch(
+                    "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                    new=AsyncMock(),
+                    create=True,
+                ),
+                patch(
+                    "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                    new=AsyncMock(),
+                    create=True,
+                ),
+                patch(
+                    "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                    new=AsyncMock(),
+                    create=True,
+                ),
+            ):
+                await entity.async_added_to_hass()
+            assert entity._last_color_hex is None
+
+
+class TestFrontLightPendingWhiteBalance:
+    @pytest.mark.asyncio
+    async def test_turn_on_applies_pending_white_balance(self):
+        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_shc_camera.shc import (
+            get_pending_front_white_balance,
+            set_pending_front_white_balance,
+        )
+
+        light = _make_light(klass=BoschFrontLight, led_key="frontLightSettings")
+        light._white_balance = -1.0
+        light._put_lighting_switch = AsyncMock(return_value=True)
+        light._put_switch_endpoint = AsyncMock(return_value=True)
+        light._sync_wallwasher_cache = MagicMock()
+        set_pending_front_white_balance(light.coordinator, CAM_ID, 0.4)
+        await light.async_turn_on()
+        body = light._put_lighting_switch.call_args[0][0]["frontLightSettings"]
+        assert body["whiteBalance"] == 0.4
+        assert get_pending_front_white_balance(light.coordinator, CAM_ID) is None
+        assert light.coordinator.last_front_brightness[CAM_ID] == body["brightness"]
+
+
+class TestRgbLedColorToWhiteNudge:
+    """Camera quirk verified live (Eyes Outdoor II, FW 9.40.202): a
+    color → white write is ignored when the whiteBalance equals the value
+    the camera still holds for the group, so a nudged value goes first."""
+
+    def _make(self, cache):
+        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
+        coord = _stub_coord_edge(lighting_switch_cache={CAM_ID: cache})
+        entity = BoschTopLedLight(coord, CAM_ID, SimpleNamespace(data={}, options={}))
+        entity.async_write_ha_state = MagicMock()
+        entity._put_lighting_switch = AsyncMock(return_value=True)
+        entity._put_switch_endpoint = AsyncMock(return_value=True)
+        entity._sync_wallwasher_cache = MagicMock()
+        return entity
+
+    @pytest.mark.asyncio
+    async def test_color_to_white_writes_nudge_then_exact(self):
+        from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
+
+        entity = self._make(
+            {
+                "topLedLightSettings": {
+                    "brightness": 100,
+                    "color": "#FF0000",
+                    "whiteBalance": None,
+                }
+            }
+        )
+        await entity.async_turn_on(**{ATTR_COLOR_TEMP_KELVIN: 6500})
+        calls = [
+            c.args[0]["topLedLightSettings"]
+            for c in entity._put_lighting_switch.call_args_list
+        ]
+        assert [c["whiteBalance"] for c in calls] == [-0.99, -1.0]
+        assert all(c["color"] is None for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_white_to_white_single_write(self):
+        from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
+
+        entity = self._make(
+            {
+                "topLedLightSettings": {
+                    "brightness": 100,
+                    "color": None,
+                    "whiteBalance": 0.2,
+                }
+            }
+        )
+        await entity.async_turn_on(**{ATTR_COLOR_TEMP_KELVIN: 6500})
+        assert entity._put_lighting_switch.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_warm_target_nudges_toward_center(self):
+        from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
+
+        entity = self._make(
+            {
+                "topLedLightSettings": {
+                    "brightness": 100,
+                    "color": "#00FF00",
+                    "whiteBalance": None,
+                }
+            }
+        )
+        await entity.async_turn_on(**{ATTR_COLOR_TEMP_KELVIN: 2000})
+        first = entity._put_lighting_switch.call_args_list[0].args[0]
+        assert first["topLedLightSettings"]["whiteBalance"] == 0.99
+
+    @pytest.mark.asyncio
+    async def test_white_picked_while_off_still_nudges_on_switch_on(self):
+        """Light off with a cached colour, white picked (held as pending),
+        then switched on: the camera still ignores colour -> white at an equal
+        whiteBalance, so the nudge must also run on this was_off path."""
+        entity = self._make(
+            {
+                "topLedLightSettings": {
+                    "brightness": 0,
+                    "color": "#FF0000",
+                    "whiteBalance": None,
+                }
+            }
+        )
+        entity._pending_mode = "white"
+        entity._pending_value = -1.0
+        await entity.async_turn_on()
+        calls = [
+            c.args[0]["topLedLightSettings"]
+            for c in entity._put_lighting_switch.call_args_list
+        ]
+        assert [c["whiteBalance"] for c in calls] == [-0.99, -1.0]
+
+
+class TestWhiteStateEdges:
+    def test_white_balance_defaults_to_cold_when_nothing_known(self):
+        entity = TestRgbLedWhiteMode()._make({})
+        entity._white_balance = None
+        entity._last_white_balance = None
+        assert entity._current_white_balance() == -1.0
+
+    @pytest.mark.asyncio
+    async def test_restore_ignores_garbage_picked_colour(self):
+        entity = TestRgbLedWhiteMode()._make({})
+        entity.async_get_last_state = AsyncMock(
+            return_value=SimpleNamespace(
+                attributes={
+                    "last_color_mode": "rgb",
+                    "last_picked_rgb_color": ["x", 1, 2],
+                }
+            )
+        )
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                new=AsyncMock(),
+                create=True,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                new=AsyncMock(),
+                create=True,
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                new=AsyncMock(),
+                create=True,
+            ),
+        ):
+            await entity.async_added_to_hass()
+        assert entity._last_color_hex is None
+        assert entity._restored_mode is None
+
+    @pytest.mark.asyncio
+    async def test_front_white_picked_while_off_is_held_coordinator_side(self):
+        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_shc_camera.shc import (
+            get_pending_front_white_balance,
+        )
+
+        light = _make_light(klass=BoschFrontLight, led_key="frontLightSettings")
+        light._put_lighting_switch = AsyncMock(return_value=True)
+        light._put_switch_endpoint = AsyncMock(return_value=True)
+        light._sync_wallwasher_cache = MagicMock()
+        light._is_on = False
+        await light.async_turn_on(color_temp_kelvin=6500)
+        light._put_lighting_switch.assert_not_awaited()
+        assert get_pending_front_white_balance(light.coordinator, CAM_ID) == -1.0

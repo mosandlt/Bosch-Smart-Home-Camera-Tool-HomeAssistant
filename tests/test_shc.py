@@ -2677,8 +2677,9 @@ class TestSetLightComponentGen2:
         captured = {}
 
         def _capture_put(url, json=None, headers=None):
-            captured["url"] = url
-            captured["body"] = json
+            if url.endswith("/lighting/switch"):
+                captured["url"] = url
+                captured["body"] = json
             return _mock_response(204)
 
         session = MagicMock()
@@ -2706,7 +2707,8 @@ class TestSetLightComponentGen2:
         captured = {}
 
         def _capture_put(url, json=None, headers=None):
-            captured["body"] = json
+            if url.endswith("/lighting/switch"):
+                captured["body"] = json
             return _mock_response(204)
 
         session = MagicMock()
@@ -2793,6 +2795,184 @@ class TestSetLightComponentGen2:
         _ls_url, ls_body = captured[0]
         assert ls_body["topLedLightSettings"]["brightness"] == 0
         assert ls_body["bottomLedLightSettings"]["brightness"] == 0
+
+    @pytest.mark.asyncio
+    async def test_wallwasher_write_holds_lighting_lock(self):
+        """Wallwasher /lighting/switch PUT must hold the shared per-camera
+        lighting lock like every other writer."""
+        coord = _stub_coord_light(gen2=True)
+        from custom_components.bosch_shc_camera import shc
+
+        held = []
+
+        def _put(url, json=None, headers=None):
+            if url.endswith("/lighting/switch"):
+                held.append(shc.get_lighting_lock(coord, CAM_ID).locked())
+            return _mock_response(200, json_data=json or {})
+
+        session = MagicMock()
+        session.put = MagicMock(side_effect=_put)
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "wallwasher", True
+            )
+        assert ok is True
+        assert held == [True]
+
+    @pytest.mark.asyncio
+    async def test_wallwasher_cache_merge_keeps_front_group(self):
+        """Wallwasher write merges only top/bottom into the cache: a front
+        write that landed while the PUT was in flight must survive."""
+        coord = _stub_coord_light(gen2=True)
+        from custom_components.bosch_shc_camera import shc
+
+        def _put(url, json=None, headers=None):
+            if url.endswith("/lighting/switch"):
+                # concurrent front-light write lands during the round trip
+                coord.lighting_switch_cache[CAM_ID]["frontLightSettings"] = {
+                    "brightness": 33,
+                    "color": None,
+                    "whiteBalance": 0.5,
+                }
+            return _mock_response(200, json_data=json or {})
+
+        session = MagicMock()
+        session.put = MagicMock(side_effect=_put)
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
+            await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "wallwasher", False
+            )
+        cache = coord.lighting_switch_cache[CAM_ID]
+        assert cache["frontLightSettings"]["brightness"] == 33
+        assert cache["topLedLightSettings"]["brightness"] == 0
+        assert cache["bottomLedLightSettings"]["brightness"] == 0
+
+    def _front_put_session(self, captured, ok=True):
+        def _put(url, json=None, headers=None):
+            captured.append((url, json))
+            if url.endswith("/lighting/switch") and not ok:
+                return _mock_response(500)
+            return _mock_response(200, json_data=json or {})
+
+        session = MagicMock()
+        session.put = MagicMock(side_effect=_put)
+        return session
+
+    @pytest.mark.asyncio
+    async def test_front_on_defaults_unknown_white_balance_to_cold(self):
+        """Front ON with brightness 0 and neither colour nor whiteBalance
+        cached: restore brightness and send the cold-white default."""
+        coord = _stub_coord_light(gen2=True)
+        coord.lighting_switch_cache[CAM_ID]["frontLightSettings"] = {
+            "brightness": 0,
+            "color": None,
+            "whiteBalance": None,
+        }
+        from custom_components.bosch_shc_camera import shc
+
+        captured = []
+        session = self._front_put_session(captured)
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
+            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "front", True)
+        assert ok is True
+        body = captured[0][1]["frontLightSettings"]
+        assert body["whiteBalance"] == -1.0
+        assert body["brightness"] == 50  # from front_light_intensity 0.5
+
+    @pytest.mark.asyncio
+    async def test_intensity_applies_and_clears_pending_white_balance(self):
+        coord = _stub_coord_light(gen2=True)
+        coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"] = 0
+        from custom_components.bosch_shc_camera import shc
+
+        shc.set_pending_front_white_balance(coord, CAM_ID, 0.4)
+        captured = []
+        session = self._front_put_session(captured)
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "intensity", 60
+            )
+        assert ok is True
+        front = captured[0][1]["frontLightSettings"]
+        assert front["whiteBalance"] == 0.4
+        assert front["color"] is None
+        assert shc.get_pending_front_white_balance(coord, CAM_ID) is None
+
+    @pytest.mark.asyncio
+    async def test_intensity_defaults_unknown_white_balance(self):
+        coord = _stub_coord_light(gen2=True)
+        coord.lighting_switch_cache[CAM_ID]["frontLightSettings"] = {
+            "brightness": 10,
+            "color": None,
+            "whiteBalance": None,
+        }
+        from custom_components.bosch_shc_camera import shc
+
+        captured = []
+        session = self._front_put_session(captured)
+        with patch.object(
+            shc, "async_get_bosch_cloud_session", new=AsyncMock(return_value=session)
+        ):
+            await shc.async_cloud_set_light_component(coord, CAM_ID, "intensity", 60)
+        assert captured[0][1]["frontLightSettings"]["whiteBalance"] == -1.0
+
+    @pytest.mark.asyncio
+    async def test_intensity_step1_failure_skips_enable_put(self, caplog):
+        coord = _stub_coord_light(gen2=True)
+        from custom_components.bosch_shc_camera import shc
+
+        captured = []
+        session = self._front_put_session(captured, ok=False)
+        with (
+            patch.object(
+                shc,
+                "async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            await shc.async_cloud_set_light_component(coord, CAM_ID, "intensity", 60)
+        assert [u for u, _ in captured if u.endswith("/front")] == []
+        assert "for " in caplog.text and "intensity" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_failed_final_put_logged(self, caplog):
+        """Step-2 (/front or /topdown) rejected → warning, result False."""
+        coord = _stub_coord_light(gen2=True)
+        from custom_components.bosch_shc_camera import shc
+
+        def _put(url, json=None, headers=None):
+            return _mock_response(500 if url.endswith("/front") else 200)
+
+        session = MagicMock()
+        session.put = MagicMock(side_effect=_put)
+        with (
+            patch.object(
+                shc,
+                "async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "intensity", 60
+            )
+        assert ok is False
+        assert "HTTP 500" in caplog.text
+
+    def test_front_restore_brightness_defaults_to_100(self):
+        from custom_components.bosch_shc_camera import shc
+
+        coord = SimpleNamespace(shc_state_cache={CAM_ID: {}})
+        assert shc.front_restore_brightness(coord, CAM_ID) == 100
 
     @pytest.mark.asyncio
     async def test_invalid_component_returns_false(self):
@@ -4172,3 +4352,190 @@ class TestLocalWriteTimestamp:
             ok = await shc.async_cloud_set_privacy_mode(coord, "C", True)
         assert ok is True
         assert coord.local_write_at["C"] == 4242.0
+
+
+class TestGen2FrontLightBrightnessAndIntensity:
+    """Front-light fixes verified live on an Eyes Outdoor II:
+
+    - front switch ON with cached brightness 0 must restore a brightness via
+      /lighting/switch first (the /front toggle never writes one);
+    - Gen2 intensity must change the front group only — it used to write all
+      three groups (top/bottom switched on, colors/whites reset to -1.0).
+    """
+
+    @staticmethod
+    def _session(captured):
+        def _capture_put(url, json=None, headers=None):
+            captured.append((url, json))
+            return _mock_response(204)
+
+        session = MagicMock()
+        session.put = MagicMock(side_effect=_capture_put)
+        return session
+
+    @pytest.mark.asyncio
+    async def test_front_on_restores_brightness_when_cache_zero(self):
+        coord = _stub_coord_light(gen2=True)
+        front = coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]
+        front["brightness"] = 0
+        front["whiteBalance"] = -0.33
+        coord.last_front_brightness = {CAM_ID: 20}
+        from custom_components.bosch_shc_camera import shc
+
+        captured: list = []
+        with patch.object(
+            shc,
+            "async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=self._session(captured)),
+        ):
+            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "front", True)
+
+        assert ok is True
+        urls = [u for u, _ in captured]
+        assert urls[0].endswith("/lighting/switch")
+        assert urls[-1].endswith("/lighting/switch/front")
+        front = captured[0][1]["frontLightSettings"]
+        assert front["brightness"] == 20
+        assert front["whiteBalance"] == -0.33  # kept
+        # top/bottom re-sent unchanged
+        assert captured[0][1]["topLedLightSettings"]["brightness"] == 80
+        assert (
+            coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"]
+            == 20
+        )
+
+    @pytest.mark.asyncio
+    async def test_front_on_skips_restore_when_brightness_known(self):
+        coord = _stub_coord_light(gen2=True)  # cached front brightness 50
+        from custom_components.bosch_shc_camera import shc
+
+        captured: list = []
+        with patch.object(
+            shc,
+            "async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=self._session(captured)),
+        ):
+            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "front", True)
+
+        assert ok is True
+        assert [u.rsplit("/", 1)[-1] for u, _ in captured] == ["front"]
+
+    @pytest.mark.asyncio
+    async def test_front_on_applies_pending_white_balance(self):
+        coord = _stub_coord_light(gen2=True)
+        coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"] = 0
+        from custom_components.bosch_shc_camera import shc
+
+        shc.set_pending_front_white_balance(coord, CAM_ID, 0.4)
+        captured: list = []
+        with patch.object(
+            shc,
+            "async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=self._session(captured)),
+        ):
+            await shc.async_cloud_set_light_component(coord, CAM_ID, "front", True)
+
+        assert captured[0][1]["frontLightSettings"]["whiteBalance"] == 0.4
+        assert shc.get_pending_front_white_balance(coord, CAM_ID) is None
+
+    @pytest.mark.asyncio
+    async def test_front_off_remembers_brightness(self):
+        coord = _stub_coord_light(gen2=True)  # cached front brightness 50
+        from custom_components.bosch_shc_camera import shc
+
+        captured: list = []
+        with (
+            patch.object(
+                shc,
+                "async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=self._session(captured)),
+            ),
+            patch.object(shc, "_is_gen2", return_value=True),
+        ):
+            await shc.async_cloud_set_light_component(coord, CAM_ID, "front", False)
+
+        assert coord.last_front_brightness[CAM_ID] == 50
+        assert shc.front_restore_brightness(coord, CAM_ID) == 50
+
+    @pytest.mark.asyncio
+    async def test_intensity_changes_front_group_only(self):
+        coord = _stub_coord_light(gen2=True)
+        coord.lighting_switch_cache[CAM_ID]["topLedLightSettings"] = {
+            "brightness": 0,
+            "color": "#FF0080",
+            "whiteBalance": None,
+        }
+        coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]["whiteBalance"] = 0.2
+        from custom_components.bosch_shc_camera import shc
+
+        captured: list = []
+        with patch.object(
+            shc,
+            "async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=self._session(captured)),
+        ):
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "intensity", 0.6
+            )
+
+        assert ok is True
+        body = next(j for u, j in captured if u.endswith("/lighting/switch"))
+        assert body["frontLightSettings"]["brightness"] == 60
+        assert body["frontLightSettings"]["whiteBalance"] == 0.2  # not reset
+        assert body["topLedLightSettings"] == {
+            "brightness": 0,
+            "color": "#FF0080",
+            "whiteBalance": None,
+        }
+        assert body["bottomLedLightSettings"]["brightness"] == 80
+        assert captured[-1] == (
+            f"{shc.CLOUD_API}/v11/video_inputs/{CAM_ID}/lighting/switch/front",
+            {"enabled": True},
+        )
+        assert coord.shc_state_cache[CAM_ID]["front_light"] is True
+
+    @pytest.mark.asyncio
+    async def test_front_on_skips_enable_when_restore_fails(self):
+        coord = _stub_coord_light(gen2=True)
+        coord.lighting_switch_cache[CAM_ID]["frontLightSettings"]["brightness"] = 0
+        from custom_components.bosch_shc_camera import shc
+
+        captured: list = []
+
+        def _put(url, json=None, headers=None):
+            captured.append(url)
+            return _mock_response(500)
+
+        session = MagicMock()
+        session.put = MagicMock(side_effect=_put)
+        with (
+            patch.object(
+                shc,
+                "async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch.object(shc, "_notify_write_failed", new=AsyncMock()),
+        ):
+            ok = await shc.async_cloud_set_light_component(coord, CAM_ID, "front", True)
+
+        assert ok is False
+        assert not any(u.endswith("/lighting/switch/front") for u in captured)
+
+    @pytest.mark.asyncio
+    async def test_intensity_zero_disables_front(self):
+        coord = _stub_coord_light(gen2=True)
+        from custom_components.bosch_shc_camera import shc
+
+        captured: list = []
+        with patch.object(
+            shc,
+            "async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=self._session(captured)),
+        ):
+            ok = await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "intensity", 0
+            )
+
+        assert ok is True
+        assert captured[-1][1] == {"enabled": False}
+        assert coord.shc_state_cache[CAM_ID]["front_light"] is False

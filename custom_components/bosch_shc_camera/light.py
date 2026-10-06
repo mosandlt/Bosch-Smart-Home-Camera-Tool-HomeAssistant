@@ -1,8 +1,10 @@
 """Bosch Smart Home Camera — Light Platform (Gen2 only).
 
 Creates native HA light entities for Gen2 cameras (Eyes Außenkamera II):
-  - Top LED Light   — RGB color + brightness (oberes Licht, "tausende Farben")
-  - Bottom LED Light — RGB color + brightness (unteres Licht, "tausende Farben")
+  - Top LED Light   — RGB color OR white (color temperature) + brightness
+                      (oberes Licht, "tausende Farben" / Weißtöne)
+  - Bottom LED Light — RGB color OR white (color temperature) + brightness
+                      (unteres Licht, "tausende Farben" / Weißtöne)
   - Front Light     — color temperature + brightness (Frontlicht, kaltweiß↔warmweiß)
 
 Gen2 lighting API: PUT /v11/video_inputs/{id}/lighting/switch
@@ -30,15 +32,52 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util.color import color_temperature_to_rgb
 
 from . import CLOUD_API, DOMAIN  # type: ignore[attr-defined]
 from .cloud_ssl import async_get_bosch_cloud_session
 from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _warn_if_privacy_on
+from .shc import (
+    clear_pending_front_white_balance,
+    get_pending_front_white_balance,
+    remember_front_brightness,
+    set_pending_front_white_balance,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
+
+# whiteBalance <-> Kelvin mapping shared by every light group.
+# -1.0 (cool/blue) = 6500 K, 0.0 = 4250 K, 1.0 (warm/orange) = 2000 K.
+MIN_COLOR_TEMP_KELVIN = 2000
+MAX_COLOR_TEMP_KELVIN = 6500
+
+# Light-group modes as reported by GET /lighting/switch: a group carries
+# EITHER `color` (hex) OR `whiteBalance`, never both.
+_MODE_COLOR = "color"
+_MODE_WHITE = "white"
+
+
+def _wb_to_kelvin(wb: float) -> int:
+    """Convert Bosch whiteBalance (-1.0 … 1.0) to Kelvin (6500 … 2000)."""
+    return round(4250 - wb * 2250)
+
+
+def _kelvin_to_wb(kelvin: float) -> float:
+    """Convert Kelvin to Bosch whiteBalance, clamped to -1.0 … 1.0."""
+    wb = round((4250 - kelvin) / 2250, 2)
+    return max(-1.0, min(1.0, wb))
+
+
+def _hex_to_rgb_list(color_hex: str) -> list[int] | None:
+    """Decode '#RRGGBB' to [r, g, b]; None on malformed input."""
+    h = color_hex.lstrip("#")
+    try:
+        return [int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)]
+    except ValueError:
+        return None
 
 
 async def async_setup_entry(
@@ -419,25 +458,196 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
 
 # ─────────────────────────────────────────────────────────────────────────────
 class _BoschRgbLedLight(_BoschLightBase):
-    """Base for Top/Bottom LED light — RGB color + brightness.
+    """Base for Top/Bottom LED light — RGB color OR white + brightness.
 
-    Remembers last brightness and color for restore on turn_on.
+    The Bosch API lets each LED group run in one of two modes: `color`
+    (hex) or `whiteBalance` (-1.0 cool … 1.0 warm). The Bosch app's white
+    presets ("Kaltweiß", "Warmweiß", …) use the whiteBalance mode. Both
+    modes are exposed to HA (ColorMode.RGB + ColorMode.COLOR_TEMP) and the
+    reported `color_mode` follows the mode the camera actually reports, so
+    a white set in the Bosch app shows up as a color temperature instead of
+    a stale, unrelated RGB value.
+
+    Turning the light on without color arguments restores the mode the
+    group is currently in (per the camera), never a remembered RGB color
+    on top of an active white setting. A color/temperature picked while the
+    light is off is held as a pending value and applied on the next turn_on.
     """
 
     _led_key = ""
-    _attr_color_mode = ColorMode.RGB
-    _attr_supported_color_modes: ClassVar[set[ColorMode]] = {ColorMode.RGB}
+    _attr_supported_color_modes: ClassVar[set[ColorMode]] = {
+        ColorMode.RGB,
+        ColorMode.COLOR_TEMP,
+    }
+    _attr_min_color_temp_kelvin = MIN_COLOR_TEMP_KELVIN
+    _attr_max_color_temp_kelvin = MAX_COLOR_TEMP_KELVIN
+
+    # Class-level defaults so instances built via __new__ (tests) work too.
+    # Pending = color/temperature picked while the light was off; applied on
+    # the next turn_on. Value is a '#RRGGBB' hex (color) or a whiteBalance
+    # float (white).
+    _pending_mode: str | None = None
+    _pending_value: str | float | None = None
+    # Mode restored from the last HA state; used only until the first
+    # /lighting/switch poll fills the cache (or during a cloud outage).
+    _restored_mode: str | None = None
+
+    # The base class shows this as `last_rgb_color` when no color was ever
+    # picked. It is a display value only and must not be restored as a pick.
+    _DISPLAY_DEFAULT_RGB: ClassVar[list[int]] = [255, 180, 100]
+
+    # ── mode bookkeeping ──────────────────────────────────────────────────
+    def _cached_mode(self) -> str | None:
+        """Mode reported by the camera for this group, or None if unknown."""
+        lsc = self.coordinator.lighting_switch_cache.get(self._cam_id, {})
+        led = lsc.get(self._led_key) or {}
+        if led.get("color"):
+            return _MODE_COLOR
+        if led.get("whiteBalance") is not None:
+            return _MODE_WHITE
+        return None
+
+    def _known_mode(self) -> str | None:
+        """Pending pick > camera-reported mode > mode restored after restart."""
+        if self._pending_mode is not None:
+            return self._pending_mode
+        cached = self._cached_mode()
+        if cached is not None:
+            return cached
+        return self._restored_mode
+
+    def _active_mode(self) -> str:
+        mode = self._known_mode()
+        if mode is not None:
+            return mode
+        # Nothing known at all (fresh install, empty cache): keep the
+        # previous behavior — a remembered color wins, otherwise white.
+        return _MODE_COLOR if self._last_color_hex else _MODE_WHITE
+
+    def _clear_pending(self) -> None:
+        self._pending_mode = None
+        self._pending_value = None
+
+    def _load_state_from_cache(self) -> None:
+        super()._load_state_from_cache()
+        # The light was switched on elsewhere (Bosch app, schedule): a value
+        # preconfigured in HA while it was off is obsolete.
+        if self._is_on and self._pending_mode is not None:
+            self._clear_pending()
+
+    def _current_white_balance(self) -> float:
+        if self._pending_mode == _MODE_WHITE and isinstance(
+            self._pending_value, (int, float)
+        ):
+            return float(self._pending_value)
+        if self._white_balance is not None:
+            return self._white_balance
+        if self._last_white_balance is not None:
+            return self._last_white_balance
+        return -1.0
+
+    def _current_color_hex(self) -> str | None:
+        if self._pending_mode == _MODE_COLOR and isinstance(self._pending_value, str):
+            return self._pending_value
+        return self._color_hex or self._last_color_hex
+
+    # ── HA properties ─────────────────────────────────────────────────────
+    @property
+    def color_mode(self) -> ColorMode:
+        self._load_state_from_cache()
+        if self._active_mode() == _MODE_WHITE:
+            return ColorMode.COLOR_TEMP
+        return ColorMode.RGB
+
+    @property
+    def color_temp_kelvin(self) -> int | None:
+        self._load_state_from_cache()
+        return _wb_to_kelvin(self._current_white_balance())
 
     @property
     def rgb_color(self) -> tuple[int, int, int] | None:
         self._load_state_from_cache()
-        color = self._color_hex or self._last_color_hex
+        color = self._current_color_hex()
         if color:
-            h = color.lstrip("#")
-            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+            rgb = _hex_to_rgb_list(color)
+            if rgb is not None:
+                return (rgb[0], rgb[1], rgb[2])
         # Default warm white when no color known (e.g. after HA restart with light off)
         return (255, 180, 100)
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Add color-mode info on top of the base last_* attributes.
+
+        `last_rgb_color` is what the Lovelace card paints its color dot
+        with, so while the group is (known to be) in white mode it carries
+        the RGB equivalent of the white temperature instead of a stale
+        color. The last color the user actually picked stays available as
+        `last_picked_rgb_color` and is what RestoreState reads back.
+        """
+        # Refresh from the camera cache first: HA may read the attributes
+        # before any other property, and the white value must be current.
+        self._load_state_from_cache()
+        attrs = super().extra_state_attributes
+        picked = self._current_color_hex()
+        if picked:
+            picked_rgb = _hex_to_rgb_list(picked)
+            if picked_rgb is not None:
+                attrs["last_picked_rgb_color"] = picked_rgb
+                if self._known_mode() == _MODE_COLOR:
+                    attrs["last_rgb_color"] = picked_rgb
+        if self._known_mode() == _MODE_WHITE:
+            kelvin = _wb_to_kelvin(self._current_white_balance())
+            r, g, b = color_temperature_to_rgb(kelvin)
+            attrs["last_rgb_color"] = [round(r), round(g), round(b)]
+            attrs["last_color_temp_kelvin"] = kelvin
+            attrs["last_color_mode"] = ColorMode.COLOR_TEMP.value
+        else:
+            # Same resolution as `color_mode`, so attribute and state agree.
+            attrs["last_color_mode"] = (
+                ColorMode.COLOR_TEMP.value
+                if self._active_mode() == _MODE_WHITE
+                else ColorMode.RGB.value
+            )
+        return attrs
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last *picked* color and the last mode.
+
+        `last_rgb_color` is a display value (white-mode equivalent, or the
+        warm-white default when nothing was picked), so the base class must
+        not be trusted to restore it as a picked color.
+        """
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.attributes is None:
+            return
+        attrs = last_state.attributes
+        mode_attr = attrs.get("last_color_mode")
+        if mode_attr is None:
+            # Pre-fix state format: only drop the display-only default.
+            lrc = attrs.get("last_rgb_color")
+            is_default = isinstance(lrc, (list, tuple)) and (
+                list(lrc) == self._DISPLAY_DEFAULT_RGB
+            )
+            if is_default:
+                self._last_color_hex = None
+            return
+        self._restored_mode = (
+            _MODE_WHITE if mode_attr == ColorMode.COLOR_TEMP.value else _MODE_COLOR
+        )
+        self._last_color_hex = None
+        lpc = attrs.get("last_picked_rgb_color")
+        if isinstance(lpc, (list, tuple)) and len(lpc) == 3:
+            try:
+                r, g, b = (int(lpc[0]), int(lpc[1]), int(lpc[2]))
+                self._last_color_hex = f"#{r:02X}{g:02X}{b:02X}"
+            except (ValueError, TypeError):
+                pass
+        if self._restored_mode == _MODE_COLOR and self._last_color_hex is None:
+            self._restored_mode = None
+
+    # ── service calls ─────────────────────────────────────────────────────
     async def async_turn_on(self, **kwargs: Any) -> None:
         # Privacy mode blocks /lighting/switch PUT with HTTP 443 — warn the user.
         if await _warn_if_privacy_on(self, "RGB Light"):
@@ -445,17 +655,30 @@ class _BoschRgbLedLight(_BoschLightBase):
         self._load_state_from_cache()
         brightness = kwargs.get(ATTR_BRIGHTNESS)
         rgb = kwargs.get(ATTR_RGB_COLOR)
+        kelvin = kwargs.get(ATTR_COLOR_TEMP_KELVIN)
         was_off = not self._is_on
-        color_hex: str | None = None
 
+        mode: str
+        value: str | float
         if rgb:
             color_hex = f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
             self._color_hex = color_hex
             self._last_color_hex = color_hex
             self._white_balance = None
+            mode, value = _MODE_COLOR, color_hex
+        elif kelvin:
+            wb = _kelvin_to_wb(kelvin)
+            self._white_balance = wb
+            self._last_white_balance = wb
+            self._color_hex = None
+            mode, value = _MODE_WHITE, wb
+        elif self._active_mode() == _MODE_COLOR and self._current_color_hex():
+            mode, value = _MODE_COLOR, str(self._current_color_hex())
         else:
-            # Restore last color (may be None if user has never picked a color)
-            color_hex = self._color_hex or self._last_color_hex
+            # White mode reported by the camera (e.g. set in the Bosch app),
+            # or nothing known at all: keep/restore white instead of
+            # replaying a stale RGB color.
+            mode, value = _MODE_WHITE, self._current_white_balance()
 
         if brightness:
             # Round up so brightness=1 (card sentinel for "at least 1 step")
@@ -465,7 +688,10 @@ class _BoschRgbLedLight(_BoschLightBase):
         # Preconfigure while off: any color/brightness change is stored locally
         # but the light stays physically off. User must explicitly toggle the
         # switch row (turn_on with no kwargs) to apply the stored settings.
-        if was_off and (rgb or brightness):
+        if was_off and (rgb or kelvin or brightness):
+            if rgb or kelvin:
+                self._pending_mode = mode
+                self._pending_value = value
             self.async_write_ha_state()
             return
 
@@ -476,22 +702,42 @@ class _BoschRgbLedLight(_BoschLightBase):
             else (self._last_brightness or 100)
         )
 
-        if color_hex:
-            body = {
-                self._led_key: {
-                    "brightness": api_brightness,
-                    "color": color_hex,
-                    "whiteBalance": None,
+        # Camera quirk (verified live, Eyes Outdoor II FW 9.40.202): a
+        # color → white switch is IGNORED when the whiteBalance equals the
+        # value the camera still has stored for the group — the LED stays on
+        # the color although the PUT returns 204. Typical trigger: the
+        # "cold white" preset (6500 K = -1.0) after a color when the group
+        # was -1.0 before. Writing a nudged value first makes the second,
+        # exact write a real change.
+        if (
+            mode == _MODE_WHITE
+            and self._cached_mode() == _MODE_COLOR
+            and isinstance(value, float)
+        ):
+            nudge = round(value + 0.01 if value <= 0 else value - 0.01, 2)
+            await self._put_lighting_switch(
+                {
+                    self._led_key: {
+                        "brightness": api_brightness,
+                        "color": None,
+                        "whiteBalance": nudge,
+                    }
                 }
+            )
+
+        if mode == _MODE_COLOR:
+            settings: dict[str, Any] = {
+                "brightness": api_brightness,
+                "color": value,
+                "whiteBalance": None,
             }
         else:
-            body = {
-                self._led_key: {
-                    "brightness": api_brightness,
-                    "color": None,
-                    "whiteBalance": -1.0,
-                }
+            settings = {
+                "brightness": api_brightness,
+                "color": None,
+                "whiteBalance": value,
             }
+        body = {self._led_key: settings}
 
         # Only commit the optimistic on-state if the PUT actually succeeded —
         # otherwise is_on/brightness (raw instance vars) would show the light ON
@@ -500,6 +746,7 @@ class _BoschRgbLedLight(_BoschLightBase):
             self._brightness = api_brightness
             self._last_brightness = api_brightness
             self._is_on = True
+            self._clear_pending()
             await self._put_switch_endpoint("topdown", True)
             # Only sync (and stamp the light_set_at write-lock) on confirmed
             # success — on a failed write this would freeze the stale
@@ -563,8 +810,8 @@ class BoschFrontLight(_BoschLightBase):
     _led_key = "frontLightSettings"
     _attr_color_mode = ColorMode.COLOR_TEMP
     _attr_supported_color_modes: ClassVar[set[ColorMode]] = {ColorMode.COLOR_TEMP}
-    _attr_min_color_temp_kelvin = 2000
-    _attr_max_color_temp_kelvin = 6500
+    _attr_min_color_temp_kelvin = MIN_COLOR_TEMP_KELVIN
+    _attr_max_color_temp_kelvin = MAX_COLOR_TEMP_KELVIN
 
     def __init__(self, coordinator: Any, cam_id: str, entry: ConfigEntry) -> None:
         super().__init__(coordinator, cam_id, entry)
@@ -587,7 +834,7 @@ class BoschFrontLight(_BoschLightBase):
                 else -1.0
             )
         # -1.0 (cool) = 6500K, 1.0 (warm) = 2000K
-        return int(4250 - wb * 2250)
+        return _wb_to_kelvin(wb)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         # Privacy mode blocks /lighting/switch PUT with HTTP 443 — warn the user.
@@ -598,12 +845,15 @@ class BoschFrontLight(_BoschLightBase):
         color_temp_k = kwargs.get(ATTR_COLOR_TEMP_KELVIN)
         was_off = not self._is_on
 
+        pending_wb = get_pending_front_white_balance(self.coordinator, self._cam_id)
         if color_temp_k:
             # Convert Kelvin to whiteBalance: 6500K = -1.0, 2000K = 1.0
-            wb = round((4250 - color_temp_k) / 2250, 2)
-            wb = max(-1.0, min(1.0, wb))
+            wb = _kelvin_to_wb(color_temp_k)
             self._white_balance = wb
             self._last_white_balance = wb
+        elif pending_wb is not None:
+            # Set via the white-balance number while the light was off.
+            wb = pending_wb
         else:
             wb = self._white_balance if self._white_balance is not None else -1.0
 
@@ -613,6 +863,11 @@ class BoschFrontLight(_BoschLightBase):
         # Preconfigure while off: any change is stored locally, light stays off.
         # User must explicitly toggle the switch row to apply the stored values.
         if was_off and (brightness or color_temp_k):
+            if color_temp_k:
+                # Also hold it coordinator-side so the switch / intensity ON
+                # paths apply it too (the local value is overwritten by the
+                # next cache read).
+                set_pending_front_white_balance(self.coordinator, self._cam_id, wb)
             self.async_write_ha_state()
             return
 
@@ -633,6 +888,8 @@ class BoschFrontLight(_BoschLightBase):
             self._brightness = api_brightness
             self._last_brightness = api_brightness
             self._is_on = True
+            remember_front_brightness(self.coordinator, self._cam_id, api_brightness)
+            clear_pending_front_white_balance(self.coordinator, self._cam_id)
             await self._put_switch_endpoint("front", True)
             # Only sync (and stamp the light_set_at write-lock) on confirmed
             # success — see the matching comment in _BoschRgbLedLight.
@@ -645,6 +902,7 @@ class BoschFrontLight(_BoschLightBase):
         # brightness, and any subsequent top/bottom LED PUT would re-enable the front light.
         # Only commit the optimistic off-state if the PUT succeeded.
         wb = self._white_balance if self._white_balance is not None else -1.0
+        remember_front_brightness(self.coordinator, self._cam_id, self._brightness)
         if await self._put_lighting_switch(
             {self._led_key: {"brightness": 0, "color": None, "whiteBalance": wb}}
         ):
