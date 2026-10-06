@@ -2899,3 +2899,62 @@ class TestBoschNumberEntityBareDescriptionGuards:
         entity = self._make_bare_entity()
         with pytest.raises(NotImplementedError):
             await entity.async_set_native_value(1.0)
+
+
+class TestWhiteBalanceSingleLockBlock:
+    """The decide + PUT + enable sequence must run under one lighting lock so
+    a concurrent front-light turn_off cannot be undone between the steps."""
+
+    def _entity(self):
+        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+
+        coord = _stub_coord_guards(
+            lighting_switch_cache={CAM_ID: {"frontLightSettings": {"brightness": 0}}}
+        )
+        coord.shc_state_cache = {CAM_ID: {"front_light": True}}
+        coord.last_front_brightness = {CAM_ID: 20}
+        return coord, _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
+
+    @pytest.mark.asyncio
+    async def test_enable_put_runs_while_lock_held(self):
+        from custom_components.bosch_shc_camera.shc import get_lighting_lock
+
+        coord, e = self._entity()
+        held: list[bool] = []
+
+        async def _put(cam_id, path, body):
+            held.append(get_lighting_lock(coord, cam_id).locked())
+            return True
+
+        coord.async_put_camera = AsyncMock(side_effect=_put)
+        await e.async_set_native_value(0.0)
+        assert [c.args[1] for c in coord.async_put_camera.call_args_list] == [
+            "lighting/switch",
+            "lighting/switch/front",
+        ]
+        assert held == [True, True]
+
+    @pytest.mark.asyncio
+    async def test_enable_put_failure_is_logged(self, caplog):
+        coord, e = self._entity()
+        coord.async_put_camera = AsyncMock(side_effect=[True, False])
+        with caplog.at_level("WARNING"):
+            await e.async_set_native_value(0.0)
+        assert "Front light enable failed" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_failed_main_put_skips_enable(self):
+        coord, e = self._entity()
+        coord.async_put_camera = AsyncMock(return_value=False)
+        await e.async_set_native_value(0.0)
+        assert coord.async_put_camera.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_success_stamps_write_lock_and_notifies_listeners(self):
+        coord, e = self._entity()
+        coord.light_set_at = {}
+        coord.async_update_listeners = MagicMock()
+        coord.async_put_camera = AsyncMock(return_value=True)
+        await e.async_set_native_value(0.0)
+        assert CAM_ID in coord.light_set_at
+        coord.async_update_listeners.assert_called_once()

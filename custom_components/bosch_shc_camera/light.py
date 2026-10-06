@@ -711,7 +711,6 @@ class _BoschRgbLedLight(_BoschLightBase):
         # exact write a real change.
         if (
             mode == _MODE_WHITE
-            and not was_off
             and self._cached_mode() == _MODE_COLOR
             and isinstance(value, float)
         ):

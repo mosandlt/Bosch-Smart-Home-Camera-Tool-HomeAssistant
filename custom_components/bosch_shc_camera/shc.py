@@ -976,69 +976,75 @@ async def async_cloud_set_light_component(
             # Wallwasher controls BOTH top + bottom LEDs.
             # Must sync brightness via /lighting/switch AND toggle via /topdown
             # to keep light entities and wallwasher switch in sync.
-            lsc = coordinator.lighting_switch_cache.get(cam_id, {})
-            front_settings = lsc.get(
-                "frontLightSettings",
-                {"brightness": 0, "color": None, "whiteBalance": -1.0},
-            )
-            if not hasattr(coordinator, "last_topdown_brightness"):
-                coordinator.last_topdown_brightness = {}
-            if value:
-                # Turn ON: restore last brightness, then enable topdown
-                saved = coordinator.last_topdown_brightness.get(cam_id, {})
-                top_bri = saved.get("top", 100)
-                bot_bri = saved.get("bottom", 100)
-                top_settings = {
-                    **lsc.get(
-                        "topLedLightSettings", {"color": None, "whiteBalance": -1.0}
-                    ),
-                    "brightness": top_bri,
-                }
-                bot_settings = {
-                    **lsc.get(
-                        "bottomLedLightSettings", {"color": None, "whiteBalance": -1.0}
-                    ),
-                    "brightness": bot_bri,
-                }
-            else:
-                # Turn OFF: save current brightness, then zero it
-                cur_top = lsc.get("topLedLightSettings", {}).get("brightness", 0)
-                cur_bot = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
-                if cur_top > 0 or cur_bot > 0:
-                    coordinator.last_topdown_brightness[cam_id] = {
-                        "top": cur_top or 100,
-                        "bottom": cur_bot or 100,
-                    }
-                top_settings = {
-                    **lsc.get(
-                        "topLedLightSettings", {"color": None, "whiteBalance": -1.0}
-                    ),
-                    "brightness": 0,
-                }
-                bot_settings = {
-                    **lsc.get(
-                        "bottomLedLightSettings", {"color": None, "whiteBalance": -1.0}
-                    ),
-                    "brightness": 0,
-                }
-            full_body = {
-                "frontLightSettings": front_settings,
-                "topLedLightSettings": top_settings,
-                "bottomLedLightSettings": bot_settings,
-            }
-            # Step 1: Set brightness via /lighting/switch
             assert session is not None  # narrowed by `if gen2 and token` above
-            step1 = await cloud_put_json(session, token, base, full_body)
-            if step1.ok:
-                coordinator.lighting_switch_cache[cam_id] = (
-                    step1.body if step1.body is not None else full_body
+            async with get_lighting_lock(coordinator, cam_id):
+                lsc = coordinator.lighting_switch_cache.get(cam_id, {})
+                front_settings = lsc.get(
+                    "frontLightSettings",
+                    {"brightness": 0, "color": None, "whiteBalance": -1.0},
                 )
-            else:
-                _LOGGER.warning(
-                    "cloud_set_light_component (gen2): lighting/switch HTTP %s for %s",
-                    step1.status,
-                    cam_id[:8],
-                )
+                if not hasattr(coordinator, "last_topdown_brightness"):
+                    coordinator.last_topdown_brightness = {}
+                if value:
+                    # Turn ON: restore last brightness, then enable topdown
+                    saved = coordinator.last_topdown_brightness.get(cam_id, {})
+                    top_bri = saved.get("top", 100)
+                    bot_bri = saved.get("bottom", 100)
+                    top_settings = {
+                        **lsc.get(
+                            "topLedLightSettings", {"color": None, "whiteBalance": -1.0}
+                        ),
+                        "brightness": top_bri,
+                    }
+                    bot_settings = {
+                        **lsc.get(
+                            "bottomLedLightSettings",
+                            {"color": None, "whiteBalance": -1.0},
+                        ),
+                        "brightness": bot_bri,
+                    }
+                else:
+                    # Turn OFF: save current brightness, then zero it
+                    cur_top = lsc.get("topLedLightSettings", {}).get("brightness", 0)
+                    cur_bot = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+                    if cur_top > 0 or cur_bot > 0:
+                        coordinator.last_topdown_brightness[cam_id] = {
+                            "top": cur_top or 100,
+                            "bottom": cur_bot or 100,
+                        }
+                    top_settings = {
+                        **lsc.get(
+                            "topLedLightSettings", {"color": None, "whiteBalance": -1.0}
+                        ),
+                        "brightness": 0,
+                    }
+                    bot_settings = {
+                        **lsc.get(
+                            "bottomLedLightSettings",
+                            {"color": None, "whiteBalance": -1.0},
+                        ),
+                        "brightness": 0,
+                    }
+                full_body = {
+                    "frontLightSettings": front_settings,
+                    "topLedLightSettings": top_settings,
+                    "bottomLedLightSettings": bot_settings,
+                }
+                # Step 1: Set brightness via /lighting/switch
+                step1 = await cloud_put_json(session, token, base, full_body)
+                if step1.ok:
+                    # Merge ONLY top/bottom so a front-light write that
+                    # landed meanwhile is not clobbered by this snapshot.
+                    src = step1.body if isinstance(step1.body, dict) else full_body
+                    cur = coordinator.lighting_switch_cache.setdefault(cam_id, {})
+                    for grp in ("topLedLightSettings", "bottomLedLightSettings"):
+                        cur[grp] = src.get(grp, full_body[grp])
+                else:
+                    _LOGGER.warning(
+                        "cloud_set_light_component (gen2): lighting/switch HTTP %s for %s",
+                        step1.status,
+                        cam_id[:8],
+                    )
             # Step 2: Toggle topdown switch
             url = f"{base}/topdown"
             body = {"enabled": value}

@@ -703,8 +703,8 @@ async def _white_balance_set(entity: BoschNumberEntity, value: float) -> None:
     ok = False
     held = False
     restored = False
-    # Read the brightness under the lock so a concurrent turn_off can't be
-    # undone by re-sending a stale brightness.
+    # Decide, write and (if needed) enable under ONE lock hold so a
+    # concurrent front-light turn_off can't be undone between the steps.
     async with get_lighting_lock(coord, cam_id):
         cached = coord.lighting_switch_cache.get(cam_id, {})
         brightness = (cached.get("frontLightSettings") or {}).get("brightness") or 0
@@ -716,6 +716,32 @@ async def _white_balance_set(entity: BoschNumberEntity, value: float) -> None:
             restored = brightness <= 0
             if restored:
                 brightness = front_restore_brightness(coord, cam_id)
+            body = _lighting_switch_body(cached)
+            body["frontLightSettings"] = {
+                **body["frontLightSettings"],
+                "brightness": brightness,
+                "whiteBalance": wb,
+                "color": None,
+            }
+            # Route through the coordinator's universal writer, which handles
+            # a 401 via token-refresh + retry.
+            ok = await coord.async_put_camera(cam_id, "lighting/switch", body)
+            if ok:
+                # Merge ONLY the group we changed into the live cache (not the
+                # whole snapshot) so a concurrent sibling write to a different
+                # light group isn't clobbered by our stale snapshot.
+                cur = coord.lighting_switch_cache.setdefault(cam_id, {})
+                cur["frontLightSettings"] = body["frontLightSettings"]
+                if restored:
+                    enabled = await coord.async_put_camera(
+                        cam_id, "lighting/switch/front", {"enabled": True}
+                    )
+                    if not enabled:
+                        _LOGGER.warning(
+                            "Front light enable failed after white balance "
+                            "write for %s",
+                            cam_id[:8],
+                        )
     if held:
         entity._wb_value = wb
         _LOGGER.debug(
@@ -725,36 +751,10 @@ async def _white_balance_set(entity: BoschNumberEntity, value: float) -> None:
         )
         entity.async_write_ha_state()
         return
-    async with get_lighting_lock(coord, cam_id):
-        cached = coord.lighting_switch_cache.get(cam_id, {})
-        if not restored:
-            current = (cached.get("frontLightSettings") or {}).get("brightness") or 0
-            if current > 0:
-                brightness = current
-        body = _lighting_switch_body(cached)
-        body["frontLightSettings"] = {
-            **body["frontLightSettings"],
-            "brightness": brightness,
-            "whiteBalance": wb,
-            "color": None,
-        }
-        # Route through the coordinator's universal writer, which handles a
-        # 401 via token-refresh + retry.
-        ok = await coord.async_put_camera(cam_id, "lighting/switch", body)
-        if ok:
-            # Merge ONLY the group we changed into the live cache (not the
-            # whole snapshot) so a concurrent sibling write to a different
-            # light group isn't clobbered by our stale snapshot.
-            cur = coord.lighting_switch_cache.setdefault(cam_id, {})
-            cur["frontLightSettings"] = body["frontLightSettings"]
     if ok:
         entity._wb_value = wb
         clear_pending_front_white_balance(coord, cam_id)
         remember_front_brightness(coord, cam_id, brightness)
-        if restored:
-            await coord.async_put_camera(
-                cam_id, "lighting/switch/front", {"enabled": True}
-            )
         set_at = getattr(coord, "light_set_at", None)
         if set_at is not None:
             set_at[cam_id] = _time.monotonic()
