@@ -38,6 +38,12 @@ from . import CLOUD_API, DOMAIN  # type: ignore[attr-defined]
 from .cloud_ssl import async_get_bosch_cloud_session
 from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _warn_if_privacy_on
+from .shc import (
+    clear_pending_front_white_balance,
+    get_pending_front_white_balance,
+    remember_front_brightness,
+    set_pending_front_white_balance,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -816,11 +822,15 @@ class BoschFrontLight(_BoschLightBase):
         color_temp_k = kwargs.get(ATTR_COLOR_TEMP_KELVIN)
         was_off = not self._is_on
 
+        pending_wb = get_pending_front_white_balance(self.coordinator, self._cam_id)
         if color_temp_k:
             # Convert Kelvin to whiteBalance: 6500K = -1.0, 2000K = 1.0
             wb = _kelvin_to_wb(color_temp_k)
             self._white_balance = wb
             self._last_white_balance = wb
+        elif pending_wb is not None:
+            # Set via the white-balance number while the light was off.
+            wb = pending_wb
         else:
             wb = self._white_balance if self._white_balance is not None else -1.0
 
@@ -830,6 +840,11 @@ class BoschFrontLight(_BoschLightBase):
         # Preconfigure while off: any change is stored locally, light stays off.
         # User must explicitly toggle the switch row to apply the stored values.
         if was_off and (brightness or color_temp_k):
+            if color_temp_k:
+                # Also hold it coordinator-side so the switch / intensity ON
+                # paths apply it too (the local value is overwritten by the
+                # next cache read).
+                set_pending_front_white_balance(self.coordinator, self._cam_id, wb)
             self.async_write_ha_state()
             return
 
@@ -850,6 +865,8 @@ class BoschFrontLight(_BoschLightBase):
             self._brightness = api_brightness
             self._last_brightness = api_brightness
             self._is_on = True
+            remember_front_brightness(self.coordinator, self._cam_id, api_brightness)
+            clear_pending_front_white_balance(self.coordinator, self._cam_id)
             await self._put_switch_endpoint("front", True)
             # Only sync (and stamp the light_set_at write-lock) on confirmed
             # success — see the matching comment in _BoschRgbLedLight.
@@ -862,6 +879,7 @@ class BoschFrontLight(_BoschLightBase):
         # brightness, and any subsequent top/bottom LED PUT would re-enable the front light.
         # Only commit the optimistic off-state if the PUT succeeded.
         wb = self._white_balance if self._white_balance is not None else -1.0
+        remember_front_brightness(self.coordinator, self._cam_id, self._brightness)
         if await self._put_lighting_switch(
             {self._led_key: {"brightness": 0, "color": None, "whiteBalance": wb}}
         ):

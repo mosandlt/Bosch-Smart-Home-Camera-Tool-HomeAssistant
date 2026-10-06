@@ -2828,3 +2828,25 @@ class TestRgbLedWhiteMode:
             ):
                 await entity.async_added_to_hass()
             assert entity._last_color_hex is None
+
+
+class TestFrontLightPendingWhiteBalance:
+    @pytest.mark.asyncio
+    async def test_turn_on_applies_pending_white_balance(self):
+        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_shc_camera.shc import (
+            get_pending_front_white_balance,
+            set_pending_front_white_balance,
+        )
+
+        light = _make_light(klass=BoschFrontLight, led_key="frontLightSettings")
+        light._white_balance = -1.0
+        light._put_lighting_switch = AsyncMock(return_value=True)
+        light._put_switch_endpoint = AsyncMock(return_value=True)
+        light._sync_wallwasher_cache = MagicMock()
+        set_pending_front_white_balance(light.coordinator, CAM_ID, 0.4)
+        await light.async_turn_on()
+        body = light._put_lighting_switch.call_args[0][0]["frontLightSettings"]
+        assert body["whiteBalance"] == 0.4
+        assert get_pending_front_white_balance(light.coordinator, CAM_ID) is None
+        assert light.coordinator.last_front_brightness[CAM_ID] == body["brightness"]
