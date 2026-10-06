@@ -270,7 +270,7 @@ def front_restore_brightness(coordinator: Any, cam_id: str) -> int:
         return int(saved)
     intensity = coordinator.shc_state_cache.get(cam_id, {}).get("front_light_intensity")
     if isinstance(intensity, (int, float)) and intensity > 0:
-        return int(round(intensity * 100)) if intensity <= 1.0 else int(intensity)
+        return round(intensity * 100) if intensity <= 1.0 else int(intensity)
     return 100
 
 

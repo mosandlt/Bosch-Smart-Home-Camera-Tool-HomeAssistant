@@ -2585,7 +2585,7 @@ class TestRgbLedWhiteMode:
         )
 
         for klass in (BoschTopLedLight, BoschBottomLedLight):
-            assert klass._attr_supported_color_modes == {
+            assert self._make(_white_cache(), klass).supported_color_modes == {
                 ColorMode.RGB,
                 ColorMode.COLOR_TEMP,
             }
@@ -2861,9 +2861,7 @@ class TestRgbLedColorToWhiteNudge:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(lighting_switch_cache={CAM_ID: cache})
-        entity = BoschTopLedLight(
-            coord, CAM_ID, SimpleNamespace(data={}, options={})
-        )
+        entity = BoschTopLedLight(coord, CAM_ID, SimpleNamespace(data={}, options={}))
         entity.async_write_ha_state = MagicMock()
         entity._put_lighting_switch = AsyncMock(return_value=True)
         entity._put_switch_endpoint = AsyncMock(return_value=True)
