@@ -702,6 +702,30 @@ class _BoschRgbLedLight(_BoschLightBase):
             else (self._last_brightness or 100)
         )
 
+        # Camera quirk (verified live, Eyes Outdoor II FW 9.40.202): a
+        # color → white switch is IGNORED when the whiteBalance equals the
+        # value the camera still has stored for the group — the LED stays on
+        # the color although the PUT returns 204. Typical trigger: the
+        # "cold white" preset (6500 K = -1.0) after a color when the group
+        # was -1.0 before. Writing a nudged value first makes the second,
+        # exact write a real change.
+        if (
+            mode == _MODE_WHITE
+            and not was_off
+            and self._cached_mode() == _MODE_COLOR
+            and isinstance(value, float)
+        ):
+            nudge = round(value + 0.01 if value <= 0 else value - 0.01, 2)
+            await self._put_lighting_switch(
+                {
+                    self._led_key: {
+                        "brightness": api_brightness,
+                        "color": None,
+                        "whiteBalance": nudge,
+                    }
+                }
+            )
+
         if mode == _MODE_COLOR:
             settings: dict[str, Any] = {
                 "brightness": api_brightness,

@@ -2850,3 +2850,76 @@ class TestFrontLightPendingWhiteBalance:
         assert body["whiteBalance"] == 0.4
         assert get_pending_front_white_balance(light.coordinator, CAM_ID) is None
         assert light.coordinator.last_front_brightness[CAM_ID] == body["brightness"]
+
+
+class TestRgbLedColorToWhiteNudge:
+    """Camera quirk verified live (Eyes Outdoor II, FW 9.40.202): a
+    color → white write is ignored when the whiteBalance equals the value
+    the camera still holds for the group, so a nudged value goes first."""
+
+    def _make(self, cache):
+        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+
+        coord = _stub_coord_edge(lighting_switch_cache={CAM_ID: cache})
+        entity = BoschTopLedLight(
+            coord, CAM_ID, SimpleNamespace(data={}, options={})
+        )
+        entity.async_write_ha_state = MagicMock()
+        entity._put_lighting_switch = AsyncMock(return_value=True)
+        entity._put_switch_endpoint = AsyncMock(return_value=True)
+        entity._sync_wallwasher_cache = MagicMock()
+        return entity
+
+    @pytest.mark.asyncio
+    async def test_color_to_white_writes_nudge_then_exact(self):
+        from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
+
+        entity = self._make(
+            {
+                "topLedLightSettings": {
+                    "brightness": 100,
+                    "color": "#FF0000",
+                    "whiteBalance": None,
+                }
+            }
+        )
+        await entity.async_turn_on(**{ATTR_COLOR_TEMP_KELVIN: 6500})
+        calls = [
+            c.args[0]["topLedLightSettings"]
+            for c in entity._put_lighting_switch.call_args_list
+        ]
+        assert [c["whiteBalance"] for c in calls] == [-0.99, -1.0]
+        assert all(c["color"] is None for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_white_to_white_single_write(self):
+        from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
+
+        entity = self._make(
+            {
+                "topLedLightSettings": {
+                    "brightness": 100,
+                    "color": None,
+                    "whiteBalance": 0.2,
+                }
+            }
+        )
+        await entity.async_turn_on(**{ATTR_COLOR_TEMP_KELVIN: 6500})
+        assert entity._put_lighting_switch.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_warm_target_nudges_toward_center(self):
+        from homeassistant.components.light import ATTR_COLOR_TEMP_KELVIN
+
+        entity = self._make(
+            {
+                "topLedLightSettings": {
+                    "brightness": 100,
+                    "color": "#00FF00",
+                    "whiteBalance": None,
+                }
+            }
+        )
+        await entity.async_turn_on(**{ATTR_COLOR_TEMP_KELVIN: 2000})
+        first = entity._put_lighting_switch.call_args_list[0].args[0]
+        assert first["topLedLightSettings"]["whiteBalance"] == 0.99
