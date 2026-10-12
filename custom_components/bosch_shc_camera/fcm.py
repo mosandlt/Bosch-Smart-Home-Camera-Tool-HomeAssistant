@@ -1496,8 +1496,7 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
     # FCM_REREGISTER_INTERVAL_SEC so a server-side-dropped Bosch device
     # registration self-heals without needing a token change or a hard-heal.
     # Deliberately no periodic re-POST while the listener runs: Bosch tokens
-    # live ~270 days and extra POSTs only add backend load (Bosch request
-    # 2026-09-04). The age check runs at listener (re)start only.
+    # live ~270 days and extra POSTs only add backend load. The age check runs at listener (re)start only.
     registered_at_raw = coordinator.entry.data.get("fcm_registered_at")
     try:
         registered_at = float(registered_at_raw) if registered_at_raw else 0.0
@@ -1599,8 +1598,7 @@ async def deregister_fcm_with_bosch(coordinator: Any, device_token: str) -> bool
     Endpoint: PUT /v11/registration/logout?deviceToken=<token>. Response:
     HTTP 204 on success. Best-effort — called right before a hard-heal purge
     discards `device_token` for a fresh one, so Bosch's backend doesn't
-    accumulate an abandoned registration per purge (Bosch backend-load
-    request, 2026-09-04). Never raises; a failure here must not block the
+    accumulate an abandoned registration per purge. Never raises; a failure here must not block the
     purge/re-registration it's cleaning up after — including if the
     coordinator has no bearer token available yet (e.g. very early startup).
     """
@@ -1731,8 +1729,7 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
     hard_heal_streak: int = 0
     push_ts_at_last_hard_heal: float = coordinator.fcm_last_push
     # Consecutive soft-restart-threshold-triggered hard-heals with no
-    # SUSTAINED listener uptime since the previous one (Bosch backend-load
-    # finding, 2026-09-04: on a persistently flaky WAN/router, 3 push-less
+    # SUSTAINED listener uptime since the previous one (on a persistently flaky WAN/router, 3 push-less
     # soft-restarts can recur every 1.5-5 min indefinitely — each one purges
     # good credentials and mints a genuinely new Bosch device-token
     # registration, since this benign-reason path deliberately skips the
@@ -1807,8 +1804,7 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                 # toward FCM_SUPERVISOR_BACKOFF_SEC's 30-min ceiling for a
                 # problem that was never actually still there.
                 confirmed_problem = False
-                # Separate, lighter backoff (Bosch backend-load finding,
-                # 2026-09-04): does NOT require push confirmation like the
+                # Separate, lighter backoff: does NOT require push confirmation like the
                 # CONFIRMED-problem streak below — it only requires the
                 # listener to have stayed up continuously for
                 # FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC since the last such
@@ -1897,8 +1893,7 @@ async def _async_run_fcm_supervisor(coordinator: Any) -> None:
                     stale_token = coordinator.entry.data.get("fcm_registered_token")
                     if stale_token:
                         # Best-effort — clean up the about-to-be-abandoned
-                        # registration on Bosch's backend (Bosch backend-load
-                        # request, 2026-09-04). Never blocks/fails the purge.
+                        # registration on Bosch's backend. Never blocks/fails the purge.
                         await deregister_fcm_with_bosch(coordinator, stale_token)
                     new_data = {
                         k: v

@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v17.2.4] - 2026-10-12
+
+### Changed
+
+- **Source comments reworded.** Comments and test docstrings around the push-token handling no longer refer to where a requirement came from. No behaviour change.
+
 ## [v17.2.3] - 2026-10-06
 
 ### Fixed

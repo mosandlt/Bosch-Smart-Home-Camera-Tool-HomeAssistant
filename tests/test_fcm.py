@@ -511,7 +511,7 @@ async def test_supervisor_hard_heal_reason_soft_streak(
 async def test_supervisor_soft_trigger_heal_backoff_escalates_without_sustained_uptime(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Bosch backend-load finding (2026-09-04): a persistently flaky WAN can
+    """Backend load: a persistently flaky WAN can
     hit the benign soft-restart-threshold hard-heal repeatedly without ever
     achieving FCM_SUPERVISOR_SUSTAINED_UPTIME_SEC of listener uptime in
     between — each purge mints a genuinely new FCM device token and re-POSTs
@@ -4154,7 +4154,7 @@ def _make_session_put(resp_cm: MagicMock) -> MagicMock:
 
 
 async def test_deregister_fcm_with_bosch_success_204() -> None:
-    """Bosch backend-load request (2026-09-04): PUT v11/registration/logout
+    """PUT v11/registration/logout
     with the stale deviceToken as a URL param, HTTP 204 -> True."""
     coord = _make_register_coord(data={})
     resp_cm = _make_mock_response(204)
@@ -4243,7 +4243,7 @@ async def test_deregister_fcm_with_bosch_no_token_or_no_bearer_returns_false() -
 
 
 async def test_supervisor_hard_heal_purge_deregisters_stale_token_with_bosch() -> None:
-    """Bosch backend-load request (2026-09-04): before a hard-heal purge
+    """Before a hard-heal purge
     discards the currently-registered FCM device token for a fresh one, the
     stale token must be deregistered from Bosch's backend (best-effort) so
     it doesn't accumulate an abandoned registration server-side."""
@@ -17429,7 +17429,7 @@ class TestClipContentLengthValueErrorFallsThroughToRead:
 async def test_register_deregisters_superseded_token(status: int, body: str) -> None:
     """Soft reconnect minted a new token -> old one is logged out after the POST.
 
-    Bosch backend-load request 2026-09-04: abandoned registrations pile up.
+    Abandoned registrations would otherwise pile up on the backend.
     """
     coord = _make_register_coord(
         data={
