@@ -521,3 +521,16 @@ async def test_async_remove_all_snapshots_delegates_to_executor(
     await async_remove_all_snapshots(hass)
 
     hass.async_add_executor_job.assert_awaited_once_with(_sync_remove_all, hass)
+
+
+@pytest.mark.asyncio
+async def test_snapshot_mtime(tmp_path: Path) -> None:
+    from custom_components.bosch_shc_camera.snapshot_store import (
+        save_snapshot,
+        snapshot_mtime,
+    )
+
+    hass = _make_hass(tmp_path)
+    assert await snapshot_mtime(hass, VALID_CAM_ID) is None
+    await save_snapshot(hass, VALID_CAM_ID, VALID_JPEG)
+    assert await snapshot_mtime(hass, VALID_CAM_ID) > 0

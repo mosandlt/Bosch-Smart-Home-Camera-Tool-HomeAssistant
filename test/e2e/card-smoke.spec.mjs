@@ -4867,3 +4867,30 @@ test("a missing camera_entity (wrong/removed entity id) still shows the auth ove
   expect(r.offlineVisible, "offline overlay must not also show").toBe(false);
   expect(r.reauthBtnHidden, "re-login button hidden — it can't fix a wrong entity id").toBe(true);
 });
+
+// A 1x1 placeholder data URL saved by older card versions must not restore as a
+// loaded frame, or an offline/privacy camera never fetches the real snapshot.
+test("restore discards tiny placeholder cache entry and keeps real ones", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card"), null, { timeout: 10000 });
+  const r = await page.evaluate(async () => {
+    const card = document.createElement("bosch-camera-card");
+    card.setConfig({ camera_entity: "camera.test", status_entity: "sensor.test_status" });
+    document.body.appendChild(card);
+    await new Promise((res) => setTimeout(res, 200));
+    card._storageKey = "bosch_cam_restore_test";
+    card._imageLoaded = false;
+    localStorage.setItem(card._storageKey, "data:image/jpeg;base64," + "A".repeat(220));
+    card._restoreCachedImage();
+    const tinyLoaded = card._imageLoaded;
+    const tinyKept = localStorage.getItem(card._storageKey) !== null;
+    localStorage.setItem(card._storageKey, "data:image/jpeg;base64," + "A".repeat(4000));
+    card._restoreCachedImage();
+    const realLoaded = card._imageLoaded;
+    localStorage.removeItem(card._storageKey);
+    return { tinyLoaded, tinyKept, realLoaded };
+  });
+  expect(r.tinyLoaded, "placeholder entry must not count as loaded").toBe(false);
+  expect(r.tinyKept, "placeholder entry is removed").toBe(false);
+  expect(r.realLoaded, "real-sized entry restores").toBe(true);
+});

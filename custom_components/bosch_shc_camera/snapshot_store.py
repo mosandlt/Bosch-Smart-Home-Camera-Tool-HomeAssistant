@@ -164,6 +164,20 @@ async def save_snapshot(hass: HomeAssistant, cam_id: str, jpeg: bytes) -> None:
         await hass.async_add_executor_job(_sync_save, hass, cam_id, jpeg)
 
 
+def _sync_mtime(hass: HomeAssistant, cam_id: str) -> float | None:
+    """Blocking: modification time of the persisted snapshot, or None."""
+    try:
+        return _snap_path(hass, cam_id).stat().st_mtime
+    except OSError:
+        return None
+
+
+async def snapshot_mtime(hass: HomeAssistant, cam_id: str) -> float | None:
+    """Async: epoch mtime of the persisted snapshot for *cam_id*, or None."""
+    cam_id = _validate_cam_id(cam_id)
+    return await hass.async_add_executor_job(_sync_mtime, hass, cam_id)  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
+
+
 async def load_snapshot(hass: HomeAssistant, cam_id: str) -> bytes | None:
     """Async: load persisted snapshot bytes for *cam_id*, or None if absent.
 

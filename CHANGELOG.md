@@ -7,6 +7,20 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v17.2.6] - 2026-10-12
+
+### Changed
+
+- **Offline cameras and cameras in privacy mode show their last snapshot.** Instead of a black placeholder, the card now shows the last known frame behind the offline label or the privacy lock, which sit on a translucent glass overlay. Such a request is answered immediately from the stored frame without the slow snapshot fallback chain, and while privacy mode is on no new image is ever fetched or stored. The privacy badge and the offline "last seen" text use the capture time of the frame (new camera attribute `last_snapshot_at`) instead of the moment the browser loaded it.
+
+### Fixed
+
+- **Placeholder right after switching privacy off.** For a locally connected camera the first seconds after privacy was switched off returned the black placeholder even though a real frame was stored; the last real frame is now served until a fresh one arrives.
+- **Cloud-offline cameras with local access.** A camera reported offline by the cloud but reachable on the LAN kept a frozen picture; the local snapshot paths run before the offline shortcut now.
+- **Empty or invalid event images overwrite the snapshot.** An empty or non-JPEG answer from the event-image fallback replaced a good cached frame and brought the placeholder back; such answers are ignored.
+- **Stale placeholder in the browser cache.** A 1×1 placeholder stored by an older card version in local storage is discarded when the card loads, so the real frame can be fetched.
+- **Card contrast.** The offline title, subtitle and the privacy age badge have a dark text shadow so they stay readable on a bright snapshot, and the pulsing animation of the offline overlay is gone.
+
 ## [v17.2.4] - 2026-10-12
 
 ### Changed

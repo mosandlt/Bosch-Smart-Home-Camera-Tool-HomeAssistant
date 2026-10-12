@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
@@ -66,14 +67,19 @@ from .const import (
     with_jpeg_size,
 )
 from .dynamic_devices import register_dynamic_camera_listener
-from .ldi_local import ensure_ldi_stream, ldi_privacy_on, ldi_wanted
+from .ldi_local import ensure_ldi_stream, ldi_wanted
 from .ldi_snapshot import downscale_jpeg
 from .mjpeg_snapshot import fetch_mjpeg_snapshot
 from .models import (
     get_display_name,
     get_model_config,
 )  # [S4] hoisted: avoid per-call import binding on hot path
-from .snapshot_store import load_snapshot, save_snapshot
+from .snapshot_store import (
+    _MIN_JPEG_BYTES,
+    load_snapshot,
+    save_snapshot,
+    snapshot_mtime,
+)
 from .switch import _redact_rtsp_creds
 from .time_utils import parse_bosch_timestamp
 
@@ -220,7 +226,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     # The (redacted) stream/proxy URLs rotate on every reconnect, so recording
     # them churns the `state_attributes` table with no history value.
     # Keep them visible live; never historize them.
-    _unrecorded_attributes = frozenset({"live_rtsps", "live_proxy", "stream_url"})
+    _unrecorded_attributes = frozenset(
+        {"live_rtsps", "live_proxy", "stream_url", "last_snapshot_at"}
+    )
 
     def __init__(
         self,
@@ -247,7 +255,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
 
         self._cam_id = cam_id
         self._entry = entry
-        self.cached_image: bytes | None = self._PLACEHOLDER_JPEG
+        self._image_at: datetime | None = None
+        self.cached_image = self._PLACEHOLDER_JPEG
         # (limit, source frame, downscaled frame) of the last snapshot_size resize.
         self._snapshot_size_memo: tuple[int, bytes, bytes] | None = None
         self._force_image_refresh: bool = False  # bypasses HA image cache once
@@ -284,6 +293,24 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         self._fw = info.get("firmwareVersion", "")
         self._mac = info.get("macAddress", "")
 
+    @property
+    def cached_image(self) -> bytes | None:
+        return getattr(self, "_cached_image", None)
+
+    @cached_image.setter
+    def cached_image(self, value: bytes | None) -> None:
+        # Only a genuinely new real frame advances the capture time; re-serving
+        # the same bytes or the placeholder must not make an old frame look fresh.
+        if (
+            value
+            and value is not self._PLACEHOLDER_JPEG
+            and value is not getattr(self, "_cached_image", None)
+        ):
+            self._image_at = datetime.now(UTC)
+        if value == b"":
+            return
+        self._cached_image = value
+
     # ── Startup ───────────────────────────────────────────────────────────────
     async def async_added_to_hass(self) -> None:
         """Called when entity is added to HA — kick off initial image fetch."""
@@ -297,6 +324,10 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         persisted = await load_snapshot(self.hass, self._cam_id)
         if persisted:
             self.cached_image = persisted
+            mtime = await snapshot_mtime(self.hass, self._cam_id)
+            self._image_at = (
+                datetime.fromtimestamp(mtime, UTC) if mtime is not None else None
+            )
             # Back-date last_image_fetch so the normal snapshot_interval still
             # triggers a live refresh on schedule.  Using float('-inf') would
             # trigger an immediate re-fetch; instead back-date by one full
@@ -817,6 +848,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             # HA layout matches the Bosch app order.
             "bosch_priority": bosch_priority,
         }
+        image_at = getattr(self, "_image_at", None)
+        if image_at is not None and self._last_real_image() is not None:
+            attrs["last_snapshot_at"] = image_at.isoformat()
         if rtsps_url:
             attrs["stream_url"] = _redact_rtsp_creds(rtsps_url)
         # bufferingTime from PUT /connection (LOCAL=500ms, REMOTE=1000ms)
@@ -1232,27 +1266,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                 self._display_name,
                 err,
             )
-            # Same fail-closed reasoning as every other blind-cache-serve
-            # point in _async_camera_image_impl: an unhandled exception here
-            # (e.g. _async_rcp_thumbnail has no try/except of its own) must
-            # not bypass the privacy gate by serving cached_image
-            # unconditionally. Checked as `is not False` rather than just
-            # `is None` — privacy could have flipped ON *during* this same
-            # call (e.g. a fetch call outside any try/except raising after
-            # a concurrent coordinator poll resolved privacy_mode=True),
-            # and only a confirmed-False read is safe to serve stale data
-            # for.
-            privacy_confirmed_safe = (
-                self.coordinator.shc_state_cache.get(self._cam_id, {}).get(
-                    "privacy_mode"
-                )
-                is False
-            )
-            jpeg = (
-                self.cached_image or self._PLACEHOLDER_JPEG
-                if privacy_confirmed_safe
-                else self._PLACEHOLDER_JPEG
-            )
+            jpeg = self.cached_image or self._PLACEHOLDER_JPEG
         if jpeg is not self._PLACEHOLDER_JPEG and jpeg:
             jpeg = await self._async_cap_snapshot_width(jpeg)
         # Apply 180° rotation if the user enabled it via the Bild 180° drehen
@@ -1362,9 +1376,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     async def _async_ldi_image(self) -> bytes | None:
         """Snapshot of a local-only camera: its own preview stream, no cloud.
 
-        The previous frame is kept while a grab is unavailable (go2rtc
-        missing, camera busy) — but only while privacy is confirmed off:
-        with the privacy mode on, or not yet known, nothing is served.
+        Without a fresh grab (go2rtc missing, camera waking after privacy off,
+        privacy state stale or unknown) the last real frame stays served;
+        only a camera that never delivered one yields None.
         """
         fresh: bytes | None = await self.coordinator.async_fetch_live_snapshot(
             self._cam_id
@@ -1373,9 +1387,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             self.cached_image = fresh
             self.last_image_fetch = time.monotonic()
             return fresh
-        if ldi_privacy_on(self.coordinator, self._cam_id) is False:
-            return self.cached_image
-        return None
+        return self._last_real_image()
 
     async def _async_cap_snapshot_width(self, jpeg: bytes) -> bytes:
         """``jpeg`` capped to the ``snapshot_size`` option's width, if any.
@@ -1397,6 +1409,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         )
         self._snapshot_size_memo = (limit, jpeg, sized)
         return sized
+
+    def _last_real_image(self) -> bytes | None:
+        """Last known real frame, or None when only the placeholder is held."""
+        img = self.cached_image
+        if img and img is not self._PLACEHOLDER_JPEG:
+            return img
+        return None
 
     async def _async_camera_image_impl(
         self, width: int | None = None, height: int | None = None
@@ -1433,18 +1452,22 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         prefer the 320×180 RCP thumbnail on mobile/small displays (avoids 150 KB
         snap.jpg when the card only needs a 400 px thumbnail).
         """
-        # Privacy mode ON: every fetch tier below already short-circuits to
-        # None (the camera returns a 0-byte snap.jpg/RCP thumbnail while
-        # privacy is engaged), but without this early return the cascade
-        # falls through to `self.cached_image` — the last REAL scene from
-        # before privacy was enabled — and keeps serving it through the
-        # camera proxy indefinitely. Return None here so the public
-        # wrapper's `result or _PLACEHOLDER_JPEG` serves the placeholder
-        # instead.
+        # Privacy ON: the camera yields no usable frame (0-byte snap.jpg/RCP
+        # thumbnail), so serve the last known real frame without any fetch and
+        # never touch the cache. The card dims it under a privacy overlay. No
+        # real frame yet -> None, the public wrapper substitutes the placeholder.
         if self.coordinator.shc_state_cache.get(self._cam_id, {}).get("privacy_mode"):
-            return None
+            return self._last_real_image()
         if ldi_wanted(self.coordinator, self._cam_id):
             return await self._async_ldi_image()
+        # Cloud status OFFLINE only means the camera is missing from the Bosch
+        # cloud; with LAN credentials the LOCAL paths below can still deliver.
+        if str(
+            self._cam_data.get("status", "")
+        ).upper() == "OFFLINE" and not self.coordinator.local_creds_cache.get(
+            self._cam_id
+        ):
+            return self._last_real_image()
         width = effective_snapshot_width(
             get_options(self._entry).get("snapshot_size"), width
         )
@@ -1549,13 +1572,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         "%s: skipping LOCAL snap, stream pre-warming",
                         self._display_name,
                     )
-                    # Fail closed while privacy is unverified — this is a
-                    # blind cache serve with no fetch attempt at all.
-                    return (
-                        None
-                        if privacy_unknown
-                        else self.cached_image or self._PLACEHOLDER_JPEG
-                    )
+                    return self.cached_image or self._PLACEHOLDER_JPEG
                 if local_user and local_pass:
                     data: bytes | None = None
                     try:
@@ -1614,12 +1631,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     # the Digest auth we just tried — aiohttp without auth would
                     # 401 in another ~10 s burning HA's outer budget. Go straight
                     # to cached image / placeholder via the final return.
-                    # Fail closed while privacy is unverified.
-                    return (
-                        None
-                        if privacy_unknown
-                        else self.cached_image or self._PLACEHOLDER_JPEG
-                    )
+                    return self.cached_image or self._PLACEHOLDER_JPEG
             renew_after_status: int | None = None
             try:
                 async with asyncio.timeout(10):
@@ -1861,10 +1873,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         REFRESH_ON_STALE_CACHE_BUDGET_SEC,
                         int(cache_age),
                     )
-                    # privacy_unknown forced this fetch attempt specifically
-                    # to verify the cached frame is safe to serve; a failed
-                    # attempt must not fall back to it anyway.
-                    return None if privacy_unknown else self.cached_image
+                    return self.cached_image
                 if fresh2:
                     # Only a full-resolution fetch may update the shared cache.
                     if req_jpeg_size is None:
@@ -1881,19 +1890,9 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                     self._display_name,
                     int(cache_age),
                 )
-                # Same fail-closed reasoning as the TimeoutError branch above.
-                return None if privacy_unknown else self.cached_image
+                return self.cached_image
             else:
-                # A failed verification attempt above stamps
-                # last_image_fetch even on fail-closed paths (so the
-                # throttle still engages and doesn't hammer the network) —
-                # which means the very next request within
-                # PRIVACY_UNKNOWN_RETRY_SEC would otherwise land here with
-                # cache_stale now False and unconditionally serve the frame
-                # just withheld. Keep failing closed for the whole throttle
-                # window instead of only the single request that actually
-                # attempted verification.
-                return None if privacy_unknown else self.cached_image
+                return self.cached_image
 
         # ── 2b. LOCAL snap.jpg with cached Digest creds (cloud-outage fallback) ──
         # When the Bosch cloud or auth server is unreachable, PUT /connection
@@ -1960,19 +1959,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # The placeholder is a real (truthy) 1x1 black JPEG, so `if
         # self.cached_image:` alone would intercept it here too, before tier 4
         # (the actual last resort) ever runs on a genuine cold start — use the
-        # identity check too, mirroring the tier-2 guard above. `not
-        # privacy_unknown`: this tier can be reached via a tier-1a/2a
-        # ("first load") fall-through whose own precondition was an
-        # empty/placeholder cache at entry — but `cached_image` can be
-        # concurrently set by `async_added_to_hass`'s disk restore or
-        # `async_trigger_image_refresh` while an earlier tier's fetch
-        # awaits, so the same fail-closed guarantee as tier 2 above applies
-        # here too.
-        if (
-            self.cached_image
-            and self.cached_image is not self._PLACEHOLDER_JPEG
-            and not privacy_unknown
-        ):
+        # identity check too, mirroring the tier-2 guard above.
+        if self.cached_image and self.cached_image is not self._PLACEHOLDER_JPEG:
             return self.cached_image
 
         # ── 4. Latest event snapshot (last resort — first startup before cloud fetch runs) ──
@@ -2000,7 +1988,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                         img_url, headers=headers_bearer, allow_redirects=False
                     ) as resp:
                         if resp.status == 200:
-                            self.cached_image = await resp.read()
+                            ev_data = await resp.read()
+                            if (
+                                len(ev_data) < _MIN_JPEG_BYTES
+                                or ev_data[:2] != b"\xff\xd8"
+                            ):
+                                continue
+                            self.cached_image = ev_data
                             self.last_image_fetch = time.monotonic()
                             _LOGGER.debug(
                                 "%s: event snapshot %d bytes @ %s",
@@ -2008,24 +2002,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
                                 len(self.cached_image),
                                 _fmt_event_ts(ev.get("timestamp")),
                             )
-                            # Unlike the other tiers, this fetches a STORED
-                            # HISTORICAL motion-event JPEG from Bosch cloud
-                            # storage — independent of the camera's current
-                            # privacy state, so it does not naturally
-                            # short-circuit to empty/error the way a live
-                            # camera fetch does while privacy is engaged. The
-                            # event itself could predate privacy being
-                            # enabled just as easily as a stale
-                            # `cached_image` can, so the same fail-closed
-                            # guarantee applies.
-                            return None if privacy_unknown else self.cached_image
+                            return self.cached_image
                         if resp.status == 401:
                             _LOGGER.warning(
                                 "%s: token expired — update via integration options",
                                 self._display_name,
                             )
-                            # Same fail-closed reasoning as tier 3 above.
-                            return None if privacy_unknown else self.cached_image
+                            return self.cached_image
                         # e.g. 403/404/410 = expired URL — try next event
                         _LOGGER.debug(
                             "%s: event snapshot HTTP %d @ %s — trying next",
@@ -2036,12 +2019,5 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             except (TimeoutError, aiohttp.ClientError) as err:
                 _LOGGER.debug("%s: event snapshot error: %s", self._display_name, err)
 
-        # Return last cached image if all methods failed. Same fail-closed
-        # reasoning as tier 3 above — withhold it if privacy is still
-        # unknown. `None` (not the placeholder directly) for consistency
-        # with every other fail-closed exit point in this method — the
-        # public wrapper converts either way, but a direct impl caller sees
-        # a consistent contract.
-        if privacy_unknown:
-            return None
+        # Last cached image if all methods failed.
         return self.cached_image or self._PLACEHOLDER_JPEG

@@ -288,10 +288,22 @@ class TestCameraEntity:
         assert await BoschCamera._async_camera_image_impl(cam) == b"\xff\xd8old"
 
     @pytest.mark.asyncio
-    async def test_unknown_privacy_and_no_frame_serves_nothing(self) -> None:
+    @pytest.mark.parametrize("privacy_cloud", [None, False])
+    async def test_failed_fetch_keeps_last_real_frame_after_privacy_off(
+        self, privacy_cloud: bool | None
+    ) -> None:
+        """Waking camera: stale/unknown privacy must not drop the last frame."""
         cam = _ldi_camera(
-            privacy_cloud=None, passwords={CAM_ID: PW}, cached_image=b"\xff\xd8old"
+            privacy_cloud=privacy_cloud,
+            passwords={CAM_ID: PW},
+            cached_image=b"\xff\xd8old",
         )
+        assert await BoschCamera._async_camera_image_impl(cam) == b"\xff\xd8old"
+
+    @pytest.mark.asyncio
+    async def test_failed_fetch_with_only_placeholder_yields_none(self) -> None:
+        cam = _ldi_camera(privacy_cloud=None, passwords={CAM_ID: PW})
+        cam.cached_image = BoschCamera._PLACEHOLDER_JPEG
         assert await BoschCamera._async_camera_image_impl(cam) is None
 
     @pytest.mark.asyncio
@@ -301,14 +313,14 @@ class TestCameraEntity:
         cam.coordinator.async_fetch_live_snapshot.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_privacy_reported_by_the_camera_serves_nothing_quietly(
+    async def test_privacy_reported_by_the_camera_keeps_last_frame_quietly(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         cam = _ldi_camera(
             privacy_cloud=False, passwords={CAM_ID: PW}, cached_image=b"\xff\xd8old"
         )
         cam.coordinator.ldi_rest_state = {CAM_ID: {"privacy_on": True}}
-        assert await BoschCamera._async_camera_image_impl(cam) is None
+        assert await BoschCamera._async_camera_image_impl(cam) == b"\xff\xd8old"
         assert not [r for r in caplog.records if r.levelname in ("WARNING", "ERROR")]
 
     @pytest.mark.asyncio

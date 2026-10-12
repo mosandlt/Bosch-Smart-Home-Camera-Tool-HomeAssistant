@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.21";
+const CARD_VERSION = "14.1.22";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -5231,18 +5231,13 @@ class BoschCameraCard extends HTMLElement {
           position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 8;
           display: none;
           flex-direction: column; align-items: center; justify-content: center;
-          background: rgba(20, 20, 20, 0.82);
-          backdrop-filter: grayscale(100%) blur(3px);
-          -webkit-backdrop-filter: grayscale(100%) blur(3px);
+          background: rgba(20, 20, 20, 0.42);
+          backdrop-filter: grayscale(70%) blur(6px);
+          -webkit-backdrop-filter: grayscale(70%) blur(6px);
           gap: 10px;
           pointer-events: none;
-          animation: offline-pulse 3s ease-in-out infinite;
         }
         .offline-overlay.visible { display: flex; }
-        @keyframes offline-pulse {
-          0%, 100% { background: rgba(20, 20, 20, 0.78); }
-          50%      { background: rgba(40, 20, 20, 0.88); }
-        }
         .offline-overlay svg {
           width: 48px; height: 48px;
           stroke: #ff453a; stroke-width: 2; fill: none;
@@ -5251,10 +5246,11 @@ class BoschCameraCard extends HTMLElement {
         .offline-overlay .offline-title {
           font-size: 18px; font-weight: 700; color: #ff453a;
           letter-spacing: 1px; text-transform: uppercase;
-          text-shadow: 0 0 10px rgba(255, 69, 58, 0.4);
+          text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 10px rgba(0, 0, 0, 0.6);
         }
         .offline-overlay .offline-subtitle {
-          font-size: 12px; color: rgba(255,255,255,.7);
+          text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 8px rgba(0, 0, 0, 0.6);
+          font-size: 12px; color: rgba(255,255,255,.85);
           font-weight: 400; max-width: 80%; text-align: center; line-height: 1.4;
         }
 
@@ -5464,15 +5460,15 @@ class BoschCameraCard extends HTMLElement {
              stream is still connecting shows the lock, not a spinner. 2026-06-15. */
           z-index: 11;
           display: flex; flex-direction: column; align-items: center; justify-content: center;
-          background: rgba(20,20,22,.55);
-          backdrop-filter: blur(8px);
-          -webkit-backdrop-filter: blur(8px);
+          background: rgba(20,20,22,.4);
+          backdrop-filter: grayscale(50%) blur(6px);
+          -webkit-backdrop-filter: grayscale(50%) blur(6px);
           gap: 10px;
           opacity: 0; transition: opacity 0.3s; pointer-events: none;
         }
         .privacy-placeholder.visible { opacity: 1; }
-        .privacy-placeholder svg { width: 44px; height: 44px; color: rgba(255,255,255,.5); }
-        .privacy-placeholder span { font-size: 13px; color: rgba(255,255,255,.6); font-weight: 500; }
+        .privacy-placeholder svg { width: 44px; height: 44px; color: rgba(255,255,255,.85); filter: drop-shadow(0 1px 3px rgba(0,0,0,.5)); }
+        .privacy-placeholder span { font-size: 13px; color: rgba(255,255,255,.9); font-weight: 500; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
         /* Stale-image badge: shown below the lock label when privacy is ON and
            a last-event timestamp is available.  Uses a slightly smaller font +
            softer opacity so it reads as supplementary info, not an alarm.  The
@@ -5493,12 +5489,13 @@ class BoschCameraCard extends HTMLElement {
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .privacy-stale-badge.visible { display: inline-flex; }
+        .privacy-stale-badge { text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85); }
         /* Day mode: lighter overlay with darker glyph for legibility */
         :host(.apple-style.mode-day) .privacy-placeholder {
-          background: rgba(240,240,242,.6);
+          background: rgba(240,240,242,.42);
         }
-        :host(.apple-style.mode-day) .privacy-placeholder svg { color: rgba(28,28,30,.55); }
-        :host(.apple-style.mode-day) .privacy-placeholder span { color: rgba(28,28,30,.65); }
+        :host(.apple-style.mode-day) .privacy-placeholder svg { color: rgba(28,28,30,.8); filter: none; }
+        :host(.apple-style.mode-day) .privacy-placeholder span { color: rgba(28,28,30,.85); text-shadow: 0 1px 2px rgba(255,255,255,.5); }
         :host(.apple-style.mode-day) .privacy-stale-badge {
           background: rgba(0,0,0,.08); border-color: rgba(0,0,0,.10);
           color: rgba(28,28,30,.55);
@@ -6398,13 +6395,14 @@ class BoschCameraCard extends HTMLElement {
         :host(.apple-style.cam-offline:not(.minimal)) .accordion:not(#acc-automations) {
           display: none !important;
         }
-        /* Offline overlay: drop the dim red full-cover backdrop so the last
-           cached snapshot stays visible behind. The OFFLINE label + last-seen
+        /* Offline overlay: light glass tint over the last cached snapshot so
+           it stays visible behind. The OFFLINE label + last-seen
            text sit in a single glass pill centered on the video — same
            material as the title-pill so the layer reads as a coherent
            "system overlay" instead of a separate widget. */
         :host(.apple-style.cam-offline) .offline-overlay {
-          background: transparent;
+          background: rgba(20,20,22,.42);
+          animation: none;
           gap: 0;
           align-items: center; justify-content: center;
         }
@@ -7668,6 +7666,10 @@ class BoschCameraCard extends HTMLElement {
     const src     = img?.src || "";
     const isCache = src.startsWith("data:");
 
+    // A tiny frame (1x1 placeholder) is not a real image: keep _imageLoaded
+    // false so an offline/privacy camera still loads the real one later.
+    const tiny = !!img && (img.naturalWidth < 16 || img.naturalHeight < 16);
+    if (tiny) return;
     this._imageLoaded = true;
     this._loadRetries = 0;   // reset retry counter on success
     if (img) img.classList.remove("hidden");
@@ -7837,6 +7839,12 @@ class BoschCameraCard extends HTMLElement {
     try {
       const cached = localStorage.getItem(this._storageKey);
       if (!cached) return;
+      // Older card versions stored the 1x1 placeholder (~250-char data URL); a
+      // real 320x180 JPEG is several KB, so anything under 1000 chars is junk.
+      if (cached.length < 1000) {
+        localStorage.removeItem(this._storageKey);
+        return;
+      }
       const img = this.shadowRoot.getElementById("cam-img");
       if (img) { img.src = cached; img.classList.remove("hidden"); }
       this._imageLoaded = true;
@@ -7863,6 +7871,8 @@ class BoschCameraCard extends HTMLElement {
     if (!this._storageKey) return;
     const img = this.shadowRoot.getElementById("cam-img");
     if (!img || !img.naturalWidth || !img.naturalHeight) return;
+    // 1x1 backend placeholder (no real frame yet) must not overwrite a real cached frame.
+    if (img.naturalWidth < 16 || img.naturalHeight < 16) return;
     try {
       const canvas = document.createElement("canvas");
       canvas.width = img.naturalWidth;
@@ -10041,9 +10051,11 @@ class BoschCameraCard extends HTMLElement {
           // prefix and the date locale follow the active card language (was
           // hardcoded German "Zuletzt gesehen:" + "de-DE" for all users).
           let txt = this._t("offline_no_conn");
-          if (lastChanged) {
+          const snapAt = hass.states[ents.camera]?.attributes?.last_snapshot_at;
+          const lastSeen = snapAt || lastChanged;
+          if (lastSeen) {
             try {
-              const d = new Date(lastChanged);
+              const d = new Date(lastSeen);
               const loc = cardLang(this._hass);
               txt = `${this._t("offline_last_seen")} ${d.toLocaleString(loc, {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"})}`;
             } catch { /* keep no-connection fallback */ }
@@ -10797,8 +10809,12 @@ class BoschCameraCard extends HTMLElement {
       // usually far more recent than "event" (last motion/audio). Falls back to the
       // event timestamp when no snapshot has loaded yet. 2026-06-15.
       let prefix = null, ts = null;
-      if (privacyOn && this._config.privacy_stale_source === "snapshot" && this._lastSnapshotAt) {
-        ts = fmtStale(new Date(this._lastSnapshotAt));
+      // Backend capture time of the delivered frame beats browser load time,
+      // which would read "just now" for a days-old disk/cache frame.
+      const capturedAt = Date.parse(hass.states[ents.camera]?.attributes?.last_snapshot_at);
+      const snapMs = Number.isNaN(capturedAt) ? this._lastSnapshotAt : capturedAt;
+      if (privacyOn && this._config.privacy_stale_source === "snapshot" && snapMs) {
+        ts = fmtStale(new Date(snapMs));
         if (ts) prefix = this._t("privacy_stale_prefix_snapshot");
       }
       if (privacyOn && !ts && lastEventStr !== "—") {
