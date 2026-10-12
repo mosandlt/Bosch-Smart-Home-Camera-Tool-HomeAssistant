@@ -38,6 +38,7 @@ from . import (  # type: ignore[attr-defined]
 from .const import CONF_AI_ANALYSIS_ENABLED
 from .dynamic_devices import register_dynamic_camera_listener
 from .models import get_display_name
+from .privacy_store import effective_privacy
 from .snapshot_store import load_snapshot
 
 _LOGGER = logging.getLogger(__name__)
@@ -163,9 +164,16 @@ class BoschCameraLastSnapshotImage(ImageEntity):  # type: ignore[misc]  # HA bas
         # Serve the in-RAM copy if we already loaded it since the last
         # refresh — avoids a disk read on every /api/image_proxy request.
         # async_notify_refreshed() clears it when a new snapshot is persisted.
+        # Fail closed: a frame captured before privacy was engaged must not
+        # be served unless the last confirmed state is explicitly off.
+        if effective_privacy(self._coordinator, self._cam_id) is not False:
+            return None
         if self._cached_bytes is not None:
             return self._cached_bytes
         disk_bytes = await load_snapshot(self.hass, self._cam_id)
+        # Privacy may have flipped ON while the disk read was awaited.
+        if effective_privacy(self._coordinator, self._cam_id) is not False:
+            return None
         if disk_bytes:
             self._cached_bytes = disk_bytes
             return disk_bytes

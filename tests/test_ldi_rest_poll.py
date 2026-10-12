@@ -184,7 +184,7 @@ class TestApplyProbe:
         assert c.ldi_open_status[CAM]["reason"] == RESULT_NO_GO2RTC
 
     @pytest.mark.parametrize("status", [None, 401, 500])
-    def test_failed_read_forgets_privacy_but_keeps_firmware(
+    def test_failed_read_clears_rest_slot_but_keeps_firmware(
         self, status: int | None
     ) -> None:
         c = _coord()
@@ -192,8 +192,10 @@ class TestApplyProbe:
         ldi_local._apply_probe(c, CAM, _probe(200, True))  # type: ignore[arg-type]
         assert ldi_privacy_on(c, CAM) is True  # type: ignore[arg-type]
         ldi_local._apply_probe(c, CAM, _probe(status))  # type: ignore[arg-type]
-        # a stale "on" must not hide an unreachable camera: cloud flag again
-        assert ldi_privacy_on(c, CAM) is False  # type: ignore[arg-type]
+        # REST slot is cleared; the last locally confirmed value stays in the
+        # shared cache until the next cloud poll overwrites it
+        assert c.ldi_rest_state[CAM]["privacy_on"] is None
+        assert ldi_privacy_on(c, CAM) is True  # type: ignore[arg-type]
         assert ldi_local_firmware(c, CAM) == "9.40.0202"  # type: ignore[arg-type]
 
     def test_stub_without_status_map(self) -> None:

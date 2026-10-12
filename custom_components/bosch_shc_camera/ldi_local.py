@@ -239,6 +239,16 @@ def _apply_probe(
     )
     if probe.result == ldi_rest.PROBE_OK and probe.firmware is not None:
         entry["firmware"] = probe.firmware
+    # The camera's own answer outranks the cloud flag (see ldi_privacy_on);
+    # mirror it into the tracked cache so the snapshot gate and persistence
+    # see it. Never written on failure or a non-bool answer.
+    shc_cache = getattr(coordinator, "shc_state_cache", None)
+    if (
+        shc_cache is not None
+        and probe.result == ldi_rest.PROBE_OK
+        and isinstance(probe.privacy_on, bool)
+    ):
+        shc_cache.setdefault(cam_id, {})["privacy_mode"] = probe.privacy_on
     status: dict[str, dict[str, Any]] = (
         getattr(coordinator, "ldi_open_status", None) or {}
     )
