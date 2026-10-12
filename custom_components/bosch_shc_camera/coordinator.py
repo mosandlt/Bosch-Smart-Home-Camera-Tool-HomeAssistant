@@ -81,11 +81,6 @@ from .ldi_local import ensure_ldi_stream, ldi_wanted, refresh_ldi_rest
 from .ldi_snapshot import fetch_snapshot as fetch_ldi_snapshot
 from .live_connection import try_live_connection_inner
 from .lock_utils import get_or_create_lock
-from .privacy_store import (
-    PersistedPrivacy,
-    PrivacyTrackingCacheView,
-    effective_privacy,
-)
 from .rcp import async_update_rcp_data
 
 # These 4 are re-exported for backward-compat imports only — they are plain
@@ -450,12 +445,8 @@ class BoschCameraCoordinator(
         # SHC local API state cache — keyed by cam_id
         # Each entry: {"device_id": str, "camera_light": bool|None, "privacy_mode": bool|None}
         # Session-State-Facade Slice 2: CacheFieldView over self._sessions.
-        # Every privacy_mode write is mirrored into the persisted store so an
-        # offline camera keeps a known state across restarts.
-        self.privacy_store: PersistedPrivacy = PersistedPrivacy(hass)
-        self.privacy_store.set_spawner(self.spawn_tracked)
-        self.shc_state_cache: CacheFieldView[dict[str, Any]] = PrivacyTrackingCacheView(
-            self._sessions, "shc_state_cache", self.privacy_store.record
+        self.shc_state_cache: CacheFieldView[dict[str, Any]] = CacheFieldView(
+            self._sessions, "shc_state_cache"
         )
         self.shc_devices_raw: list[Any] = []  # cached GET /smarthome/devices response
         self.last_shc_fetch: float = float(
@@ -2632,7 +2623,6 @@ class BoschCameraCoordinator(
         had_nvr_intent = (
             getattr(self._sessions.get(cam_id), "nvr_user_intent", None) is True
         )
-        self.privacy_store.remove(cam_id)
         for attr_name in self._PURGE_CAM_DICT_ATTRS:
             attr = getattr(self, attr_name)
             attr.pop(cam_id, None)
@@ -2659,10 +2649,6 @@ class BoschCameraCoordinator(
         ]
         for key in stale_lan_denied_keys:
             self._rcp_lan_denied_until.pop(key, None)
-
-    def effective_privacy(self, cam_id: str) -> bool | None:
-        """Live privacy state, else the persisted last-confirmed one, else None."""
-        return effective_privacy(self, cam_id)
 
     def cleanup_stale_devices(self, current_cam_ids: set[str]) -> None:
         """Remove devices for cameras no longer in the Bosch cloud account.

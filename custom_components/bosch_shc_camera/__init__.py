@@ -714,10 +714,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 len(_persisted_ips),
             )
 
-    # Last confirmed privacy state per camera, so an offline camera's
-    # persisted snapshot stays servable after a restart (live values win).
-    await coordinator.privacy_store.async_load()
-
     # Load the persistent hardware-version map (cam_id → hw_version). Without
     # this, a cold start during a Bosch cloud 5xx leaves `hw_version` empty
     # and `_is_gen2()` returns False for every camera — which in turn makes
@@ -1604,7 +1600,6 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         f"{DOMAIN}_hw_versions",
         f"{DOMAIN}_local_creds",
         f"{DOMAIN}_nvr_user_intent",
-        f"{DOMAIN}_privacy_state",
     ):
         await Store(hass, version=1, key=key).async_remove()
     await async_remove_all_snapshots(hass)

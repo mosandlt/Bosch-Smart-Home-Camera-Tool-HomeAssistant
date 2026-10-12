@@ -668,7 +668,6 @@ def _make_coord_stub(camera_ids):
     coord.token_refresh_handle = None
     coord.stream_log_listener = None
     coord.async_load_ai_budget = AsyncMock(return_value=None)
-    coord.privacy_store.async_load = AsyncMock(return_value=None)
     return coord
 
 
@@ -1077,7 +1076,6 @@ def _make_coord_stub_setup_lan_fallback(camera_ids, *, first_refresh_raises=None
     coord.async_outage_ping_all = AsyncMock(return_value=None)
     coord.async_start_fcm_push = AsyncMock(return_value=None)
     coord.async_load_ai_budget = AsyncMock(return_value=None)
-    coord.privacy_store.async_load = AsyncMock(return_value=None)
 
     def _spawn_tracked_close(coro, **_kwargs):
         coro.close()  # never actually scheduled in this stub, avoid a leaked-coroutine warning
@@ -13088,7 +13086,6 @@ def _make_coord_stub_ai_describe_snapshot(
     coord.async_outage_ping_all = AsyncMock(return_value=None)
     coord.async_start_fcm_push = AsyncMock(return_value=None)
     coord.async_load_ai_budget = AsyncMock(return_value=None)
-    coord.privacy_store.async_load = AsyncMock(return_value=None)
     coord.shc_state_cache = {}
     coord.camera_entities = {CAM_ID: SimpleNamespace(entity_id="camera.bosch_test")}
     coord.ai_in_flight = 0
@@ -31581,7 +31578,6 @@ def _make_coord_stub_sprint_md(
     coord.async_outage_ping_all = AsyncMock(return_value=None)
     coord.async_start_fcm_push = AsyncMock(return_value=None)
     coord.async_load_ai_budget = AsyncMock(return_value=None)
-    coord.privacy_store.async_load = AsyncMock(return_value=None)
     return coord
 
 
@@ -34818,7 +34814,6 @@ class TestAsyncRemoveEntry:
             f"{DOMAIN}_hw_versions",
             f"{DOMAIN}_local_creds",
             f"{DOMAIN}_nvr_user_intent",
-            f"{DOMAIN}_privacy_state",
         ]
         mock_remove_snapshots.assert_awaited_once_with(hass)
 

@@ -53,7 +53,6 @@ def _make_coordinator(cam_id: str = CAM_ID) -> Any:
         },
         camera_entities={},
         image_entities={},
-        shc_state_cache={cam_id: {"privacy_mode": False}},
         async_add_listener=MagicMock(return_value=MagicMock()),
     )
 

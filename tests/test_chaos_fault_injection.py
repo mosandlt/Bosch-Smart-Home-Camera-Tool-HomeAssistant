@@ -924,7 +924,6 @@ def _make_purge_stub() -> BoschCameraCoordinator:
     # slices' folded fields.
     coord.live_connections = CacheFieldView(coord._sessions, "live_connection")
     coord.user_intent_streams = BoolFieldView(coord._sessions, "user_intent_stream")
-    coord.privacy_store = MagicMock()
     return coord
 
 

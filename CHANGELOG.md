@@ -7,15 +7,6 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
-## [v17.2.5] - 2026-10-12
-
-### Fixed
-
-- **Offline cameras showed a black frame after a restart.** A camera that is offline cannot report its privacy state, so after a restart the persisted snapshot was withheld as a precaution and only the black placeholder was served. The last confirmed privacy state is now stored per camera and restored at startup; an offline camera shows its last snapshot only when that state was explicitly off. A state that was never confirmed, a stored "on", or unreadable data still gives the placeholder. A switch to "on" is saved immediately.
-- **Last-snapshot image entity ignored privacy.** The `image` entity served the stored frame without checking the privacy state. It now applies the same check, including a re-check after the disk read.
-- **Frame served right after privacy was switched on.** A request that started while privacy was off could still return a cached frame if privacy flipped on during the fetch. The result is re-checked before it is returned.
-- **Local privacy answer not reflected.** A privacy state read directly from the camera is now also written to the shared state, so the snapshot check and persistence see it.
-
 ## [v17.2.4] - 2026-10-12
 
 ### Changed

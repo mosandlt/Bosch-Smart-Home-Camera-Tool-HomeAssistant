@@ -73,7 +73,6 @@ from .models import (
     get_display_name,
     get_model_config,
 )  # [S4] hoisted: avoid per-call import binding on hot path
-from .privacy_store import effective_privacy
 from .snapshot_store import load_snapshot, save_snapshot
 from .switch import _redact_rtsp_creds
 from .time_utils import parse_bosch_timestamp
@@ -1225,10 +1224,6 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         try:
             result = await self._async_camera_image_impl(width, height)
             jpeg = result if result else self._PLACEHOLDER_JPEG
-            # Privacy may have flipped ON mid-fetch (stale cache served by a
-            # fallback branch); only a confirmed True switches to placeholder.
-            if effective_privacy(self.coordinator, self._cam_id) is True:
-                jpeg = self._PLACEHOLDER_JPEG
         except asyncio.CancelledError:
             raise  # let cancellation propagate cleanly
         except Exception as err:
@@ -1248,7 +1243,10 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
             # and only a confirmed-False read is safe to serve stale data
             # for.
             privacy_confirmed_safe = (
-                effective_privacy(self.coordinator, self._cam_id) is False
+                self.coordinator.shc_state_cache.get(self._cam_id, {}).get(
+                    "privacy_mode"
+                )
+                is False
             )
             jpeg = (
                 self.cached_image or self._PLACEHOLDER_JPEG
@@ -1443,7 +1441,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # camera proxy indefinitely. Return None here so the public
         # wrapper's `result or _PLACEHOLDER_JPEG` serves the placeholder
         # instead.
-        if effective_privacy(self.coordinator, self._cam_id):
+        if self.coordinator.shc_state_cache.get(self._cam_id, {}).get("privacy_mode"):
             return None
         if ldi_wanted(self.coordinator, self._cam_id):
             return await self._async_ldi_image()
@@ -1457,7 +1455,10 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         # cache/placeholder-fallback return points — only a confirmed-False
         # state is safe to serve stale data for. Computed once here and
         # threaded through the rest of the function.
-        privacy_unknown = effective_privacy(self.coordinator, self._cam_id) is None
+        privacy_unknown = (
+            self.coordinator.shc_state_cache.get(self._cam_id, {}).get("privacy_mode")
+            is None
+        )
 
         # Verifying Bosch-cloud session: REMOTE proxy snap.jpg fetches below are
         # TLS-validated against the pinned Bosch CA. The LOCAL Digest paths pass
