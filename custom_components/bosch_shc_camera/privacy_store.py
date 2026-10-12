@@ -156,18 +156,18 @@ class PrivacyTrackingCacheView(CacheFieldView[dict[str, Any]]):
         self._on_privacy = on_privacy
 
     def setdefault(
-        self, cam_id: str, default: dict[str, Any] | None = None
+        self, key: str, default: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         # The mixin returns `default` itself; callers mutate the result, so it
         # must be the stored (tracking) object.
-        if cam_id not in self:
-            self[cam_id] = default if default is not None else {}
-        return self[cam_id]
+        if key not in self:
+            self[key] = default if default is not None else {}
+        return self[key]
 
-    def __setitem__(self, cam_id: str, value: dict[str, Any]) -> None:
+    def __setitem__(self, key: str, value: dict[str, Any]) -> None:
         if isinstance(value, dict) and not isinstance(value, _PrivacyTrackingDict):
-            value = _PrivacyTrackingDict(cam_id, self._on_privacy, value)
-        super().__setitem__(cam_id, value)
+            value = _PrivacyTrackingDict(key, self._on_privacy, value)
+        super().__setitem__(key, value)
 
 
 def effective_privacy(coordinator: Any, cam_id: str) -> bool | None:
