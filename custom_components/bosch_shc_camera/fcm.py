@@ -1457,6 +1457,16 @@ async def _async_start_fcm_push_locked(coordinator: Any) -> bool:
     return result
 
 
+async def _deregister_replaced_token(coordinator: Any, old_token: str | None) -> None:
+    """Log out a superseded device token after the new one is registered.
+
+    A soft reconnect can mint a new token; without this Bosch keeps the old
+    registration forever. Best-effort: deregister_fcm_with_bosch never raises.
+    """
+    if old_token and old_token != coordinator.fcm_token:
+        await deregister_fcm_with_bosch(coordinator, old_token)
+
+
 async def register_fcm_with_bosch(coordinator: Any) -> bool:
     """Register our FCM token with Bosch CBS so it sends us push notifications.
 
@@ -1485,6 +1495,9 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
     # re-POST if the last successful registration is older than
     # FCM_REREGISTER_INTERVAL_SEC so a server-side-dropped Bosch device
     # registration self-heals without needing a token change or a hard-heal.
+    # Deliberately no periodic re-POST while the listener runs: Bosch tokens
+    # live ~270 days and extra POSTs only add backend load (Bosch request
+    # 2026-09-04). The age check runs at listener (re)start only.
     registered_at_raw = coordinator.entry.data.get("fcm_registered_at")
     try:
         registered_at = float(registered_at_raw) if registered_at_raw else 0.0
@@ -1525,6 +1538,7 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
     }
     payload = {"deviceType": "ANDROID", "deviceToken": coordinator.fcm_token}
 
+    registered = False
     try:
         async with asyncio.timeout(10):
             async with session.post(
@@ -1544,32 +1558,38 @@ async def register_fcm_with_bosch(coordinator: Any) -> bool:
                         "FCM token registered with Bosch CBS as deviceType=ANDROID (HTTP %d)",
                         resp.status,
                     )
-                    return True
-                resp_body = await resp.text()
-                if resp.status == 500 and "sh:internal.error" in resp_body:
-                    # Bosch returns 500 "sh:internal.error" when the same device
-                    # token is already registered — FCM push still works. Treat as
-                    # success and save both markers so subsequent restarts skip the POST.
-                    coordinator.hass.config_entries.async_update_entry(
-                        coordinator.entry,
-                        data={
-                            **coordinator.entry.data,
-                            "fcm_registered_token": coordinator.fcm_token,
-                            "fcm_registered_device_type": "ANDROID",
-                            "fcm_registered_at": time.time(),
-                        },
+                    registered = True
+                else:
+                    resp_body = await resp.text()
+                    if resp.status == 500 and "sh:internal.error" in resp_body:
+                        # Bosch returns 500 "sh:internal.error" when the same device
+                        # token is already registered — FCM push still works. Treat as
+                        # success and save both markers so subsequent restarts skip the POST.
+                        coordinator.hass.config_entries.async_update_entry(
+                            coordinator.entry,
+                            data={
+                                **coordinator.entry.data,
+                                "fcm_registered_token": coordinator.fcm_token,
+                                "fcm_registered_device_type": "ANDROID",
+                                "fcm_registered_at": time.time(),
+                            },
+                        )
+                        _LOGGER.debug(
+                            "FCM: token already registered with Bosch (HTTP 500 sh:internal.error) — skipping on next restart"
+                        )
+                        return True
+                    _LOGGER.warning(
+                        "FCM token registration failed: HTTP %d — %s",
+                        resp.status,
+                        resp_body[:200],
                     )
-                    _LOGGER.debug(
-                        "FCM: token already registered with Bosch (HTTP 500 sh:internal.error) — skipping on next restart"
-                    )
-                    return True
-                _LOGGER.warning(
-                    "FCM token registration failed: HTTP %d — %s",
-                    resp.status,
-                    resp_body[:200],
-                )
     except (TimeoutError, aiohttp.ClientError) as err:
         _LOGGER.warning("FCM token registration error: %s", err)
+    if registered:
+        # Outside the POST's 10s timeout: a slow logout must not turn an
+        # already-confirmed registration into a failure.
+        await _deregister_replaced_token(coordinator, stored_token)
+        return True
     return False
 
 
@@ -1621,7 +1641,8 @@ async def deregister_fcm_with_bosch(coordinator: Any, device_token: str) -> bool
         # retries at a fixed 5s cadence, silently blocking credential
         # recovery instead of just skipping this best-effort cleanup step.
         _LOGGER.info(
-            "FCM: stale device token deregistration error (non-fatal): %s", err
+            "FCM: stale device token deregistration error (non-fatal): %s",
+            type(err).__name__,
         )
     return False
 

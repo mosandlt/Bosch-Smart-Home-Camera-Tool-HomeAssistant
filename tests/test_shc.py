@@ -3121,11 +3121,11 @@ class TestSetLightComponentGen2Errors:
 
 class TestCloudSetLightComponentGen2WallwasherNetworkError:
     """Gen2 wallwasher /lighting/switch PUT raises aiohttp error → warning
-    log, then execution still continues to the topdown step."""
+    log, the topdown toggle is skipped and the write reports failure."""
 
     @pytest.mark.asyncio
     async def test_lighting_switch_put_raises_client_error_logs_warning(self):
-        """aiohttp.ClientError on /lighting/switch → warning + execution continues to step 2."""
+        """aiohttp.ClientError on /lighting/switch → warning, no topdown PUT, False."""
         from custom_components.bosch_shc_camera.shc import (
             async_cloud_set_light_component,
         )
@@ -3150,17 +3150,16 @@ class TestCloudSetLightComponentGen2WallwasherNetworkError:
             "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
-            # Should not raise — warning is logged and execution continues to step 2
             result = await async_cloud_set_light_component(
                 coord, CAM_ID, "wallwasher", True
             )
 
-        # Step 2 succeeded → ok = True
-        assert result is True
+        assert result is False
+        assert session.put.call_count == 1
 
     @pytest.mark.asyncio
     async def test_lighting_switch_put_raises_timeout_logs_warning(self):
-        """asyncio.TimeoutError on /lighting/switch → warning + step 2 still runs."""
+        """asyncio.TimeoutError on /lighting/switch → warning, no topdown PUT, False."""
         from custom_components.bosch_shc_camera.shc import (
             async_cloud_set_light_component,
         )
@@ -3185,7 +3184,8 @@ class TestCloudSetLightComponentGen2WallwasherNetworkError:
                 coord, CAM_ID, "wallwasher", False
             )
 
-        assert result is True
+        assert result is False
+        assert session.put.call_count == 1
 
 
 # async_cloud_set_light_component — Gen2 LOCAL RCP front-light fallback
@@ -4197,7 +4197,7 @@ class TestShcLanFallbackFiresForUnknownHw:
 
         from custom_components.bosch_shc_camera import shc
 
-        src = inspect.getsource(shc.async_cloud_set_light_component)
+        src = inspect.getsource(shc._set_light_component_locked)
         assert "_hw_light" in src and "CAMERA" in src, (
             "async_cloud_set_light_component must relax the Gen2 gate for "
             "unknown hw — light writes would fail during cold-start cloud "

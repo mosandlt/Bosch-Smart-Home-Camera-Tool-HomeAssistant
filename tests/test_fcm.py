@@ -17423,3 +17423,131 @@ class TestClipContentLengthValueErrorFallsThroughToRead:
             "an unparseable Content-Length must not block the download — "
             "must fall through to reading + the actual byte-count check"
         )
+
+
+@pytest.mark.parametrize(("status", "body"), [(200, ""), (204, "")])
+async def test_register_deregisters_superseded_token(status: int, body: str) -> None:
+    """Soft reconnect minted a new token -> old one is logged out after the POST.
+
+    Bosch backend-load request 2026-09-04: abandoned registrations pile up.
+    """
+    coord = _make_register_coord(
+        data={
+            "fcm_registered_token": "fcm-tok-old",
+            "fcm_registered_device_type": "ANDROID",
+            "fcm_registered_at": time.time(),
+        }
+    )
+    session = _make_session_post(_make_mock_response(status, body))
+    dereg = AsyncMock(return_value=True)
+    with (
+        patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ),
+        patch(f"{MODULE}.deregister_fcm_with_bosch", new=dereg),
+    ):
+        assert await fcm.register_fcm_with_bosch(coord) is True
+    dereg.assert_awaited_once_with(coord, "fcm-tok-old")
+    assert coord.entry.data["fcm_registered_token"] == "fcm-tok-new"
+
+
+async def test_register_slow_logout_does_not_fail_registration() -> None:
+    """The old-token logout runs outside the POST's timeout.
+
+    A slow logout must not turn an already-confirmed registration into a
+    failure (which would stop the listener until the supervisor retries).
+    """
+    coord = _make_register_coord(
+        data={
+            "fcm_registered_token": "fcm-tok-old",
+            "fcm_registered_device_type": "ANDROID",
+            "fcm_registered_at": time.time(),
+        }
+    )
+    session = _make_session_post(_make_mock_response(204, ""))
+    real_timeout = asyncio.timeout
+
+    async def _slow_logout(*_a: object) -> bool:
+        await asyncio.sleep(0.2)
+        return True
+
+    with (
+        patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ),
+        patch(f"{MODULE}.deregister_fcm_with_bosch", new=_slow_logout),
+        patch.object(asyncio, "timeout", lambda _d: real_timeout(0.05)),
+    ):
+        assert await fcm.register_fcm_with_bosch(coord) is True
+
+
+async def test_register_500_keeps_old_token_registered() -> None:
+    """HTTP 500 may be a transient backend error, not 'already registered'.
+
+    The new token is unconfirmed, so logging out the old one could leave no
+    working registration at all.
+    """
+    coord = _make_register_coord(
+        data={
+            "fcm_registered_token": "fcm-tok-old",
+            "fcm_registered_device_type": "ANDROID",
+            "fcm_registered_at": time.time(),
+        }
+    )
+    session = _make_session_post(_make_mock_response(500, "sh:internal.error"))
+    dereg = AsyncMock(return_value=True)
+    with (
+        patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ),
+        patch(f"{MODULE}.deregister_fcm_with_bosch", new=dereg),
+    ):
+        assert await fcm.register_fcm_with_bosch(coord) is True
+    dereg.assert_not_awaited()
+
+
+@pytest.mark.parametrize("stored", [None, "fcm-tok-new"])
+async def test_register_no_deregister_without_superseded_token(
+    stored: str | None,
+) -> None:
+    """Fresh install or same-token stale re-POST must never log out a token."""
+    data: dict = {}
+    if stored:
+        data = {
+            "fcm_registered_token": stored,
+            "fcm_registered_device_type": "ANDROID",
+            "fcm_registered_at": 1.0,
+        }
+    coord = _make_register_coord(data=data)
+    session = _make_session_post(_make_mock_response(204))
+    dereg = AsyncMock(return_value=True)
+    with (
+        patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ),
+        patch(f"{MODULE}.deregister_fcm_with_bosch", new=dereg),
+    ):
+        assert await fcm.register_fcm_with_bosch(coord) is True
+    dereg.assert_not_awaited()
+
+
+async def test_register_failed_post_keeps_old_token_registered() -> None:
+    """If the new registration fails the old token must not be logged out."""
+    coord = _make_register_coord(
+        data={"fcm_registered_token": "fcm-tok-old", "fcm_registered_at": 1.0}
+    )
+    session = _make_session_post(_make_mock_response(403, "nope"))
+    dereg = AsyncMock(return_value=True)
+    with (
+        patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ),
+        patch(f"{MODULE}.deregister_fcm_with_bosch", new=dereg),
+    ):
+        assert await fcm.register_fcm_with_bosch(coord) is False
+    dereg.assert_not_awaited()

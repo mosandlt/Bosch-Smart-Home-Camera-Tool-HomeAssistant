@@ -51,6 +51,9 @@ if TYPE_CHECKING:  # pragma: no cover — only for type hints
 
 _LOGGER = logging.getLogger(__name__)
 
+# Min spacing between retries of a first fetch that got no backend answer.
+SLOW_TIER_FIRST_RETRY_SEC = 60.0
+
 
 def err_str(err: BaseException) -> str:
     """Format an exception so empty-message types (TimeoutError, some
@@ -140,6 +143,17 @@ def _compute_cam_context(
     if not hasattr(coordinator, "slow_tier_ran_once"):
         coordinator.slow_tier_ran_once = set()
     first_fetch_pending = cam_id not in coordinator.slow_tier_ran_once
+    # A first fetch that was attempted but got no backend answer (timeouts)
+    # is retried after a short throttle instead of waiting a full slow
+    # interval with empty diagnostic caches.
+    if not hasattr(coordinator, "slow_tier_first_attempt_at"):
+        coordinator.slow_tier_first_attempt_at = {}
+    _first_attempt = coordinator.slow_tier_first_attempt_at.get(cam_id)
+    first_retry_due = (
+        first_fetch_pending
+        and _first_attempt is not None
+        and time.monotonic() - _first_attempt >= SLOW_TIER_FIRST_RETRY_SEC
+    )
     stream_active = cam_id in coordinator.live_connections
     # Option: defer slow-tier when stream is active (default ON).
     # When OFF, slow-tier runs regardless — diagnostic sensors stay
@@ -156,6 +170,7 @@ def _compute_cam_context(
     # fetch is now safe to run (stream gone idle since last deferral).
     do_slow_cam = (
         do_slow
+        or first_retry_due
         or (cam_id in coordinator.slow_tier_deferred and not stream_active)
         or defer_bound_reached
     )
@@ -422,6 +437,10 @@ async def _poll_slow_tier_endpoints(
     # Reduces slow-tier from ~13×5s = 65s to ~5s (single timeout).
     hw = ctx.hw
     pan_limit = ctx.pan_limit
+    if cam_id not in getattr(coordinator, "slow_tier_ran_once", ()):
+        if not hasattr(coordinator, "slow_tier_first_attempt_at"):
+            coordinator.slow_tier_first_attempt_at = {}
+        coordinator.slow_tier_first_attempt_at[cam_id] = time.monotonic()
 
     async def _fetch(
         endpoint: str,
@@ -436,7 +455,18 @@ async def _poll_slow_tier_endpoints(
                     ) as r
                 ):
                     if r.status == 200:
-                        return (endpoint, 200, await r.json())
+                        try:
+                            return (endpoint, 200, await r.json())
+                        except (ValueError, aiohttp.ContentTypeError) as err:
+                            # The backend did answer; an unparsable body must
+                            # still spend the first-fetch exemption.
+                            _LOGGER.debug(
+                                "%s returned unparsable body for %s: %s",
+                                endpoint,
+                                cam_id,
+                                err_str(err),
+                            )
+                            return (endpoint, 200, None)
                     return (endpoint, r.status, None)
         except Exception as err:
             _LOGGER.debug(
@@ -533,6 +563,7 @@ async def _poll_slow_tier_endpoints(
             if not hasattr(coordinator, "slow_tier_ran_once"):
                 coordinator.slow_tier_ran_once = set()
             coordinator.slow_tier_ran_once.add(cam_id)
+            getattr(coordinator, "slow_tier_first_attempt_at", {}).pop(cam_id, None)
         if ep == LDI_ENDPOINT:
             ldi_state = state_from_response(ep_status, ep_data)
             if ldi_state is not None:

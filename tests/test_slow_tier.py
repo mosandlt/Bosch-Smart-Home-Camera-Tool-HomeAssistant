@@ -1528,6 +1528,55 @@ class TestFirstFetchMarkedDone:
         assert self._ctx_for(coord).do_slow_cam is False
         assert CAM_A in coord.slow_tier_deferred
 
+    @pytest.mark.asyncio
+    async def test_timeout_first_fetch_retried_after_throttle(self):
+        """Regression: all-timeout first fetch left caches empty until the
+        next 5-min slow interval; now retried after the throttle, not sooner."""
+        coord = self._streaming_coord()
+        ctx = self._ctx_for(coord)
+        session = MagicMock()
+        session.get = MagicMock(side_effect=OSError("boom"))
+        await _poll_slow_tier_endpoints(
+            coord, CAM_A, {}, ctx, {CAM_A: {}}, session, HEADERS, NOOP_INTRUSION
+        )
+        assert CAM_A in coord.slow_tier_first_attempt_at
+        coord.slow_tier_ran_once.add(CAM_A)
+        coord.slow_tier_ran_once.discard(CAM_A)
+        # Not due yet: interval not elapsed, no retry storm.
+        opts = {"defer_diag_during_stream": False}
+        c = _compute_cam_context(
+            coord, CAM_A, _cam_raw(), {CAM_A: {"status": "ONLINE"}}, opts, False
+        )
+        assert c.do_slow_cam is False
+        coord.slow_tier_first_attempt_at[CAM_A] = time.monotonic() - 61
+        c = _compute_cam_context(
+            coord, CAM_A, _cam_raw(), {CAM_A: {"status": "ONLINE"}}, opts, False
+        )
+        assert c.do_slow_cam is True
+
+    def test_no_retry_without_prior_attempt(self):
+        coord = self._streaming_coord()
+        c = _compute_cam_context(
+            coord, CAM_A, _cam_raw(), {CAM_A: {"status": "ONLINE"}}, {}, False
+        )
+        assert c.do_slow_cam is False
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_200_counts_as_answer(self):
+        """Regression: 200 with unparsable body was status 0, so the
+        exemption stayed open and the full fan-out ran every interval."""
+        coord = self._streaming_coord()
+        ctx = self._ctx_for(coord)
+        resp = _make_resp(200)
+        resp.json = AsyncMock(side_effect=ValueError("bad json"))
+        session = MagicMock()
+        session.get = MagicMock(return_value=resp)
+        await _poll_slow_tier_endpoints(
+            coord, CAM_A, {}, ctx, {CAM_A: {}}, session, HEADERS, NOOP_INTRUSION
+        )
+        assert CAM_A in coord.slow_tier_ran_once
+        assert CAM_A not in coord.slow_tier_first_attempt_at
+
     def test_defer_option_off_first_fetch_runs_and_is_not_deferred(self):
         coord = self._streaming_coord()
         ctx = self._ctx_for(coord, opts={"defer_diag_during_stream": False})

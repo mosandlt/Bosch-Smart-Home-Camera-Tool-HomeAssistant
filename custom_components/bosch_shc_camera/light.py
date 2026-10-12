@@ -40,6 +40,7 @@ from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _warn_if_privacy_on
 from .shc import (
     clear_pending_front_white_balance,
+    get_lighting_lock,
     get_pending_front_white_balance,
     remember_front_brightness,
     set_pending_front_white_balance,
@@ -325,7 +326,9 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
             ),
         }
 
-    async def _put_lighting_switch(self, updates: dict[str, Any]) -> bool:
+    async def _put_lighting_switch(
+        self, updates: dict[str, Any], *, lock_held: bool = False
+    ) -> bool:
         """Send PUT /lighting/switch — ALWAYS sends full body with all 3 groups.
 
         The Bosch API requires all 3 light groups in every PUT request.
@@ -343,69 +346,65 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
         # a cache that already contains the prior write's result, and we merge
         # only the changed group(s) back (never the whole entry). Matches the
         # merge-only-own-key pattern number.py also uses.
-        locks = getattr(self.coordinator, "lighting_switch_locks", None)
-        if locks is None:
-            locks = {}
-            self.coordinator.lighting_switch_locks = locks
-        lock = locks.get(self._cam_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            locks[self._cam_id] = lock
-        async with lock:
-            # Build full body INSIDE the lock so it reflects any sibling write
-            # that just completed.
-            body = self._get_current_state()
-            for key, val in updates.items():
-                if key in body:
-                    body[key] = {**body[key], **val}  # merge, not replace
-                else:
-                    body[key] = val
-            session = await async_get_bosch_cloud_session(self.hass)
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            }
-            try:
-                async with asyncio.timeout(10):
-                    async with session.put(
-                        f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
-                        headers=headers,
-                        json=body,
-                    ) as resp:
-                        if resp.status in (200, 201, 204):
-                            # /lighting/switch returns 204 No Content (empty body);
-                            # 200/201 would carry authoritative JSON. Prefer the
-                            # server body when present, else the optimistic `body`
-                            # we sent — calling resp.json() unconditionally on a
-                            # 204 raises, which would leave the cache never
-                            # updated and is_on stuck False.
-                            try:
-                                rsp = await resp.json(content_type=None)
-                            except Exception:
-                                rsp = None
-                            authoritative = (
-                                rsp if (rsp and isinstance(rsp, dict)) else body
-                            )
-                            # Merge ONLY the group(s) we changed into the live
-                            # cache — never overwrite the whole entry, or a sibling
-                            # group written concurrently would be clobbered.
-                            cur = self.coordinator.lighting_switch_cache.setdefault(
-                                self._cam_id, {}
-                            )
-                            for key in updates:
-                                if key in authoritative:
-                                    cur[key] = authoritative[key]
-                            return True
-                        _LOGGER.warning(
-                            "lighting/switch HTTP %d for %s",
-                            resp.status,
-                            self._cam_id[:8],
+        if lock_held:
+            return await self._put_lighting_switch_unlocked(updates, token)
+        async with get_lighting_lock(self.coordinator, self._cam_id):
+            return await self._put_lighting_switch_unlocked(updates, token)
+
+    async def _put_lighting_switch_unlocked(
+        self, updates: dict[str, Any], token: str
+    ) -> bool:
+        """Full-body PUT; caller holds the per-camera lighting lock."""
+        # Build full body INSIDE the lock so it reflects any sibling write
+        # that just completed.
+        body = self._get_current_state()
+        for key, val in updates.items():
+            if key in body:
+                body[key] = {**body[key], **val}  # merge, not replace
+            else:
+                body[key] = val
+        session = await async_get_bosch_cloud_session(self.hass)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with asyncio.timeout(10):
+                async with session.put(
+                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
+                    headers=headers,
+                    json=body,
+                ) as resp:
+                    if resp.status in (200, 201, 204):
+                        # /lighting/switch returns 204 No Content (empty body);
+                        # 200/201 would carry authoritative JSON. Prefer the
+                        # server body when present, else the optimistic `body`
+                        # we sent — calling resp.json() unconditionally on a
+                        # 204 raises, which would leave the cache never
+                        # updated and is_on stuck False.
+                        try:
+                            rsp = await resp.json(content_type=None)
+                        except Exception:
+                            rsp = None
+                        authoritative = rsp if (rsp and isinstance(rsp, dict)) else body
+                        # Merge ONLY the group(s) we changed into the live
+                        # cache — never overwrite the whole entry, or a sibling
+                        # group written concurrently would be clobbered.
+                        cur = self.coordinator.lighting_switch_cache.setdefault(
+                            self._cam_id, {}
                         )
-            except Exception as err:
-                _LOGGER.warning(
-                    "lighting/switch error for %s: %s", self._cam_id[:8], err
-                )
-            return False
+                        for key in updates:
+                            if key in authoritative:
+                                cur[key] = authoritative[key]
+                        return True
+                    _LOGGER.warning(
+                        "lighting/switch HTTP %d for %s",
+                        resp.status,
+                        self._cam_id[:8],
+                    )
+        except Exception as err:
+            _LOGGER.warning("lighting/switch error for %s: %s", self._cam_id[:8], err)
+        return False
 
     async def _put_switch_endpoint(self, endpoint: str, enabled: bool) -> bool:
         """Send PUT /lighting/switch/front or /topdown."""
@@ -709,62 +708,64 @@ class _BoschRgbLedLight(_BoschLightBase):
         # "cold white" preset (6500 K = -1.0) after a color when the group
         # was -1.0 before. Writing a nudged value first makes the second,
         # exact write a real change.
-        nudged = False
-        if (
-            mode == _MODE_WHITE
-            and self._cached_mode() == _MODE_COLOR
-            and isinstance(value, float)
-        ):
-            nudge = round(value + 0.01 if value <= 0 else value - 0.01, 2)
-            nudge_ok = await self._put_lighting_switch(
-                {
-                    self._led_key: {
-                        "brightness": api_brightness,
-                        "color": None,
-                        "whiteBalance": nudge,
-                    }
+        async with get_lighting_lock(self.coordinator, self._cam_id):
+            nudged = False
+            if (
+                mode == _MODE_WHITE
+                and self._cached_mode() == _MODE_COLOR
+                and isinstance(value, float)
+            ):
+                nudge = round(value + 0.01 if value <= 0 else value - 0.01, 2)
+                nudge_ok = await self._put_lighting_switch(
+                    {
+                        self._led_key: {
+                            "brightness": api_brightness,
+                            "color": None,
+                            "whiteBalance": nudge,
+                        }
+                    },
+                    lock_held=True,
+                )
+                if not nudge_ok:
+                    # Nothing was written: skip the exact write instead of
+                    # reporting a half-applied state.
+                    self.async_write_ha_state()
+                    return
+                nudged = True
+
+            if mode == _MODE_COLOR:
+                settings: dict[str, Any] = {
+                    "brightness": api_brightness,
+                    "color": value,
+                    "whiteBalance": None,
                 }
-            )
-            if not nudge_ok:
-                # Nothing was written: skip the exact write instead of
-                # reporting a half-applied state.
-                self.async_write_ha_state()
-                return
-            nudged = True
+            else:
+                settings = {
+                    "brightness": api_brightness,
+                    "color": None,
+                    "whiteBalance": value,
+                }
+            body = {self._led_key: settings}
 
-        if mode == _MODE_COLOR:
-            settings: dict[str, Any] = {
-                "brightness": api_brightness,
-                "color": value,
-                "whiteBalance": None,
-            }
-        else:
-            settings = {
-                "brightness": api_brightness,
-                "color": None,
-                "whiteBalance": value,
-            }
-        body = {self._led_key: settings}
-
-        # Only commit the optimistic on-state if the PUT actually succeeded —
-        # otherwise is_on/brightness (raw instance vars) would show the light ON
-        # after a failed write until the next slow poll corrects it.
-        if await self._put_lighting_switch(body):
-            self._brightness = api_brightness
-            self._last_brightness = api_brightness
-            self._is_on = True
-            self._clear_pending()
-            await self._put_switch_endpoint("topdown", True)
-            # Only sync (and stamp the light_set_at write-lock) on confirmed
-            # success — on a failed write this would freeze the stale
-            # camera_light/wallwasher cache against SHC/cloud correction for
-            # the full WRITE_LOCK_SECS window (GitHub #66 bug-hunt finding).
-            self._sync_wallwasher_cache()
-        elif nudged:
-            # The nudge already switched the LED on (at the nudged white);
-            # report that instead of a stale "off".
-            self._brightness = api_brightness
-            self._is_on = True
+            # Only commit the optimistic on-state if the PUT actually succeeded —
+            # otherwise is_on/brightness (raw instance vars) would show the light ON
+            # after a failed write until the next slow poll corrects it.
+            if await self._put_lighting_switch(body, lock_held=True):
+                self._brightness = api_brightness
+                self._last_brightness = api_brightness
+                self._is_on = True
+                self._clear_pending()
+                await self._put_switch_endpoint("topdown", True)
+                # Only sync (and stamp the light_set_at write-lock) on confirmed
+                # success — on a failed write this would freeze the stale
+                # camera_light/wallwasher cache against SHC/cloud correction for
+                # the full WRITE_LOCK_SECS window (GitHub #66 bug-hunt finding).
+                self._sync_wallwasher_cache()
+            elif nudged:
+                # The nudge already switched the LED on (at the nudged white);
+                # report that instead of a stale "off".
+                self._brightness = api_brightness
+                self._is_on = True
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -773,17 +774,18 @@ class _BoschRgbLedLight(_BoschLightBase):
             self._last_brightness = self._brightness
         if self._color_hex:
             self._last_color_hex = self._color_hex
-        body = {self._led_key: {"brightness": 0}}
-        if await self._put_lighting_switch(body):
-            self._is_on = False
-            self._brightness = 0
-            # If BOTH top+bottom are now off, also disable topdown switch
-            lsc = self.coordinator.lighting_switch_cache.get(self._cam_id, {})
-            top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
-            bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
-            if top_bri == 0 and bot_bri == 0:
-                await self._put_switch_endpoint("topdown", False)
-            self._sync_wallwasher_cache()
+        async with get_lighting_lock(self.coordinator, self._cam_id):
+            body = {self._led_key: {"brightness": 0}}
+            if await self._put_lighting_switch(body, lock_held=True):
+                self._is_on = False
+                self._brightness = 0
+                # If BOTH top+bottom are now off, also disable topdown switch
+                lsc = self.coordinator.lighting_switch_cache.get(self._cam_id, {})
+                top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
+                bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+                if top_bri == 0 and bot_bri == 0:
+                    await self._put_switch_endpoint("topdown", False)
+                self._sync_wallwasher_cache()
         self.async_write_ha_state()
 
 
@@ -896,16 +898,19 @@ class BoschFrontLight(_BoschLightBase):
                 "whiteBalance": wb,
             }
         }
-        if await self._put_lighting_switch(body):
-            self._brightness = api_brightness
-            self._last_brightness = api_brightness
-            self._is_on = True
-            remember_front_brightness(self.coordinator, self._cam_id, api_brightness)
-            clear_pending_front_white_balance(self.coordinator, self._cam_id)
-            await self._put_switch_endpoint("front", True)
-            # Only sync (and stamp the light_set_at write-lock) on confirmed
-            # success — see the matching comment in _BoschRgbLedLight.
-            self._sync_wallwasher_cache()
+        async with get_lighting_lock(self.coordinator, self._cam_id):
+            if await self._put_lighting_switch(body, lock_held=True):
+                self._brightness = api_brightness
+                self._last_brightness = api_brightness
+                self._is_on = True
+                remember_front_brightness(
+                    self.coordinator, self._cam_id, api_brightness
+                )
+                clear_pending_front_white_balance(self.coordinator, self._cam_id)
+                await self._put_switch_endpoint("front", True)
+                # Only sync (and stamp the light_set_at write-lock) on confirmed
+                # success — see the matching comment in _BoschRgbLedLight.
+                self._sync_wallwasher_cache()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -915,11 +920,13 @@ class BoschFrontLight(_BoschLightBase):
         # Only commit the optimistic off-state if the PUT succeeded.
         wb = self._white_balance if self._white_balance is not None else -1.0
         remember_front_brightness(self.coordinator, self._cam_id, self._brightness)
-        if await self._put_lighting_switch(
-            {self._led_key: {"brightness": 0, "color": None, "whiteBalance": wb}}
-        ):
-            self._is_on = False
-            self._brightness = 0
-            await self._put_switch_endpoint("front", False)
-            self._sync_wallwasher_cache()
+        async with get_lighting_lock(self.coordinator, self._cam_id):
+            if await self._put_lighting_switch(
+                {self._led_key: {"brightness": 0, "color": None, "whiteBalance": wb}},
+                lock_held=True,
+            ):
+                self._is_on = False
+                self._brightness = 0
+                await self._put_switch_endpoint("front", False)
+                self._sync_wallwasher_cache()
         self.async_write_ha_state()

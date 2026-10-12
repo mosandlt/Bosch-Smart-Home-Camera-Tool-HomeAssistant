@@ -433,6 +433,7 @@ class BoschCameraCoordinator(
         # since startup; until then the defer gate never skips the fetch
         # (diagnostic caches would otherwise stay empty up to the defer cap).
         self.slow_tier_ran_once: set[str] = set()
+        self.slow_tier_first_attempt_at: dict[str, float] = {}
         # Cached data for types that are not re-fetched this tick
         self.cached_status: dict[str, str] = {}
         # Per-cam time (monotonic) the cloud last returned HTTP 444 (session
@@ -2327,6 +2328,7 @@ class BoschCameraCoordinator(
     #
     # Plain `dict[str, ...]` attributes keyed directly by cam_id → `.pop()`.
     _PURGE_CAM_DICT_ATTRS: tuple[str, ...] = (
+        "slow_tier_first_attempt_at",
         "_sessions",  # also backs the live_opened_at / stream_warming views
         # (and, since Slice 2, every _rcp_*_cache / shc_state_cache /
         # pan_cache / audio_cache / local_creds_cache / _nvr_mode_preference /

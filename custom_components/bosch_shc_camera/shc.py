@@ -339,17 +339,24 @@ async def _zero_lighting_switch_cache_gen2(
     if not _is_gen2(coordinator, cam_id):
         return
     async with get_lighting_lock(coordinator, cam_id):
-        lsc_entry = coordinator.lighting_switch_cache.setdefault(cam_id, {})
-        for key in groups:
-            group = lsc_entry.get(key)
-            if not isinstance(group, dict):
-                group = _default_lighting_group()
-                lsc_entry[key] = group
-            if key == _FRONT:
-                # Keep it so a later front-ON can restore it (see
-                # _restore_front_brightness_gen2).
-                remember_front_brightness(coordinator, cam_id, group.get("brightness"))
-            group["brightness"] = 0
+        _zero_lighting_cache_unlocked(coordinator, cam_id, groups)
+
+
+def _zero_lighting_cache_unlocked(
+    coordinator: BoschCameraCoordinator, cam_id: str, groups: tuple[str, ...]
+) -> None:
+    """Zero the given group brightnesses; caller holds the lighting lock."""
+    lsc_entry = coordinator.lighting_switch_cache.setdefault(cam_id, {})
+    for key in groups:
+        group = lsc_entry.get(key)
+        if not isinstance(group, dict):
+            group = _default_lighting_group()
+            lsc_entry[key] = group
+        if key == _FRONT:
+            # Keep it so a later front-ON can restore it (see
+            # _restore_front_brightness_unlocked).
+            remember_front_brightness(coordinator, cam_id, group.get("brightness"))
+        group["brightness"] = 0
 
 
 def _full_lighting_body(lsc_entry: dict[str, Any]) -> dict[str, Any]:
@@ -365,7 +372,7 @@ def _full_lighting_body(lsc_entry: dict[str, Any]) -> dict[str, Any]:
     return body
 
 
-async def _restore_front_brightness_gen2(
+async def _restore_front_brightness_unlocked(
     coordinator: BoschCameraCoordinator,
     session: Any,
     token: str,
@@ -373,6 +380,8 @@ async def _restore_front_brightness_gen2(
     base_url: str,
 ) -> bool:
     """Before enabling the front light, make sure its brightness isn't 0.
+
+    Caller holds the lighting lock.
 
     Returns False if the restore PUT failed (the caller then skips the
     enable, which would otherwise re-create the "switch on, brightness 0"
@@ -386,31 +395,30 @@ async def _restore_front_brightness_gen2(
     lamp off again (verified live). Mirrors the wallwasher branch, which
     already restores top/bottom brightness the same way.
     """
-    async with get_lighting_lock(coordinator, cam_id):
-        lsc_entry = coordinator.lighting_switch_cache.setdefault(cam_id, {})
-        body = _full_lighting_body(lsc_entry)
-        front = body[_FRONT]
-        pending_wb = get_pending_front_white_balance(coordinator, cam_id)
-        if (front.get("brightness") or 0) > 0 and pending_wb is None:
-            return True
-        if not (front.get("brightness") or 0) > 0:
-            front["brightness"] = front_restore_brightness(coordinator, cam_id)
-        if pending_wb is not None:
-            front["whiteBalance"] = pending_wb
-            front["color"] = None
-        elif front.get("whiteBalance") is None and not front.get("color"):
-            front["whiteBalance"] = -1.0
-        result = await cloud_put_json(session, token, base_url, body)
-        if result.ok:
-            lsc_entry[_FRONT] = front
-            clear_pending_front_white_balance(coordinator, cam_id)
-            return True
-        _LOGGER.warning(
-            "front-light brightness restore: lighting/switch HTTP %s for %s",
-            result.status,
-            cam_id[:8],
-        )
-        return False
+    lsc_entry = coordinator.lighting_switch_cache.setdefault(cam_id, {})
+    body = _full_lighting_body(lsc_entry)
+    front = body[_FRONT]
+    pending_wb = get_pending_front_white_balance(coordinator, cam_id)
+    if (front.get("brightness") or 0) > 0 and pending_wb is None:
+        return True
+    if not (front.get("brightness") or 0) > 0:
+        front["brightness"] = front_restore_brightness(coordinator, cam_id)
+    if pending_wb is not None:
+        front["whiteBalance"] = pending_wb
+        front["color"] = None
+    elif front.get("whiteBalance") is None and not front.get("color"):
+        front["whiteBalance"] = -1.0
+    result = await cloud_put_json(session, token, base_url, body)
+    if result.ok:
+        lsc_entry[_FRONT] = front
+        clear_pending_front_white_balance(coordinator, cam_id)
+        return True
+    _LOGGER.warning(
+        "front-light brightness restore: lighting/switch HTTP %s for %s",
+        result.status,
+        cam_id[:8],
+    )
+    return False
 
 
 # ── SHC state polling ────────────────────────────────────────────────────────
@@ -944,11 +952,27 @@ async def async_cloud_set_light_component(
 ) -> bool:
     """Set individual light component.
 
+    Gen2 cloud writes hold the per-camera lighting lock across every step
+    (brightness PUT, enable PUT, cache update) so concurrent light writes
+    cannot interleave and leave group state and cache contradicting.
+
     Gen1: PUT /v11/video_inputs/{id}/lighting_override
       component: "front" (bool), "wallwasher" (bool), or "intensity" (float 0.0-1.0).
     Gen2: PUT /v11/video_inputs/{id}/lighting/switch/front or /topdown
       component: "front" (bool), "wallwasher" (bool), or "intensity" (int 0-100).
     """
+    if coordinator.token and _is_gen2(coordinator, cam_id):
+        async with get_lighting_lock(coordinator, cam_id):
+            return await _set_light_component_locked(
+                coordinator, cam_id, component, value
+            )
+    return await _set_light_component_locked(coordinator, cam_id, component, value)
+
+
+async def _set_light_component_locked(
+    coordinator: BoschCameraCoordinator, cam_id: str, component: str, value: Any
+) -> bool:
+    """Body of `async_cloud_set_light_component`; Gen2 callers hold the lock."""
     token = coordinator.token
     # Session is only created when we have a token to use it with. The Gen2
     # LAN-RCP fallback at the end of this function works without a cloud
@@ -968,7 +992,7 @@ async def async_cloud_set_light_component(
             body = {"enabled": value}
             if value:
                 assert session is not None  # narrowed by `if gen2 and token`
-                if not await _restore_front_brightness_gen2(
+                if not await _restore_front_brightness_unlocked(
                     coordinator, session, token, cam_id, base
                 ):
                     url = None  # falls through to the LAN RCP fallback
@@ -977,77 +1001,81 @@ async def async_cloud_set_light_component(
             # Must sync brightness via /lighting/switch AND toggle via /topdown
             # to keep light entities and wallwasher switch in sync.
             assert session is not None  # narrowed by `if gen2 and token` above
-            async with get_lighting_lock(coordinator, cam_id):
-                lsc = coordinator.lighting_switch_cache.get(cam_id, {})
-                front_settings = lsc.get(
-                    "frontLightSettings",
-                    {"brightness": 0, "color": None, "whiteBalance": -1.0},
-                )
-                if not hasattr(coordinator, "last_topdown_brightness"):
-                    coordinator.last_topdown_brightness = {}
-                if value:
-                    # Turn ON: restore last brightness, then enable topdown
-                    saved = coordinator.last_topdown_brightness.get(cam_id, {})
-                    top_bri = saved.get("top", 100)
-                    bot_bri = saved.get("bottom", 100)
-                    top_settings = {
-                        **lsc.get(
-                            "topLedLightSettings", {"color": None, "whiteBalance": -1.0}
-                        ),
-                        "brightness": top_bri,
-                    }
-                    bot_settings = {
-                        **lsc.get(
-                            "bottomLedLightSettings",
-                            {"color": None, "whiteBalance": -1.0},
-                        ),
-                        "brightness": bot_bri,
-                    }
-                else:
-                    # Turn OFF: save current brightness, then zero it
-                    cur_top = lsc.get("topLedLightSettings", {}).get("brightness", 0)
-                    cur_bot = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
-                    if cur_top > 0 or cur_bot > 0:
-                        coordinator.last_topdown_brightness[cam_id] = {
-                            "top": cur_top or 100,
-                            "bottom": cur_bot or 100,
-                        }
-                    top_settings = {
-                        **lsc.get(
-                            "topLedLightSettings", {"color": None, "whiteBalance": -1.0}
-                        ),
-                        "brightness": 0,
-                    }
-                    bot_settings = {
-                        **lsc.get(
-                            "bottomLedLightSettings",
-                            {"color": None, "whiteBalance": -1.0},
-                        ),
-                        "brightness": 0,
-                    }
-                full_body = {
-                    "frontLightSettings": front_settings,
-                    "topLedLightSettings": top_settings,
-                    "bottomLedLightSettings": bot_settings,
+            lsc = coordinator.lighting_switch_cache.get(cam_id, {})
+            front_settings = lsc.get(
+                "frontLightSettings",
+                {"brightness": 0, "color": None, "whiteBalance": -1.0},
+            )
+            if not hasattr(coordinator, "last_topdown_brightness"):
+                coordinator.last_topdown_brightness = {}
+            if value:
+                # Turn ON: restore last brightness, then enable topdown
+                saved = coordinator.last_topdown_brightness.get(cam_id, {})
+                top_bri = saved.get("top", 100)
+                bot_bri = saved.get("bottom", 100)
+                top_settings = {
+                    **lsc.get(
+                        "topLedLightSettings", {"color": None, "whiteBalance": -1.0}
+                    ),
+                    "brightness": top_bri,
                 }
-                # Step 1: Set brightness via /lighting/switch
-                step1 = await cloud_put_json(session, token, base, full_body)
-                if step1.ok:
-                    # Merge ONLY top/bottom so a front-light write that
-                    # landed meanwhile is not clobbered by this snapshot.
-                    src = step1.body if isinstance(step1.body, dict) else full_body
-                    cur = coordinator.lighting_switch_cache.setdefault(cam_id, {})
-                    for grp in ("topLedLightSettings", "bottomLedLightSettings"):
-                        cur[grp] = src.get(grp, full_body[grp])
-                else:
-                    _LOGGER.warning(
-                        "cloud_set_light_component (gen2): lighting/switch HTTP %s for %s",
-                        step1.status,
-                        cam_id[:8],
-                    )
-            # Step 2: Toggle topdown switch
-            url = f"{base}/topdown"
-            body = {"enabled": value}
+                bot_settings = {
+                    **lsc.get(
+                        "bottomLedLightSettings",
+                        {"color": None, "whiteBalance": -1.0},
+                    ),
+                    "brightness": bot_bri,
+                }
+            else:
+                # Turn OFF: save current brightness, then zero it
+                cur_top = lsc.get("topLedLightSettings", {}).get("brightness", 0)
+                cur_bot = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+                if cur_top > 0 or cur_bot > 0:
+                    coordinator.last_topdown_brightness[cam_id] = {
+                        "top": cur_top or 100,
+                        "bottom": cur_bot or 100,
+                    }
+                top_settings = {
+                    **lsc.get(
+                        "topLedLightSettings", {"color": None, "whiteBalance": -1.0}
+                    ),
+                    "brightness": 0,
+                }
+                bot_settings = {
+                    **lsc.get(
+                        "bottomLedLightSettings",
+                        {"color": None, "whiteBalance": -1.0},
+                    ),
+                    "brightness": 0,
+                }
+            full_body = {
+                "frontLightSettings": front_settings,
+                "topLedLightSettings": top_settings,
+                "bottomLedLightSettings": bot_settings,
+            }
+            # Step 1: Set brightness via /lighting/switch
+            step1 = await cloud_put_json(session, token, base, full_body)
+            if step1.ok:
+                # Merge ONLY top/bottom so a front-light write that
+                # landed meanwhile is not clobbered by this snapshot.
+                src = step1.body if isinstance(step1.body, dict) else full_body
+                cur = coordinator.lighting_switch_cache.setdefault(cam_id, {})
+                for grp in ("topLedLightSettings", "bottomLedLightSettings"):
+                    cur[grp] = src.get(grp, full_body[grp])
+            else:
+                _LOGGER.warning(
+                    "cloud_set_light_component (gen2): lighting/switch HTTP %s for %s",
+                    step1.status,
+                    cam_id[:8],
+                )
+            if step1.ok:
+                # Step 2: Toggle topdown switch
+                url = f"{base}/topdown"
+                body = {"enabled": value}
+            else:
+                # Brightness not written: toggling topdown alone would
+                # report success with an unchanged camera.
+                url = None
         elif component == "intensity":
             # Gen2 brightness is 0-100 (Gen1 is 0.0-1.0)
             brightness = (
@@ -1061,23 +1089,22 @@ async def async_cloud_set_light_component(
             # API still needs the full 3-group body, so the other groups are
             # re-sent unchanged from the cache.
             assert session is not None  # narrowed by `if gen2 and token`
-            async with get_lighting_lock(coordinator, cam_id):
-                lsc_entry = coordinator.lighting_switch_cache.setdefault(cam_id, {})
-                full_body = _full_lighting_body(lsc_entry)
-                front = full_body[_FRONT]
-                pending_wb = get_pending_front_white_balance(coordinator, cam_id)
-                front["brightness"] = brightness
+            lsc_entry = coordinator.lighting_switch_cache.setdefault(cam_id, {})
+            full_body = _full_lighting_body(lsc_entry)
+            front = full_body[_FRONT]
+            pending_wb = get_pending_front_white_balance(coordinator, cam_id)
+            front["brightness"] = brightness
+            if pending_wb is not None and brightness > 0:
+                front["whiteBalance"] = pending_wb
+                front["color"] = None
+            elif front.get("whiteBalance") is None and not front.get("color"):
+                front["whiteBalance"] = -1.0
+            step1 = await cloud_put_json(session, token, base, full_body)
+            if step1.ok:
+                lsc_entry[_FRONT] = front
+                remember_front_brightness(coordinator, cam_id, brightness)
                 if pending_wb is not None and brightness > 0:
-                    front["whiteBalance"] = pending_wb
-                    front["color"] = None
-                elif front.get("whiteBalance") is None and not front.get("color"):
-                    front["whiteBalance"] = -1.0
-                step1 = await cloud_put_json(session, token, base, full_body)
-                if step1.ok:
-                    lsc_entry[_FRONT] = front
-                    remember_front_brightness(coordinator, cam_id, brightness)
-                    if pending_wb is not None and brightness > 0:
-                        clear_pending_front_white_balance(coordinator, cam_id)
+                    clear_pending_front_white_balance(coordinator, cam_id)
             if step1.ok:
                 # Step 2: enable/disable the front group to match, like the
                 # light entity does after its own /lighting/switch PUT.
@@ -1157,9 +1184,8 @@ async def async_cloud_set_light_component(
             # lighting_switch_cache's brightness, so light.*_front_light
             # would show stale ON brightness until the next poll (GitHub
             # #66, same class as the camera_light switch's own gap).
-            await _zero_lighting_switch_cache_gen2(
-                coordinator, cam_id, groups=("frontLightSettings",)
-            )
+            if gen2:
+                _zero_lighting_cache_unlocked(coordinator, cam_id, (_FRONT,))
         coordinator.async_update_listeners()
         _LOGGER.debug(
             "cloud_set_light_component: %s %s=%s (gen%d)",

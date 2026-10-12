@@ -1829,7 +1829,7 @@ class TestFrontLightSyncsCameraLightCache:
     ):
         """switch.*_kameralicht reads shc_state_cache — must reflect a Front-Light-only turn_on."""
 
-        async def _fake_put(body):
+        async def _fake_put(body, **_kw):
             stub_coord_setup.lighting_switch_cache.setdefault(CAM_ID, {})[
                 "frontLightSettings"
             ] = {"brightness": body["frontLightSettings"]["brightness"]}
@@ -1849,7 +1849,7 @@ class TestFrontLightSyncsCameraLightCache:
         """Front-Light-only turn_off, with top/bottom LEDs already off, must clear camera_light."""
         stub_coord_setup.shc_state_cache[CAM_ID]["camera_light"] = True
 
-        async def _fake_put(body):
+        async def _fake_put(body, **_kw):
             stub_coord_setup.lighting_switch_cache.setdefault(CAM_ID, {})[
                 "frontLightSettings"
             ] = {"brightness": 0}
@@ -1902,7 +1902,7 @@ class TestFrontLightSyncsCameraLightCache:
         stub_coord_setup.shc_state_cache[CAM_ID]["front_light"] = True
         stub_coord_setup.shc_state_cache[CAM_ID]["front_light_intensity"] = 0.8
 
-        async def _fake_put(body):
+        async def _fake_put(body, **_kw):
             stub_coord_setup.lighting_switch_cache.setdefault(CAM_ID, {})[
                 "frontLightSettings"
             ] = {"brightness": 0}
@@ -1920,7 +1920,7 @@ class TestFrontLightSyncsCameraLightCache:
     async def test_turn_on_sets_front_light_intensity_from_brightness(
         self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        async def _fake_put(body):
+        async def _fake_put(body, **_kw):
             stub_coord_setup.lighting_switch_cache.setdefault(CAM_ID, {})[
                 "frontLightSettings"
             ] = {"brightness": body["frontLightSettings"]["brightness"]}
