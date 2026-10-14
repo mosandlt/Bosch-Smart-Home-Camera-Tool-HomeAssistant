@@ -57,6 +57,7 @@ def _event_is_today_local(ts_str: str | None) -> bool:
 from . import BoschCameraCoordinator, get_options
 from .const import CONF_AI_ANALYSIS_ENABLED, CONF_ENABLE_AI_DESCRIPTION, DOMAIN
 from .dynamic_devices import register_dynamic_camera_listener
+from .ldi_local import VIDEO_SOURCE_OPTIONS, ldi_video_source
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ async def async_setup_entry(
             cam_entities.append(BoschLedDimmerSensor(coordinator, cam_id, config_entry))
         # Commissioned status (diagnostic, disabled by default)
         cam_entities.append(BoschCommissionedSensor(coordinator, cam_id, config_entry))
+        cam_entities.append(BoschVideoSourceSensor(coordinator, cam_id, config_entry))
         # Cloud rules count (diagnostic, disabled by default)
         cam_entities.append(BoschRulesCountSensor(coordinator, cam_id, config_entry))
         # RCP deep-dive sensors (diagnostic, disabled by default)
@@ -1105,6 +1107,56 @@ class BoschCommissionedSensor(BoschSensorEntity):
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
     ) -> None:
         super().__init__(coordinator, cam_id, entry, COMMISSIONED_DESCRIPTION)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+def _video_source_value(entity: BoschSensorEntity) -> str:
+    return ldi_video_source(entity.coordinator, entity._cam_id)[0]
+
+
+def _video_source_attrs(entity: BoschSensorEntity) -> dict[str, Any]:
+    _, problem = ldi_video_source(entity.coordinator, entity._cam_id)
+    attrs: dict[str, Any] = {}
+    if problem is not None:
+        attrs["problem"] = problem
+    live = entity.coordinator.live_connections.get(entity._cam_id) or {}
+    if live:
+        attrs["connection"] = live.get("_connection_type", "")
+    return attrs
+
+
+def _video_source_available(entity: BoschSensorEntity) -> bool:
+    # Derived from local caches and options only, so it stays valid during a
+    # Bosch cloud outage, when "local, no cloud" is the most useful answer.
+    return entity._cam_id in (entity.coordinator.data or {})
+
+
+VIDEO_SOURCE_DESCRIPTION = BoschSensorEntityDescription(
+    key="video_source",
+    translation_key="video_source",
+    entity_category=EntityCategory.DIAGNOSTIC,
+    options=VIDEO_SOURCE_OPTIONS,
+    device_class=SensorDeviceClass.ENUM,
+    unique_id_fn=lambda cam_id: f"bosch_shc_camera_{cam_id}_video_source",
+    value_fn=_video_source_value,
+    available_fn=_video_source_available,
+    extra_attrs_fn=_video_source_attrs,
+)
+
+
+class BoschVideoSourceSensor(BoschSensorEntity):
+    """Sensor: where the camera's video comes from.
+
+    Local data interface (no Bosch cloud), a failed local open (no cloud
+    fallback), the cloud because no local password is stored, or the cloud.
+    """
+
+    entity_description = VIDEO_SOURCE_DESCRIPTION
+
+    def __init__(
+        self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, cam_id, entry, VIDEO_SOURCE_DESCRIPTION)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

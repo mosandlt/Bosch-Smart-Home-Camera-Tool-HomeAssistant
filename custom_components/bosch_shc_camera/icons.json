@@ -206,6 +206,15 @@
       "commissioned": {
         "default": "mdi:check-network"
       },
+      "video_source": {
+        "default": "mdi:video-input-component",
+        "state": {
+          "local_data_interface": "mdi:lan-connect",
+          "local_data_interface_problem": "mdi:lan-disconnect",
+          "cloud_no_password": "mdi:cloud-question",
+          "cloud": "mdi:cloud-outline"
+        }
+      },
       "schedule_rules": {
         "default": "mdi:calendar-clock"
       },

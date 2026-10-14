@@ -734,6 +734,15 @@
       "commissioned": {
         "name": "Commissioned"
       },
+      "video_source": {
+        "name": "Video source",
+        "state": {
+          "local_data_interface": "Local (data interface)",
+          "local_data_interface_problem": "Local – problem",
+          "cloud_no_password": "Cloud (no local password)",
+          "cloud": "Cloud"
+        }
+      },
       "schedule_rules": {
         "name": "Schedule Rules"
       },

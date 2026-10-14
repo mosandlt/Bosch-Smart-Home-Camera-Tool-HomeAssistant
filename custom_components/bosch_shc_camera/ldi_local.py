@@ -103,6 +103,41 @@ def ldi_wanted(coordinator: BoschCameraCoordinator, cam_id: str) -> bool:
     return _ldi_password(coordinator, cam_id) is not None
 
 
+SOURCE_LDI = "local_data_interface"
+SOURCE_LDI_PROBLEM = "local_data_interface_problem"
+SOURCE_CLOUD_UNCONFIGURED = "cloud_no_password"
+SOURCE_CLOUD = "cloud"
+VIDEO_SOURCE_OPTIONS: list[str] = [
+    SOURCE_LDI,
+    SOURCE_LDI_PROBLEM,
+    SOURCE_CLOUD_UNCONFIGURED,
+    SOURCE_CLOUD,
+]
+
+
+def ldi_video_source(
+    coordinator: BoschCameraCoordinator, cam_id: str
+) -> tuple[str, str | None]:
+    """Where the camera's video comes from, plus the open problem if any.
+
+    `local_data_interface`: local only, no Bosch cloud. `..._problem`: wanted
+    locally but the last open failed (reason: auth/unreachable/no_ip/
+    no_go2rtc); there is no cloud fallback. `cloud_no_password`: the camera
+    offers the interface but no password is stored, so the cloud is used.
+    `cloud`: interface off or unsupported. A not-yet-polled interface counts
+    as wanted when the firmware qualifies and a password is stored.
+    """
+    if ldi_wanted(coordinator, cam_id):
+        status = (getattr(coordinator, "ldi_open_status", None) or {}).get(cam_id)
+        reason = status.get("reason") if isinstance(status, dict) else None
+        if isinstance(reason, str):
+            return SOURCE_LDI_PROBLEM, reason
+        return SOURCE_LDI, None
+    if ldi_active(coordinator, cam_id):
+        return SOURCE_CLOUD_UNCONFIGURED, None
+    return SOURCE_CLOUD, None
+
+
 def resolve_ldi_ip(coordinator: BoschCameraCoordinator, cam_id: str) -> str | None:
     """Safe LAN address from the RCP/credential caches or the cloud Wi-Fi status."""
     from .coordinator import _is_safe_local_camera_host

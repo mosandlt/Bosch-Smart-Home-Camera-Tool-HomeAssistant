@@ -746,6 +746,15 @@
       "commissioned": {
         "name": "Messa in servizio"
       },
+      "video_source": {
+        "name": "Sorgente video",
+        "state": {
+          "local_data_interface": "Locale (interfaccia dati)",
+          "local_data_interface_problem": "Locale – problema",
+          "cloud_no_password": "Cloud (nessuna password locale)",
+          "cloud": "Cloud"
+        }
+      },
       "schedule_rules": {
         "name": "Regole di pianificazione"
       },

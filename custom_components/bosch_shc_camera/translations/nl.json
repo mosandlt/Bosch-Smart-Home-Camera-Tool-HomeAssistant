@@ -723,6 +723,15 @@
       "commissioned": {
         "name": "Inbedrijfstelling"
       },
+      "video_source": {
+        "name": "Videobron",
+        "state": {
+          "local_data_interface": "Lokaal (data-interface)",
+          "local_data_interface_problem": "Lokaal – probleem",
+          "cloud_no_password": "Cloud (geen lokaal wachtwoord)",
+          "cloud": "Cloud"
+        }
+      },
       "schedule_rules": {
         "name": "Planningsregels"
       },

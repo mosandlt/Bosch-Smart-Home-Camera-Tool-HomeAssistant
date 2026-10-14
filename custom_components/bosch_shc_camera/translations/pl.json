@@ -746,6 +746,15 @@
       "commissioned": {
         "name": "Status Uruchomienia"
       },
+      "video_source": {
+        "name": "Źródło wideo",
+        "state": {
+          "local_data_interface": "Lokalnie (interfejs danych)",
+          "local_data_interface_problem": "Lokalnie – problem",
+          "cloud_no_password": "Chmura (brak hasła lokalnego)",
+          "cloud": "Chmura"
+        }
+      },
       "schedule_rules": {
         "name": "Reguły Harmonogramu"
       },

@@ -723,6 +723,15 @@
       "commissioned": {
         "name": "启用状态"
       },
+      "video_source": {
+        "name": "视频来源",
+        "state": {
+          "local_data_interface": "本地（数据接口）",
+          "local_data_interface_problem": "本地 – 有问题",
+          "cloud_no_password": "云端（无本地密码）",
+          "cloud": "云端"
+        }
+      },
       "schedule_rules": {
         "name": "计划规则"
       },

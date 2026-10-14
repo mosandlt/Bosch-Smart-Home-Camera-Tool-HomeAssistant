@@ -798,6 +798,15 @@
       "commissioned": {
         "name": "Inbetriebnahme-Status"
       },
+      "video_source": {
+        "name": "Videoquelle",
+        "state": {
+          "local_data_interface": "Lokal (Datenschnittstelle)",
+          "local_data_interface_problem": "Lokal – Problem",
+          "cloud_no_password": "Cloud (kein lokales Passwort)",
+          "cloud": "Cloud"
+        }
+      },
       "schedule_rules": {
         "name": "Zeitplanregeln"
       },

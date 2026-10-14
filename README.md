@@ -655,6 +655,7 @@ Gen2 cameras on firmware **9.40.105 or newer** have a camera-side **local data i
 | Audio | Available. The audio track is always part of the stream; the audio switch only mutes the card, as on the cloud path. |
 | Quality | The **Video quality** select applies: **High** (and **Auto**) read the camera's high stream, **Low** its low stream. Changing the select re-registers the go2rtc source and restarts the stream. |
 | Snapshots | Taken from the camera's 1-frame-per-second preview stream through go2rtc, never from the cloud. One frame is shared for a few seconds between everything asking (one short camera session), and a failed grab is not retried for ~15 s. Without go2rtc, or with privacy mode on, no new frame is taken and the last image is kept (nothing is shown while privacy mode is on or unknown). |
+| Video source | The diagnostic sensor **Video source** (per camera) shows the path in use: `Local (data interface)`, `Local – problem` (attribute `problem` names the reason), `Cloud (no local password)` when the interface is on but no password is stored, or `Cloud`. |
 | Reachability checks | Once a minute per camera the integration reads the camera's local REST interface (read-only): it tells "camera answers", "password rejected" and "privacy mode on" apart, and the camera's own firmware version is shown as the `local_firmware` attribute of the **Local data interface** sensor. Cameras without the interface are never asked. |
 | Mini-NVR / Frigate | Read go2rtc's restream (see below), with audio. Frigate **High** reads the main stream; **Low** reads a second go2rtc stream (`inst=2`) that is created on demand, so using Frigate **Low** adds a second camera session (the camera serves only a few at once). |
 | Privacy mode | The camera stops the stream while privacy mode is ON; this is a normal closed state, not an error. |
@@ -908,6 +909,7 @@ sequenceDiagram
 | Motion sensitivity | `sensor` | diagnostic |
 | Audio alarm state | `sensor` | diagnostic |
 | Local data interface (FW 9.40.105+, shown while enabled) | `binary_sensor` | diagnostic |
+| Video source (local data interface or cloud) | `sensor` | diagnostic |
 | Last event type | `sensor` | enabled |
 | Movement events today | `sensor` | enabled |
 | Audio events today | `sensor` | enabled |

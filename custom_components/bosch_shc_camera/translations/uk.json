@@ -723,6 +723,15 @@
       "commissioned": {
         "name": "Стан Введення в Експлуатацію"
       },
+      "video_source": {
+        "name": "Джерело відео",
+        "state": {
+          "local_data_interface": "Локально (інтерфейс даних)",
+          "local_data_interface_problem": "Локально – проблема",
+          "cloud_no_password": "Хмара (немає локального пароля)",
+          "cloud": "Хмара"
+        }
+      },
       "schedule_rules": {
         "name": "Правила Розкладу"
       },

@@ -723,6 +723,15 @@
       "commissioned": {
         "name": "Estado de Comissionamento"
       },
+      "video_source": {
+        "name": "Fonte de vídeo",
+        "state": {
+          "local_data_interface": "Local (interface de dados)",
+          "local_data_interface_problem": "Local – problema",
+          "cloud_no_password": "Nuvem (sem palavra-passe local)",
+          "cloud": "Nuvem"
+        }
+      },
       "schedule_rules": {
         "name": "Regras de Agendamento"
       },

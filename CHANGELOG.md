@@ -9,6 +9,10 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [v17.2.6] - 2026-10-12
 
+### Added
+
+- **Video source sensor.** A new diagnostic sensor per camera shows where its video comes from: `Local (data interface)`, `Local – problem` (the local connection failed; attribute `problem` names the reason, and there is no cloud fallback), `Cloud (no local password)` (the camera offers the local data interface but no password is stored) or `Cloud`. While a session is open the attribute `connection` shows `LOCAL` or `REMOTE`. Translated into all 11 languages.
+
 ### Changed
 
 - **Offline cameras and cameras in privacy mode show their last snapshot.** Instead of a black placeholder, the card now shows the last known frame behind the offline label or the privacy lock, which sit on a translucent glass overlay. Such a request is answered immediately from the stored frame without the slow snapshot fallback chain, and while privacy mode is on no new image is ever fetched or stored. The privacy badge and the offline "last seen" text use the capture time of the frame (new camera attribute `last_snapshot_at`) instead of the moment the browser loaded it.

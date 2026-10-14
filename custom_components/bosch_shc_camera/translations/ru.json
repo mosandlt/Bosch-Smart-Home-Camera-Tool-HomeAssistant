@@ -723,6 +723,15 @@
       "commissioned": {
         "name": "Статус ввода в эксплуатацию"
       },
+      "video_source": {
+        "name": "Источник видео",
+        "state": {
+          "local_data_interface": "Локально (интерфейс данных)",
+          "local_data_interface_problem": "Локально – проблема",
+          "cloud_no_password": "Облако (нет локального пароля)",
+          "cloud": "Облако"
+        }
+      },
       "schedule_rules": {
         "name": "Правила расписания"
       },
