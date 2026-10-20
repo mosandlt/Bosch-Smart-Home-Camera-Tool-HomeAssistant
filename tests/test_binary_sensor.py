@@ -1316,8 +1316,8 @@ class TestMotionSensorIsOnWithWindow:
         assert sensor.is_on is False
 
     def test_window_30s_event_at_29s_is_on(self) -> None:
-        """29 s old event is ON with custom 30 s window."""
-        events = [{"eventType": "MOVEMENT", "id": "e1", "timestamp": _ago_iso(29)}]
+        """25 s old event is ON with custom 30 s window."""
+        events = [{"eventType": "MOVEMENT", "id": "e1", "timestamp": _ago_iso(25)}]
         sensor = self._motion_sensor(30, events)
         assert sensor.is_on is True
 
@@ -1328,8 +1328,8 @@ class TestMotionSensorIsOnWithWindow:
         assert sensor.is_on is False
 
     def test_window_min_10s_event_at_9s_is_on(self) -> None:
-        """Boundary-min 10 s window: 9 s old event is ON."""
-        events = [{"eventType": "MOVEMENT", "id": "e1", "timestamp": _ago_iso(9)}]
+        """Boundary-min 10 s window: 5 s old event is ON."""
+        events = [{"eventType": "MOVEMENT", "id": "e1", "timestamp": _ago_iso(5)}]
         sensor = self._motion_sensor(10, events)
         assert sensor.is_on is True
 
@@ -1340,8 +1340,8 @@ class TestMotionSensorIsOnWithWindow:
         assert sensor.is_on is False
 
     def test_window_max_300s_event_at_299s_is_on(self) -> None:
-        """Boundary-max 300 s window: 299 s old event is ON."""
-        events = [{"eventType": "MOVEMENT", "id": "e1", "timestamp": _ago_iso(299)}]
+        """Boundary-max 300 s window: 295 s old event is ON."""
+        events = [{"eventType": "MOVEMENT", "id": "e1", "timestamp": _ago_iso(295)}]
         sensor = self._motion_sensor(300, events)
         assert sensor.is_on is True
 
@@ -1352,14 +1352,14 @@ class TestMotionSensorIsOnWithWindow:
         assert sensor.is_on is False
 
     def test_garbage_negative_clamped_10s_event_at_9s_is_on(self) -> None:
-        """Garbage value -5 clamped to 10 s: 9 s old event is ON."""
-        events = [{"eventType": "MOVEMENT", "id": "e1", "timestamp": _ago_iso(9)}]
+        """Garbage value -5 clamped to 10 s: 5 s old event is ON."""
+        events = [{"eventType": "MOVEMENT", "id": "e1", "timestamp": _ago_iso(5)}]
         sensor = self._motion_sensor(-5, events)
         assert sensor.is_on is True
 
     def test_garbage_1000s_clamped_300s_event_at_299s_is_on(self) -> None:
-        """Garbage value 1000 clamped to 300 s: 299 s old event is ON."""
-        events = [{"eventType": "MOVEMENT", "id": "e1", "timestamp": _ago_iso(299)}]
+        """Garbage value 1000 clamped to 300 s: 295 s old event is ON."""
+        events = [{"eventType": "MOVEMENT", "id": "e1", "timestamp": _ago_iso(295)}]
         sensor = self._motion_sensor(1000, events)
         assert sensor.is_on is True
 
@@ -1368,13 +1368,13 @@ class TestAllSensorTypesRespectWindow:
     """AudioAlarm and PersonDetected sensors share the same window logic."""
 
     def test_audio_alarm_uses_configured_window(self) -> None:
-        """AudioAlarmBinarySensor: 29 s old event with 30 s window is ON."""
+        """AudioAlarmBinarySensor: 25 s old event with 30 s window is ON."""
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
 
         coord = _make_coord(
-            [{"eventType": "AUDIO_ALARM", "id": "a1", "timestamp": _ago_iso(29)}]
+            [{"eventType": "AUDIO_ALARM", "id": "a1", "timestamp": _ago_iso(25)}]
         )
         sensor = _patched_hass(
             BoschAudioAlarmBinarySensor(coord, CAM_ID, _make_entry(30))
@@ -1396,13 +1396,13 @@ class TestAllSensorTypesRespectWindow:
         assert sensor.is_on is False
 
     def test_person_detected_uses_configured_window(self) -> None:
-        """PersonDetectedBinarySensor: 29 s old event with 30 s window is ON."""
+        """PersonDetectedBinarySensor: 25 s old event with 30 s window is ON."""
         from custom_components.bosch_shc_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
         coord = _make_coord(
-            [{"eventType": "PERSON", "id": "p1", "timestamp": _ago_iso(29)}]
+            [{"eventType": "PERSON", "id": "p1", "timestamp": _ago_iso(25)}]
         )
         sensor = _patched_hass(
             BoschPersonDetectedBinarySensor(coord, CAM_ID, _make_entry(30))
