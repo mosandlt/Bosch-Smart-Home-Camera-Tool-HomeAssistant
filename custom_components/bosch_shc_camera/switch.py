@@ -63,6 +63,7 @@ from .guards import (
     _warn_if_privacy_on,
     async_require_admin,
 )
+from .ldi_local import ldi_serviceable
 from .session_state import FloatFieldView
 
 _LOGGER = logging.getLogger(__name__)
@@ -453,7 +454,7 @@ class BoschLiveStreamSwitch(_BoschSwitchBase):
         is_updating = getattr(self.coordinator, "is_updating", None)
         if is_updating is not None and is_updating(self._cam_id):
             return False
-        if not super().available:
+        if not (super().available or ldi_serviceable(self.coordinator, self._cam_id)):
             return False
         if bool(
             self.coordinator.shc_state_cache.get(self._cam_id, {}).get("privacy_mode")

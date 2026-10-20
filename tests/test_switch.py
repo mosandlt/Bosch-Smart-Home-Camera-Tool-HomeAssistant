@@ -410,6 +410,40 @@ class TestLiveStreamSwitch:
         sw = BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.available is True
 
+    @pytest.mark.parametrize(
+        ("serviceable", "expected"), [(True, True), (False, False)]
+    )
+    def test_cloud_down_follows_local_data_interface(
+        self,
+        stub_coord: SimpleNamespace,
+        stub_entry: SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+        serviceable: bool,
+        expected: bool,
+    ):
+        """Cloud poll failed: the switch stays usable only while the camera is
+        served over its local data interface (no cloud needed for the stream)."""
+        import custom_components.bosch_shc_camera.switch as sw_mod
+
+        stub_coord.last_update_success = False
+        monkeypatch.setattr(sw_mod, "ldi_serviceable", lambda coord, cid: serviceable)
+        sw = sw_mod.BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw.available is expected
+
+    def test_cloud_down_ldi_still_blocked_by_privacy(
+        self,
+        stub_coord: SimpleNamespace,
+        stub_entry: SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        import custom_components.bosch_shc_camera.switch as sw_mod
+
+        stub_coord.last_update_success = False
+        stub_coord.shc_state_cache = {CAM_ID: {"privacy_mode": True}}
+        monkeypatch.setattr(sw_mod, "ldi_serviceable", lambda coord, cid: True)
+        sw = sw_mod.BoschLiveStreamSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw.available is False
+
     def test_extra_attrs_exposes_connection_metadata(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):

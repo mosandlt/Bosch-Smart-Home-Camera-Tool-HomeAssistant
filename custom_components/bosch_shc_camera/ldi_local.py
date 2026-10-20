@@ -174,6 +174,25 @@ def ldi_source(
     return ip, LDI_USER, password
 
 
+def ldi_serviceable(coordinator: BoschCameraCoordinator, cam_id: str) -> bool:
+    """True when the camera is served over its local data interface, has a
+    usable LAN address and was last seen reachable on the LAN.
+
+    Independent of the Bosch cloud, so entities that only need the local path
+    use it to stay available while the cloud poll fails. Never raises: it is
+    read on every state update.
+    """
+    try:
+        if ldi_video_source(coordinator, cam_id)[0] != SOURCE_LDI:
+            return False
+        if ldi_source(coordinator, cam_id) is None:
+            return False
+        is_lan_reachable = getattr(coordinator, "is_lan_reachable", None)
+        return is_lan_reachable is not None and is_lan_reachable(cam_id) is True
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
 def record_ldi_result(
     coordinator: BoschCameraCoordinator, cam_id: str, result: str
 ) -> None:

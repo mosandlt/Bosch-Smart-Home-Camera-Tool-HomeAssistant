@@ -67,7 +67,7 @@ from .const import (
     with_jpeg_size,
 )
 from .dynamic_devices import register_dynamic_camera_listener
-from .ldi_local import ensure_ldi_stream, ldi_wanted
+from .ldi_local import ensure_ldi_stream, ldi_serviceable, ldi_wanted
 from .ldi_snapshot import downscale_jpeg
 from .mjpeg_snapshot import fetch_mjpeg_snapshot
 from .models import (
@@ -775,6 +775,13 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         never raise — `available` is read on every state-machine update.
         """
         coord = self.coordinator
+        # A camera read over its local data interface never touches the Bosch
+        # cloud (no token, no PUT /connection), so a cloud outage — maintenance
+        # window or not — cannot make it unreachable. A camera that must be read
+        # locally never falls back to the maintenance-window rule below: an open
+        # LDI problem or a LAN address not seen reachable marks it unavailable.
+        if ldi_wanted(coord, self._cam_id):
+            return ldi_serviceable(coord, self._cam_id)
         mw = getattr(coord, "maintenance_cache", None)
         if mw is None or not getattr(mw, "camera_relevant", False):
             return False

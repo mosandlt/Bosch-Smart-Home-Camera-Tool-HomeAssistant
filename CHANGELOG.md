@@ -7,6 +7,10 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cameras read over the local data interface stay usable when the Bosch cloud is down.** The camera and its live-stream switch no longer turn `unavailable` on a failed cloud poll as long as the camera is served locally, its LAN address is known and it was last seen reachable. Before, only a known maintenance window kept a locally streaming camera available, so any other cloud outage greyed out the camera (and hid the card controls) although snapshot and live view kept working locally.
+
 ## [v17.2.6] - 2026-10-12
 
 ### Added

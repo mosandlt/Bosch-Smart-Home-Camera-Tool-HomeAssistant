@@ -519,6 +519,74 @@ class TestAvailableDuringCloudOutage:
         assert self._cam(stub_coord, stub_entry).available is False
 
 
+class TestAvailableOverLocalDataInterface:
+    """A camera read over the local data interface stays available when the
+    cloud poll fails, with or without a maintenance window (GitHub-less audit
+    2026-10-20: the maintenance-window-only guard greyed out locally working
+    cameras during any other cloud outage)."""
+
+    def _cam(self, stub_coord, stub_entry):
+        from custom_components.bosch_shc_camera.camera import BoschCamera
+
+        return BoschCamera(stub_coord, CAM_ID, stub_entry)
+
+    def _ldi(self, coord, *, reachable=True, ip="10.0.0.5", problem=None):
+        coord.last_update_success = False
+        coord.maintenance_cache = None
+        coord.is_lan_reachable = lambda cam_id: reachable
+        from custom_components.bosch_shc_camera.local_data_interface import STATE_ACTIVE
+
+        coord.local_data_interface_cache = {CAM_ID: {"state": STATE_ACTIVE}}
+        coord.entry = SimpleNamespace(options={"local_passwords": {CAM_ID: "pw"}})
+        coord.get_cam_lan_ip = lambda cam_id: ip
+        coord.ldi_open_status = {CAM_ID: {"reason": problem}} if problem else {}
+
+    def test_available_without_maintenance_window(self, stub_coord, stub_entry):
+        self._ldi(stub_coord)
+        assert self._cam(stub_coord, stub_entry).available is True
+
+    def test_lan_unreachable_is_unavailable(self, stub_coord, stub_entry):
+        self._ldi(stub_coord, reachable=False)
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_lan_unknown_is_unavailable(self, stub_coord, stub_entry):
+        self._ldi(stub_coord)
+        stub_coord.is_lan_reachable = lambda cam_id: None
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_open_problem_not_overridden_by_maintenance_window(
+        self, stub_coord, stub_entry
+    ):
+        self._ldi(stub_coord, problem="auth")
+        stub_coord.maintenance_cache = _make_maintenance()
+        stub_coord.live_connections = {CAM_ID: {"rtspsUrl": "rtsps://127.0.0.1:1/x"}}
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_open_problem_is_unavailable(self, stub_coord, stub_entry):
+        self._ldi(stub_coord, problem="auth")
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_no_lan_address_is_unavailable(self, stub_coord, stub_entry):
+        self._ldi(stub_coord, ip="")
+        stub_coord.wifiinfo_cache = {}
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_no_password_is_unavailable(self, stub_coord, stub_entry):
+        self._ldi(stub_coord)
+        stub_coord.entry = SimpleNamespace(options={})
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_firmware_install_still_wins(self, stub_coord, stub_entry):
+        self._ldi(stub_coord)
+        stub_coord.is_updating = lambda cam_id: True
+        assert self._cam(stub_coord, stub_entry).available is False
+
+    def test_malformed_cache_entry_is_unavailable(self, stub_coord, stub_entry):
+        self._ldi(stub_coord)
+        stub_coord.local_data_interface_cache = {CAM_ID: "garbage"}
+        assert self._cam(stub_coord, stub_entry).available is False
+
+
 def _entry_with(mode_value):
     """ConfigEntry-like with auto_play_default set to ``mode_value`` (or absent)."""
     opts: dict = {"snapshot_interval": 1800}
@@ -8043,3 +8111,12 @@ class TestEventSnapshotRejectsInvalidBytes:
         cam.cached_image = real
         cam.cached_image = b""
         assert cam.cached_image == real
+
+
+def test_ldi_serviceable_never_raises_on_broken_cache(stub_coord: SimpleNamespace):
+    """`ldi_serviceable` is read on every state update: a corrupt cache must
+    mean "not serviceable", not an exception."""
+    from custom_components.bosch_shc_camera.ldi_local import ldi_serviceable
+
+    stub_coord.local_data_interface_cache = 5
+    assert ldi_serviceable(stub_coord, CAM_ID) is False
