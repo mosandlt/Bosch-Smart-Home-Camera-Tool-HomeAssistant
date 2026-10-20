@@ -284,6 +284,57 @@ class TestHwVersionPersistence:
         store.async_save.assert_called_once_with({})
 
 
+class TestLdiStatePersistence:
+    @pytest.mark.asyncio
+    async def test_saves_only_active_cameras_when_changed(self):
+        from custom_components.bosch_shc_camera.local_data_interface import (
+            STATE_ACTIVE,
+        )
+
+        store = MagicMock()
+        coord = _make_coord(
+            local_data_interface_cache={
+                CAM_A: {"state": STATE_ACTIVE, "username": "u"},
+                "B": {"state": "inactive"},
+                "C": "garbage",
+            },
+            ldi_state_store=store,
+            ldi_state_snapshot=None,
+        )
+        await run_housekeeping(coord, {}, {}, NOW, False)
+        store.async_save.assert_called_once_with({CAM_A: STATE_ACTIVE})
+
+    @pytest.mark.asyncio
+    async def test_skips_save_when_unchanged(self):
+        from custom_components.bosch_shc_camera.local_data_interface import (
+            STATE_ACTIVE,
+        )
+
+        store = MagicMock()
+        coord = _make_coord(
+            local_data_interface_cache={CAM_A: {"state": STATE_ACTIVE}},
+            ldi_state_store=store,
+            ldi_state_snapshot={CAM_A: STATE_ACTIVE},
+        )
+        await run_housekeeping(coord, {}, {}, NOW, False)
+        store.async_save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_saves_empty_snapshot_when_interface_turned_off(self):
+        from custom_components.bosch_shc_camera.local_data_interface import (
+            STATE_ACTIVE,
+        )
+
+        store = MagicMock()
+        coord = _make_coord(
+            local_data_interface_cache={},
+            ldi_state_store=store,
+            ldi_state_snapshot={CAM_A: STATE_ACTIVE},
+        )
+        await run_housekeeping(coord, {}, {}, NOW, False)
+        store.async_save.assert_called_once_with({})
+
+
 class TestLocalCredsPersistence:
     @pytest.mark.asyncio
     async def test_saves_full_creds_when_changed(self):

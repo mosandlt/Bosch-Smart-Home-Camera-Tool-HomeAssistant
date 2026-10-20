@@ -32257,6 +32257,52 @@ class TestSetupEntryPersistedStores:
         # hw_version should have been recovered from the device registry
         assert coord_stub.hw_version.get(CAM_A) == "HOME_Eyes_Outdoor"
 
+    async def test_persisted_ldi_state_restored_for_cold_start(self) -> None:
+        """Cameras whose local data interface was active are restored on a cold
+        start (cloud down, nothing to ask); other values and bad keys are
+        ignored, and a status the cloud already supplied is not overwritten."""
+        from custom_components.bosch_shc_camera import async_setup_entry
+        from custom_components.bosch_shc_camera.local_data_interface import (
+            STATE_ACTIVE,
+        )
+
+        store_factory = _MultiStore_sprint_md(
+            {
+                "_maint_notified": None,
+                "_cloud_alert_state": None,
+                "_lan_ips": None,
+                "_hw_versions": None,
+                "_local_creds": None,
+                "_ldi_state": {
+                    CAM_A.lower(): STATE_ACTIVE,
+                    "OTHER": "inactive",
+                    "THIRD": STATE_ACTIVE,
+                    7: STATE_ACTIVE,
+                },
+            }
+        )
+        hass = _make_hass_sprint_md()
+        entry = _make_entry_sprint_md()
+        coord_stub = _make_coord_stub_sprint_md([CAM_A])
+        coord_stub.local_data_interface_cache = {"THIRD": {"state": "unsupported"}}
+
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+        ):
+            assert await async_setup_entry(hass, entry) is True
+
+        cache = coord_stub.local_data_interface_cache
+        assert cache[CAM_A.upper()] == {"state": STATE_ACTIVE}
+        assert "OTHER" not in cache
+        assert cache["THIRD"] == {"state": "unsupported"}
+        assert 7 not in cache
+
     async def test_hw_version_recovery_skips_wrong_domain_identifier(self) -> None:
         """Device with identifier from a different domain → continue (skip). Pins L5433."""
         from custom_components.bosch_shc_camera import async_setup_entry

@@ -69,6 +69,7 @@ from .coordinator import _is_safe_local_camera_host
 from .coordinator import (
     get_options as get_options,  # re-export: mypy --no-implicit-reexport (button.py/image.py/sensor.py/switch.py import it via `from . import`)
 )
+from .local_data_interface import STATE_ACTIVE
 from .services import _register_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -731,6 +732,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "Loaded %d persisted hardware version(s) for cloud-degraded LAN fallback",
                 len(_persisted_hw),
             )
+
+    # Load which cameras had the local data interface active. A cold start while
+    # the cloud is down cannot ask the cloud, and without this the cameras read
+    # locally would drop to the cloud path and turn unavailable. The first
+    # successful poll replaces these entries with the real status.
+    ldi_state_store: Store = Store(hass, version=1, key=f"{DOMAIN}_ldi_state")
+    coordinator.ldi_state_store = ldi_state_store
+    _persisted_ldi = await ldi_state_store.async_load() or {}
+    if isinstance(_persisted_ldi, dict):
+        for _cid, _state in _persisted_ldi.items():
+            if isinstance(_cid, str) and _state == STATE_ACTIVE:
+                coordinator.local_data_interface_cache.setdefault(
+                    _cid.upper(), {"state": STATE_ACTIVE}
+                )
 
     # Load the persistent Mini-NVR recording-intent map (cam_id → True).
     # RestoreEntity alone loses this permanently whenever the switch itself

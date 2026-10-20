@@ -16,6 +16,8 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from .local_data_interface import STATE_ACTIVE
+
 if TYPE_CHECKING:  # pragma: no cover — only for type hints
     from . import BoschCameraCoordinator
 
@@ -130,6 +132,23 @@ async def run_housekeeping(
             coordinator.spawn_tracked(
                 _hw_store.async_save(_hw_snapshot),
                 name="bosch_shc_camera_hw_version_save",
+            )
+
+    # Persist which cameras are read over the local data interface so a cold
+    # start during a cloud outage keeps serving them locally.
+    _ldi_store = getattr(coordinator, "ldi_state_store", None)
+    if _ldi_store is not None:
+        _ldi_snapshot = {
+            k: STATE_ACTIVE
+            for k, v in coordinator.local_data_interface_cache.items()
+            if isinstance(v, dict) and v.get("state") == STATE_ACTIVE
+        }
+        _ldi_prev = getattr(coordinator, "ldi_state_snapshot", None)
+        if _ldi_snapshot != _ldi_prev:
+            coordinator.ldi_state_snapshot = _ldi_snapshot
+            coordinator.spawn_tracked(
+                _ldi_store.async_save(_ldi_snapshot),
+                name="bosch_shc_camera_ldi_state_save",
             )
 
     # Persist LOCAL Digest creds so LAN-fallback privacy / light
