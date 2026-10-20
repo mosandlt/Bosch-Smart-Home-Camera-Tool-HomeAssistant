@@ -209,6 +209,20 @@ async def async_setup_entry(
     )
 
 
+def _reported_status(
+    coordinator: BoschCameraCoordinator, cam_id: str, cam_data: dict[str, Any]
+) -> str:
+    """Cloud status, except a camera that is reachable over its local data
+    interface counts as ONLINE when the cloud says UNKNOWN (cold start without
+    the cloud) or OFFLINE — the card sorts and labels by it."""
+    status = str(cam_data.get("status", "UNKNOWN"))
+    if status.upper() in ("UNKNOWN", "OFFLINE") and ldi_serviceable(
+        coordinator, cam_id
+    ):
+        return "ONLINE"
+    return status
+
+
 class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
     """Represents a single Bosch Smart Home camera in Home Assistant.
 
@@ -835,7 +849,7 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         last_event_dt = parse_bosch_timestamp(latest.get("timestamp"))
         attrs = {
             "camera_id": self._cam_id,
-            "status": cam_data.get("status", "UNKNOWN"),
+            "status": _reported_status(self.coordinator, self._cam_id, cam_data),
             "stream_status": stream_status,
             "streaming_state": "active" if is_streaming else "idle",  # [S2] local var
             "last_event": last_event_dt.isoformat() if last_event_dt else "",

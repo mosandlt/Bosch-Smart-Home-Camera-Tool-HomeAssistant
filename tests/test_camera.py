@@ -576,6 +576,24 @@ class TestAvailableOverLocalDataInterface:
         stub_coord.entry = SimpleNamespace(options={})
         assert self._cam(stub_coord, stub_entry).available is False
 
+    @pytest.mark.parametrize(
+        ("cloud_status", "reachable", "expected"),
+        [
+            ("UNKNOWN", True, "ONLINE"),  # cold start without the cloud
+            ("OFFLINE", True, "ONLINE"),  # LAN wins over the cloud's status
+            ("OFFLINE", False, "OFFLINE"),
+            ("UPDATING", True, "UPDATING"),  # firmware install keeps its label
+            ("ONLINE", True, "ONLINE"),
+        ],
+    )
+    def test_status_attribute_follows_local_reachability(
+        self, stub_coord, stub_entry, cloud_status, reachable, expected
+    ):
+        self._ldi(stub_coord, reachable=reachable)
+        stub_coord.data[CAM_ID]["status"] = cloud_status
+        attrs = self._cam(stub_coord, stub_entry).extra_state_attributes
+        assert attrs["status"] == expected
+
     def test_lan_wins_over_cloud_offline_status(self, stub_coord, stub_entry):
         """Cloud poll fine but reports OFFLINE: the local path still serves."""
         self._ldi(stub_coord)

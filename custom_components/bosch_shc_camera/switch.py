@@ -63,7 +63,7 @@ from .guards import (
     _warn_if_privacy_on,
     async_require_admin,
 )
-from .ldi_local import ldi_serviceable
+from .ldi_local import ldi_privacy_on, ldi_serviceable, ldi_wanted
 from .session_state import FloatFieldView
 
 _LOGGER = logging.getLogger(__name__)
@@ -1145,6 +1145,14 @@ class BoschPrivacyModeSwitch(_BoschSwitchBase):
         """
         if self._pending_privacy is not None:
             return self._pending_privacy
+        # Cloud poll failed: the cached cloud flag may be hours old. A camera
+        # read locally answers for itself (local REST probe), so show that.
+        if not self.coordinator.last_update_success and ldi_wanted(
+            self.coordinator, self._cam_id
+        ):
+            local = ldi_privacy_on(self.coordinator, self._cam_id)
+            if local is not None:
+                return local
         return self.coordinator.shc_state_cache.get(self._cam_id, {}).get(  # type: ignore[no-any-return]  # value is correct at runtime; HA/external source is Any-typed
             "privacy_mode"
         )

@@ -488,6 +488,36 @@ class TestPrivacyModeSwitch:
         sw = BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
         assert sw.is_on is False
 
+    @pytest.mark.parametrize(
+        ("cloud_ok", "wanted", "local", "cached", "expected"),
+        [
+            (False, True, True, False, True),  # outage: the camera's own answer wins
+            (False, True, False, True, False),
+            (False, True, None, True, True),  # no local answer yet: cached value
+            (False, False, True, False, False),  # not read locally: cached value
+            (True, True, True, False, False),  # cloud healthy: cached value
+        ],
+    )
+    def test_is_on_prefers_local_state_during_cloud_outage(
+        self,
+        stub_coord: SimpleNamespace,
+        stub_entry: SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+        cloud_ok: bool,
+        wanted: bool,
+        local: bool | None,
+        cached: bool,
+        expected: bool,
+    ):
+        import custom_components.bosch_shc_camera.switch as sw_mod
+
+        stub_coord.last_update_success = cloud_ok
+        stub_coord.shc_state_cache[CAM_ID]["privacy_mode"] = cached
+        monkeypatch.setattr(sw_mod, "ldi_wanted", lambda coord, cid: wanted)
+        monkeypatch.setattr(sw_mod, "ldi_privacy_on", lambda coord, cid: local)
+        sw = sw_mod.BoschPrivacyModeSwitch(stub_coord, CAM_ID, stub_entry)
+        assert sw.is_on is expected
+
     def test_available_even_when_camera_offline(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
