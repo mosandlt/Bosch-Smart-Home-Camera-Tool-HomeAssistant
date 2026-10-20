@@ -116,6 +116,22 @@ class TestShouldRecord:
         coord = _make_gate_coord(conn_type="LOCAL", online=False)
         assert should_record(coord, CAM_ID, switch_on=True) is False
 
+    @pytest.mark.parametrize(
+        ("serviceable", "expected"), [(True, True), (False, False)]
+    )
+    def test_cloud_offline_follows_local_data_interface(
+        self, monkeypatch, serviceable, expected
+    ):
+        """Cloud status OFFLINE: a camera served over its local data interface
+        and seen on the LAN is still recorded."""
+        import custom_components.bosch_shc_camera.recorder as recorder_mod
+
+        monkeypatch.setattr(
+            recorder_mod, "ldi_serviceable", lambda coord, cam_id: serviceable
+        )
+        coord = _make_gate_coord(conn_type="LOCAL", online=False)
+        assert recorder_mod.should_record(coord, CAM_ID, switch_on=True) is expected
+
     def test_no_live_connection_returns_false(self):
         """Unknown cam_id (not in `live_connections`) → not LOCAL → False."""
         from custom_components.bosch_shc_camera.recorder import should_record

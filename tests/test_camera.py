@@ -576,6 +576,18 @@ class TestAvailableOverLocalDataInterface:
         stub_coord.entry = SimpleNamespace(options={})
         assert self._cam(stub_coord, stub_entry).available is False
 
+    def test_lan_wins_over_cloud_offline_status(self, stub_coord, stub_entry):
+        """Cloud poll fine but reports OFFLINE: the local path still serves."""
+        self._ldi(stub_coord)
+        stub_coord.last_update_success = True
+        stub_coord.data[CAM_ID]["status"] = "OFFLINE"
+        assert self._cam(stub_coord, stub_entry).available is True
+
+    def test_cloud_ok_but_lan_dead_is_unavailable(self, stub_coord, stub_entry):
+        self._ldi(stub_coord, reachable=False)
+        stub_coord.last_update_success = True
+        assert self._cam(stub_coord, stub_entry).available is False
+
     def test_firmware_install_still_wins(self, stub_coord, stub_entry):
         self._ldi(stub_coord)
         stub_coord.is_updating = lambda cam_id: True

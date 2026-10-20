@@ -3162,6 +3162,7 @@ def _make_coord_lan_fallback(**overrides) -> SimpleNamespace:
     coord.local_write_at = {}
     coord.LOCAL_WRITE_GRACE_S = 30.0
     coord._last_outage_ping_at = float("-inf")
+    coord._poll_ldi_rest = MagicMock()
     coord.rcp_lan_ip_cache = {CAM_A: "192.0.2.10", CAM_B_lan_fallback: "192.0.2.11"}
     coord.local_creds_cache = {}
     coord.data = {
@@ -3262,6 +3263,21 @@ class TestOutagePingAll:
             await BoschCameraCoordinator.async_outage_ping_all(coord)
         called = {c.args[0] for c in coord.async_local_tcp_ping.await_args_list}
         assert called == {CAM_A, CAM_B_lan_fallback}
+
+    async def test_polls_local_rest_once_per_sweep(self):
+        """The local REST probe runs in the outage sweep (it clears a stored
+        local-interface problem) and shares the 30 s throttle."""
+        coord = _make_coord_lan_fallback()
+        coord.async_local_tcp_ping = AsyncMock(return_value=True)
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+        ):
+            await BoschCameraCoordinator.async_outage_ping_all(coord)
+        with patch(
+            "custom_components.bosch_shc_camera.time.monotonic", return_value=1010.0
+        ):
+            await BoschCameraCoordinator.async_outage_ping_all(coord)
+        coord._poll_ldi_rest.assert_called_once_with()
 
     async def test_throttles_within_30s(self):
         coord = _make_coord_lan_fallback()

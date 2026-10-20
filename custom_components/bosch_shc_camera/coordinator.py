@@ -1688,6 +1688,9 @@ class BoschCameraCoordinator(
         if (now - self._last_outage_ping_at) < 30.0:
             return
         self._last_outage_ping_at = now
+        # The local REST probe also clears a stored local-interface problem;
+        # the normal tick that polls it does not run while the cloud is down.
+        self._poll_ldi_rest()
         cam_ids: list[str] = []
         if self.data:
             cam_ids.extend(self.data.keys())

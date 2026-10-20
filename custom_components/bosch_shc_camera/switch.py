@@ -862,6 +862,14 @@ class BoschAudioSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc]
         coordinator.audio_enabled.setdefault(cam_id, False)
 
     @property
+    def available(self) -> bool:
+        """Local-only mute preference: usable without the cloud when the camera
+        is served over its local data interface."""
+        return ldi_serviceable(self.coordinator, self._cam_id) or bool(
+            super().available
+        )
+
+    @property
     def is_on(self) -> bool:
         return self.coordinator.audio_enabled.get(self._cam_id, False)  # type: ignore[no-any-return]
 
@@ -2639,9 +2647,10 @@ class BoschNvrRecordingSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[
         cloud relay or OFFLINE so the user can see at a glance that recording
         is paused (concept §2 — visible state beats silent no-op).
         """
-        if not self.coordinator.last_update_success:
-            return False
-        if not self.coordinator.is_camera_online(self._cam_id):
+        if not ldi_serviceable(self.coordinator, self._cam_id) and not (
+            self.coordinator.last_update_success
+            and self.coordinator.is_camera_online(self._cam_id)
+        ):
             return False
         live = self.coordinator.live_connections.get(self._cam_id, {})
         return live.get("_connection_type") == "LOCAL"  # type: ignore[no-any-return]
@@ -2830,7 +2839,9 @@ class BoschExternalStreamSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignor
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success  # type: ignore[no-any-return]
+        return bool(self.coordinator.last_update_success) or ldi_serviceable(
+            self.coordinator, self._cam_id
+        )
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

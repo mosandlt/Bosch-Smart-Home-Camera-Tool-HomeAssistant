@@ -61,6 +61,7 @@ from .const import (
     TIMEOUT_RECORDER_KILL_WAIT,
     TIMEOUT_RECORDER_SEGMENT_PROBE,
 )
+from .ldi_local import ldi_serviceable
 from .smb import _safe_name
 from .time_utils import parse_bosch_timestamp
 
@@ -1744,7 +1745,8 @@ def should_record(
 
     1. ``switch_on`` — user has toggled the per-camera NVR switch ON.
     2. The live session is LOCAL (NOT cloud relay).
-    3. The camera is reachable (last status == ONLINE).
+    3. The camera is reachable (last status == ONLINE, or served over its
+       local data interface and seen on the LAN).
 
     Pure helper so tests can hit every combination without HA running.
     """
@@ -1753,7 +1755,9 @@ def should_record(
     live = coordinator.live_connections.get(cam_id, {})
     if live.get("_connection_type") != "LOCAL":
         return False
-    if not coordinator.is_camera_online(cam_id):
+    if not (
+        coordinator.is_camera_online(cam_id) or ldi_serviceable(coordinator, cam_id)
+    ):
         return False
     return True
 

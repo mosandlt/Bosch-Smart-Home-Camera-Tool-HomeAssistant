@@ -749,6 +749,10 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         is_updating = getattr(self.coordinator, "is_updating", None)
         if is_updating is not None and is_updating(self._cam_id):
             return False
+        if ldi_wanted(self.coordinator, self._cam_id):
+            # Read locally only: the LAN state decides, not the cloud's cached
+            # status (OFFLINE/SESSION_LIMIT) or whether the cloud poll worked.
+            return ldi_serviceable(self.coordinator, self._cam_id)
         if self.coordinator.last_update_success:
             # A successful account-level coordinator update does not mean
             # every camera is reachable — check this camera's own cached
@@ -766,7 +770,8 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
 
     def _local_available_during_cloud_outage(self) -> bool:
         """True only when the cloud poll failed BUT this camera is still
-        locally serviceable inside a known active maintenance window.
+        locally serviceable inside a known active maintenance window. Cameras
+        read over the local data interface never get here (see `available`).
 
         Three guards, ALL required: an active camera-relevant Bosch maintenance
         window, a positive LAN-TCP reachability for this cam, and an established
@@ -775,13 +780,6 @@ class BoschCamera(CoordinatorEntity, Camera):  # type: ignore[misc]
         never raise — `available` is read on every state-machine update.
         """
         coord = self.coordinator
-        # A camera read over its local data interface never touches the Bosch
-        # cloud (no token, no PUT /connection), so a cloud outage — maintenance
-        # window or not — cannot make it unreachable. A camera that must be read
-        # locally never falls back to the maintenance-window rule below: an open
-        # LDI problem or a LAN address not seen reachable marks it unavailable.
-        if ldi_wanted(coord, self._cam_id):
-            return ldi_serviceable(coord, self._cam_id)
         mw = getattr(coord, "maintenance_cache", None)
         if mw is None or not getattr(mw, "camera_relevant", False):
             return False

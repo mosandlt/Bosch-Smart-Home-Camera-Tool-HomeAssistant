@@ -49,6 +49,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .base import _BoschEntityBase
 from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _get_cam_lock, _is_gen2_indoor, _warn_if_privacy_on
+from .ldi_local import ldi_serviceable
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -401,6 +402,8 @@ def _audio_volume_value(entity: BoschNumberEntity) -> float:
 def _audio_volume_available(entity: BoschNumberEntity) -> bool:
     # Grey out together with the camera's other controls when it is offline,
     # rather than staying settable on its own (the audio switch greys too).
+    if ldi_serviceable(entity.coordinator, entity._cam_id):
+        return True
     return bool(entity.coordinator.last_update_success) and bool(
         entity.coordinator.is_camera_online(entity._cam_id)
     )

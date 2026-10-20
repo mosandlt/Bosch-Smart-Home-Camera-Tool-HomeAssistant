@@ -27,6 +27,7 @@ from . import BoschCameraCoordinator
 from .const import CONF_ENABLE_PTZ_CONTROLS, DOMAIN, STREAM_START_SKIPPED
 from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _is_gen2_indoor, _warn_if_privacy_on
+from .ldi_local import ldi_serviceable
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -161,6 +162,14 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
             if quality_key:
                 self.coordinator.set_quality(self._cam_id, quality_key)
                 _LOGGER.debug("Restored quality %s for %s", quality_key, self._cam_id)
+
+    @property
+    def available(self) -> bool:
+        """Local-only setting: stays usable while the cloud poll fails if the
+        camera is served over its local data interface."""
+        return bool(self.coordinator.last_update_success) or ldi_serviceable(
+            self.coordinator, self._cam_id
+        )
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -346,6 +355,14 @@ class BoschNvrModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):  # typ
                     ),
                     name=f"bosch_nvr_mode_correct_{self._cam_id[:8]}",
                 )
+
+    @property
+    def available(self) -> bool:
+        """Local-only setting: stays usable while the cloud poll fails if the
+        camera is served over its local data interface."""
+        return bool(self.coordinator.last_update_success) or ldi_serviceable(
+            self.coordinator, self._cam_id
+        )
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -596,6 +613,14 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
         self._cam_title = cam_info.get("title", cam_id)
         self._attr_unique_id = "bosch_shc_camera_stream_mode"
         self._attr_translation_key = "stream_mode"
+
+    @property
+    def available(self) -> bool:
+        """Local-only setting: stays usable while the cloud poll fails if the
+        camera is served over its local data interface."""
+        return bool(self.coordinator.last_update_success) or ldi_serviceable(
+            self.coordinator, self._cam_id
+        )
 
     @property
     def device_info(self) -> dict[str, Any]:
