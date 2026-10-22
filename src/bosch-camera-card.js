@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.22";
+const CARD_VERSION = "14.1.23";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -420,6 +420,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "How long to wait for WebRTC before falling back to HLS. Lower for a faster fallback on unreliable connections.",
     ed_show_motion_zones: "Show motion-zone overlay",
     ed_fs_auto_hide: "Auto-hide fullscreen controls after idle",
+    ed_motion_overlay: "Highlight motion in the live view (browser-side, while the card is open)",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Notification Types",
     accordion_advanced: "Advanced",
@@ -692,6 +693,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Wie lange auf WebRTC gewartet wird, bevor auf HLS zurückgefallen wird. Niedriger für schnelleren Fallback bei unzuverlässigen Verbindungen.",
     ed_show_motion_zones: "Bewegungszonen-Overlay anzeigen",
     ed_fs_auto_hide: "Vollbild-Bedienelemente bei Inaktivität automatisch ausblenden",
+    ed_motion_overlay: "Bewegung im Livebild markieren (im Browser, solange die Karte offen ist)",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Benachrichtigungs-Typen",
     accordion_advanced: "Erweitert",
@@ -928,6 +930,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Cuánto esperar a WebRTC antes de recurrir a HLS. Reduce el valor para un cambio más rápido en conexiones poco fiables.",
     ed_show_motion_zones: "Mostrar superposición de zonas de movimiento",
     ed_fs_auto_hide: "Ocultar automáticamente los controles de pantalla completa tras inactividad",
+    ed_motion_overlay: "Resaltar movimiento en la vista en vivo (en el navegador, mientras la tarjeta esté abierta)",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipos de notificación",
     accordion_advanced: "Avanzado",
@@ -1163,6 +1166,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Durée d'attente de WebRTC avant de basculer vers HLS. Réduisez pour un repli plus rapide sur les connexions peu fiables.",
     ed_show_motion_zones: "Afficher la superposition des zones de mouvement",
     ed_fs_auto_hide: "Masquer automatiquement les commandes plein écran après inactivité",
+    ed_motion_overlay: "Mettre en évidence le mouvement dans la vue en direct (dans le navigateur, tant que la carte est ouverte)",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Types de notification",
     accordion_advanced: "Avancé",
@@ -1398,6 +1402,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Quanto attendere WebRTC prima di passare a HLS. Riduci per un fallback più rapido su connessioni inaffidabili.",
     ed_show_motion_zones: "Mostra overlay zone di movimento",
     ed_fs_auto_hide: "Nascondi automaticamente i controlli a schermo intero dopo inattività",
+    ed_motion_overlay: "Evidenzia il movimento nella vista live (nel browser, finché la scheda è aperta)",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipi di notifica",
     accordion_advanced: "Avanzate",
@@ -1633,6 +1638,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Hoe lang op WebRTC wachten voordat wordt teruggevallen op HLS. Verlaag voor een snellere terugval bij onbetrouwbare verbindingen.",
     ed_show_motion_zones: "Bewegingszone-overlay tonen",
     ed_fs_auto_hide: "Volledig scherm-bediening automatisch verbergen bij inactiviteit",
+    ed_motion_overlay: "Beweging markeren in de livebeeld (in de browser, zolang de kaart open is)",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Meldingstypen",
     accordion_advanced: "Geavanceerd",
@@ -1868,6 +1874,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Jak długo czekać na WebRTC przed przełączeniem na HLS. Zmniejsz dla szybszego przełączenia przy niestabilnych połączeniach.",
     ed_show_motion_zones: "Pokaż nakładkę stref ruchu",
     ed_fs_auto_hide: "Automatycznie ukrywaj elementy sterujące pełnego ekranu po bezczynności",
+    ed_motion_overlay: "Zaznacz ruch w podglądzie na żywo (w przeglądarce, gdy karta jest otwarta)",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Typy powiadomień",
     accordion_advanced: "Zaawansowane",
@@ -2103,6 +2110,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Quanto tempo esperar pelo WebRTC antes de recorrer ao HLS. Reduza para um recurso mais rápido em ligações pouco fiáveis.",
     ed_show_motion_zones: "Mostrar sobreposição de zonas de movimento",
     ed_fs_auto_hide: "Ocultar automaticamente os controlos de ecrã inteiro após inatividade",
+    ed_motion_overlay: "Realçar movimento na vista em direto (no navegador, enquanto o cartão estiver aberto)",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipos de notificação",
     accordion_advanced: "Avançado",
@@ -2338,6 +2346,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Сколько ждать WebRTC перед переключением на HLS. Уменьшите значение для более быстрого переключения при нестабильном соединении.",
     ed_show_motion_zones: "Показывать зоны движения",
     ed_fs_auto_hide: "Автоматически скрывать элементы управления в полноэкранном режиме при бездействии",
+    ed_motion_overlay: "Выделять движение в прямом эфире (в браузере, пока карточка открыта)",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Типы уведомлений",
     accordion_advanced: "Дополнительно",
@@ -2573,6 +2582,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Скільки чекати на WebRTC перед переходом на HLS. Зменшіть значення для швидшого переходу при нестабільному з'єднанні.",
     ed_show_motion_zones: "Показувати зони руху",
     ed_fs_auto_hide: "Автоматично приховувати елементи керування на весь екран при бездіяльності",
+    ed_motion_overlay: "Виділяти рух у прямому ефірі (у браузері, поки картку відкрито)",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Типи сповіщень",
     accordion_advanced: "Додатково",
@@ -2808,6 +2818,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "在回退到 HLS 之前等待 WebRTC 的时间。降低此值可在不稳定的连接上更快回退。",
     ed_show_motion_zones: "显示移动区域叠加",
     ed_fs_auto_hide: "全屏时空闲后自动隐藏控件",
+    ed_motion_overlay: "在实时画面中标出移动（在浏览器中运行，卡片打开时有效）",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "通知类型",
     accordion_advanced: "高级",
@@ -3383,6 +3394,13 @@ class BoschCameraCard extends HTMLElement {
       // the idle watcher (_wireFsAutoHide/_fsIdleTimer) is never armed at
       // all, so no background timer ticks for cards that don't want it.
       fullscreen_auto_hide_controls: config.fullscreen_auto_hide_controls !== false,
+      // Client-side motion overlay (prototype, opt-in, YAML only): frame-differences
+      // the live <video> in the browser and draws a box around moving areas.
+      // Only runs while this card is visible and streaming — NOT a replacement
+      // for the camera's own motion events.
+      motion_overlay:               config.motion_overlay === true,
+      motion_overlay_threshold:     Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 25)),
+      motion_overlay_min_area:      Math.min(100, Math.max(0.1, Number(config.motion_overlay_min_area) || 0.5)),
       // WebRTC connect escape hatches (2026-07-19, forum 998974/42): some
       // remote setups (e.g. WireGuard) never get a usable WebRTC path, so
       // the attempt is pure wasted latency on every stream start —
@@ -7944,6 +7962,7 @@ class BoschCameraCard extends HTMLElement {
       this._startingLiveVideo  = false;
       // Stream just went live → the PiP button is now usable, and the audio
       // control (hidden while not streaming) must re-appear. 2026-06-15.
+      this._motionStart(video);
       this._reflectPipState();
       this._refreshAudioPill();
       this._refreshAudioToggle();
@@ -9554,6 +9573,118 @@ class BoschCameraCard extends HTMLElement {
     this._timers.delete(id);
   }
 
+  // Client-side motion overlay: grayscale frame-diff on a 96x54 canvas, ~4 fps.
+  // Draws the bounding box of changed cells on a canvas above the <video> and
+  // fires a `bosch-card-motion` CustomEvent ({detail:{active,area}}) on changes.
+  _motionStart(video) {
+    this._motionStop();
+    if (!this._config?.motion_overlay || !video) return;
+    const W = 96, H = 54;
+    const work = document.createElement("canvas");
+    work.width = W; work.height = H;
+    const wctx = work.getContext("2d", { willReadFrequently: true });
+    const ov = document.createElement("canvas");
+    ov.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3";
+    video.parentElement.appendChild(ov);
+    this._motionCanvas = ov;
+    this._motionActive = false;
+    let prev = null, quiet = 0, failures = 0, onScreen = true;
+    const cfg = this._config;
+    // Cards scrolled out of view (large overview grids) skip the analysis.
+    if (typeof IntersectionObserver === "function") {
+      this._motionIO = new IntersectionObserver((e) => { onScreen = e[e.length - 1].isIntersecting; });
+      this._motionIO.observe(video);
+    }
+    const setActive = (on, area) => {
+      if (on === this._motionActive) return;
+      this._motionActive = on;
+      this.dispatchEvent(new CustomEvent("bosch-card-motion", {
+        detail: { active: on, area }, bubbles: true, composed: true,
+      }));
+    };
+    this._motionTimer = setInterval(() => {
+      if (document.hidden || !onScreen || video.readyState < 2 || !video.videoWidth) {
+        // Paused: drop the old frame so resuming never diffs against a stale one.
+        prev = null; quiet = 0;
+        const pc = ov.getContext("2d");
+        pc.setTransform(1, 0, 0, 1, 0, 0);
+        pc.clearRect(0, 0, ov.width, ov.height);
+        setActive(false, 0);
+        return;
+      }
+      let data;
+      try {
+        wctx.drawImage(video, 0, 0, W, H);
+        data = wctx.getImageData(0, 0, W, H).data;
+      } catch {
+        // Tainted/unreadable canvas will not recover — stop instead of retrying forever.
+        if (++failures >= 3) this._motionStop();
+        return;
+      }
+      failures = 0;
+      const gray = new Uint8Array(W * H);
+      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+        gray[j] = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
+      }
+      if (!prev) { prev = gray; return; }
+      let n = 0, x0 = W, y0 = H, x1 = -1, y1 = -1;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const k = y * W + x;
+          if (Math.abs(gray[k] - prev[k]) > cfg.motion_overlay_threshold) {
+            n++;
+            if (x < x0) x0 = x; if (x > x1) x1 = x;
+            if (y < y0) y0 = y; if (y > y1) y1 = y;
+          }
+        }
+      }
+      prev = gray;
+      const area = (n * 100) / (W * H);
+      const moving = area >= cfg.motion_overlay_min_area;
+      // Overlay tracks the <video> box (it can be taller than the wrapper via min-height).
+      const w = video.clientWidth, h = video.clientHeight, dpr = window.devicePixelRatio || 1;
+      ov.style.cssText = `position:absolute;left:${video.offsetLeft}px;top:${video.offsetTop}px;width:${w}px;height:${h}px;pointer-events:none;z-index:3`;
+      if (ov.width !== Math.round(w * dpr) || ov.height !== Math.round(h * dpr)) {
+        ov.width = Math.round(w * dpr); ov.height = Math.round(h * dpr);
+      }
+      const c = ov.getContext("2d");
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.clearRect(0, 0, w, h);
+      if (moving) {
+        quiet = 0;
+        // Map video-space (object-fit) to element-space.
+        const cover = getComputedStyle(video).objectFit === "cover";
+        const sc = (cover ? Math.max : Math.min)(w / video.videoWidth, h / video.videoHeight);
+        const ox = (w - video.videoWidth * sc) / 2, oy = (h - video.videoHeight * sc) / 2;
+        const kx = (video.videoWidth * sc) / W, ky = (video.videoHeight * sc) / H;
+        let rx = ox + x0 * kx, ry = oy + y0 * ky, rw = (x1 - x0 + 1) * kx, rh = (y1 - y0 + 1) * ky;
+        if (this.shadowRoot.getElementById("img-wrapper")?.classList.contains("rotated-180")) {
+          rx = w - rx - rw; ry = h - ry - rh;
+        }
+        c.strokeStyle = "#ff3b30"; c.lineWidth = 2;
+        c.strokeRect(rx, ry, rw, rh);
+        c.fillStyle = "#ff3b30"; c.font = "12px sans-serif";
+        c.fillText(`Bewegung ${area.toFixed(1)}%`, rx + 4, Math.max(12, ry - 4));
+      } else {
+        quiet++;
+      }
+      // Debounce "inactive" for ~2 s (8 ticks) to avoid flapping.
+      setActive(moving || (this._motionActive && quiet < 8), area);
+    }, 250);
+  }
+
+  _motionStop() {
+    if (this._motionTimer) { clearInterval(this._motionTimer); this._motionTimer = null; }
+    if (this._motionIO) { this._motionIO.disconnect(); this._motionIO = null; }
+    if (this._motionCanvas) { this._motionCanvas.remove(); this._motionCanvas = null; }
+    if (this._motionActive) {
+      this._motionActive = false;
+      this.dispatchEvent(new CustomEvent("bosch-card-motion", {
+        detail: { active: false, area: 0 }, bubbles: true, composed: true,
+      }));
+    }
+  }
+
   // Sweeps every timer/interval still tracked by the registry. Not yet a full
   // replacement for the individual `this._xTimer` guards (only timers armed
   // via _armTimer/_armInterval are tracked so far — a stepwise migration, see
@@ -9576,6 +9707,7 @@ class BoschCameraCard extends HTMLElement {
     // whatever was in flight rather than relying solely on a later start
     // to bump the counter first. 2026-08-09.
     this._startGen++;
+    this._motionStop();
     this._disarmAutoUnmute();
     if (this._hls) { this._hls.destroy(); this._hls = null; }
     this._clearTimer(this._stallChecker); this._stallChecker = null;
@@ -12747,6 +12879,7 @@ class BoschCameraCardEditor extends HTMLElement {
         <h4>${this._t("ed_h_advanced")}</h4>
         ${chk("show_motion_zones", this._t("ed_show_motion_zones"), false)}
         ${chk("fullscreen_auto_hide_controls", this._t("ed_fs_auto_hide"), true)}
+        ${chk("motion_overlay", this._t("ed_motion_overlay"), false)}
         <label>${this._t("ed_border_radius")}
           <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />
         </label>
@@ -12780,6 +12913,7 @@ class BoschCameraCardEditor extends HTMLElement {
     root.querySelector('select[name="pan_overlay"]')?.addEventListener("change", e => fire({ pan_overlay: e.target.value }));
     root.querySelector('input[name="show_motion_zones"]')?.addEventListener("change", e => fire({ show_motion_zones: e.target.checked }));
     root.querySelector('input[name="fullscreen_auto_hide_controls"]')?.addEventListener("change", e => fire({ fullscreen_auto_hide_controls: e.target.checked }));
+    root.querySelector('input[name="motion_overlay"]')?.addEventListener("change", e => fire({ motion_overlay: e.target.checked }));
     root.querySelector('input[name="border_radius"]')?.addEventListener("change", e => fire({ border_radius: e.target.value || undefined }));
     root.querySelector('input[name="box_shadow"]')?.addEventListener("change", e => fire({ box_shadow: e.target.value || undefined }));
     root.querySelector('input[name="disable_webrtc"]')?.addEventListener("change", e => fire({ disable_webrtc: e.target.checked }));

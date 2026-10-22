@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.22";
+const CARD_VERSION = "14.1.23";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
@@ -199,6 +199,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "How long to wait for WebRTC before falling back to HLS. Lower for a faster fallback on unreliable connections.",
     ed_show_motion_zones: "Show motion-zone overlay",
     ed_fs_auto_hide: "Auto-hide fullscreen controls after idle",
+    ed_motion_overlay: "Highlight motion in the live view (browser-side, while the card is open)",
     accordion_notif_types: "Notification Types",
     accordion_advanced: "Advanced",
     accordion_auto_security: "Automation & Security",
@@ -466,6 +467,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Wie lange auf WebRTC gewartet wird, bevor auf HLS zurückgefallen wird. Niedriger für schnelleren Fallback bei unzuverlässigen Verbindungen.",
     ed_show_motion_zones: "Bewegungszonen-Overlay anzeigen",
     ed_fs_auto_hide: "Vollbild-Bedienelemente bei Inaktivität automatisch ausblenden",
+    ed_motion_overlay: "Bewegung im Livebild markieren (im Browser, solange die Karte offen ist)",
     accordion_notif_types: "Benachrichtigungs-Typen",
     accordion_advanced: "Erweitert",
     accordion_auto_security: "Automatik & Sicherheit",
@@ -699,6 +701,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Cuánto esperar a WebRTC antes de recurrir a HLS. Reduce el valor para un cambio más rápido en conexiones poco fiables.",
     ed_show_motion_zones: "Mostrar superposición de zonas de movimiento",
     ed_fs_auto_hide: "Ocultar automáticamente los controles de pantalla completa tras inactividad",
+    ed_motion_overlay: "Resaltar movimiento en la vista en vivo (en el navegador, mientras la tarjeta esté abierta)",
     accordion_notif_types: "Tipos de notificación",
     accordion_advanced: "Avanzado",
     accordion_auto_security: "Automatización y seguridad",
@@ -932,6 +935,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Durée d'attente de WebRTC avant de basculer vers HLS. Réduisez pour un repli plus rapide sur les connexions peu fiables.",
     ed_show_motion_zones: "Afficher la superposition des zones de mouvement",
     ed_fs_auto_hide: "Masquer automatiquement les commandes plein écran après inactivité",
+    ed_motion_overlay: "Mettre en évidence le mouvement dans la vue en direct (dans le navigateur, tant que la carte est ouverte)",
     accordion_notif_types: "Types de notification",
     accordion_advanced: "Avancé",
     accordion_auto_security: "Automatisation et sécurité",
@@ -1165,6 +1169,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Quanto attendere WebRTC prima di passare a HLS. Riduci per un fallback più rapido su connessioni inaffidabili.",
     ed_show_motion_zones: "Mostra overlay zone di movimento",
     ed_fs_auto_hide: "Nascondi automaticamente i controlli a schermo intero dopo inattività",
+    ed_motion_overlay: "Evidenzia il movimento nella vista live (nel browser, finché la scheda è aperta)",
     accordion_notif_types: "Tipi di notifica",
     accordion_advanced: "Avanzate",
     accordion_auto_security: "Automazione e sicurezza",
@@ -1398,6 +1403,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Hoe lang op WebRTC wachten voordat wordt teruggevallen op HLS. Verlaag voor een snellere terugval bij onbetrouwbare verbindingen.",
     ed_show_motion_zones: "Bewegingszone-overlay tonen",
     ed_fs_auto_hide: "Volledig scherm-bediening automatisch verbergen bij inactiviteit",
+    ed_motion_overlay: "Beweging markeren in de livebeeld (in de browser, zolang de kaart open is)",
     accordion_notif_types: "Meldingstypen",
     accordion_advanced: "Geavanceerd",
     accordion_auto_security: "Automatisering & Beveiliging",
@@ -1631,6 +1637,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Jak długo czekać na WebRTC przed przełączeniem na HLS. Zmniejsz dla szybszego przełączenia przy niestabilnych połączeniach.",
     ed_show_motion_zones: "Pokaż nakładkę stref ruchu",
     ed_fs_auto_hide: "Automatycznie ukrywaj elementy sterujące pełnego ekranu po bezczynności",
+    ed_motion_overlay: "Zaznacz ruch w podglądzie na żywo (w przeglądarce, gdy karta jest otwarta)",
     accordion_notif_types: "Typy powiadomień",
     accordion_advanced: "Zaawansowane",
     accordion_auto_security: "Automatyka i bezpieczeństwo",
@@ -1864,6 +1871,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Quanto tempo esperar pelo WebRTC antes de recorrer ao HLS. Reduza para um recurso mais rápido em ligações pouco fiáveis.",
     ed_show_motion_zones: "Mostrar sobreposição de zonas de movimento",
     ed_fs_auto_hide: "Ocultar automaticamente os controlos de ecrã inteiro após inatividade",
+    ed_motion_overlay: "Realçar movimento na vista em direto (no navegador, enquanto o cartão estiver aberto)",
     accordion_notif_types: "Tipos de notificação",
     accordion_advanced: "Avançado",
     accordion_auto_security: "Automação e segurança",
@@ -2097,6 +2105,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Сколько ждать WebRTC перед переключением на HLS. Уменьшите значение для более быстрого переключения при нестабильном соединении.",
     ed_show_motion_zones: "Показывать зоны движения",
     ed_fs_auto_hide: "Автоматически скрывать элементы управления в полноэкранном режиме при бездействии",
+    ed_motion_overlay: "Выделять движение в прямом эфире (в браузере, пока карточка открыта)",
     accordion_notif_types: "Типы уведомлений",
     accordion_advanced: "Дополнительно",
     accordion_auto_security: "Автоматизация и безопасность",
@@ -2330,6 +2339,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Скільки чекати на WebRTC перед переходом на HLS. Зменшіть значення для швидшого переходу при нестабільному з'єднанні.",
     ed_show_motion_zones: "Показувати зони руху",
     ed_fs_auto_hide: "Автоматично приховувати елементи керування на весь екран при бездіяльності",
+    ed_motion_overlay: "Виділяти рух у прямому ефірі (у браузері, поки картку відкрито)",
     accordion_notif_types: "Типи сповіщень",
     accordion_advanced: "Додатково",
     accordion_auto_security: "Автоматизація та безпека",
@@ -2563,6 +2573,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "在回退到 HLS 之前等待 WebRTC 的时间。降低此值可在不稳定的连接上更快回退。",
     ed_show_motion_zones: "显示移动区域叠加",
     ed_fs_auto_hide: "全屏时空闲后自动隐藏控件",
+    ed_motion_overlay: "在实时画面中标出移动（在浏览器中运行，卡片打开时有效）",
     accordion_notif_types: "通知类型",
     accordion_advanced: "高级",
     accordion_auto_security: "自动化与安全",
@@ -2946,6 +2957,9 @@ class BoschCameraCard extends HTMLElement {
       ai_description_in_privacy: config.ai_description_in_privacy !== false,
       ai_description_overlay_timeout: config.ai_description_overlay_timeout === undefined ? 12 : Number(config.ai_description_overlay_timeout),
       fullscreen_auto_hide_controls: config.fullscreen_auto_hide_controls !== false,
+      motion_overlay: config.motion_overlay === true,
+      motion_overlay_threshold: Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 25)),
+      motion_overlay_min_area: Math.min(100, Math.max(.1, Number(config.motion_overlay_min_area) || .5)),
       disable_webrtc: config.disable_webrtc === true,
       webrtc_connect_timeout_ms: typeof config.webrtc_connect_timeout_ms === "number" ? config.webrtc_connect_timeout_ms : undefined
     };
@@ -4345,6 +4359,7 @@ class BoschCameraCard extends HTMLElement {
       this._liveVideoActive = true;
       this._liveStreamStalled = false;
       this._startingLiveVideo = false;
+      this._motionStart(video);
       this._reflectPipState();
       this._refreshAudioPill();
       this._refreshAudioToggle();
@@ -5234,6 +5249,141 @@ class BoschCameraCard extends HTMLElement {
     if (type === "interval") clearInterval(id); else clearTimeout(id);
     this._timers.delete(id);
   }
+  _motionStart(video) {
+    this._motionStop();
+    if (!this._config?.motion_overlay || !video) return;
+    const W = 96, H = 54;
+    const work = document.createElement("canvas");
+    work.width = W;
+    work.height = H;
+    const wctx = work.getContext("2d", {
+      willReadFrequently: true
+    });
+    const ov = document.createElement("canvas");
+    ov.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3";
+    video.parentElement.appendChild(ov);
+    this._motionCanvas = ov;
+    this._motionActive = false;
+    let prev = null, quiet = 0, failures = 0, onScreen = true;
+    const cfg = this._config;
+    if (typeof IntersectionObserver === "function") {
+      this._motionIO = new IntersectionObserver(e => {
+        onScreen = e[e.length - 1].isIntersecting;
+      });
+      this._motionIO.observe(video);
+    }
+    const setActive = (on, area) => {
+      if (on === this._motionActive) return;
+      this._motionActive = on;
+      this.dispatchEvent(new CustomEvent("bosch-card-motion", {
+        detail: {
+          active: on,
+          area: area
+        },
+        bubbles: true,
+        composed: true
+      }));
+    };
+    this._motionTimer = setInterval(() => {
+      if (document.hidden || !onScreen || video.readyState < 2 || !video.videoWidth) {
+        prev = null;
+        quiet = 0;
+        const pc = ov.getContext("2d");
+        pc.setTransform(1, 0, 0, 1, 0, 0);
+        pc.clearRect(0, 0, ov.width, ov.height);
+        setActive(false, 0);
+        return;
+      }
+      let data;
+      try {
+        wctx.drawImage(video, 0, 0, W, H);
+        data = wctx.getImageData(0, 0, W, H).data;
+      } catch {
+        if (++failures >= 3) this._motionStop();
+        return;
+      }
+      failures = 0;
+      const gray = new Uint8Array(W * H);
+      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+        gray[j] = data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29 >> 8;
+      }
+      if (!prev) {
+        prev = gray;
+        return;
+      }
+      let n = 0, x0 = W, y0 = H, x1 = -1, y1 = -1;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const k = y * W + x;
+          if (Math.abs(gray[k] - prev[k]) > cfg.motion_overlay_threshold) {
+            n++;
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+          }
+        }
+      }
+      prev = gray;
+      const area = n * 100 / (W * H);
+      const moving = area >= cfg.motion_overlay_min_area;
+      const w = video.clientWidth, h = video.clientHeight, dpr = window.devicePixelRatio || 1;
+      ov.style.cssText = `position:absolute;left:${video.offsetLeft}px;top:${video.offsetTop}px;width:${w}px;height:${h}px;pointer-events:none;z-index:3`;
+      if (ov.width !== Math.round(w * dpr) || ov.height !== Math.round(h * dpr)) {
+        ov.width = Math.round(w * dpr);
+        ov.height = Math.round(h * dpr);
+      }
+      const c = ov.getContext("2d");
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.clearRect(0, 0, w, h);
+      if (moving) {
+        quiet = 0;
+        const cover = getComputedStyle(video).objectFit === "cover";
+        const sc = (cover ? Math.max : Math.min)(w / video.videoWidth, h / video.videoHeight);
+        const ox = (w - video.videoWidth * sc) / 2, oy = (h - video.videoHeight * sc) / 2;
+        const kx = video.videoWidth * sc / W, ky = video.videoHeight * sc / H;
+        let rx = ox + x0 * kx, ry = oy + y0 * ky, rw = (x1 - x0 + 1) * kx, rh = (y1 - y0 + 1) * ky;
+        if (this.shadowRoot.getElementById("img-wrapper")?.classList.contains("rotated-180")) {
+          rx = w - rx - rw;
+          ry = h - ry - rh;
+        }
+        c.strokeStyle = "#ff3b30";
+        c.lineWidth = 2;
+        c.strokeRect(rx, ry, rw, rh);
+        c.fillStyle = "#ff3b30";
+        c.font = "12px sans-serif";
+        c.fillText(`Bewegung ${area.toFixed(1)}%`, rx + 4, Math.max(12, ry - 4));
+      } else {
+        quiet++;
+      }
+      setActive(moving || this._motionActive && quiet < 8, area);
+    }, 250);
+  }
+  _motionStop() {
+    if (this._motionTimer) {
+      clearInterval(this._motionTimer);
+      this._motionTimer = null;
+    }
+    if (this._motionIO) {
+      this._motionIO.disconnect();
+      this._motionIO = null;
+    }
+    if (this._motionCanvas) {
+      this._motionCanvas.remove();
+      this._motionCanvas = null;
+    }
+    if (this._motionActive) {
+      this._motionActive = false;
+      this.dispatchEvent(new CustomEvent("bosch-card-motion", {
+        detail: {
+          active: false,
+          area: 0
+        },
+        bubbles: true,
+        composed: true
+      }));
+    }
+  }
   _clearAllTimers() {
     for (const [id, type] of this._timers) {
       if (type === "interval") clearInterval(id); else clearTimeout(id);
@@ -5243,6 +5393,7 @@ class BoschCameraCard extends HTMLElement {
   _stopLiveVideo() {
     this._stoppingLiveVideo = true;
     this._startGen++;
+    this._motionStop();
     this._disarmAutoUnmute();
     if (this._hls) {
       this._hls.destroy();
@@ -7434,7 +7585,7 @@ class BoschCameraCardEditor extends HTMLElement {
     cams.sort();
     const sel = (label, name, val, opts) => `\n      <label>${label}\n        <select name="${name}">\n          ${opts.map(([v, l]) => `<option value="${v}" ${val === v ? "selected" : ""}>${l}</option>`).join("")}\n        </select>\n      </label>`;
     const chk = (key, label, def) => `\n      <label class="inline">\n        <input type="checkbox" name="${key}" ${cfg[key] ?? def ? "checked" : ""} />\n        <span>${label}</span>\n      </label>`;
-    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .row { display: flex; flex-direction: column; gap: 14px; padding: 18px; }\n        label {\n          font-size: 14px; color: var(--primary-text-color);\n          display: flex; flex-direction: column; gap: 4px;\n        }\n        label.inline { flex-direction: row; align-items: center; gap: 10px; }\n        select, input[type="text"] {\n          padding: 9px 10px; border-radius: 6px;\n          border: 1px solid var(--divider-color, rgba(120,120,128,.2));\n          background: var(--card-background-color, #fff);\n          color: var(--primary-text-color, #1c1c1e);\n          font: inherit; font-size: 14px;\n        }\n        select:focus, input:focus { outline: 2px solid #0a84ff; outline-offset: 1px; }\n        input[type="checkbox"] { width: 18px; height: 18px; accent-color: #0a84ff; }\n        .hint {\n          font-size: 12px; color: var(--secondary-text-color, #6c6c70);\n          margin-top: 2px;\n        }\n        h4 {\n          margin: 12px 0 0; font-size: 11px; font-weight: 700;\n          letter-spacing: .08em; text-transform: uppercase;\n          color: var(--secondary-text-color, #6c6c70);\n        }\n        .help {\n          font-size: 12px;\n          color: var(--secondary-text-color, #6c6c70);\n          background: var(--secondary-background-color, rgba(120,120,128,.08));\n          padding: 8px 10px; border-radius: 6px;\n        }\n      </style>\n      <div class="row">\n        ${cams.length === 0 ? `\n          <div class="help">${this._t("ed_no_cams")}</div>\n        ` : ""}\n        <label>${this._t("ed_cam_entity")}\n          <select name="camera_entity">\n            ${cams.length ? cams.map(id => `<option value="${id}" ${cfg.camera_entity === id ? "selected" : ""}>${id}</option>`).join("") : `<option value="${cfg.camera_entity || ""}" selected>${cfg.camera_entity || this._t("ed_not_set")}</option>`}\n          </select>\n          <span class="hint">${this._t("ed_cam_entity_hint")}</span>\n        </label>\n        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt_single")}</small>\n          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_single")}" />\n        </label>\n\n        <h4>${this._t("ed_h_design")}</h4>\n        ${chk("apple_style", this._t("ed_apple_style"), true)}\n        ${sel(this._t("ed_theme"), "theme", cfg.theme || "ios", [ [ "auto", this._t("ed_theme_auto") ], [ "ios", this._t("ed_theme_ios") ], [ "android", this._t("ed_theme_android") ] ])}\n        ${sel(this._t("ed_mode"), "modus", cfg.mode || "auto", [ [ "auto", this._t("ed_mode_auto") ], [ "day", this._t("ed_mode_day") ], [ "night", this._t("ed_mode_night") ] ])}\n        ${chk("minimal", this._t("ed_minimal_single"), false)}\n        ${chk("compact", this._t("ed_compact_single"), false)}\n        ${chk("show_title", this._t("ed_show_title"), true)}\n        ${chk("show_last_event", this._t("ed_show_last_event"), true)}\n        ${chk("show_audio", this._t("ed_show_audio"), true)}\n        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}\n        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}\n        ${sel(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [ [ "auto", this._t("ed_pan_overlay_auto") ], [ "always", this._t("ed_pan_overlay_always") ], [ "never", this._t("ed_pan_overlay_never") ] ])}\n\n        <h4>${this._t("ed_h_autoplay")}</h4>\n        ${sel(this._t("ed_h_autoplay"), "autoplay", cfg.auto_play || "", [ [ "", this._t("ed_autoplay_default") ], [ "lan", this._t("ed_autoplay_lan") ], [ "always", this._t("ed_autoplay_always") ], [ "never", this._t("ed_autoplay_never") ] ])}\n        <span class="hint">${this._t("ed_autoplay_hint")}</span>\n\n        <h4>${this._t("ed_h_advanced")}</h4>\n        ${chk("show_motion_zones", this._t("ed_show_motion_zones"), false)}\n        ${chk("fullscreen_auto_hide_controls", this._t("ed_fs_auto_hide"), true)}\n        <label>${this._t("ed_border_radius")}\n          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />\n        </label>\n        <label>${this._t("ed_box_shadow")}\n          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />\n        </label>\n        ${chk("disable_webrtc", this._t("ed_disable_webrtc"), false)}\n        <span class="hint">${this._t("ed_disable_webrtc_hint")}</span>\n        <label>${this._t("ed_webrtc_timeout")}\n          <input type="number" name="webrtc_connect_timeout_ms" min="1000" max="30000" step="500" value="${clampWebrtcTimeoutMsForDisplay(cfg.webrtc_connect_timeout_ms)}" />\n          <span class="hint">${this._t("ed_webrtc_timeout_hint")}</span>\n        </label>\n      </div>`;
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .row { display: flex; flex-direction: column; gap: 14px; padding: 18px; }\n        label {\n          font-size: 14px; color: var(--primary-text-color);\n          display: flex; flex-direction: column; gap: 4px;\n        }\n        label.inline { flex-direction: row; align-items: center; gap: 10px; }\n        select, input[type="text"] {\n          padding: 9px 10px; border-radius: 6px;\n          border: 1px solid var(--divider-color, rgba(120,120,128,.2));\n          background: var(--card-background-color, #fff);\n          color: var(--primary-text-color, #1c1c1e);\n          font: inherit; font-size: 14px;\n        }\n        select:focus, input:focus { outline: 2px solid #0a84ff; outline-offset: 1px; }\n        input[type="checkbox"] { width: 18px; height: 18px; accent-color: #0a84ff; }\n        .hint {\n          font-size: 12px; color: var(--secondary-text-color, #6c6c70);\n          margin-top: 2px;\n        }\n        h4 {\n          margin: 12px 0 0; font-size: 11px; font-weight: 700;\n          letter-spacing: .08em; text-transform: uppercase;\n          color: var(--secondary-text-color, #6c6c70);\n        }\n        .help {\n          font-size: 12px;\n          color: var(--secondary-text-color, #6c6c70);\n          background: var(--secondary-background-color, rgba(120,120,128,.08));\n          padding: 8px 10px; border-radius: 6px;\n        }\n      </style>\n      <div class="row">\n        ${cams.length === 0 ? `\n          <div class="help">${this._t("ed_no_cams")}</div>\n        ` : ""}\n        <label>${this._t("ed_cam_entity")}\n          <select name="camera_entity">\n            ${cams.length ? cams.map(id => `<option value="${id}" ${cfg.camera_entity === id ? "selected" : ""}>${id}</option>`).join("") : `<option value="${cfg.camera_entity || ""}" selected>${cfg.camera_entity || this._t("ed_not_set")}</option>`}\n          </select>\n          <span class="hint">${this._t("ed_cam_entity_hint")}</span>\n        </label>\n        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt_single")}</small>\n          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_single")}" />\n        </label>\n\n        <h4>${this._t("ed_h_design")}</h4>\n        ${chk("apple_style", this._t("ed_apple_style"), true)}\n        ${sel(this._t("ed_theme"), "theme", cfg.theme || "ios", [ [ "auto", this._t("ed_theme_auto") ], [ "ios", this._t("ed_theme_ios") ], [ "android", this._t("ed_theme_android") ] ])}\n        ${sel(this._t("ed_mode"), "modus", cfg.mode || "auto", [ [ "auto", this._t("ed_mode_auto") ], [ "day", this._t("ed_mode_day") ], [ "night", this._t("ed_mode_night") ] ])}\n        ${chk("minimal", this._t("ed_minimal_single"), false)}\n        ${chk("compact", this._t("ed_compact_single"), false)}\n        ${chk("show_title", this._t("ed_show_title"), true)}\n        ${chk("show_last_event", this._t("ed_show_last_event"), true)}\n        ${chk("show_audio", this._t("ed_show_audio"), true)}\n        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}\n        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}\n        ${sel(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [ [ "auto", this._t("ed_pan_overlay_auto") ], [ "always", this._t("ed_pan_overlay_always") ], [ "never", this._t("ed_pan_overlay_never") ] ])}\n\n        <h4>${this._t("ed_h_autoplay")}</h4>\n        ${sel(this._t("ed_h_autoplay"), "autoplay", cfg.auto_play || "", [ [ "", this._t("ed_autoplay_default") ], [ "lan", this._t("ed_autoplay_lan") ], [ "always", this._t("ed_autoplay_always") ], [ "never", this._t("ed_autoplay_never") ] ])}\n        <span class="hint">${this._t("ed_autoplay_hint")}</span>\n\n        <h4>${this._t("ed_h_advanced")}</h4>\n        ${chk("show_motion_zones", this._t("ed_show_motion_zones"), false)}\n        ${chk("fullscreen_auto_hide_controls", this._t("ed_fs_auto_hide"), true)}\n        ${chk("motion_overlay", this._t("ed_motion_overlay"), false)}\n        <label>${this._t("ed_border_radius")}\n          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />\n        </label>\n        <label>${this._t("ed_box_shadow")}\n          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />\n        </label>\n        ${chk("disable_webrtc", this._t("ed_disable_webrtc"), false)}\n        <span class="hint">${this._t("ed_disable_webrtc_hint")}</span>\n        <label>${this._t("ed_webrtc_timeout")}\n          <input type="number" name="webrtc_connect_timeout_ms" min="1000" max="30000" step="500" value="${clampWebrtcTimeoutMsForDisplay(cfg.webrtc_connect_timeout_ms)}" />\n          <span class="hint">${this._t("ed_webrtc_timeout_hint")}</span>\n        </label>\n      </div>`;
     const root = this.shadowRoot;
     const fire = patch => {
       this._config = {
@@ -7493,6 +7644,9 @@ class BoschCameraCardEditor extends HTMLElement {
     }));
     root.querySelector('input[name="fullscreen_auto_hide_controls"]')?.addEventListener("change", e => fire({
       fullscreen_auto_hide_controls: e.target.checked
+    }));
+    root.querySelector('input[name="motion_overlay"]')?.addEventListener("change", e => fire({
+      motion_overlay: e.target.checked
     }));
     root.querySelector('input[name="border_radius"]')?.addEventListener("change", e => fire({
       border_radius: e.target.value || undefined

@@ -11,6 +11,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ### Added
 
+- **Motion overlay in the live view (opt-in).** New card option `motion_overlay` (also in the card editor) draws a red box around moving areas of the live video by comparing frames in the browser, and fires a `bosch-card-motion` event on the card. It only runs while the card is open, visible and streaming, so it does not replace the camera's own motion events. Tune with `motion_overlay_threshold` and `motion_overlay_min_area`.
 - **Video source sensor.** A new diagnostic sensor per camera shows where its video comes from: `Local (data interface)`, `Local – problem` (the local connection failed; attribute `problem` names the reason, and there is no cloud fallback), `Cloud (no local password)` (the camera offers the local data interface but no password is stored) or `Cloud`. While a session is open the attribute `connection` shows `LOCAL` or `REMOTE`. Translated into all 11 languages.
 
 ### Changed
