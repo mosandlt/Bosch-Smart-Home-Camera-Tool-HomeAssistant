@@ -40,6 +40,8 @@ async function attachFakeStream(page) {
     setInterval(() => {
       c.fillStyle = "#222"; c.fillRect(0, 0, 320, 180);
       if (window.__moving) { x = (x + 37) % 240; c.fillStyle = "#fff"; c.fillRect(x, 60, 60, 60); }
+      // burned-in clock stand-in: flickers in the bottom-right corner
+      if (window.__clock && Math.random() > 0.5) { c.fillStyle = "#fff"; c.fillRect(262, 158, 54, 14); }
     }, 40);
     const video = window.__card.shadowRoot.getElementById("cam-video");
     video.style.display = "block";
@@ -136,4 +138,35 @@ test("motion_overlay: unreadable canvas stops the detector after retries", async
     window.__card._motionStart(window.__video);
   });
   await page.waitForFunction(() => window.__card._motionTimer === null, null, { timeout: 5000 });
+});
+
+async function clockEvents(page, cfg) {
+  await mount(page, cfg);
+  await attachFakeStream(page);
+  await page.evaluate(() => { window.__clock = true; window.__card._motionStart(window.__video); });
+  await page.waitForTimeout(2500);
+  return page.evaluate(() => window.__events);
+}
+
+test("motion_overlay: burned-in clock corner is ignored by default", async ({ page }) => {
+  expect(await clockEvents(page, { motion_overlay: true })).toEqual([]);
+});
+
+test("motion_overlay: clock corner counts as motion when ignore is disabled", async ({ page }) => {
+  expect(await clockEvents(page, { motion_overlay: true, motion_overlay_ignore_timestamp: false })).toContain(true);
+});
+
+test("motion_overlay: custom ignore zone masks that area; bad zones are dropped", async ({ page }) => {
+  const zone = { x: 0.78, y: 0.8, w: 0.22, h: 0.2 };
+  expect(await clockEvents(page, {
+    motion_overlay: true, motion_overlay_ignore_timestamp: false, motion_overlay_ignore_zones: [zone],
+  })).toEqual([]);
+  await mount(page, { motion_overlay: true, motion_overlay_ignore_zones: [{ x: "a" }, null, { x: 0, y: 0, w: 0, h: 1 }, zone] });
+  expect(await page.evaluate(() => window.__card._config.motion_overlay_ignore_zones.length)).toBe(1);
+});
+
+test("motion_overlay: measured defaults (threshold 20, min area 0.25 %, clock zone)", async ({ page }) => {
+  await mount(page, { motion_overlay: true });
+  const c = await page.evaluate(() => window.__card._config);
+  expect([c.motion_overlay_threshold, c.motion_overlay_min_area, c.motion_overlay_ignore_timestamp]).toEqual([20, 0.25, true]);
 });

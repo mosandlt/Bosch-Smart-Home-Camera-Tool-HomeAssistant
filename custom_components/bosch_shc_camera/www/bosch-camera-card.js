@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.23";
+const CARD_VERSION = "14.1.24";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
@@ -2958,8 +2958,15 @@ class BoschCameraCard extends HTMLElement {
       ai_description_overlay_timeout: config.ai_description_overlay_timeout === undefined ? 12 : Number(config.ai_description_overlay_timeout),
       fullscreen_auto_hide_controls: config.fullscreen_auto_hide_controls !== false,
       motion_overlay: config.motion_overlay === true,
-      motion_overlay_threshold: Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 25)),
-      motion_overlay_min_area: Math.min(100, Math.max(.1, Number(config.motion_overlay_min_area) || .5)),
+      motion_overlay_threshold: Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 20)),
+      motion_overlay_min_area: Math.min(100, Math.max(.1, Number(config.motion_overlay_min_area) || .25)),
+      motion_overlay_ignore_timestamp: config.motion_overlay_ignore_timestamp !== false,
+      motion_overlay_ignore_zones: Array.isArray(config.motion_overlay_ignore_zones) ? config.motion_overlay_ignore_zones.map(z => ({
+        x: Number(z?.x),
+        y: Number(z?.y),
+        w: Number(z?.w),
+        h: Number(z?.h)
+      })).filter(z => [ z.x, z.y, z.w, z.h ].every(Number.isFinite) && z.w > 0 && z.h > 0) : [],
       disable_webrtc: config.disable_webrtc === true,
       webrtc_connect_timeout_ms: typeof config.webrtc_connect_timeout_ms === "number" ? config.webrtc_connect_timeout_ms : undefined
     };
@@ -5266,6 +5273,19 @@ class BoschCameraCard extends HTMLElement {
     this._motionActive = false;
     let prev = null, quiet = 0, failures = 0, onScreen = true;
     const cfg = this._config;
+    const ignore = new Uint8Array(W * H);
+    const zones = [ ...cfg.motion_overlay_ignore_zones ];
+    if (cfg.motion_overlay_ignore_timestamp) zones.push({
+      x: .78,
+      y: .86,
+      w: .22,
+      h: .11
+    });
+    for (const z of zones) {
+      const x0 = Math.max(0, Math.floor(z.x * W)), x1 = Math.min(W, Math.ceil((z.x + z.w) * W));
+      const y0 = Math.max(0, Math.floor(z.y * H)), y1 = Math.min(H, Math.ceil((z.y + z.h) * H));
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) ignore[y * W + x] = 1;
+    }
     if (typeof IntersectionObserver === "function") {
       this._motionIO = new IntersectionObserver(e => {
         onScreen = e[e.length - 1].isIntersecting;
@@ -5315,7 +5335,7 @@ class BoschCameraCard extends HTMLElement {
       for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
           const k = y * W + x;
-          if (Math.abs(gray[k] - prev[k]) > cfg.motion_overlay_threshold) {
+          if (!ignore[k] && Math.abs(gray[k] - prev[k]) > cfg.motion_overlay_threshold) {
             n++;
             if (x < x0) x0 = x;
             if (x > x1) x1 = x;

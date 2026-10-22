@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.23";
+const CARD_VERSION = "14.1.24";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -3394,13 +3394,27 @@ class BoschCameraCard extends HTMLElement {
       // the idle watcher (_wireFsAutoHide/_fsIdleTimer) is never armed at
       // all, so no background timer ticks for cards that don't want it.
       fullscreen_auto_hide_controls: config.fullscreen_auto_hide_controls !== false,
+      // Defaults measured on a real 1080p outdoor camera in daylight: the noise floor
+      // is ~0 % of the frame even at threshold 10, so 20 / 0.25 % catches a person or
+      // a pet without flagging sensor noise; the burned-in clock sits at x 0.80-0.98,
+      // y 0.88-0.93.
       // Client-side motion overlay (prototype, opt-in, YAML only): frame-differences
       // the live <video> in the browser and draws a box around moving areas.
       // Only runs while this card is visible and streaming — NOT a replacement
       // for the camera's own motion events.
       motion_overlay:               config.motion_overlay === true,
-      motion_overlay_threshold:     Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 25)),
-      motion_overlay_min_area:      Math.min(100, Math.max(0.1, Number(config.motion_overlay_min_area) || 0.5)),
+      motion_overlay_threshold:     Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 20)),
+      motion_overlay_min_area:      Math.min(100, Math.max(0.1, Number(config.motion_overlay_min_area) || 0.25)),
+      // The camera burns a clock into the picture (bottom right) that changes every
+      // second and would count as motion; that corner is ignored unless disabled.
+      motion_overlay_ignore_timestamp: config.motion_overlay_ignore_timestamp !== false,
+      // Extra ignore zones as fractions of the video frame: [{x, y, w, h}] (0..1,
+      // video coordinates, i.e. before any 180° rotation).
+      motion_overlay_ignore_zones:  Array.isArray(config.motion_overlay_ignore_zones)
+        ? config.motion_overlay_ignore_zones
+            .map(z => ({ x: Number(z?.x), y: Number(z?.y), w: Number(z?.w), h: Number(z?.h) }))
+            .filter(z => [z.x, z.y, z.w, z.h].every(Number.isFinite) && z.w > 0 && z.h > 0)
+        : [],
       // WebRTC connect escape hatches (2026-07-19, forum 998974/42): some
       // remote setups (e.g. WireGuard) never get a usable WebRTC path, so
       // the attempt is pure wasted latency on every stream start —
@@ -9590,6 +9604,15 @@ class BoschCameraCard extends HTMLElement {
     this._motionActive = false;
     let prev = null, quiet = 0, failures = 0, onScreen = true;
     const cfg = this._config;
+    // Cells that never count as motion (burned-in clock + user zones).
+    const ignore = new Uint8Array(W * H);
+    const zones = [...cfg.motion_overlay_ignore_zones];
+    if (cfg.motion_overlay_ignore_timestamp) zones.push({ x: 0.78, y: 0.86, w: 0.22, h: 0.11 });
+    for (const z of zones) {
+      const x0 = Math.max(0, Math.floor(z.x * W)), x1 = Math.min(W, Math.ceil((z.x + z.w) * W));
+      const y0 = Math.max(0, Math.floor(z.y * H)), y1 = Math.min(H, Math.ceil((z.y + z.h) * H));
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) ignore[y * W + x] = 1;
+    }
     // Cards scrolled out of view (large overview grids) skip the analysis.
     if (typeof IntersectionObserver === "function") {
       this._motionIO = new IntersectionObserver((e) => { onScreen = e[e.length - 1].isIntersecting; });
@@ -9631,7 +9654,7 @@ class BoschCameraCard extends HTMLElement {
       for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
           const k = y * W + x;
-          if (Math.abs(gray[k] - prev[k]) > cfg.motion_overlay_threshold) {
+          if (!ignore[k] && Math.abs(gray[k] - prev[k]) > cfg.motion_overlay_threshold) {
             n++;
             if (x < x0) x0 = x; if (x > x1) x1 = x;
             if (y < y0) y0 = y; if (y > y1) y1 = y;
