@@ -621,6 +621,15 @@
           "back_left": "Назад влево (−120°)",
           "back_right": "Назад вправо (+120°)"
         }
+      },
+      "lighting_mode": {
+        "name": "Режим подсветки",
+        "state": {
+          "follow_schedule": "По расписанию",
+          "ambient_light": "Яркость окружения",
+          "ambient_light_and_schedule": "Яркость окружения и расписание",
+          "always_off": "Выкл."
+        }
       }
     },
     "binary_sensor": {

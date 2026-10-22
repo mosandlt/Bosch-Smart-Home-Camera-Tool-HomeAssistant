@@ -930,6 +930,7 @@ sequenceDiagram
 | Stream quality | `select` | Auto (~7.5 Mbps) / High (30 Mbps) / Low (1.9 Mbps). LAN always uses max quality; setting only affects REMOTE/cloud streams. Persists across restarts. |
 | Stream mode | `select` | Auto (Local → Cloud) / Local only / Cloud only |
 | Motion sensitivity | `select` | SUPER_HIGH / HIGH / MEDIUM_HIGH / MEDIUM_LOW / LOW / OFF |
+| Lighting mode | `select` | Eyes Outdoor (Gen1) only: follow schedule / ambient brightness / ambient brightness and schedule / off. Changes only the mode — threshold, schedule, front light and motion light stay as configured. |
 | FCM Push mode | `select` | Auto / Polling |
 | Motion detected | `binary_sensor` | disabled by default |
 | Audio alarm detected | `binary_sensor` | disabled by default |

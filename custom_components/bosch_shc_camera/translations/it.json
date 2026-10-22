@@ -621,6 +621,15 @@
           "back_left": "Sinistra posteriore (−120°)",
           "back_right": "Destra posteriore (+120°)"
         }
+      },
+      "lighting_mode": {
+        "name": "Modalità illuminazione",
+        "state": {
+          "follow_schedule": "Segui programma",
+          "ambient_light": "Luminosità ambientale",
+          "ambient_light_and_schedule": "Luminosità ambientale e programma",
+          "always_off": "Spento"
+        }
       }
     },
     "binary_sensor": {

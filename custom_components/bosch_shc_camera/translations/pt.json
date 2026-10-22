@@ -621,6 +621,15 @@
           "back_left": "Esquerda traseira (−120°)",
           "back_right": "Direita traseira (+120°)"
         }
+      },
+      "lighting_mode": {
+        "name": "Modo de iluminação",
+        "state": {
+          "follow_schedule": "Seguir horário",
+          "ambient_light": "Brilho ambiente",
+          "ambient_light_and_schedule": "Brilho ambiente e horário",
+          "always_off": "Desligado"
+        }
       }
     },
     "binary_sensor": {

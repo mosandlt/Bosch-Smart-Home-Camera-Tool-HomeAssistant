@@ -31,6 +31,7 @@ from .const import (
 )
 from .coordinator import get_options
 from .guards import admin_only_service, wrap_service_errors
+from .lighting_options import cached_if_write_locked, lighting_write_lock
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -976,72 +977,79 @@ def _register_services(hass: HomeAssistant) -> None:
                     "Authorization": f"Bearer {coord.token}",
                     "Content-Type": "application/json",
                 }
-                with wrap_service_errors("Set lighting schedule"):
-                    async with asyncio.timeout(10):
-                        async with session.get(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
-                            headers=headers,
-                        ) as get_resp:
-                            if get_resp.status != 200:
-                                body = await get_resp.text()
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="http_error_with_body",
-                                    translation_placeholders={
-                                        "action": "Set lighting schedule (fetch current)",
-                                        "status": str(get_resp.status),
-                                        "body": body[:200],
-                                    },
-                                )
-                            data = await get_resp.json()
-                    if on_time:
-                        data["generalLightOnTime"] = (
-                            on_time if len(on_time.split(":")) == 3 else f"{on_time}:00"
-                        )
-                    if off_time:
-                        data["generalLightOffTime"] = (
-                            off_time
-                            if len(off_time.split(":")) == 3
-                            else f"{off_time}:00"
-                        )
-                    if motion is not None:
-                        data["lightOnMotion"] = bool(motion)
-                    if threshold is not None:
-                        data["darknessThreshold"] = threshold
-                    data["scheduleStatus"] = "FOLLOW_SCHEDULE"
-                    async with asyncio.timeout(10):
-                        async with session.put(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
-                            headers=headers,
-                            json=data,
-                        ) as put_resp:
-                            if put_resp.status in (200, 204):
-                                _LOGGER.info(
-                                    "Lighting schedule set for %s: %s → %s",
-                                    cam_id[:8],
-                                    data.get("generalLightOnTime"),
-                                    data.get("generalLightOffTime"),
-                                )
-                                # Optimistic cache update + write-lock, same
-                                # pattern as privacy_sound_cache/ledlights_cache
-                                # (slow_tier.py) — without this, a slow-tier poll
-                                # landing before the next rotation completes can
-                                # serve get_lighting_schedule stale pre-write data
-                                # for up to a full poll interval.
-                                coord.lighting_options_cache[cam_id] = data
-                                coord.lighting_options_set_at[cam_id] = time.monotonic()
-                                await coord.async_request_refresh()
-                            else:
-                                body = await put_resp.text()
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="http_error_with_body",
-                                    translation_placeholders={
-                                        "action": "Set lighting schedule",
-                                        "status": str(put_resp.status),
-                                        "body": body[:200],
-                                    },
-                                )
+                async with lighting_write_lock(coord, cam_id):
+                    with wrap_service_errors("Set lighting schedule"):
+                        data = cached_if_write_locked(coord, cam_id)
+                        if data is None:
+                            async with asyncio.timeout(10):
+                                async with session.get(
+                                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
+                                    headers=headers,
+                                ) as get_resp:
+                                    if get_resp.status != 200:
+                                        body = await get_resp.text()
+                                        raise HomeAssistantError(
+                                            translation_domain=DOMAIN,
+                                            translation_key="http_error_with_body",
+                                            translation_placeholders={
+                                                "action": "Set lighting schedule (fetch current)",
+                                                "status": str(get_resp.status),
+                                                "body": body[:200],
+                                            },
+                                        )
+                                    data = await get_resp.json()
+                        if on_time:
+                            data["generalLightOnTime"] = (
+                                on_time
+                                if len(on_time.split(":")) == 3
+                                else f"{on_time}:00"
+                            )
+                        if off_time:
+                            data["generalLightOffTime"] = (
+                                off_time
+                                if len(off_time.split(":")) == 3
+                                else f"{off_time}:00"
+                            )
+                        if motion is not None:
+                            data["lightOnMotion"] = bool(motion)
+                        if threshold is not None:
+                            data["darknessThreshold"] = threshold
+                        data["scheduleStatus"] = "FOLLOW_SCHEDULE"
+                        async with asyncio.timeout(10):
+                            async with session.put(
+                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
+                                headers=headers,
+                                json=data,
+                            ) as put_resp:
+                                if put_resp.status in (200, 204):
+                                    _LOGGER.info(
+                                        "Lighting schedule set for %s: %s → %s",
+                                        cam_id[:8],
+                                        data.get("generalLightOnTime"),
+                                        data.get("generalLightOffTime"),
+                                    )
+                                    # Optimistic cache update + write-lock, same
+                                    # pattern as privacy_sound_cache/ledlights_cache
+                                    # (slow_tier.py) — without this, a slow-tier poll
+                                    # landing before the next rotation completes can
+                                    # serve get_lighting_schedule stale pre-write data
+                                    # for up to a full poll interval.
+                                    coord.lighting_options_cache[cam_id] = data
+                                    coord.lighting_options_set_at[cam_id] = (
+                                        time.monotonic()
+                                    )
+                                    await coord.async_request_refresh()
+                                else:
+                                    body = await put_resp.text()
+                                    raise HomeAssistantError(
+                                        translation_domain=DOMAIN,
+                                        translation_key="http_error_with_body",
+                                        translation_placeholders={
+                                            "action": "Set lighting schedule",
+                                            "status": str(put_resp.status),
+                                            "body": body[:200],
+                                        },
+                                    )
                 break
 
     async def handle_rename_camera(call: ServiceCall) -> None:

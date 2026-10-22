@@ -621,6 +621,15 @@
           "back_left": "Back Left (−120°)",
           "back_right": "Back Right (+120°)"
         }
+      },
+      "lighting_mode": {
+        "name": "Lighting mode",
+        "state": {
+          "follow_schedule": "Follow schedule",
+          "ambient_light": "Ambient brightness",
+          "ambient_light_and_schedule": "Ambient brightness and schedule",
+          "always_off": "Off"
+        }
       }
     },
     "binary_sensor": {

@@ -621,6 +621,15 @@
           "back_left": "Achter links (−120°)",
           "back_right": "Achter rechts (+120°)"
         }
+      },
+      "lighting_mode": {
+        "name": "Verlichtingsmodus",
+        "state": {
+          "follow_schedule": "Schema volgen",
+          "ambient_light": "Omgevingshelderheid",
+          "ambient_light_and_schedule": "Omgevingshelderheid en schema",
+          "always_off": "Uit"
+        }
       }
     },
     "binary_sensor": {

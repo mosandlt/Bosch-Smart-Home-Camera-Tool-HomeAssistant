@@ -685,6 +685,15 @@
           "back_left": "Hinten links (−120°)",
           "back_right": "Hinten rechts (+120°)"
         }
+      },
+      "lighting_mode": {
+        "name": "Lichtmodus",
+        "state": {
+          "follow_schedule": "Zeitplan",
+          "ambient_light": "Umgebungshelligkeit",
+          "ambient_light_and_schedule": "Umgebungshelligkeit und Zeitplan",
+          "always_off": "Aus"
+        }
       }
     },
     "binary_sensor": {

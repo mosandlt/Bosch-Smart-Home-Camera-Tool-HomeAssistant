@@ -28,6 +28,7 @@ from .const import CONF_ENABLE_PTZ_CONTROLS, DOMAIN, STREAM_START_SKIPPED
 from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _is_gen2_indoor, _warn_if_privacy_on
 from .ldi_local import ldi_serviceable
+from .lighting_options import SCHEDULE_STATUS_OPTIONS, async_set_schedule_status
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,6 +54,9 @@ DETECTION_MODE_OPTIONS = ["all_motions", "only_humans", "zones"]
 DETECTION_TO_API = {k: k.upper() for k in DETECTION_MODE_OPTIONS}
 
 FCM_PUSH_MODE_OPTIONS = ["auto", "polling"]
+
+# Hardware strings of the Gen1 Eyes Outdoor (only model with lighting_options).
+GEN1_OUTDOOR_HARDWARE = ("OUTDOOR", "CAMERA_EYES")
 
 # Pan preset options and their mapped angles (degrees from centre).
 # Available only for cameras with panLimit > 0 (CAMERA_360 indoor).
@@ -94,6 +98,13 @@ async def async_setup_entry(
         if pan_limit and ptz_enabled:
             cam_entities.append(
                 BoschPanPresetSelect(coordinator, cam_id, config_entry, pan_limit)
+            )
+        # Gen1 Eyes Outdoor: lighting_options only exists there (Gen2 answers 442).
+        if hw in GEN1_OUTDOOR_HARDWARE and cam_info.get("featureSupport", {}).get(
+            "light", False
+        ):
+            cam_entities.append(
+                BoschLightingModeSelect(coordinator, cam_id, config_entry)
             )
         # Per-camera Mini-NVR mode override — only relevant once Mini-NVR
         # itself is enabled (same gate as BoschNvrRecordingSwitch).
@@ -504,6 +515,62 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
             )
         else:
             _LOGGER.warning("Failed to set motion sensitivity for %s", self._cam_id)
+        self.async_write_ha_state()
+
+
+class BoschLightingModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[misc]
+    """Ambient/mood light mode of a Gen1 Eyes Outdoor (``scheduleStatus``).
+
+    Options: follow_schedule / ambient_light / ambient_light_and_schedule /
+    always_off. Switching only changes ``scheduleStatus``; darkness threshold,
+    schedule, front light and motion-light settings are left as they are, so
+    always_off → ambient_light restores the previous behaviour.
+    """
+
+    _attr_options = SCHEDULE_STATUS_OPTIONS
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: BoschCameraCoordinator,
+        cam_id: str,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._cam_id = cam_id
+        self._entry = entry
+        cam_info = coordinator.data.get(cam_id, {}).get("info", {})
+        self._cam_title = cam_info.get("title", cam_id)
+        self._attr_unique_id = f"bosch_shc_camera_{cam_id}_lighting_mode_select"
+        self._attr_translation_key = "lighting_mode"
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        cam_info = self.coordinator.data.get(self._cam_id, {}).get("info", {})
+        return {
+            "identifiers": {(DOMAIN, self._cam_id)},
+            "name": f"Bosch {self._cam_title}",
+            "manufacturer": "Bosch",
+            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "sw_version": cam_info.get("firmwareVersion", ""),
+        }
+
+    @property
+    def current_option(self) -> str | None:
+        value = self.coordinator.lighting_options_cache.get(self._cam_id, {}).get(
+            "scheduleStatus"
+        )
+        lower = str(value).lower() if value else None
+        return lower if lower in SCHEDULE_STATUS_OPTIONS else None
+
+    @property
+    def available(self) -> bool:
+        """Only once lighting_options has been fetched with a known mode."""
+        return self.coordinator.last_update_success and self.current_option is not None
+
+    async def async_select_option(self, option: str) -> None:
+        await async_set_schedule_status(self.coordinator, self._cam_id, option)
         self.async_write_ha_state()
 
 

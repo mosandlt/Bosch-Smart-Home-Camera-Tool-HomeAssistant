@@ -621,6 +621,15 @@
           "back_left": "左后 (−120°)",
           "back_right": "右后 (+120°)"
         }
+      },
+      "lighting_mode": {
+        "name": "灯光模式",
+        "state": {
+          "follow_schedule": "按计划",
+          "ambient_light": "环境亮度",
+          "ambient_light_and_schedule": "环境亮度和计划",
+          "always_off": "关闭"
+        }
       }
     },
     "binary_sensor": {

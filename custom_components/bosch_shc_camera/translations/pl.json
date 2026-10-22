@@ -621,6 +621,15 @@
           "back_left": "Lewy tył (−120°)",
           "back_right": "Prawy tył (+120°)"
         }
+      },
+      "lighting_mode": {
+        "name": "Tryb oświetlenia",
+        "state": {
+          "follow_schedule": "Według harmonogramu",
+          "ambient_light": "Jasność otoczenia",
+          "ambient_light_and_schedule": "Jasność otoczenia i harmonogram",
+          "always_off": "Wyłączone"
+        }
       }
     },
     "binary_sensor": {
