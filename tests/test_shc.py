@@ -41,7 +41,7 @@ import asyncio
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -494,6 +494,7 @@ def _make_stub_coordinator(write_lock_secs: float = 30.0):
         shc_state_cache={},
         privacy_set_at={},
         light_set_at={},
+        hw_version={},
         shc_devices_raw=[{"id": "dev-1", "name": "terrasse"}],
         last_shc_fetch=time.monotonic(),
         WRITE_LOCK_SECS=write_lock_secs,
@@ -4539,3 +4540,36 @@ class TestGen2FrontLightBrightnessAndIntensity:
         assert ok is True
         assert captured[-1][1] == {"enabled": False}
         assert coord.shc_state_cache[CAM_ID]["front_light"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("hw", "expected"), [("HOME_Eyes_Outdoor", None), ("CAMERA", True)]
+)
+async def test_shc_camera_light_only_overwrites_gen1(hw, expected):
+    """GitHub #80: Gen2 camera_light comes from the lighting cache, not SHC."""
+    from custom_components.bosch_shc_camera.shc import _update_one_camera_shc_state
+
+    coord = SimpleNamespace(
+        hw_version={"cam": hw},
+        shc_state_cache={},
+        light_set_at={},
+        privacy_set_at={},
+        WRITE_LOCK_SECS=30,
+    )
+
+    async def fake_request(_coord, _method, path, *a, **k):
+        if path.endswith("CameraLight"):
+            return {"state": {"value": "ON"}}
+        return {"state": {"value": "OFF"}}
+
+    with patch(
+        "custom_components.bosch_shc_camera.shc.async_shc_request", fake_request
+    ):
+        await _update_one_camera_shc_state(
+            cast(Any, coord),
+            "cam",
+            {"info": {"title": "Cam"}},
+            [{"name": "cam", "id": "dev"}],
+        )
+    assert coord.shc_state_cache["cam"]["camera_light"] is expected

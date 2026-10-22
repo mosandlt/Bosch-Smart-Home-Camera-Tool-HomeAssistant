@@ -456,7 +456,10 @@ async def _update_one_camera_shc_state(
     svc = await async_shc_request(
         coordinator, "GET", f"/devices/{device_id}/services/CameraLight"
     )
-    if isinstance(svc, dict):
+    # Gen2: the SHC CameraLight service is not the light-group state (cloud
+    # lighting/switch brightness is, see slow_tier). Letting it write here
+    # made the switch disagree with the Front/Top/Bottom lights (GitHub #80).
+    if isinstance(svc, dict) and not _is_gen2(coordinator, cam_id):
         val = svc.get("state", {}).get("value", "")
         new_light = val.upper() == "ON"
         # Honor light_set_at write-lock — same race as privacy_mode.
