@@ -693,7 +693,7 @@ const CARD_I18N = {
     ed_webrtc_timeout_hint: "Wie lange auf WebRTC gewartet wird, bevor auf HLS zurückgefallen wird. Niedriger für schnelleren Fallback bei unzuverlässigen Verbindungen.",
     ed_show_motion_zones: "Bewegungszonen-Overlay anzeigen",
     ed_fs_auto_hide: "Vollbild-Bedienelemente bei Inaktivität automatisch ausblenden",
-    ed_motion_overlay: "Bewegung im Livebild markieren (im Browser, solange die Karte offen ist)",
+    ed_motion_overlay: "Bewegung im Livebild markieren (im Browser, solange die Karte geöffnet ist)",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Benachrichtigungs-Typen",
     accordion_advanced: "Erweitert",
