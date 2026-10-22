@@ -230,6 +230,35 @@ def _compute_cam_context(
     )
 
 
+def sync_gen2_light_cache(coordinator: BoschCameraCoordinator, cam_id: str) -> None:
+    """Derive camera_light/front_light/wallwasher/intensity from lighting/switch.
+
+    The three light entities read `lighting_switch_cache` live, the switches
+    read these derived fields. They are re-derived right after every
+    lighting/switch fetch: deriving only in the info pass (which runs BEFORE
+    that fetch within a tick) left the switches one full tick (60 s) behind the
+    lights and flipped Camera Light off ~30 s after a manual ON (GitHub #80).
+    Skipped inside the write-lock window so a stale poll cannot undo a write.
+    """
+    lsc = coordinator.lighting_switch_cache.get(cam_id)
+    if not lsc:
+        return
+    if (
+        cam_id in coordinator.light_set_at
+        and (time.monotonic() - coordinator.light_set_at[cam_id])
+        < coordinator.WRITE_LOCK_SECS
+    ):
+        return
+    front_bri = lsc.get("frontLightSettings", {}).get("brightness", 0)
+    top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
+    bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
+    cache = coordinator.shc_state_cache.setdefault(cam_id, {})
+    cache["front_light"] = front_bri > 0
+    cache["wallwasher"] = top_bri > 0 or bot_bri > 0
+    cache["camera_light"] = front_bri > 0 or top_bri > 0 or bot_bri > 0
+    cache["front_light_intensity"] = front_bri / 100.0 if front_bri else 0.0
+
+
 def _poll_cam_info_caches(
     coordinator: BoschCameraCoordinator,
     cam_id: str,
@@ -311,15 +340,7 @@ def _poll_cam_info_caches(
             # Gen2: Only update light state from lighting/switch cache
             # Do NOT use featureStatus (reports config, not physical state)
             # If cache not yet populated, keep current state (don't overwrite)
-            lsc = coordinator.lighting_switch_cache.get(cam_id)
-            if lsc:
-                front_bri = lsc.get("frontLightSettings", {}).get("brightness", 0)
-                top_bri = lsc.get("topLedLightSettings", {}).get("brightness", 0)
-                bot_bri = lsc.get("bottomLedLightSettings", {}).get("brightness", 0)
-                cache["front_light"] = front_bri > 0
-                cache["wallwasher"] = top_bri > 0 or bot_bri > 0
-                cache["camera_light"] = front_bri > 0 or top_bri > 0 or bot_bri > 0
-                cache["front_light_intensity"] = front_bri / 100.0 if front_bri else 0.0
+            sync_gen2_light_cache(coordinator, cam_id)
             # else: keep current cache values, don't overwrite from featureStatus
         else:
             cache["camera_light"] = light_on
@@ -397,6 +418,7 @@ async def _poll_cam_control(
                 ) as ls_resp:
                     if ls_resp.status == 200:
                         coordinator.lighting_switch_cache[cam_id] = await ls_resp.json()
+                        sync_gen2_light_cache(coordinator, cam_id)
         except Exception as err:
             _LOGGER.debug(
                 "lighting/switch fetch error for %s: %s",

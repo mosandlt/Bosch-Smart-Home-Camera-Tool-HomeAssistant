@@ -200,6 +200,8 @@ def _base_coord() -> SimpleNamespace:
         async_update_listeners=MagicMock(),
         async_request_refresh=AsyncMock(),
         hass=SimpleNamespace(async_create_task=MagicMock()),
+        # Gen2 light-ON schedules a delayed lighting/switch re-read (#80).
+        spawn_tracked=MagicMock(side_effect=lambda coro, name: coro.close()),
     )
 
 
@@ -1400,6 +1402,7 @@ def _stub_coord_setters(*, gen2: bool = True, with_token: bool = True):
         # successful Gen2 camera_light OFF write — without this every future
         # gen2-OFF-success test written against this fixture AttributeErrors.
         lighting_switch_cache={},
+        spawn_tracked=lambda coro, name: coro.close(),  # Gen2 ON confirm (#80)
         async_update_listeners=lambda: None,
         async_request_refresh=AsyncMock(),
         ensure_valid_token=AsyncMock(return_value="token-FRESH"),

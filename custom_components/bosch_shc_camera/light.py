@@ -766,6 +766,9 @@ class _BoschRgbLedLight(_BoschLightBase):
                 # report that instead of a stale "off".
                 self._brightness = api_brightness
                 self._is_on = True
+                # The camera did change: stamp the write so an in-flight lighting
+                # confirm (shc._refresh_lighting_switch_after_on) is discarded.
+                self.coordinator.light_set_at[self._cam_id] = time.monotonic()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:

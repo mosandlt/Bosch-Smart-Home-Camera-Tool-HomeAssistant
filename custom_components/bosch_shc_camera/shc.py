@@ -876,6 +876,52 @@ def _is_gen2(coordinator: BoschCameraCoordinator, cam_id: str) -> bool:
     return get_model_config(hw).generation >= 2
 
 
+# Seconds after a Gen2 light-ON write at which lighting/switch is re-read; the
+# cloud needs a few seconds to reflect the write (see WRITE_LOCK_SECS).
+_LIGHT_ON_CONFIRM_DELAYS = (4.0, 12.0)
+
+
+async def _refresh_lighting_switch_after_on(
+    coordinator: BoschCameraCoordinator, cam_id: str, write_stamp: float | None
+) -> None:
+    """Re-read lighting/switch after a Gen2 light-ON write (no full refresh).
+
+    `write_stamp` is the `light_set_at` of that write. Any later light write
+    (OFF, a light entity's PUT) moves it, which makes this confirmation stale:
+    a still-positive cloud answer must not overwrite the newer optimistic cache.
+    """
+    started = time.monotonic()
+    for delay in _LIGHT_ON_CONFIRM_DELAYS:
+        # Absolute offsets from the write, not cumulative sleeps.
+        await asyncio.sleep(max(0.0, delay - (time.monotonic() - started)))
+        if coordinator.light_set_at.get(cam_id) != write_stamp:
+            return
+        try:
+            session = await async_get_bosch_cloud_session(coordinator.hass)
+            async with asyncio.timeout(5):
+                async with session.get(
+                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting/switch",
+                    headers={"Authorization": f"Bearer {coordinator.token}"},
+                ) as resp:
+                    data = await resp.json() if resp.status == 200 else None
+        except (TimeoutError, aiohttp.ClientError, ValueError) as err:
+            _LOGGER.debug("lighting/switch confirm for %s failed: %s", cam_id[:8], err)
+            continue
+        if not isinstance(data, dict):
+            continue
+        async with get_lighting_lock(coordinator, cam_id):
+            # A light PUT that ran while we were fetching has moved the stamp.
+            if coordinator.light_set_at.get(cam_id) != write_stamp:
+                return
+            coordinator.lighting_switch_cache[cam_id] = data
+        coordinator.async_update_listeners()
+        if any(
+            (data.get(key) or {}).get("brightness", 0) > 0
+            for key in _ALL_LIGHTING_GROUPS
+        ):
+            return
+
+
 async def async_cloud_set_camera_light(
     coordinator: BoschCameraCoordinator, cam_id: str, on: bool
 ) -> bool:
@@ -933,6 +979,16 @@ async def async_cloud_set_camera_light(
                 2 if gen2 else 1,
             )
             # No forced refresh — optimistic cache + listeners above suffice; regular tick confirms. Avoids re-registering go2rtc / disrupting unrelated live streams.
+            if on and gen2:
+                # The ON write never touches lighting_switch_cache, so the
+                # Front/Upper/Lower light entities would stay off until the
+                # next 60 s tick; one light-only fetch confirms them sooner.
+                coordinator.spawn_tracked(
+                    _refresh_lighting_switch_after_on(
+                        coordinator, cam_id, coordinator.light_set_at.get(cam_id)
+                    ),
+                    name=f"lighting_switch_confirm_{cam_id[:8]}",
+                )
             return True
 
     # -- SHC local API fallback (offline mode) ---------------------------------

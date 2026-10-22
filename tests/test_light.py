@@ -2926,6 +2926,8 @@ class TestRgbLedColorToWhiteNudge:
         assert entity._is_on is True
         assert entity._brightness > 0
         entity._put_switch_endpoint.assert_not_awaited()
+        # partial success still stamps the write-lock (GitHub #80 re-review)
+        assert entity._cam_id in entity.coordinator.light_set_at
 
     @pytest.mark.asyncio
     async def test_white_to_white_single_write(self):
