@@ -805,6 +805,8 @@ class BoschCameraCoordinator(
         self.cloud_privacy_masks_cache: dict[str, list[Any]] = {}
         # Lighting options cache — keyed by cam_id, from GET /lighting_options
         self.lighting_options_cache: dict[str, dict[str, Any]] = {}
+        # Lights that were on before the lighting-mode select went to always_off
+        self.lighting_mode_light_snapshot: dict[str, dict[str, bool]] = {}
         # Intrusion detection config cache — keyed by cam_id, from GET /intrusionDetectionConfig (Gen2 only)
         self.intrusion_config_cache: dict[str, dict[str, Any]] = {}
         # Audio detection config cache — keyed by cam_id, from GET /audioDetectionConfig
@@ -2384,6 +2386,7 @@ class BoschCameraCoordinator(
         "cloud_zones_cache",
         "cloud_privacy_masks_cache",
         "lighting_options_cache",
+        "lighting_mode_light_snapshot",
         "intrusion_config_cache",
         "audio_detection_cache",
         "local_data_interface_cache",

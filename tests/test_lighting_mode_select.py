@@ -49,6 +49,8 @@ def _coord(cache: dict[str, Any] | None = None) -> SimpleNamespace:
         token="t",
         lighting_options_cache={CAM: dict(cache)} if cache is not None else {},
         lighting_options_set_at={},
+        shc_state_cache={},
+        lighting_mode_light_snapshot={},
         async_request_refresh=AsyncMock(),
         last_update_success=True,
         is_write_locked=lambda cam, d: cam in d,
@@ -330,3 +332,63 @@ async def test_setup_creates_select_only_for_gen1_with_light() -> None:
     assert not has(await build("CAMERA_EYES", False))
     assert not has(await build("HOME_Eyes_Outdoor", True))
     assert not has(await build("SOME_UNKNOWN_MODEL", True))  # default model != Gen1
+
+
+def _mode_coord(lights: dict[str, bool], status: str) -> SimpleNamespace:
+    coord = _coord({**CURRENT, "scheduleStatus": status})
+    coord.shc_state_cache = {CAM: lights}
+    coord.lighting_mode_light_snapshot = {}
+    coord.async_cloud_set_light_component = AsyncMock(return_value=True)
+    return coord
+
+
+async def _switch(coord: SimpleNamespace, option: str) -> None:
+    session = MagicMock()
+    session.get.return_value = _resp(200, coord.lighting_options_cache[CAM])
+    session.put.return_value = _resp(200)
+    with _patch_session(session):
+        await async_set_schedule_status(coord, CAM, option)
+
+
+@pytest.mark.asyncio
+async def test_leaving_always_off_restores_lights_enabled_before() -> None:
+    """GitHub #78: off → ambient must bring back the upper/lower light."""
+    coord = _mode_coord({"wallwasher": True, "front_light": False}, "AMBIENT_LIGHT")
+    await _switch(coord, "always_off")
+    coord.shc_state_cache[CAM] = {"wallwasher": False, "front_light": False}
+    await _switch(coord, "ambient_light")
+    coord.async_cloud_set_light_component.assert_awaited_once_with(
+        CAM, "wallwasher", True
+    )
+    assert CAM not in coord.lighting_mode_light_snapshot
+
+
+@pytest.mark.asyncio
+async def test_no_restore_when_lights_were_off_or_mode_unrelated() -> None:
+    coord = _mode_coord({"wallwasher": False, "front_light": False}, "AMBIENT_LIGHT")
+    await _switch(coord, "follow_schedule")
+    await _switch(coord, "always_off")
+    await _switch(coord, "ambient_light")
+    coord.async_cloud_set_light_component.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_restore_keeps_snapshot_and_raises() -> None:
+    coord = _mode_coord({"wallwasher": True, "front_light": True}, "AMBIENT_LIGHT")
+    await _switch(coord, "always_off")
+    coord.async_cloud_set_light_component = AsyncMock(side_effect=[True, False])
+    with pytest.raises(HomeAssistantError):
+        await _switch(coord, "ambient_light")
+    assert coord.lighting_mode_light_snapshot[CAM] == {"front": True}
+
+
+@pytest.mark.asyncio
+async def test_noop_switch_refreshes_stale_cache() -> None:
+    coord = _mode_coord({}, "AMBIENT_LIGHT")
+    coord.lighting_options_cache[CAM]["scheduleStatus"] = "FOLLOW_SCHEDULE"
+    session = MagicMock()
+    session.get.return_value = _resp(200, {**CURRENT, "scheduleStatus": "ALWAYS_OFF"})
+    with _patch_session(session):
+        await async_set_schedule_status(coord, CAM, "always_off")
+    assert coord.lighting_options_cache[CAM]["scheduleStatus"] == "ALWAYS_OFF"
+    session.put.assert_not_called()

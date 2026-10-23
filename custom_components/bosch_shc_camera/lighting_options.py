@@ -64,6 +64,26 @@ def _http_error(action: str, status: int, body: str) -> HomeAssistantError:
     )
 
 
+async def _restore_lights(coordinator: Any, cam_id: str) -> None:
+    """Switch back on what was on before always_off; failures stay queued."""
+    pending = coordinator.lighting_mode_light_snapshot.get(cam_id, {})
+    for component, was_on in list(pending.items()):
+        if not was_on or await coordinator.async_cloud_set_light_component(
+            cam_id, component, True
+        ):
+            del pending[component]
+    if pending:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="unexpected_error",
+            translation_placeholders={
+                "action": "Restore lights after lighting mode change",
+                "error": "light write failed, will retry on the next mode change",
+            },
+        )
+    coordinator.lighting_mode_light_snapshot.pop(cam_id, None)
+
+
 async def async_set_schedule_status(coordinator: Any, cam_id: str, option: str) -> None:
     """Set only ``scheduleStatus``; mode, threshold and schedule stay untouched."""
     # Local import (not top-level): same reason as services.py — patches target
@@ -100,8 +120,18 @@ async def async_set_schedule_status(coordinator: Any, cam_id: str, option: str) 
                         data = await get_resp.json()
             # Compared under the lock against the freshest state, so a queued
             # request is never dropped because of a stale pre-lock comparison.
-            if str(data.get("scheduleStatus", "")).upper() == option.upper():
+            previous = str(data.get("scheduleStatus", "")).upper()
+            if previous == option.upper():
+                coordinator.lighting_options_cache[cam_id] = data
                 return
+            if option == "always_off":
+                # always_off makes the camera drop the lights that were switched
+                # on; remember them to put them back when leaving that mode.
+                lights = coordinator.shc_state_cache.get(cam_id, {})
+                coordinator.lighting_mode_light_snapshot[cam_id] = {
+                    "wallwasher": bool(lights.get("wallwasher")),
+                    "front": bool(lights.get("front_light")),
+                }
             data["scheduleStatus"] = option.upper()
             async with asyncio.timeout(10):
                 async with session.put(url, headers=headers, json=data) as put_resp:
@@ -113,4 +143,6 @@ async def async_set_schedule_status(coordinator: Any, cam_id: str, option: str) 
             # a slow-tier poll must not revert it before the cloud catches up.
             coordinator.lighting_options_cache[cam_id] = data
             coordinator.lighting_options_set_at[cam_id] = time.monotonic()
+            if previous == "ALWAYS_OFF":
+                await _restore_lights(coordinator, cam_id)
         await coordinator.async_request_refresh()
