@@ -32018,6 +32018,38 @@ class TestSetupEntryPersistedStores:
             "ACTIVE",
         )
 
+    async def test_lighting_mode_snapshot_loaded_from_store(self) -> None:
+        """Persisted lights-before-always_off map is restored into the coordinator (#78)."""
+        from custom_components.bosch_shc_camera import async_setup_entry
+
+        store_factory = _MultiStore_sprint_md(
+            {
+                "_lighting_mode_snapshot": {CAM_A: {"wallwasher": True, "front": 0}},
+                "_maint_notified": None,
+                "_cloud_alert_state": None,
+                "_lan_ips": None,
+                "_hw_versions": None,
+                "_local_creds": None,
+            }
+        )
+        hass = _make_hass_sprint_md()
+        entry = _make_entry_sprint_md()
+        coord_stub = _make_coord_stub_sprint_md([CAM_A])
+        coord_stub.lighting_mode_light_snapshot = {}
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch(f"{MODULE}.Store", side_effect=store_factory),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get",
+                return_value=_make_ent_reg(),
+            ),
+        ):
+            assert await async_setup_entry(hass, entry) is True
+        assert coord_stub.lighting_mode_light_snapshot == {
+            CAM_A: {"wallwasher": True, "front": False}
+        }
+
     async def test_cloud_outage_flag_loaded_from_store(self) -> None:
         """Persisted cloud-outage flag True → coordinator.cloud_outage_notified=True.
         Pins L5342-5343."""
