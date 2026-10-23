@@ -17,6 +17,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ### Changed
 
+- **Camera client library 0.5.12.** The minimum version of `bosch-shc-camera-client` is now 0.5.12.
 - **Offline cameras and cameras in privacy mode show their last snapshot.** Instead of a black placeholder, the card now shows the last known frame behind the offline label or the privacy lock, which sit on a translucent glass overlay. Such a request is answered immediately from the stored frame without the slow snapshot fallback chain, and while privacy mode is on no new image is ever fetched or stored. The privacy badge and the offline "last seen" text use the capture time of the frame (new camera attribute `last_snapshot_at`) instead of the moment the browser loaded it.
 
 ### Fixed
