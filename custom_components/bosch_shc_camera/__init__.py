@@ -715,6 +715,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 len(_persisted_ips),
             )
 
+    # Lights that were on before the lighting mode went to always_off; without
+    # persistence a restart during "off" would lose what to switch back on.
+    light_snapshot_store: Store = Store(
+        hass, version=1, key=f"{DOMAIN}_lighting_mode_snapshot"
+    )
+    coordinator.lighting_snapshot_store = light_snapshot_store
+    _persisted_snap = await light_snapshot_store.async_load() or {}
+    if isinstance(_persisted_snap, dict):
+        for _cid, _lights in _persisted_snap.items():
+            if isinstance(_cid, str) and isinstance(_lights, dict):
+                coordinator.lighting_mode_light_snapshot[_cid] = {
+                    str(k): bool(v) for k, v in _lights.items()
+                }
+
     # Load the persistent hardware-version map (cam_id → hw_version). Without
     # this, a cold start during a Bosch cloud 5xx leaves `hw_version` empty
     # and `_is_gen2()` returns False for every camera — which in turn makes

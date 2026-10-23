@@ -807,6 +807,7 @@ class BoschCameraCoordinator(
         self.lighting_options_cache: dict[str, dict[str, Any]] = {}
         # Lights that were on before the lighting-mode select went to always_off
         self.lighting_mode_light_snapshot: dict[str, dict[str, bool]] = {}
+        self.lighting_snapshot_store: Any = None
         # Intrusion detection config cache — keyed by cam_id, from GET /intrusionDetectionConfig (Gen2 only)
         self.intrusion_config_cache: dict[str, dict[str, Any]] = {}
         # Audio detection config cache — keyed by cam_id, from GET /audioDetectionConfig

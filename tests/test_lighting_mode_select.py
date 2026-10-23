@@ -392,3 +392,15 @@ async def test_noop_switch_refreshes_stale_cache() -> None:
         await async_set_schedule_status(coord, CAM, "always_off")
     assert coord.lighting_options_cache[CAM]["scheduleStatus"] == "ALWAYS_OFF"
     session.put.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_is_persisted_and_cleared() -> None:
+    coord = _mode_coord({"wallwasher": True, "front_light": False}, "AMBIENT_LIGHT")
+    coord.lighting_snapshot_store = MagicMock(async_save=AsyncMock())
+    await _switch(coord, "always_off")
+    coord.lighting_snapshot_store.async_save.assert_awaited_with(
+        {CAM: {"wallwasher": True, "front": False}}
+    )
+    await _switch(coord, "ambient_light")
+    coord.lighting_snapshot_store.async_save.assert_awaited_with({})

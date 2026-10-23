@@ -64,6 +64,12 @@ def _http_error(action: str, status: int, body: str) -> HomeAssistantError:
     )
 
 
+async def _persist_snapshot(coordinator: Any) -> None:
+    store = getattr(coordinator, "lighting_snapshot_store", None)
+    if store is not None:
+        await store.async_save(coordinator.lighting_mode_light_snapshot)
+
+
 async def _restore_lights(coordinator: Any, cam_id: str) -> None:
     """Switch back on what was on before always_off; failures stay queued."""
     pending = coordinator.lighting_mode_light_snapshot.get(cam_id, {})
@@ -72,6 +78,9 @@ async def _restore_lights(coordinator: Any, cam_id: str) -> None:
             cam_id, component, True
         ):
             del pending[component]
+    if not pending:
+        coordinator.lighting_mode_light_snapshot.pop(cam_id, None)
+    await _persist_snapshot(coordinator)
     if pending:
         raise HomeAssistantError(
             translation_domain=DOMAIN,
@@ -81,7 +90,6 @@ async def _restore_lights(coordinator: Any, cam_id: str) -> None:
                 "error": "light write failed, will retry on the next mode change",
             },
         )
-    coordinator.lighting_mode_light_snapshot.pop(cam_id, None)
 
 
 async def async_set_schedule_status(coordinator: Any, cam_id: str, option: str) -> None:
@@ -132,6 +140,7 @@ async def async_set_schedule_status(coordinator: Any, cam_id: str, option: str) 
                     "wallwasher": bool(lights.get("wallwasher")),
                     "front": bool(lights.get("front_light")),
                 }
+                await _persist_snapshot(coordinator)
             data["scheduleStatus"] = option.upper()
             async with asyncio.timeout(10):
                 async with session.put(url, headers=headers, json=data) as put_resp:
