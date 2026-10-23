@@ -4126,6 +4126,16 @@ class BoschCameraCoordinator(
                                     )
                                 return ok2
                     ok = resp.status in (200, 201, 204)
+                    if ok and endpoint.startswith("lighting"):
+                        # Lets users line up what was sent with what the
+                        # lights physically did (GitHub #78).
+                        _LOGGER.debug(
+                            "async_put_camera %s/%s: HTTP %d, sent %s",
+                            cam_id,
+                            endpoint,
+                            resp.status,
+                            payload,
+                        )
                     if not ok:
                         body = await resp.text()
                         _LOGGER.debug(

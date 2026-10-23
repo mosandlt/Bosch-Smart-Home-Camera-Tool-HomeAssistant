@@ -40903,6 +40903,37 @@ async def test_async_put_camera_200_success():
 
 
 @pytest.mark.asyncio
+async def test_async_put_camera_logs_lighting_payload_on_success(caplog):
+    """GitHub #78: a successful lighting write logs the sent payload at debug."""
+    import logging
+
+    from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+    session = MagicMock()
+    session.put = MagicMock(return_value=_make_resp(204))
+    coord = SimpleNamespace(token="tok", hass=MagicMock())
+
+    with (
+        patch(
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ),
+        caplog.at_level(logging.DEBUG),
+    ):
+        await BoschCameraCoordinator.async_put_camera(
+            coord, "cam-1", "lighting/switch/front", {"enabled": True}
+        )
+        await BoschCameraCoordinator.async_put_camera(
+            coord, "cam-1", "privacy", {"privacyMode": "ON"}
+        )
+
+    assert (
+        "cam-1/lighting/switch/front: HTTP 204, sent {'enabled': True}" in caplog.text
+    )
+    assert "cam-1/privacy" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_async_put_camera_401_then_token_refresh_fails():
     """When token refresh raises non-CancelledError, async_put_camera returns False."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
