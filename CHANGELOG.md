@@ -23,6 +23,8 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ### Fixed
 
+- **Live stream on the Eyes Outdoor (Gen1) froze every ~10 seconds.** Each session heartbeat re-applied the unchanged stream address to Home Assistant, which restarted the stream worker every time (picture froze for 10-30 s, HLS playlist ended). The address is now only updated when it actually changes. (GitHub #81)
+
 - **Lighting mode "Off" then "Ambient brightness" left the lights off.** Switching the Eyes Outdoor (Gen1) to "Off" makes the camera drop the lights that were switched on; going back to another mode now switches the upper, lower and front lights that were on before "Off" back on (GitHub #78). The remembered lights survive a Home Assistant restart while the mode is "Off".
 - **Light switches lagging behind the lights (Gen2).** Camera Light, Front Light and Wallwasher switches are now updated in the same poll that reads the lights, instead of one poll (about a minute) later. This also fixes Camera Light switching itself off about 30 seconds after being switched on by hand, and the switches staying stale when the lights are changed in the Bosch app. After switching Camera Light on, the Front, Upper and Lower lights are re-read after a few seconds instead of at the next poll.
 - **Overlapping light writes.** `set_lighting_schedule` and the new lighting-mode select now share one lock per camera, so two writes can no longer interleave their read-modify-write and send back a stale copy of the lighting settings.

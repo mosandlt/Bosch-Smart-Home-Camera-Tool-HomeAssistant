@@ -143,7 +143,10 @@ async def refresh_local_creds_from_heartbeat(
             coordinator.local_creds_cache[cam_id] = cache
         cam_entity = coordinator.camera_entities.get(cam_id)
         stream = getattr(cam_entity, "stream", None) if cam_entity else None
-        if stream is not None:
+        # An unchanged URL (viewing front-door active) must not reach
+        # update_source(): HA tears the running worker down on every call,
+        # which froze the picture on each 10 s Gen1 heartbeat.
+        if stream is not None and effective_url != old_url:
             try:
                 stream.update_source(effective_url)
             except Exception as err:

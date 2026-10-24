@@ -12699,6 +12699,30 @@ class TestRefreshLocalCredsFromHeartbeat:
         assert "new-pass" not in live["rtspsUrl"]
         front_door_runner.has_server.assert_called_once_with(CAM_A)
 
+    async def test_front_door_active_does_not_restart_stream(self):
+        """GitHub #81: with the viewing front-door bound the published URL
+        never changes, so Stream.update_source must not be called — HA tears
+        the running worker down on every call, freezing the Gen1 picture on
+        each 10 s heartbeat."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord, cam_entity = self._coord()
+        front_door_runner = MagicMock()
+        front_door_runner.has_server = MagicMock(return_value=True)
+        coord.viewing_front_door_runner = front_door_runner
+        stream = MagicMock()
+        cam_entity.stream = stream
+
+        await BoschCameraCoordinator.refresh_local_creds_from_heartbeat(
+            coord,
+            CAM_A,
+            '{"user": "new-user", "password": "new-pass"}',
+            generation=1,
+            elapsed=10.0,
+        )
+        assert coord.live_connections[CAM_A]["_local_user"] == "new-user"
+        stream.update_source.assert_not_called()
+
     async def test_front_door_inactive_url_still_rebuilt_with_new_creds(self):
         """A runner exists (feature used elsewhere) but no server is bound
         for THIS camera — must fall back to the raw-credentialed rebuild
