@@ -12723,6 +12723,33 @@ class TestRefreshLocalCredsFromHeartbeat:
         assert coord.live_connections[CAM_A]["_local_user"] == "new-user"
         stream.update_source.assert_not_called()
 
+    async def test_front_door_lost_pushes_raw_url_to_stream(self):
+        """Front-door was bound (published URL has no creds) and then went
+        away: the next heartbeat must hand the running stream the rebuilt raw
+        URL with the rotated creds, otherwise the worker keeps pointing at
+        the dead front-door address."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord, cam_entity = self._coord()
+        front_door_runner = MagicMock()
+        front_door_runner.has_server = MagicMock(return_value=False)
+        coord.viewing_front_door_runner = front_door_runner
+        coord.live_connections[CAM_A]["rtspsUrl"] = "rtsp://127.0.0.1:50000/stable"
+        stream = MagicMock()
+        cam_entity.stream = stream
+
+        await BoschCameraCoordinator.refresh_local_creds_from_heartbeat(
+            coord,
+            CAM_A,
+            '{"user": "new-user", "password": "new-pass"}',
+            generation=1,
+            elapsed=10.0,
+        )
+        stream.update_source.assert_called_once()
+        assert (
+            "new-user:new-pass@127.0.0.1:46767" in stream.update_source.call_args[0][0]
+        )
+
     async def test_front_door_inactive_url_still_rebuilt_with_new_creds(self):
         """A runner exists (feature used elsewhere) but no server is bound
         for THIS camera — must fall back to the raw-credentialed rebuild
