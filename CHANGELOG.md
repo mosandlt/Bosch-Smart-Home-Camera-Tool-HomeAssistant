@@ -23,6 +23,8 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ### Fixed
 
+- **Camera entity unavailable when only the local data interface is used.** After a factory reset the camera has no cached LAN address, so the reachability check never ran and the camera stayed "unavailable" although the connection worked. The address from the camera's Wi-Fi status is now used for the check. (GitHub discussion #82)
+
 - **Live stream on the Eyes Outdoor (Gen1) froze every ~10 seconds.** Each session heartbeat re-applied the unchanged stream address to Home Assistant, which restarted the stream worker every time (picture froze for 10-30 s, HLS playlist ended). The address is now only updated when it actually changes. (GitHub #81)
 
 - **Lighting mode "Off" then "Ambient brightness" left the lights off.** Switching the Eyes Outdoor (Gen1) to "Off" makes the camera drop the lights that were switched on; going back to another mode now switches the upper, lower and front lights that were on before "Off" back on (GitHub #78). The remembered lights survive a Home Assistant restart while the mode is "Off".

@@ -1656,6 +1656,16 @@ class BoschCameraCoordinator(
         """
         cam_ip = self.get_cam_lan_ip(cam_id)
         if not cam_ip:
+            # Local-interface-only cameras never fill the RCP/creds caches
+            # (e.g. after a factory reset); the cloud Wi-Fi status still has
+            # the address.
+            wifi_ip = (
+                (getattr(self, "wifiinfo_cache", None) or {})
+                .get(cam_id, {})
+                .get("ipAddress")
+            )
+            cam_ip = wifi_ip if isinstance(wifi_ip, str) and wifi_ip else None
+        if not cam_ip:
             return False  # no known LAN IP — can't ping locally
         # rcp_lan_ip_cache is populated from RCP data returned via the cloud
         # proxy and restored unvalidated from storage — unlike

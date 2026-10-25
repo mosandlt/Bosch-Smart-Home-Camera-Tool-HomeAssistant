@@ -15508,6 +15508,30 @@ class TestLocalTcpPing:
         assert CAM_A not in coord.lan_tcp_reachable
 
     @pytest.mark.asyncio
+    async def test_falls_back_to_wifi_status_ip(self):
+        """GitHub discussion #82: a camera on the local data interface only
+        (factory reset, empty RCP/creds caches) has just the cloud Wi-Fi
+        status address. Without it the ping never ran, lan_tcp_reachable
+        stayed unknown and the camera entity was unavailable."""
+        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+        coord = _make_coord_async_methods(
+            wifiinfo_cache={CAM_A: {"ipAddress": "192.0.2.77"}}
+        )
+        _bind_method(coord, "get_cam_lan_ip")
+        writer = MagicMock()
+        writer.close = MagicMock()
+        writer.wait_closed = AsyncMock()
+        with patch(
+            "asyncio.open_connection",
+            new=AsyncMock(return_value=(MagicMock(), writer)),
+        ) as opened:
+            ok = await BoschCameraCoordinator.async_local_tcp_ping(coord, CAM_A)
+        assert ok is True
+        assert opened.call_args[0][0] == "192.0.2.77"
+        assert coord.lan_tcp_reachable[CAM_A][0] is True
+
+    @pytest.mark.asyncio
     async def test_returns_true_on_successful_connect(self):
         from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
