@@ -156,7 +156,7 @@ const EVENT_KIND_LABELS = {
   person: { en: "Person", de: "Person", es: "Persona", fr: "Personne", it: "Persona", nl: "Persoon", pl: "Osoba", pt: "Pessoa", ru: "Человек", uk: "Людина", zh: "人员" },
   audio_alarm: { en: "Sound", de: "Geräusch", es: "Sonido", fr: "Son", it: "Suono", nl: "Geluid", pl: "Dźwięk", pt: "Som", ru: "Звук", uk: "Звук", zh: "声音" },
 };
-const CARD_VERSION = "14.2.0.1";
+const CARD_VERSION = "14.2.1";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the

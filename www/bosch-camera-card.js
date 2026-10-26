@@ -37,7 +37,7 @@ const EVENT_KIND_LABELS = {
   }
 };
 
-const CARD_VERSION = "14.2.0.1";
+const CARD_VERSION = "14.2.1";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
