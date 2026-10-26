@@ -8,7 +8,36 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.2.0";
+const EVENT_KIND_LABELS = {
+  person: {
+    en: "Person",
+    de: "Person",
+    es: "Persona",
+    fr: "Personne",
+    it: "Persona",
+    nl: "Persoon",
+    pl: "Osoba",
+    pt: "Pessoa",
+    ru: "Человек",
+    uk: "Людина",
+    zh: "人员"
+  },
+  audio_alarm: {
+    en: "Sound",
+    de: "Geräusch",
+    es: "Sonido",
+    fr: "Son",
+    it: "Suono",
+    nl: "Geluid",
+    pl: "Dźwięk",
+    pt: "Som",
+    ru: "Звук",
+    uk: "Звук",
+    zh: "声音"
+  }
+};
+
+const CARD_VERSION = "14.2.0.1";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
@@ -201,6 +230,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Auto-hide fullscreen controls after idle",
     ed_motion_overlay: "Highlight motion in the live view (browser-side, while the card is open)",
     ed_motion_objects: "Recognise people, animals and vehicles in the motion box (experimental; downloads a ~5 MB model from the internet)",
+    ed_motion_zones: "Motion ignore areas in % (x,y,width,height; separate several with ;)",
     motion_label: "Motion",
     accordion_notif_types: "Notification Types",
     accordion_advanced: "Advanced",
@@ -471,6 +501,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Vollbild-Bedienelemente bei Inaktivität automatisch ausblenden",
     ed_motion_overlay: "Bewegung im Livebild markieren (im Browser, solange die Karte geöffnet ist)",
     ed_motion_objects: "Personen, Tiere und Fahrzeuge in der Bewegungsbox erkennen (experimentell; lädt ein ca. 5-MB-Modell aus dem Internet)",
+    ed_motion_zones: "Bewegungs-Ignorierbereiche in % (x,y,Breite,Höhe; mehrere mit ; trennen)",
     motion_label: "Bewegung",
     accordion_notif_types: "Benachrichtigungs-Typen",
     accordion_advanced: "Erweitert",
@@ -707,6 +738,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Ocultar automáticamente los controles de pantalla completa tras inactividad",
     ed_motion_overlay: "Resaltar movimiento en la vista en vivo (en el navegador, mientras la tarjeta esté abierta)",
     ed_motion_objects: "Reconocer personas, animales y vehículos en el recuadro de movimiento (experimental; descarga un modelo de ~5 MB de internet)",
+    ed_motion_zones: "Zonas a ignorar en % (x,y,ancho,alto; separe varias con ;)",
     motion_label: "Movimiento",
     accordion_notif_types: "Tipos de notificación",
     accordion_advanced: "Avanzado",
@@ -943,6 +975,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Masquer automatiquement les commandes plein écran après inactivité",
     ed_motion_overlay: "Mettre en évidence le mouvement dans la vue en direct (dans le navigateur, tant que la carte est ouverte)",
     ed_motion_objects: "Reconnaître personnes, animaux et véhicules dans le cadre de mouvement (expérimental ; télécharge un modèle d'environ 5 Mo depuis Internet)",
+    ed_motion_zones: "Zones à ignorer en % (x,y,largeur,hauteur ; séparer par ;)",
     motion_label: "Mouvement",
     accordion_notif_types: "Types de notification",
     accordion_advanced: "Avancé",
@@ -1179,6 +1212,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Nascondi automaticamente i controlli a schermo intero dopo inattività",
     ed_motion_overlay: "Evidenzia il movimento nella vista live (nel browser, finché la scheda è aperta)",
     ed_motion_objects: "Riconoscere persone, animali e veicoli nel riquadro di movimento (sperimentale; scarica un modello da ~5 MB da internet)",
+    ed_motion_zones: "Aree da ignorare in % (x,y,larghezza,altezza; separare con ;)",
     motion_label: "Movimento",
     accordion_notif_types: "Tipi di notifica",
     accordion_advanced: "Avanzate",
@@ -1415,6 +1449,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Volledig scherm-bediening automatisch verbergen bij inactiviteit",
     ed_motion_overlay: "Beweging markeren in de livebeeld (in de browser, zolang de kaart open is)",
     ed_motion_objects: "Personen, dieren en voertuigen herkennen in het bewegingskader (experimenteel; downloadt een model van ~5 MB van internet)",
+    ed_motion_zones: "Negeergebieden in % (x,y,breedte,hoogte; scheid met ;)",
     motion_label: "Beweging",
     accordion_notif_types: "Meldingstypen",
     accordion_advanced: "Geavanceerd",
@@ -1651,6 +1686,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Automatycznie ukrywaj elementy sterujące pełnego ekranu po bezczynności",
     ed_motion_overlay: "Zaznacz ruch w podglądzie na żywo (w przeglądarce, gdy karta jest otwarta)",
     ed_motion_objects: "Rozpoznawaj osoby, zwierzęta i pojazdy w ramce ruchu (eksperymentalne; pobiera model ok. 5 MB z internetu)",
+    ed_motion_zones: "Obszary ignorowane w % (x,y,szerokość,wysokość; rozdziel średnikiem)",
     motion_label: "Ruch",
     accordion_notif_types: "Typy powiadomień",
     accordion_advanced: "Zaawansowane",
@@ -1887,6 +1923,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Ocultar automaticamente os controlos de ecrã inteiro após inatividade",
     ed_motion_overlay: "Realçar movimento na vista em direto (no navegador, enquanto o cartão estiver aberto)",
     ed_motion_objects: "Reconhecer pessoas, animais e veículos na caixa de movimento (experimental; descarrega um modelo de ~5 MB da internet)",
+    ed_motion_zones: "Áreas a ignorar em % (x,y,largura,altura; separe com ;)",
     motion_label: "Movimento",
     accordion_notif_types: "Tipos de notificação",
     accordion_advanced: "Avançado",
@@ -2123,6 +2160,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Автоматически скрывать элементы управления в полноэкранном режиме при бездействии",
     ed_motion_overlay: "Выделять движение в прямом эфире (в браузере, пока карточка открыта)",
     ed_motion_objects: "Распознавать людей, животных и транспорт в рамке движения (экспериментально; загружает модель ~5 МБ из интернета)",
+    ed_motion_zones: "Игнорируемые области в % (x,y,ширина,высота; через ;)",
     motion_label: "Движение",
     accordion_notif_types: "Типы уведомлений",
     accordion_advanced: "Дополнительно",
@@ -2359,6 +2397,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Автоматично приховувати елементи керування на весь екран при бездіяльності",
     ed_motion_overlay: "Виділяти рух у прямому ефірі (у браузері, поки картку відкрито)",
     ed_motion_objects: "Розпізнавати людей, тварин і транспорт у рамці руху (експериментально; завантажує модель ~5 МБ з інтернету)",
+    ed_motion_zones: "Ігноровані області у % (x,y,ширина,висота; через ;)",
     motion_label: "Рух",
     accordion_notif_types: "Типи сповіщень",
     accordion_advanced: "Додатково",
@@ -2595,6 +2634,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "全屏时空闲后自动隐藏控件",
     ed_motion_overlay: "在实时画面中标出移动（在浏览器中运行，卡片打开时有效）",
     ed_motion_objects: "在移动框中识别人、动物和车辆（实验性；会从互联网下载约 5 MB 的模型）",
+    ed_motion_zones: "忽略区域（百分比：x,y,宽,高；多个用 ; 分隔）",
     motion_label: "移动",
     accordion_notif_types: "通知类型",
     accordion_advanced: "高级",
@@ -3020,6 +3060,7 @@ class BoschCameraCard extends HTMLElement {
       status: config.status_entity || `sensor.${base}_status`,
       events_today: config.events_today_entity || `sensor.${base}_events_today`,
       last_event: config.last_event_entity || `sensor.${base}_last_event`,
+      last_event_type: config.last_event_type_entity || `sensor.${base}_last_event_type`,
       timestamp: config.timestamp_entity || `switch.${base}_timestamp_overlay`,
       autofollow: config.autofollow_entity || `switch.${base}_auto_follow`,
       motion: config.motion_entity || `switch.${base}_motion_detection`,
@@ -6175,7 +6216,9 @@ class BoschCameraCard extends HTMLElement {
           }
         } catch {}
       }
-      apLastEventText.textContent = pretty;
+      const evKind = hass.states[ents.last_event_type]?.state;
+      const kindLabel = hasEvent && evKind && EVENT_KIND_LABELS[evKind] ? EVENT_KIND_LABELS[evKind][(cardLang(hass) || "en").slice(0, 2)] || EVENT_KIND_LABELS[evKind].en : "";
+      apLastEventText.textContent = kindLabel ? `${kindLabel} · ${pretty}` : pretty;
       const camTimestampOverlay = !!hass.states[ents.camera]?.attributes?.camera_timestamp_overlay;
       apLastEvent.classList.toggle("visible", hasEvent && !camTimestampOverlay && !this._playGateActive);
       apLastEvent.classList.toggle("hide-during-stream", isStreaming);
@@ -7832,7 +7875,7 @@ class BoschCameraCardEditor extends HTMLElement {
     cams.sort();
     const sel = (label, name, val, opts) => `\n      <label>${label}\n        <select name="${name}">\n          ${opts.map(([v, l]) => `<option value="${v}" ${val === v ? "selected" : ""}>${l}</option>`).join("")}\n        </select>\n      </label>`;
     const chk = (key, label, def) => `\n      <label class="inline">\n        <input type="checkbox" name="${key}" ${cfg[key] ?? def ? "checked" : ""} />\n        <span>${label}</span>\n      </label>`;
-    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .row { display: flex; flex-direction: column; gap: 14px; padding: 18px; }\n        label {\n          font-size: 14px; color: var(--primary-text-color);\n          display: flex; flex-direction: column; gap: 4px;\n        }\n        label.inline { flex-direction: row; align-items: center; gap: 10px; }\n        select, input[type="text"] {\n          padding: 9px 10px; border-radius: 6px;\n          border: 1px solid var(--divider-color, rgba(120,120,128,.2));\n          background: var(--card-background-color, #fff);\n          color: var(--primary-text-color, #1c1c1e);\n          font: inherit; font-size: 14px;\n        }\n        select:focus, input:focus { outline: 2px solid #0a84ff; outline-offset: 1px; }\n        input[type="checkbox"] { width: 18px; height: 18px; accent-color: #0a84ff; }\n        .hint {\n          font-size: 12px; color: var(--secondary-text-color, #6c6c70);\n          margin-top: 2px;\n        }\n        h4 {\n          margin: 12px 0 0; font-size: 11px; font-weight: 700;\n          letter-spacing: .08em; text-transform: uppercase;\n          color: var(--secondary-text-color, #6c6c70);\n        }\n        .help {\n          font-size: 12px;\n          color: var(--secondary-text-color, #6c6c70);\n          background: var(--secondary-background-color, rgba(120,120,128,.08));\n          padding: 8px 10px; border-radius: 6px;\n        }\n      </style>\n      <div class="row">\n        ${cams.length === 0 ? `\n          <div class="help">${this._t("ed_no_cams")}</div>\n        ` : ""}\n        <label>${this._t("ed_cam_entity")}\n          <select name="camera_entity">\n            ${cams.length ? cams.map(id => `<option value="${id}" ${cfg.camera_entity === id ? "selected" : ""}>${id}</option>`).join("") : `<option value="${cfg.camera_entity || ""}" selected>${cfg.camera_entity || this._t("ed_not_set")}</option>`}\n          </select>\n          <span class="hint">${this._t("ed_cam_entity_hint")}</span>\n        </label>\n        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt_single")}</small>\n          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_single")}" />\n        </label>\n\n        <h4>${this._t("ed_h_design")}</h4>\n        ${chk("apple_style", this._t("ed_apple_style"), true)}\n        ${sel(this._t("ed_theme"), "theme", cfg.theme || "ios", [ [ "auto", this._t("ed_theme_auto") ], [ "ios", this._t("ed_theme_ios") ], [ "android", this._t("ed_theme_android") ] ])}\n        ${sel(this._t("ed_mode"), "modus", cfg.mode || "auto", [ [ "auto", this._t("ed_mode_auto") ], [ "day", this._t("ed_mode_day") ], [ "night", this._t("ed_mode_night") ] ])}\n        ${chk("minimal", this._t("ed_minimal_single"), false)}\n        ${chk("compact", this._t("ed_compact_single"), false)}\n        ${chk("show_title", this._t("ed_show_title"), true)}\n        ${chk("show_last_event", this._t("ed_show_last_event"), true)}\n        ${chk("show_audio", this._t("ed_show_audio"), true)}\n        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}\n        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}\n        ${sel(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [ [ "auto", this._t("ed_pan_overlay_auto") ], [ "always", this._t("ed_pan_overlay_always") ], [ "never", this._t("ed_pan_overlay_never") ] ])}\n\n        <h4>${this._t("ed_h_autoplay")}</h4>\n        ${sel(this._t("ed_h_autoplay"), "autoplay", cfg.auto_play || "", [ [ "", this._t("ed_autoplay_default") ], [ "lan", this._t("ed_autoplay_lan") ], [ "always", this._t("ed_autoplay_always") ], [ "never", this._t("ed_autoplay_never") ] ])}\n        <span class="hint">${this._t("ed_autoplay_hint")}</span>\n\n        <h4>${this._t("ed_h_advanced")}</h4>\n        ${chk("show_motion_zones", this._t("ed_show_motion_zones"), false)}\n        ${chk("fullscreen_auto_hide_controls", this._t("ed_fs_auto_hide"), true)}\n        ${chk("motion_overlay", this._t("ed_motion_overlay"), false)}\n        ${chk("motion_overlay_objects", this._t("ed_motion_objects"), false)}\n        <label>${this._t("ed_border_radius")}\n          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />\n        </label>\n        <label>${this._t("ed_box_shadow")}\n          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />\n        </label>\n        ${chk("disable_webrtc", this._t("ed_disable_webrtc"), false)}\n        <span class="hint">${this._t("ed_disable_webrtc_hint")}</span>\n        <label>${this._t("ed_webrtc_timeout")}\n          <input type="number" name="webrtc_connect_timeout_ms" min="1000" max="30000" step="500" value="${clampWebrtcTimeoutMsForDisplay(cfg.webrtc_connect_timeout_ms)}" />\n          <span class="hint">${this._t("ed_webrtc_timeout_hint")}</span>\n        </label>\n      </div>`;
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .row { display: flex; flex-direction: column; gap: 14px; padding: 18px; }\n        label {\n          font-size: 14px; color: var(--primary-text-color);\n          display: flex; flex-direction: column; gap: 4px;\n        }\n        label.inline { flex-direction: row; align-items: center; gap: 10px; }\n        select, input[type="text"] {\n          padding: 9px 10px; border-radius: 6px;\n          border: 1px solid var(--divider-color, rgba(120,120,128,.2));\n          background: var(--card-background-color, #fff);\n          color: var(--primary-text-color, #1c1c1e);\n          font: inherit; font-size: 14px;\n        }\n        select:focus, input:focus { outline: 2px solid #0a84ff; outline-offset: 1px; }\n        input[type="checkbox"] { width: 18px; height: 18px; accent-color: #0a84ff; }\n        .hint {\n          font-size: 12px; color: var(--secondary-text-color, #6c6c70);\n          margin-top: 2px;\n        }\n        h4 {\n          margin: 12px 0 0; font-size: 11px; font-weight: 700;\n          letter-spacing: .08em; text-transform: uppercase;\n          color: var(--secondary-text-color, #6c6c70);\n        }\n        .help {\n          font-size: 12px;\n          color: var(--secondary-text-color, #6c6c70);\n          background: var(--secondary-background-color, rgba(120,120,128,.08));\n          padding: 8px 10px; border-radius: 6px;\n        }\n      </style>\n      <div class="row">\n        ${cams.length === 0 ? `\n          <div class="help">${this._t("ed_no_cams")}</div>\n        ` : ""}\n        <label>${this._t("ed_cam_entity")}\n          <select name="camera_entity">\n            ${cams.length ? cams.map(id => `<option value="${id}" ${cfg.camera_entity === id ? "selected" : ""}>${id}</option>`).join("") : `<option value="${cfg.camera_entity || ""}" selected>${cfg.camera_entity || this._t("ed_not_set")}</option>`}\n          </select>\n          <span class="hint">${this._t("ed_cam_entity_hint")}</span>\n        </label>\n        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt_single")}</small>\n          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_single")}" />\n        </label>\n\n        <h4>${this._t("ed_h_design")}</h4>\n        ${chk("apple_style", this._t("ed_apple_style"), true)}\n        ${sel(this._t("ed_theme"), "theme", cfg.theme || "ios", [ [ "auto", this._t("ed_theme_auto") ], [ "ios", this._t("ed_theme_ios") ], [ "android", this._t("ed_theme_android") ] ])}\n        ${sel(this._t("ed_mode"), "modus", cfg.mode || "auto", [ [ "auto", this._t("ed_mode_auto") ], [ "day", this._t("ed_mode_day") ], [ "night", this._t("ed_mode_night") ] ])}\n        ${chk("minimal", this._t("ed_minimal_single"), false)}\n        ${chk("compact", this._t("ed_compact_single"), false)}\n        ${chk("show_title", this._t("ed_show_title"), true)}\n        ${chk("show_last_event", this._t("ed_show_last_event"), true)}\n        ${chk("show_audio", this._t("ed_show_audio"), true)}\n        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}\n        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}\n        ${sel(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [ [ "auto", this._t("ed_pan_overlay_auto") ], [ "always", this._t("ed_pan_overlay_always") ], [ "never", this._t("ed_pan_overlay_never") ] ])}\n\n        <h4>${this._t("ed_h_autoplay")}</h4>\n        ${sel(this._t("ed_h_autoplay"), "autoplay", cfg.auto_play || "", [ [ "", this._t("ed_autoplay_default") ], [ "lan", this._t("ed_autoplay_lan") ], [ "always", this._t("ed_autoplay_always") ], [ "never", this._t("ed_autoplay_never") ] ])}\n        <span class="hint">${this._t("ed_autoplay_hint")}</span>\n\n        <h4>${this._t("ed_h_advanced")}</h4>\n        ${chk("show_motion_zones", this._t("ed_show_motion_zones"), false)}\n        ${chk("fullscreen_auto_hide_controls", this._t("ed_fs_auto_hide"), true)}\n        ${chk("motion_overlay", this._t("ed_motion_overlay"), false)}\n        ${chk("motion_overlay_objects", this._t("ed_motion_objects"), false)}\n        <label>${this._t("ed_motion_zones")}\n          <input type="text" name="motion_ignore_zones" value="${(cfg.motion_overlay_ignore_zones || []).map(z => [ z.x, z.y, z.w, z.h ].map(v => Math.round(v * 100)).join(",")).join("; ")}" placeholder="0,0,20,10; 60,40,40,30" />\n        </label>\n        <label>${this._t("ed_border_radius")}\n          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />\n        </label>\n        <label>${this._t("ed_box_shadow")}\n          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />\n        </label>\n        ${chk("disable_webrtc", this._t("ed_disable_webrtc"), false)}\n        <span class="hint">${this._t("ed_disable_webrtc_hint")}</span>\n        <label>${this._t("ed_webrtc_timeout")}\n          <input type="number" name="webrtc_connect_timeout_ms" min="1000" max="30000" step="500" value="${clampWebrtcTimeoutMsForDisplay(cfg.webrtc_connect_timeout_ms)}" />\n          <span class="hint">${this._t("ed_webrtc_timeout_hint")}</span>\n        </label>\n      </div>`;
     const root = this.shadowRoot;
     const fire = patch => {
       this._config = {
@@ -7895,6 +7938,17 @@ class BoschCameraCardEditor extends HTMLElement {
     root.querySelector('input[name="motion_overlay"]')?.addEventListener("change", e => fire({
       motion_overlay: e.target.checked
     }));
+    root.querySelector('input[name="motion_ignore_zones"]')?.addEventListener("change", e => {
+      const zones = e.target.value.split(";").map(p => p.split(",").map(v => Number(v.trim()) / 100)).filter(a => a.length === 4 && a.every(n => Number.isFinite(n) && n >= 0 && n <= 1) && a[2] > 0 && a[3] > 0).map(([x, y, w, h]) => ({
+        x: x,
+        y: y,
+        w: w,
+        h: h
+      }));
+      fire({
+        motion_overlay_ignore_zones: zones.length ? zones : undefined
+      });
+    });
     root.querySelector('input[name="motion_overlay_objects"]')?.addEventListener("change", e => fire({
       motion_overlay_objects: e.target.checked
     }));

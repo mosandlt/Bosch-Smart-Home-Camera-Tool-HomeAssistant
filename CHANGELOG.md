@@ -10,6 +10,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 ## [v17.2.7] - 2026-10-26
 
 ### Added
+- The last-event badge now shows the camera's own classification ("Person", "Sound") in front of the time; plain motion stays unlabelled. Card editor: new field for motion ignore areas (percent of the frame).
 - Card option `motion_overlay_objects` (experimental, default off, card 14.2.0): while the motion box is active, people, animals and vehicles are recognised in the browser (COCO-SSD) and labelled with a green box; fires a `bosch-card-objects` event. Loads TensorFlow.js and a ~5 MB model from the internet on first use; nothing is sent to the camera cloud.
 
 ### Changed

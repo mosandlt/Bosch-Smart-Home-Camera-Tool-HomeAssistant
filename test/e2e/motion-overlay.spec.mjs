@@ -304,3 +304,37 @@ test("motion_overlay_objects: recognised objects get a labelled box and an event
   await mount(page, { motion_overlay: true });
   expect(await page.evaluate(() => window.__card._config.motion_overlay_objects)).toBe(false);
 });
+
+test("last-event badge shows the camera's person/sound classification, plain motion stays unlabelled", async ({ page }) => {
+  await mount(page, { apple_style: true });
+  const text = async (kind) => page.evaluate((kind) => {
+    const card = window.__card;
+    const st = (state) => ({ state, attributes: {}, last_updated: "2026-01-01T00:00:00Z" });
+    card._hass = { ...card._hass, language: "de", states: { ...card._hass.states,
+      "sensor.test_last_event": st("2026-10-26T10:00:00+00:00"), "sensor.test_last_event_type": st(kind) } };
+    card._update?.();
+    return card.shadowRoot.getElementById("ap-last-event-text").textContent;
+  }, kind);
+  expect(await text("person")).toMatch(/^Person · /);
+  expect(await text("audio_alarm")).toMatch(/^Geräusch · /);
+  expect(await text("movement")).not.toContain("·");
+});
+
+test("editor: ignore areas are entered in percent and stored as fractions", async ({ page }) => {
+  await page.goto("/test/e2e/fixtures/card.html");
+  await page.waitForFunction(() => !!customElements.get("bosch-camera-card-editor"), null, { timeout: 10000 });
+  const cfg = await page.evaluate(async () => {
+    const ed = document.createElement("bosch-camera-card-editor");
+    document.body.appendChild(ed);
+    ed.hass = { states: {}, language: "en", localize: () => "" };
+    ed.setConfig({ type: "custom:bosch-camera-card", camera_entity: "camera.test" });
+    let out = null;
+    ed.addEventListener("config-changed", (e) => { out = e.detail.config; });
+    await new Promise((r) => setTimeout(r, 300));
+    const i = ed.shadowRoot.querySelector('input[name="motion_ignore_zones"]');
+    i.value = "10,20,30,40; junk; 0,0,0,5";
+    i.dispatchEvent(new Event("change"));
+    return out.motion_overlay_ignore_zones;
+  });
+  expect(cfg).toEqual([{ x: 0.1, y: 0.2, w: 0.3, h: 0.4 }]);
+});
