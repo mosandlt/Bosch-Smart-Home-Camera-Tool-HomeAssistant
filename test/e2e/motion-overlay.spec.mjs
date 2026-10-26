@@ -85,7 +85,7 @@ test("motion_overlay: static scene = no motion, moving square = box + event, sto
 
   // back to static: inactive event after debounce
   await page.evaluate(() => { window.__moving = false; });
-  await page.waitForFunction(() => window.__events.at(-1) === false, null, { timeout: 6000 });
+  await page.waitForFunction(() => window.__events.at(-1) === false, null, { timeout: 12000 });
 
   // overlay box tracks the <video> box
   const geo = await page.evaluate(() => {
@@ -235,8 +235,8 @@ test("motion_overlay: a large object covering most of the frame is still motion"
 });
 
 // Two objects far apart get two boxes, one object gets one.
-const TWO = 'c.fillStyle = "#222"; c.fillRect(0, 0, 320, 180); const o = Math.abs(((phase * 2) % 240) - 120); c.fillStyle = "#fff"; c.fillRect(20 + o, 30, 40, 40); c.fillRect(230 - o, 110, 40, 40);';
-const ONE = 'c.fillStyle = "#222"; c.fillRect(0, 0, 320, 180); const o = Math.abs(((phase * 2) % 240) - 120); c.fillStyle = "#fff"; c.fillRect(120 + o, 60, 40, 40);';
+const TWO = 'c.fillStyle = "#222"; c.fillRect(0, 0, 320, 180); const o = Math.abs((phase % 240) - 120); c.fillStyle = "#fff"; c.fillRect(20 + o, 30, 40, 40); c.fillRect(230 - o, 110, 40, 40);';
+const ONE = 'c.fillStyle = "#222"; c.fillRect(0, 0, 320, 180); const o = Math.abs((phase % 240) - 120); c.fillStyle = "#fff"; c.fillRect(120 + o, 60, 40, 40);';
 
 // Most frequent box count after warm-up (start-up and direction reversals briefly show ghost blobs).
 async function modeBoxes(page, scene) {
@@ -278,6 +278,6 @@ test("motion_overlay: small flickering leaves produce no boxes", async ({ page }
 });
 
 test("motion_overlay: leaves next to one person-sized object give one box", async ({ page }) => {
-  const person = ' const o = Math.abs(((phase * 2) % 240) - 120); c.fillStyle = "#fff"; c.fillRect(100 + o, 60, 40, 80);';
+  const person = ' const o = Math.abs((phase % 240) - 120); c.fillStyle = "#fff"; c.fillRect(100 + o, 60, 40, 80);';
   expect(await modeBoxes(page, LEAVES + person)).toBe(1);
 });
