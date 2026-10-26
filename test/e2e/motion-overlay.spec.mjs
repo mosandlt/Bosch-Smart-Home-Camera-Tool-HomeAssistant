@@ -254,3 +254,17 @@ test("motion_overlay: two separate moving objects get two boxes", async ({ page 
 test("motion_overlay: one moving object gets exactly one box", async ({ page }) => {
   expect(await modeBoxes(page, ONE)).toBe(1);
 });
+
+test("motion_overlay: a steady fast brightness ramp is not motion", async ({ page }) => {
+  await mount(page, { motion_overlay: true });
+  // ~48 grey levels per second, whole frame
+  await attachScene(page, 'const g = Math.round(30 + phase * 1.2); c.fillStyle = `rgb(${g},${g},${g})`; c.fillRect(0, 0, 320, 180);');
+  await page.evaluate(() => window.__card._motionStart(window.__video));
+  await page.waitForTimeout(4500);
+  expect(await page.evaluate(() => window.__events)).toEqual([]);
+});
+
+test("motion_overlay: label is translated", async ({ page }) => {
+  await mount(page, { motion_overlay: true });
+  expect(await page.evaluate(() => window.__card._t("motion_label"))).toBe("Motion");
+});

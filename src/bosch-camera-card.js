@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.24.4";
+const CARD_VERSION = "14.1.24.5";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -421,6 +421,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Show motion-zone overlay",
     ed_fs_auto_hide: "Auto-hide fullscreen controls after idle",
     ed_motion_overlay: "Highlight motion in the live view (browser-side, while the card is open)",
+    motion_label: "Motion",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Notification Types",
     accordion_advanced: "Advanced",
@@ -694,6 +695,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Bewegungszonen-Overlay anzeigen",
     ed_fs_auto_hide: "Vollbild-Bedienelemente bei Inaktivität automatisch ausblenden",
     ed_motion_overlay: "Bewegung im Livebild markieren (im Browser, solange die Karte geöffnet ist)",
+    motion_label: "Bewegung",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Benachrichtigungs-Typen",
     accordion_advanced: "Erweitert",
@@ -931,6 +933,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Mostrar superposición de zonas de movimiento",
     ed_fs_auto_hide: "Ocultar automáticamente los controles de pantalla completa tras inactividad",
     ed_motion_overlay: "Resaltar movimiento en la vista en vivo (en el navegador, mientras la tarjeta esté abierta)",
+    motion_label: "Movimiento",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipos de notificación",
     accordion_advanced: "Avanzado",
@@ -1167,6 +1170,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Afficher la superposition des zones de mouvement",
     ed_fs_auto_hide: "Masquer automatiquement les commandes plein écran après inactivité",
     ed_motion_overlay: "Mettre en évidence le mouvement dans la vue en direct (dans le navigateur, tant que la carte est ouverte)",
+    motion_label: "Mouvement",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Types de notification",
     accordion_advanced: "Avancé",
@@ -1403,6 +1407,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Mostra overlay zone di movimento",
     ed_fs_auto_hide: "Nascondi automaticamente i controlli a schermo intero dopo inattività",
     ed_motion_overlay: "Evidenzia il movimento nella vista live (nel browser, finché la scheda è aperta)",
+    motion_label: "Movimento",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipi di notifica",
     accordion_advanced: "Avanzate",
@@ -1639,6 +1644,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Bewegingszone-overlay tonen",
     ed_fs_auto_hide: "Volledig scherm-bediening automatisch verbergen bij inactiviteit",
     ed_motion_overlay: "Beweging markeren in de livebeeld (in de browser, zolang de kaart open is)",
+    motion_label: "Beweging",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Meldingstypen",
     accordion_advanced: "Geavanceerd",
@@ -1875,6 +1881,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Pokaż nakładkę stref ruchu",
     ed_fs_auto_hide: "Automatycznie ukrywaj elementy sterujące pełnego ekranu po bezczynności",
     ed_motion_overlay: "Zaznacz ruch w podglądzie na żywo (w przeglądarce, gdy karta jest otwarta)",
+    motion_label: "Ruch",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Typy powiadomień",
     accordion_advanced: "Zaawansowane",
@@ -2111,6 +2118,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Mostrar sobreposição de zonas de movimento",
     ed_fs_auto_hide: "Ocultar automaticamente os controlos de ecrã inteiro após inatividade",
     ed_motion_overlay: "Realçar movimento na vista em direto (no navegador, enquanto o cartão estiver aberto)",
+    motion_label: "Movimento",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipos de notificação",
     accordion_advanced: "Avançado",
@@ -2347,6 +2355,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Показывать зоны движения",
     ed_fs_auto_hide: "Автоматически скрывать элементы управления в полноэкранном режиме при бездействии",
     ed_motion_overlay: "Выделять движение в прямом эфире (в браузере, пока карточка открыта)",
+    motion_label: "Движение",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Типы уведомлений",
     accordion_advanced: "Дополнительно",
@@ -2583,6 +2592,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Показувати зони руху",
     ed_fs_auto_hide: "Автоматично приховувати елементи керування на весь екран при бездіяльності",
     ed_motion_overlay: "Виділяти рух у прямому ефірі (у браузері, поки картку відкрито)",
+    motion_label: "Рух",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Типи сповіщень",
     accordion_advanced: "Додатково",
@@ -2819,6 +2829,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "显示移动区域叠加",
     ed_fs_auto_hide: "全屏时空闲后自动隐藏控件",
     ed_motion_overlay: "在实时画面中标出移动（在浏览器中运行，卡片打开时有效）",
+    motion_label: "移动",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "通知类型",
     accordion_advanced: "高级",
@@ -9610,7 +9621,8 @@ class BoschCameraCard extends HTMLElement {
     const mask = new Uint8Array(W * H);
     const hist = new Uint32Array(511);
     const grayBuf = new Uint8Array(W * H);
-    let boxes = [];
+    let boxes = [], warm = 0;
+    const label = this._t("motion_label");
     const keep = new Uint8Array(W * H), seen = new Uint8Array(W * H), stack = new Uint16Array(W * H);
     const cfg = this._config;
     // Cells that never count as motion (burned-in clock + user zones).
@@ -9635,9 +9647,9 @@ class BoschCameraCard extends HTMLElement {
       }));
     };
     this._motionTimer = setInterval(() => {
-      if (document.hidden || !onScreen || video.readyState < 2 || !video.videoWidth) {
+      if (document.hidden || !onScreen || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
         // Paused: drop the old frame so resuming never diffs against a stale one.
-        prev = null; quiet = 0; boxes = [];
+        prev = null; quiet = 0; boxes = []; warm = 0;
         const pc = ov.getContext("2d");
         pc.setTransform(1, 0, 0, 1, 0, 0);
         pc.clearRect(0, 0, ov.width, ov.height);
@@ -9648,9 +9660,9 @@ class BoschCameraCard extends HTMLElement {
       try {
         wctx.drawImage(video, 0, 0, W, H);
         data = wctx.getImageData(0, 0, W, H).data;
-      } catch {
+      } catch (e) {
         // Tainted/unreadable canvas will not recover — stop instead of retrying forever.
-        if (++failures >= 3) this._motionStop();
+        if (e?.name === "SecurityError" || ++failures >= 3) this._motionStop();
         return;
       }
       failures = 0;
@@ -9694,9 +9706,10 @@ class BoschCameraCard extends HTMLElement {
       }
       // Background follows the scene (~1 s time constant): lighting and wind
       // settle, a stopped object fades out, a departed one leaves no ghost.
-      for (let k = 0; k < gray.length; k++) prev[k] += (gray[k] - prev[k]) * 0.15;
+      for (let k = 0; k < gray.length; k++) prev[k] += shift + (gray[k] - prev[k] - shift) * 0.15;
       const area = (n * 100) / (W * H);
-      const moving = area >= cfg.motion_overlay_min_area;
+      // The first ~1 s after (re)start only learns the background (no ghost of the start frame).
+      const moving = ++warm > 4 && area >= cfg.motion_overlay_min_area;
       // One box per blob: label connected cells (a single empty cell does not split a blob), bbox
       // from the real cells only. Biggest 6 blobs, tiny ones dropped.
       const dets = [];
@@ -9769,7 +9782,7 @@ class BoschCameraCard extends HTMLElement {
           let rx = ox + bx.x0 * kx, ry = oy + bx.y0 * ky, rw = (bx.x1 - bx.x0) * kx, rh = (bx.y1 - bx.y0) * ky;
           if (rot) { rx = w - rx - rw; ry = h - ry - rh; }
           c.strokeRect(rx, ry, rw, rh);
-          if (bx === biggest) c.fillText(`Bewegung ${((biggest.cnt * 100) / (W * H)).toFixed(1)}%`, rx + 4, Math.max(12, ry - 4));
+          if (bx === biggest) c.fillText(`${label} ${((biggest.cnt * 100) / (W * H)).toFixed(1)}%`, rx + 4, Math.max(12, ry - 4));
         }
       }
       // Debounce "inactive" for ~2 s (8 ticks) to avoid flapping.
