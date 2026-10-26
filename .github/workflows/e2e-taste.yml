@@ -16,7 +16,7 @@ permissions:
 jobs:
   hass-taste-test:
     name: hass-taste-test (real HA)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
