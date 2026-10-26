@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.24.7";
+const CARD_VERSION = "14.1.25";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
