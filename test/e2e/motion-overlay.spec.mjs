@@ -165,10 +165,10 @@ test("motion_overlay: custom ignore zone masks that area; bad zones are dropped"
   expect(await page.evaluate(() => window.__card._config.motion_overlay_ignore_zones.length)).toBe(1);
 });
 
-test("motion_overlay: measured defaults (threshold 20, min area 0.25 %, clock zone)", async ({ page }) => {
+test("motion_overlay: measured defaults (threshold 28, min area 0.25 %, clock zone)", async ({ page }) => {
   await mount(page, { motion_overlay: true });
   const c = await page.evaluate(() => window.__card._config);
-  expect([c.motion_overlay_threshold, c.motion_overlay_min_area, c.motion_overlay_ignore_timestamp]).toEqual([20, 0.25, true]);
+  expect([c.motion_overlay_threshold, c.motion_overlay_min_area, c.motion_overlay_ignore_timestamp]).toEqual([28, 0.25, true]);
 });
 
 // Scene variants for the false-positive filters (global brightness, scattered noise).
@@ -267,4 +267,17 @@ test("motion_overlay: a steady fast brightness ramp is not motion", async ({ pag
 test("motion_overlay: label is translated", async ({ page }) => {
   await mount(page, { motion_overlay: true });
   expect(await page.evaluate(() => window.__card._t("motion_label"))).toBe("Motion");
+});
+
+// Tree-like scene: many small flickering patches (leaves) must not produce boxes;
+// next to one person-sized object only that object is boxed.
+const LEAVES = 'c.fillStyle = "#222"; c.fillRect(0, 0, 320, 180); c.fillStyle = "#aaa"; for (let i = 0; i < 12; i++) { const a = phase * 0.4 + i * 7; c.fillRect(20 + (i % 6) * 45 + Math.sin(a) * 5, 20 + Math.floor(i / 6) * 70 + Math.cos(a) * 5, 10, 10); }';
+
+test("motion_overlay: small flickering leaves produce no boxes", async ({ page }) => {
+  expect(await modeBoxes(page, LEAVES)).toBe(0);
+});
+
+test("motion_overlay: leaves next to one person-sized object give one box", async ({ page }) => {
+  const person = ' const o = Math.abs(((phase * 2) % 240) - 120); c.fillStyle = "#fff"; c.fillRect(100 + o, 60, 40, 80);';
+  expect(await modeBoxes(page, LEAVES + person)).toBe(1);
 });

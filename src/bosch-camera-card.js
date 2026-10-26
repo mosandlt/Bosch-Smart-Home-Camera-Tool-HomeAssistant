@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.24.5";
+const CARD_VERSION = "14.1.24.7";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -3414,7 +3414,7 @@ class BoschCameraCard extends HTMLElement {
       // Only runs while this card is visible and streaming — NOT a replacement
       // for the camera's own motion events.
       motion_overlay:               config.motion_overlay === true,
-      motion_overlay_threshold:     Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 20)),
+      motion_overlay_threshold:     Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 28)),
       motion_overlay_min_area:      Math.min(100, Math.max(0.1, Number(config.motion_overlay_min_area) || 0.25)),
       // The camera burns a clock into the picture (bottom right) that changes every
       // second and would count as motion; that corner is ignored unless disabled.
@@ -9622,6 +9622,7 @@ class BoschCameraCard extends HTMLElement {
     const hist = new Uint32Array(511);
     const grayBuf = new Uint8Array(W * H);
     let boxes = [], warm = 0;
+    const MIN_BLOB = 15; // cells (of 96x54) a blob needs to count as an object
     const label = this._t("motion_label");
     const keep = new Uint8Array(W * H), seen = new Uint8Array(W * H), stack = new Uint16Array(W * H);
     const cfg = this._config;
@@ -9733,10 +9734,17 @@ class BoschCameraCard extends HTMLElement {
               }
             }
           }
-          if (cnt >= 3) dets.push({ x0: bx0, y0: by0, x1: bx1 + 1, y1: by1 + 1, cnt });
+          if (cnt >= MIN_BLOB) dets.push({ x0: bx0, y0: by0, x1: bx1 + 1, y1: by1 + 1, cnt });
         }
         dets.sort((p, q) => q.cnt - p.cnt);
-        dets.length = Math.min(dets.length, 6);
+        // Leaves, shadows and wind make many small blobs: drop everything much smaller
+        // than the biggest one; at most 3 boxes are shown.
+        const floor = dets.length ? Math.max(MIN_BLOB, dets[0].cnt * 0.25) : 0;
+        let kept = dets.filter((d) => d.cnt >= floor);
+        // 4+ similar blobs = foliage in the wind, not objects: only clearly dominant ones stay.
+        if (kept.length >= 4) kept = kept.filter((d) => d.cnt >= dets[0].cnt * 0.5);
+        if (kept.length >= 4) kept = [];
+        dets.splice(0, dets.length, ...kept);
       }
       // Track blobs between ticks: nearest-centre match, smooth, hold ~1 s.
       const used = new Set();
@@ -9756,7 +9764,7 @@ class BoschCameraCard extends HTMLElement {
         bx.quiet = 0; bx.cnt = d.cnt;
       }
       dets.forEach((d, i) => { if (!used.has(i)) boxes.push({ ...d, quiet: 0 }); });
-      boxes = boxes.filter((bx) => bx.quiet < 4).sort((p, q) => q.cnt - p.cnt).slice(0, 6);
+      boxes = boxes.filter((bx) => bx.quiet < 4).sort((p, q) => q.cnt - p.cnt).slice(0, 3);
       this._motionBoxes = boxes;
       // Overlay tracks the <video> box (it can be taller than the wrapper via min-height).
       const w = video.clientWidth, h = video.clientHeight, dpr = window.devicePixelRatio || 1;

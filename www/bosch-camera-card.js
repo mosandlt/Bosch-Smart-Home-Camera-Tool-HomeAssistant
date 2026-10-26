@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.24.5";
+const CARD_VERSION = "14.1.24.7";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
@@ -2969,7 +2969,7 @@ class BoschCameraCard extends HTMLElement {
       ai_description_overlay_timeout: config.ai_description_overlay_timeout === undefined ? 12 : Number(config.ai_description_overlay_timeout),
       fullscreen_auto_hide_controls: config.fullscreen_auto_hide_controls !== false,
       motion_overlay: config.motion_overlay === true,
-      motion_overlay_threshold: Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 20)),
+      motion_overlay_threshold: Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 28)),
       motion_overlay_min_area: Math.min(100, Math.max(.1, Number(config.motion_overlay_min_area) || .25)),
       motion_overlay_ignore_timestamp: config.motion_overlay_ignore_timestamp !== false,
       motion_overlay_ignore_zones: Array.isArray(config.motion_overlay_ignore_zones) ? config.motion_overlay_ignore_zones.map(z => ({
@@ -5287,6 +5287,7 @@ class BoschCameraCard extends HTMLElement {
     const hist = new Uint32Array(511);
     const grayBuf = new Uint8Array(W * H);
     let boxes = [], warm = 0;
+    const MIN_BLOB = 15;
     const label = this._t("motion_label");
     const keep = new Uint8Array(W * H), seen = new Uint8Array(W * H), stack = new Uint16Array(W * H);
     const cfg = this._config;
@@ -5416,7 +5417,7 @@ class BoschCameraCard extends HTMLElement {
               }
             }
           }
-          if (cnt >= 3) dets.push({
+          if (cnt >= MIN_BLOB) dets.push({
             x0: bx0,
             y0: by0,
             x1: bx1 + 1,
@@ -5425,7 +5426,11 @@ class BoschCameraCard extends HTMLElement {
           });
         }
         dets.sort((p, q) => q.cnt - p.cnt);
-        dets.length = Math.min(dets.length, 6);
+        const floor = dets.length ? Math.max(MIN_BLOB, dets[0].cnt * .25) : 0;
+        let kept = dets.filter(d => d.cnt >= floor);
+        if (kept.length >= 4) kept = kept.filter(d => d.cnt >= dets[0].cnt * .5);
+        if (kept.length >= 4) kept = [];
+        dets.splice(0, dets.length, ...kept);
       }
       const used = new Set;
       for (const bx of boxes) {
@@ -5458,7 +5463,7 @@ class BoschCameraCard extends HTMLElement {
           quiet: 0
         });
       });
-      boxes = boxes.filter(bx => bx.quiet < 4).sort((p, q) => q.cnt - p.cnt).slice(0, 6);
+      boxes = boxes.filter(bx => bx.quiet < 4).sort((p, q) => q.cnt - p.cnt).slice(0, 3);
       this._motionBoxes = boxes;
       const w = video.clientWidth, h = video.clientHeight, dpr = window.devicePixelRatio || 1;
       ov.style.cssText = `position:absolute;left:${video.offsetLeft}px;top:${video.offsetTop}px;width:${w}px;height:${h}px;pointer-events:none;z-index:3`;
