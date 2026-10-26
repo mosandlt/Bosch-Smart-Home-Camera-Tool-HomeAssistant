@@ -8,7 +8,7 @@
  * scripts/build-card.mjs. Do not edit directly — edit the src file and
  * rebuild. Comments are stripped to reduce the gzipped payload size.
  */
-const CARD_VERSION = "14.1.24";
+const CARD_VERSION = "14.1.24.1";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
@@ -5271,7 +5271,10 @@ class BoschCameraCard extends HTMLElement {
     video.parentElement.appendChild(ov);
     this._motionCanvas = ov;
     this._motionActive = false;
-    let prev = null, quiet = 0, failures = 0, onScreen = true;
+    let prev = null, cur = new Uint8Array(W * H), quiet = 0, failures = 0, onScreen = true;
+    const mask = new Uint8Array(W * H);
+    const hist = new Uint32Array(511);
+    let box = null, boxArea = 0;
     const cfg = this._config;
     const ignore = new Uint8Array(W * H);
     const zones = [ ...cfg.motion_overlay_ignore_zones ];
@@ -5308,6 +5311,7 @@ class BoschCameraCard extends HTMLElement {
       if (document.hidden || !onScreen || video.readyState < 2 || !video.videoWidth) {
         prev = null;
         quiet = 0;
+        box = null;
         const pc = ov.getContext("2d");
         pc.setTransform(1, 0, 0, 1, 0, 0);
         pc.clearRect(0, 0, ov.width, ov.height);
@@ -5323,27 +5327,53 @@ class BoschCameraCard extends HTMLElement {
         return;
       }
       failures = 0;
-      const gray = new Uint8Array(W * H);
+      const gray = cur;
       for (let i = 0, j = 0; i < data.length; i += 4, j++) {
         gray[j] = data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29 >> 8;
       }
       if (!prev) {
         prev = gray;
+        cur = new Uint8Array(W * H);
         return;
+      }
+      hist.fill(0);
+      let samples = 0;
+      for (let k = 0; k < gray.length; k++) {
+        if (!ignore[k]) {
+          hist[gray[k] - prev[k] + 255]++;
+          samples++;
+        }
+      }
+      let shift = 0;
+      for (let d = 0, acc = 0; d < hist.length && samples; d++) {
+        acc += hist[d];
+        if (acc * 2 > samples) {
+          shift = d - 255;
+          break;
+        }
+      }
+      const lim = cfg.motion_overlay_threshold * .75;
+      shift = Math.max(-lim, Math.min(lim, shift));
+      for (let k = 0; k < gray.length; k++) {
+        mask[k] = !ignore[k] && Math.abs(gray[k] - prev[k] - shift) > cfg.motion_overlay_threshold ? 1 : 0;
       }
       let n = 0, x0 = W, y0 = H, x1 = -1, y1 = -1;
       for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
-          const k = y * W + x;
-          if (!ignore[k] && Math.abs(gray[k] - prev[k]) > cfg.motion_overlay_threshold) {
-            n++;
-            if (x < x0) x0 = x;
-            if (x > x1) x1 = x;
-            if (y < y0) y0 = y;
-            if (y > y1) y1 = y;
+          if (!mask[y * W + x]) continue;
+          let nb = 0;
+          for (let yy = Math.max(0, y - 1); yy <= Math.min(H - 1, y + 1); yy++) {
+            for (let xx = Math.max(0, x - 1); xx <= Math.min(W - 1, x + 1); xx++) nb += mask[yy * W + xx];
           }
+          if (nb < 3) continue;
+          n++;
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
         }
       }
+      cur = prev;
       prev = gray;
       const area = n * 100 / (W * H);
       const moving = area >= cfg.motion_overlay_min_area;
@@ -5358,11 +5388,28 @@ class BoschCameraCard extends HTMLElement {
       c.clearRect(0, 0, w, h);
       if (moving) {
         quiet = 0;
+        const nb = {
+          x0: x0,
+          y0: y0,
+          x1: x1 + 1,
+          y1: y1 + 1
+        };
+        box = box ? {
+          x0: box.x0 + (nb.x0 - box.x0) * .5,
+          y0: box.y0 + (nb.y0 - box.y0) * .5,
+          x1: box.x1 + (nb.x1 - box.x1) * .5,
+          y1: box.y1 + (nb.y1 - box.y1) * .5
+        } : nb;
+        boxArea = area;
+      } else {
+        quiet++;
+      }
+      if (box && quiet < 4) {
         const cover = getComputedStyle(video).objectFit === "cover";
         const sc = (cover ? Math.max : Math.min)(w / video.videoWidth, h / video.videoHeight);
         const ox = (w - video.videoWidth * sc) / 2, oy = (h - video.videoHeight * sc) / 2;
         const kx = video.videoWidth * sc / W, ky = video.videoHeight * sc / H;
-        let rx = ox + x0 * kx, ry = oy + y0 * ky, rw = (x1 - x0 + 1) * kx, rh = (y1 - y0 + 1) * ky;
+        let rx = ox + box.x0 * kx, ry = oy + box.y0 * ky, rw = (box.x1 - box.x0) * kx, rh = (box.y1 - box.y0) * ky;
         if (this.shadowRoot.getElementById("img-wrapper")?.classList.contains("rotated-180")) {
           rx = w - rx - rw;
           ry = h - ry - rh;
@@ -5372,9 +5419,9 @@ class BoschCameraCard extends HTMLElement {
         c.strokeRect(rx, ry, rw, rh);
         c.fillStyle = "#ff3b30";
         c.font = "12px sans-serif";
-        c.fillText(`Bewegung ${area.toFixed(1)}%`, rx + 4, Math.max(12, ry - 4));
+        c.fillText(`Bewegung ${boxArea.toFixed(1)}%`, rx + 4, Math.max(12, ry - 4));
       } else {
-        quiet++;
+        box = null;
       }
       setActive(moving || this._motionActive && quiet < 8, area);
     }, 250);

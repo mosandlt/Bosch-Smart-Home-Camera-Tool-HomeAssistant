@@ -170,3 +170,66 @@ test("motion_overlay: measured defaults (threshold 20, min area 0.25 %, clock zo
   const c = await page.evaluate(() => window.__card._config);
   expect([c.motion_overlay_threshold, c.motion_overlay_min_area, c.motion_overlay_ignore_timestamp]).toEqual([20, 0.25, true]);
 });
+
+// Scene variants for the false-positive filters (global brightness, scattered noise).
+async function attachScene(page, draw) {
+  await page.evaluate(async (draw) => {
+    const src = document.createElement("canvas");
+    src.width = 320; src.height = 180;
+    const c = src.getContext("2d");
+    window.__phase = 0;
+    const fn = new Function("c", "phase", draw);
+    setInterval(() => { window.__phase++; fn(c, window.__phase); }, 40);
+    const video = window.__card.shadowRoot.getElementById("cam-video");
+    video.style.display = "block";
+    video.srcObject = src.captureStream(25);
+    await video.play();
+    window.__video = video;
+  }, draw);
+  await page.waitForFunction(() => window.__video.readyState >= 2 && window.__video.videoWidth > 0);
+}
+
+test("motion_overlay: a global brightness change is not motion", async ({ page }) => {
+  await mount(page, { motion_overlay: true });
+  // whole frame flips between two grey levels every ~1 s (auto exposure / IR switch stand-in)
+  await attachScene(page, 'c.fillStyle = (Math.floor(phase / 25) % 2) ? "#343434" : "#222"; c.fillRect(0, 0, 320, 180);');
+  await page.evaluate(() => window.__card._motionStart(window.__video));
+  await page.waitForTimeout(3000);
+  expect(await page.evaluate(() => window.__events)).toEqual([]);
+});
+
+test("motion_overlay: scattered single-pixel noise is not motion", async ({ page }) => {
+  await mount(page, { motion_overlay: true });
+  await attachScene(page, 'c.fillStyle = "#222"; c.fillRect(0, 0, 320, 180); c.fillStyle = "#fff"; for (let i = 0; i < 12; i++) c.fillRect(Math.random() * 316, Math.random() * 176, 2, 2);');
+  await page.evaluate(() => window.__card._motionStart(window.__video));
+  await page.waitForTimeout(3000);
+  expect(await page.evaluate(() => window.__events)).toEqual([]);
+});
+
+test("motion_overlay: the box stays visible for a moment after motion stops", async ({ page }) => {
+  await mount(page, { motion_overlay: true });
+  await attachFakeStream(page);
+  await page.evaluate(() => { window.__moving = true; window.__card._motionStart(window.__video); });
+  await page.waitForFunction(() => window.__card._motionActive === true, null, { timeout: 5000 });
+  await page.waitForTimeout(600);
+  await page.evaluate(() => { window.__moving = false; });
+  // within ~2 ticks of the last motion the held box must still be drawn
+  const held = await page.evaluate(() => new Promise((res) => {
+    const ov = window.__card._motionCanvas;
+    let seen = false, left = 12;
+    const t = setInterval(() => {
+      const d = ov.getContext("2d").getImageData(0, 0, ov.width, ov.height).data;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 200 && d[i + 1] < 100 && d[i + 3] > 0) { seen = true; break; }
+      if (--left === 0) { clearInterval(t); res(seen); }
+    }, 100);
+  }));
+  expect(held).toBe(true);
+});
+
+test("motion_overlay: a large object covering most of the frame is still motion", async ({ page }) => {
+  await mount(page, { motion_overlay: true });
+  // 60 % of the frame lights up for a second, then goes dark again (big object entering/leaving)
+  await attachScene(page, 'c.fillStyle = "#222"; c.fillRect(0, 0, 320, 180); if (Math.floor(phase / 25) % 2) { c.fillStyle = "#4a4a4a"; c.fillRect(0, 0, 192, 180); }');
+  await page.evaluate(() => window.__card._motionStart(window.__video));
+  await page.waitForFunction(() => window.__events.includes(true), null, { timeout: 5000 });
+});
