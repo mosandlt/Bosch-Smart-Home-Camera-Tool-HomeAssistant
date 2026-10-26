@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.24.1";
+const CARD_VERSION = "14.1.24.4";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -9602,12 +9602,16 @@ class BoschCameraCard extends HTMLElement {
     video.parentElement.appendChild(ov);
     this._motionCanvas = ov;
     this._motionActive = false;
-    let prev = null, cur = new Uint8Array(W * H), quiet = 0, failures = 0, onScreen = true;
+    // `prev` is a slowly adapting background (Float32), not the last frame: a solid
+    // moving object then shows as one filled blob instead of two edge strips.
+    let prev = null, quiet = 0, failures = 0, onScreen = true;
     // Per-cell hit mask, difference histogram (global brightness shift) and the
     // smoothed box in cell units, held for a moment after motion stops.
     const mask = new Uint8Array(W * H);
     const hist = new Uint32Array(511);
-    let box = null, boxArea = 0;
+    const grayBuf = new Uint8Array(W * H);
+    let boxes = [];
+    const keep = new Uint8Array(W * H), seen = new Uint8Array(W * H), stack = new Uint16Array(W * H);
     const cfg = this._config;
     // Cells that never count as motion (burned-in clock + user zones).
     const ignore = new Uint8Array(W * H);
@@ -9633,7 +9637,7 @@ class BoschCameraCard extends HTMLElement {
     this._motionTimer = setInterval(() => {
       if (document.hidden || !onScreen || video.readyState < 2 || !video.videoWidth) {
         // Paused: drop the old frame so resuming never diffs against a stale one.
-        prev = null; quiet = 0; box = null;
+        prev = null; quiet = 0; boxes = [];
         const pc = ov.getContext("2d");
         pc.setTransform(1, 0, 0, 1, 0, 0);
         pc.clearRect(0, 0, ov.width, ov.height);
@@ -9650,17 +9654,17 @@ class BoschCameraCard extends HTMLElement {
         return;
       }
       failures = 0;
-      const gray = cur;
+      const gray = grayBuf;
       for (let i = 0, j = 0; i < data.length; i += 4, j++) {
         gray[j] = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
       }
-      if (!prev) { prev = gray; cur = new Uint8Array(W * H); return; }
+      if (!prev) { prev = Float32Array.from(gray); return; }
       // Median frame-to-frame difference = global brightness change (auto
       // exposure, IR switch, clouds); subtract it so only local change counts.
       hist.fill(0);
       let samples = 0;
       for (let k = 0; k < gray.length; k++) {
-        if (!ignore[k]) { hist[gray[k] - prev[k] + 255]++; samples++; }
+        if (!ignore[k]) { hist[Math.round(gray[k] - prev[k]) + 255]++; samples++; }
       }
       let shift = 0;
       for (let d = 0, acc = 0; d < hist.length && samples; d++) {
@@ -9676,7 +9680,8 @@ class BoschCameraCard extends HTMLElement {
       }
       // A cell only counts with >= 3 hits in its 3x3 neighbourhood: scattered
       // codec noise no longer inflates the box, a real object still passes.
-      let n = 0, x0 = W, y0 = H, x1 = -1, y1 = -1;
+      let n = 0;
+      keep.fill(0);
       for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
           if (!mask[y * W + x]) continue;
@@ -9684,15 +9689,62 @@ class BoschCameraCard extends HTMLElement {
           for (let yy = Math.max(0, y - 1); yy <= Math.min(H - 1, y + 1); yy++) {
             for (let xx = Math.max(0, x - 1); xx <= Math.min(W - 1, x + 1); xx++) nb += mask[yy * W + xx];
           }
-          if (nb < 3) continue;
-          n++;
-          if (x < x0) x0 = x; if (x > x1) x1 = x;
-          if (y < y0) y0 = y; if (y > y1) y1 = y;
+          if (nb >= 3) { keep[y * W + x] = 1; n++; }
         }
       }
-      cur = prev; prev = gray;
+      // Background follows the scene (~1 s time constant): lighting and wind
+      // settle, a stopped object fades out, a departed one leaves no ghost.
+      for (let k = 0; k < gray.length; k++) prev[k] += (gray[k] - prev[k]) * 0.15;
       const area = (n * 100) / (W * H);
       const moving = area >= cfg.motion_overlay_min_area;
+      // One box per blob: label connected cells (a single empty cell does not split a blob), bbox
+      // from the real cells only. Biggest 6 blobs, tiny ones dropped.
+      const dets = [];
+      if (moving) {
+        seen.fill(0);
+        for (let s0 = 0; s0 < keep.length; s0++) {
+          if (!keep[s0] || seen[s0]) continue;
+          let top = 0, cnt = 0, bx0 = W, by0 = H, bx1 = -1, by1 = -1;
+          stack[top++] = s0; seen[s0] = 1;
+          while (top) {
+            const k = stack[--top], kx = k % W, ky = (k - kx) / W;
+            if (keep[k]) {
+              cnt++;
+              if (kx < bx0) bx0 = kx; if (kx > bx1) bx1 = kx;
+              if (ky < by0) by0 = ky; if (ky > by1) by1 = ky;
+            }
+            for (let yy = Math.max(0, ky - 2); yy <= Math.min(H - 1, ky + 2); yy++) {
+              for (let xx = Math.max(0, kx - 2); xx <= Math.min(W - 1, kx + 2); xx++) {
+                const q = yy * W + xx;
+                if (keep[q] && !seen[q]) { seen[q] = 1; stack[top++] = q; }
+              }
+            }
+          }
+          if (cnt >= 3) dets.push({ x0: bx0, y0: by0, x1: bx1 + 1, y1: by1 + 1, cnt });
+        }
+        dets.sort((p, q) => q.cnt - p.cnt);
+        dets.length = Math.min(dets.length, 6);
+      }
+      // Track blobs between ticks: nearest-centre match, smooth, hold ~1 s.
+      const used = new Set();
+      for (const bx of boxes) {
+        let best = -1, bd = 14 * 14;
+        const cx = (bx.x0 + bx.x1) / 2, cy = (bx.y0 + bx.y1) / 2;
+        dets.forEach((d, i) => {
+          if (used.has(i)) return;
+          const dx = (d.x0 + d.x1) / 2 - cx, dy = (d.y0 + d.y1) / 2 - cy;
+          if (dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; best = i; }
+        });
+        if (best < 0) { bx.quiet++; continue; }
+        used.add(best);
+        const d = dets[best];
+        bx.x0 += (d.x0 - bx.x0) * 0.5; bx.y0 += (d.y0 - bx.y0) * 0.5;
+        bx.x1 += (d.x1 - bx.x1) * 0.5; bx.y1 += (d.y1 - bx.y1) * 0.5;
+        bx.quiet = 0; bx.cnt = d.cnt;
+      }
+      dets.forEach((d, i) => { if (!used.has(i)) boxes.push({ ...d, quiet: 0 }); });
+      boxes = boxes.filter((bx) => bx.quiet < 4).sort((p, q) => q.cnt - p.cnt).slice(0, 6);
+      this._motionBoxes = boxes;
       // Overlay tracks the <video> box (it can be taller than the wrapper via min-height).
       const w = video.clientWidth, h = video.clientHeight, dpr = window.devicePixelRatio || 1;
       ov.style.cssText = `position:absolute;left:${video.offsetLeft}px;top:${video.offsetTop}px;width:${w}px;height:${h}px;pointer-events:none;z-index:3`;
@@ -9702,35 +9754,23 @@ class BoschCameraCard extends HTMLElement {
       const c = ov.getContext("2d");
       c.setTransform(dpr, 0, 0, dpr, 0, 0);
       c.clearRect(0, 0, w, h);
-      if (moving) {
-        quiet = 0;
-        // Smooth the box between ticks so it follows instead of jittering.
-        const nb = { x0, y0, x1: x1 + 1, y1: y1 + 1 };
-        box = box ? {
-          x0: box.x0 + (nb.x0 - box.x0) * 0.5, y0: box.y0 + (nb.y0 - box.y0) * 0.5,
-          x1: box.x1 + (nb.x1 - box.x1) * 0.5, y1: box.y1 + (nb.y1 - box.y1) * 0.5,
-        } : nb;
-        boxArea = area;
-      } else {
-        quiet++;
-      }
-      // Keep the last box on screen for ~1 s (4 ticks) after motion stops.
-      if (box && quiet < 4) {
+      if (moving) quiet = 0; else quiet++;
+      if (boxes.length) {
         // Map video-space (object-fit) to element-space.
         const cover = getComputedStyle(video).objectFit === "cover";
         const sc = (cover ? Math.max : Math.min)(w / video.videoWidth, h / video.videoHeight);
         const ox = (w - video.videoWidth * sc) / 2, oy = (h - video.videoHeight * sc) / 2;
         const kx = (video.videoWidth * sc) / W, ky = (video.videoHeight * sc) / H;
-        let rx = ox + box.x0 * kx, ry = oy + box.y0 * ky, rw = (box.x1 - box.x0) * kx, rh = (box.y1 - box.y0) * ky;
-        if (this.shadowRoot.getElementById("img-wrapper")?.classList.contains("rotated-180")) {
-          rx = w - rx - rw; ry = h - ry - rh;
+        const rot = this.shadowRoot.getElementById("img-wrapper")?.classList.contains("rotated-180");
+        c.strokeStyle = "#ff3b30"; c.lineWidth = 2; c.fillStyle = "#ff3b30"; c.font = "12px sans-serif";
+        let biggest = boxes[0];
+        for (const bx of boxes) if (bx.cnt > biggest.cnt) biggest = bx;
+        for (const bx of boxes) {
+          let rx = ox + bx.x0 * kx, ry = oy + bx.y0 * ky, rw = (bx.x1 - bx.x0) * kx, rh = (bx.y1 - bx.y0) * ky;
+          if (rot) { rx = w - rx - rw; ry = h - ry - rh; }
+          c.strokeRect(rx, ry, rw, rh);
+          if (bx === biggest) c.fillText(`Bewegung ${((biggest.cnt * 100) / (W * H)).toFixed(1)}%`, rx + 4, Math.max(12, ry - 4));
         }
-        c.strokeStyle = "#ff3b30"; c.lineWidth = 2;
-        c.strokeRect(rx, ry, rw, rh);
-        c.fillStyle = "#ff3b30"; c.font = "12px sans-serif";
-        c.fillText(`Bewegung ${boxArea.toFixed(1)}%`, rx + 4, Math.max(12, ry - 4));
-      } else {
-        box = null;
       }
       // Debounce "inactive" for ~2 s (8 ticks) to avoid flapping.
       setActive(moving || (this._motionActive && quiet < 8), area);

@@ -144,7 +144,7 @@ async function clockEvents(page, cfg) {
   await mount(page, cfg);
   await attachFakeStream(page);
   await page.evaluate(() => { window.__clock = true; window.__card._motionStart(window.__video); });
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(4000);
   return page.evaluate(() => window.__events);
 }
 
@@ -232,4 +232,25 @@ test("motion_overlay: a large object covering most of the frame is still motion"
   await attachScene(page, 'c.fillStyle = "#222"; c.fillRect(0, 0, 320, 180); if (Math.floor(phase / 25) % 2) { c.fillStyle = "#4a4a4a"; c.fillRect(0, 0, 192, 180); }');
   await page.evaluate(() => window.__card._motionStart(window.__video));
   await page.waitForFunction(() => window.__events.includes(true), null, { timeout: 5000 });
+});
+
+// Two objects far apart get two boxes, one object gets one.
+const TWO = 'c.fillStyle = "#222"; c.fillRect(0, 0, 320, 180); const o = Math.abs(((phase * 2) % 240) - 120); c.fillStyle = "#fff"; c.fillRect(20 + o, 30, 40, 40); c.fillRect(230 - o, 110, 40, 40);';
+const ONE = 'c.fillStyle = "#222"; c.fillRect(0, 0, 320, 180); const o = Math.abs(((phase * 2) % 240) - 120); c.fillStyle = "#fff"; c.fillRect(120 + o, 60, 40, 40);';
+
+// Most frequent box count after warm-up (start-up and direction reversals briefly show ghost blobs).
+async function modeBoxes(page, scene) {
+  await mount(page, { motion_overlay: true });
+  await attachScene(page, scene);
+  await page.evaluate(() => { window.__counts = {}; window.__card._motionStart(window.__video); setTimeout(() => setInterval(() => { const n = (window.__card._motionBoxes || []).length; window.__counts[n] = (window.__counts[n] || 0) + 1; }, 50), 1500); });
+  await page.waitForTimeout(5000);
+  return page.evaluate(() => Number(Object.entries(window.__counts).sort((a, b) => b[1] - a[1])[0][0]));
+}
+
+test("motion_overlay: two separate moving objects get two boxes", async ({ page }) => {
+  expect(await modeBoxes(page, TWO)).toBe(2);
+});
+
+test("motion_overlay: one moving object gets exactly one box", async ({ page }) => {
+  expect(await modeBoxes(page, ONE)).toBe(1);
 });
