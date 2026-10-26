@@ -9,6 +9,9 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [v17.2.7] - 2026-10-26
 
+### Added
+- Card option `motion_overlay_objects` (experimental, default off, card 14.2.0): while the motion box is active, people, animals and vehicles are recognised in the browser (COCO-SSD) and labelled with a green box; fires a `bosch-card-objects` event. Loads TensorFlow.js and a ~5 MB model from the internet on first use; nothing is sent to the camera cloud.
+
 ### Changed
 
 - **Motion overlay (opt-in card option `motion_overlay`) is more accurate and calmer.** It now compares the live picture against a slowly adapting background instead of the previous frame, so a solid object is one filled box instead of two edge strips, and it draws one box per moving object (at most 3). Brightness changes of the whole picture (auto exposure, day/night switch, clouds) and scattered compression noise no longer count as motion, boxes are smoothed and stay visible for about a second, and small blobs such as leaves or several similar blobs (foliage in the wind) are ignored. The default `motion_overlay_threshold` is now 28 (was 20); an explicitly configured value is kept. The label is translated.

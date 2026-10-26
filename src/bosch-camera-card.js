@@ -152,7 +152,7 @@
  *     hls.js is loaded on demand from CDN. Safari/iOS continue to use native HLS.
  */
 
-const CARD_VERSION = "14.1.25";
+const CARD_VERSION = "14.2.0";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -421,6 +421,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Show motion-zone overlay",
     ed_fs_auto_hide: "Auto-hide fullscreen controls after idle",
     ed_motion_overlay: "Highlight motion in the live view (browser-side, while the card is open)",
+    ed_motion_objects: "Recognise people, animals and vehicles in the motion box (experimental; downloads a ~5 MB model from the internet)",
     motion_label: "Motion",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Notification Types",
@@ -695,6 +696,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Bewegungszonen-Overlay anzeigen",
     ed_fs_auto_hide: "Vollbild-Bedienelemente bei Inaktivität automatisch ausblenden",
     ed_motion_overlay: "Bewegung im Livebild markieren (im Browser, solange die Karte geöffnet ist)",
+    ed_motion_objects: "Personen, Tiere und Fahrzeuge in der Bewegungsbox erkennen (experimentell; lädt ein ca. 5-MB-Modell aus dem Internet)",
     motion_label: "Bewegung",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Benachrichtigungs-Typen",
@@ -933,6 +935,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Mostrar superposición de zonas de movimiento",
     ed_fs_auto_hide: "Ocultar automáticamente los controles de pantalla completa tras inactividad",
     ed_motion_overlay: "Resaltar movimiento en la vista en vivo (en el navegador, mientras la tarjeta esté abierta)",
+    ed_motion_objects: "Reconocer personas, animales y vehículos en el recuadro de movimiento (experimental; descarga un modelo de ~5 MB de internet)",
     motion_label: "Movimiento",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipos de notificación",
@@ -1170,6 +1173,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Afficher la superposition des zones de mouvement",
     ed_fs_auto_hide: "Masquer automatiquement les commandes plein écran après inactivité",
     ed_motion_overlay: "Mettre en évidence le mouvement dans la vue en direct (dans le navigateur, tant que la carte est ouverte)",
+    ed_motion_objects: "Reconnaître personnes, animaux et véhicules dans le cadre de mouvement (expérimental ; télécharge un modèle d'environ 5 Mo depuis Internet)",
     motion_label: "Mouvement",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Types de notification",
@@ -1407,6 +1411,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Mostra overlay zone di movimento",
     ed_fs_auto_hide: "Nascondi automaticamente i controlli a schermo intero dopo inattività",
     ed_motion_overlay: "Evidenzia il movimento nella vista live (nel browser, finché la scheda è aperta)",
+    ed_motion_objects: "Riconoscere persone, animali e veicoli nel riquadro di movimento (sperimentale; scarica un modello da ~5 MB da internet)",
     motion_label: "Movimento",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipi di notifica",
@@ -1644,6 +1649,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Bewegingszone-overlay tonen",
     ed_fs_auto_hide: "Volledig scherm-bediening automatisch verbergen bij inactiviteit",
     ed_motion_overlay: "Beweging markeren in de livebeeld (in de browser, zolang de kaart open is)",
+    ed_motion_objects: "Personen, dieren en voertuigen herkennen in het bewegingskader (experimenteel; downloadt een model van ~5 MB van internet)",
     motion_label: "Beweging",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Meldingstypen",
@@ -1881,6 +1887,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Pokaż nakładkę stref ruchu",
     ed_fs_auto_hide: "Automatycznie ukrywaj elementy sterujące pełnego ekranu po bezczynności",
     ed_motion_overlay: "Zaznacz ruch w podglądzie na żywo (w przeglądarce, gdy karta jest otwarta)",
+    ed_motion_objects: "Rozpoznawaj osoby, zwierzęta i pojazdy w ramce ruchu (eksperymentalne; pobiera model ok. 5 MB z internetu)",
     motion_label: "Ruch",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Typy powiadomień",
@@ -2118,6 +2125,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Mostrar sobreposição de zonas de movimento",
     ed_fs_auto_hide: "Ocultar automaticamente os controlos de ecrã inteiro após inatividade",
     ed_motion_overlay: "Realçar movimento na vista em direto (no navegador, enquanto o cartão estiver aberto)",
+    ed_motion_objects: "Reconhecer pessoas, animais e veículos na caixa de movimento (experimental; descarrega um modelo de ~5 MB da internet)",
     motion_label: "Movimento",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipos de notificação",
@@ -2355,6 +2363,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Показывать зоны движения",
     ed_fs_auto_hide: "Автоматически скрывать элементы управления в полноэкранном режиме при бездействии",
     ed_motion_overlay: "Выделять движение в прямом эфире (в браузере, пока карточка открыта)",
+    ed_motion_objects: "Распознавать людей, животных и транспорт в рамке движения (экспериментально; загружает модель ~5 МБ из интернета)",
     motion_label: "Движение",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Типы уведомлений",
@@ -2592,6 +2601,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "Показувати зони руху",
     ed_fs_auto_hide: "Автоматично приховувати елементи керування на весь екран при бездіяльності",
     ed_motion_overlay: "Виділяти рух у прямому ефірі (у браузері, поки картку відкрито)",
+    ed_motion_objects: "Розпізнавати людей, тварин і транспорт у рамці руху (експериментально; завантажує модель ~5 МБ з інтернету)",
     motion_label: "Рух",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Типи сповіщень",
@@ -2829,6 +2839,7 @@ const CARD_I18N = {
     ed_show_motion_zones: "显示移动区域叠加",
     ed_fs_auto_hide: "全屏时空闲后自动隐藏控件",
     ed_motion_overlay: "在实时画面中标出移动（在浏览器中运行，卡片打开时有效）",
+    ed_motion_objects: "在移动框中识别人、动物和车辆（实验性；会从互联网下载约 5 MB 的模型）",
     motion_label: "移动",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "通知类型",
@@ -3415,6 +3426,7 @@ class BoschCameraCard extends HTMLElement {
       // for the camera's own motion events.
       motion_overlay:               config.motion_overlay === true,
       motion_overlay_threshold:     Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 28)),
+      motion_overlay_objects:       config.motion_overlay_objects === true,
       motion_overlay_min_area:      Math.min(100, Math.max(0.1, Number(config.motion_overlay_min_area) || 0.25)),
       // The camera burns a clock into the picture (bottom right) that changes every
       // second and would count as motion; that corner is ignored unless disabled.
@@ -9601,6 +9613,27 @@ class BoschCameraCard extends HTMLElement {
   // Client-side motion overlay: grayscale frame-diff on a 96x54 canvas, ~4 fps.
   // Draws the bounding box of changed cells on a canvas above the <video> and
   // fires a `bosch-card-motion` CustomEvent ({detail:{active,area}}) on changes.
+  // Opt-in object recognition (COCO-SSD via TensorFlow.js). Both scripts are pinned with SRI,
+  // loaded once per page; the model weights come from Google's tfjs-models bucket.
+  _loadObjectModel() {
+    if (window.__boschCocoModel) return window.__boschCocoModel;
+    const load = (src, integrity) => new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = src; s.integrity = integrity; s.crossOrigin = "anonymous";
+      s.onload = resolve; s.onerror = () => reject(new Error(`load failed: ${src}`));
+      document.head.appendChild(s);
+    });
+    window.__boschCocoModel = (async () => {
+      if (!window.cocoSsd) {
+        if (!window.tf) await load("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js", "sha384-vE8hbVJ4lezako5rlvE7bY0BVzWlFhZncPlckrqNwcUQpVtgbENTgZ8TBbnPjZre");
+        await load("https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js", "sha384-7qLdgfEQyO9ZQi9ArRHigK+IBto4XPk468jAqc+fnsXaZIcMAhQeLwzggRK7aESl");
+      }
+      return window.cocoSsd.load({ base: "lite_mobilenet_v2" });
+    })();
+    window.__boschCocoModel.catch(() => { window.__boschCocoModel = null; });
+    return window.__boschCocoModel;
+  }
+
   _motionStart(video) {
     this._motionStop();
     if (!this._config?.motion_overlay || !video) return;
@@ -9624,6 +9657,27 @@ class BoschCameraCard extends HTMLElement {
     let boxes = [], warm = 0;
     const MIN_BLOB = 15; // cells (of 96x54) a blob needs to count as an object
     const label = this._t("motion_label");
+    // Recognised objects (opt-in): classify only while motion is active, at most once a second.
+    let objBusy = false, objLast = 0, objFails = 0;
+    const gen = (this._motionGen = (this._motionGen || 0) + 1);
+    this._motionObjects = [];
+    const OBJ_NAMES = { person: "Person", cat: "Cat", dog: "Dog", bird: "Bird", car: "Car", bicycle: "Bicycle", motorcycle: "Motorcycle", truck: "Truck", horse: "Horse" };
+    const classify = () => {
+      objBusy = true; objLast = Date.now();
+      const vw = video.videoWidth, vh = video.videoHeight;
+      this._loadObjectModel()
+        .then((m) => (gen === this._motionGen ? m.detect(video, 6, 0.5) : []))
+        .then((res) => {
+          if (gen !== this._motionGen || video.videoWidth !== vw || video.videoHeight !== vh) return;
+          objFails = 0;
+          this._motionObjects = res.filter((r) => OBJ_NAMES[r.class] && r.score >= 0.5)
+            .map((r) => ({ cls: r.class, score: r.score, bbox: r.bbox, t: Date.now() }));
+          const classes = [...new Set(this._motionObjects.map((o) => o.cls))];
+          if (classes.length) this.dispatchEvent(new CustomEvent("bosch-card-objects", { detail: { objects: classes }, bubbles: true, composed: true }));
+        })
+        .catch(() => { objFails++; objLast = Date.now() + 10000; })
+        .finally(() => { objBusy = false; });
+    };
     const keep = new Uint8Array(W * H), seen = new Uint8Array(W * H), stack = new Uint16Array(W * H);
     const cfg = this._config;
     // Cells that never count as motion (burned-in clock + user zones).
@@ -9793,12 +9847,31 @@ class BoschCameraCard extends HTMLElement {
           if (bx === biggest) c.fillText(`${label} ${((biggest.cnt * 100) / (W * H)).toFixed(1)}%`, rx + 4, Math.max(12, ry - 4));
         }
       }
+      if (cfg.motion_overlay_objects && objFails < 3) {
+        if (moving && !objBusy && Date.now() - objLast > 1000) classify();
+        this._motionObjects = this._motionObjects.filter((o) => Date.now() - o.t < 2500);
+        if (this._motionObjects.length) {
+          const cover = getComputedStyle(video).objectFit === "cover";
+          const sc = (cover ? Math.max : Math.min)(w / video.videoWidth, h / video.videoHeight);
+          const ox = (w - video.videoWidth * sc) / 2, oy = (h - video.videoHeight * sc) / 2;
+          const rot = this.shadowRoot.getElementById("img-wrapper")?.classList.contains("rotated-180");
+          c.strokeStyle = "#34c759"; c.fillStyle = "#34c759"; c.lineWidth = 2; c.font = "bold 12px sans-serif";
+          for (const o of this._motionObjects) {
+            let [bx, by, bw, bh] = o.bbox;
+            let rx = ox + bx * sc, ry = oy + by * sc; bw *= sc; bh *= sc;
+            if (rot) { rx = w - rx - bw; ry = h - ry - bh; }
+            c.strokeRect(rx, ry, bw, bh);
+            c.fillText(`${OBJ_NAMES[o.cls]} ${Math.round(o.score * 100)}%`, rx + 4, Math.max(12, ry - 4));
+          }
+        }
+      }
       // Debounce "inactive" for ~2 s (8 ticks) to avoid flapping.
       setActive(moving || (this._motionActive && quiet < 8), area);
     }, 250);
   }
 
   _motionStop() {
+    this._motionGen = (this._motionGen || 0) + 1;
     if (this._motionTimer) { clearInterval(this._motionTimer); this._motionTimer = null; }
     if (this._motionIO) { this._motionIO.disconnect(); this._motionIO = null; }
     if (this._motionCanvas) { this._motionCanvas.remove(); this._motionCanvas = null; }
@@ -13005,6 +13078,7 @@ class BoschCameraCardEditor extends HTMLElement {
         ${chk("show_motion_zones", this._t("ed_show_motion_zones"), false)}
         ${chk("fullscreen_auto_hide_controls", this._t("ed_fs_auto_hide"), true)}
         ${chk("motion_overlay", this._t("ed_motion_overlay"), false)}
+        ${chk("motion_overlay_objects", this._t("ed_motion_objects"), false)}
         <label>${this._t("ed_border_radius")}
           <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />
         </label>
@@ -13039,6 +13113,7 @@ class BoschCameraCardEditor extends HTMLElement {
     root.querySelector('input[name="show_motion_zones"]')?.addEventListener("change", e => fire({ show_motion_zones: e.target.checked }));
     root.querySelector('input[name="fullscreen_auto_hide_controls"]')?.addEventListener("change", e => fire({ fullscreen_auto_hide_controls: e.target.checked }));
     root.querySelector('input[name="motion_overlay"]')?.addEventListener("change", e => fire({ motion_overlay: e.target.checked }));
+    root.querySelector('input[name="motion_overlay_objects"]')?.addEventListener("change", e => fire({ motion_overlay_objects: e.target.checked }));
     root.querySelector('input[name="border_radius"]')?.addEventListener("change", e => fire({ border_radius: e.target.value || undefined }));
     root.querySelector('input[name="box_shadow"]')?.addEventListener("change", e => fire({ box_shadow: e.target.value || undefined }));
     root.querySelector('input[name="disable_webrtc"]')?.addEventListener("change", e => fire({ disable_webrtc: e.target.checked }));

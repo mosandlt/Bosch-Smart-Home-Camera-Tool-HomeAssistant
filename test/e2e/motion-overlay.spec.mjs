@@ -288,3 +288,19 @@ test("motion_overlay: leaves next to one person-sized object give one box", asyn
   const person = ' const o = Math.abs((phase % 240) - 120); c.fillStyle = "#fff"; c.fillRect(100 + o, 60, 40, 80);';
   expect(await modeBoxes(page, LEAVES + person)).toBe(1);
 });
+
+test("motion_overlay_objects: recognised objects get a labelled box and an event; off by default", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.tf = {};
+    window.cocoSsd = { load: async () => ({ detect: async () => [{ class: "person", score: 0.9, bbox: [100, 50, 60, 100] }, { class: "chair", score: 0.9, bbox: [0, 0, 10, 10] }] }) };
+  });
+  await mount(page, { motion_overlay: true, motion_overlay_objects: true });
+  await page.evaluate(() => { window.__objs = []; window.__card.addEventListener("bosch-card-objects", (e) => window.__objs.push(e.detail.objects)); });
+  await attachScene(page, ONE);
+  await page.evaluate(() => window.__card._motionStart(window.__video));
+  await page.waitForFunction(() => window.__objs.length > 0, null, { timeout: 12000 });
+  expect(await page.evaluate(() => window.__objs[0])).toEqual(["person"]);
+  expect(await page.evaluate(() => window.__card._motionObjects.map((o) => o.cls))).toEqual(["person"]);
+  await mount(page, { motion_overlay: true });
+  expect(await page.evaluate(() => window.__card._config.motion_overlay_objects)).toBe(false);
+});
