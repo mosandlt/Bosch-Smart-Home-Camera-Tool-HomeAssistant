@@ -942,7 +942,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Ocultar automáticamente los controles de pantalla completa tras inactividad",
     ed_motion_overlay: "Resaltar movimiento en la vista en vivo (en el navegador, mientras la tarjeta esté abierta)",
     ed_motion_objects: "Reconocer personas, animales y vehículos en el recuadro de movimiento (experimental; descarga un modelo de ~5 MB de internet)",
-    ed_motion_zones: "Zonas a ignorar en % (x,y,ancho,alto; separe varias con ;)",
+    ed_motion_zones: "Zonas a ignorar en % (x,y,ancho,alto; varias con ;)",
     motion_label: "Movimiento",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipos de notificación",
@@ -2137,7 +2137,7 @@ const CARD_I18N = {
     ed_fs_auto_hide: "Ocultar automaticamente os controlos de ecrã inteiro após inatividade",
     ed_motion_overlay: "Realçar movimento na vista em direto (no navegador, enquanto o cartão estiver aberto)",
     ed_motion_objects: "Reconhecer pessoas, animais e veículos na caixa de movimento (experimental; descarrega um modelo de ~5 MB da internet)",
-    ed_motion_zones: "Áreas a ignorar em % (x,y,largura,altura; separe com ;)",
+    ed_motion_zones: "Áreas a ignorar em % (x,y,largura,altura; várias com ;)",
     motion_label: "Movimento",
     // ── card view: static labels (issue #45 — were hardcoded German) ──
     accordion_notif_types: "Tipos de notificação",
