@@ -151,8 +151,8 @@ jobs:
             SUMMARY=$(awk -v ver="$VERSION" '
               index($0, "## [v" ver "]") == 1 { f=1; next }
               /^## / { f=0 }
-              f && NF { print; exit }
-            ' CHANGELOG.md | sed -E 's/\*\*//g; s/^(Patch|Minor|Major)[[:space:]]+[—-]+[[:space:]]*//')
+              f && NF && $0 !~ /^#/ { print; exit }
+            ' CHANGELOG.md | sed -E 's/\*\*//g; s/^-[[:space:]]+//; s/^(Patch|Minor|Major)[[:space:]]+[—-]+[[:space:]]*//')
             # GitHub release titles cap at 256 chars total ("TAG — SUMMARY");
             # a long first CHANGELOG bullet (a full paragraph, not a short
             # one-liner) would otherwise fail release creation outright with
