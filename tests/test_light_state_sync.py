@@ -402,3 +402,17 @@ async def test_gen1_lighting_override_ignored_when_write_lands_during_request() 
     session.get.side_effect = _get
     await _poll_cam_control(coord, CAM, _gen1_ctx(), session, {})
     assert coord.shc_state_cache[CAM]["front_light"] is True
+
+
+@pytest.mark.asyncio
+async def test_gen1_lighting_override_fetch_error_keeps_cache() -> None:
+    """A failing or non-200 lighting_override read leaves the cache untouched."""
+    coord = _coord()
+    coord.shc_state_cache[CAM] = {"front_light": True, "wallwasher": True}
+    session = MagicMock()
+    session.get.side_effect = TimeoutError("boom")
+    await _poll_cam_control(coord, CAM, _gen1_ctx(), session, {})
+    session.get.side_effect = None
+    session.get.return_value = _resp(500, None)
+    await _poll_cam_control(coord, CAM, _gen1_ctx(), session, {})
+    assert coord.shc_state_cache[CAM] == {"front_light": True, "wallwasher": True}
