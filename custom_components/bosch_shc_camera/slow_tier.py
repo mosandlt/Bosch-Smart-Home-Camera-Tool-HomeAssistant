@@ -343,11 +343,17 @@ def _poll_cam_info_caches(
             sync_gen2_light_cache(coordinator, cam_id)
             # else: keep current cache values, don't overwrite from featureStatus
         else:
-            cache["camera_light"] = light_on
-            cache["front_light"] = feat_status.get("frontIlluminatorInGeneralLightOn")
-            cache["wallwasher"] = feat_status.get("wallwasherInGeneralLightOn")
+            # featureStatus only seeds the Gen1 light state: it describes the
+            # general light, not the manual override, so it must not replace a
+            # value the lighting_override poll or a write already set (#78).
+            if cache.get("front_light") is None:
+                cache["camera_light"] = light_on
+                cache["front_light"] = feat_status.get(
+                    "frontIlluminatorInGeneralLightOn"
+                )
+                cache["wallwasher"] = feat_status.get("wallwasherInGeneralLightOn")
             intensity = feat_status.get("frontIlluminatorGeneralLightIntensity")
-            if intensity is not None:
+            if intensity is not None and cache.get("front_light_intensity") is None:
                 cache["front_light_intensity"] = intensity
     elif cache.get("camera_light") is None:
         cache["camera_light"] = None
@@ -416,6 +422,7 @@ async def _poll_cam_control(
         < coordinator.WRITE_LOCK_SECS
     )
     if ctx.is_online and not ctx.is_gen2 and ctx.has_light and not light_locked:
+        write_stamp = coordinator.light_set_at.get(cam_id)
         try:
             async with asyncio.timeout(5):
                 async with session.get(
@@ -424,7 +431,12 @@ async def _poll_cam_control(
                 ) as lo_resp:
                     if lo_resp.status == 200:
                         data = await lo_resp.json()
-                        if apply_gen1_light_override(coordinator, cam_id, data):
+                        # A write that landed during the request is newer.
+                        if coordinator.light_set_at.get(
+                            cam_id
+                        ) == write_stamp and apply_gen1_light_override(
+                            coordinator, cam_id, data
+                        ):
                             _LOGGER.debug(
                                 "lighting_override for %s: %s", cam_id[:8], data
                             )

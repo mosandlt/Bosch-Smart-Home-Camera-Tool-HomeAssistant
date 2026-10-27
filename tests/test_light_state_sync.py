@@ -359,3 +359,46 @@ async def test_gen1_lighting_override_skipped_inside_write_lock() -> None:
     session = MagicMock()
     await _poll_cam_control(coord, CAM, _gen1_ctx(), session, {})
     session.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_gen1_feature_status_does_not_replace_confirmed_light_state() -> None:
+    """GitHub #78: a failed lighting_override read must not let the general-light
+    featureStatus flip a confirmed ON back to OFF."""
+    coord = _coord()
+    coord.shc_state_cache[CAM] = {
+        "front_light": True,
+        "wallwasher": True,
+        "camera_light": True,
+    }
+    _poll_cam_info_caches(
+        coord,
+        CAM,
+        {
+            "hardwareVersion": "CAMERA_EYES",
+            "featureSupport": {"light": True},
+            "featureStatus": {
+                "frontIlluminatorInGeneralLightOn": False,
+                "wallwasherInGeneralLightOn": False,
+            },
+        },
+    )
+    c = coord.shc_state_cache[CAM]
+    assert (c["camera_light"], c["front_light"], c["wallwasher"]) == (True, True, True)
+
+
+@pytest.mark.asyncio
+async def test_gen1_lighting_override_ignored_when_write_lands_during_request() -> None:
+    coord = _coord()
+    coord.shc_state_cache[CAM] = {"front_light": False, "wallwasher": False}
+    resp = _resp(200, {"frontLightOn": False, "wallwasherOn": False})
+    session = MagicMock()
+
+    def _get(*_a: Any, **_k: Any) -> Any:
+        coord.light_set_at[CAM] = time.monotonic()  # user write during the GET
+        coord.shc_state_cache[CAM]["front_light"] = True
+        return resp
+
+    session.get.side_effect = _get
+    await _poll_cam_control(coord, CAM, _gen1_ctx(), session, {})
+    assert coord.shc_state_cache[CAM]["front_light"] is True

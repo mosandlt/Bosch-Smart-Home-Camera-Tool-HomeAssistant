@@ -15,7 +15,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ### Fixed
 
-- **Eyes Outdoor (Gen1): front light and wallwasher switches no longer fall back to OFF by themselves.** The state was read from the camera's general-light status, which does not reflect lights switched on by hand, so a light that was physically on showed as off after about 30 seconds (and the next front-light write could then switch the wallwasher off). The switches now read the manual light state (`lighting_override`) every update (GitHub #78).
+- **Eyes Outdoor (Gen1): front light and wallwasher switches no longer fall back to OFF by themselves.** The state was read from the camera's general-light status, which does not reflect lights switched on by hand, so a light that was physically on showed as off after about 30 seconds (and the next front-light write could then switch the wallwasher off). The switches now read the manual light state (`lighting_override`) every update. A light that is on only because of the schedule or ambient light mode, without a manual switch-on, is not shown as on by these switches. The general-light status is only used for the first value after startup (GitHub #78).
 
 ### Changed
 
