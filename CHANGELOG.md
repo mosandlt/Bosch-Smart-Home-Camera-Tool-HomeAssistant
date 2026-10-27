@@ -15,6 +15,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ### Changed
 
+- **Lighting writes of the Eyes Outdoor (Gen1) are logged at debug level too.** The endpoint and the sent body (front light, upper/lower lights) now appear with debug logging for `custom_components.bosch_shc_camera`, so a light that does not match what Home Assistant shows can be traced (GitHub #78).
 - **Motion overlay (opt-in card option `motion_overlay`) is more accurate and calmer.** It now compares the live picture against a slowly adapting background instead of the previous frame, so a solid object is one filled box instead of two edge strips, and it draws one box per moving object (at most 3). Brightness changes of the whole picture (auto exposure, day/night switch, clouds) and scattered compression noise no longer count as motion, boxes are smoothed and stay visible for about a second, and small blobs such as leaves or several similar blobs (foliage in the wind) are ignored. The default `motion_overlay_threshold` is now 28 (was 20); an explicitly configured value is kept. The label is translated.
 
 ## [v17.2.6] - 2026-10-12

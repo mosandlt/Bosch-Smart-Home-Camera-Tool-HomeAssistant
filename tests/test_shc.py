@@ -2494,6 +2494,39 @@ class TestSetLightComponentGen1:
         assert "wallwasherOn" in body
 
     @pytest.mark.asyncio
+    async def test_gen1_write_logs_sent_body_at_debug(self, caplog):
+        """GitHub #78: the Gen1 lighting_override body is logged at debug so a
+        wallwasher flipped by a front-light write can be traced."""
+        import logging
+
+        coord = _stub_coord_light(gen2=False)
+        coord.shc_state_cache[CAM_ID]["wallwasher"] = True
+
+        from custom_components.bosch_shc_camera import shc
+
+        session = MagicMock()
+        session.put = MagicMock(return_value=_mock_response(204))
+        with (
+            patch.object(
+                shc,
+                "async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            caplog.at_level(logging.DEBUG, logger=shc._LOGGER.name),
+        ):
+            assert await shc.async_cloud_set_light_component(
+                coord, CAM_ID, "front", True
+            )
+
+        line = next(
+            r.getMessage()
+            for r in caplog.records
+            if "lighting_override" in r.getMessage()
+        )
+        assert "'wallwasherOn': True" in line
+        assert "'frontLightOn': True" in line
+
+    @pytest.mark.asyncio
     async def test_front_off_omits_intensity(self):
         """Bosch API rejects intensity when frontLightOn=False (HTTP 400).
         Body MUST omit the field — sending intensity:0 is also rejected."""

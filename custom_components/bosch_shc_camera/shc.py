@@ -1214,6 +1214,16 @@ async def _set_light_component_locked(
         assert session is not None  # narrowed by `elif not gen2 and token` above
         result = await cloud_put_json(session, token, url, body)
         ok = result.ok
+        if ok:
+            # Lets users line up what was sent with what the lights
+            # physically did (GitHub #78); Gen1 does not pass through
+            # async_put_camera, which logs the Gen2 writes.
+            _LOGGER.debug(
+                "cloud_set_light_component %s/lighting_override: HTTP %s, sent %s",
+                cam_id,
+                result.status,
+                body,
+            )
         if not ok:
             _LOGGER.warning(
                 "cloud_set_light_component: HTTP %s for %s — body sent=%s, response=%s",
