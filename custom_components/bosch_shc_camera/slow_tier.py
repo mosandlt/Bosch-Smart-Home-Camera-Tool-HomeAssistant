@@ -409,6 +409,32 @@ async def _poll_cam_control(
         < coordinator.WRITE_LOCK_SECS
         and coordinator.shc_state_cache.get(cam_id, {}).get("camera_light") is False
     )
+    # ── Gen1 lighting_override — the state the light switches write ──
+    light_locked = (
+        cam_id in coordinator.light_set_at
+        and (time.monotonic() - coordinator.light_set_at[cam_id])
+        < coordinator.WRITE_LOCK_SECS
+    )
+    if ctx.is_online and not ctx.is_gen2 and ctx.has_light and not light_locked:
+        try:
+            async with asyncio.timeout(5):
+                async with session.get(
+                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override",
+                    headers=headers,
+                ) as lo_resp:
+                    if lo_resp.status == 200:
+                        data = await lo_resp.json()
+                        if apply_gen1_light_override(coordinator, cam_id, data):
+                            _LOGGER.debug(
+                                "lighting_override for %s: %s", cam_id[:8], data
+                            )
+        except Exception as err:
+            _LOGGER.debug(
+                "lighting_override fetch error for %s: %s",
+                cam_id,
+                err_str(err),
+            )
+
     if ctx.is_online and ctx.is_gen2 and not lighting_switch_locked:
         try:
             async with asyncio.timeout(5):
@@ -425,6 +451,33 @@ async def _poll_cam_control(
                 cam_id,
                 err_str(err),
             )
+
+
+def apply_gen1_light_override(
+    coordinator: BoschCameraCoordinator, cam_id: str, data: Any
+) -> bool:
+    """Take the Gen1 light state from a GET `lighting_override` body.
+
+    `featureStatus.frontIlluminatorInGeneralLightOn` describes the general
+    light, not the manual override the switches write, so a light switched on
+    by hand read back as OFF once the write lock expired (GitHub #78). A body
+    without boolean `frontLightOn` and `wallwasherOn` is ignored and the
+    `featureStatus` values stay in place.
+    """
+    if not isinstance(data, dict):
+        return False
+    front = data.get("frontLightOn")
+    wall = data.get("wallwasherOn")
+    if not isinstance(front, bool) or not isinstance(wall, bool):
+        return False
+    cache = coordinator.shc_state_cache.setdefault(cam_id, {})
+    cache["front_light"] = front
+    cache["wallwasher"] = wall
+    cache["camera_light"] = front or wall
+    intensity = data.get("frontLightIntensity")
+    if isinstance(intensity, (int, float)) and not isinstance(intensity, bool):
+        cache["front_light_intensity"] = float(intensity)
+    return True
 
 
 async def _poll_slow_tier_endpoints(

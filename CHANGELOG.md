@@ -13,6 +13,10 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 - The last-event badge now shows the camera's own classification ("Person", "Sound") in front of the time; plain motion stays unlabelled. Card editor: new field for motion ignore areas (percent of the frame).
 - Card option `motion_overlay_objects` (experimental, default off, card 14.2.0): while the motion box is active, people, animals and vehicles are recognised in the browser (COCO-SSD) and labelled with a green box; fires a `bosch-card-objects` event. Loads TensorFlow.js and a ~5 MB model from the internet on first use; nothing is sent to the camera cloud.
 
+### Fixed
+
+- **Eyes Outdoor (Gen1): front light and wallwasher switches no longer fall back to OFF by themselves.** The state was read from the camera's general-light status, which does not reflect lights switched on by hand, so a light that was physically on showed as off after about 30 seconds (and the next front-light write could then switch the wallwasher off). The switches now read the manual light state (`lighting_override`) every update (GitHub #78).
+
 ### Changed
 
 - **Lighting writes of the Eyes Outdoor (Gen1) are logged at debug level too.** The endpoint and the sent body (front light, upper/lower lights) now appear with debug logging for `custom_components.bosch_shc_camera`, so a light that does not match what Home Assistant shows can be traced (GitHub #78).

@@ -284,3 +284,78 @@ async def test_confirm_is_cancellable_and_delays_are_absolute() -> None:
     from custom_components.bosch_shc_camera import shc
 
     assert shc._LIGHT_ON_CONFIRM_DELAYS == (4.0, 12.0)
+
+
+def _gen1_ctx() -> CamContext:
+    return CamContext(
+        hw="CAMERA_EYES",
+        is_gen2=False,
+        is_online=True,
+        stream_active=False,
+        local_stream_active=False,
+        privacy_on=False,
+        do_slow_cam=False,
+        pan_limit=0,
+        has_light=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_gen1_switches_follow_lighting_override_not_feature_status() -> None:
+    """GitHub #78: featureStatus reports the general light, so a manually
+    switched-on Gen1 light read back as OFF after the write lock. The
+    lighting_override GET is the source of truth."""
+    coord = _coord()
+    coord.hw_version = {CAM: "CAMERA_EYES"}
+    _poll_cam_info_caches(
+        coord,
+        CAM,
+        {
+            "hardwareVersion": "CAMERA_EYES",
+            "featureSupport": {"light": True},
+            "featureStatus": {
+                "frontIlluminatorInGeneralLightOn": False,
+                "wallwasherInGeneralLightOn": False,
+            },
+        },
+    )
+    assert coord.shc_state_cache[CAM]["wallwasher"] is False
+
+    session = MagicMock()
+    session.get.return_value = _resp(
+        200, {"frontLightOn": True, "wallwasherOn": True, "frontLightIntensity": 0.5}
+    )
+    await _poll_cam_control(coord, CAM, _gen1_ctx(), session, {})
+    c = coord.shc_state_cache[CAM]
+    assert (c["camera_light"], c["front_light"], c["wallwasher"]) == (True, True, True)
+    assert c["front_light_intensity"] == 0.5
+    assert session.get.call_args.args[0].endswith("/lighting_override")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        [],
+        {},
+        {"frontLightOn": "yes", "wallwasherOn": True},
+        {"frontLightOn": True},
+    ],
+)
+async def test_gen1_malformed_lighting_override_keeps_cache(payload: Any) -> None:
+    coord = _coord()
+    coord.shc_state_cache[CAM] = {"front_light": False, "wallwasher": True}
+    session = MagicMock()
+    session.get.return_value = _resp(200, payload)
+    await _poll_cam_control(coord, CAM, _gen1_ctx(), session, {})
+    assert coord.shc_state_cache[CAM] == {"front_light": False, "wallwasher": True}
+
+
+@pytest.mark.asyncio
+async def test_gen1_lighting_override_skipped_inside_write_lock() -> None:
+    coord = _coord()
+    coord.light_set_at[CAM] = time.monotonic()
+    session = MagicMock()
+    await _poll_cam_control(coord, CAM, _gen1_ctx(), session, {})
+    session.get.assert_not_called()
