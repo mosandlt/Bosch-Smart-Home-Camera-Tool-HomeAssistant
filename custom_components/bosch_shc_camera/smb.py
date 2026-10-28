@@ -892,6 +892,10 @@ def _sync_ftp_cleanup(coordinator: BoschCameraCoordinator) -> None:
     password = opts.get("smb_password", "")
     base_path = opts.get("smb_base_path", "Bosch-Kameras").strip().strip("/")
     retention_days = int(opts.get("smb_retention_days", 180))
+    # NVR recordings sit under {base}/{nvr_smb_subpath} with their own
+    # retention job; the event-file walk must not delete them early.
+    nvr_sub = (opts.get("nvr_smb_subpath") or "NVR").strip().strip("/")
+    nvr_dir_name = nvr_sub.split("/")[0]
 
     if not opts.get("enable_smb_upload") or not server or retention_days <= 0:
         return
@@ -905,7 +909,7 @@ def _sync_ftp_cleanup(coordinator: BoschCameraCoordinator) -> None:
     cutoff = time.time() - retention_days * 86400
     deleted = 0
 
-    def _walk_and_delete(path: str) -> None:
+    def _walk_and_delete(path: str, *, is_root: bool = False) -> None:
         nonlocal deleted
         try:
             ftp.cwd(path)
@@ -952,6 +956,8 @@ def _sync_ftp_cleanup(coordinator: BoschCameraCoordinator) -> None:
                     _LOGGER.debug("FTP cleanup: delete %s failed: %s", name, err)
 
         for sub in subdirs:
+            if is_root and nvr_dir_name and sub == nvr_dir_name:
+                continue
             _walk_and_delete(f"{path}/{sub}")
             try:
                 ftp.cwd(path)  # back up before next sibling
@@ -960,7 +966,7 @@ def _sync_ftp_cleanup(coordinator: BoschCameraCoordinator) -> None:
 
     try:
         root = f"/{base_path}"
-        _walk_and_delete(root)
+        _walk_and_delete(root, is_root=True)
     finally:
         try:
             ftp.quit()

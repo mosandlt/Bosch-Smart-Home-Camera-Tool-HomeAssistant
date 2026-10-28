@@ -1621,6 +1621,55 @@ class TestWalkAndDeleteRetention:
 
         fake_smb.remove.assert_called_once()
 
+    @pytest.mark.parametrize("sub_opt", [None, "NVR", "/NVR/", "NVR/segments"])
+    def test_nvr_subtree_is_not_walked_or_deleted(self, sub_opt):
+        """Mini-NVR recordings live under {base}/{nvr_smb_subpath}; they have
+        their own retention job, so the event-file cleanup must skip them."""
+        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+
+        opts = {
+            "smb_server": "192.168.1.1",
+            "smb_retention_days": 1,
+            "smb_username": "u",
+            "smb_password": "p",
+            "smb_base_path": "Bosch",
+        }
+        if sub_opt is not None:
+            opts["nvr_smb_subpath"] = sub_opt
+        coord = _coord(opts)
+
+        old_ts = time.strftime("%Y%m%d%H%M%S", time.gmtime(time.time() - 5 * 86400))
+        file_line = "-rw-r--r-- 1 user group 1000 Jan 01 10:00 old.mp4"
+        tree = {
+            "/Bosch": [
+                "drwxr-xr-x 1 u g 0 Jan 01 10:00 NVR",
+                "drwxr-xr-x 1 u g 0 Jan 01 10:00 Cam",
+            ],
+            "/Bosch/Cam": [file_line],
+            "/Bosch/NVR": [file_line],
+        }
+        cwd = {"p": "/"}
+        entered: list[str] = []
+        deleted_in: list[str] = []
+        fake_ftp = MagicMock()
+
+        def _cwd(path):
+            cwd["p"] = path
+            entered.append(path)
+
+        fake_ftp.cwd.side_effect = _cwd
+        fake_ftp.retrlines.side_effect = lambda cmd, cb: [
+            cb(line) for line in tree.get(cwd["p"], [])
+        ]
+        fake_ftp.sendcmd.return_value = f"213 {old_ts}"
+        fake_ftp.delete.side_effect = lambda name: deleted_in.append(cwd["p"])
+
+        with patch(f"{MODULE}._ftp_connect", return_value=fake_ftp):
+            _sync_ftp_cleanup(coord)
+
+        assert "/Bosch/NVR" not in entered
+        assert deleted_in == ["/Bosch/Cam"]
+
     def test_walk_and_delete_skips_recent_files(self):
         """File newer than cutoff → not deleted."""
         from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
