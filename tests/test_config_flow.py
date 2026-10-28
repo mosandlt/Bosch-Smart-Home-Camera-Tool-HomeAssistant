@@ -1079,6 +1079,7 @@ class TestCameraAccessVerification:
         session = MagicMock()
         resp = MagicMock()
         resp.status = status
+        resp.json = AsyncMock(return_value=[])
         resp.__aenter__ = AsyncMock(return_value=resp)
         resp.__aexit__ = AsyncMock(return_value=None)
         session.get = MagicMock(return_value=resp)
@@ -1091,6 +1092,33 @@ class TestCameraAccessVerification:
             AsyncMock(return_value=session),
         ):
             return await flow._async_verify_camera_access("tok")
+
+    @pytest.mark.asyncio
+    async def test_verify_true_on_200_with_non_json_body(self) -> None:
+        """HTTP 200 proves account access even when the body is not JSON."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschCameraConfigFlow,
+        )
+
+        session = MagicMock()
+        resp = MagicMock()
+        resp.status = 200
+        resp.json = AsyncMock(side_effect=ValueError("not json"))
+        resp.__aenter__ = AsyncMock(return_value=resp)
+        resp.__aexit__ = AsyncMock(return_value=None)
+        session.get = MagicMock(return_value=resp)
+        flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
+        flow.hass = MagicMock()
+        with patch(
+            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            AsyncMock(return_value=session),
+        ):
+            assert await flow._async_verify_camera_access("tok") is True
+
+    @pytest.mark.asyncio
+    async def test_verify_false_on_403_and_404(self) -> None:
+        assert await self._verify_with_status(403) is False
+        assert await self._verify_with_status(404) is False
 
     @pytest.mark.asyncio
     async def test_verify_returns_none_on_429(self) -> None:

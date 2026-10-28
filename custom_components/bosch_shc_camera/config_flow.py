@@ -76,6 +76,12 @@ from urllib.parse import parse_qs, urlencode
 
 import aiohttp
 import voluptuous as vol
+from bosch_shc_camera_client.cameras import (
+    BoschCameraAuthError,
+    BoschCameraConnectionError,
+    BoschCameraInvalidResponseError,
+    fetch_json,
+)
 from homeassistant import config_entries
 from homeassistant.components.application_credentials import (
     ClientCredential,
@@ -845,25 +851,33 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
         """
         try:
             session = await async_get_bosch_cloud_session(self.hass)
-            async with (
-                asyncio.timeout(10),
-                session.get(
+            async with asyncio.timeout(10):
+                await fetch_json(
+                    session,
+                    bearer_token,
                     f"{CLOUD_API}/v11/video_inputs",
-                    headers={
-                        "Authorization": f"Bearer {bearer_token}",
-                        "Accept": "application/json",
-                    },
-                ) as resp,
-            ):
-                if resp.status == 200:
-                    return True
-                if resp.status == 429 or 500 <= resp.status < 600:
-                    _LOGGER.debug(
-                        "Camera-access verification got transient HTTP %d — aborting with retry semantics",
-                        resp.status,
-                    )
-                    return None
-                return False
+                    "Camera list",
+                )
+            return True
+        except BoschCameraInvalidResponseError:
+            # HTTP 200 with an unparseable body still proves account access.
+            return True
+        except BoschCameraAuthError:
+            return False
+        except BoschCameraConnectionError as err:
+            if err.status is None:
+                _LOGGER.debug(
+                    "Camera-access verification inconclusive (%s) — aborting with retry semantics",
+                    err,
+                )
+                return None
+            if err.status == 429 or 500 <= err.status < 600:
+                _LOGGER.debug(
+                    "Camera-access verification got transient HTTP %d — aborting with retry semantics",
+                    err.status,
+                )
+                return None
+            return False
         except (TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.debug(
                 "Camera-access verification inconclusive (%s) — aborting with retry semantics",
