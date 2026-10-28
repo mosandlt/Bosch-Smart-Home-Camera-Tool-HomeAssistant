@@ -27,8 +27,6 @@ from bosch_shc_camera_client.media_transfer import (
     is_safe_bosch_url as _lib_is_safe_bosch_url,
 )
 from bosch_shc_camera_client.settings import (
-    ENDPOINT_PATTERN,
-    BoschCameraPrivacyModeError,
     put_setting,
 )
 
@@ -270,7 +268,7 @@ async def _put_camera_via_lib(
     session: aiohttp.ClientSession,
     cam_id: str,
     endpoint: str,
-    payload: dict[str, Any],
+    payload: dict[str, Any] | None,
 ) -> bool:
     """Write through the client library; refresh the token once after a 401."""
     token = coordinator.token
@@ -281,7 +279,7 @@ async def _put_camera_via_lib(
             )
         except BoschCameraAuthError as err:
             # 403 is a real refusal; only an expired token (401) is retried.
-            if attempt == 2 or "401" not in str(err):
+            if attempt == 2 or err.status != 401:
                 _LOGGER.debug("async_put_camera %s/%s: %s", cam_id, endpoint, err)
                 return False
             _LOGGER.info(
@@ -295,14 +293,17 @@ async def _put_camera_via_lib(
                 _LOGGER.debug("async_put_camera token refresh failed: %s", refresh_err)
                 return False
         except BoschCameraConnectionError as err:
-            if isinstance(err, BoschCameraPrivacyModeError) or " returned HTTP " in str(
-                err
-            ):
+            # An HTTP answer (incl. privacy mode 443) is debug noise; a
+            # timeout or transport failure is worth a warning.
+            if err.status is not None:
                 _LOGGER.debug("async_put_camera %s/%s: %s", cam_id, endpoint, err)
             else:
                 _LOGGER.warning(
                     "async_put_camera %s/%s error: %s", cam_id, endpoint, err
                 )
+            return False
+        except ValueError as err:
+            _LOGGER.warning("async_put_camera %s/%s error: %s", cam_id, endpoint, err)
             return False
         else:
             if endpoint.startswith("lighting"):
@@ -4149,81 +4150,6 @@ class BoschCameraCoordinator(
         )
 
         session = await async_get_bosch_cloud_session(self.hass)
-        if payload is not None and ENDPOINT_PATTERN.fullmatch(endpoint):
-            return await _put_camera_via_lib(self, session, cam_id, endpoint, payload)
-
-        token = self.token
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
-        put_kwargs: dict[str, Any] = (
-            {"data": ""} if payload is None else {"json": payload}
-        )
-        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/{endpoint}"
-        try:
-            async with asyncio.timeout(10):
-                async with session.put(url, headers=headers, **put_kwargs) as resp:
-                    if resp.status == 401:
-                        # Token expired — refresh and retry once
-                        _LOGGER.info(
-                            "async_put_camera %s/%s: 401 — refreshing token",
-                            cam_id,
-                            endpoint,
-                        )
-                        try:
-                            token = await self.ensure_valid_token(token)
-                            headers["Authorization"] = f"Bearer {token}"
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception as err:
-                            _LOGGER.debug(
-                                "async_put_camera token refresh failed: %s", err
-                            )
-                            return False
-                        async with asyncio.timeout(10):
-                            async with session.put(
-                                url, headers=headers, **put_kwargs
-                            ) as resp2:
-                                # Must accept the same status set as the
-                                # initial attempt below (200/201/204) — this
-                                # is the identical write, retried after a
-                                # token refresh, not a different semantic
-                                # operation.
-                                ok2 = resp2.status in (200, 201, 204)
-                                if not ok2:
-                                    body2 = await resp2.text()
-                                    _LOGGER.debug(
-                                        "async_put_camera %s/%s: retry HTTP %d — %s",
-                                        cam_id,
-                                        endpoint,
-                                        resp2.status,
-                                        body2[:200],
-                                    )
-                                return ok2
-                    ok = resp.status in (200, 201, 204)
-                    if ok and endpoint.startswith("lighting"):
-                        # Lets users line up what was sent with what the
-                        # lights physically did (GitHub #78).
-                        _LOGGER.debug(
-                            "async_put_camera %s/%s: HTTP %d, sent %s",
-                            cam_id,
-                            endpoint,
-                            resp.status,
-                            payload,
-                        )
-                    if not ok:
-                        body = await resp.text()
-                        _LOGGER.debug(
-                            "async_put_camera %s/%s: HTTP %d — %s",
-                            cam_id,
-                            endpoint,
-                            resp.status,
-                            body[:200],
-                        )
-                    return ok
-        except Exception as err:
-            _LOGGER.warning("async_put_camera %s/%s error: %s", cam_id, endpoint, err)
-            return False
+        return await _put_camera_via_lib(self, session, cam_id, endpoint, payload)
 
     # SMB/NAS upload, download, cleanup, and disk-check functions are in smb.py

@@ -35599,7 +35599,7 @@ class TestAsyncPutCamera_round9:
             captured_kwargs.append(kwargs)
             return _resp_cm_round9(200)
 
-        session.put = MagicMock(side_effect=_put_cm)
+        session.request = MagicMock(side_effect=_put_cm)
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -42006,7 +42006,9 @@ async def test_async_put_camera_lib_path_network_error_warns(caplog):
 def _legacy_put_session(*statuses: int) -> MagicMock:
     responses = iter(statuses)
     session = MagicMock()
-    session.put = MagicMock(side_effect=lambda *a, **kw: _make_resp(next(responses)))
+    session.request = MagicMock(
+        side_effect=lambda *a, **kw: _make_resp(next(responses))
+    )
     return session
 
 
@@ -42015,8 +42017,8 @@ def _legacy_put_session(*statuses: int) -> MagicMock:
     ("statuses", "expected"),
     [((204,), True), ((500,), False), ((401, 204), True), ((401, 500), False)],
 )
-async def test_async_put_camera_empty_body_keeps_direct_put_path(statuses, expected):
-    """Resets send no body, which the library cannot do: direct PUT with 401 retry."""
+async def test_async_put_camera_empty_body_via_lib(statuses, expected):
+    """Resets send no body through the library, with the 401 token-refresh retry."""
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
     session = _legacy_put_session(*statuses)
@@ -42033,12 +42035,14 @@ async def test_async_put_camera_empty_body_keeps_direct_put_path(statuses, expec
             coord, "cam-1", "soft_reset", None
         )
     assert ok is expected
-    assert session.put.call_args.kwargs["data"] == ""
+    assert session.request.call_args.kwargs["data"] == ""
 
 
 @pytest.mark.asyncio
 async def test_async_put_camera_empty_body_refresh_failure_and_network_error():
-    """Direct PUT path: failed token refresh and transport errors return False."""
+    """Empty-body path: failed token refresh and transport errors return False."""
+    import aiohttp
+
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
 
     coord = SimpleNamespace(
@@ -42054,7 +42058,7 @@ async def test_async_put_camera_empty_body_refresh_failure_and_network_error():
             coord, "cam-1", "hard_reset", None
         )
     broken = MagicMock()
-    broken.put = MagicMock(side_effect=OSError("down"))
+    broken.request = MagicMock(side_effect=aiohttp.ClientConnectionError("down"))
     with patch(
         "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
         new=AsyncMock(return_value=broken),
@@ -42066,7 +42070,7 @@ async def test_async_put_camera_empty_body_refresh_failure_and_network_error():
 
 @pytest.mark.asyncio
 async def test_async_put_camera_empty_body_cancel_during_refresh_propagates():
-    """Direct PUT path must not swallow task cancellation during token refresh."""
+    """Empty-body path must not swallow task cancellation during token refresh."""
     import asyncio
 
     from custom_components.bosch_shc_camera import BoschCameraCoordinator
@@ -42086,3 +42090,53 @@ async def test_async_put_camera_empty_body_cancel_during_refresh_propagates():
         await BoschCameraCoordinator.async_put_camera(
             coord, "cam-1", "hard_reset", None
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cam_id", "endpoint"), [("cam-1", "bad endpoint!"), ("cam 1", "audio")]
+)
+async def test_async_put_camera_rejects_unsafe_path_without_request(
+    caplog, cam_id, endpoint
+):
+    """The library refuses unexpected path characters: warn, return False, send nothing."""
+    import logging
+
+    from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+    session = MagicMock()
+    coord = SimpleNamespace(token="tok", hass=MagicMock())
+    with (
+        patch(
+            "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ),
+        caplog.at_level(logging.DEBUG),
+    ):
+        ok = await BoschCameraCoordinator.async_put_camera(
+            coord, cam_id, endpoint, {"enabled": True}
+        )
+    assert ok is False
+    session.request.assert_not_called()
+    assert any(r.levelname == "WARNING" for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_async_put_camera_three_segment_lighting_path_via_lib():
+    """`lighting/switch/front` goes through the library like every other endpoint."""
+    from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+    session = MagicMock()
+    session.request = MagicMock(return_value=_make_resp(204))
+    coord = SimpleNamespace(token="tok", hass=MagicMock())
+    with patch(
+        "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
+    ):
+        ok = await BoschCameraCoordinator.async_put_camera(
+            coord, "cam-1", "lighting/switch/front", {"enabled": True}
+        )
+    assert ok is True
+    assert session.request.call_args.args[1].endswith(
+        "/video_inputs/cam-1/lighting/switch/front"
+    )
