@@ -7,6 +7,18 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v17.2.8] - 2026-10-28
+
+### Changed
+
+- **Camera cloud access runs through the `bosch-shc-camera-client` library.** Writes, settings reads, event lists, camera status, pan position, lighting reads, clip downloads and timestamp parsing now use the shared library instead of private copies; behaviour, timeouts and error handling are unchanged. The library requirement is now `>=0.6.2,<0.8`.
+
+### Fixed
+
+- **RCP session id `0x00000000` is no longer accepted or cached.** The camera proxy answers with it when it refuses a session; the integration used to keep it for five minutes, so RCP reads in that window could fail. Every spelling of the all-zero id is now rejected and the next read opens a fresh session.
+- **FTP retention cleanup no longer touches the Mini-NVR recording folder.** With an FTP target, `smb_retention_days` could delete recordings below the NVR subfolder earlier than the NVR retention allows; it now skips that folder like the SMB cleanup does.
+- **A failed camera write always reports failure instead of raising.** Unexpected errors such as a closed session are logged and returned as a failed write, as before the library switch.
+
 ## [v17.2.7] - 2026-10-26
 
 ### Added
