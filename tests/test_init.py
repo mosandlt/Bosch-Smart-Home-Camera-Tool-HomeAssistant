@@ -8978,6 +8978,9 @@ class TestHandleSetMotionZones:
             }
             await handler(call_mock)
 
+        assert session.request.call_args.args[0] == "POST", (
+            "motion zones are written with POST"
+        )
         coord.async_request_refresh.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -9023,7 +9026,7 @@ class TestHandleSetMotionZones:
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         session = MagicMock()
-        session.post = MagicMock(
+        session.request = MagicMock(
             return_value=_resp_cm(500, text="Internal Server Error")
         )
 
@@ -9053,7 +9056,7 @@ class TestHandleSetMotionZones:
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         session = MagicMock()
-        session.post.side_effect = Exception("connection refused")
+        session.request.side_effect = Exception("connection refused")
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -9491,7 +9494,7 @@ class TestHandleSetPrivacyMasks:
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         session = MagicMock()
-        session.post = MagicMock(return_value=_resp_cm(500, text="Server Error"))
+        session.request = MagicMock(return_value=_resp_cm(500, text="Server Error"))
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",

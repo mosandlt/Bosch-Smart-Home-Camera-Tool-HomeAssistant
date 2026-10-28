@@ -204,6 +204,14 @@ async def get_cached_rcp_session(
         return new_session_id
 
 
+def _is_zero_session(session_id: str) -> bool:
+    """True for any spelling of the all-zero rejection id (0x0, 0X00000000)."""
+    try:
+        return int(session_id, 16) == 0
+    except ValueError:
+        return False
+
+
 async def _rcp_session(
     coordinator: BoschCameraCoordinator, proxy_host: str, proxy_hash: str
 ) -> str | None:
@@ -262,7 +270,7 @@ async def _rcp_session(
         session_id = m.group(1)
 
         # 0x00000000 is the proxy's rejection answer, not a usable session.
-        if session_id == "0x00000000":
+        if _is_zero_session(session_id):
             _LOGGER.debug(
                 "_rcp_session: invalid session 0x00000000 for %s — proxy rejected",
                 proxy_host,

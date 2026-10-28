@@ -294,6 +294,25 @@ class TestRcpSession:
         assert session.get.call_count == 1
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("zero", ["0x0", "0X00000000", "0x00"])
+    async def test_other_zero_spellings_are_rejected(self, zero: str) -> None:
+        coord = _make_coord()
+        session = self._mock_session(
+            _resp_cm(200, text=f"<sessionid>{zero}</sessionid>")
+        )
+        with patch(
+            f"{RCP_CLIENT_MODULE}.async_bosch_cloud_session_cm", return_value=session
+        ):
+            result = await rcp_client._rcp_session(
+                coord, "proxy-01:42090", "abc123hash"
+            )
+        assert result is None
+        assert session.get.call_count == 1
+
+    def test_is_zero_session_non_hex_is_false(self) -> None:
+        assert rcp_client._is_zero_session("zzz") is False
+
+    @pytest.mark.asyncio
     async def test_rejected_zero_session_id_is_not_cached(self) -> None:
         coord = _make_coord(rcp_session_cache={})
         session = self._mock_session(
