@@ -37,7 +37,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
-from bosch_shc_camera_client.settings import LightingOverride, get_lighting_override
+from bosch_shc_camera_client.settings import (
+    LightingOverride,
+    get_lighting_override,
+    get_setting_raw,
+)
 
 from .const import CLOUD_API, SLOW_TIER_MAX_DEFER_SEC
 from .local_data_interface import (
@@ -523,40 +527,20 @@ async def _poll_slow_tier_endpoints(
             coordinator.slow_tier_first_attempt_at = {}
         coordinator.slow_tier_first_attempt_at[cam_id] = time.monotonic()
 
+    token = headers.get("Authorization", "").removeprefix("Bearer ")
+
     async def _fetch(
         endpoint: str,
     ) -> tuple[str, int, dict[str, Any] | None]:
         """Fetch a single slow-tier endpoint. Returns (endpoint, status, data)."""
-        try:
-            async with asyncio.timeout(8):
-                async with (
-                    session.get(
-                        f"{CLOUD_API}/v11/video_inputs/{cam_id}/{endpoint}",  # closure awaited within the same loop iteration
-                        headers=headers,
-                    ) as r
-                ):
-                    if r.status == 200:
-                        try:
-                            return (endpoint, 200, await r.json())
-                        except (ValueError, aiohttp.ContentTypeError) as err:
-                            # The backend did answer; an unparsable body must
-                            # still spend the first-fetch exemption.
-                            _LOGGER.debug(
-                                "%s returned unparsable body for %s: %s",
-                                endpoint,
-                                cam_id,
-                                err_str(err),
-                            )
-                            return (endpoint, 200, None)
-                    return (endpoint, r.status, None)
-        except Exception as err:
-            _LOGGER.debug(
-                "%s fetch error for %s: %s",
-                endpoint,
-                cam_id,  # closure awaited within the same loop iteration
-                err_str(err),
-            )
-            return (endpoint, 0, None)
+        raw = await get_setting_raw(session, token, cam_id, endpoint, api_url=CLOUD_API)
+        if raw.status == 0:
+            _LOGGER.debug("%s fetch error for %s: no response", endpoint, cam_id)
+        elif raw.status == 200 and raw.body is None:
+            # The backend did answer; an unparsable body must still spend the
+            # first-fetch exemption.
+            _LOGGER.debug("%s returned unparsable body for %s", endpoint, cam_id)
+        return (endpoint, raw.status, raw.body)
 
     # Build task list (skip endpoints not applicable to this camera)
     is_gen2 = ctx.is_gen2
