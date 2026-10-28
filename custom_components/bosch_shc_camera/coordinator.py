@@ -302,7 +302,9 @@ async def _put_camera_via_lib(
                     "async_put_camera %s/%s error: %s", cam_id, endpoint, err
                 )
             return False
-        except ValueError as err:
+        except Exception as err:
+            # Callers treat any failed write as False, as before the library
+            # switch (a closed session or unserialisable body must not escape).
             _LOGGER.warning("async_put_camera %s/%s error: %s", cam_id, endpoint, err)
             return False
         else:

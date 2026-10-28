@@ -42007,6 +42007,25 @@ async def test_async_put_camera_lib_path_network_error_warns(caplog):
     assert any(r.levelname == "WARNING" and "boom" in r.message for r in caplog.records)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exc", [RuntimeError("Session is closed"), TypeError("x")])
+async def test_async_put_camera_lib_path_unexpected_error_returns_false(exc):
+    """Callers rely on False for any failed write, not an escaping exception."""
+    from custom_components.bosch_shc_camera import BoschCameraCoordinator
+
+    session = MagicMock()
+    session.request = MagicMock(side_effect=exc)
+    coord = SimpleNamespace(token="tok", hass=MagicMock())
+    with patch(
+        "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
+    ):
+        ok = await BoschCameraCoordinator.async_put_camera(
+            coord, "cam-1", "audio", {"enabled": True}
+        )
+    assert ok is False
+
+
 def _legacy_put_session(*statuses: int) -> MagicMock:
     responses = iter(statuses)
     session = MagicMock()
