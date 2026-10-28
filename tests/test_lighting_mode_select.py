@@ -70,10 +70,10 @@ async def test_always_off_changes_only_schedule_status() -> None:
     coord = _coord(CURRENT)
     session = MagicMock()
     session.get.return_value = _resp(200, CURRENT)
-    session.put.return_value = _resp(200)
+    session.request.return_value = _resp(200)
     with _patch_session(session):
         await async_set_schedule_status(coord, CAM, "always_off")
-    sent = session.put.call_args.kwargs["json"]
+    sent = session.request.call_args.kwargs["json"]
     assert sent == {**CURRENT, "scheduleStatus": "ALWAYS_OFF"}
     assert coord.lighting_options_cache[CAM]["scheduleStatus"] == "ALWAYS_OFF"
     assert CAM in coord.lighting_options_set_at
@@ -88,10 +88,10 @@ async def test_every_mode_maps_to_api_value(option: str) -> None:
     session.get.return_value = _resp(
         200, {**CURRENT, "scheduleStatus": "SOMETHING_ELSE"}
     )
-    session.put.return_value = _resp(204)
+    session.request.return_value = _resp(204)
     with _patch_session(session):
         await async_set_schedule_status(coord, CAM, option)
-    assert session.put.call_args.kwargs["json"]["scheduleStatus"] == option.upper()
+    assert session.request.call_args.kwargs["json"]["scheduleStatus"] == option.upper()
 
 
 @pytest.mark.asyncio
@@ -110,7 +110,7 @@ async def test_get_failure_raises_and_does_not_put() -> None:
     session.get.return_value = _resp(442)
     with _patch_session(session), pytest.raises(HomeAssistantError):
         await async_set_schedule_status(coord, CAM, "always_off")
-    session.put.assert_not_called()
+    session.request.assert_not_called()
     assert coord.lighting_options_cache[CAM]["scheduleStatus"] == "AMBIENT_LIGHT"
 
 
@@ -119,7 +119,7 @@ async def test_put_failure_raises_and_keeps_cache() -> None:
     coord = _coord(CURRENT)
     session = MagicMock()
     session.get.return_value = _resp(200, CURRENT)
-    session.put.return_value = _resp(500)
+    session.request.return_value = _resp(500)
     with _patch_session(session), pytest.raises(HomeAssistantError):
         await async_set_schedule_status(coord, CAM, "always_off")
     assert coord.lighting_options_cache[CAM]["scheduleStatus"] == "AMBIENT_LIGHT"
@@ -155,7 +155,7 @@ async def test_overlapping_writes_are_serialized() -> None:
 
     session = MagicMock()
     session.get.side_effect = get
-    session.put.side_effect = put
+    session.request.side_effect = put
     with _patch_session(session):
         t1 = asyncio.create_task(async_set_schedule_status(coord, CAM, "always_off"))
         await asyncio.sleep(0.01)
@@ -230,7 +230,7 @@ async def test_same_mode_under_lock_skips_put() -> None:
     session.get.return_value = _resp(200, CURRENT)  # already AMBIENT_LIGHT
     with _patch_session(session):
         await async_set_schedule_status(coord, CAM, "ambient_light")
-    session.put.assert_not_called()
+    session.request.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -240,10 +240,10 @@ async def test_queued_request_is_not_dropped_by_stale_cache() -> None:
     coord = _coord(CURRENT)
     session = MagicMock()
     session.get.return_value = _resp(200, {**CURRENT, "scheduleStatus": "ALWAYS_OFF"})
-    session.put.return_value = _resp(200)
+    session.request.return_value = _resp(200)
     with _patch_session(session):
         await async_set_schedule_status(coord, CAM, "ambient_light")
-    assert session.put.call_args.kwargs["json"]["scheduleStatus"] == "AMBIENT_LIGHT"
+    assert session.request.call_args.kwargs["json"]["scheduleStatus"] == "AMBIENT_LIGHT"
 
 
 @pytest.mark.asyncio
@@ -253,11 +253,11 @@ async def test_uses_own_last_write_when_cloud_get_would_be_stale() -> None:
     coord.lighting_options_set_at[CAM] = 1.0  # fresh write in flight
     session = MagicMock()
     session.get.return_value = _resp(200, CURRENT)  # stale threshold 0.05
-    session.put.return_value = _resp(200)
+    session.request.return_value = _resp(200)
     with _patch_session(session):
         await async_set_schedule_status(coord, CAM, "always_off")
     session.get.assert_not_called()
-    assert session.put.call_args.kwargs["json"]["darknessThreshold"] == 0.9
+    assert session.request.call_args.kwargs["json"]["darknessThreshold"] == 0.9
 
 
 @pytest.mark.asyncio
@@ -291,7 +291,7 @@ async def test_service_and_select_share_the_lock() -> None:
     lock = lighting_write_lock(coord, CAM)
     session = MagicMock()
     session.get.return_value = _resp(200, CURRENT)
-    session.put.return_value = _resp(200)
+    session.request.return_value = _resp(200)
     await lock.acquire()  # simulate the service mid-write
     with _patch_session(session):
         task = asyncio.create_task(async_set_schedule_status(coord, CAM, "always_off"))
@@ -299,7 +299,7 @@ async def test_service_and_select_share_the_lock() -> None:
         session.get.assert_not_called()
         lock.release()
         await task
-    session.put.assert_called_once()
+    session.request.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -345,7 +345,7 @@ def _mode_coord(lights: dict[str, bool], status: str) -> SimpleNamespace:
 async def _switch(coord: SimpleNamespace, option: str) -> None:
     session = MagicMock()
     session.get.return_value = _resp(200, coord.lighting_options_cache[CAM])
-    session.put.return_value = _resp(200)
+    session.request.return_value = _resp(200)
     with _patch_session(session):
         await async_set_schedule_status(coord, CAM, option)
 
@@ -391,7 +391,7 @@ async def test_noop_switch_refreshes_stale_cache() -> None:
     with _patch_session(session):
         await async_set_schedule_status(coord, CAM, "always_off")
     assert coord.lighting_options_cache[CAM]["scheduleStatus"] == "ALWAYS_OFF"
-    session.put.assert_not_called()
+    session.request.assert_not_called()
 
 
 @pytest.mark.asyncio

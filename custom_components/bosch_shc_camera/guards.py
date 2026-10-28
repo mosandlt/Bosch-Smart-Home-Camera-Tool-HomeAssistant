@@ -11,8 +11,9 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
+from bosch_shc_camera_client.cameras import BoschCameraError
 from homeassistant.exceptions import HomeAssistantError, Unauthorized
 
 from .const import DOMAIN
@@ -172,3 +173,33 @@ def wrap_service_errors(action: str) -> Iterator[None]:
             translation_key="unexpected_error",
             translation_placeholders={"action": action, "error": str(err)},
         ) from err
+
+
+def raise_lib_error(
+    action: str,
+    err: BoschCameraError,
+    *,
+    privacy_action: str | None = None,
+    with_body: bool = True,
+) -> NoReturn:
+    """Raise the service error for a client-library error that carries an HTTP status.
+
+    Timeouts and transport failures have no status and are re-raised as is, so
+    `wrap_service_errors` reports them as unexpected errors.
+    """
+    if err.status is None:
+        raise err
+    if err.status == 443 and privacy_action is not None:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="privacy_blocked",
+            translation_placeholders={"action": privacy_action},
+        ) from err
+    placeholders = {"action": action, "status": str(err.status)}
+    if with_body:
+        placeholders["body"] = (err.body or "")[:200]
+    raise HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key="http_error_with_body" if with_body else "http_error",
+        translation_placeholders=placeholders,
+    ) from err

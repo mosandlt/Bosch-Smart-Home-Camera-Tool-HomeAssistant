@@ -15,7 +15,7 @@ import asyncio
 import logging
 import time
 from datetime import UTC
-from typing import Any, NoReturn
+from typing import Any
 
 import aiohttp
 from bosch_shc_camera_client.cameras import BoschCameraError, fetch_json
@@ -32,40 +32,10 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import get_options
-from .guards import admin_only_service, wrap_service_errors
+from .guards import admin_only_service, raise_lib_error, wrap_service_errors
 from .lighting_options import cached_if_write_locked, lighting_write_lock
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _raise_lib_error(
-    action: str,
-    err: BoschCameraError,
-    *,
-    privacy_action: str | None = None,
-    with_body: bool = True,
-) -> NoReturn:
-    """Raise the service error for a client-library error that carries an HTTP status.
-
-    Timeouts and transport failures have no status and are re-raised as is, so
-    `wrap_service_errors` reports them as unexpected errors.
-    """
-    if err.status is None:
-        raise err
-    if err.status == 443 and privacy_action is not None:
-        raise HomeAssistantError(
-            translation_domain=DOMAIN,
-            translation_key="privacy_blocked",
-            translation_placeholders={"action": privacy_action},
-        ) from err
-    placeholders = {"action": action, "status": str(err.status)}
-    if with_body:
-        placeholders["body"] = (err.body or "")[:200]
-    raise HomeAssistantError(
-        translation_domain=DOMAIN,
-        translation_key="http_error_with_body" if with_body else "http_error",
-        translation_placeholders=placeholders,
-    ) from err
 
 
 def _register_services(hass: HomeAssistant) -> None:
@@ -410,7 +380,7 @@ def _register_services(hass: HomeAssistant) -> None:
                             api_url=CLOUD_API,
                         )
                     except BoschCameraError as err:
-                        _raise_lib_error(
+                        raise_lib_error(
                             "Set motion zones", err, privacy_action="Set motion zones"
                         )
                     _LOGGER.info(
@@ -464,7 +434,7 @@ def _register_services(hass: HomeAssistant) -> None:
                                     "notification_id": "bosch_motion_zones",
                                 },
                             )
-                        _raise_lib_error(
+                        raise_lib_error(
                             "Get motion zones", err, privacy_action="get_motion_zones"
                         )
                     if not zones:
@@ -617,7 +587,7 @@ def _register_services(hass: HomeAssistant) -> None:
                                     "notification_id": "bosch_privacy_masks",
                                 },
                             )
-                        _raise_lib_error(
+                        raise_lib_error(
                             "Get privacy masks", err, privacy_action="get_privacy_masks"
                         )
                     if not masks:
@@ -719,7 +689,7 @@ def _register_services(hass: HomeAssistant) -> None:
                             api_url=CLOUD_API,
                         )
                     except BoschCameraError as err:
-                        _raise_lib_error(
+                        raise_lib_error(
                             "Set privacy masks", err, privacy_action="Set privacy masks"
                         )
                     _LOGGER.info(
@@ -765,7 +735,7 @@ def _register_services(hass: HomeAssistant) -> None:
                             10,
                         )
                     except BoschCameraError as err:
-                        _raise_lib_error(
+                        raise_lib_error(
                             "delete_motion_zone fetch", err, with_body=False
                         )
                     if zone_index >= len(zones):
@@ -790,9 +760,7 @@ def _register_services(hass: HomeAssistant) -> None:
                             api_url=CLOUD_API,
                         )
                     except BoschCameraError as err:
-                        _raise_lib_error(
-                            "delete_motion_zone POST", err, with_body=False
-                        )
+                        raise_lib_error("delete_motion_zone POST", err, with_body=False)
                     _LOGGER.info(
                         "Zone %d deleted, %d zones remaining",
                         zone_index,
@@ -838,7 +806,7 @@ def _register_services(hass: HomeAssistant) -> None:
                                 10,
                             )
                         except BoschCameraError as err:
-                            _raise_lib_error(
+                            raise_lib_error(
                                 "get_lighting_schedule", err, with_body=False
                             )
                     sched = data.get("scheduleStatus", "?")
@@ -940,7 +908,7 @@ def _register_services(hass: HomeAssistant) -> None:
                                     10,
                                 )
                             except BoschCameraError as err:
-                                _raise_lib_error(
+                                raise_lib_error(
                                     "Set lighting schedule (fetch current)", err
                                 )
                         if on_time:
@@ -970,7 +938,7 @@ def _register_services(hass: HomeAssistant) -> None:
                                 api_url=CLOUD_API,
                             )
                         except BoschCameraError as err:
-                            _raise_lib_error("Set lighting schedule", err)
+                            raise_lib_error("Set lighting schedule", err)
                         _LOGGER.info(
                             "Lighting schedule set for %s: %s → %s",
                             cam_id[:8],
