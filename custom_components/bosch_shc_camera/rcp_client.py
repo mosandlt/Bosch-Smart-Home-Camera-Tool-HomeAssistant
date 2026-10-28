@@ -261,6 +261,14 @@ async def _rcp_session(
             return None
         session_id = m.group(1)
 
+        # 0x00000000 is the proxy's rejection answer, not a usable session.
+        if session_id == "0x00000000":
+            _LOGGER.debug(
+                "_rcp_session: invalid session 0x00000000 for %s — proxy rejected",
+                proxy_host,
+            )
+            return None
+
         # Step 2: ACK the session
         params2 = {
             "command": "0xff0d",

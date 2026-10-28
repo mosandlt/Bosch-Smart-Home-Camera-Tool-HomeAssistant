@@ -277,6 +277,38 @@ class TestRcpSession:
         assert result == "0x12345678"
 
     @pytest.mark.asyncio
+    async def test_rejected_zero_session_id_returns_none_without_ack(self) -> None:
+        """The proxy answers 0x00000000 when it rejects the session; it must
+        neither be ACKed nor returned (and so never cached for 5 minutes)."""
+        coord = _make_coord()
+        session = self._mock_session(
+            _resp_cm(200, text="<sessionid>0x00000000</sessionid>")
+        )
+        with patch(
+            f"{RCP_CLIENT_MODULE}.async_bosch_cloud_session_cm", return_value=session
+        ):
+            result = await rcp_client._rcp_session(
+                coord, "proxy-01:42090", "abc123hash"
+            )
+        assert result is None
+        assert session.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_rejected_zero_session_id_is_not_cached(self) -> None:
+        coord = _make_coord(rcp_session_cache={})
+        session = self._mock_session(
+            _resp_cm(200, text="<sessionid>0x00000000</sessionid>")
+        )
+        with patch(
+            f"{RCP_CLIENT_MODULE}.async_bosch_cloud_session_cm", return_value=session
+        ):
+            result = await rcp_client.get_cached_rcp_session(
+                coord, "proxy-01:42090", "abc123hash"
+            )
+        assert result is None
+        assert "abc123hash" not in coord.rcp_session_cache
+
+    @pytest.mark.asyncio
     async def test_step1_non200_returns_none(self) -> None:
         coord = _make_coord()
         session = self._mock_session(_resp_cm(403))
