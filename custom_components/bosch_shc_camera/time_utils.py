@@ -25,28 +25,10 @@ movement / audio counters.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from bosch_shc_camera_client.events import parse_event_timestamp
 
+# Library parser: honors the offset/"Z", strips the RFC-9557 bracket, treats a
+# naive value as UTC, returns None for empty or unparseable input.
+parse_bosch_timestamp = parse_event_timestamp
 
-def parse_bosch_timestamp(ts_str: str | None) -> datetime | None:
-    """Parse a Bosch event timestamp into a timezone-aware UTC datetime.
-
-    Honors the timezone designator the API sends (``+02:00`` or ``Z``). A
-    naive timestamp (no offset, no ``Z``) is assumed to be UTC — this branch
-    is effectively never hit by the live API but keeps behavior defined.
-
-    Returns ``None`` for empty or unparseable input.
-    """
-    if not ts_str:
-        return None
-    # Strip the RFC-9557 zone bracket suffix, e.g. "...+02:00[Europe/Berlin]".
-    # fromisoformat understands the numeric offset / "Z" but not the bracket.
-    iso = ts_str.split("[", 1)[0]
-    try:
-        dt = datetime.fromisoformat(iso)
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        # Legacy naive form — define it as UTC (the historical Bosch "Z" tier).
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
+__all__ = ["parse_bosch_timestamp"]

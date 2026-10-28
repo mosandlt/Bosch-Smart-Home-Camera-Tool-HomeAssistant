@@ -38,6 +38,18 @@ RAW_NAIVE_INSTANT = datetime(2026, 3, 19, 9, 32, 8, tzinfo=UTC)
 class TestParseBoschTimestamp:
     """The shared helper must honor every designator Bosch can send."""
 
+    def test_is_the_library_parser(self) -> None:
+        from bosch_shc_camera_client.events import parse_event_timestamp
+
+        from custom_components.bosch_shc_camera.time_utils import parse_bosch_timestamp
+
+        assert parse_bosch_timestamp is parse_event_timestamp
+
+    def test_out_of_range_offset_returns_none(self) -> None:
+        from custom_components.bosch_shc_camera.time_utils import parse_bosch_timestamp
+
+        assert parse_bosch_timestamp("0001-01-01T00:00:00+14:00") is None
+
     def test_offset_with_zone_bracket(self) -> None:
         from custom_components.bosch_shc_camera.time_utils import parse_bosch_timestamp
 
