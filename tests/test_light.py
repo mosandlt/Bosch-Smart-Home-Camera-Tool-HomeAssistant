@@ -3041,3 +3041,26 @@ class TestWhiteStateEdges:
         await light.async_turn_on(color_temp_kelvin=6500)
         light._put_lighting_switch.assert_not_awaited()
         assert get_pending_front_white_balance(light.coordinator, CAM_ID) == -1.0
+
+
+class TestPutLightingSwitchUnexpectedError:
+    @pytest.mark.asyncio
+    async def test_non_http_exception_returns_false(self, caplog):
+        """An error the library does not wrap still ends in a warning and False."""
+        import logging
+
+        session = MagicMock()
+        session.request = MagicMock(side_effect=RuntimeError("boom"))
+        light = _make_light(_stub_coord_edge())
+
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            ok = await light._put_lighting_switch({"topLedLightSettings": {}})
+
+        assert ok is False
+        assert "lighting/switch error" in caplog.text

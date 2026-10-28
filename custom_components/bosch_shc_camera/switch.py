@@ -41,6 +41,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from bosch_shc_camera_client.cameras import BoschCameraError, fetch_json
+from bosch_shc_camera_client.settings import put_setting
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -54,7 +56,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import BoschCameraCoordinator, get_options
 from .cloud_ssl import async_get_bosch_cloud_session
-from .const import DOMAIN, STREAM_START_SKIPPED
+from .const import CLOUD_API, DOMAIN, STREAM_START_SKIPPED
 from .dynamic_devices import register_dynamic_camera_listener
 from .guards import (
     _INDOOR_HW,
@@ -1932,20 +1934,23 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
                 return
             session = await async_get_bosch_cloud_session(self.hass)
             try:
-                async with asyncio.timeout(10):
-                    async with session.get(
-                        f"https://residential.cbs.boschsecurity.com/v11/video_inputs/{self._cam_id}/lighting/motion",
-                        headers={"Authorization": f"Bearer {token}"},
-                    ) as resp:
-                        if resp.status == 200:
-                            cache = await resp.json()
-                        else:
-                            _LOGGER.warning(
-                                "Motion light GET HTTP %d for %s",
-                                resp.status,
-                                self._cam_id[:8],
-                            )
-                            return
+                cache = await fetch_json(
+                    session,
+                    token,
+                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/motion",
+                    "Motion light",
+                    10,
+                )
+            except BoschCameraError as err:
+                if err.status is None:
+                    _LOGGER.exception("Motion light GET error for %s", self._cam_id[:8])
+                else:
+                    _LOGGER.warning(
+                        "Motion light GET HTTP %d for %s",
+                        err.status,
+                        self._cam_id[:8],
+                    )
+                return
             except Exception:
                 _LOGGER.exception("Motion light GET error for %s", self._cam_id[:8])
                 return
@@ -2011,37 +2016,48 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
         if not token:
             return
         session = await async_get_bosch_cloud_session(self.hass)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
-        url = f"https://residential.cbs.boschsecurity.com/v11/video_inputs/{self._cam_id}/lighting/ambient"
         desired_label = "ON" if enabled else "OFF"
         try:
-            async with asyncio.timeout(10):
-                async with session.get(url, headers=headers) as resp:
-                    if resp.status != 200:
-                        # A camera that doesn't support ambient lighting (or
-                        # any other GET failure) would otherwise leave
-                        # `is_on` stuck at "unknown" forever with zero
-                        # indication why. Sibling switches (motion light,
-                        # _warn_write_failed users) all log on failure — log
-                        # here too for consistency.
-                        _LOGGER.warning(
-                            "Ambient light GET HTTP %d for %s",
-                            resp.status,
-                            self._cam_id[:8],
-                        )
-                        return
-                    data = await resp.json()
+            try:
+                data = await fetch_json(
+                    session,
+                    token,
+                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/ambient",
+                    "Ambient light",
+                    10,
+                )
+            except BoschCameraError as err:
+                if err.status is None:
+                    raise
+                # A camera that doesn't support ambient lighting (or
+                # any other GET failure) would otherwise leave
+                # `is_on` stuck at "unknown" forever with zero
+                # indication why. Sibling switches (motion light,
+                # _warn_write_failed users) all log on failure — log
+                # here too for consistency.
+                _LOGGER.warning(
+                    "Ambient light GET HTTP %d for %s",
+                    err.status,
+                    self._cam_id[:8],
+                )
+                return
             data["ambientLightEnabled"] = enabled
-            async with asyncio.timeout(10):
-                async with session.put(url, headers=headers, json=data) as resp:
-                    if resp.status in (200, 201, 204):
-                        self._is_on = enabled
-                        self.coordinator.ambient_lighting_cache[self._cam_id] = data
-                    else:
-                        self._warn_write_failed("Ambient light", desired_label)
+            try:
+                await put_setting(
+                    session,
+                    token,
+                    self._cam_id,
+                    "lighting/ambient",
+                    data,
+                    api_url=CLOUD_API,
+                )
+            except BoschCameraError as err:
+                if err.status is None:
+                    raise
+                self._warn_write_failed("Ambient light", desired_label)
+            else:
+                self._is_on = enabled
+                self.coordinator.ambient_lighting_cache[self._cam_id] = data
         except Exception:
             _LOGGER.exception("Ambient light error for %s", self._cam_id[:8])
         self.async_write_ha_state()
@@ -2093,30 +2109,24 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
         threshold = cache.get("darknessThreshold", 0.5)
         body = {"darknessThreshold": threshold, "softLightFading": enabled}
         session = await async_get_bosch_cloud_session(self.hass)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
-        url = f"https://residential.cbs.boschsecurity.com/v11/video_inputs/{self._cam_id}/lighting"
         try:
-            async with asyncio.timeout(10):
-                async with session.put(url, headers=headers, json=body) as resp:
-                    if resp.status in (200, 201, 204):
-                        # Update cache
-                        try:
-                            rsp = await resp.json()
-                            if isinstance(rsp, dict):
-                                self.coordinator.global_lighting_cache[self._cam_id] = (
-                                    rsp
-                                )
-                            else:
-                                self.coordinator.global_lighting_cache[self._cam_id] = (
-                                    body
-                                )
-                        except Exception:
-                            self.coordinator.global_lighting_cache[self._cam_id] = body
+            result = await put_setting(
+                session,
+                token,
+                self._cam_id,
+                "lighting",
+                body,
+                api_url=CLOUD_API,
+            )
+        except BoschCameraError as err:
+            if err.status is None:
+                _LOGGER.exception("Soft fading error for %s", self._cam_id[:8])
         except Exception:
             _LOGGER.exception("Soft fading error for %s", self._cam_id[:8])
+        else:
+            self.coordinator.global_lighting_cache[self._cam_id] = (
+                body if result.response is None else result.response
+            )
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:

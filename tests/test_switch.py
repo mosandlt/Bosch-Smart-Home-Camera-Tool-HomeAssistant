@@ -1839,6 +1839,7 @@ class TestAmbientLightSwitchModePins:
         )
         put_resp = MagicMock()
         put_resp.status = 204
+        put_resp.json = AsyncMock(return_value=None)
         get_ctx = MagicMock()
         get_ctx.__aenter__ = AsyncMock(return_value=get_resp)
         get_ctx.__aexit__ = AsyncMock(return_value=None)
@@ -1847,13 +1848,13 @@ class TestAmbientLightSwitchModePins:
         put_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
         mock_session.get = MagicMock(return_value=get_ctx)
-        mock_session.put = MagicMock(return_value=put_ctx)
+        mock_session.request = MagicMock(return_value=put_ctx)
         with patch(
             "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=mock_session),
         ):
             await sw._set_ambient_light(True)
-        _, put_kwargs = mock_session.put.call_args
+        _, put_kwargs = mock_session.request.call_args
         assert put_kwargs["json"]["ambientLightEnabled"] is True
         assert sw._is_on is True
 
@@ -1871,6 +1872,7 @@ class TestAmbientLightSwitchModePins:
         )
         put_resp = MagicMock()
         put_resp.status = 200
+        put_resp.json = AsyncMock(return_value=None)
         get_ctx = MagicMock()
         get_ctx.__aenter__ = AsyncMock(return_value=get_resp)
         get_ctx.__aexit__ = AsyncMock(return_value=None)
@@ -1879,13 +1881,13 @@ class TestAmbientLightSwitchModePins:
         put_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
         mock_session.get = MagicMock(return_value=get_ctx)
-        mock_session.put = MagicMock(return_value=put_ctx)
+        mock_session.request = MagicMock(return_value=put_ctx)
         with patch(
             "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=mock_session),
         ):
             await sw._set_ambient_light(False)
-        _, put_kwargs = mock_session.put.call_args
+        _, put_kwargs = mock_session.request.call_args
         assert put_kwargs["json"]["ambientLightEnabled"] is False
         assert sw._is_on is False
 
@@ -1961,13 +1963,13 @@ class TestSoftLightFadingSwitchModePins:
         put_ctx.__aenter__ = AsyncMock(return_value=put_resp)
         put_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
-        mock_session.put = MagicMock(return_value=put_ctx)
+        mock_session.request = MagicMock(return_value=put_ctx)
         with patch(
             "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=mock_session),
         ):
             await sw._put_global_lighting(True)
-        _, put_kwargs = mock_session.put.call_args
+        _, put_kwargs = mock_session.request.call_args
         assert put_kwargs["json"]["softLightFading"] is True
         assert coord.global_lighting_cache[CAM_ID]["softLightFading"] is True
 
@@ -1990,13 +1992,13 @@ class TestSoftLightFadingSwitchModePins:
         put_ctx.__aenter__ = AsyncMock(return_value=put_resp)
         put_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
-        mock_session.put = MagicMock(return_value=put_ctx)
+        mock_session.request = MagicMock(return_value=put_ctx)
         with patch(
             "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=mock_session),
         ):
             await sw._put_global_lighting(False)
-        _, put_kwargs = mock_session.put.call_args
+        _, put_kwargs = mock_session.request.call_args
         assert put_kwargs["json"]["softLightFading"] is False
         assert coord.global_lighting_cache[CAM_ID]["softLightFading"] is False
 
@@ -2733,7 +2735,7 @@ class TestAmbientLightCacheUpdate:
         put_resp = _resp_cm(204)
         session = MagicMock()
         session.get = MagicMock(return_value=get_resp)
-        session.put = MagicMock(return_value=put_resp)
+        session.request = MagicMock(return_value=put_resp)
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -2759,7 +2761,7 @@ class TestAmbientLightCacheUpdate:
         put_resp = _resp_cm(200)
         session = MagicMock()
         session.get = MagicMock(return_value=get_resp)
-        session.put = MagicMock(return_value=put_resp)
+        session.request = MagicMock(return_value=put_resp)
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -2784,7 +2786,7 @@ class TestAmbientLightCacheUpdate:
         put_resp = _resp_cm(500)  # server error
         session = MagicMock()
         session.get = MagicMock(return_value=get_resp)
-        session.put = MagicMock(return_value=put_resp)
+        session.request = MagicMock(return_value=put_resp)
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -2817,7 +2819,7 @@ class TestAmbientLightCacheUpdate:
         put_resp = _resp_cm(500)
         session = MagicMock()
         session.get = MagicMock(return_value=get_resp)
-        session.put = MagicMock(return_value=put_resp)
+        session.request = MagicMock(return_value=put_resp)
 
         with (
             patch(
@@ -2845,7 +2847,7 @@ class TestAmbientLightCacheUpdate:
         get_resp = _resp_cm(442)  # Bosch's "not supported by this hardware" status
         session = MagicMock()
         session.get = MagicMock(return_value=get_resp)
-        session.put = MagicMock()
+        session.request = MagicMock()
 
         with (
             patch(
@@ -2856,7 +2858,7 @@ class TestAmbientLightCacheUpdate:
         ):
             await sw._set_ambient_light(True)
 
-        session.put.assert_not_called()
+        session.request.assert_not_called()
         assert any("Ambient light GET HTTP 442" in r.message for r in caplog.records), (
             "GET failure must be logged with the HTTP status, not silently swallowed"
         )
@@ -2892,7 +2894,7 @@ class TestAmbientLightCacheUpdate:
         ):
             await sw._set_ambient_light(True)
         # PUT must not have been called (returned early after GET 500)
-        assert session.put.call_count == 0 if hasattr(session, "put") else True
+        assert session.request.call_count == 0 if hasattr(session, "put") else True
 
     @pytest.mark.asyncio
     async def test_exception_caught(self):
@@ -3173,7 +3175,7 @@ async def test_softlight_fading_json_exception_falls_back_to_body():
     cm.__aenter__ = AsyncMock(return_value=resp)
     cm.__aexit__ = AsyncMock(return_value=False)
     session = MagicMock()
-    session.put = MagicMock(return_value=cm)
+    session.request = MagicMock(return_value=cm)
 
     sw = BoschSoftLightFadingSwitch(coord, CAM_ID, _make_entry())
     sw.hass = MagicMock()
@@ -5405,7 +5407,7 @@ def _coord_privacy_write_failure(**overrides: object) -> SimpleNamespace:
 def _put_raises_session() -> MagicMock:
     """aiohttp session whose .put(...) raises immediately (connect failure)."""
     session = MagicMock()
-    session.put = MagicMock(
+    session.request = MagicMock(
         side_effect=aiohttp.ClientConnectorError(
             connection_key=MagicMock(), os_error=OSError("Connect call failed")
         )
@@ -8906,6 +8908,7 @@ class TestAmbientLightSwitch:
         )
         put_resp = MagicMock()
         put_resp.status = 204
+        put_resp.json = AsyncMock(return_value=None)
         get_ctx = MagicMock()
         get_ctx.__aenter__ = AsyncMock(return_value=get_resp)
         get_ctx.__aexit__ = AsyncMock(return_value=None)
@@ -8914,7 +8917,7 @@ class TestAmbientLightSwitch:
         put_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
         mock_session.get = MagicMock(return_value=get_ctx)
-        mock_session.put = MagicMock(return_value=put_ctx)
+        mock_session.request = MagicMock(return_value=put_ctx)
         with patch(
             "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=mock_session),
@@ -9042,7 +9045,7 @@ class TestSoftLightFadingSwitch:
         put_ctx.__aenter__ = AsyncMock(return_value=put_resp)
         put_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
-        mock_session.put = MagicMock(return_value=put_ctx)
+        mock_session.request = MagicMock(return_value=put_ctx)
         with patch(
             "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=mock_session),
@@ -9089,7 +9092,7 @@ class TestSoftLightFadingSwitch:
         put_ctx.__aenter__ = AsyncMock(return_value=put_resp)
         put_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
-        mock_session.put = MagicMock(return_value=put_ctx)
+        mock_session.request = MagicMock(return_value=put_ctx)
         with patch(
             "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=mock_session),
@@ -9115,12 +9118,12 @@ class TestSoftLightFadingSwitch:
             stub_coord_sprintma, CAM_ID, stub_entry_sprintma
         )
         _bind_hass(sw)
-        # Raise inside session.put (inside the try block), not before it
+        # Raise inside session.request (inside the try block), not before it
         failing_ctx = MagicMock()
         failing_ctx.__aenter__ = AsyncMock(side_effect=Exception("network error"))
         failing_ctx.__aexit__ = AsyncMock(return_value=None)
         mock_session = MagicMock()
-        mock_session.put = MagicMock(return_value=failing_ctx)
+        mock_session.request = MagicMock(return_value=failing_ctx)
         with patch(
             "custom_components.bosch_shc_camera.switch.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=mock_session),
@@ -10350,3 +10353,105 @@ class TestGenericDelegatedSwitchEntityWithoutWriteFn:
         stub_coord.shc_state_cache[CAM_ID] = {}
         sw = BoschDelegatedSwitchEntity(stub_coord, CAM_ID, stub_entry, description)
         assert sw.available is False
+
+
+def _lib_switch_session(*, get=None, request=None):
+    session = MagicMock()
+    if get is not None:
+        session.get = get
+    if request is not None:
+        session.request = request
+    return session
+
+
+def _ok_cm(status: int, body):
+    resp = MagicMock()
+    resp.status = status
+    resp.json = AsyncMock(return_value=body)
+    resp.text = AsyncMock(return_value="")
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=resp)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    return cm
+
+
+async def _run_lib_switch(sw, method, session, *args):
+    sw.hass = MagicMock()
+    sw.async_write_ha_state = MagicMock()
+    with patch(
+        f"{switch_mod.__name__}.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
+    ):
+        await getattr(sw, method)(*args)
+
+
+@pytest.mark.asyncio
+async def test_ambient_light_get_transport_error_logs_exception(caplog):
+    """A connection failure on the GET is logged with a traceback, state stays unknown."""
+    sw = BoschAmbientLightSwitch(_make_coord(), CAM_ID, _make_entry())
+    session = _lib_switch_session(get=MagicMock(side_effect=aiohttp.ClientError("x")))
+
+    with caplog.at_level(logging.ERROR):
+        await _run_lib_switch(sw, "_set_ambient_light", session, True)
+
+    assert "Ambient light error" in caplog.text
+    assert sw._is_on is None
+
+
+@pytest.mark.asyncio
+async def test_ambient_light_put_http_error_warns_without_exception(caplog):
+    """A refused PUT warns through _warn_write_failed and leaves the state alone."""
+    sw = BoschAmbientLightSwitch(_make_coord(), CAM_ID, _make_entry())
+    session = _lib_switch_session(
+        get=MagicMock(return_value=_ok_cm(200, {"ambientLightEnabled": False})),
+        request=MagicMock(return_value=_ok_cm(500, None)),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await _run_lib_switch(sw, "_set_ambient_light", session, True)
+
+    assert "failed on all paths" in caplog.text
+    assert "Ambient light error" not in caplog.text
+    assert sw._is_on is None
+
+
+@pytest.mark.asyncio
+async def test_ambient_light_put_transport_error_logs_exception(caplog):
+    sw = BoschAmbientLightSwitch(_make_coord(), CAM_ID, _make_entry())
+    session = _lib_switch_session(
+        get=MagicMock(return_value=_ok_cm(200, {"ambientLightEnabled": False})),
+        request=MagicMock(side_effect=aiohttp.ClientError("x")),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        await _run_lib_switch(sw, "_set_ambient_light", session, True)
+
+    assert "Ambient light error" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "logged"),
+    [
+        (aiohttp.ClientError("x"), True),
+        (RuntimeError("boom"), True),
+        (None, False),
+    ],
+)
+async def test_soft_fading_failures(caplog, error, logged):
+    """Transport/unexpected errors log a traceback; an HTTP refusal stays silent."""
+    coord = _make_coord()
+    coord.global_lighting_cache = {CAM_ID: {"darknessThreshold": 0.5}}
+    sw = BoschSoftLightFadingSwitch(coord, CAM_ID, _make_entry())
+    request = (
+        MagicMock(side_effect=error)
+        if error
+        else MagicMock(return_value=_ok_cm(500, None))
+    )
+    session = _lib_switch_session(request=request)
+
+    with caplog.at_level(logging.ERROR):
+        await _run_lib_switch(sw, "_put_global_lighting", session, True)
+
+    assert ("Soft fading error" in caplog.text) is logged
+    assert coord.global_lighting_cache[CAM_ID] == {"darknessThreshold": 0.5}
