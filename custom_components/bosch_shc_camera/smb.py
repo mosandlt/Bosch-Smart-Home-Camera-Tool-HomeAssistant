@@ -12,8 +12,6 @@ import socket
 import ssl
 import threading
 import time
-import urllib.error
-import urllib.request
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
@@ -547,12 +545,7 @@ def _sync_smb_upload_events(
                     tmp_path = f"{smb_path}.part"
                     try:
                         total = 0
-                        req_obj = urllib.request.Request(  # noqa: S310 # Bosch cloud clip URL, https+bearer; guarded by _is_safe_bosch_url above
-                            clip_url, headers={"Authorization": f"Bearer {token}"}
-                        )
-                        with urllib.request.urlopen(  # noqa: S310 # Bosch cloud clip URL, https+bearer; from Bosch API response (not user-supplied)
-                            req_obj, context=_bosch_ssl_ctx(), timeout=60
-                        ) as r:
+                        with _http_get_chunked(clip_url, token, timeout=60) as r:
                             if r.status == 200:
                                 with open_file(tmp_path, mode="wb") as f:
                                     while True:
@@ -866,12 +859,7 @@ def _sync_ftp_upload(
                         _LOGGER.debug("FTP skip (exists): %s", fname)
                     else:
                         try:
-                            req_obj = urllib.request.Request(  # noqa: S310 # Bosch cloud clip URL, https+bearer, guarded by _is_safe_bosch_url above
-                                clip_url, headers={"Authorization": f"Bearer {token}"}
-                            )
-                            with urllib.request.urlopen(  # noqa: S310 # Bosch cloud clip URL, https+bearer, guarded by _is_safe_bosch_url above
-                                req_obj, context=_bosch_ssl_ctx(), timeout=60
-                            ) as r:
+                            with _http_get_chunked(clip_url, token, timeout=60) as r:
                                 if r.status == 200:
                                     ftp.storbinary(f"STOR {fpath}", r)
                                     _LOGGER.info("FTP uploaded: %s", fname)

@@ -54,7 +54,7 @@ CAM_IMG = "Terrasse_2026-05-07_10-00-00_MOVEMENT_11111111.jpg"
 
 _SAFE_IMAGE_URL = "https://media.boschsecurity.com/snapshot.jpg"
 _SAFE_VIDEO_URL = "https://media.boschsecurity.com/clip.mp4"
-_URLOPEN = "custom_components.bosch_shc_camera.smb.urllib.request.urlopen"
+_URLOPEN = "urllib.request.urlopen"
 
 
 # Shared helpers (deduped from the original 10 files)

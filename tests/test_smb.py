@@ -43,7 +43,7 @@ import pytest
 
 MODULE = "custom_components.bosch_shc_camera.smb"
 CAM_ID = "11111111-1111-1111-1111-111111111111"
-URLOPEN = f"{MODULE}.urllib.request.urlopen"
+URLOPEN = "urllib.request.urlopen"
 
 
 # ── shared fixtures/helpers ──────────────────────────────────────────────────
@@ -1210,6 +1210,36 @@ class TestSmbClipUpload:
         assert rename_args[0] == call_path
         assert rename_args[1].endswith(".mp4") and not rename_args[1].endswith(".part")
 
+    def test_clip_download_request_pins_bearer_timeout_and_ssl_context(self):
+        """Clip download keeps Bearer auth, 60 s timeout and the pinned context."""
+        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+
+        coord = _smb_upload_coord()
+        fake_smb = _fake_smb()
+        fake_smb.stat.side_effect = OSError("not found")
+        fake_file = MagicMock()
+        fake_file.__enter__ = MagicMock(return_value=fake_file)
+        fake_file.__exit__ = MagicMock(return_value=False)
+        fake_smb.open_file.return_value = fake_file
+        resp = _urlopen_resp(200, b"VIDDATA")
+        ctx = object()
+
+        with (
+            patch.dict(sys.modules, {"smbclient": fake_smb}),
+            patch(f"{MODULE}.socket"),
+            patch(f"{MODULE}.smb_makedirs"),
+            patch(f"{MODULE}._bosch_ssl_ctx", return_value=ctx),
+            patch(URLOPEN, return_value=resp) as mock_open,
+        ):
+            ev = _basic_event(image_url=None, clip_url="https://cdn.bosch.com/clip.mp4")
+            data = {CAM_ID: {"info": {"title": "Terrasse"}, "events": [ev]}}
+            sync_smb_upload(coord, data, "tok")
+
+        req = mock_open.call_args.args[0]
+        assert req.full_url == "https://cdn.bosch.com/clip.mp4"
+        assert req.get_header("Authorization") == "Bearer tok"
+        assert mock_open.call_args.kwargs == {"context": ctx, "timeout": 60}
+
     def test_clip_non200_logs_warning(self):
         """Clip: HTTP 503 → warning, open_file NOT called."""
         from custom_components.bosch_shc_camera.smb import sync_smb_upload
@@ -1368,7 +1398,7 @@ class TestSmbImageUrlSafetyGuard:
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
-        URLLIB_REQUEST = f"{MODULE}.urllib.request"
+        URLLIB_REQUEST = "urllib.request"
         with (
             patch.dict(sys.modules, {"smbclient": fake_smb}),
             patch(f"{MODULE}.smb_makedirs"),
@@ -3229,7 +3259,7 @@ class TestLocalSaveFilenaming:
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch(
-            "custom_components.bosch_shc_camera.smb.urllib.request.urlopen",
+            "urllib.request.urlopen",
             return_value=mock_resp,
         ):
             with patch(
