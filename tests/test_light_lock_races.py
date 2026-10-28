@@ -81,27 +81,29 @@ class _FakeCamera:
         await asyncio.sleep(0)
         return True
 
-    # light.py path (aiohttp session.put context manager)
+    # light.py path (aiohttp session.request context manager)
     def session(self) -> MagicMock:
         cam = self
 
         class _Ctx:
-            def __init__(self, url: str, json: dict[str, Any]) -> None:
-                self.url, self.json = url, json
+            def __init__(self, url: str, body: dict[str, Any]) -> None:
+                self.url, self.body = url, body
                 self.status = 204
 
             async def __aenter__(self) -> _Ctx:
-                self.status = 204 if await cam.put(self.url, self.json) else 500
+                self.status = 204 if await cam.put(self.url, self.body) else 500
                 return self
 
             async def __aexit__(self, *a: Any) -> None:
                 return None
 
-            async def json_(self) -> None:  # pragma: no cover
+            async def json(self, **_kw: Any) -> None:
                 return None
 
         sess = MagicMock()
-        sess.put = lambda url, headers=None, json=None: _Ctx(url, json)
+        sess.request = lambda method, url, headers=None, json=None, **kw: _Ctx(
+            url, json
+        )
         return sess
 
     # shc.py path

@@ -15,11 +15,12 @@ When whiteBalance is set, color becomes null (temperature mode).
 Gen1 cameras use a different API (lighting_override) and are handled by switch.py instead.
 """
 
-import asyncio
 import logging
 import time
 from typing import Any, ClassVar
 
+from bosch_shc_camera_client.cameras import BoschCameraError
+from bosch_shc_camera_client.settings import put_setting
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_COLOR_TEMP_KELVIN,
@@ -364,47 +365,40 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
             else:
                 body[key] = val
         session = await async_get_bosch_cloud_session(self.hass)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
         try:
-            async with asyncio.timeout(10):
-                async with session.put(
-                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch",
-                    headers=headers,
-                    json=body,
-                ) as resp:
-                    if resp.status in (200, 201, 204):
-                        # /lighting/switch returns 204 No Content (empty body);
-                        # 200/201 would carry authoritative JSON. Prefer the
-                        # server body when present, else the optimistic `body`
-                        # we sent — calling resp.json() unconditionally on a
-                        # 204 raises, which would leave the cache never
-                        # updated and is_on stuck False.
-                        try:
-                            rsp = await resp.json(content_type=None)
-                        except Exception:
-                            rsp = None
-                        authoritative = rsp if (rsp and isinstance(rsp, dict)) else body
-                        # Merge ONLY the group(s) we changed into the live
-                        # cache — never overwrite the whole entry, or a sibling
-                        # group written concurrently would be clobbered.
-                        cur = self.coordinator.lighting_switch_cache.setdefault(
-                            self._cam_id, {}
-                        )
-                        for key in updates:
-                            if key in authoritative:
-                                cur[key] = authoritative[key]
-                        return True
-                    _LOGGER.warning(
-                        "lighting/switch HTTP %d for %s",
-                        resp.status,
-                        self._cam_id[:8],
-                    )
+            result = await put_setting(
+                session,
+                token,
+                self._cam_id,
+                "lighting/switch",
+                body,
+                api_url=CLOUD_API,
+            )
+        except BoschCameraError as err:
+            if err.status is not None:
+                _LOGGER.warning(
+                    "lighting/switch HTTP %d for %s", err.status, self._cam_id[:8]
+                )
+            else:
+                _LOGGER.warning(
+                    "lighting/switch error for %s: %s", self._cam_id[:8], err
+                )
+            return False
         except Exception as err:
             _LOGGER.warning("lighting/switch error for %s: %s", self._cam_id[:8], err)
-        return False
+            return False
+        # /lighting/switch returns 204 No Content (empty body); 200/201 would
+        # carry authoritative JSON. Prefer the server body when present, else
+        # the optimistic `body` we sent.
+        authoritative = result.response or body
+        # Merge ONLY the group(s) we changed into the live cache — never
+        # overwrite the whole entry, or a sibling group written concurrently
+        # would be clobbered.
+        cur = self.coordinator.lighting_switch_cache.setdefault(self._cam_id, {})
+        for key in updates:
+            if key in authoritative:
+                cur[key] = authoritative[key]
+        return True
 
     async def _put_switch_endpoint(self, endpoint: str, enabled: bool) -> bool:
         """Send PUT /lighting/switch/front or /topdown."""
@@ -412,21 +406,19 @@ class _BoschLightBase(CoordinatorEntity, LightEntity, RestoreEntity):  # type: i
         if not token:
             return False
         session = await async_get_bosch_cloud_session(self.hass)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
         try:
-            async with asyncio.timeout(10):
-                async with session.put(
-                    f"{CLOUD_API}/v11/video_inputs/{self._cam_id}/lighting/switch/{endpoint}",
-                    headers=headers,
-                    json={"enabled": enabled},
-                ) as resp:
-                    return resp.status in (200, 201, 204)
+            await put_setting(
+                session,
+                token,
+                self._cam_id,
+                f"lighting/switch/{endpoint}",
+                {"enabled": enabled},
+                api_url=CLOUD_API,
+            )
         except Exception as err:
             _LOGGER.warning("lighting/switch/%s error: %s", endpoint, err)
-        return False
+            return False
+        return True
 
     def _sync_wallwasher_cache(self) -> None:
         """Sync camera_light/wallwasher switch state from lighting/switch cache.

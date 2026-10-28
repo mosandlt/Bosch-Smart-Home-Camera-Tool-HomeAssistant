@@ -278,7 +278,7 @@ def _make_light(coord=None, klass=None, led_key="topLedLightSettings"):
 def _make_put_session(
     status: int = 200, json_payload=None, json_raises: Exception | None = None
 ):
-    """Return an async-context-manager session.put() stub returning the given
+    """Return an async-context-manager session.request() stub returning the given
     status; json() either returns json_payload or raises json_raises."""
     resp = MagicMock()
     resp.status = status
@@ -293,7 +293,7 @@ def _make_put_session(
         yield resp
 
     session = MagicMock()
-    session.put = MagicMock(side_effect=_resp_cm)
+    session.request = MagicMock(side_effect=_resp_cm)
     return session, resp
 
 
@@ -337,7 +337,7 @@ class TestPutLightingSwitchDefensiveMerge:
 
         captured_body = {}
 
-        def _capture(url, headers=None, json=None):
+        def _capture(method, url, headers=None, json=None):
             captured_body.update(json or {})
 
             @asynccontextmanager
@@ -346,7 +346,7 @@ class TestPutLightingSwitchDefensiveMerge:
 
             return _cm()
 
-        session.put = MagicMock(side_effect=_capture)
+        session.request = MagicMock(side_effect=_capture)
 
         with patch(
             "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
@@ -807,7 +807,7 @@ class TestPutLightingSwitch:
             yield r
 
         session = MagicMock()
-        session.put = _put_resp
+        session.request = _put_resp
         coord = _stub_coord_edge(
             lighting_switch_cache={
                 CAM_ID: {
@@ -859,7 +859,7 @@ class TestPutLightingSwitch:
             yield r
 
         session = MagicMock()
-        session.put = _put_500
+        session.request = _put_500
         coord = _stub_coord_edge()
         light = _make_light(coord)
         with patch(
@@ -877,7 +877,7 @@ class TestPutLightingSwitch:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         session = MagicMock()
-        session.put = MagicMock(side_effect=TimeoutError())
+        session.request = MagicMock(side_effect=TimeoutError())
         coord = _stub_coord_edge()
         light = _make_light(coord)
         with patch(
@@ -908,7 +908,7 @@ class TestPutLightingSwitch:
             yield r
 
         session = MagicMock()
-        session.put = _put
+        session.request = _put
         coord = _stub_coord_edge()
         light = _make_light(coord)
         with patch(
@@ -936,10 +936,11 @@ class TestPutSwitchEndpoint:
         async def _put(*args, **kw):
             r = MagicMock()
             r.status = 204
+            r.json = AsyncMock(return_value=None)
             yield r
 
         session = MagicMock()
-        session.put = _put
+        session.request = _put
         coord = _stub_coord_edge()
         light = _make_light(coord)
         with patch(
@@ -963,7 +964,7 @@ class TestPutSwitchEndpoint:
         from custom_components.bosch_shc_camera.light import BoschTopLedLight
 
         session = MagicMock()
-        session.put = MagicMock(side_effect=RuntimeError("network"))
+        session.request = MagicMock(side_effect=RuntimeError("network"))
         coord = _stub_coord_edge()
         light = _make_light(coord)
         with patch(
@@ -1090,11 +1091,11 @@ class TestPutLightingSwitch204NoCacheUpdate:
             r = MagicMock()
             r.status = 204
             # Simulate 204 No Content: resp.json() raises because there is no body
-            r.json = AsyncMock(side_effect=Exception("No JSON body"))
+            r.json = AsyncMock(side_effect=ValueError("No JSON body"))
             yield r
 
         session = MagicMock()
-        session.put = _put_204
+        session.request = _put_204
         coord = _stub_coord_edge(
             lighting_switch_cache={
                 CAM_ID: {
@@ -1148,11 +1149,11 @@ class TestPutLightingSwitch204NoCacheUpdate:
         async def _put_204(*args, **kw):
             r = MagicMock()
             r.status = 204
-            r.json = AsyncMock(side_effect=Exception("No JSON body"))
+            r.json = AsyncMock(side_effect=ValueError("No JSON body"))
             yield r
 
         session = MagicMock()
-        session.put = _put_204
+        session.request = _put_204
         coord = _stub_coord_edge(
             lighting_switch_cache={
                 CAM_ID: {
@@ -1226,7 +1227,7 @@ class TestPutLightingSwitch204NoCacheUpdate:
             yield r
 
         session = MagicMock()
-        session.put = _put_200
+        session.request = _put_200
         coord = _stub_coord_edge(
             lighting_switch_cache={
                 CAM_ID: {
@@ -1293,18 +1294,18 @@ class TestPutLightingSwitchConcurrentNoClobber:
         put_bodies: list[dict] = []
 
         @asynccontextmanager
-        async def _slow_put(url, *args, **kw):
+        async def _slow_put(method, url, *args, **kw):
             # Yield so the sibling task starts (and blocks on the lock) before we
             # commit — this is exactly the interleaving that used to clobber.
             await asyncio.sleep(0)
             put_bodies.append(dict(kw.get("json", {})))
             r = MagicMock()
             r.status = 204
-            r.json = AsyncMock(side_effect=Exception("No JSON body"))
+            r.json = AsyncMock(side_effect=ValueError("No JSON body"))
             yield r
 
         session = MagicMock()
-        session.put = _slow_put
+        session.request = _slow_put
         coord = _stub_coord_edge(
             lighting_switch_cache={
                 CAM_ID: {
