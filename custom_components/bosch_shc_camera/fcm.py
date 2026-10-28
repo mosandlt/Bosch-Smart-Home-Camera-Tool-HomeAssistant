@@ -28,6 +28,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import aiohttp
+from bosch_shc_camera_client.cameras import (
+    BoschCameraAuthError,
+    BoschCameraConnectionError,
+)
+from bosch_shc_camera_client.events import list_events_raw
 from bosch_shc_camera_client.media_transfer import (
     is_safe_bosch_url as _is_safe_bosch_url,
 )
@@ -2242,7 +2247,6 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
         return
 
     session = await async_get_bosch_cloud_session(coordinator.hass)
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
     # Bug fix (B3): was a single flag shared across ALL cameras in one
     # push-fetch cycle — if camera A's event dispatched but camera B's
@@ -2252,35 +2256,35 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
     _any_fetch_ok = False  # B1 fix: track if ≥1 camera fetch returned HTTP 200
     for cam_id in list(coordinator.data.keys()):
         try:
-            url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=5"
-            async with asyncio.timeout(10):
-                async with session.get(url, headers=headers) as r:
-                    if r.status != 200:
-                        # Bug fix (B2): the non-200 status was previously
-                        # dropped with zero logging and no distinction
-                        # between a transient blip and a 401 (expired
-                        # token, which would otherwise make every push a
-                        # silent no-op until the next 300s poll). Log it,
-                        # and for a 401 specifically trigger the same
-                        # token-refresh path async_put_camera uses.
-                        _LOGGER.warning(
-                            "FCM push: events fetch for %s returned HTTP %d",
-                            cam_id,
-                            r.status,
+            try:
+                async with asyncio.timeout(10):
+                    events = await list_events_raw(session, token, cam_id, limit=5)
+            except (BoschCameraAuthError, BoschCameraConnectionError) as fetch_err:
+                if fetch_err.status is None:
+                    raise
+                # Bug fix (B2): the non-200 status was previously
+                # dropped with zero logging and no distinction
+                # between a transient blip and a 401 (expired
+                # token, which would otherwise make every push a
+                # silent no-op until the next 300s poll). Log it,
+                # and for a 401 specifically trigger the same
+                # token-refresh path async_put_camera uses.
+                _LOGGER.warning(
+                    "FCM push: events fetch for %s returned HTTP %d",
+                    cam_id,
+                    fetch_err.status,
+                )
+                if fetch_err.status == 401:
+                    try:
+                        token = await coordinator.ensure_valid_token(token)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        _LOGGER.debug(
+                            "FCM push: token refresh after 401 failed",
+                            exc_info=True,
                         )
-                        if r.status == 401:
-                            try:
-                                token = await coordinator.ensure_valid_token(token)
-                                headers["Authorization"] = f"Bearer {token}"
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception:
-                                _LOGGER.debug(
-                                    "FCM push: token refresh after 401 failed",
-                                    exc_info=True,
-                                )
-                        continue
-                    events = await r.json()
+                continue
             _any_fetch_ok = True  # HTTP 200 received — cloud is reachable
 
             if not events:
@@ -2635,7 +2639,7 @@ async def async_handle_fcm_push(coordinator: Any, _attempt: int = 0) -> None:
             elif newest_id:
                 coordinator.last_event_ids[cam_id] = newest_id
 
-        except (TimeoutError, aiohttp.ClientError) as err:
+        except (TimeoutError, aiohttp.ClientError, BoschCameraConnectionError) as err:
             # Transient cloud hiccup — the retry/backoff loop below (and the
             # 300 s safety poll) recover from it without operator action.
             # → DEBUG, not WARNING.
@@ -3056,18 +3060,22 @@ async def async_send_alert(
             await asyncio.sleep(delay)
             try:
                 async with asyncio.timeout(10):
-                    async with session.get(events_url, headers=headers) as r:
-                        if r.status == 200:
-                            fresh_events = await r.json()
-                            if fresh_events:
-                                image_url = fresh_events[0].get("imageUrl", "")
-                                clip_url = (
-                                    fresh_events[0].get("videoClipUrl", "") or clip_url
-                                )
-                                clip_status = (
-                                    fresh_events[0].get("videoClipUploadStatus", "")
-                                    or clip_status
-                                )
+                    fresh_events = await list_events_raw(
+                        session,
+                        coordinator.token or "",
+                        _resolved_cam_id or "",
+                        limit=5,
+                    )
+                if fresh_events:
+                    image_url = fresh_events[0].get("imageUrl", "")
+                    clip_url = fresh_events[0].get("videoClipUrl", "") or clip_url
+                    clip_status = (
+                        fresh_events[0].get("videoClipUploadStatus", "") or clip_status
+                    )
+            except (BoschCameraAuthError, BoschCameraConnectionError) as err:
+                if err.status is None:
+                    _LOGGER.debug("Alert: re-fetch attempt %d failed: %s", attempt, err)
+                continue
             except Exception as err:
                 _LOGGER.debug("Alert: re-fetch attempt %d failed: %s", attempt, err)
                 continue
@@ -3315,10 +3323,6 @@ async def async_send_alert(
             f"{_safe_path_segment(cam_name)}_{_safe_path_segment(ts_safe)}"
             f"_{_safe_path_segment(event_type)}_{alert_token}.mp4",
         )
-        auth_headers = {
-            "Authorization": f"Bearer {coordinator.token}",
-            "Accept": "application/json",
-        }
         found_clip_url = clip_url if (clip_url and clip_status == "Done") else ""
         # Bug fix (Area 5, item 9): the probe below is NOT a HEAD request —
         # it's a full GET, and aiohttp's ClientResponse.release() (called
@@ -3377,40 +3381,36 @@ async def async_send_alert(
                 await asyncio.sleep(10)
                 try:
                     async with asyncio.timeout(10):
-                        async with session.get(
-                            f"{CLOUD_API}/v11/events?videoInputId={_clip_cam_id}&limit=3",
-                            headers=auth_headers,
-                        ) as r:
-                            if r.status != 200:
-                                continue
-                            fresh = await r.json()
-                            for ev in fresh:
-                                # Match by event_id (stable UUID) rather than
-                                # timestamp[:19] — two events within the same
-                                # second share the same prefix and the wrong
-                                # clip could be attached (BUG-6 fix).
-                                _ev_id = ev.get("id", "")
-                                if event_id and _ev_id and _ev_id != event_id:
-                                    continue
-                                if not event_id and (
-                                    (ev.get("timestamp") or "")[:19] != timestamp[:19]
-                                ):
-                                    # Fallback: no event_id known, use timestamp
-                                    # (legacy path — event_id should always be
-                                    # present for FCM-triggered alerts).
-                                    continue
-                                status = ev.get("videoClipUploadStatus", "")
-                                url = ev.get("videoClipUrl", "")
-                                if status == "Done" and url:
-                                    found_clip_url = url
-                                elif status == "Unavailable":
-                                    clip_unavailable = True
-                                    _LOGGER.debug(
-                                        "Alert: clip Unavailable after %ds — stop polling for %s",
-                                        (attempt + 1) * 10,
-                                        cam_name,
-                                    )
-                                break
+                        fresh = await list_events_raw(
+                            session, coordinator.token or "", _clip_cam_id, limit=3
+                        )
+                    for ev in fresh:
+                        # Match by event_id (stable UUID) rather than
+                        # timestamp[:19] — two events within the same
+                        # second share the same prefix and the wrong
+                        # clip could be attached (BUG-6 fix).
+                        _ev_id = ev.get("id", "")
+                        if event_id and _ev_id and _ev_id != event_id:
+                            continue
+                        if not event_id and (
+                            (ev.get("timestamp") or "")[:19] != timestamp[:19]
+                        ):
+                            # Fallback: no event_id known, use timestamp
+                            # (legacy path — event_id should always be
+                            # present for FCM-triggered alerts).
+                            continue
+                        status = ev.get("videoClipUploadStatus", "")
+                        url = ev.get("videoClipUrl", "")
+                        if status == "Done" and url:
+                            found_clip_url = url
+                        elif status == "Unavailable":
+                            clip_unavailable = True
+                            _LOGGER.debug(
+                                "Alert: clip Unavailable after %ds — stop polling for %s",
+                                (attempt + 1) * 10,
+                                cam_name,
+                            )
+                        break
                     if found_clip_url:
                         _LOGGER.debug(
                             "Alert: clip ready after %ds for %s",

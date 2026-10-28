@@ -16391,6 +16391,62 @@ class TestHandleFcmPush401TriggersTokenRefresh:
         assert any("500" in r.getMessage() for r in caplog.records)
 
 
+class TestHandleFcmPushEventListThroughLibrary:
+    """Event list GET goes through the client library; status mapping stays."""
+
+    @pytest.mark.asyncio
+    async def test_403_logged_without_token_refresh(self, caplog):
+        coord = _make_push_coord_motion()
+        coord.ensure_valid_token = AsyncMock(return_value="fresh-token")
+        session = MagicMock()
+        session.get = MagicMock(return_value=_resp_cm_motion(403))
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            caplog.at_level("WARNING", logger=MODULE),
+        ):
+            await async_handle_fcm_push(coord)
+        coord.ensure_valid_token.assert_not_called()
+        assert any("403" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_network_error_is_debug_only_and_skips_camera(self, caplog):
+        coord = _make_push_coord_motion()
+        session = MagicMock()
+        session.get = MagicMock(side_effect=aiohttp.ClientConnectionError("boom"))
+        with (
+            patch(
+                f"{MODULE}.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            caplog.at_level("DEBUG", logger=MODULE),
+        ):
+            await async_handle_fcm_push(coord)
+        assert not [r for r in caplog.records if r.levelname == "WARNING"]
+        assert any("network error" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_refreshed_token_used_for_next_camera(self):
+        coord = _make_push_coord_motion()
+        coord.data = {"11111111-1111-1111-1111-111111111111": {}, "cam-2": {}}
+        coord.ensure_valid_token = AsyncMock(return_value="fresh-token")
+        session = MagicMock()
+        session.get = MagicMock(
+            side_effect=[_resp_cm_motion(401), _resp_cm_motion(200, [])]
+        )
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            await async_handle_fcm_push(coord)
+        auth = [
+            c.kwargs["headers"]["Authorization"] for c in session.get.call_args_list
+        ]
+        assert auth[:2] == ["Bearer tok-test", "Bearer fresh-token"]
+
+
 class TestDispatchedNewScopedPerCamera:
     """Area 3, B3: `_dispatched_new` was a single flag shared across ALL
     cameras in one push-fetch cycle — camera A dispatching could suppress
