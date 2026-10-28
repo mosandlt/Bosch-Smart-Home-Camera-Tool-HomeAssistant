@@ -19,8 +19,17 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
+from bosch_shc_camera_client.cameras import (
+    BoschCameraAuthError,
+    BoschCameraConnectionError,
+)
 from bosch_shc_camera_client.media_transfer import (
     is_safe_bosch_url as _lib_is_safe_bosch_url,
+)
+from bosch_shc_camera_client.settings import (
+    ENDPOINT_PATTERN,
+    BoschCameraPrivacyModeError,
+    put_setting,
 )
 
 if TYPE_CHECKING:
@@ -254,6 +263,60 @@ def get_options(entry: ConfigEntry) -> dict[str, Any]:
     opts: dict[str, Any] = dict(DEFAULT_OPTIONS)
     opts.update(entry.options)
     return opts
+
+
+async def _put_camera_via_lib(
+    coordinator: "BoschCameraCoordinator",
+    session: aiohttp.ClientSession,
+    cam_id: str,
+    endpoint: str,
+    payload: dict[str, Any],
+) -> bool:
+    """Write through the client library; refresh the token once after a 401."""
+    token = coordinator.token
+    for attempt in (1, 2):
+        try:
+            result = await put_setting(
+                session, token, cam_id, endpoint, payload, api_url=CLOUD_API
+            )
+        except BoschCameraAuthError as err:
+            # 403 is a real refusal; only an expired token (401) is retried.
+            if attempt == 2 or "401" not in str(err):
+                _LOGGER.debug("async_put_camera %s/%s: %s", cam_id, endpoint, err)
+                return False
+            _LOGGER.info(
+                "async_put_camera %s/%s: 401 — refreshing token", cam_id, endpoint
+            )
+            try:
+                token = await coordinator.ensure_valid_token(token)
+            except asyncio.CancelledError:
+                raise
+            except Exception as refresh_err:
+                _LOGGER.debug("async_put_camera token refresh failed: %s", refresh_err)
+                return False
+        except BoschCameraConnectionError as err:
+            if isinstance(err, BoschCameraPrivacyModeError) or " returned HTTP " in str(
+                err
+            ):
+                _LOGGER.debug("async_put_camera %s/%s: %s", cam_id, endpoint, err)
+            else:
+                _LOGGER.warning(
+                    "async_put_camera %s/%s error: %s", cam_id, endpoint, err
+                )
+            return False
+        else:
+            if endpoint.startswith("lighting"):
+                # Lets users line up what was sent with what the lights
+                # physically did (GitHub #78).
+                _LOGGER.debug(
+                    "async_put_camera %s/%s: HTTP %d, sent %s",
+                    cam_id,
+                    endpoint,
+                    result.status,
+                    result.sent,
+                )
+            return True
+    return False  # pragma: no cover
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4085,6 +4148,10 @@ class BoschCameraCoordinator(
             async_get_bosch_cloud_session as async_get_bosch_cloud_session,
         )
 
+        session = await async_get_bosch_cloud_session(self.hass)
+        if payload is not None and ENDPOINT_PATTERN.fullmatch(endpoint):
+            return await _put_camera_via_lib(self, session, cam_id, endpoint, payload)
+
         token = self.token
         headers = {
             "Authorization": f"Bearer {token}",
@@ -4093,7 +4160,6 @@ class BoschCameraCoordinator(
         put_kwargs: dict[str, Any] = (
             {"data": ""} if payload is None else {"json": payload}
         )
-        session = await async_get_bosch_cloud_session(self.hass)
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/{endpoint}"
         try:
             async with asyncio.timeout(10):
