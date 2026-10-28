@@ -386,16 +386,16 @@ async def _poll_cam_control(
     # Fetch pan position for cameras that support it (skip if offline)
     if ctx.pan_limit and ctx.is_online:
         try:
-            async with asyncio.timeout(5):
-                async with session.get(
-                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/pan",
-                    headers=headers,
-                ) as pan_resp:
-                    if pan_resp.status == 200:
-                        pan_data = await pan_resp.json()
-                        coordinator.pan_cache[cam_id] = pan_data.get(
-                            "currentAbsolutePosition"
-                        )
+            pan = await get_setting_raw(
+                session,
+                headers.get("Authorization", "").removeprefix("Bearer "),
+                cam_id,
+                "pan",
+                timeout=5,
+                api_url=CLOUD_API,
+            )
+            if pan.status == 200:
+                coordinator.pan_cache[cam_id] = pan.body.get("currentAbsolutePosition")
         except Exception as err:
             _LOGGER.debug(
                 "Pan fetch error for %s: %s",
@@ -450,19 +450,24 @@ async def _poll_cam_control(
     if ctx.is_online and ctx.is_gen2 and not lighting_switch_locked:
         ls_stamp = coordinator.light_set_at.get(cam_id)
         try:
-            async with asyncio.timeout(5):
-                async with session.get(
-                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting/switch",
-                    headers=headers,
-                ) as ls_resp:
-                    if ls_resp.status == 200:
-                        ls_data = await ls_resp.json()
-                        # A write that landed during the request is newer: its
-                        # optimistic zeroing must not be replaced by this
-                        # older (stale) body.
-                        if coordinator.light_set_at.get(cam_id) == ls_stamp:
-                            coordinator.lighting_switch_cache[cam_id] = ls_data
-                            sync_gen2_light_cache(coordinator, cam_id)
+            ls = await get_setting_raw(
+                session,
+                headers.get("Authorization", "").removeprefix("Bearer "),
+                cam_id,
+                "lighting/switch",
+                timeout=5,
+                api_url=CLOUD_API,
+            )
+            # A write that landed during the request is newer: its
+            # optimistic zeroing must not be replaced by this
+            # older (stale) body.
+            if (
+                ls.status == 200
+                and ls.body is not None
+                and coordinator.light_set_at.get(cam_id) == ls_stamp
+            ):
+                coordinator.lighting_switch_cache[cam_id] = ls.body
+                sync_gen2_light_cache(coordinator, cam_id)
         except Exception as err:
             _LOGGER.debug(
                 "lighting/switch fetch error for %s: %s",

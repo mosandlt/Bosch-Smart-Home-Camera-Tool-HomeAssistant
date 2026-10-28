@@ -44,6 +44,7 @@ from bosch_shc_camera_client.cloud import (
     cloud_set_pan,
     cloud_set_privacy_mode,
 )
+from bosch_shc_camera_client.settings import get_setting_raw
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .cloud_ssl import async_get_bosch_cloud_session
@@ -907,12 +908,15 @@ async def _refresh_lighting_switch_after_on(
             return
         try:
             session = await async_get_bosch_cloud_session(coordinator.hass)
-            async with asyncio.timeout(5):
-                async with session.get(
-                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting/switch",
-                    headers={"Authorization": f"Bearer {coordinator.token}"},
-                ) as resp:
-                    data = await resp.json() if resp.status == 200 else None
+            raw = await get_setting_raw(
+                session,
+                coordinator.token,
+                cam_id,
+                "lighting/switch",
+                timeout=5,
+                api_url=CLOUD_API,
+            )
+            data = raw.body if raw.status == 200 else None
         except (TimeoutError, aiohttp.ClientError, ValueError) as err:
             _LOGGER.debug("lighting/switch confirm for %s failed: %s", cam_id[:8], err)
             continue
