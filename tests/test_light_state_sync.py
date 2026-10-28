@@ -206,6 +206,26 @@ async def test_confirm_refresh_stops_once_lights_reported_on() -> None:
 
 
 @pytest.mark.asyncio
+async def test_confirm_refresh_survives_library_value_error() -> None:
+    """An endpoint/camera-id rejected by the library is logged, not raised."""
+    coord = _coord(OFF)
+    with (
+        patch("custom_components.bosch_shc_camera.shc._LIGHT_ON_CONFIRM_DELAYS", (0,)),
+        patch(
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
+        patch(
+            "custom_components.bosch_shc_camera.shc.get_setting_raw",
+            new=AsyncMock(side_effect=ValueError("invalid camera id")),
+        ),
+    ):
+        await _refresh_lighting_switch_after_on(coord, CAM, None)
+    assert coord.lighting_switch_cache[CAM] == OFF
+    coord.async_update_listeners.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_confirm_refresh_survives_errors_and_bad_payloads() -> None:
     coord = _coord(OFF)
     session = MagicMock()

@@ -12603,6 +12603,38 @@ class TestStep2RefetchExceptionContinues:
                         )
 
 
+class TestStep2RefetchTransportErrorContinues:
+    """A transport failure in a re-fetch attempt is logged and retried."""
+
+    @pytest.mark.asyncio
+    async def test_refetch_connection_error_does_not_abort(self):
+        import aiohttp
+
+        coord = _make_alert_coord()
+        session = MagicMock()
+        session.get = MagicMock(side_effect=aiohttp.ClientConnectionError("down"))
+
+        with patch(
+            f"{MODULE}.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
+                with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
+                    with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
+                        from custom_components.bosch_shc_camera.fcm import (
+                            async_send_alert,
+                        )
+
+                        await async_send_alert(
+                            coord,
+                            "Terrasse",
+                            "MOVEMENT",
+                            "2026-05-07T10:00:00.000Z",
+                            "",
+                        )
+        assert session.get.call_count >= 2, "loop must continue after the error"
+
+
 class TestStep2NoImageData:
     """imageUrl responds with empty body → snapshot not written."""
 

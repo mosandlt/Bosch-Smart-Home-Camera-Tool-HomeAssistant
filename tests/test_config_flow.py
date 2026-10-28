@@ -1034,6 +1034,24 @@ class TestCameraAccessVerification:
             assert await flow._async_verify_camera_access("tok") is None
 
     @pytest.mark.asyncio
+    async def test_verify_returns_none_when_request_times_out(self) -> None:
+        """A timeout inside the request is inconclusive, not a rejection."""
+        from custom_components.bosch_shc_camera.config_flow import (
+            BoschCameraConfigFlow,
+        )
+
+        flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
+        flow.hass = MagicMock()
+        session = MagicMock()
+        session.get = MagicMock(side_effect=TimeoutError())
+
+        with patch(
+            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            AsyncMock(return_value=session),
+        ):
+            assert await flow._async_verify_camera_access("tok") is None
+
+    @pytest.mark.asyncio
     async def test_verify_returns_none_on_client_error(self) -> None:
         """A network-layer connection error is inconclusive, same as a timeout."""
         from custom_components.bosch_shc_camera.config_flow import (
