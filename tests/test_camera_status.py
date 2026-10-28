@@ -478,3 +478,38 @@ class TestPollStatuses:
         result = await poll_statuses(coord, [], session, HEADERS, NOW, {})
 
         assert result is False
+
+
+class TestLibraryRequests:
+    @pytest.mark.asyncio
+    async def test_ping_and_commissioned_carry_token_from_headers(self):
+        coord = _make_coord()
+        session = _make_session(
+            {
+                "/ping": _make_resp(500),
+                "/commissioned": _make_resp(
+                    200, {"connected": True, "commissioned": True}
+                ),
+            }
+        )
+
+        await _check_one_camera_status(coord, CAM_A, session, HEADERS, NOW, INTERVAL)
+
+        tokens = {
+            c.kwargs["headers"]["Authorization"] for c in session.get.call_args_list
+        }
+        assert tokens == {HEADERS["Authorization"]}
+
+    @pytest.mark.asyncio
+    async def test_commissioned_non_object_body_keeps_cached_status(self):
+        coord = _make_coord()
+        session = _make_session(
+            {"/ping": _make_resp(500), "/commissioned": _make_resp(200, ["junk"])}
+        )
+
+        _cam_id, status = await _check_one_camera_status(
+            coord, CAM_A, session, HEADERS, NOW, INTERVAL
+        )
+
+        assert status == "UNKNOWN"
+        assert CAM_A not in coord.commissioned_cache

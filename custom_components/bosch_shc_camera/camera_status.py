@@ -29,6 +29,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
+from bosch_shc_camera_client.actions import ping_raw
+from bosch_shc_camera_client.settings import get_setting_raw
 
 from .const import CLOUD_API, DEFAULT_OPTIONS
 
@@ -133,55 +135,43 @@ async def _check_one_camera_status(
     # tracking and makes an unavailable camera read as available again on a
     # transient probe blip.
     status = coordinator.cached_status.get(cam_id, "UNKNOWN")
-    ping_ok = False
+    token = headers.get("Authorization", "").removeprefix("Bearer ")
+    ping_status, ping_ok = "", False
     try:
-        async with asyncio.timeout(5):
-            async with session.get(
-                f"{CLOUD_API}/v11/video_inputs/{cam_id}/ping",
-                headers=headers,
-            ) as pr:
-                if pr.status == 200:
-                    ping_result = (await pr.text()).strip().strip('"')
-                    # Map firmware update statuses to UPDATING
-                    if ping_result.startswith("UPDATING"):
-                        status = "UPDATING"
-                    else:
-                        status = ping_result  # "ONLINE" or "OFFLINE"
-                    ping_ok = True
-                elif pr.status == 444:
-                    _LOGGER.warning(
-                        "Bosch session-quota hit for %s — too many simultaneous"
-                        " live sessions across all clients (HA, Bosch App, ioBroker, etc.)."
-                        " Close unused sessions to recover.",
-                        cam_id[:8],
-                    )
-                    status = "SESSION_LIMIT"
-                    ping_ok = True
+        ping_status, ping_ok = await ping_raw(session, token, cam_id, api_url=CLOUD_API)
     except Exception as err:
         _LOGGER.debug("Ping check error for %s: %s", cam_id, err)
-    if not ping_ok:
+    if ping_ok:
+        status = ping_status
+        if status == "SESSION_LIMIT":
+            _LOGGER.warning(
+                "Bosch session-quota hit for %s — too many simultaneous"
+                " live sessions across all clients (HA, Bosch App, ioBroker, etc.)."
+                " Close unused sessions to recover.",
+                cam_id[:8],
+            )
+    else:
         try:
-            async with asyncio.timeout(8):
-                async with session.get(
-                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/commissioned",
-                    headers=headers,
-                ) as r:
-                    if r.status == 200:
-                        comm = await r.json()
-                        coordinator.commissioned_cache[cam_id] = comm
-                        if comm.get("connected") and comm.get("commissioned"):
-                            status = "ONLINE"
-                        elif comm.get("configured"):
-                            status = "OFFLINE"
-                    elif r.status == 444:
-                        _LOGGER.warning(
-                            "Bosch session-quota hit for %s (commissioned fallback)"
-                            " — too many simultaneous live sessions across all clients.",
-                            cam_id[:8],
-                        )
-                        status = "SESSION_LIMIT"
+            raw = await get_setting_raw(
+                session, token, cam_id, "commissioned", timeout=8, api_url=CLOUD_API
+            )
         except Exception as err:
             _LOGGER.debug("Commissioned fallback error for %s: %s", cam_id, err)
+        else:
+            if raw.status == 200 and isinstance(raw.body, dict):
+                comm = raw.body
+                coordinator.commissioned_cache[cam_id] = comm
+                if comm.get("connected") and comm.get("commissioned"):
+                    status = "ONLINE"
+                elif comm.get("configured"):
+                    status = "OFFLINE"
+            elif raw.status == 444:
+                _LOGGER.warning(
+                    "Bosch session-quota hit for %s (commissioned fallback)"
+                    " — too many simultaneous live sessions across all clients.",
+                    cam_id[:8],
+                )
+                status = "SESSION_LIMIT"
 
     coordinator.per_cam_status_at[cam_id] = now
     # Track offline duration for extended interval.
