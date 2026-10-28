@@ -19,6 +19,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
+from bosch_shc_camera_client.events import get_last_event, list_events_raw
 
 from .const import CLOUD_API
 
@@ -53,26 +54,19 @@ async def _fetch_one_camera_events(
     events: list[Any] = []
     skip_full_fetch = False
     ok = False
+    token = headers.get("Authorization", "").removeprefix("Bearer ")
     try:
-        async with asyncio.timeout(5):
-            async with session.get(
-                f"{CLOUD_API}/v11/video_inputs/{cam_id}/last_event",
-                headers=headers,
-            ) as le_resp:
-                if le_resp.status == 200:
-                    last_ev = await le_resp.json()
-                    last_ev_id = last_ev.get("id", "")
-                    if last_ev_id and last_ev_id == coordinator.last_event_ids.get(
-                        cam_id
-                    ):
-                        skip_full_fetch = True
-                        ok = True
-                        events = coordinator.cached_events.get(cam_id, [])
-                        _LOGGER.debug(
-                            "last_event unchanged for %s (id=%s) — skipping full fetch",
-                            cam_id,
-                            last_ev_id[:8],
-                        )
+        last_ev = await get_last_event(session, token, cam_id, api_url=CLOUD_API)
+        last_ev_id = last_ev.get("id", "")
+        if last_ev_id and last_ev_id == coordinator.last_event_ids.get(cam_id):
+            skip_full_fetch = True
+            ok = True
+            events = coordinator.cached_events.get(cam_id, [])
+            _LOGGER.debug(
+                "last_event unchanged for %s (id=%s) — skipping full fetch",
+                cam_id,
+                last_ev_id[:8],
+            )
     except Exception as err:
         _LOGGER.debug(
             "last_event check error for %s: %s — falling back to full fetch",
@@ -82,12 +76,10 @@ async def _fetch_one_camera_events(
 
     if not skip_full_fetch:
         try:
-            url = f"{CLOUD_API}/v11/events?videoInputId={cam_id}&limit=20"
-            async with asyncio.timeout(15):
-                async with session.get(url, headers=headers) as r:
-                    if r.status == 200:
-                        events = await r.json()
-                        ok = True
+            events = await list_events_raw(
+                session, token, cam_id, limit=20, api_url=CLOUD_API
+            )
+            ok = True
         except Exception as err:
             _LOGGER.debug(
                 "Events fetch error for %s: %s",

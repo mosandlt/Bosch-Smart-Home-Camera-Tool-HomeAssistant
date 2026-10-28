@@ -326,3 +326,52 @@ class TestPollEvents:
         assert result is True
         assert CAM_A in coord.cached_events
         assert CAM_B in coord.cached_events
+
+
+class TestLibraryRequests:
+    @pytest.mark.asyncio
+    async def test_both_requests_carry_token_from_headers(self):
+        """The bearer token is taken from the shared headers for both GETs."""
+        session = _make_session(
+            {
+                "last_event": _make_resp(200, {"id": "new"}),
+                "/events": [_make_resp(200, [])],
+            }
+        )
+
+        await _fetch_one_camera_events(_make_coord(), CAM_A, session, HEADERS)
+
+        assert [
+            c.kwargs["headers"]["Authorization"] for c in session.get.call_args_list
+        ] == [
+            "Bearer tok",
+            "Bearer tok",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_events_request_asks_for_twenty_newest(self):
+        session = _make_session({"last_event": _make_resp(200, {"id": "new"})})
+
+        await _fetch_one_camera_events(_make_coord(), CAM_A, session, HEADERS)
+
+        assert (
+            session.get.call_args_list[1]
+            .args[0]
+            .endswith(f"/v11/events?videoInputId={CAM_A}&limit=20")
+        )
+
+    @pytest.mark.asyncio
+    async def test_non_object_events_are_dropped(self):
+        session = _make_session(
+            {
+                "last_event": _make_resp(500),
+                "/events": [_make_resp(200, [{"id": "a"}, "junk", 3])],
+            }
+        )
+
+        _cid, events, ok, _skip = await _fetch_one_camera_events(
+            _make_coord(), CAM_A, session, HEADERS
+        )
+
+        assert ok is True
+        assert events == [{"id": "a"}]
