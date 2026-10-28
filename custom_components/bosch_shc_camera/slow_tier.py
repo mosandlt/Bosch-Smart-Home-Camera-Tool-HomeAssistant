@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -448,6 +449,7 @@ async def _poll_cam_control(
             )
 
     if ctx.is_online and ctx.is_gen2 and not lighting_switch_locked:
+        ls_stamp = coordinator.light_set_at.get(cam_id)
         try:
             async with asyncio.timeout(5):
                 async with session.get(
@@ -455,8 +457,13 @@ async def _poll_cam_control(
                     headers=headers,
                 ) as ls_resp:
                     if ls_resp.status == 200:
-                        coordinator.lighting_switch_cache[cam_id] = await ls_resp.json()
-                        sync_gen2_light_cache(coordinator, cam_id)
+                        ls_data = await ls_resp.json()
+                        # A write that landed during the request is newer: its
+                        # optimistic zeroing must not be replaced by this
+                        # older (stale) body.
+                        if coordinator.light_set_at.get(cam_id) == ls_stamp:
+                            coordinator.lighting_switch_cache[cam_id] = ls_data
+                            sync_gen2_light_cache(coordinator, cam_id)
         except Exception as err:
             _LOGGER.debug(
                 "lighting/switch fetch error for %s: %s",
@@ -487,7 +494,11 @@ def apply_gen1_light_override(
     cache["wallwasher"] = wall
     cache["camera_light"] = front or wall
     intensity = data.get("frontLightIntensity")
-    if isinstance(intensity, (int, float)) and not isinstance(intensity, bool):
+    if (
+        isinstance(intensity, (int, float))
+        and not isinstance(intensity, bool)
+        and math.isfinite(intensity)
+    ):
         cache["front_light_intensity"] = float(intensity)
     return True
 

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import ssl
 import time
 from typing import TYPE_CHECKING, Any
@@ -252,7 +253,11 @@ def get_lighting_lock(coordinator: Any, cam_id: str) -> asyncio.Lock:
 
 def remember_front_brightness(coordinator: Any, cam_id: str, brightness: Any) -> None:
     """Remember the last non-zero front-light brightness (0-100)."""
-    if isinstance(brightness, (int, float)) and brightness > 0:
+    if (
+        isinstance(brightness, (int, float))
+        and math.isfinite(brightness)
+        and brightness > 0
+    ):
         store = getattr(coordinator, "last_front_brightness", None)
         if store is None:
             store = {}
@@ -269,7 +274,11 @@ def front_restore_brightness(coordinator: Any, cam_id: str) -> int:
     if isinstance(saved, (int, float)) and saved > 0:
         return int(saved)
     intensity = coordinator.shc_state_cache.get(cam_id, {}).get("front_light_intensity")
-    if isinstance(intensity, (int, float)) and intensity > 0:
+    if (
+        isinstance(intensity, (int, float))
+        and math.isfinite(intensity)
+        and intensity > 0
+    ):
         return round(intensity * 100) if intensity <= 1.0 else int(intensity)
     return 100
 
@@ -947,6 +956,17 @@ async def async_cloud_set_camera_light(
             gen2=gen2,
             last_front_intensity=last_intensity,
         )
+        if 401 in (light_result.status, getattr(light_result, "topdown_status", None)):
+            new_token = await _renew_token_after_401(coordinator, token)
+            if new_token:
+                light_result = await cloud_set_camera_light(
+                    session,
+                    new_token,
+                    cam_id,
+                    on,
+                    gen2=gen2,
+                    last_front_intensity=last_intensity,
+                )
         ok = light_result.ok
         if not ok:
             if gen2:
@@ -1345,6 +1365,21 @@ async def _set_light_component_locked(
     return False
 
 
+async def _renew_token_after_401(
+    coordinator: BoschCameraCoordinator, observed_token: str
+) -> str | None:
+    """Refresh the bearer after a write answered HTTP 401 (None if that fails).
+
+    ensure_valid_token drives the refresh-failure escalation that ends in the
+    reauth flow, so a rejected token no longer stays a generic write failure.
+    """
+    try:
+        return await coordinator.ensure_valid_token(observed_token)
+    except Exception as err:
+        _LOGGER.debug("token refresh after 401 failed: %s", type(err).__name__)
+        return None
+
+
 async def async_cloud_set_notifications(
     coordinator: BoschCameraCoordinator, cam_id: str, enabled: bool
 ) -> bool:
@@ -1360,6 +1395,12 @@ async def async_cloud_set_notifications(
         session = await async_get_bosch_cloud_session(coordinator.hass)
 
         result = await cloud_set_notifications(session, token, cam_id, enabled)
+        if result.status == 401:
+            new_token = await _renew_token_after_401(coordinator, token)
+            if new_token:
+                result = await cloud_set_notifications(
+                    session, new_token, cam_id, enabled
+                )
         if result.ok:
             coordinator.shc_state_cache.setdefault(cam_id, {})[
                 "notifications_status"
@@ -1406,6 +1447,10 @@ async def async_cloud_set_pan(
     session = await async_get_bosch_cloud_session(coordinator.hass)
 
     result = await cloud_set_pan(session, token, cam_id, position)
+    if result.status == 401:
+        new_token = await _renew_token_after_401(coordinator, token)
+        if new_token:
+            result = await cloud_set_pan(session, new_token, cam_id, position)
     if result.ok:
         coordinator.pan_cache[cam_id] = result.position
         coordinator.async_update_listeners()

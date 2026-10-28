@@ -1610,3 +1610,30 @@ class TestFirstFetchMarkedDone:
         )
         self._ctx_for(coord)
         assert coord.slow_tier_ran_once == set()
+
+
+class TestPollCamControlInFlightWrite:
+    @pytest.mark.asyncio
+    async def test_gen2_lighting_switch_stale_get_dropped_after_write(self):
+        """A write landing while the lighting/switch GET is in flight wins.
+
+        Otherwise the older body replaces the optimistic OFF zeroing and the
+        lights flip back on until the next poll.
+        """
+        coord = _make_control_coord(
+            lighting_switch_cache={CAM_A: {"frontLightSettings": {"brightness": 0}}}
+        )
+
+        async def _json():
+            coord.light_set_at[CAM_A] = time.monotonic()  # write during request
+            return {"frontLightSettings": {"brightness": 80}}
+
+        resp = _make_resp(200)
+        resp.json = AsyncMock(side_effect=_json)
+        session = _make_session({"/lighting/switch": resp})
+        await _poll_cam_control(
+            coord, CAM_A, _ctx(is_gen2=True, is_online=True), session, HEADERS
+        )
+        assert coord.lighting_switch_cache[CAM_A] == {
+            "frontLightSettings": {"brightness": 0}
+        }

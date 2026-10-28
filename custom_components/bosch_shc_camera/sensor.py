@@ -492,7 +492,11 @@ def _wifi_signal_value(entity: BoschSensorEntity) -> int | None:
     signal = wifi.get("signalStrength")
     if signal is None:
         return None
-    return int(signal)
+    try:
+        return int(signal)
+    except (ValueError, TypeError, OverflowError):
+        # NaN/inf/garbage from the cloud JSON count as missing, not a crash.
+        return None
 
 
 def _wifi_signal_available(entity: BoschSensorEntity) -> bool:

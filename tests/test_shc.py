@@ -4609,3 +4609,106 @@ async def test_shc_camera_light_only_overwrites_gen1(hw, expected):
             [{"name": "cam", "id": "dev"}],
         )
     assert coord.shc_state_cache["cam"]["camera_light"] is expected
+
+
+class TestWrite401RefreshesToken:
+    """HTTP 401 on a cloud write refreshes the bearer once and retries.
+
+    The helper returns the status instead of raising, so a rejected token was
+    only ever a generic write failure and the refresh/reauth escalation in
+    ensure_valid_token never ran (cross-version parity with the HA-core
+    review finding). Privacy mode already did this; notifications, pan and
+    the camera light now do too.
+    """
+
+    @staticmethod
+    def _session(first: int, second: int) -> MagicMock:
+        session = MagicMock()
+        session.put.side_effect = [_mock_response(first), _mock_response(second)]
+        return session
+
+    @pytest.mark.asyncio
+    async def test_notifications_401_then_retry_ok(self) -> None:
+        from custom_components.bosch_shc_camera.shc import async_cloud_set_notifications
+
+        coord = _base_coord()
+        coord.ensure_valid_token = AsyncMock(return_value="tok-FRESH")
+        session = self._session(401, 204)
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            assert await async_cloud_set_notifications(coord, CAM_ID, True) is True
+        coord.ensure_valid_token.assert_awaited_once_with("tok-AAA")
+        assert session.put.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_notifications_401_refresh_fails(self) -> None:
+        from custom_components.bosch_shc_camera.shc import async_cloud_set_notifications
+
+        coord = _base_coord()
+        coord.ensure_valid_token = AsyncMock(side_effect=RuntimeError("down"))
+        session = self._session(401, 204)
+        with (
+            patch(
+                "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(
+                "custom_components.bosch_shc_camera.shc._notify_write_failed",
+                new=AsyncMock(),
+            ),
+        ):
+            assert await async_cloud_set_notifications(coord, CAM_ID, True) is False
+        assert session.put.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_pan_401_then_retry_ok(self) -> None:
+        from custom_components.bosch_shc_camera.shc import async_cloud_set_pan
+
+        coord = _base_coord()
+        coord.shc_state_cache[CAM_ID]["privacy_mode"] = False
+        coord.ensure_valid_token = AsyncMock(return_value="tok-FRESH")
+        session = self._session(401, 204)
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            assert await async_cloud_set_pan(coord, CAM_ID, 30) is True
+        coord.ensure_valid_token.assert_awaited_once_with("tok-AAA")
+
+    @pytest.mark.asyncio
+    async def test_camera_light_401_then_retry_ok(self) -> None:
+        from custom_components.bosch_shc_camera.shc import async_cloud_set_camera_light
+
+        coord = _base_coord()
+        coord.hw_version = {CAM_ID: "CAMERA_EYES"}  # gen1: single PUT
+        coord.ensure_valid_token = AsyncMock(return_value="tok-FRESH")
+        session = self._session(401, 204)
+        with patch(
+            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            new=AsyncMock(return_value=session),
+        ):
+            assert await async_cloud_set_camera_light(coord, CAM_ID, True) is True
+        coord.ensure_valid_token.assert_awaited_once_with("tok-AAA")
+
+
+class TestNonFiniteBrightness:
+    """NaN/inf brightness or intensity must read as missing, not raise."""
+
+    def test_remember_ignores_non_finite(self) -> None:
+        from custom_components.bosch_shc_camera.shc import remember_front_brightness
+
+        coord = SimpleNamespace()
+        for bad in (float("nan"), float("inf")):
+            remember_front_brightness(coord, CAM_ID, bad)
+        assert getattr(coord, "last_front_brightness", {}) == {}
+
+    def test_restore_falls_back_on_non_finite_intensity(self) -> None:
+        from custom_components.bosch_shc_camera.shc import front_restore_brightness
+
+        for bad in (float("nan"), float("inf")):
+            coord = SimpleNamespace(
+                shc_state_cache={CAM_ID: {"front_light_intensity": bad}}
+            )
+            assert front_restore_brightness(coord, CAM_ID) == 100

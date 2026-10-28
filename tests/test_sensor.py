@@ -8238,3 +8238,13 @@ class TestAiAlerts24hSensor:
         base_sensor_coord.ai_analysis_recent = {}
         s = BoschAiAlerts24hSensor(base_sensor_coord, "unknown-cam", stub_entry)
         assert s.native_value == 0
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), "abc", [1]])
+def test_wifi_signal_non_finite_is_none(bad):
+    """NaN/inf/garbage signalStrength is treated as missing (no ValueError)."""
+    from custom_components.bosch_shc_camera.sensor import BoschWifiSignalSensor
+
+    c = _make_broad_sensor_coord(wifiinfo_cache={CAM_ID: {"signalStrength": bad}})
+    sw = _make_sensor_via_new(BoschWifiSignalSensor, c)
+    assert sw.native_value is None
