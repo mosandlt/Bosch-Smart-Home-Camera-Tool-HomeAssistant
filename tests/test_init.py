@@ -8963,7 +8963,7 @@ class TestHandleSetMotionZones:
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         session = MagicMock()
-        session.post = MagicMock(return_value=_resp_cm(200))
+        session.request = MagicMock(return_value=_resp_cm(200))
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -8992,7 +8992,7 @@ class TestHandleSetMotionZones:
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         session = MagicMock()
-        session.post = MagicMock(return_value=_resp_cm(443))
+        session.request = MagicMock(return_value=_resp_cm(443))
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -9433,7 +9433,7 @@ class TestHandleSetPrivacyMasks:
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         session = MagicMock()
-        session.post = MagicMock(return_value=_resp_cm(200))
+        session.request = MagicMock(return_value=_resp_cm(200))
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -9462,7 +9462,7 @@ class TestHandleSetPrivacyMasks:
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         session = MagicMock()
-        session.post = MagicMock(return_value=_resp_cm(443))
+        session.request = MagicMock(return_value=_resp_cm(443))
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -9549,7 +9549,7 @@ class TestHandleDeleteMotionZone:
         zone_b = {"x": 0.5, "y": 0.5, "w": 0.5, "h": 0.5}
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(200, json_data=[zone_a, zone_b]))
-        session.post = MagicMock(return_value=_resp_cm(204))
+        session.request = MagicMock(return_value=_resp_cm(204))
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -9561,7 +9561,7 @@ class TestHandleDeleteMotionZone:
             call_mock.data = {"camera_id": CAM_ID, "zone_index": 0}
             await handler(call_mock)
 
-        post_json = session.post.call_args[1]["json"]
+        post_json = session.request.call_args.kwargs["json"]
         assert post_json == [zone_b], (
             "After deleting zone 0, only zone_b must be re-POSTed"
         )
@@ -20036,7 +20036,7 @@ class TestHandleSetPrivacyMasksException:
         hass.config_entries.async_loaded_entries.return_value = [entry]
 
         session = MagicMock()
-        session.post = MagicMock(side_effect=OSError("connection refused"))
+        session.request = MagicMock(side_effect=OSError("connection refused"))
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -37818,6 +37818,7 @@ def _make_session_backend_round2_fixes(resp_cm):
     session.put = MagicMock(return_value=resp_cm)
     session.get = MagicMock(return_value=resp_cm)
     session.delete = MagicMock(return_value=resp_cm)
+    session.request = MagicMock(return_value=resp_cm)
     return session
 
 
@@ -38028,10 +38029,10 @@ async def test_set_lighting_schedule_puts_merged_schedule():
     get_url = session.get.call_args[0][0]
     assert f"/video_inputs/{CAM_ID}/lighting_options" in get_url
 
-    session.put.assert_called_once()
-    put_url = session.put.call_args[0][0]
+    session.request.assert_called_once()
+    put_url = session.request.call_args[0][1]
     assert f"/video_inputs/{CAM_ID}/lighting_options" in put_url
-    put_body = session.put.call_args.kwargs["json"]
+    put_body = session.request.call_args.kwargs["json"]
     assert put_body["generalLightOnTime"] == "18:00:00"
     assert put_body["generalLightOffTime"] == "23:00:00"
     assert put_body["lightOnMotion"] is True
@@ -42140,3 +42141,171 @@ async def test_async_put_camera_three_segment_lighting_path_via_lib():
     assert session.request.call_args.args[1].endswith(
         "/video_inputs/cam-1/lighting/switch/front"
     )
+
+
+# Cloud settings services go through the client library: HTTP answers keep
+# their status/body in the service error, transport failures stay unexpected.
+_LIB_ZONE = [{"x": 0.0, "y": 0.0, "w": 0.5, "h": 0.5}]
+
+
+def _lib_service_session(*, status=None, method_status=None, error=None, get_json=None):
+    """`session.get` answers `status`; `session.request` answers `method_status`."""
+    session = MagicMock()
+    session.get = MagicMock(
+        side_effect=error,
+        return_value=_resp_cm(status or 200, "denied", get_json or _LIB_ZONE),
+    )
+    session.request = MagicMock(
+        side_effect=error,
+        return_value=_resp_cm(method_status or 204, "denied", _LIB_ZONE),
+    )
+    return session
+
+
+async def _call_lib_service(name, data, session):
+    from custom_components.bosch_shc_camera import _register_services
+
+    entry, coord = _entry_with_coord(
+        lighting_options_cache={}, lighting_options_set_at={}
+    )
+    hass = _make_hass_services_round1()
+    hass.config_entries.async_loaded_entries.return_value = [entry]
+    with patch(
+        f"{MODULE}.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
+    ):
+        _register_services(hass)
+        call = MagicMock()
+        call.data = {"camera_id": CAM_ID, **data}
+        await _get_handlers(hass)[name](call)
+    return hass, coord
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "data", "key", "action"),
+    [
+        ("set_motion_zones", {"zones": _LIB_ZONE}, "http_error_with_body", None),
+        ("set_privacy_masks", {"masks": _LIB_ZONE}, "http_error_with_body", None),
+        ("set_lighting_schedule", {"on_time": "18:00"}, "http_error_with_body", None),
+        (
+            "delete_motion_zone",
+            {"zone_index": 0},
+            "http_error",
+            "delete_motion_zone POST",
+        ),
+    ],
+)
+async def test_lib_write_service_http_error_keeps_status_and_body(
+    name, data, key, action
+):
+    """A 500 on the write names the status and (where the key has one) the body."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    session = _lib_service_session(
+        method_status=500,
+        get_json=(
+            _LIB_ZONE
+            if name == "delete_motion_zone"
+            else {"scheduleStatus": "FOLLOW_SCHEDULE"}
+        ),
+    )
+    with pytest.raises(HomeAssistantError) as exc:
+        await _call_lib_service(name, data, session)
+    assert exc.value.translation_key == key
+    assert exc.value.translation_placeholders["status"] == "500"
+    if key == "http_error_with_body":
+        assert exc.value.translation_placeholders["body"] == "denied"
+    if action:
+        assert exc.value.translation_placeholders["action"] == action
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "data", "key"),
+    [
+        ("get_motion_zones", {}, "http_error_with_body"),
+        ("get_privacy_masks", {}, "http_error_with_body"),
+        ("delete_motion_zone", {"zone_index": 0}, "http_error"),
+        ("get_lighting_schedule", {}, "http_error"),
+        ("set_lighting_schedule", {"on_time": "18:00"}, "http_error_with_body"),
+    ],
+)
+async def test_lib_read_service_http_error_keeps_status(name, data, key):
+    """A 401 on the read maps to the same translation key as before."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    session = _lib_service_session(status=401)
+    with pytest.raises(HomeAssistantError) as exc:
+        await _call_lib_service(name, data, session)
+    assert exc.value.translation_key == key
+    assert exc.value.translation_placeholders["status"] == "401"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "data", "notification"),
+    [
+        ("get_motion_zones", {}, "bosch_motion_zones"),
+        ("get_privacy_masks", {}, "bosch_privacy_masks"),
+    ],
+)
+async def test_lib_get_regions_privacy_mode_notifies_and_raises(
+    name, data, notification
+):
+    """HTTP 443 on a region read posts the notification and raises privacy_blocked."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    session = _lib_service_session(status=443)
+    with pytest.raises(HomeAssistantError) as exc:
+        await _call_lib_service(name, data, session)
+    assert exc.value.translation_key == "privacy_blocked"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "data"),
+    [
+        ("set_motion_zones", {"zones": _LIB_ZONE}),
+        ("delete_motion_zone", {"zone_index": 0}),
+        ("get_lighting_schedule", {}),
+        ("set_lighting_schedule", {"on_time": "18:00"}),
+    ],
+)
+async def test_lib_service_transport_error_is_unexpected(name, data):
+    """A connection failure has no HTTP status and stays `unexpected_error`."""
+    import aiohttp
+    from homeassistant.exceptions import HomeAssistantError
+
+    session = _lib_service_session(
+        error=aiohttp.ClientConnectionError("down"),
+        get_json={"scheduleStatus": "FOLLOW_SCHEDULE"},
+    )
+    with pytest.raises(HomeAssistantError) as exc:
+        await _call_lib_service(name, data, session)
+    assert exc.value.translation_key == "unexpected_error"
+
+
+@pytest.mark.asyncio
+async def test_lib_get_regions_443_notification_text():
+    """The 443 notification keeps its text and notification id."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    from custom_components.bosch_shc_camera import _register_services
+
+    entry, _coord = _entry_with_coord()
+    hass = _make_hass_services_round1()
+    hass.config_entries.async_loaded_entries.return_value = [entry]
+    session = _lib_service_session(status=443)
+    with patch(
+        f"{MODULE}.async_get_bosch_cloud_session",
+        new=AsyncMock(return_value=session),
+    ):
+        _register_services(hass)
+        call = MagicMock()
+        call.data = {"camera_id": CAM_ID}
+        with pytest.raises(HomeAssistantError):
+            await _get_handlers(hass)["get_motion_zones"](call)
+    payload = hass.services.async_call.call_args.args[2]
+    assert payload["notification_id"] == "bosch_motion_zones"
+    assert "HTTP 443" in payload["message"]

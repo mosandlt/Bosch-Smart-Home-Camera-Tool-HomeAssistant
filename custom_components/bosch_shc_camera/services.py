@@ -15,9 +15,11 @@ import asyncio
 import logging
 import time
 from datetime import UTC
-from typing import Any
+from typing import Any, NoReturn
 
 import aiohttp
+from bosch_shc_camera_client.cameras import BoschCameraError, fetch_json
+from bosch_shc_camera_client.settings import put_setting
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -34,6 +36,36 @@ from .guards import admin_only_service, wrap_service_errors
 from .lighting_options import cached_if_write_locked, lighting_write_lock
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _raise_lib_error(
+    action: str,
+    err: BoschCameraError,
+    *,
+    privacy_action: str | None = None,
+    with_body: bool = True,
+) -> NoReturn:
+    """Raise the service error for a client-library error that carries an HTTP status.
+
+    Timeouts and transport failures have no status and are re-raised as is, so
+    `wrap_service_errors` reports them as unexpected errors.
+    """
+    if err.status is None:
+        raise err
+    if err.status == 443 and privacy_action is not None:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="privacy_blocked",
+            translation_placeholders={"action": privacy_action},
+        ) from err
+    placeholders = {"action": action, "status": str(err.status)}
+    if with_body:
+        placeholders["body"] = (err.body or "")[:200]
+    raise HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key="http_error_with_body" if with_body else "http_error",
+        translation_placeholders=placeholders,
+    ) from err
 
 
 def _register_services(hass: HomeAssistant) -> None:
@@ -366,43 +398,27 @@ def _register_services(hass: HomeAssistant) -> None:
             coord = entry.runtime_data
             if coord:
                 session = await async_get_bosch_cloud_session(hass)
-                headers = {
-                    "Authorization": f"Bearer {coord.token}",
-                    "Content-Type": "application/json",
-                }
                 with wrap_service_errors("Set motion zones"):
-                    async with asyncio.timeout(10):
-                        async with session.post(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
-                            headers=headers,
-                            json=zones,
-                        ) as resp:
-                            if resp.status in (200, 201, 204):
-                                _LOGGER.info(
-                                    "Motion zones set for %s (%d zones)",
-                                    cam_id[:8],
-                                    len(zones),
-                                )
-                                await coord.async_request_refresh()
-                            elif resp.status == 443:
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="privacy_blocked",
-                                    translation_placeholders={
-                                        "action": "Set motion zones"
-                                    },
-                                )
-                            else:
-                                body = await resp.text()
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="http_error_with_body",
-                                    translation_placeholders={
-                                        "action": "Set motion zones",
-                                        "status": str(resp.status),
-                                        "body": body[:200],
-                                    },
-                                )
+                    try:
+                        await put_setting(
+                            session,
+                            coord.token,
+                            cam_id,
+                            "motion_sensitive_areas",
+                            zones,
+                            method="POST",
+                            api_url=CLOUD_API,
+                        )
+                    except BoschCameraError as err:
+                        _raise_lib_error(
+                            "Set motion zones", err, privacy_action="Set motion zones"
+                        )
+                    _LOGGER.info(
+                        "Motion zones set for %s (%d zones)",
+                        cam_id[:8],
+                        len(zones),
+                    )
+                    await coord.async_request_refresh()
                 break
 
     async def handle_get_motion_zones(call: ServiceCall) -> None:
@@ -428,63 +444,48 @@ def _register_services(hass: HomeAssistant) -> None:
             coord = entry.runtime_data
             if coord:
                 session = await async_get_bosch_cloud_session(hass)
-                headers = {"Authorization": f"Bearer {coord.token}"}
                 with wrap_service_errors("Get motion zones"):
-                    async with asyncio.timeout(10):
-                        async with session.get(
+                    try:
+                        zones = await fetch_json(
+                            session,
+                            coord.token,
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
-                            headers=headers,
-                        ) as resp:
-                            if resp.status == 200:
-                                zones = await resp.json()
-                                if not zones:
-                                    msg = "Keine Motion-Zonen konfiguriert."
-                                else:
-                                    lines = [f"{len(zones)} Motion-Zone(n):"]
-                                    for i, z in enumerate(zones):
-                                        lines.append(
-                                            f"• Zone {i + 1}: x={z.get('x', 0):.3f} y={z.get('y', 0):.3f} w={z.get('w', 0):.3f} h={z.get('h', 0):.3f}"
-                                        )
-                                    msg = "\n".join(lines)
-                                _LOGGER.info("Motion zones for %s: %s", cam_id[:8], msg)
-                                await hass.services.async_call(
-                                    "persistent_notification",
-                                    "create",
-                                    {
-                                        "title": "Motion-Zonen",
-                                        "message": msg,
-                                        "notification_id": "bosch_motion_zones",
-                                    },
-                                )
-                            elif resp.status == 443:
-                                msg = "Motion-Zonen nicht verfügbar (HTTP 443). Mögliche Ursache: Privacy-Mode ist aktiv."
-                                await hass.services.async_call(
-                                    "persistent_notification",
-                                    "create",
-                                    {
-                                        "title": "Motion-Zonen",
-                                        "message": msg,
-                                        "notification_id": "bosch_motion_zones",
-                                    },
-                                )
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="privacy_blocked",
-                                    translation_placeholders={
-                                        "action": "get_motion_zones"
-                                    },
-                                )
-                            else:
-                                body = await resp.text()
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="http_error_with_body",
-                                    translation_placeholders={
-                                        "action": "Get motion zones",
-                                        "status": str(resp.status),
-                                        "body": body[:200],
-                                    },
-                                )
+                            "Get motion zones",
+                            10,
+                        )
+                    except BoschCameraError as err:
+                        if err.status == 443:
+                            await hass.services.async_call(
+                                "persistent_notification",
+                                "create",
+                                {
+                                    "title": "Motion-Zonen",
+                                    "message": "Motion-Zonen nicht verfügbar (HTTP 443). Mögliche Ursache: Privacy-Mode ist aktiv.",
+                                    "notification_id": "bosch_motion_zones",
+                                },
+                            )
+                        _raise_lib_error(
+                            "Get motion zones", err, privacy_action="get_motion_zones"
+                        )
+                    if not zones:
+                        msg = "Keine Motion-Zonen konfiguriert."
+                    else:
+                        lines = [f"{len(zones)} Motion-Zone(n):"]
+                        for i, z in enumerate(zones):
+                            lines.append(
+                                f"• Zone {i + 1}: x={z.get('x', 0):.3f} y={z.get('y', 0):.3f} w={z.get('w', 0):.3f} h={z.get('h', 0):.3f}"
+                            )
+                        msg = "\n".join(lines)
+                    _LOGGER.info("Motion zones for %s: %s", cam_id[:8], msg)
+                    await hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "title": "Motion-Zonen",
+                            "message": msg,
+                            "notification_id": "bosch_motion_zones",
+                        },
+                    )
                 break
 
     async def handle_share_camera(call: ServiceCall) -> None:
@@ -596,65 +597,48 @@ def _register_services(hass: HomeAssistant) -> None:
             coord = entry.runtime_data
             if coord:
                 session = await async_get_bosch_cloud_session(hass)
-                headers = {"Authorization": f"Bearer {coord.token}"}
                 with wrap_service_errors("Get privacy masks"):
-                    async with asyncio.timeout(10):
-                        async with session.get(
+                    try:
+                        masks = await fetch_json(
+                            session,
+                            coord.token,
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_masks",
-                            headers=headers,
-                        ) as resp:
-                            if resp.status == 200:
-                                masks = await resp.json()
-                                if not masks:
-                                    msg = "Keine Privacy-Masken konfiguriert."
-                                else:
-                                    lines = [f"{len(masks)} Privacy-Maske(n):"]
-                                    for i, m in enumerate(masks):
-                                        lines.append(
-                                            f"• Maske {i + 1}: x={m.get('x', 0):.3f} y={m.get('y', 0):.3f} w={m.get('w', 0):.3f} h={m.get('h', 0):.3f}"
-                                        )
-                                    msg = "\n".join(lines)
-                                _LOGGER.info(
-                                    "Privacy masks for %s: %s", cam_id[:8], msg
-                                )
-                                await hass.services.async_call(
-                                    "persistent_notification",
-                                    "create",
-                                    {
-                                        "title": "Privacy-Masken",
-                                        "message": msg,
-                                        "notification_id": "bosch_privacy_masks",
-                                    },
-                                )
-                            elif resp.status == 443:
-                                msg = "Privacy-Masken nicht verfügbar (HTTP 443). Mögliche Ursache: Privacy-Mode ist aktiv."
-                                await hass.services.async_call(
-                                    "persistent_notification",
-                                    "create",
-                                    {
-                                        "title": "Privacy-Masken",
-                                        "message": msg,
-                                        "notification_id": "bosch_privacy_masks",
-                                    },
-                                )
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="privacy_blocked",
-                                    translation_placeholders={
-                                        "action": "get_privacy_masks"
-                                    },
-                                )
-                            else:
-                                body = await resp.text()
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="http_error_with_body",
-                                    translation_placeholders={
-                                        "action": "Get privacy masks",
-                                        "status": str(resp.status),
-                                        "body": body[:200],
-                                    },
-                                )
+                            "Get privacy masks",
+                            10,
+                        )
+                    except BoschCameraError as err:
+                        if err.status == 443:
+                            await hass.services.async_call(
+                                "persistent_notification",
+                                "create",
+                                {
+                                    "title": "Privacy-Masken",
+                                    "message": "Privacy-Masken nicht verfügbar (HTTP 443). Mögliche Ursache: Privacy-Mode ist aktiv.",
+                                    "notification_id": "bosch_privacy_masks",
+                                },
+                            )
+                        _raise_lib_error(
+                            "Get privacy masks", err, privacy_action="get_privacy_masks"
+                        )
+                    if not masks:
+                        msg = "Keine Privacy-Masken konfiguriert."
+                    else:
+                        lines = [f"{len(masks)} Privacy-Maske(n):"]
+                        for i, m in enumerate(masks):
+                            lines.append(
+                                f"• Maske {i + 1}: x={m.get('x', 0):.3f} y={m.get('y', 0):.3f} w={m.get('w', 0):.3f} h={m.get('h', 0):.3f}"
+                            )
+                        msg = "\n".join(lines)
+                    _LOGGER.info("Privacy masks for %s: %s", cam_id[:8], msg)
+                    await hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "title": "Privacy-Masken",
+                            "message": msg,
+                            "notification_id": "bosch_privacy_masks",
+                        },
+                    )
                 break
 
     async def handle_set_privacy_masks(call: ServiceCall) -> None:
@@ -723,43 +707,27 @@ def _register_services(hass: HomeAssistant) -> None:
             coord = entry.runtime_data
             if coord:
                 session = await async_get_bosch_cloud_session(hass)
-                headers = {
-                    "Authorization": f"Bearer {coord.token}",
-                    "Content-Type": "application/json",
-                }
                 with wrap_service_errors("Set privacy masks"):
-                    async with asyncio.timeout(10):
-                        async with session.post(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_masks",
-                            headers=headers,
-                            json=masks,
-                        ) as resp:
-                            if resp.status in (200, 201, 204):
-                                _LOGGER.info(
-                                    "Privacy masks set for %s (%d masks)",
-                                    cam_id[:8],
-                                    len(masks),
-                                )
-                                await coord.async_request_refresh()
-                            elif resp.status == 443:
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="privacy_blocked",
-                                    translation_placeholders={
-                                        "action": "Set privacy masks"
-                                    },
-                                )
-                            else:
-                                body = await resp.text()
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="http_error_with_body",
-                                    translation_placeholders={
-                                        "action": "Set privacy masks",
-                                        "status": str(resp.status),
-                                        "body": body[:200],
-                                    },
-                                )
+                    try:
+                        await put_setting(
+                            session,
+                            coord.token,
+                            cam_id,
+                            "privacy_masks",
+                            masks,
+                            method="POST",
+                            api_url=CLOUD_API,
+                        )
+                    except BoschCameraError as err:
+                        _raise_lib_error(
+                            "Set privacy masks", err, privacy_action="Set privacy masks"
+                        )
+                    _LOGGER.info(
+                        "Privacy masks set for %s (%d masks)",
+                        cam_id[:8],
+                        len(masks),
+                    )
+                    await coord.async_request_refresh()
                 break
 
     async def handle_delete_motion_zone(call: ServiceCall) -> None:
@@ -787,26 +755,19 @@ def _register_services(hass: HomeAssistant) -> None:
             if coord:
                 # Fetch current zones, remove the one at index, re-POST
                 session = await async_get_bosch_cloud_session(hass)
-                headers = {
-                    "Authorization": f"Bearer {coord.token}",
-                    "Content-Type": "application/json",
-                }
                 with wrap_service_errors("delete_motion_zone"):
-                    async with asyncio.timeout(10):
-                        async with session.get(
+                    try:
+                        zones = await fetch_json(
+                            session,
+                            coord.token,
                             f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
-                            headers=headers,
-                        ) as resp:
-                            if resp.status != 200:
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="http_error",
-                                    translation_placeholders={
-                                        "action": "delete_motion_zone fetch",
-                                        "status": str(resp.status),
-                                    },
-                                )
-                            zones = await resp.json()
+                            "delete_motion_zone fetch",
+                            10,
+                        )
+                    except BoschCameraError as err:
+                        _raise_lib_error(
+                            "delete_motion_zone fetch", err, with_body=False
+                        )
                     if zone_index >= len(zones):
                         raise ServiceValidationError(
                             translation_domain=DOMAIN,
@@ -818,28 +779,26 @@ def _register_services(hass: HomeAssistant) -> None:
                         )
                     removed = zones.pop(zone_index)
                     _LOGGER.info("Removing zone %d: %s", zone_index, removed)
-                    async with asyncio.timeout(10):
-                        async with session.post(
-                            f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
-                            headers=headers,
-                            json=zones,
-                        ) as resp:
-                            if resp.status in (200, 201, 204):
-                                _LOGGER.info(
-                                    "Zone %d deleted, %d zones remaining",
-                                    zone_index,
-                                    len(zones),
-                                )
-                                await coord.async_request_refresh()
-                            else:
-                                raise HomeAssistantError(
-                                    translation_domain=DOMAIN,
-                                    translation_key="http_error",
-                                    translation_placeholders={
-                                        "action": "delete_motion_zone POST",
-                                        "status": str(resp.status),
-                                    },
-                                )
+                    try:
+                        await put_setting(
+                            session,
+                            coord.token,
+                            cam_id,
+                            "motion_sensitive_areas",
+                            zones,
+                            method="POST",
+                            api_url=CLOUD_API,
+                        )
+                    except BoschCameraError as err:
+                        _raise_lib_error(
+                            "delete_motion_zone POST", err, with_body=False
+                        )
+                    _LOGGER.info(
+                        "Zone %d deleted, %d zones remaining",
+                        zone_index,
+                        len(zones),
+                    )
+                    await coord.async_request_refresh()
                 break
 
     async def handle_get_lighting_schedule(call: ServiceCall) -> None:
@@ -870,23 +829,18 @@ def _register_services(hass: HomeAssistant) -> None:
                         data = cached
                     else:
                         session = await async_get_bosch_cloud_session(hass)
-                        headers = {"Authorization": f"Bearer {coord.token}"}
-                        async with asyncio.timeout(10):
-                            async with session.get(
+                        try:
+                            data = await fetch_json(
+                                session,
+                                coord.token,
                                 f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
-                                headers=headers,
-                            ) as resp:
-                                if resp.status == 200:
-                                    data = await resp.json()
-                                else:
-                                    raise HomeAssistantError(
-                                        translation_domain=DOMAIN,
-                                        translation_key="http_error",
-                                        translation_placeholders={
-                                            "action": "get_lighting_schedule",
-                                            "status": str(resp.status),
-                                        },
-                                    )
+                                "get_lighting_schedule",
+                                10,
+                            )
+                        except BoschCameraError as err:
+                            _raise_lib_error(
+                                "get_lighting_schedule", err, with_body=False
+                            )
                     sched = data.get("scheduleStatus", "?")
                     on_time = data.get("generalLightOnTime", "?")
                     off_time = data.get("generalLightOffTime", "?")
@@ -973,31 +927,22 @@ def _register_services(hass: HomeAssistant) -> None:
             coord = entry.runtime_data
             if coord:
                 session = await async_get_bosch_cloud_session(hass)
-                headers = {
-                    "Authorization": f"Bearer {coord.token}",
-                    "Content-Type": "application/json",
-                }
                 async with lighting_write_lock(coord, cam_id):
                     with wrap_service_errors("Set lighting schedule"):
                         data = cached_if_write_locked(coord, cam_id)
                         if data is None:
-                            async with asyncio.timeout(10):
-                                async with session.get(
+                            try:
+                                data = await fetch_json(
+                                    session,
+                                    coord.token,
                                     f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
-                                    headers=headers,
-                                ) as get_resp:
-                                    if get_resp.status != 200:
-                                        body = await get_resp.text()
-                                        raise HomeAssistantError(
-                                            translation_domain=DOMAIN,
-                                            translation_key="http_error_with_body",
-                                            translation_placeholders={
-                                                "action": "Set lighting schedule (fetch current)",
-                                                "status": str(get_resp.status),
-                                                "body": body[:200],
-                                            },
-                                        )
-                                    data = await get_resp.json()
+                                    "Set lighting schedule (fetch current)",
+                                    10,
+                                )
+                            except BoschCameraError as err:
+                                _raise_lib_error(
+                                    "Set lighting schedule (fetch current)", err
+                                )
                         if on_time:
                             data["generalLightOnTime"] = (
                                 on_time
@@ -1015,41 +960,32 @@ def _register_services(hass: HomeAssistant) -> None:
                         if threshold is not None:
                             data["darknessThreshold"] = threshold
                         data["scheduleStatus"] = "FOLLOW_SCHEDULE"
-                        async with asyncio.timeout(10):
-                            async with session.put(
-                                f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
-                                headers=headers,
-                                json=data,
-                            ) as put_resp:
-                                if put_resp.status in (200, 204):
-                                    _LOGGER.info(
-                                        "Lighting schedule set for %s: %s → %s",
-                                        cam_id[:8],
-                                        data.get("generalLightOnTime"),
-                                        data.get("generalLightOffTime"),
-                                    )
-                                    # Optimistic cache update + write-lock, same
-                                    # pattern as privacy_sound_cache/ledlights_cache
-                                    # (slow_tier.py) — without this, a slow-tier poll
-                                    # landing before the next rotation completes can
-                                    # serve get_lighting_schedule stale pre-write data
-                                    # for up to a full poll interval.
-                                    coord.lighting_options_cache[cam_id] = data
-                                    coord.lighting_options_set_at[cam_id] = (
-                                        time.monotonic()
-                                    )
-                                    await coord.async_request_refresh()
-                                else:
-                                    body = await put_resp.text()
-                                    raise HomeAssistantError(
-                                        translation_domain=DOMAIN,
-                                        translation_key="http_error_with_body",
-                                        translation_placeholders={
-                                            "action": "Set lighting schedule",
-                                            "status": str(put_resp.status),
-                                            "body": body[:200],
-                                        },
-                                    )
+                        try:
+                            await put_setting(
+                                session,
+                                coord.token,
+                                cam_id,
+                                "lighting_options",
+                                data,
+                                api_url=CLOUD_API,
+                            )
+                        except BoschCameraError as err:
+                            _raise_lib_error("Set lighting schedule", err)
+                        _LOGGER.info(
+                            "Lighting schedule set for %s: %s → %s",
+                            cam_id[:8],
+                            data.get("generalLightOnTime"),
+                            data.get("generalLightOffTime"),
+                        )
+                        # Optimistic cache update + write-lock, same
+                        # pattern as privacy_sound_cache/ledlights_cache
+                        # (slow_tier.py) — without this, a slow-tier poll
+                        # landing before the next rotation completes can
+                        # serve get_lighting_schedule stale pre-write data
+                        # for up to a full poll interval.
+                        coord.lighting_options_cache[cam_id] = data
+                        coord.lighting_options_set_at[cam_id] = time.monotonic()
+                        await coord.async_request_refresh()
                 break
 
     async def handle_rename_camera(call: ServiceCall) -> None:
