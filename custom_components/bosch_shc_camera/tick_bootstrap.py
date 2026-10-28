@@ -23,6 +23,8 @@ import logging
 from typing import TYPE_CHECKING
 
 import aiohttp
+from bosch_shc_camera_client.cameras import BoschCameraError
+from bosch_shc_camera_client.events import get_feature_flags
 
 from .const import CLOUD_API
 
@@ -45,18 +47,17 @@ async def ensure_feature_flags(
     """
     if coordinator.feature_flags:
         return
+    token = headers.get("Authorization", "").removeprefix("Bearer ")
     try:
         async with asyncio.timeout(5):
-            async with session.get(
-                f"{CLOUD_API}/v11/feature_flags", headers=headers
-            ) as ff_resp:
-                if ff_resp.status == 200:
-                    coordinator.feature_flags = await ff_resp.json()
-                    _LOGGER.debug("Feature flags: %s", coordinator.feature_flags)
+            flags = await get_feature_flags(session, token, api_url=CLOUD_API)
     except asyncio.CancelledError:
         raise
-    except (TimeoutError, aiohttp.ClientError) as err:
+    except (TimeoutError, aiohttp.ClientError, BoschCameraError) as err:
         _LOGGER.debug("Feature flags fetch failed: %s", err)
+    else:
+        coordinator.feature_flags = flags.flags
+        _LOGGER.debug("Feature flags: %s", coordinator.feature_flags)
 
 
 async def ensure_protocol_checked(

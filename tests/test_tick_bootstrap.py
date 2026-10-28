@@ -76,6 +76,27 @@ class TestEnsureFeatureFlags:
         assert coord.feature_flags == {}
 
     @pytest.mark.asyncio
+    async def test_non_boolean_flag_map_leaves_flags_unset(self):
+        """The library rejects a body that is not a name -> bool map."""
+        coord = _make_coord()
+        session = _make_session(_make_resp(200, {"flag_a": "yes"}))
+
+        await ensure_feature_flags(coord, session, HEADERS)
+
+        assert coord.feature_flags == {}
+
+    @pytest.mark.asyncio
+    async def test_bearer_token_comes_from_headers(self):
+        coord = _make_coord()
+        session = _make_session(_make_resp(200, {"flag_a": True}))
+
+        await ensure_feature_flags(coord, session, {"Authorization": "Bearer tok-1"})
+
+        assert session.get.call_args.kwargs["headers"]["Authorization"] == (
+            "Bearer tok-1"
+        )
+
+    @pytest.mark.asyncio
     async def test_client_error_is_swallowed(self):
         coord = _make_coord()
         resp = MagicMock()
