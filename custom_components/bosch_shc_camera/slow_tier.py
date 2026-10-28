@@ -31,13 +31,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
+from bosch_shc_camera_client.settings import LightingOverride, get_lighting_override
 
 from .const import CLOUD_API, SLOW_TIER_MAX_DEFER_SEC
 from .local_data_interface import (
@@ -426,21 +426,16 @@ async def _poll_cam_control(
         write_stamp = coordinator.light_set_at.get(cam_id)
         try:
             async with asyncio.timeout(5):
-                async with session.get(
-                    f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_override",
-                    headers=headers,
-                ) as lo_resp:
-                    if lo_resp.status == 200:
-                        data = await lo_resp.json()
-                        # A write that landed during the request is newer.
-                        if coordinator.light_set_at.get(
-                            cam_id
-                        ) == write_stamp and apply_gen1_light_override(
-                            coordinator, cam_id, data
-                        ):
-                            _LOGGER.debug(
-                                "lighting_override for %s: %s", cam_id[:8], data
-                            )
+                override = await get_lighting_override(
+                    session,
+                    headers.get("Authorization", "").removeprefix("Bearer "),
+                    cam_id,
+                    api_url=CLOUD_API,
+                )
+            # A write that landed during the request is newer.
+            if coordinator.light_set_at.get(cam_id) == write_stamp:
+                apply_gen1_light_override(coordinator, cam_id, override)
+                _LOGGER.debug("lighting_override for %s: %s", cam_id[:8], override)
         except Exception as err:
             _LOGGER.debug(
                 "lighting_override fetch error for %s: %s",
@@ -473,34 +468,22 @@ async def _poll_cam_control(
 
 
 def apply_gen1_light_override(
-    coordinator: BoschCameraCoordinator, cam_id: str, data: Any
-) -> bool:
-    """Take the Gen1 light state from a GET `lighting_override` body.
+    coordinator: BoschCameraCoordinator, cam_id: str, override: LightingOverride
+) -> None:
+    """Take the Gen1 light state from the `lighting_override` read.
 
     `featureStatus.frontIlluminatorInGeneralLightOn` describes the general
     light, not the manual override the switches write, so a light switched on
     by hand read back as OFF once the write lock expired (GitHub #78). A body
-    without boolean `frontLightOn` and `wallwasherOn` is ignored and the
-    `featureStatus` values stay in place.
+    without boolean `frontLightOn` and `wallwasherOn` never gets here (the
+    library rejects it) and the `featureStatus` values stay in place.
     """
-    if not isinstance(data, dict):
-        return False
-    front = data.get("frontLightOn")
-    wall = data.get("wallwasherOn")
-    if not isinstance(front, bool) or not isinstance(wall, bool):
-        return False
     cache = coordinator.shc_state_cache.setdefault(cam_id, {})
-    cache["front_light"] = front
-    cache["wallwasher"] = wall
-    cache["camera_light"] = front or wall
-    intensity = data.get("frontLightIntensity")
-    if (
-        isinstance(intensity, (int, float))
-        and not isinstance(intensity, bool)
-        and math.isfinite(intensity)
-    ):
-        cache["front_light_intensity"] = float(intensity)
-    return True
+    cache["front_light"] = override.front_light_on
+    cache["wallwasher"] = override.wallwasher_on
+    cache["camera_light"] = override.front_light_on or override.wallwasher_on
+    if override.front_light_intensity is not None:
+        cache["front_light_intensity"] = override.front_light_intensity
 
 
 async def _poll_slow_tier_endpoints(
