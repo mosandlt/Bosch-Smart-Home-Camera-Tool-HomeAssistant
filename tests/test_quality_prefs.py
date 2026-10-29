@@ -12,7 +12,7 @@ these functions only ever touch a handful of per-cam dicts plus
 
 from types import SimpleNamespace
 
-from custom_components.bosch_shc_camera import quality_prefs
+from custom_components.bosch_smart_camera import quality_prefs
 
 CAM_A = "cam-a"
 CAM_B = "cam-b"

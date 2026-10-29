@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera.const import (
+from custom_components.bosch_smart_camera.const import (
     CONF_ENABLE_PTZ_CONTROLS,
     DEFAULT_OPTIONS,
 )
@@ -85,7 +85,7 @@ class TestVideoQualitySelectNaming:
     def test_attr_name_is_none(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+        from custom_components.bosch_smart_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_naming, CAM_ID, stub_entry)
         name = getattr(sel, "_attr_name", None)
@@ -96,7 +96,7 @@ class TestVideoQualitySelectNaming:
     def test_translation_key_is_video_quality(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+        from custom_components.bosch_smart_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "video_quality"
@@ -104,7 +104,7 @@ class TestVideoQualitySelectNaming:
     def test_has_entity_name_is_true(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+        from custom_components.bosch_smart_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_has_entity_name is True
@@ -114,7 +114,7 @@ class TestMotionSensitivitySelectNaming:
     def test_attr_name_is_none(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -127,7 +127,7 @@ class TestMotionSensitivitySelectNaming:
     def test_translation_key_is_motion_sensitivity(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -137,7 +137,7 @@ class TestMotionSensitivitySelectNaming:
     def test_has_entity_name_is_true(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -149,7 +149,7 @@ class TestFcmPushModeSelectNaming:
     def test_attr_name_is_none(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         sel = BoschFcmPushModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         name = getattr(sel, "_attr_name", None)
@@ -160,7 +160,7 @@ class TestFcmPushModeSelectNaming:
     def test_translation_key_is_fcm_push_mode(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         sel = BoschFcmPushModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "fcm_push_mode"
@@ -168,7 +168,7 @@ class TestFcmPushModeSelectNaming:
     def test_has_entity_name_is_true(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         sel = BoschFcmPushModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_has_entity_name is True
@@ -178,7 +178,7 @@ class TestStreamModeSelectNaming:
     def test_attr_name_is_none(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+        from custom_components.bosch_smart_camera.select import BoschStreamModeSelect
 
         sel = BoschStreamModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         name = getattr(sel, "_attr_name", None)
@@ -189,7 +189,7 @@ class TestStreamModeSelectNaming:
     def test_translation_key_is_stream_mode(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+        from custom_components.bosch_smart_camera.select import BoschStreamModeSelect
 
         sel = BoschStreamModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "stream_mode"
@@ -197,7 +197,7 @@ class TestStreamModeSelectNaming:
     def test_has_entity_name_is_true(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+        from custom_components.bosch_smart_camera.select import BoschStreamModeSelect
 
         sel = BoschStreamModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_has_entity_name is True
@@ -207,7 +207,7 @@ class TestDetectionModeSelectNaming:
     def test_attr_name_is_none(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
+        from custom_components.bosch_smart_camera.select import BoschDetectionModeSelect
 
         sel = BoschDetectionModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         name = getattr(sel, "_attr_name", None)
@@ -218,7 +218,7 @@ class TestDetectionModeSelectNaming:
     def test_translation_key_is_detection_mode(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
+        from custom_components.bosch_smart_camera.select import BoschDetectionModeSelect
 
         sel = BoschDetectionModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "detection_mode"
@@ -226,7 +226,7 @@ class TestDetectionModeSelectNaming:
     def test_has_entity_name_is_true(
         self, stub_coord_naming: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
+        from custom_components.bosch_smart_camera.select import BoschDetectionModeSelect
 
         sel = BoschDetectionModeSelect(stub_coord_naming, CAM_ID, stub_entry)
         assert sel._attr_has_entity_name is True
@@ -259,7 +259,7 @@ class TestVideoQualitySelectBasic:
     def test_construction(
         self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+        from custom_components.bosch_smart_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_basic, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "video_quality"
@@ -268,7 +268,7 @@ class TestVideoQualitySelectBasic:
     def test_current_option_reads_coordinator(
         self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+        from custom_components.bosch_smart_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_basic, CAM_ID, stub_entry)
         assert sel.current_option == "auto"
@@ -276,7 +276,7 @@ class TestVideoQualitySelectBasic:
     def test_current_option_falls_back_to_auto_for_unknown(
         self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+        from custom_components.bosch_smart_camera.select import BoschVideoQualitySelect
 
         stub_coord_basic.get_quality = lambda cid: "weird-not-an-option"
         sel = BoschVideoQualitySelect(stub_coord_basic, CAM_ID, stub_entry)
@@ -286,7 +286,7 @@ class TestVideoQualitySelectBasic:
         self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """A select entity must have a non-empty _attr_options."""
-        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+        from custom_components.bosch_smart_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_basic, CAM_ID, stub_entry)
         assert len(sel._attr_options) >= 2
@@ -295,7 +295,7 @@ class TestVideoQualitySelectBasic:
     def test_extra_state_attributes_empty_when_no_remote_fallback(
         self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+        from custom_components.bosch_smart_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_basic, CAM_ID, stub_entry)
         assert sel.extra_state_attributes == {}
@@ -307,7 +307,7 @@ class TestVideoQualitySelectBasic:
         used inst=2 (~7.5 Mbps) — the select entity must surface this so a
         remote/VPN user isn't misled into thinking they got 1.9 Mbps.
         """
-        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+        from custom_components.bosch_smart_camera.select import BoschVideoQualitySelect
 
         stub_coord_basic.get_quality = lambda cid: "low"
         stub_coord_basic.get_quality_remote_fallback_active = lambda cid: True
@@ -369,7 +369,7 @@ class TestNvrModeSelectBasic:
     def test_construction(
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         assert sel._attr_translation_key == "nvr_mode"
@@ -378,8 +378,8 @@ class TestNvrModeSelectBasic:
     def test_device_info(
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera import DOMAIN
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera import DOMAIN
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         info = sel.device_info
@@ -391,7 +391,7 @@ class TestNvrModeSelectBasic:
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """No 'off' option — that's the existing BoschNvrRecordingSwitch's job."""
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         assert sel._attr_options == ["continuous", "event_buffered"]
@@ -399,7 +399,7 @@ class TestNvrModeSelectBasic:
     def test_current_option_reads_coordinator_default(
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         assert sel.current_option == "continuous"
@@ -407,7 +407,7 @@ class TestNvrModeSelectBasic:
     def test_current_option_reflects_override(
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         stub_coord_nvr_mode.get_nvr_mode = lambda cid: "event_buffered"
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
@@ -416,7 +416,7 @@ class TestNvrModeSelectBasic:
     def test_current_option_falls_back_for_unknown_value(
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         stub_coord_nvr_mode.get_nvr_mode = lambda cid: "garbage"
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
@@ -426,7 +426,7 @@ class TestNvrModeSelectBasic:
     async def test_async_select_option_calls_coordinator_setter(
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         sel.async_write_ha_state = MagicMock()
@@ -443,7 +443,7 @@ class TestNvrModeSelectBasic:
         healthy long-running camera could be stuck on the old mode
         indefinitely (the proactive cred-rotation restart that used to
         pick this up was removed in v14.5.4)."""
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         stub_coord_nvr_mode.nvr_processes[CAM_ID] = MagicMock()  # already running
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
@@ -459,7 +459,7 @@ class TestNvrModeSelectBasic:
     ):
         """Same as above, but the camera was running event-buffered mode
         (tracked in nvr_preroll_processes, not nvr_processes)."""
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         stub_coord_nvr_mode.nvr_preroll_processes[CAM_ID] = MagicMock()
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
@@ -475,7 +475,7 @@ class TestNvrModeSelectBasic:
     ):
         """No recorder running for this camera (e.g. the NVR switch is off) →
         must NOT call start_recorder, which would incorrectly turn NVR on."""
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         sel.async_write_ha_state = MagicMock()
@@ -486,7 +486,7 @@ class TestNvrModeSelectBasic:
     async def test_restore_state_applies_valid_saved_option(
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         last = MagicMock()
@@ -514,7 +514,7 @@ class TestNvrModeSelectBasic:
         turns out to be "event_buffered" — the restore must detect the
         mismatch and restart into the correct mode.
         """
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         stub_coord_nvr_mode.nvr_processes[CAM_ID] = MagicMock()  # continuous running
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
@@ -547,7 +547,7 @@ class TestNvrModeSelectBasic:
     ):
         """Mirror case: a preroll ring is already running but the restored
         override is "continuous" — must also restart."""
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         stub_coord_nvr_mode.nvr_preroll_processes[CAM_ID] = MagicMock()
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
@@ -574,7 +574,7 @@ class TestNvrModeSelectBasic:
         """No race occurred — the running recorder already matches the
         restored mode — must NOT restart (would needlessly interrupt an
         already-healthy recorder/ring on every HA restart)."""
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         stub_coord_nvr_mode.nvr_preroll_processes[CAM_ID] = MagicMock()
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
@@ -597,7 +597,7 @@ class TestNvrModeSelectBasic:
         """No recorder active at all yet (normal case, no race) — must not
         call start_recorder from the restore path; the switch's own restore
         or the LOCAL-stream-up hook is responsible for the first start."""
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         last = MagicMock()
@@ -629,7 +629,7 @@ class TestNvrModeSelectBasic:
         """
         import asyncio
 
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         real_lock = asyncio.Lock()
         stub_coord_nvr_mode.get_nvr_recorder_lock = lambda cid: real_lock
@@ -672,7 +672,7 @@ class TestNvrModeSelectBasic:
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """A stale/invalid restored state must not be applied as an override."""
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         last = MagicMock()
@@ -691,7 +691,7 @@ class TestNvrModeSelectBasic:
     async def test_restore_no_last_state_leaves_default(
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschNvrModeSelect
+        from custom_components.bosch_smart_camera.select import BoschNvrModeSelect
 
         sel = BoschNvrModeSelect(stub_coord_nvr_mode, CAM_ID, stub_entry)
         with (
@@ -709,7 +709,7 @@ class TestFcmPushModeSelectBasic:
     def test_construction(
         self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         sel = BoschFcmPushModeSelect(stub_coord_basic, CAM_ID, stub_entry)
         # FCM mode select binds to the integration, not per-camera
@@ -720,7 +720,7 @@ class TestStreamModeSelectBasic:
     def test_construction(
         self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+        from custom_components.bosch_smart_camera.select import BoschStreamModeSelect
 
         sel = BoschStreamModeSelect(stub_coord_basic, CAM_ID, stub_entry)
         assert sel._attr_options
@@ -731,7 +731,7 @@ class TestMotionSensitivitySelectBasic:
         self, stub_coord_basic: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Motion-sensitivity select is hidden by default — disabled_by_default."""
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -807,7 +807,7 @@ class TestOptionConstants:
     leaks into the UI) or the API call (Bosch returns 400 invalid value)."""
 
     def test_stream_mode_options_pinned(self):
-        from custom_components.bosch_shc_camera.select import STREAM_MODE_OPTIONS
+        from custom_components.bosch_smart_camera.select import STREAM_MODE_OPTIONS
 
         assert STREAM_MODE_OPTIONS == ["auto", "local", "remote"], (
             "Stream-mode option keys are referenced by translations/de.json + "
@@ -817,7 +817,7 @@ class TestOptionConstants:
         )
 
     def test_motion_sensitivity_options_pinned(self):
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             MOTION_SENSITIVITY_OPTIONS,
             SENSITIVITY_TO_API,
         )
@@ -837,12 +837,12 @@ class TestOptionConstants:
             assert SENSITIVITY_TO_API[key] == key.upper()
 
     def test_detection_mode_options_pinned(self):
-        from custom_components.bosch_shc_camera.select import DETECTION_MODE_OPTIONS
+        from custom_components.bosch_smart_camera.select import DETECTION_MODE_OPTIONS
 
         assert DETECTION_MODE_OPTIONS == ["all_motions", "only_humans", "zones"]
 
     def test_fcm_push_mode_options_pinned(self):
-        from custom_components.bosch_shc_camera.select import FCM_PUSH_MODE_OPTIONS
+        from custom_components.bosch_smart_camera.select import FCM_PUSH_MODE_OPTIONS
 
         # v12.4.5: simplified to 2 options — OSS Android key handles both platforms.
         # Order matters for the dropdown in the UI.
@@ -856,7 +856,7 @@ class TestStreamModeSelectFallbackChain:
         """When the user changes the dropdown live, `stream_type_override`
         wins over the persisted option until the integration reloads.
         Otherwise the next coordinator tick would flip the dropdown back."""
-        from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+        from custom_components.bosch_smart_camera.select import BoschStreamModeSelect
 
         stub_coord_extra.stream_type_override = "local"
         stub_entry_extra.options["stream_connection_type"] = "auto"
@@ -867,7 +867,7 @@ class TestStreamModeSelectFallbackChain:
         self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
         """Without an in-memory override, persisted option wins."""
-        from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+        from custom_components.bosch_smart_camera.select import BoschStreamModeSelect
 
         stub_coord_extra.stream_type_override = None
         stub_entry_extra.options["stream_connection_type"] = "remote"
@@ -880,7 +880,7 @@ class TestStreamModeSelectFallbackChain:
         """Garbage in the entry options must not poison the dropdown —
         the select entity would refuse to render an out-of-list value.
         Default collapse target is 'local' since v12.4.2 (LOCAL-first)."""
-        from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+        from custom_components.bosch_smart_camera.select import BoschStreamModeSelect
 
         stub_coord_extra.stream_type_override = "made-up-mode"
         sel = BoschStreamModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -897,7 +897,7 @@ class TestStreamModeSelectFallbackChain:
         'auto', silently breaking existing installations that rely on
         LOCAL-first-then-REMOTE behaviour.
         """
-        from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+        from custom_components.bosch_smart_camera.select import BoschStreamModeSelect
 
         stub_coord_extra.stream_type_override = None
         stub_entry_extra.options["stream_connection_type"] = "auto"
@@ -915,7 +915,7 @@ class TestStreamModeSelectFallbackChain:
         """User picks 'remote' in the dropdown → `stream_type_override`
         flips immediately. Takes effect on the next stream activation,
         no integration reload required."""
-        from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+        from custom_components.bosch_smart_camera.select import BoschStreamModeSelect
 
         sel = BoschStreamModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         sel.async_write_ha_state = MagicMock()
@@ -931,7 +931,7 @@ class TestFcmPushModeSelectAvailability:
         """If the integration option `enable_fcm_push` is False, the
         dropdown must show 'unavailable' so the user knows toggling here
         does nothing — the master switch lives in integration options."""
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         stub_coord_extra.options["enable_fcm_push"] = False
         sel = BoschFcmPushModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -943,7 +943,7 @@ class TestFcmPushModeSelectAvailability:
     def test_available_when_fcm_enabled(
         self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         stub_coord_extra.options["enable_fcm_push"] = True
         sel = BoschFcmPushModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -955,7 +955,7 @@ class TestFcmPushModeSelectAvailability:
         # v12.4.5: valid options are now "auto" and "polling" only.
         # Pin "polling" — the non-default valid option — to verify persisted
         # entry options are read correctly through the fallback chain.
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         stub_entry_extra.options["fcm_push_mode"] = "polling"
         sel = BoschFcmPushModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -966,7 +966,7 @@ class TestFcmPushModeSelectAvailability:
     ):
         """Missing option key → 'auto'. Stable default ensures fresh
         installs land on the cross-platform-safe mode."""
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         stub_entry_extra.options.pop("fcm_push_mode", None)
         sel = BoschFcmPushModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -975,7 +975,7 @@ class TestFcmPushModeSelectAvailability:
     def test_current_option_unknown_collapses(
         self, stub_coord_extra: SimpleNamespace, stub_entry_extra: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         stub_entry_extra.options["fcm_push_mode"] = "junk"
         sel = BoschFcmPushModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -990,7 +990,7 @@ class TestFcmPushModeSelectAvailability:
         FCM connectivity is blocked (corporate firewalls). Users who
         explicitly chose this mode must not be silently reverted to 'auto'.
         """
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         stub_entry_extra.options["fcm_push_mode"] = "polling"
         sel = BoschFcmPushModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
@@ -1011,7 +1011,7 @@ class TestMotionSensitivitySelectApiMapping:
         stub_coord_extra.motion_settings = lambda cid: {
             "motionAlarmConfiguration": "HIGH"
         }
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -1024,7 +1024,7 @@ class TestMotionSensitivitySelectApiMapping:
         """Slow-tier data not yet pulled → None (HA renders 'unknown')
         instead of an arbitrary default that might mismatch the camera."""
         stub_coord_extra.motion_settings = lambda cid: {}
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -1041,7 +1041,7 @@ class TestMotionSensitivitySelectApiMapping:
         stub_coord_extra.motion_settings = lambda cid: {
             "motionAlarmConfiguration": "EXTREME"
         }
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             MOTION_SENSITIVITY_OPTIONS,
             BoschMotionSensitivitySelect,
         )
@@ -1059,7 +1059,7 @@ class TestMotionSensitivitySelectApiMapping:
         select rendering with a stale 'auto' that the user might click,
         which would issue a write before the read populated the cache."""
         stub_coord_extra.motion_settings = lambda cid: {}
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -1071,7 +1071,7 @@ class TestMotionSensitivitySelectApiMapping:
     ):
         """Hidden by default — too granular for most users; expose only
         when explicitly enabled via Settings → Entities."""
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -1090,7 +1090,7 @@ class TestMotionSensitivitySelectApiMapping:
             "motionAlarmConfiguration": "MEDIUM_HIGH",
             "enabled": True,
         }
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -1118,7 +1118,7 @@ class TestMotionSensitivitySelectApiMapping:
         """An option outside the list must not call the API. Defends
         against typos in dashboard service calls (`select.select_option`
         with an arbitrary value)."""
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -1134,7 +1134,7 @@ class TestVideoQualitySelectExtra:
     ):
         """get_quality returns the active level — must round-trip if
         in the option list."""
-        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+        from custom_components.bosch_smart_camera.select import BoschVideoQualitySelect
 
         sel = BoschVideoQualitySelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         for opt in sel._attr_options:
@@ -1186,7 +1186,7 @@ class TestMotionSensitivitySelectAllLevels:
         stub_coord_extra.motion_settings = lambda cid: {
             "motionAlarmConfiguration": api_value
         }
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -1231,7 +1231,7 @@ class TestDetectionModeSelectPins:
         a valid API value being cached, confusing users who check their settings.
         """
         stub_coord_extra.intrusion_config_cache = {CAM_ID: {"detectionMode": api_value}}
-        from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
+        from custom_components.bosch_smart_camera.select import BoschDetectionModeSelect
 
         sel = BoschDetectionModeSelect(stub_coord_extra, CAM_ID, stub_entry_extra)
         assert sel.current_option == expected_key, (
@@ -1295,7 +1295,7 @@ def _stub_entry_platform(options=None):
 class TestAsyncSetupEntryPlatform:
     @pytest.mark.asyncio
     async def test_gen2_adds_detection_mode_select(self):
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschDetectionModeSelect,
             async_setup_entry,
         )
@@ -1314,7 +1314,7 @@ class TestAsyncSetupEntryPlatform:
 
     @pytest.mark.asyncio
     async def test_gen1_no_detection_mode_select(self):
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschDetectionModeSelect,
             async_setup_entry,
         )
@@ -1333,7 +1333,7 @@ class TestAsyncSetupEntryPlatform:
 
     @pytest.mark.asyncio
     async def test_enable_nvr_true_adds_nvr_mode_select(self):
-        from custom_components.bosch_shc_camera.select import async_setup_entry
+        from custom_components.bosch_smart_camera.select import async_setup_entry
 
         coord = _stub_coord_platform()
         entry = _stub_entry_platform(options={"enable_nvr": True})
@@ -1350,7 +1350,7 @@ class TestAsyncSetupEntryPlatform:
     @pytest.mark.asyncio
     async def test_enable_nvr_false_no_nvr_mode_select(self):
         """Default (Mini-NVR disabled) → no NVR mode select clutters the entity list."""
-        from custom_components.bosch_shc_camera.select import async_setup_entry
+        from custom_components.bosch_smart_camera.select import async_setup_entry
 
         coord = _stub_coord_platform()
         entry = _stub_entry_platform()  # enable_nvr absent → defaults False
@@ -1366,7 +1366,7 @@ class TestAsyncSetupEntryPlatform:
 
     @pytest.mark.asyncio
     async def test_integration_level_selects_added(self):
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschFcmPushModeSelect,
             BoschStreamModeSelect,
             async_setup_entry,
@@ -1387,7 +1387,7 @@ class TestAsyncSetupEntryPlatform:
 
     @pytest.mark.asyncio
     async def test_empty_data_no_entities(self):
-        from custom_components.bosch_shc_camera.select import async_setup_entry
+        from custom_components.bosch_smart_camera.select import async_setup_entry
 
         coord = _stub_coord_platform()
         coord.data = {}
@@ -1411,7 +1411,7 @@ class TestAsyncSetupEntryPlatform:
         The account-level selects (FcmPushMode/StreamMode) must NOT be
         re-added by the listener.
         """
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschFcmPushModeSelect,
             BoschStreamModeSelect,
             BoschVideoQualitySelect,
@@ -1471,7 +1471,7 @@ class TestAsyncSetupEntryPlatform:
 
 class TestVideoQualitySelectDeviceInfoAndRestore:
     def _make(self, coord=None):
-        from custom_components.bosch_shc_camera.select import BoschVideoQualitySelect
+        from custom_components.bosch_smart_camera.select import BoschVideoQualitySelect
 
         coord = coord or _stub_coord_platform()
         entry = _stub_entry_platform()
@@ -1481,7 +1481,7 @@ class TestVideoQualitySelectDeviceInfoAndRestore:
         return sel
 
     def test_device_info_returns_identifiers(self):
-        from custom_components.bosch_shc_camera import DOMAIN
+        from custom_components.bosch_smart_camera import DOMAIN
 
         sel = self._make()
         info = sel.device_info
@@ -1582,7 +1582,7 @@ class TestVideoQualitySelectDeviceInfoAndRestore:
         object itself instead of a URL dict, corrupting live-session state
         for every other consumer that calls .get() on it.
         """
-        from custom_components.bosch_shc_camera.const import STREAM_START_SKIPPED
+        from custom_components.bosch_smart_camera.const import STREAM_START_SKIPPED
 
         coord = _stub_coord_platform()
         original_live = {"rtspsUrl": "rtsps://old"}
@@ -1599,7 +1599,7 @@ class TestVideoQualitySelectDeviceInfoAndRestore:
 
 class TestMotionSensitivitySelectWrite:
     def _make(self, coord=None, put_return=True):
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             BoschMotionSensitivitySelect,
         )
 
@@ -1612,7 +1612,7 @@ class TestMotionSensitivitySelectWrite:
         return sel
 
     def test_device_info_returns_identifiers(self):
-        from custom_components.bosch_shc_camera import DOMAIN
+        from custom_components.bosch_smart_camera import DOMAIN
 
         sel = self._make()
         info = sel.device_info
@@ -1627,11 +1627,11 @@ class TestMotionSensitivitySelectWrite:
         }
         with (
             patch(
-                "custom_components.bosch_shc_camera.select._is_gen2_indoor",
+                "custom_components.bosch_smart_camera.select._is_gen2_indoor",
                 return_value=False,
             ),
             patch(
-                "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
+                "custom_components.bosch_smart_camera.select._warn_if_privacy_on",
                 AsyncMock(return_value=False),
             ),
         ):
@@ -1649,11 +1649,11 @@ class TestMotionSensitivitySelectWrite:
         sel = self._make(put_return=False)
         with (
             patch(
-                "custom_components.bosch_shc_camera.select._is_gen2_indoor",
+                "custom_components.bosch_smart_camera.select._is_gen2_indoor",
                 return_value=False,
             ),
             patch(
-                "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
+                "custom_components.bosch_smart_camera.select._warn_if_privacy_on",
                 AsyncMock(return_value=False),
             ),
         ):
@@ -1666,11 +1666,11 @@ class TestMotionSensitivitySelectWrite:
         sel = self._make()
         with (
             patch(
-                "custom_components.bosch_shc_camera.select._is_gen2_indoor",
+                "custom_components.bosch_smart_camera.select._is_gen2_indoor",
                 return_value=True,
             ),
             patch(
-                "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
+                "custom_components.bosch_smart_camera.select._warn_if_privacy_on",
                 AsyncMock(return_value=True),
             ),
         ):
@@ -1680,7 +1680,7 @@ class TestMotionSensitivitySelectWrite:
 
 class TestFcmPushModeSelectRestart:
     def _make(self, options=None):
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         coord = _stub_coord_platform()
         entry = _stub_entry_platform(options=options or {})
@@ -1692,7 +1692,7 @@ class TestFcmPushModeSelectRestart:
         return sel
 
     def test_device_info_returns_identifiers(self):
-        from custom_components.bosch_shc_camera import DOMAIN
+        from custom_components.bosch_smart_camera import DOMAIN
 
         sel = self._make()
         info = sel.device_info
@@ -1741,7 +1741,7 @@ class TestFcmPushModeSelectRestart:
 
 class TestStreamModeSelectDeviceInfo:
     def _make(self):
-        from custom_components.bosch_shc_camera.select import BoschStreamModeSelect
+        from custom_components.bosch_smart_camera.select import BoschStreamModeSelect
 
         coord = _stub_coord_platform()
         entry = _stub_entry_platform()
@@ -1751,7 +1751,7 @@ class TestStreamModeSelectDeviceInfo:
         return sel
 
     def test_device_info_returns_identifiers(self):
-        from custom_components.bosch_shc_camera import DOMAIN
+        from custom_components.bosch_smart_camera import DOMAIN
 
         sel = self._make()
         info = sel.device_info
@@ -1760,7 +1760,7 @@ class TestStreamModeSelectDeviceInfo:
 
 class TestDetectionModeSelect:
     def _make(self, intrusion_cache=None, put_return=True):
-        from custom_components.bosch_shc_camera.select import BoschDetectionModeSelect
+        from custom_components.bosch_smart_camera.select import BoschDetectionModeSelect
 
         coord = _stub_coord_platform(gen2=True)
         coord.intrusion_config_cache = intrusion_cache or {}
@@ -1777,7 +1777,7 @@ class TestDetectionModeSelect:
         assert CAM_ID in sel._attr_unique_id
 
     def test_device_info_returns_identifiers(self):
-        from custom_components.bosch_shc_camera import DOMAIN
+        from custom_components.bosch_smart_camera import DOMAIN
 
         sel = self._make()
         info = sel.device_info
@@ -1789,7 +1789,7 @@ class TestDetectionModeSelect:
 
     def test_current_option_invalid_returns_default(self):
         """Bug M8 fix: unknown API value must return first option (+ warning), not None."""
-        from custom_components.bosch_shc_camera.select import DETECTION_MODE_OPTIONS
+        from custom_components.bosch_smart_camera.select import DETECTION_MODE_OPTIONS
 
         sel = self._make(intrusion_cache={CAM_ID: {"detectionMode": "UNKNOWN_MODE"}})
         result = sel.current_option
@@ -1817,7 +1817,7 @@ class TestDetectionModeSelect:
             put_return=True,
         )
         with patch(
-            "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
+            "custom_components.bosch_smart_camera.select._warn_if_privacy_on",
             AsyncMock(return_value=False),
         ):
             await sel.async_select_option("only_humans")
@@ -1833,7 +1833,7 @@ class TestDetectionModeSelect:
             put_return=False,
         )
         with patch(
-            "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
+            "custom_components.bosch_smart_camera.select._warn_if_privacy_on",
             AsyncMock(return_value=False),
         ):
             await sel.async_select_option("only_humans")
@@ -1851,7 +1851,7 @@ class TestDetectionModeSelect:
         """Empty config cache → return early without PUT."""
         sel = self._make(intrusion_cache={})
         with patch(
-            "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
+            "custom_components.bosch_smart_camera.select._warn_if_privacy_on",
             AsyncMock(return_value=False),
         ):
             await sel.async_select_option("only_humans")
@@ -1862,7 +1862,7 @@ class TestDetectionModeSelect:
         """Privacy mode ON → returns early, no PUT."""
         sel = self._make(intrusion_cache={CAM_ID: {"detectionMode": "ALL_MOTIONS"}})
         with patch(
-            "custom_components.bosch_shc_camera.select._warn_if_privacy_on",
+            "custom_components.bosch_smart_camera.select._warn_if_privacy_on",
             AsyncMock(return_value=True),
         ):
             await sel.async_select_option("only_humans")
@@ -1900,7 +1900,7 @@ def stub_coord_pan() -> SimpleNamespace:
 
 
 def _make_sel(coord: SimpleNamespace, entry: SimpleNamespace) -> object:
-    from custom_components.bosch_shc_camera.select import BoschPanPresetSelect
+    from custom_components.bosch_smart_camera.select import BoschPanPresetSelect
 
     return BoschPanPresetSelect(coord, PAN_CAM_ID, entry, pan_limit=120)
 
@@ -1922,7 +1922,7 @@ class TestPanPresetConstruction:
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
         sel = _make_sel(stub_coord_pan, stub_entry)
-        from custom_components.bosch_shc_camera.select import PAN_PRESET_OPTIONS
+        from custom_components.bosch_smart_camera.select import PAN_PRESET_OPTIONS
 
         assert sel._attr_options == PAN_PRESET_OPTIONS  # type: ignore[attr-defined]
         assert len(sel._attr_options) == 5  # type: ignore[attr-defined]
@@ -2156,7 +2156,7 @@ class TestPanPresetSetupEntry:
     def test_created_when_pan_limit_positive(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        from custom_components.bosch_shc_camera.select import (
+        from custom_components.bosch_smart_camera.select import (
             PAN_PRESET_OPTIONS,
             BoschPanPresetSelect,
         )
@@ -2170,13 +2170,13 @@ class TestPanPresetSetupEntry:
     def test_pan_preset_options_count(
         self, stub_coord_pan: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        from custom_components.bosch_shc_camera.select import PAN_PRESET_OPTIONS
+        from custom_components.bosch_smart_camera.select import PAN_PRESET_OPTIONS
 
         assert len(PAN_PRESET_OPTIONS) == 5
 
     def test_pan_preset_angles_all_in_range(self) -> None:
         """All mapped angles must be within the default ±120° pan range."""
-        from custom_components.bosch_shc_camera.select import PAN_PRESET_ANGLES
+        from custom_components.bosch_smart_camera.select import PAN_PRESET_ANGLES
 
         for name, angle in PAN_PRESET_ANGLES.items():
             assert -120 <= angle <= 120, (
@@ -2240,7 +2240,7 @@ def test_default_options_has_ptz_disabled() -> None:
 @pytest.mark.asyncio
 async def test_pan_select_NOT_created_when_toggle_disabled() -> None:
     """panLimit > 0 + toggle off → no BoschPanPresetSelect entity."""
-    from custom_components.bosch_shc_camera.select import async_setup_entry
+    from custom_components.bosch_smart_camera.select import async_setup_entry
 
     coord = _coord(with_pan=True)
     entry = _entry(ptz_enabled=False)
@@ -2257,7 +2257,7 @@ async def test_pan_select_NOT_created_when_toggle_disabled() -> None:
 @pytest.mark.asyncio
 async def test_pan_select_created_when_toggle_enabled() -> None:
     """panLimit > 0 + toggle on → exactly one BoschPanPresetSelect entity."""
-    from custom_components.bosch_shc_camera.select import async_setup_entry
+    from custom_components.bosch_smart_camera.select import async_setup_entry
 
     coord = _coord(with_pan=True)
     entry = _entry(ptz_enabled=True)
@@ -2273,7 +2273,7 @@ async def test_pan_select_NOT_created_on_non_pan_camera_even_when_toggle_enabled
     None
 ):
     """panLimit = 0 + toggle on → still no entity (gate is panLimit AND toggle)."""
-    from custom_components.bosch_shc_camera.select import async_setup_entry
+    from custom_components.bosch_smart_camera.select import async_setup_entry
 
     coord = _coord(with_pan=False)
     entry = _entry(ptz_enabled=True)
@@ -2287,7 +2287,7 @@ async def test_pan_select_NOT_created_on_non_pan_camera_even_when_toggle_enabled
 @pytest.mark.asyncio
 async def test_pan_select_options_value_missing_treated_as_disabled() -> None:
     """Missing key in options dict → fallback False → entity not created."""
-    from custom_components.bosch_shc_camera.select import async_setup_entry
+    from custom_components.bosch_smart_camera.select import async_setup_entry
 
     coord = _coord(with_pan=True)
     entry = SimpleNamespace(
@@ -2309,7 +2309,7 @@ async def test_pan_select_options_value_garbage_collapses_to_disabled() -> None:
     in config_flow.py. Here we test that the runtime gate works either way:
     only literal True enables. (None / 0 / "" → False.)
     """
-    from custom_components.bosch_shc_camera.select import async_setup_entry
+    from custom_components.bosch_smart_camera.select import async_setup_entry
 
     coord = _coord(with_pan=True)
     # explicit None — config_flow bool-coerce makes this False on submit, but
@@ -2335,7 +2335,7 @@ class TestFcmPushModeSelectAvailableSuperFalse:
     False, and separately require `enable_fcm_push` when super() is True."""
 
     def _make(self, enable_fcm_push: bool = True):
-        from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+        from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
         coord = SimpleNamespace(
             data={
@@ -2393,7 +2393,7 @@ async def test_fcm_mode_select_tracks_restart_task() -> None:
     task in coordinator.bg_tasks so async_unload_entry can cancel it — an
     untracked fire-and-forget task could keep running (and re-establish FCM)
     after the entry was unloaded."""
-    from custom_components.bosch_shc_camera.select import BoschFcmPushModeSelect
+    from custom_components.bosch_smart_camera.select import BoschFcmPushModeSelect
 
     coordinator = SimpleNamespace(
         data={CAM_ID: {"info": {"title": "Terrasse"}}},

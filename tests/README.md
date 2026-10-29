@@ -28,7 +28,7 @@ pip install -r requirements_test.txt
 pytest tests/ --timeout=30 -q
 
 # with coverage
-pytest tests/ --cov=custom_components/bosch_shc_camera --cov-report=term-missing -q
+pytest tests/ --cov=custom_components/bosch_smart_camera --cov-report=term-missing -q
 
 # single file
 pytest tests/test_init_sprint_kc.py -v
@@ -143,7 +143,7 @@ def _url_session(url_map: dict):
 
 Then patch `async_get_clientsession` in the test:
 ```python
-with patch("custom_components.bosch_shc_camera.async_get_clientsession", return_value=session):
+with patch("custom_components.bosch_smart_camera.async_get_clientsession", return_value=session):
     await BoschCameraCoordinator._async_update_data(coord)
 ```
 
@@ -194,7 +194,7 @@ PHACC's `verify_cleanup` fixture runs after every test and fails the test if thr
 
 1. Use the `hass` fixture from `pytest_homeassistant_custom_component`.
 2. Use `MockConfigEntry` to attach a config entry to `hass`.
-3. For cloud-API behaviour, patch `custom_components.bosch_shc_camera.async_get_clientsession` (see `mock_cloud_api_video_inputs` in conftest).
+3. For cloud-API behaviour, patch `custom_components.bosch_smart_camera.async_get_clientsession` (see `mock_cloud_api_video_inputs` in conftest).
 4. Mark async tests with `async def` — auto-detected by pytest-asyncio in `asyncio_mode = auto` (set in `pyproject.toml` or `pytest.ini`).
 5. Camera tests that bypass `__init__` via `BoschCamera.__new__` must set **both** `_attr_name` and `_display_name` on the fixture object.
 6. `smbclient` is not installed in the test venv — always mock via `patch.dict(sys.modules, {"smbclient": fake_smb})`.

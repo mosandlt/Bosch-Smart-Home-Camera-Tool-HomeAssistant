@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from custom_components.bosch_shc_camera.session_state import (
+from custom_components.bosch_smart_camera.session_state import (
     BoolFieldView,
     CacheFieldView,
     CameraSessionState,

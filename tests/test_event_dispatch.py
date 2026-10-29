@@ -14,11 +14,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera.event_dispatch import build_data_and_dispatch
+from custom_components.bosch_smart_camera.event_dispatch import build_data_and_dispatch
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 NOW = 1000.0
-RECORDER_MODULE = "custom_components.bosch_shc_camera.recorder"
+RECORDER_MODULE = "custom_components.bosch_smart_camera.recorder"
 
 
 def _make_coord(**overrides):
@@ -440,7 +440,7 @@ class TestNvrClipViaPolling:
                 MagicMock(return_value="stub-coro"),
             ),
             caplog.at_level(
-                "WARNING", logger="custom_components.bosch_shc_camera.recorder"
+                "WARNING", logger="custom_components.bosch_smart_camera.recorder"
             ),
         ):
             await build_data_and_dispatch(coord, [CAM_A], _cam_by_id(), NOW, True)

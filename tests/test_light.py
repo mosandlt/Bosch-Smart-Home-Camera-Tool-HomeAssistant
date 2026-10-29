@@ -94,7 +94,7 @@ class TestTopLedLight:
     def test_construction(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
         assert light._led_key == "topLedLightSettings"
@@ -102,7 +102,7 @@ class TestTopLedLight:
     def test_off_when_brightness_zero(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
         # Cache has brightness=0 → is_on=False
@@ -114,7 +114,7 @@ class TestTopLedLight:
         stub_coord.lighting_switch_cache[CAM_ID]["topLedLightSettings"][
             "brightness"
         ] = 75
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
         assert light.is_on is True
@@ -126,7 +126,7 @@ class TestTopLedLight:
         stub_coord.lighting_switch_cache[CAM_ID]["topLedLightSettings"][
             "brightness"
         ] = 50
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
         # 50% → 127/128 in HA's 255-scale
@@ -139,7 +139,7 @@ class TestTopLedLight:
     ):
         """When user never picked a color, card sees a warm-white default
         so the color dot isn't grey on first load."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
         attrs = light.extra_state_attributes
@@ -153,7 +153,7 @@ class TestTopLedLight:
     ):
         """A picked color is kept in last_picked_rgb_color, and shown in
         last_rgb_color while the camera reports the group in color mode."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         # stub_coord reports whiteBalance=-1.0 → the LED is white on the
         # camera; the remembered color must not be shown as current.
@@ -182,7 +182,7 @@ class TestTopLedLight:
         last_rgb_color attribute), rather than substituting a default.
         Either way is acceptable as long as the property doesn't raise.
         """
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
         light._last_color_hex = "#ZZZZZZ"  # invalid hex
@@ -193,7 +193,7 @@ class TestTopLedLight:
     def test_available_follows_coordinator(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = BoschTopLedLight(stub_coord, CAM_ID, stub_entry)
         assert light.available is True
@@ -205,7 +205,7 @@ class TestBottomLedLight:
     def test_uses_bottom_led_key(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.light import BoschBottomLedLight
+        from custom_components.bosch_smart_camera.light import BoschBottomLedLight
 
         light = BoschBottomLedLight(stub_coord, CAM_ID, stub_entry)
         assert light._led_key == "bottomLedLightSettings"
@@ -215,7 +215,7 @@ class TestFrontLight:
     def test_uses_front_led_key(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         light = BoschFrontLight(stub_coord, CAM_ID, stub_entry)
         assert light._led_key == "frontLightSettings"
@@ -248,7 +248,7 @@ def _stub_coord_edge(**overrides):
 def _make_light(coord=None, klass=None, led_key="topLedLightSettings"):
     """Bypass __init__ so we don't need the HA framework's CoordinatorEntity setup chain."""
     if klass is None:
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         klass = BoschTopLedLight
     coord = coord or _stub_coord_edge()
@@ -305,7 +305,7 @@ class TestDeviceInfoReturn:
         light = _make_light()
         info = light.device_info
         assert isinstance(info, dict)
-        assert ("bosch_shc_camera", CAM_ID) in info["identifiers"] or any(
+        assert ("bosch_smart_camera", CAM_ID) in info["identifiers"] or any(
             CAM_ID in str(i) for i in info["identifiers"]
         )
         # MAC populated → connections set
@@ -349,7 +349,7 @@ class TestPutLightingSwitchDefensiveMerge:
         session.request = MagicMock(side_effect=_capture)
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             # `someFutureGroup` is NOT in the 3-LED default → triggers else branch
@@ -378,7 +378,7 @@ class TestPutLightingSwitchJsonParseError:
         )
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await light._put_lighting_switch(
@@ -415,7 +415,7 @@ class TestAsyncTurnOnRemembersBrightness:
         session, _resp = _make_put_session(status=200, json_payload={})
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             # brightness=255 → round(255*100/255)=100 → _last_brightness=max(1,100)=100
@@ -437,7 +437,7 @@ class TestAsyncTurnOnRemembersBrightness:
         session, _resp = _make_put_session(status=200, json_payload={})
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             await light.async_turn_on(**{ATTR_BRIGHTNESS: 1})
@@ -462,7 +462,7 @@ class TestAsyncTurnOffRemembersColor:
         session, _resp = _make_put_session(status=200, json_payload={})
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             await light.async_turn_off()
@@ -479,7 +479,7 @@ class TestExtraStateAttributes:
     expose `last_rgb_color` as an extra attr."""
 
     def test_warm_white_default_when_no_color(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         attrs = light.extra_state_attributes
@@ -487,7 +487,7 @@ class TestExtraStateAttributes:
         assert attrs["last_rgb_color"] == [255, 180, 100]
 
     def test_returns_decoded_color_when_set(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         light._last_color_hex = "#FF8800"
@@ -495,7 +495,7 @@ class TestExtraStateAttributes:
         assert attrs["last_rgb_color"] == [255, 136, 0]
 
     def test_invalid_hex_skipped_silently(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         light._last_color_hex = "#NOTAHEX"
@@ -504,7 +504,7 @@ class TestExtraStateAttributes:
         assert "last_rgb_color" not in attrs
 
     def test_includes_last_brightness_pct(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         light._last_brightness = 75
@@ -513,7 +513,7 @@ class TestExtraStateAttributes:
     def test_omits_last_brightness_when_zero(self):
         """`if self._last_brightness:` gates the field — zero is excluded
         so the card doesn't restore to 0."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         light._last_brightness = 0
@@ -521,7 +521,7 @@ class TestExtraStateAttributes:
         assert "last_brightness_pct" not in attrs
 
     def test_includes_last_white_balance_when_set(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         light._last_white_balance = 0.42
@@ -535,7 +535,7 @@ class TestAsyncAddedToHassRestore:
 
     @pytest.mark.asyncio
     async def test_restores_color_and_brightness_and_wb(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         last_state = SimpleNamespace(
@@ -548,15 +548,15 @@ class TestAsyncAddedToHassRestore:
         light.async_get_last_state = AsyncMock(return_value=last_state)
         with (
             patch(
-                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.CoordinatorEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.LightEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.RestoreEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
         ):
@@ -567,21 +567,21 @@ class TestAsyncAddedToHassRestore:
 
     @pytest.mark.asyncio
     async def test_no_last_state_returns_silently(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         light.async_get_last_state = AsyncMock(return_value=None)
         with (
             patch(
-                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.CoordinatorEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.LightEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.RestoreEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
         ):
@@ -593,7 +593,7 @@ class TestAsyncAddedToHassRestore:
     async def test_invalid_color_tuple_swallowed(self):
         """Corrupt RestoreState (e.g. user mucked with .storage) must
         not crash entity setup."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         last_state = SimpleNamespace(
@@ -604,15 +604,15 @@ class TestAsyncAddedToHassRestore:
         light.async_get_last_state = AsyncMock(return_value=last_state)
         with (
             patch(
-                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.CoordinatorEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.LightEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.RestoreEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
         ):
@@ -622,7 +622,7 @@ class TestAsyncAddedToHassRestore:
 
     @pytest.mark.asyncio
     async def test_brightness_out_of_range_skipped(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         last_state = SimpleNamespace(
@@ -633,15 +633,15 @@ class TestAsyncAddedToHassRestore:
         light.async_get_last_state = AsyncMock(return_value=last_state)
         with (
             patch(
-                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.CoordinatorEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.LightEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.RestoreEntity.async_added_to_hass",
                 new=AsyncMock(),
             ),
         ):
@@ -652,7 +652,7 @@ class TestAsyncAddedToHassRestore:
 
 class TestLoadStateFromCache:
     def test_off_when_brightness_zero(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
             lighting_switch_cache={
@@ -665,7 +665,7 @@ class TestLoadStateFromCache:
         assert light._brightness == 0
 
     def test_on_when_brightness_positive(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
             lighting_switch_cache={
@@ -684,7 +684,7 @@ class TestLoadStateFromCache:
     def test_remembers_last_brightness(self):
         """Last non-zero brightness saved for restore-on-turn-on so the
         slider position survives an off cycle."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
             lighting_switch_cache={
@@ -696,7 +696,7 @@ class TestLoadStateFromCache:
         assert light._last_brightness == 60
 
     def test_white_balance_replaces_color(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
             lighting_switch_cache={
@@ -716,7 +716,7 @@ class TestLoadStateFromCache:
         assert light._color_hex is None  # color cleared when wb wins
 
     def test_empty_cache_returns_silently(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()  # default cache empty
         # Must NOT raise; state untouched
@@ -726,7 +726,7 @@ class TestLoadStateFromCache:
 
 class TestGetCurrentState:
     def test_returns_defaults_when_cache_empty(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         state = light._get_current_state()
@@ -738,7 +738,7 @@ class TestGetCurrentState:
         assert state["topLedLightSettings"]["color"] is None
 
     def test_uses_cached_values_when_present(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
             lighting_switch_cache={
@@ -764,7 +764,7 @@ class TestGetCurrentState:
 class TestPutLightingSwitch:
     @pytest.mark.asyncio
     async def test_no_token_returns_false(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(token="")
         light = _make_light(coord)
@@ -779,7 +779,7 @@ class TestPutLightingSwitch:
         """200 with a full-group body → cache adopts the server's value for the
         CHANGED group only (merge-only-changed-key — no longer a wholesale
         replace of the entry)."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         server_response = {
             "frontLightSettings": {
@@ -831,7 +831,7 @@ class TestPutLightingSwitch:
         )
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
@@ -849,7 +849,7 @@ class TestPutLightingSwitch:
 
     @pytest.mark.asyncio
     async def test_500_returns_false(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         @asynccontextmanager
         async def _put_500(*args, **kw):
@@ -863,7 +863,7 @@ class TestPutLightingSwitch:
         coord = _stub_coord_edge()
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
@@ -874,14 +874,14 @@ class TestPutLightingSwitch:
 
     @pytest.mark.asyncio
     async def test_exception_returns_false(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         session = MagicMock()
         session.request = MagicMock(side_effect=TimeoutError())
         coord = _stub_coord_edge()
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
@@ -895,7 +895,7 @@ class TestPutLightingSwitch:
         """Bosch API requires all 3 groups in every PUT — pin so a
         refactor doesn't accidentally send a partial body that the
         camera would reject as 400."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         captured = {}
 
@@ -912,7 +912,7 @@ class TestPutLightingSwitch:
         coord = _stub_coord_edge()
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             await BoschTopLedLight._put_lighting_switch(
@@ -930,7 +930,7 @@ class TestPutLightingSwitch:
 class TestPutSwitchEndpoint:
     @pytest.mark.asyncio
     async def test_success_returns_true(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         @asynccontextmanager
         async def _put(*args, **kw):
@@ -944,7 +944,7 @@ class TestPutSwitchEndpoint:
         coord = _stub_coord_edge()
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_switch_endpoint(light, "front", True)
@@ -952,7 +952,7 @@ class TestPutSwitchEndpoint:
 
     @pytest.mark.asyncio
     async def test_no_token_returns_false(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(token="")
         light = _make_light(coord)
@@ -961,14 +961,14 @@ class TestPutSwitchEndpoint:
 
     @pytest.mark.asyncio
     async def test_exception_returns_false(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         session = MagicMock()
         session.request = MagicMock(side_effect=RuntimeError("network"))
         coord = _stub_coord_edge()
         light = _make_light(coord)
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_switch_endpoint(light, "front", True)
@@ -977,7 +977,7 @@ class TestPutSwitchEndpoint:
 
 class TestSyncWallwasherCache:
     def test_top_or_bottom_on_marks_wallwasher_on(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
             lighting_switch_cache={
@@ -993,7 +993,7 @@ class TestSyncWallwasherCache:
         assert coord.shc_state_cache[CAM_ID]["wallwasher"] is True
 
     def test_only_front_on_does_not_mark_wallwasher(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
             lighting_switch_cache={
@@ -1011,7 +1011,7 @@ class TestSyncWallwasherCache:
         assert coord.shc_state_cache[CAM_ID]["camera_light"] is True
 
     def test_all_off_marks_camera_light_off(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(
             lighting_switch_cache={
@@ -1030,7 +1030,7 @@ class TestSyncWallwasherCache:
         """The 30s write-lock that prevents stale poll reverts depends on
         light_set_at being stamped here. Pin so a refactor can't drop
         this and reintroduce the brightness-revert-after-toggle bug."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge()
         light = _make_light(coord)
@@ -1041,7 +1041,7 @@ class TestSyncWallwasherCache:
 
 class TestRgbColor:
     def test_returns_tuple_when_color_set(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         light._color_hex = "#10ABFF"
@@ -1049,7 +1049,7 @@ class TestRgbColor:
         assert rgb == (0x10, 0xAB, 0xFF)
 
     def test_returns_warm_white_default_when_no_color(self):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         # Default warm white display value
@@ -1058,7 +1058,7 @@ class TestRgbColor:
     def test_uses_last_color_when_current_is_none(self):
         """After turn_off the cache may have color=None, but the saved
         last_color_hex should still surface for the card."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         light = _make_light()
         light._color_hex = None
@@ -1084,7 +1084,7 @@ class TestPutLightingSwitch204NoCacheUpdate:
     @pytest.mark.asyncio
     async def test_204_no_content_updates_cache_from_body(self):
         """204 with empty response → cache updated from the PUT body, not empty."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         @asynccontextmanager
         async def _put_204(*args, **kw):
@@ -1119,7 +1119,7 @@ class TestPutLightingSwitch204NoCacheUpdate:
         )
         light = _make_light(coord, led_key="frontLightSettings")
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
@@ -1143,7 +1143,7 @@ class TestPutLightingSwitch204NoCacheUpdate:
     async def test_204_no_content_is_on_reads_true_after_turn_on(self):
         """End-to-end: after a 204 response, is_on reflects the written state
         (not the stale cache), so HA stops warning about unverifiable state."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         @asynccontextmanager
         async def _put_204(*args, **kw):
@@ -1178,7 +1178,7 @@ class TestPutLightingSwitch204NoCacheUpdate:
         light = _make_light(coord, led_key="frontLightSettings")
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
@@ -1199,7 +1199,7 @@ class TestPutLightingSwitch204NoCacheUpdate:
     async def test_200_with_valid_json_still_uses_response_body(self):
         """200 with valid JSON body → cache updated from response (not sent body).
         Ensures the fallback doesn't regress the happy-path."""
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         server_response = {
             "frontLightSettings": {
@@ -1251,7 +1251,7 @@ class TestPutLightingSwitch204NoCacheUpdate:
         )
         light = _make_light(coord, led_key="frontLightSettings")
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await BoschTopLedLight._put_lighting_switch(
@@ -1286,7 +1286,7 @@ class TestPutLightingSwitchConcurrentNoClobber:
 
     @pytest.mark.asyncio
     async def test_concurrent_sibling_writes_do_not_clobber(self):
-        from custom_components.bosch_shc_camera.light import (
+        from custom_components.bosch_smart_camera.light import (
             BoschBottomLedLight,
             BoschTopLedLight,
         )
@@ -1333,7 +1333,7 @@ class TestPutLightingSwitchConcurrentNoClobber:
         )
 
         with patch(
-            "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             await asyncio.gather(
@@ -1392,7 +1392,7 @@ def stub_coord_setup() -> SimpleNamespace:
 class TestLightAsyncSetupEntry:
     def test_entities_added_for_gen2_with_light(self):
         """Three light entities (top/bottom/front) must be added for Gen2 Outdoor with light."""
-        from custom_components.bosch_shc_camera.light import async_setup_entry
+        from custom_components.bosch_smart_camera.light import async_setup_entry
 
         coord = _stub_coord_setup()
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Outdoor"
@@ -1421,7 +1421,7 @@ class TestLightAsyncSetupEntry:
 
     def test_no_entities_for_gen1_cameras(self):
         """No light entities for Gen1 (non-Gen2) cameras — light.py is Gen2-only."""
-        from custom_components.bosch_shc_camera.light import async_setup_entry
+        from custom_components.bosch_smart_camera.light import async_setup_entry
 
         coord = _stub_coord_setup()
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "CAMERA_360"  # Gen1
@@ -1440,7 +1440,7 @@ class TestLightAsyncSetupEntry:
 
     def test_no_entities_when_has_light_false(self):
         """No light entities for Gen2 Outdoor without featureSupport.light."""
-        from custom_components.bosch_shc_camera.light import async_setup_entry
+        from custom_components.bosch_smart_camera.light import async_setup_entry
 
         coord = _stub_coord_setup()
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Outdoor"
@@ -1463,7 +1463,7 @@ class TestLightAsyncSetupEntry:
         night-vision LEDs that the firmware manages on its own): Indoor II
         + cloud `featureSupport.light=false` must yield zero light
         entities (confirmed by the camera owner)."""
-        from custom_components.bosch_shc_camera.light import async_setup_entry
+        from custom_components.bosch_smart_camera.light import async_setup_entry
 
         coord = _stub_coord_setup()
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Indoor"
@@ -1489,7 +1489,7 @@ class TestLightAsyncSetupEntry:
     def test_indoor_ii_alias_also_gets_no_light(self):
         """`CAMERA_INDOOR_GEN2` is the legacy alias for HOME_Eyes_Indoor —
         cover both hw strings."""
-        from custom_components.bosch_shc_camera.light import async_setup_entry
+        from custom_components.bosch_smart_camera.light import async_setup_entry
 
         coord = _stub_coord_setup()
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "CAMERA_INDOOR_GEN2"
@@ -1513,7 +1513,7 @@ class TestLightAsyncSetupEntry:
         setup falls back to the persistent `hw_version` store. Same fallback
         used by the rest of the integration to determine model behaviour.
         Outdoor II must still get its three light entities on cold start."""
-        from custom_components.bosch_shc_camera.light import async_setup_entry
+        from custom_components.bosch_smart_camera.light import async_setup_entry
 
         coord = _stub_coord_setup()
         # Simulate cold-start rehydrate: info has title only, no hardwareVersion
@@ -1548,7 +1548,7 @@ class TestLightAsyncSetupEntry:
         get its light entities added automatically via the registered
         coordinator-update listener, with no duplicate/no-op re-adds on a
         tick that introduces no new cameras."""
-        from custom_components.bosch_shc_camera.light import async_setup_entry
+        from custom_components.bosch_smart_camera.light import async_setup_entry
 
         coord = _stub_coord_setup()
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Outdoor"
@@ -1605,7 +1605,7 @@ class TestLightAsyncSetupEntry:
 
 class TestFrontLightColorTempKelvin:
     def _make_front_light(self, coord, entry):
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         entity = BoschFrontLight(coord, CAM_ID, entry)
         return entity
@@ -1662,7 +1662,7 @@ class TestFrontLightColorTempKelvin:
 
 class TestFrontLightTurnOn:
     def _make_front_light(self, coord, entry):
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         entity = BoschFrontLight(coord, CAM_ID, entry)
         entity.async_write_ha_state = MagicMock()
@@ -1743,7 +1743,7 @@ class TestFrontLightTurnOn:
 
 class TestFrontLightTurnOff:
     def _make_front_light(self, coord, entry):
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         entity = BoschFrontLight(coord, CAM_ID, entry)
         entity.async_write_ha_state = MagicMock()
@@ -1802,7 +1802,7 @@ class TestFrontLightSyncsCameraLightCache:
     """
 
     def _make_front_light(self, coord, entry):
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         entity = BoschFrontLight(coord, CAM_ID, entry)
         entity.async_write_ha_state = MagicMock()
@@ -1938,7 +1938,7 @@ class TestFrontLightSyncsCameraLightCache:
 
 class TestTopLedLightTurnOn:
     def _make_top_led(self, coord, entry):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         entity = BoschTopLedLight(coord, CAM_ID, entry)
         entity.async_write_ha_state = MagicMock()
@@ -2032,7 +2032,7 @@ class TestLightBaseAvailableAndBrightness:
         self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Light entities must be available when coordinator succeeded (no camera-online gate)."""
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         entity = BoschFrontLight(stub_coord_setup, CAM_ID, stub_entry)
         stub_coord_setup.last_update_success = True
@@ -2044,7 +2044,7 @@ class TestLightBaseAvailableAndBrightness:
         self, stub_coord_setup: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """brightness property must return last_brightness (scaled to 0-255) when light is off."""
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         entity = BoschFrontLight(stub_coord_setup, CAM_ID, stub_entry)
         entity._is_on = False
@@ -2064,7 +2064,7 @@ class TestLightWriteFailureGating:
     next slow poll, and stamped the wallwasher write-lock."""
 
     def _front(self, coord, entry):
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         entity = BoschFrontLight(coord, CAM_ID, entry)
         entity.async_write_ha_state = MagicMock()
@@ -2073,7 +2073,7 @@ class TestLightWriteFailureGating:
         return entity
 
     def _top(self, coord, entry):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         entity = BoschTopLedLight(coord, CAM_ID, entry)
         entity.async_write_ha_state = MagicMock()
@@ -2190,7 +2190,7 @@ class TestTopLedLightPrefix:
     def test_name_no_doubled_prefix(
         self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         entity = BoschTopLedLight(stub_coord_light_prefix, CAM_ID, stub_entry)
         assert _no_doubled_prefix_light(entity), (
@@ -2200,7 +2200,7 @@ class TestTopLedLightPrefix:
     def test_has_entity_name(
         self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         entity = BoschTopLedLight(stub_coord_light_prefix, CAM_ID, stub_entry)
         assert _has_entity_name_light(entity)
@@ -2212,7 +2212,7 @@ class TestBottomLedLightPrefix:
     def test_name_no_doubled_prefix(
         self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.light import BoschBottomLedLight
+        from custom_components.bosch_smart_camera.light import BoschBottomLedLight
 
         entity = BoschBottomLedLight(stub_coord_light_prefix, CAM_ID, stub_entry)
         assert _no_doubled_prefix_light(entity), (
@@ -2222,7 +2222,7 @@ class TestBottomLedLightPrefix:
     def test_has_entity_name(
         self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.light import BoschBottomLedLight
+        from custom_components.bosch_smart_camera.light import BoschBottomLedLight
 
         entity = BoschBottomLedLight(stub_coord_light_prefix, CAM_ID, stub_entry)
         assert _has_entity_name_light(entity)
@@ -2234,7 +2234,7 @@ class TestFrontLightPrefixDoubling:
     def test_name_no_doubled_prefix(
         self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         entity = BoschFrontLight(stub_coord_light_prefix, CAM_ID, stub_entry)
         assert _no_doubled_prefix_light(entity), (
@@ -2244,7 +2244,7 @@ class TestFrontLightPrefixDoubling:
     def test_has_entity_name(
         self, stub_coord_light_prefix: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         entity = BoschFrontLight(stub_coord_light_prefix, CAM_ID, stub_entry)
         assert _has_entity_name_light(entity)
@@ -2260,7 +2260,7 @@ class TestLightLanFallbackAvailability:
 
     def test_lan_fallback_returns_false_without_helper(self):
         """`is_lan_reachable` missing on stub coords (older builds) → False."""
-        from custom_components.bosch_shc_camera.light import _BoschLightBase
+        from custom_components.bosch_smart_camera.light import _BoschLightBase
 
         light = _BoschLightBase.__new__(_BoschLightBase)
         light._cam_id = "C"
@@ -2269,7 +2269,7 @@ class TestLightLanFallbackAvailability:
 
     def test_lan_fallback_returns_false_when_not_gen2(self):
         """Gen1 cams never get the LAN-RCP fallback — must stay unavailable."""
-        from custom_components.bosch_shc_camera.light import _BoschLightBase
+        from custom_components.bosch_smart_camera.light import _BoschLightBase
 
         light = _BoschLightBase.__new__(_BoschLightBase)
         light._cam_id = "C"
@@ -2279,14 +2279,14 @@ class TestLightLanFallbackAvailability:
             hw_version={"C": "CAMERA_EYES"},  # Gen1
         )
         with patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2",
+            "custom_components.bosch_smart_camera.shc._is_gen2",
             return_value=False,
         ):
             assert _BoschLightBase.available.fget(light) is False
 
     def test_lan_fallback_returns_true_when_gen2_and_lan_reachable(self):
         """Gen2 + LAN-pingable → light stays controllable during a cloud 503."""
-        from custom_components.bosch_shc_camera.light import _BoschLightBase
+        from custom_components.bosch_smart_camera.light import _BoschLightBase
 
         light = _BoschLightBase.__new__(_BoschLightBase)
         light._cam_id = "C"
@@ -2296,13 +2296,13 @@ class TestLightLanFallbackAvailability:
             hw_version={"C": "HOME_Eyes_Outdoor"},  # Gen2
         )
         with patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2",
+            "custom_components.bosch_smart_camera.shc._is_gen2",
             return_value=True,
         ):
             assert _BoschLightBase.available.fget(light) is True
 
     def test_lan_fallback_returns_false_when_gen2_but_unreachable(self):
-        from custom_components.bosch_shc_camera.light import _BoschLightBase
+        from custom_components.bosch_smart_camera.light import _BoschLightBase
 
         light = _BoschLightBase.__new__(_BoschLightBase)
         light._cam_id = "C"
@@ -2312,7 +2312,7 @@ class TestLightLanFallbackAvailability:
             hw_version={"C": "HOME_Eyes_Outdoor"},
         )
         with patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2",
+            "custom_components.bosch_smart_camera.shc._is_gen2",
             return_value=True,
         ):
             assert _BoschLightBase.available.fget(light) is False
@@ -2359,7 +2359,7 @@ class TestRgbLedLightPrivacyGuard:
     NOT call the API."""
 
     def _make_top_led(self, coord):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         entry = SimpleNamespace(data={}, options={})
         entity = BoschTopLedLight.__new__(BoschTopLedLight)
@@ -2392,7 +2392,7 @@ class TestRgbLedLightPrivacyGuard:
         entity = self._make_top_led(coord)
 
         with patch(
-            "custom_components.bosch_shc_camera.light._warn_if_privacy_on",
+            "custom_components.bosch_smart_camera.light._warn_if_privacy_on",
             new=AsyncMock(return_value=True),
         ):
             await entity.async_turn_on()
@@ -2406,7 +2406,7 @@ class TestRgbLedLightPrivacyGuard:
         entity = self._make_top_led(coord)
 
         with patch(
-            "custom_components.bosch_shc_camera.light._warn_if_privacy_on",
+            "custom_components.bosch_smart_camera.light._warn_if_privacy_on",
             new=AsyncMock(return_value=False),
         ):
             await entity.async_turn_on()
@@ -2418,7 +2418,7 @@ class TestFrontLightPrivacyGuard:
     """When privacy is ON, `BoschFrontLight.async_turn_on` must abort early."""
 
     def _make_front_light(self, coord):
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         entry = SimpleNamespace(data={}, options={})
         entity = BoschFrontLight.__new__(BoschFrontLight)
@@ -2450,7 +2450,7 @@ class TestFrontLightPrivacyGuard:
         entity = self._make_front_light(coord)
 
         with patch(
-            "custom_components.bosch_shc_camera.light._warn_if_privacy_on",
+            "custom_components.bosch_smart_camera.light._warn_if_privacy_on",
             new=AsyncMock(return_value=True),
         ):
             await entity.async_turn_on()
@@ -2464,7 +2464,7 @@ class TestFrontLightPrivacyGuard:
         entity = self._make_front_light(coord)
 
         with patch(
-            "custom_components.bosch_shc_camera.light._warn_if_privacy_on",
+            "custom_components.bosch_smart_camera.light._warn_if_privacy_on",
             new=AsyncMock(return_value=False),
         ):
             await entity.async_turn_on()
@@ -2481,7 +2481,7 @@ class TestFrontLightPrivacyGuard:
 class TestGH3Gen2RgbLightClasses:
     def test_gen2_outdoor_has_rgb_light_classes(self):
         """RGB color picker classes for top + bottom LEDs + front light."""
-        from custom_components.bosch_shc_camera import light as light_mod
+        from custom_components.bosch_smart_camera import light as light_mod
 
         assert hasattr(light_mod, "BoschTopLedLight")
         assert hasattr(light_mod, "BoschBottomLedLight")
@@ -2523,7 +2523,7 @@ def _coord_light_updating(*, is_updating_value: bool) -> SimpleNamespace:
 class TestLightUpdatingUnavailable:
     def _mk_light(self, coord):
         # Concrete subclass — _BoschLightBase carries the available() override.
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
 
         light = BoschFrontLight.__new__(BoschFrontLight)
         light.coordinator = coord
@@ -2565,7 +2565,7 @@ def _white_cache(
 
 class TestRgbLedWhiteMode:
     def _make(self, cache, klass=None):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(lighting_switch_cache={CAM_ID: cache})
         entity = (klass or BoschTopLedLight)(
@@ -2580,7 +2580,7 @@ class TestRgbLedWhiteMode:
     def test_supports_rgb_and_color_temp(self):
         from homeassistant.components.light import ColorMode
 
-        from custom_components.bosch_shc_camera.light import (
+        from custom_components.bosch_smart_camera.light import (
             BoschBottomLedLight,
             BoschTopLedLight,
         )
@@ -2648,7 +2648,7 @@ class TestRgbLedWhiteMode:
 
     @pytest.mark.asyncio
     async def test_bottom_led_keeps_white_too(self):
-        from custom_components.bosch_shc_camera.light import BoschBottomLedLight
+        from custom_components.bosch_smart_camera.light import BoschBottomLedLight
 
         entity = self._make(
             _white_cache("bottomLedLightSettings", wb=-0.6), BoschBottomLedLight
@@ -2738,17 +2738,17 @@ class TestRgbLedWhiteMode:
         )
         with (
             patch(
-                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.CoordinatorEntity.async_added_to_hass",
                 new=AsyncMock(),
                 create=True,
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.LightEntity.async_added_to_hass",
                 new=AsyncMock(),
                 create=True,
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.RestoreEntity.async_added_to_hass",
                 new=AsyncMock(),
                 create=True,
             ),
@@ -2776,17 +2776,17 @@ class TestRgbLedWhiteMode:
         )
         with (
             patch(
-                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.CoordinatorEntity.async_added_to_hass",
                 new=AsyncMock(),
                 create=True,
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.LightEntity.async_added_to_hass",
                 new=AsyncMock(),
                 create=True,
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.RestoreEntity.async_added_to_hass",
                 new=AsyncMock(),
                 create=True,
             ),
@@ -2812,17 +2812,17 @@ class TestRgbLedWhiteMode:
             )
             with (
                 patch(
-                    "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                    "custom_components.bosch_smart_camera.light.CoordinatorEntity.async_added_to_hass",
                     new=AsyncMock(),
                     create=True,
                 ),
                 patch(
-                    "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                    "custom_components.bosch_smart_camera.light.LightEntity.async_added_to_hass",
                     new=AsyncMock(),
                     create=True,
                 ),
                 patch(
-                    "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                    "custom_components.bosch_smart_camera.light.RestoreEntity.async_added_to_hass",
                     new=AsyncMock(),
                     create=True,
                 ),
@@ -2834,8 +2834,8 @@ class TestRgbLedWhiteMode:
 class TestFrontLightPendingWhiteBalance:
     @pytest.mark.asyncio
     async def test_turn_on_applies_pending_white_balance(self):
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
-        from custom_components.bosch_shc_camera.shc import (
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.shc import (
             get_pending_front_white_balance,
             set_pending_front_white_balance,
         )
@@ -2859,7 +2859,7 @@ class TestRgbLedColorToWhiteNudge:
     the camera still holds for the group, so a nudged value goes first."""
 
     def _make(self, cache):
-        from custom_components.bosch_shc_camera.light import BoschTopLedLight
+        from custom_components.bosch_smart_camera.light import BoschTopLedLight
 
         coord = _stub_coord_edge(lighting_switch_cache={CAM_ID: cache})
         entity = BoschTopLedLight(coord, CAM_ID, SimpleNamespace(data={}, options={}))
@@ -3007,17 +3007,17 @@ class TestWhiteStateEdges:
         )
         with (
             patch(
-                "custom_components.bosch_shc_camera.light.CoordinatorEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.CoordinatorEntity.async_added_to_hass",
                 new=AsyncMock(),
                 create=True,
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.LightEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.LightEntity.async_added_to_hass",
                 new=AsyncMock(),
                 create=True,
             ),
             patch(
-                "custom_components.bosch_shc_camera.light.RestoreEntity.async_added_to_hass",
+                "custom_components.bosch_smart_camera.light.RestoreEntity.async_added_to_hass",
                 new=AsyncMock(),
                 create=True,
             ),
@@ -3028,8 +3028,8 @@ class TestWhiteStateEdges:
 
     @pytest.mark.asyncio
     async def test_front_white_picked_while_off_is_held_coordinator_side(self):
-        from custom_components.bosch_shc_camera.light import BoschFrontLight
-        from custom_components.bosch_shc_camera.shc import (
+        from custom_components.bosch_smart_camera.light import BoschFrontLight
+        from custom_components.bosch_smart_camera.shc import (
             get_pending_front_white_balance,
         )
 
@@ -3055,7 +3055,7 @@ class TestPutLightingSwitchUnexpectedError:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+                "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
                 new=AsyncMock(return_value=session),
             ),
             caplog.at_level(logging.WARNING),

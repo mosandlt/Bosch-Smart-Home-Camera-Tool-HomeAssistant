@@ -25,8 +25,8 @@ import asyncio
 
 import pytest
 
-from custom_components.bosch_shc_camera.lock_utils import get_or_create_lock
-from custom_components.bosch_shc_camera.session_state import (
+from custom_components.bosch_smart_camera.lock_utils import get_or_create_lock
+from custom_components.bosch_smart_camera.session_state import (
     CacheFieldView,
     CameraSessionState,
 )

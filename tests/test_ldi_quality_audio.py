@@ -16,17 +16,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera import frigate_endpoint as fe
-from custom_components.bosch_shc_camera import ldi_go2rtc, ldi_local, recorder
-from custom_components.bosch_shc_camera.frigate_endpoint import (
+from custom_components.bosch_smart_camera import frigate_endpoint as fe
+from custom_components.bosch_smart_camera import ldi_go2rtc, ldi_local, recorder
+from custom_components.bosch_smart_camera.frigate_endpoint import (
     FrontDoorRunner,
     _resolve_restream,
 )
-from custom_components.bosch_shc_camera.remote_viewing_front_door import RemoteTarget
+from custom_components.bosch_smart_camera.remote_viewing_front_door import RemoteTarget
 from tests.test_ldi_go2rtc import API, FakeGo2rtc
 from tests.test_ldi_local import CAM, IP, PW, RESTREAM, _coord, _open_patches
 
-LDI = "custom_components.bosch_shc_camera.ldi_local"
+LDI = "custom_components.bosch_smart_camera.ldi_local"
 BASE = f"rtsps://localuser:{PW}@{IP}:9554/rtsp_tunnel"
 
 

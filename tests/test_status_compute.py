@@ -14,8 +14,8 @@ pure refactor, not a behavior change.
 
 from types import SimpleNamespace
 
-from custom_components.bosch_shc_camera import status_compute
-from custom_components.bosch_shc_camera.coordinator import BoschCameraCoordinator
+from custom_components.bosch_smart_camera import status_compute
+from custom_components.bosch_smart_camera.coordinator import BoschCameraCoordinator
 
 CAM_A = "cam-a"
 

@@ -40,4 +40,4 @@ jobs:
         # not present in serial runs. `--dist=loadfile` eliminated it (3/3
         # identical runs matching the serial baseline) while keeping most of
         # the speedup (~50s vs ~57s vs ~169s serial on a 6-core box).
-        run: pytest tests/ --timeout=30 -q -n auto --dist=loadfile --cov custom_components/bosch_shc_camera --cov-report term-missing --cov-fail-under=100
+        run: pytest tests/ --timeout=30 -q -n auto --dist=loadfile --cov custom_components/bosch_smart_camera --cov-report term-missing --cov-fail-under=100

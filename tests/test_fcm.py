@@ -1,4 +1,4 @@
-"""Consolidated tests for custom_components/bosch_shc_camera/fcm.py.
+"""Consolidated tests for custom_components/bosch_smart_camera/fcm.py.
 
 fcm.py implements the FCM push-notification supervisor: starting/stopping the
 push client, the soft/hard self-heal ladder, drift detection between the
@@ -34,9 +34,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-from custom_components.bosch_shc_camera import fcm
-from custom_components.bosch_shc_camera.const import DOMAIN
-from custom_components.bosch_shc_camera.fcm import (
+from custom_components.bosch_smart_camera import fcm
+from custom_components.bosch_smart_camera.const import DOMAIN
+from custom_components.bosch_smart_camera.fcm import (
     _FCMNoiseFilter,
     _install_fcm_noise_filter,
     async_handle_fcm_push,
@@ -47,9 +47,9 @@ from custom_components.bosch_shc_camera.fcm import (
 )
 from tests.source_match import assert_in_source
 
-MODULE = "custom_components.bosch_shc_camera.fcm"
-RECORDER_MODULE = "custom_components.bosch_shc_camera.recorder"
-SMB_MODULE = "custom_components.bosch_shc_camera.smb"
+MODULE = "custom_components.bosch_smart_camera.fcm"
+RECORDER_MODULE = "custom_components.bosch_smart_camera.recorder"
+SMB_MODULE = "custom_components.bosch_smart_camera.smb"
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x42" * 400  # 404 B -- real-looking snapshot
 JPEG_BYTES_ALT = b"\xff\xd8\xff\xe0" + b"\x99" * 400  # different content, same length
@@ -63,13 +63,13 @@ class TestSafePathSegment:
     snapshot/clip filename."""
 
     def test_normal_names_unchanged(self) -> None:
-        from custom_components.bosch_shc_camera.fcm import _safe_path_segment
+        from custom_components.bosch_smart_camera.fcm import _safe_path_segment
 
         assert _safe_path_segment("Terrasse") == "Terrasse"
         assert _safe_path_segment("Eyes Outdoor II") == "Eyes Outdoor II"
 
     def test_traversal_tokens_neutralised(self) -> None:
-        from custom_components.bosch_shc_camera.fcm import _safe_path_segment
+        from custom_components.bosch_smart_camera.fcm import _safe_path_segment
 
         out = _safe_path_segment("../../config/secrets")
         assert "/" not in out
@@ -79,7 +79,7 @@ class TestSafePathSegment:
     def test_join_cannot_escape_alert_dir(self) -> None:
         """The concrete attack: a camera titled '../../config/secrets' must not
         resolve outside the alert directory."""
-        from custom_components.bosch_shc_camera.fcm import _safe_path_segment
+        from custom_components.bosch_smart_camera.fcm import _safe_path_segment
 
         alert_dir = "/config/www/bosch_alerts"
         seg = _safe_path_segment("../../config/secrets")
@@ -87,7 +87,7 @@ class TestSafePathSegment:
         assert os.path.abspath(path).startswith(os.path.abspath(alert_dir) + os.sep)
 
     def test_backslash_variant(self) -> None:
-        from custom_components.bosch_shc_camera.fcm import _safe_path_segment
+        from custom_components.bosch_smart_camera.fcm import _safe_path_segment
 
         assert "\\" not in _safe_path_segment("..\\..\\windows")
 
@@ -99,7 +99,7 @@ class TestUrlsafeB64DecodePadded:
     def test_decodes_unpadded_input(self) -> None:
         import base64
 
-        from custom_components.bosch_shc_camera.fcm import _urlsafe_b64decode_padded
+        from custom_components.bosch_smart_camera.fcm import _urlsafe_b64decode_padded
 
         raw = b"hello world, this is test data!"
         padded = base64.urlsafe_b64encode(raw)
@@ -114,7 +114,7 @@ class TestUrlsafeB64DecodePadded:
         must be a no-op in that case."""
         import base64
 
-        from custom_components.bosch_shc_camera.fcm import _urlsafe_b64decode_padded
+        from custom_components.bosch_smart_camera.fcm import _urlsafe_b64decode_padded
 
         raw = b"12 bytes!!!!"  # 12 bytes -> exactly 16 b64 chars, no padding
         encoded = base64.urlsafe_b64encode(raw).decode("ascii")
@@ -134,7 +134,7 @@ class TestUrlsafeB64DecodePadded:
         valid."""
         import binascii
 
-        from custom_components.bosch_shc_camera.fcm import _urlsafe_b64decode_padded
+        from custom_components.bosch_smart_camera.fcm import _urlsafe_b64decode_padded
 
         with pytest.raises(binascii.Error):
             _urlsafe_b64decode_padded("not valid base64!!!")
@@ -149,7 +149,7 @@ class TestDecodeMessageHeader:
     def test_normalizes_unicode_encode_error_to_binascii_error(self) -> None:
         import binascii
 
-        from custom_components.bosch_shc_camera.fcm import _decode_message_header
+        from custom_components.bosch_smart_camera.fcm import _decode_message_header
 
         with pytest.raises(binascii.Error):
             _decode_message_header("AAé")
@@ -157,7 +157,7 @@ class TestDecodeMessageHeader:
     def test_valid_input_still_decodes(self) -> None:
         import base64
 
-        from custom_components.bosch_shc_camera.fcm import _decode_message_header
+        from custom_components.bosch_smart_camera.fcm import _decode_message_header
 
         raw = b"a valid header value"
         encoded = base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
@@ -183,7 +183,7 @@ class TestDecodeCredentialMaterial:
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import ec
 
-        from custom_components.bosch_shc_camera.fcm import (
+        from custom_components.bosch_smart_camera.fcm import (
             _decode_credential_material,
         )
 
@@ -208,7 +208,7 @@ class TestDecodeCredentialMaterial:
     def test_valid_input_still_decodes(self) -> None:
         import base64
 
-        from custom_components.bosch_shc_camera.fcm import (
+        from custom_components.bosch_smart_camera.fcm import (
             _decode_credential_material,
         )
 
@@ -250,7 +250,7 @@ def _make_supervisor_coord_with_lock(
 def test_reset_fcm_error_counter_delegates_to_staleness_reset() -> None:
     """reset_fcm_error_counter() (backward-compat shim) clears
     _SHARED_STALENESS_TIMESTAMPS."""
-    from custom_components.bosch_shc_camera.fcm import (
+    from custom_components.bosch_smart_camera.fcm import (
         _FCMNoiseFilter,
         reset_fcm_error_counter,
     )
@@ -265,7 +265,7 @@ def test_reset_fcm_error_counter_delegates_to_staleness_reset() -> None:
 
 async def test_ensure_supervisor_returns_early_when_fcm_disabled() -> None:
     """async_ensure_fcm_supervisor with enable_fcm_push=False → returns without spawning."""
-    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_smart_camera import fcm
 
     coord = SimpleNamespace(
         options={"enable_fcm_push": False},
@@ -276,7 +276,7 @@ async def test_ensure_supervisor_returns_early_when_fcm_disabled() -> None:
 
 async def test_ensure_supervisor_spawns_task_when_none() -> None:
     """async_ensure_fcm_supervisor with no existing task → creates supervisor task."""
-    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_smart_camera import fcm
 
     coord = SimpleNamespace(
         options={"enable_fcm_push": True},
@@ -295,7 +295,7 @@ async def test_ensure_supervisor_spawns_task_when_none() -> None:
 
 async def test_ensure_supervisor_idempotent_when_task_alive() -> None:
     """async_ensure_fcm_supervisor with a running task → returns early, task unchanged."""
-    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_smart_camera import fcm
 
     async def _hang() -> None:
         await asyncio.sleep(9999)
@@ -319,7 +319,7 @@ async def test_ensure_supervisor_idempotent_when_task_alive() -> None:
 
 async def test_stop_supervisor_cancels_running_task_and_calls_stop_push() -> None:
     """async_stop_fcm_supervisor cancels a live task, sets it None, and calls async_stop_fcm_push."""
-    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_smart_camera import fcm
 
     async def _hang() -> None:
         await asyncio.sleep(9999)
@@ -354,7 +354,7 @@ async def test_stop_supervisor_reraises_callers_own_cancellation() -> None:
     counts cancel() requests against THAT task specifically — cancelling
     `sup` (a different task object) never touches it.
     """
-    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_smart_camera import fcm
 
     supervisor_started = asyncio.Event()
 
@@ -382,7 +382,7 @@ async def test_stop_supervisor_swallows_supervisor_own_exception() -> None:
     exception, that's the supervisor's own failure to have already handled
     internally — async_stop_fcm_supervisor must still swallow it and
     proceed with the rest of teardown, not propagate it to the caller."""
-    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_smart_camera import fcm
 
     supervisor_started = asyncio.Event()
 
@@ -415,7 +415,7 @@ async def test_start_fcm_push_passes_shared_http_session_to_avoid_leak() -> None
     leaked one session per attempt. FcmPushClient must be constructed with
     HA's shared session so FcmRegister never owns one to leak."""
     _install_firebase_module()
-    import custom_components.bosch_shc_camera.fcm as fcm_mod
+    import custom_components.bosch_smart_camera.fcm as fcm_mod
 
     fcm_mod._QuietFcmPushClient._patched_class = False
 
@@ -471,8 +471,8 @@ async def test_supervisor_hard_heal_reason_soft_streak(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """soft_streak >= FCM_SUPERVISOR_SOFT_HEAL_MAX → 'soft-restarts' hard-heal reason."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -521,8 +521,8 @@ async def test_supervisor_soft_trigger_heal_backoff_escalates_without_sustained_
     since the first must wait FCM_SUPERVISOR_BACKOFF_SEC[0] before purging
     again — a separate, lighter backoff keyed off uptime (not a push, which
     a quiet house never has either way)."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -573,8 +573,8 @@ async def test_supervisor_cancelled_during_soft_trigger_heal_backoff_sleep_break
     """Cancellation arriving during the pre-purge soft-restart-threshold
     backoff sleep must break the loop cleanly, same as every other backoff
     sleep in this function, instead of propagating uncaught."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -631,8 +631,8 @@ async def test_supervisor_soft_trigger_heal_streak_resets_after_sustained_uptime
     the reset, one successful long-running recovery followed by any later
     blip would immediately look like a streak≥2 and start delaying purges
     that no longer need delaying."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -731,8 +731,8 @@ async def test_supervisor_soft_trigger_heal_streak_resets_on_push_received(
     must be "streak 1" again (no backoff) both times, since the push
     resets it, not just `soft_streak`/`failures` (which already reset,
     pre-fix — this test isolates the streak specifically)."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -817,8 +817,8 @@ async def test_supervisor_hard_heal_resets_failures_not_just_soft_streak(
     inside that SAME iteration also fails. The "attempt #%d" log line
     must show #1 (fresh count), not #3 (stale pre-heal count + 1).
     """
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -867,8 +867,8 @@ async def test_supervisor_hard_heal_reason_creds_staleness(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A recent staleness timestamp → 'PHONE_REGISTRATION_ERROR' hard-heal reason."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     # Add a recent staleness entry so get_recent_fcm_creds_staleness_count > 0.
@@ -911,8 +911,8 @@ async def test_supervisor_hard_heal_reason_no_credentials(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """No fcm_credentials in entry.data → 'no persisted credentials' hard-heal reason."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     # Empty entry data → not coordinator.entry.data.get("fcm_credentials") is True.
@@ -958,8 +958,8 @@ async def test_supervisor_hard_heal_backoff_escalates_when_delivery_stays_dead(
     since it's deterministic without a running listener/poll cycle; the
     staleness-reset is patched to a no-op so the trigger keeps firing exactly
     like an unresolved PHONE_REGISTRATION_ERROR would in production."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.append(time.monotonic())
@@ -1015,8 +1015,8 @@ async def test_supervisor_hard_heal_streak_resets_once_push_arrives(
     first one actually worked — the streak (and its backoff) must reset
     instead of treating the next, unrelated hard-heal as a continuation of
     the old one."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.append(time.monotonic())
@@ -1067,8 +1067,8 @@ async def test_supervisor_cancelled_during_hard_heal_streak_backoff_sleep_breaks
     """Cancellation arriving during the pre-purge streak-backoff sleep (added
     for GitHub #68) must break the loop cleanly, same as the other backoff
     sleeps in this function, instead of propagating uncaught."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.append(time.monotonic())
@@ -1117,8 +1117,8 @@ async def test_supervisor_fresh_install_no_credentials_first_occurrence_is_benig
     hitting the "no persisted credentials" reason for the FIRST time must
     stay benign — no streak escalation. This is not a recurring failure yet,
     just a brand-new client that hasn't registered."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock({}, force_hard=False)
@@ -1159,8 +1159,8 @@ async def test_supervisor_no_credentials_after_purge_escalates_backoff(
     SECOND+ hard-heal via this reason must now escalate like any other
     confirmed-problem streak.
     """
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock({}, force_hard=False)
@@ -1198,8 +1198,8 @@ async def test_supervisor_no_credentials_after_purge_escalates_backoff(
 async def test_supervisor_creates_lock_when_absent_and_breaks_on_cancelled() -> None:
     """A missing fcm_start_lock is lazily created; CancelledError from the
     start call makes the supervisor break out and return normally."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     # Coordinator WITHOUT fcm_start_lock so the lazy-init path is reached.
@@ -1224,8 +1224,8 @@ async def test_supervisor_creates_lock_when_absent_and_breaks_on_cancelled() -> 
 async def test_supervisor_exception_during_start_logs_and_continues() -> None:
     """A generic exception from the start call is logged; the loop continues
     to a second attempt instead of dying."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -1257,8 +1257,8 @@ async def test_supervisor_exception_during_start_logs_and_continues() -> None:
 
 async def test_supervisor_poll_exits_when_listener_stops() -> None:
     """The inner poll loop breaks when fcm_client.is_started() returns False."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -1295,8 +1295,8 @@ async def test_supervisor_poll_exits_when_listener_stops() -> None:
 
 async def test_supervisor_cancelled_during_poll_calls_stop_push() -> None:
     """Task cancellation inside the poll sleep still calls async_stop_fcm_push."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -1328,8 +1328,8 @@ async def test_supervisor_cancelled_during_poll_calls_stop_push() -> None:
 
 async def test_supervisor_push_received_resets_counters() -> None:
     """A push arriving while the listener ran resets the failure/soft_streak counters to 0."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -1370,8 +1370,8 @@ async def test_supervisor_cancelled_during_final_backoff_sleep() -> None:
     """task.cancel() while the supervisor sleeps after listener termination → clean break."""
     import asyncio as _asyncio
 
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import (
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import (
         FCM_SUPERVISOR_POLL_SEC,
         _FCMNoiseFilter,
     )
@@ -1425,8 +1425,8 @@ async def test_supervisor_inner_poll_breaks_on_forced_hard_heal() -> None:
     supervisor never re-read the flag and the forced hard-heal never
     happened. The sleep-call safety net prevents a regressed loop from
     hanging the test."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -1493,8 +1493,8 @@ async def test_supervisor_hard_heal_purge_exception_logs_and_retries() -> None:
     cadence. The purge is wrapped in try/except and retries instead of
     dying. Pinned here: the first purge attempt raises, the supervisor
     survives and completes a second hard-heal attempt before terminating."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     # No fcm_credentials → needs_hard is True every iteration (deterministic,
@@ -1542,7 +1542,7 @@ async def test_supervisor_cancelled_during_hard_heal_purge_reraises() -> None:
     try/except distinguishes the two: `except asyncio.CancelledError: raise`
     re-raises before the broader `except Exception:` retry-handler below it
     can swallow real cancellation as a retryable failure."""
-    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_smart_camera import fcm
 
     coord = _make_supervisor_coord_with_lock({}, force_hard=False)
 
@@ -1568,7 +1568,7 @@ async def test_supervisor_cancelled_during_purge_retry_backoff_sleep_breaks() ->
     `except asyncio.CancelledError: break` must stop the loop cleanly
     (returning normally) rather than letting cancellation fall through to
     the outer retry `continue` and looping forever on a dying task."""
-    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_smart_camera import fcm
 
     coord = _make_supervisor_coord_with_lock({}, force_hard=False)
 
@@ -1598,8 +1598,8 @@ async def test_supervisor_poll_loop_exception_logs_and_treats_as_terminated() ->
     listener termination (falls through to stop+backoff). Pinned here:
     is_started() raises once, the supervisor survives and reaches a second
     start attempt."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -1646,7 +1646,7 @@ async def test_supervisor_poll_loop_exception_logs_and_treats_as_terminated() ->
 
 async def test_handle_push_retries_when_http200_but_no_new_event() -> None:
     """A recursive retry fires when HTTP 200 is returned but no new event was dispatched."""
-    from custom_components.bosch_shc_camera import fcm
+    from custom_components.bosch_smart_camera import fcm
 
     coord = SimpleNamespace()
     coord.token = "bearer_tok"
@@ -1779,7 +1779,7 @@ class TestStep1Failure:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -1843,7 +1843,7 @@ class TestStep1FailureNonCancelled:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -1909,7 +1909,7 @@ class TestDirectClipMp4ContentTypeGuard:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -1964,7 +1964,7 @@ class TestDirectClipMp4ContentTypeGuard:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -2028,8 +2028,8 @@ class TestClipPathTraversalGuard:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera import fcm
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera import fcm
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -2154,7 +2154,7 @@ def _uninstall_firebase_module():
     sys.modules.pop("firebase_messaging.fcmpushclient", None)
     # Reset the class cache so the next import doesn't reuse our fake
     try:
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
     except Exception:
@@ -2168,13 +2168,13 @@ class TestPatchedClassCreation:
 
     def setup_method(self):
         # Reset the cached patch so _patch_class() runs fresh
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
@@ -2183,7 +2183,7 @@ class TestPatchedClassCreation:
         """_patch_class() must return a class that is a subclass of
         FcmPushClient when the library is available."""
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         # Ensure the module cache is flushed so the import inside _patch_class
         # picks up our fake module (not a cached real one).
@@ -2201,7 +2201,7 @@ class TestPatchedClassCreation:
     def test_patch_class_result_has_listen_override(self):
         """The _Patched subclass must define its own `_listen` method."""
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
 
@@ -2224,7 +2224,7 @@ class TestPatchedClassCreation:
 
         _FakeFcmPushClient._listen = _listen_with_extra
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         try:
@@ -2256,7 +2256,7 @@ class TestPatchedClassCreation:
 
         _FakeFcmPushClient._decrypt_raw_data = _decrypt_raw_data_with_extra
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         try:
@@ -2286,7 +2286,7 @@ class TestPatchedClassCreation:
         original = _FakeFcmPushClient._decrypt_raw_data
         del _FakeFcmPushClient._decrypt_raw_data
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         try:
@@ -2301,7 +2301,7 @@ class TestPatchedClassCreation:
         """The _Patched subclass must define its own `_decrypt_raw_data`
         (not inherited) — this is the GitHub #68 padding fix itself."""
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
 
@@ -2323,7 +2323,7 @@ class TestBuildDecryptRawDataOverrideImportFailures:
         import binascii
         import sys
 
-        from custom_components.bosch_shc_camera.fcm import (
+        from custom_components.bosch_smart_camera.fcm import (
             _build_decrypt_raw_data_override,
         )
 
@@ -2355,7 +2355,7 @@ class TestBuildDecryptRawDataOverrideImportFailures:
 
         from http_ece import ECEException
 
-        from custom_components.bosch_shc_camera.fcm import (
+        from custom_components.bosch_smart_camera.fcm import (
             _build_decrypt_raw_data_override,
         )
 
@@ -2383,20 +2383,20 @@ class TestPatchedDecryptRawData:
     doesn't have yet."""
 
     def setup_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
 
     def _get_patched_decrypt(self):
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         patched = fcm_mod._QuietFcmPushClient._patch_class()
@@ -2550,7 +2550,7 @@ class TestExtractCryptoHeader:
     key bytes for header shapes it doesn't anticipate."""
 
     def test_plain_prefixed_header(self):
-        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+        from custom_components.bosch_smart_camera.fcm import _extract_crypto_header
 
         assert _extract_crypto_header("dh=AAAA", "dh=") == "AAAA"
 
@@ -2558,7 +2558,7 @@ class TestExtractCryptoHeader:
         """GitHub #44: a real Crypto-Key header can carry a trailing
         p256ecdsa= (VAPID) segment separated by ';' — upstream's blind
         slice leaves it appended to the key bytes."""
-        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+        from custom_components.bosch_smart_camera.fcm import _extract_crypto_header
 
         assert _extract_crypto_header("dh=AAAA; p256ecdsa=BBBB", "dh=") == "AAAA"
 
@@ -2566,12 +2566,12 @@ class TestExtractCryptoHeader:
         """GitHub #42: a header not literally starting with 'dh='/'salt=' must
         NOT be truncated by a blind slice — removeprefix() is a no-op when
         the prefix is absent."""
-        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+        from custom_components.bosch_smart_camera.fcm import _extract_crypto_header
 
         assert _extract_crypto_header("AAAA", "dh=") == "AAAA"
 
     def test_whitespace_around_segment_stripped(self):
-        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+        from custom_components.bosch_smart_camera.fcm import _extract_crypto_header
 
         assert _extract_crypto_header(" salt=AAAA ", "salt=") == "AAAA"
 
@@ -2581,7 +2581,7 @@ class TestExtractCryptoHeader:
         parameter) can legally precede dh=/salt=. A first-segment-only scan
         silently returns the WRONG value (the VAPID key, not the real DH
         key) instead of failing loudly."""
-        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+        from custom_components.bosch_smart_camera.fcm import _extract_crypto_header
 
         assert _extract_crypto_header("p256ecdsa=BBBB;dh=AAAA", "dh=") == "AAAA"
         assert _extract_crypto_header("rs=4096;salt=CCCC", "salt=") == "CCCC"
@@ -2591,7 +2591,7 @@ class TestExtractCryptoHeader:
         """Crypto-Key/Encryption are also ',' separated element lists per
         RFC 8188's ABNF, not just ';' separated parameter lists — this is
         the #44 corruption shape verbatim when the comma form is used."""
-        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+        from custom_components.bosch_smart_camera.fcm import _extract_crypto_header
 
         assert _extract_crypto_header("dh=AAAA,p256ecdsa=BBBB", "dh=") == "AAAA"
         assert _extract_crypto_header("p256ecdsa=BBBB,dh=AAAA", "dh=") == "AAAA"
@@ -2603,7 +2603,7 @@ class TestExtractCryptoHeader:
         purely positional). A literal-case-only removeprefix() would be a
         REGRESSION versus upstream for this shape, not just an incomplete
         fix."""
-        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+        from custom_components.bosch_smart_camera.fcm import _extract_crypto_header
 
         assert _extract_crypto_header("DH=AAAA", "dh=") == "AAAA"
         assert _extract_crypto_header("Salt=CCCC", "salt=") == "CCCC"
@@ -2613,7 +2613,7 @@ class TestExtractCryptoHeader:
         (e.g. 'dh= AAAA') must not survive prefix removal — it would throw
         off _decode_message_header's padding-length math (a2b_base64
         discards the space but len() would still count it)."""
-        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+        from custom_components.bosch_smart_camera.fcm import _extract_crypto_header
 
         assert _extract_crypto_header("dh= AAAA", "dh=") == "AAAA"
 
@@ -2621,7 +2621,7 @@ class TestExtractCryptoHeader:
         """When no segment matches the prefix at all, pass the whole
         (stripped) raw string through unmodified rather than guessing which
         segment might be intended."""
-        from custom_components.bosch_shc_camera.fcm import _extract_crypto_header
+        from custom_components.bosch_smart_camera.fcm import _extract_crypto_header
 
         assert (
             _extract_crypto_header(" keyid=p256dh;p256ecdsa=BBBB ", "dh=")
@@ -2635,20 +2635,20 @@ class TestBuildHandleDataMessageOverride:
     _decrypt_raw_data override."""
 
     def setup_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
 
     def test_patch_class_result_has_handle_data_message_override(self):
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         patched = fcm_mod._QuietFcmPushClient._patch_class()
@@ -2670,7 +2670,7 @@ class TestBuildHandleDataMessageOverride:
 
         _FakeFcmPushClient._handle_data_message = _handle_data_message_with_extra
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         try:
@@ -2691,7 +2691,7 @@ class TestBuildHandleDataMessageOverride:
         original = _FakeFcmPushClient._handle_data_message
         del _FakeFcmPushClient._handle_data_message
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         try:
@@ -2703,7 +2703,7 @@ class TestBuildHandleDataMessageOverride:
         assert "_handle_data_message" not in result.__dict__
 
     def test_returns_none_if_error_type_unimportable(self):
-        from custom_components.bosch_shc_camera.fcm import (
+        from custom_components.bosch_smart_camera.fcm import (
             _build_handle_data_message_override,
         )
 
@@ -2733,7 +2733,7 @@ class TestBuildHandleDataMessageOverride:
         original = _FakeFcmPushClient._app_data_by_key
         del _FakeFcmPushClient._app_data_by_key
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         try:
@@ -2762,7 +2762,7 @@ class TestBuildHandleDataMessageOverride:
 
         _FakeFcmPushClient._handle_data_message = _handle_data_message_async
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         try:
@@ -2782,14 +2782,14 @@ class TestPatchedHandleDataMessage:
     blindly-sliced (and, for these header shapes, corrupted) values."""
 
     def setup_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
         _install_firebase_module()
 
     def teardown_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
@@ -2812,7 +2812,7 @@ class TestPatchedHandleDataMessage:
         """GitHub #44 reproduction: a real 'dh=<key>; p256ecdsa=<vapid>'
         header must reach _decrypt_raw_data as just '<key>', not upstream's
         corrupted blind-slice result."""
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         patched = fcm_mod._QuietFcmPushClient._patch_class()
@@ -2843,7 +2843,7 @@ class TestPatchedHandleDataMessage:
         assert recorded["ret_val"] == {"ok": True}
 
     def test_subtype_mismatch_logs_warning_but_still_decrypts(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         patched = fcm_mod._QuietFcmPushClient._patch_class()
@@ -2863,7 +2863,7 @@ class TestPatchedHandleDataMessage:
         client.callback.assert_called_once()
 
     def test_undecryptable_payload_logs_warning(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         patched = fcm_mod._QuietFcmPushClient._patch_class()
@@ -2885,7 +2885,7 @@ class TestPatchedHandleDataMessage:
         """A JSON payload that decodes to a non-dict (e.g. a bare list) must
         be wrapped as {"message": ...} before reaching the callback, matching
         upstream's own contract with callers."""
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         patched = fcm_mod._QuietFcmPushClient._patch_class()
@@ -2904,7 +2904,7 @@ class TestPatchedHandleDataMessage:
         assert recorded["ret_val"] == {"message": [1, 2, 3]}
 
     def test_callback_exception_is_caught_and_logged(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         patched = fcm_mod._QuietFcmPushClient._patch_class()
@@ -2927,7 +2927,7 @@ class TestPatchedHandleDataMessage:
         client._try_increment_error_count.assert_called_once()
 
     def test_deleted_messages_short_circuits(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
         patched = fcm_mod._QuietFcmPushClient._patch_class()
@@ -2960,13 +2960,13 @@ class TestGetFcmPushClientClassCachedPath:
     """
 
     def setup_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
@@ -2975,7 +2975,7 @@ class TestGetFcmPushClientClassCachedPath:
         """After the first call, _patched_class is set; the second call
         must return the same object (cached-path return)."""
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
 
@@ -2990,7 +2990,7 @@ class TestGetFcmPushClientClassCachedPath:
         """When _patched_class is None (patch failed), _get_fcm_push_client_class
         falls back to the vanilla FcmPushClient from the library."""
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         # Force _patched_class=None (patch "failed" scenario)
         fcm_mod._QuietFcmPushClient._patched_class = None
@@ -3007,13 +3007,13 @@ class TestAsyncStartFcmPushNullClientWarning:
     log a warning and return early WITHOUT starting FCM."""
 
     def setup_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
@@ -3022,7 +3022,7 @@ class TestAsyncStartFcmPushNullClientWarning:
     async def test_warning_logged_when_client_class_is_none(self):
         """Simulate: FcmRegisterConfig importable, but _get_fcm_push_client_class=None."""
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         coord = SimpleNamespace(
             fcm_running=False,
@@ -3055,13 +3055,13 @@ class TestFcmStartLockLazyInit:
     async_start_fcm_push must create a new asyncio.Lock and store it."""
 
     def setup_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
@@ -3070,7 +3070,7 @@ class TestFcmStartLockLazyInit:
     async def test_lazy_init_creates_lock_when_missing(self):
         """Coordinator without fcm_start_lock → lazy-init creates one."""
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         coord = SimpleNamespace(
             options={"fcm_push_mode": "auto"},
@@ -3126,7 +3126,7 @@ class TestFcmStartLockLazyInit:
         is fast.
         """
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         coord = SimpleNamespace(
             options={},
@@ -3154,7 +3154,7 @@ class TestFcmStartLockLazyInit:
     async def test_async_start_fcm_push_shim_lazy_init(self):
         """async_start_fcm_push shim must lazy-init fcm_start_lock when missing."""
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         coord = SimpleNamespace(
             options={"enable_fcm_push": True},
@@ -3184,13 +3184,13 @@ class TestPatchedListenBody:
     """
 
     def setup_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         self._orig = fcm_mod._QuietFcmPushClient._patched_class
         fcm_mod._QuietFcmPushClient._patched_class = False
 
     def teardown_method(self):
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = self._orig
         _uninstall_firebase_module()
@@ -3198,7 +3198,7 @@ class TestPatchedListenBody:
     def _make_instance(self):
         """Create a _Patched instance with all async hooks stubbed."""
         _install_firebase_module()
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         fcm_mod._QuietFcmPushClient._patched_class = False
 
@@ -3848,7 +3848,7 @@ async def test_drift_heal_a_fresh_install_posts_and_writes_both_markers() -> Non
         ),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         result = await register_fcm_with_bosch(coord)
 
@@ -3903,7 +3903,7 @@ async def test_drift_heal_b_already_healed_skips_post() -> None:
         ),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         result = await register_fcm_with_bosch(coord)
 
@@ -3961,7 +3961,7 @@ async def test_drift_heal_c_token_matches_but_marker_missing_forces_post() -> No
         ),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         result = await register_fcm_with_bosch(coord)
 
@@ -4015,7 +4015,7 @@ async def test_drift_heal_c2_token_matches_but_marker_is_ios_forces_post() -> No
         ),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         result = await register_fcm_with_bosch(coord)
 
@@ -4061,7 +4061,7 @@ async def test_drift_heal_d_token_changed_posts_and_writes_marker() -> None:
         ),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         result = await register_fcm_with_bosch(coord)
 
@@ -4094,7 +4094,7 @@ async def test_drift_heal_e_server_500_internal_error_writes_marker() -> None:
         ),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         result = await register_fcm_with_bosch(coord)
 
@@ -4134,7 +4134,7 @@ async def test_drift_heal_f_server_401_returns_false_no_marker_written() -> None
         ),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         result = await register_fcm_with_bosch(coord)
 
@@ -4167,7 +4167,7 @@ async def test_deregister_fcm_with_bosch_success_204() -> None:
         ),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
-        from custom_components.bosch_shc_camera.fcm import deregister_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import deregister_fcm_with_bosch
 
         result = await deregister_fcm_with_bosch(coord, "old-fcm-token")
 
@@ -4192,7 +4192,7 @@ async def test_deregister_fcm_with_bosch_non_2xx_returns_false_never_raises() ->
         ),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
-        from custom_components.bosch_shc_camera.fcm import deregister_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import deregister_fcm_with_bosch
 
         result = await deregister_fcm_with_bosch(coord, "old-fcm-token")
 
@@ -4215,7 +4215,7 @@ async def test_deregister_fcm_with_bosch_client_error_returns_false_never_raises
         ),
         patch(f"{MODULE}.CLOUD_API", "https://api.bosch.example"),
     ):
-        from custom_components.bosch_shc_camera.fcm import deregister_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import deregister_fcm_with_bosch
 
         result = await deregister_fcm_with_bosch(coord, "old-fcm-token")
 
@@ -4233,7 +4233,7 @@ async def test_deregister_fcm_with_bosch_no_token_or_no_bearer_returns_false() -
         f"{MODULE}.async_get_bosch_cloud_session",
         new=AsyncMock(return_value=session),
     ):
-        from custom_components.bosch_shc_camera.fcm import deregister_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import deregister_fcm_with_bosch
 
         assert await deregister_fcm_with_bosch(coord, "") is False
         coord.token = None
@@ -4247,8 +4247,8 @@ async def test_supervisor_hard_heal_purge_deregisters_stale_token_with_bosch() -
     discards the currently-registered FCM device token for a fresh one, the
     stale token must be deregistered from Bosch's backend (best-effort) so
     it doesn't accumulate an abandoned registration server-side."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock(
@@ -4288,8 +4288,8 @@ async def test_supervisor_hard_heal_purge_skips_deregister_when_no_stale_token()
 ):
     """A fresh install (never registered with Bosch yet) has no stale token
     to clean up — deregister_fcm_with_bosch must not be called at all."""
-    from custom_components.bosch_shc_camera import fcm
-    from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+    from custom_components.bosch_smart_camera import fcm
+    from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
     _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
     coord = _make_supervisor_coord_with_lock({}, force_hard=True)
@@ -4333,7 +4333,7 @@ def _isolate_shared_state():
     """
     prev_ts = list(_FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS)
     lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
-    bosch_logger = logging.getLogger("custom_components.bosch_shc_camera.fcm")
+    bosch_logger = logging.getLogger("custom_components.bosch_smart_camera.fcm")
     prev_lib = list(lib_logger.filters)
     prev_bosch = list(bosch_logger.filters)
     yield
@@ -4442,7 +4442,7 @@ async def _run_alert(
     timestamp: str | None = "2026-05-15T10:00:00.000Z",
     session_override: Any = None,
 ) -> None:
-    from custom_components.bosch_shc_camera.fcm import async_send_alert
+    from custom_components.bosch_smart_camera.fcm import async_send_alert
 
     session = session_override or MagicMock(get=MagicMock(return_value=_resp_cm(404)))
     with patch(
@@ -4467,7 +4467,7 @@ class TestPathAMovement:
 
     @pytest.mark.asyncio
     async def test_movement_triggers_refresh(self) -> None:
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
         cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
@@ -4542,7 +4542,7 @@ class TestNvrEventBufferedClipDispatch:
     previously had zero call sites anywhere in the integration."""
 
     async def _fire_movement(self, coord) -> None:
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         session = MagicMock()
         session.get = MagicMock(
@@ -4660,7 +4660,7 @@ class TestNvrEventBufferedClipDispatch:
                 MagicMock(return_value="stub-coro"),
             ),
             caplog.at_level(
-                "WARNING", logger="custom_components.bosch_shc_camera.recorder"
+                "WARNING", logger="custom_components.bosch_smart_camera.recorder"
             ),
         ):
             await self._fire_movement(coord)
@@ -4773,7 +4773,7 @@ class TestNvrEventBufferedClipDispatch:
                 MagicMock(return_value="stub-coro"),
             ),
             caplog.at_level(
-                "WARNING", logger="custom_components.bosch_shc_camera.recorder"
+                "WARNING", logger="custom_components.bosch_smart_camera.recorder"
             ),
         ):
             await self._fire_movement(coord)
@@ -4826,7 +4826,7 @@ class TestPathAPersonEvent:
 
     @pytest.mark.asyncio
     async def test_person_triggers_refresh(self) -> None:
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
         cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
@@ -4870,7 +4870,7 @@ class TestPathAGen1Delay:
 
     @pytest.mark.asyncio
     async def test_gen1_indoor_uses_15s_delay(self) -> None:
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
         cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
@@ -4908,7 +4908,7 @@ class TestPathAStatusOnlyEvent:
 
     @pytest.mark.asyncio
     async def test_trouble_connect_does_not_trigger_refresh(self) -> None:
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
         cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
@@ -4940,7 +4940,7 @@ class TestPathAStatusOnlyEvent:
 
     @pytest.mark.asyncio
     async def test_trouble_disconnect_does_not_trigger_refresh(self) -> None:
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
         cam_entity.async_trigger_image_refresh = AsyncMock(return_value=None)
@@ -5242,7 +5242,7 @@ class TestPathAandBOrdering:
         Both are independent coroutines; the test confirms both fire for a
         single event.
         """
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         # Set up a cam entity for Path A
         cam_entity = MagicMock()
@@ -5365,7 +5365,7 @@ class TestFcmSafeBoschUrl:
         ],
     )
     def test_url_validation(self, url: str, expected: bool) -> None:
-        from custom_components.bosch_shc_camera.fcm import _is_safe_bosch_url
+        from custom_components.bosch_smart_camera.fcm import _is_safe_bosch_url
 
         assert _is_safe_bosch_url(url) is expected
 
@@ -5373,7 +5373,7 @@ class TestFcmSafeBoschUrl:
         """urlparse() can raise ValueError on malformed input — fail closed
         (backported from the Core PR's Copilot review round 18, 2026-08-04).
         """
-        from custom_components.bosch_shc_camera.fcm import _is_safe_bosch_url
+        from custom_components.bosch_smart_camera.fcm import _is_safe_bosch_url
 
         assert _is_safe_bosch_url("https://[::1") is False
 
@@ -5664,7 +5664,7 @@ class TestInstallNoiseFilter:
         in production."""
         lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
         register_logger = logging.getLogger("firebase_messaging.fcmregister")
-        bosch_logger = logging.getLogger("custom_components.bosch_shc_camera.fcm")
+        bosch_logger = logging.getLogger("custom_components.bosch_smart_camera.fcm")
         lib_logger.filters[:] = []
         register_logger.filters[:] = []
         bosch_logger.filters[:] = []
@@ -5682,7 +5682,7 @@ class TestInstallNoiseFilter:
         to both without creating a second `_FCMNoiseFilter` instance."""
         lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
         register_logger = logging.getLogger("firebase_messaging.fcmregister")
-        bosch_logger = logging.getLogger("custom_components.bosch_shc_camera.fcm")
+        bosch_logger = logging.getLogger("custom_components.bosch_smart_camera.fcm")
         f = _FCMNoiseFilter()
         lib_logger.filters[:] = [f]
         register_logger.filters[:] = []
@@ -5706,7 +5706,7 @@ class TestInstallNoiseFilter:
         what the sibling-logger gap silently broke."""
         lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
         register_logger = logging.getLogger("firebase_messaging.fcmregister")
-        bosch_logger = logging.getLogger("custom_components.bosch_shc_camera.fcm")
+        bosch_logger = logging.getLogger("custom_components.bosch_smart_camera.fcm")
         lib_logger.filters[:] = []
         register_logger.filters[:] = []
         bosch_logger.filters[:] = []
@@ -5774,7 +5774,7 @@ class TestOnFcmPush:
     def test_drops_when_not_running(self):
         """Trailing push after stop must be ignored — otherwise the
         scheduled handler runs against a torn-down session."""
-        from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+        from custom_components.bosch_smart_camera.fcm import _on_fcm_push
 
         coord = self._make_coord(running=False)
         _on_fcm_push(coord, {"from": "test"}, "push-id-1")
@@ -5783,7 +5783,7 @@ class TestOnFcmPush:
         assert coord.fcm_healthy is False
 
     def test_updates_health_flags_when_running(self):
-        from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+        from custom_components.bosch_smart_camera.fcm import _on_fcm_push
 
         coord = self._make_coord(running=True)
         _on_fcm_push(coord, {"from": "test"}, "push-id-1")
@@ -5793,7 +5793,7 @@ class TestOnFcmPush:
     def test_schedules_handler_via_loop(self):
         """Must schedule via `loop.call_soon_threadsafe` since the FCM
         callback runs on a background thread, not the event loop."""
-        from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+        from custom_components.bosch_smart_camera.fcm import _on_fcm_push
 
         coord = self._make_coord(running=True)
         _on_fcm_push(coord, {"from": "test"}, "push-id-1")
@@ -5802,7 +5802,7 @@ class TestOnFcmPush:
 
 class TestBuildNotifyData:
     def test_text_only_no_attachment(self):
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data("notify.foo", "Hello", title="Subject")
         assert data["message"] == "Hello"
@@ -5811,7 +5811,7 @@ class TestBuildNotifyData:
 
     def test_mobile_app_uses_local_image_url(self):
         """HA Companion App reads images from /local/bosch_alerts/ (auth-free)."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.mobile_app_test_phone",
@@ -5822,7 +5822,7 @@ class TestBuildNotifyData:
         assert data["data"]["push"]["sound"] == "default"
 
     def test_telegram_uses_photo_field(self):
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.telegram_chat",
@@ -5834,7 +5834,7 @@ class TestBuildNotifyData:
 
     def test_signal_uses_attachments(self):
         """Signal / email / generic services use data.attachments list."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.signal_messenger",
@@ -5844,7 +5844,7 @@ class TestBuildNotifyData:
         assert data["data"]["attachments"] == ["/config/x.mp4"]
 
     def test_no_title_field_when_empty(self):
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data("notify.x", "msg", title=None)
         assert "title" not in data
@@ -5854,7 +5854,7 @@ class TestBuildNotifyDataExtras:
     """Additional build_notify_data paths not covered above."""
 
     def test_with_title(self):
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.alex",
@@ -5867,7 +5867,7 @@ class TestBuildNotifyDataExtras:
         assert "data" not in data
 
     def test_no_title_no_data_key(self):
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data("notify.alex", "msg")
         assert "title" not in data
@@ -5877,7 +5877,7 @@ class TestBuildNotifyDataExtras:
         """iOS Companion App: the alert needs an explicit sound key.
         Without `push.sound`, iOS plays no chime — silent alerts are
         easy to miss."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.mobile_app_thomas_iphone",
@@ -5889,7 +5889,7 @@ class TestBuildNotifyDataExtras:
 
     def test_telegram_uppercase_match(self):
         """Telegram service name detection is case-insensitive."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.TELEGRAM_chat_main",
@@ -5902,7 +5902,7 @@ class TestBuildNotifyDataExtras:
     def test_signal_uses_attachments_list(self):
         """Signal-Messenger (HA addon notify.signal) requires an
         `attachments` list with file path strings."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.signal_thomas",
@@ -5914,7 +5914,7 @@ class TestBuildNotifyDataExtras:
     def test_email_falls_into_attachments(self):
         """`notify.smtp` and similar email-based services hit the
         generic `else` branch and use `attachments`."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.smtp_default",
@@ -5934,7 +5934,7 @@ class TestBuildNotifyDataLivePreview:
         """Step 1 (text-only, no snapshot yet) still gets a live-preview
         payload when the opt-in resolved an entity_id — the Companion App's
         own dynamic-content fetch doesn't need our downloaded snapshot."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.mobile_app_thomas_iphone",
@@ -5950,7 +5950,7 @@ class TestBuildNotifyDataLivePreview:
     def test_mobile_app_with_file_and_entity_id(self):
         """Step 2 (snapshot attached) keeps the static image AND adds the
         live-preview entity_id — additive, not a replacement."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.mobile_app_thomas_iphone",
@@ -5965,7 +5965,7 @@ class TestBuildNotifyDataLivePreview:
         """Default (opt-in off / unresolved): no `data` key at all when
         there's neither a file nor an entity_id — matches pre-existing
         behaviour exactly."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data("notify.mobile_app_thomas_iphone", "msg")
         assert "data" not in data
@@ -5973,7 +5973,7 @@ class TestBuildNotifyDataLivePreview:
     def test_mobile_app_with_file_no_entity_id_unchanged(self):
         """Default (opt-in off): image-only payload, no entity_id key —
         matches pre-existing behaviour exactly."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.mobile_app_thomas_iphone",
@@ -5986,7 +5986,7 @@ class TestBuildNotifyDataLivePreview:
     def test_non_mobile_app_ignores_entity_id_with_file(self):
         """Signal/Telegram/email never get entity_id — the dynamic-content
         mechanism is a Companion-App-only feature."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.signal_thomas",
@@ -5999,7 +5999,7 @@ class TestBuildNotifyDataLivePreview:
     def test_non_mobile_app_ignores_entity_id_without_file(self):
         """Same as above with no file_path — must not spuriously add a
         `data` key for a non-Companion-App service."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.signal_thomas",
@@ -6012,7 +6012,7 @@ class TestBuildNotifyDataLivePreview:
         """Garbage input: an empty-string entity_id (e.g. a registry lookup
         that returned "" instead of None) must not produce an empty
         `entity_id` key."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         data = build_notify_data(
             "notify.mobile_app_thomas_iphone",
@@ -6167,7 +6167,7 @@ class TestAsyncSendAlertLivePreviewWiring:
 
 class TestGetAlertServices:
     def test_specific_slot_used_when_set(self):
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = SimpleNamespace(
             options={
@@ -6179,7 +6179,7 @@ class TestGetAlertServices:
 
     def test_information_falls_back_to_default(self):
         """When the per-step slot is empty, fall back to alert_notify_service."""
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = SimpleNamespace(
             options={
@@ -6190,7 +6190,7 @@ class TestGetAlertServices:
         assert get_alert_services(coord, "information") == ["notify.signalkamera"]
 
     def test_system_falls_back_to_default(self):
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = SimpleNamespace(
             options={
@@ -6202,7 +6202,7 @@ class TestGetAlertServices:
 
     def test_screenshot_does_not_fall_back(self):
         """Empty `alert_notify_screenshot` must NOT fall back — empty means skip step."""
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = SimpleNamespace(
             options={
@@ -6214,7 +6214,7 @@ class TestGetAlertServices:
 
     def test_video_does_not_fall_back(self):
         """Same skip-on-empty rule for video."""
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = SimpleNamespace(
             options={
@@ -6225,7 +6225,7 @@ class TestGetAlertServices:
         assert get_alert_services(coord, "video") == []
 
     def test_comma_separated_services_split(self):
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = SimpleNamespace(
             options={
@@ -6240,7 +6240,7 @@ class TestGetAlertServices:
 
     def test_empty_strings_filtered_out(self):
         """Trailing comma or double comma → no empty entry in the result."""
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = SimpleNamespace(
             options={
@@ -6256,7 +6256,7 @@ class TestGetAlertServicesExtras:
     def test_explicit_value_takes_precedence_over_default(self):
         """Explicit per-type service must NOT be overwritten by the
         global default."""
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = SimpleNamespace(
             options={
@@ -6267,7 +6267,7 @@ class TestGetAlertServicesExtras:
         assert get_alert_services(coord, "information") == ["notify.specific"]
 
     def test_strips_whitespace_in_csv(self):
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = SimpleNamespace(
             options={
@@ -6287,7 +6287,7 @@ def _make_listen_instance():
     pytest.importorskip("firebase_messaging")
     from firebase_messaging import FcmPushClientRunState
 
-    from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
+    from custom_components.bosch_smart_camera.fcm import _QuietFcmPushClient
 
     cls = _QuietFcmPushClient._patch_class()
     assert cls is not None
@@ -6410,7 +6410,7 @@ class TestListenBranches:
         )
 
         # Capture exception log so it can be asserted on.
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         original_exc = fcm_mod._LOGGER.exception
         captured = []
@@ -6639,7 +6639,7 @@ async def test_auto_mode_calls_fcm_register() -> None:
         ),
         patch.dict("sys.modules", {"firebase_messaging": fake_firebase}),
     ):
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         await async_start_fcm_push(coord)
 
@@ -6669,7 +6669,7 @@ async def test_polling_mode_skips_fcm_register() -> None:
         patch(f"{MODULE}._install_fcm_noise_filter"),
         patch(f"{MODULE}._get_fcm_push_client_class", return_value=MagicMock()),
     ):
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         await async_start_fcm_push(coord)
 
@@ -6687,7 +6687,7 @@ def test_default_mode_is_auto() -> None:
     A regression to 'polling' would silently downgrade all fresh installs to
     polling-only, increasing motion event latency from ~1s to the polling interval.
     """
-    from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+    from custom_components.bosch_smart_camera.const import DEFAULT_OPTIONS
 
     assert DEFAULT_OPTIONS["fcm_push_mode"] == "auto", (
         "New installs must default to fcm_push_mode='auto' so FCM push is "
@@ -6734,7 +6734,7 @@ async def test_garbage_mode_coerced_to_auto() -> None:
         ),
         patch.dict("sys.modules", {"firebase_messaging": fake_firebase}),
     ):
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         await async_start_fcm_push(coord)
 
@@ -6747,7 +6747,7 @@ async def test_garbage_mode_coerced_to_auto() -> None:
 
 async def test_migration_rewrites_ios_to_auto() -> None:
     """Migration v2→v3 must rewrite fcm_push_mode='ios' to 'auto'."""
-    from custom_components.bosch_shc_camera import async_migrate_entry
+    from custom_components.bosch_smart_camera import async_migrate_entry
 
     hass, entry, captured = _make_migrate_harness(
         version=2, options={"fcm_push_mode": "ios", "enable_fcm_push": True}
@@ -6763,7 +6763,7 @@ async def test_migration_rewrites_ios_to_auto() -> None:
 
 async def test_migration_rewrites_android_to_auto() -> None:
     """Migration v2→v3 must rewrite fcm_push_mode='android' to 'auto'."""
-    from custom_components.bosch_shc_camera import async_migrate_entry
+    from custom_components.bosch_smart_camera import async_migrate_entry
 
     hass, entry, captured = _make_migrate_harness(
         version=2, options={"fcm_push_mode": "android", "some_option": True}
@@ -6782,7 +6782,7 @@ async def test_migration_rewrites_android_to_auto() -> None:
 
 async def test_migration_keeps_auto() -> None:
     """Migration v2→v3 must leave fcm_push_mode='auto' unchanged."""
-    from custom_components.bosch_shc_camera import async_migrate_entry
+    from custom_components.bosch_smart_camera import async_migrate_entry
 
     hass, entry, captured = _make_migrate_harness(
         version=2, options={"fcm_push_mode": "auto"}
@@ -6799,7 +6799,7 @@ async def test_migration_keeps_polling() -> None:
     Users who explicitly opted out of FCM (firewalls, privacy) must not be
     silently switched to 'auto' during migration.
     """
-    from custom_components.bosch_shc_camera import async_migrate_entry
+    from custom_components.bosch_smart_camera import async_migrate_entry
 
     hass, entry, captured = _make_migrate_harness(
         version=2, options={"fcm_push_mode": "polling"}
@@ -6815,7 +6815,7 @@ async def test_migration_keeps_polling() -> None:
 
 async def test_migration_v3_entry_is_noop() -> None:
     """A v3 entry must not be touched by the v2→v3 migration."""
-    from custom_components.bosch_shc_camera import async_migrate_entry
+    from custom_components.bosch_smart_camera import async_migrate_entry
 
     hass, entry, captured = _make_migrate_harness(
         version=3, options={"fcm_push_mode": "auto"}
@@ -6843,7 +6843,7 @@ async def test_migration_v3_ios_clears_fcm_creds() -> None:
     skipped re-registration, leaving Bosch CBS with deviceType=IOS while the
     HA client registered platform=ANDROID. Push routing was silently broken.
     """
-    from custom_components.bosch_shc_camera import async_migrate_entry
+    from custom_components.bosch_smart_camera import async_migrate_entry
 
     hass, entry, captured = _make_migrate_harness_with_data(
         version=2,
@@ -6874,7 +6874,7 @@ async def test_migration_v3_android_clears_fcm_creds() -> None:
     'android' in v2 used the same iOS-first Bosch registration path; after
     migration to the OSS Android key, the old token is stale.
     """
-    from custom_components.bosch_shc_camera import async_migrate_entry
+    from custom_components.bosch_smart_camera import async_migrate_entry
 
     hass, entry, captured = _make_migrate_harness_with_data(
         version=2,
@@ -6899,7 +6899,7 @@ async def test_migration_v3_old_auto_clears_fcm_creds() -> None:
     registered under the old 'auto' is equally stale and must be cleared to
     force re-registration with platform=ANDROID.
     """
-    from custom_components.bosch_shc_camera import async_migrate_entry
+    from custom_components.bosch_smart_camera import async_migrate_entry
 
     hass, entry, captured = _make_migrate_harness_with_data(
         version=2,
@@ -6925,7 +6925,7 @@ async def test_migration_v3_polling_preserves_fcm_creds() -> None:
     from a prior FCM phase but we must not alter them — we must not corrupt data
     that was stored by a different mechanism, and we must not trigger any re-reg.
     """
-    from custom_components.bosch_shc_camera import async_migrate_entry
+    from custom_components.bosch_smart_camera import async_migrate_entry
 
     hass, entry, captured = _make_migrate_harness_with_data(
         version=2,
@@ -6951,7 +6951,7 @@ async def test_migration_v3_polling_preserves_fcm_creds() -> None:
 
 async def test_migration_already_v3_data_untouched() -> None:
     """(e) entry already at version=3 → no-op, data fields not touched."""
-    from custom_components.bosch_shc_camera import async_migrate_entry
+    from custom_components.bosch_smart_camera import async_migrate_entry
 
     hass, entry, captured = _make_migrate_harness_with_data(
         version=3,
@@ -6974,7 +6974,7 @@ async def test_migration_v1_to_v3_ios_clears_fcm_creds() -> None:
     v1 entries never had an explicit stream_connection_type, so v1→v2 must
     inject 'auto'. The combined v1→v3 path must also clear FCM creds.
     """
-    from custom_components.bosch_shc_camera import async_migrate_entry
+    from custom_components.bosch_smart_camera import async_migrate_entry
 
     hass, entry, captured = _make_migrate_harness_with_data(
         version=1,
@@ -7157,7 +7157,7 @@ class TestGetFcmPushClientClassImportError:
                 raise ImportError("simulated absence")
             return real(name, *a, **kw)
 
-        from custom_components.bosch_shc_camera.fcm import (
+        from custom_components.bosch_smart_camera.fcm import (
             _get_fcm_push_client_class,
         )
 
@@ -7178,7 +7178,7 @@ class TestAsyncStartFcmPushNoLib:
         # Patch FcmRegisterConfig presence so the first ImportError check is
         # bypassed — we want execution to land on the FcmPushClient check.
         # Then force the class lookup to None.
-        from custom_components.bosch_shc_camera import fcm
+        from custom_components.bosch_smart_camera import fcm
 
         with patch.object(fcm, "_get_fcm_push_client_class", return_value=None):
             # FcmRegisterConfig import is inside the function; patch builtins
@@ -7213,7 +7213,7 @@ class TestQuietFcmPushClient:
         pytest.importorskip("firebase_messaging")
         from firebase_messaging import FcmPushClient
 
-        from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
+        from custom_components.bosch_smart_camera.fcm import _QuietFcmPushClient
 
         cls = _QuietFcmPushClient._patch_class()
         assert cls is not None, (
@@ -7228,7 +7228,7 @@ class TestQuietFcmPushClient:
         pytest.importorskip("firebase_messaging")
         from firebase_messaging import FcmPushClient
 
-        from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
+        from custom_components.bosch_smart_camera.fcm import _QuietFcmPushClient
 
         cls = _QuietFcmPushClient._patch_class()
         assert cls is not None
@@ -7257,7 +7257,7 @@ class TestQuietFcmPushClient:
         pytest.importorskip("firebase_messaging")
         from firebase_messaging import FcmPushClient
 
-        from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
+        from custom_components.bosch_smart_camera.fcm import _QuietFcmPushClient
 
         _QuietFcmPushClient._patched_class = False
         cls = _QuietFcmPushClient._patch_class()
@@ -7278,7 +7278,7 @@ class TestQuietFcmPushClient:
     def test_get_fcm_push_client_class_returns_nonnone(self):
         """_get_fcm_push_client_class() returns a usable class when the library is present."""
         pytest.importorskip("firebase_messaging")
-        from custom_components.bosch_shc_camera.fcm import (
+        from custom_components.bosch_smart_camera.fcm import (
             _get_fcm_push_client_class,
             _QuietFcmPushClient,
         )
@@ -7291,7 +7291,7 @@ class TestQuietFcmPushClient:
     def test_get_fcm_push_client_class_caches_result(self):
         """Second call must return the same object (no double-computation)."""
         pytest.importorskip("firebase_messaging")
-        from custom_components.bosch_shc_camera.fcm import (
+        from custom_components.bosch_smart_camera.fcm import (
             _get_fcm_push_client_class,
             _QuietFcmPushClient,
         )
@@ -7307,7 +7307,7 @@ class TestQuietFcmPushClient:
         pytest.importorskip("firebase_messaging")
         from firebase_messaging import FcmPushClient
 
-        from custom_components.bosch_shc_camera.fcm import (
+        from custom_components.bosch_smart_camera.fcm import (
             _get_fcm_push_client_class,
             _QuietFcmPushClient,
         )
@@ -7344,7 +7344,7 @@ class TestQuietFcmPushClient:
         pytest.importorskip("firebase_messaging")
         from firebase_messaging import FcmPushClientRunState
 
-        from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
+        from custom_components.bosch_smart_camera.fcm import _QuietFcmPushClient
 
         cls = _QuietFcmPushClient._patch_class()
         assert cls is not None
@@ -7415,7 +7415,7 @@ class TestQuietFcmPushClient:
         instance._terminate = fake_terminate  # type: ignore[attr-defined]
 
         # Capture _logger.exception calls from our fcm module
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
 
         original_exception = fcm_mod._LOGGER.exception
 
@@ -7521,7 +7521,7 @@ class TestQuietFcmPushClient:
         # silently drops the very "Unexpected exception during read" record
         # we're asserting on. Snapshot + remove + restore so this counter-
         # test always sees the raw library output.
-        from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+        from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
         prev_filters = list(fcm_logger.filters)
         for _f in prev_filters:
@@ -7573,8 +7573,8 @@ class TestFCMNoiseFilterDualLogger:
         """
         import logging
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
-        from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
+        from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
         lib_logger = logging.getLogger("firebase_messaging.fcmpushclient")
         register_logger = logging.getLogger("firebase_messaging.fcmregister")
@@ -7593,8 +7593,8 @@ class TestFCMNoiseFilterDualLogger:
         """After _install_fcm_noise_filter(), both loggers carry the filter."""
         import logging
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
-        from custom_components.bosch_shc_camera.fcm import (
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
+        from custom_components.bosch_smart_camera.fcm import (
             _FCMNoiseFilter,
             _install_fcm_noise_filter,
         )
@@ -7621,8 +7621,8 @@ class TestFCMNoiseFilterDualLogger:
         """Both loggers must carry the SAME filter instance so _last_passed is shared."""
         import logging
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
-        from custom_components.bosch_shc_camera.fcm import (
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
+        from custom_components.bosch_smart_camera.fcm import (
             _FCMNoiseFilter,
             _install_fcm_noise_filter,
         )
@@ -7652,8 +7652,8 @@ class TestFCMNoiseFilterDualLogger:
         """
         import logging
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
-        from custom_components.bosch_shc_camera.fcm import (
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
+        from custom_components.bosch_smart_camera.fcm import (
             _FCMNoiseFilter,
             _install_fcm_noise_filter,
         )
@@ -7693,8 +7693,8 @@ class TestFCMNoiseFilterDualLogger:
         instances to either logger (would allow two records through per window)."""
         import logging
 
-        import custom_components.bosch_shc_camera.fcm as fcm_mod
-        from custom_components.bosch_shc_camera.fcm import (
+        import custom_components.bosch_smart_camera.fcm as fcm_mod
+        from custom_components.bosch_smart_camera.fcm import (
             _FCMNoiseFilter,
             _install_fcm_noise_filter,
         )
@@ -7746,7 +7746,7 @@ class TestAsyncStartFcmPushClosures:
         mock_fm.FcmPushClientConfig = MagicMock(return_value=MagicMock())
         mock_fm.FcmPushClient = CapturingClient
 
-        from custom_components.bosch_shc_camera.fcm import (
+        from custom_components.bosch_smart_camera.fcm import (
             _QuietFcmPushClient,
             async_start_fcm_push,
         )
@@ -7869,21 +7869,21 @@ class TestOnFcmPush2:
         """A push that arrives after async_stop_fcm_push cleared the
         client must be dropped — otherwise it'd reschedule on a loop
         that already considers FCM down. Pin the gate."""
-        from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+        from custom_components.bosch_smart_camera.fcm import _on_fcm_push
 
         coord = _stub_coord(fcm_running=False)
         _on_fcm_push(coord, {"from": "x"}, "push-id-1")
         coord.hass.loop.call_soon_threadsafe.assert_not_called()
 
     def test_running_true_schedules_handler(self):
-        from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+        from custom_components.bosch_smart_camera.fcm import _on_fcm_push
 
         coord = _stub_coord(fcm_running=True)
         _on_fcm_push(coord, {"from": "Bosch"}, "push-id-2")
         coord.hass.loop.call_soon_threadsafe.assert_called_once()
 
     def test_marks_fcm_healthy_and_stamps_last_push(self):
-        from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+        from custom_components.bosch_smart_camera.fcm import _on_fcm_push
 
         coord = _stub_coord(fcm_running=True, fcm_healthy=False)
         before = coord.fcm_last_push
@@ -7922,7 +7922,7 @@ class TestOnFcmPushSpawnHandler:
 
     @pytest.mark.asyncio
     async def test_spawn_handler_creates_and_tracks_task(self):
-        from custom_components.bosch_shc_camera import fcm
+        from custom_components.bosch_smart_camera import fcm
 
         coord, scheduled, fake_task = self._coord()
         with patch.object(fcm, "async_handle_fcm_push", new=MagicMock()):
@@ -7943,7 +7943,7 @@ class TestOnFcmPushSpawnHandler:
     @pytest.mark.asyncio
     async def test_trailing_push_after_stop_is_dropped(self):
         """fcm_running=False (client stopped) → push dropped, nothing scheduled."""
-        from custom_components.bosch_shc_camera import fcm
+        from custom_components.bosch_smart_camera import fcm
 
         coord, scheduled, _ = self._coord()
         coord.fcm_running = False
@@ -7962,7 +7962,7 @@ class TestPushDataNoneGuard:
 
     @pytest.mark.asyncio
     async def test_returns_early_when_data_is_none(self) -> None:
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _coord(data=None)
         session = MagicMock()
@@ -7978,7 +7978,7 @@ class TestPushDataNoneGuard:
 
     @pytest.mark.asyncio
     async def test_returns_early_when_data_is_empty_dict(self) -> None:
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _coord(data={})
         session = MagicMock()
@@ -7994,7 +7994,7 @@ class TestPushDataNoneGuard:
 
     @pytest.mark.asyncio
     async def test_returns_early_when_token_missing(self) -> None:
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _coord(data={"cam-id": {"info": {}, "events": []}})
         coord.token = ""
@@ -8015,7 +8015,7 @@ class TestPathAExceptionSwallow:
         """If `get_model_config` raises mid-flight (e.g. unexpected hw
         string), the event-arrival live-snap-refresh path logs a warning
         and continues — no propagation."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         cam_entity = MagicMock()
         coord = _make_push_coord2(camera_entities={CAM_ID: cam_entity})
@@ -8034,7 +8034,7 @@ class TestPathAExceptionSwallow:
                 new=AsyncMock(return_value=session),
             ),
             patch(
-                "custom_components.bosch_shc_camera.models.get_model_config",
+                "custom_components.bosch_smart_camera.models.get_model_config",
                 side_effect=RuntimeError("simulated unknown hw"),
             ),
         ):
@@ -8047,7 +8047,7 @@ class TestPathBExceptionSwallow:
         """If `save_snapshot` raises mid-flight while persisting the
         event-image bytes from the cloud, the alert-image step logs a
         warning and continues — no propagation, no FCM listener crash."""
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         cam_b = MagicMock(cached_image=None, last_image_fetch=0.0)
         coord = _make_push_coord2(
@@ -8163,7 +8163,9 @@ class TestHandleFcmPushMarkEventsReadException:
             new=AsyncMock(return_value=session),
         ):
             with patch(f"{MODULE}.async_mark_events_read", side_effect=_raising_mark):
-                from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+                from custom_components.bosch_smart_camera.fcm import (
+                    async_handle_fcm_push,
+                )
 
                 # Must complete without raising
                 await async_handle_fcm_push(coord)
@@ -8200,7 +8202,9 @@ class TestHandleFcmPushMarkEventsReadException:
             new=AsyncMock(return_value=session),
         ):
             with patch(f"{MODULE}.async_mark_events_read", side_effect=_track_mark):
-                from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+                from custom_components.bosch_smart_camera.fcm import (
+                    async_handle_fcm_push,
+                )
 
                 await async_handle_fcm_push(coord)
 
@@ -8230,7 +8234,7 @@ class TestLocalSaveExceptionBranches:
         session.get = MagicMock(return_value=_resp_cm(404))
 
         async def _run():
-            from custom_components.bosch_shc_camera.fcm import async_send_alert
+            from custom_components.bosch_smart_camera.fcm import async_send_alert
 
             with patch(
                 f"{MODULE}.async_get_bosch_cloud_session",
@@ -8273,7 +8277,7 @@ class TestLocalSaveExceptionBranches:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -8318,7 +8322,7 @@ class TestLocalSaveExceptionBranches:
         session = MagicMock()
         session.get = MagicMock(return_value=_resp_cm(404))
 
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         with patch(
             f"{MODULE}.async_get_bosch_cloud_session",
@@ -8364,10 +8368,10 @@ class TestLocalSaveExceptionBranches:
         async def _timeout_wait_for(coro, timeout=None):
             raise TimeoutError()
 
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         with caplog.at_level(
-            logging.WARNING, logger="custom_components.bosch_shc_camera.fcm"
+            logging.WARNING, logger="custom_components.bosch_smart_camera.fcm"
         ):
             with patch(
                 f"{MODULE}.async_get_bosch_cloud_session",
@@ -8417,10 +8421,10 @@ class TestLocalSaveExceptionBranches:
         async def _error_wait_for(coro, timeout=None):
             raise OSError("no space left on device")
 
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         with caplog.at_level(
-            logging.WARNING, logger="custom_components.bosch_shc_camera.fcm"
+            logging.WARNING, logger="custom_components.bosch_smart_camera.fcm"
         ):
             with patch(
                 f"{MODULE}.async_get_bosch_cloud_session",
@@ -8469,7 +8473,7 @@ class TestStopFcmPushCancellation:
         import asyncio
         import threading
 
-        from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_stop_fcm_push
 
         async def _dummy():
             return None
@@ -8493,7 +8497,7 @@ class TestStopFcmPushCancellation:
 class TestAsyncStopFcmPush:
     @pytest.mark.asyncio
     async def test_no_client_no_op(self):
-        from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_stop_fcm_push
 
         coord = _stub_coord(fcm_client=None, fcm_running=False)
         # Must NOT raise
@@ -8501,7 +8505,7 @@ class TestAsyncStopFcmPush:
 
     @pytest.mark.asyncio
     async def test_stops_running_client_and_clears_state(self):
-        from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_stop_fcm_push
 
         client = MagicMock()
         client.stop = AsyncMock()
@@ -8518,7 +8522,7 @@ class TestAsyncStopFcmPush:
     async def test_client_stop_exception_swallowed(self):
         """Library may throw on stop (idempotency, race) — must not
         propagate. State must still be cleared."""
-        from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_stop_fcm_push
 
         client = MagicMock()
         client.stop = AsyncMock(side_effect=RuntimeError("library bug"))
@@ -8530,7 +8534,7 @@ class TestAsyncStopFcmPush:
     @pytest.mark.asyncio
     async def test_cancellation_propagates(self):
         """asyncio.CancelledError must NOT be swallowed (HA shutdown)."""
-        from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_stop_fcm_push
 
         client = MagicMock()
         client.stop = AsyncMock(side_effect=asyncio.CancelledError())
@@ -8550,7 +8554,7 @@ class TestAsyncStopFcmPush:
 
         Upstream library issue: github.com/sdb9696/firebase-messaging #33.
         """
-        from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_stop_fcm_push
 
         client = MagicMock()
         client.stop = AsyncMock()
@@ -8571,7 +8575,7 @@ class TestAsyncStopFcmPush:
         """If a library task hangs (e.g. SSL shutdown deadlock), stop must
         still return within ~10 s so the user-facing UI toggle doesn't freeze.
         State is cleared even when the gather times out."""
-        from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_stop_fcm_push
 
         client = MagicMock()
         client.stop = AsyncMock()
@@ -8584,7 +8588,7 @@ class TestAsyncStopFcmPush:
         coord = _stub_coord(fcm_client=client, fcm_running=True)
 
         with patch(
-            "custom_components.bosch_shc_camera.fcm.asyncio.wait_for",
+            "custom_components.bosch_smart_camera.fcm.asyncio.wait_for",
             AsyncMock(side_effect=TimeoutError()),
         ):
             await async_stop_fcm_push(coord)
@@ -8597,7 +8601,7 @@ class TestAsyncStopFcmPush:
     async def test_no_tasks_attr_backcompat(self):
         """Older firebase-messaging versions may not expose ``client.tasks``.
         Stop must work via getattr() default and not raise AttributeError."""
-        from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_stop_fcm_push
 
         client = MagicMock(spec=["stop"])  # no `tasks` attribute
         client.stop = AsyncMock()
@@ -8609,7 +8613,7 @@ class TestAsyncStopFcmPush:
 class TestAsyncPersistFcmCreds:
     @pytest.mark.asyncio
     async def test_writes_creds_to_entry_data(self):
-        from custom_components.bosch_shc_camera.fcm import _async_persist_fcm_creds
+        from custom_components.bosch_smart_camera.fcm import _async_persist_fcm_creds
 
         coord = _stub_coord()
         coord.entry = SimpleNamespace(data={"existing": "value"})
@@ -8626,7 +8630,7 @@ class TestAsyncPersistFcmCreds:
     async def test_swallows_exception(self):
         """async_update_entry might fire during HA shutdown — must not
         crash the FCM listener."""
-        from custom_components.bosch_shc_camera.fcm import _async_persist_fcm_creds
+        from custom_components.bosch_smart_camera.fcm import _async_persist_fcm_creds
 
         coord = _stub_coord()
         coord.hass.config_entries.async_update_entry = MagicMock(
@@ -8639,7 +8643,7 @@ class TestAsyncPersistFcmCreds:
 class TestRegisterFcmWithBosch:
     @pytest.mark.asyncio
     async def test_no_token_returns_false(self):
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         coord = _stub_coord(token="")
         ok = await register_fcm_with_bosch(coord)
@@ -8647,7 +8651,7 @@ class TestRegisterFcmWithBosch:
 
     @pytest.mark.asyncio
     async def test_no_fcm_token_returns_false(self):
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         coord = _stub_coord(fcm_token="")
         ok = await register_fcm_with_bosch(coord)
@@ -8655,7 +8659,7 @@ class TestRegisterFcmWithBosch:
 
     @pytest.mark.asyncio
     async def test_success_returns_true(self):
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         @asynccontextmanager
         async def _post(*args, **kw):
@@ -8667,7 +8671,7 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord()
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
@@ -8676,7 +8680,7 @@ class TestRegisterFcmWithBosch:
     @pytest.mark.asyncio
     async def test_500_unknown_error_returns_false(self):
         """HTTP 500 with an unrecognised error body must return False and log a warning."""
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         @asynccontextmanager
         async def _post(*args, **kw):
@@ -8689,7 +8693,7 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord()
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
@@ -8702,7 +8706,7 @@ class TestRegisterFcmWithBosch:
         """HTTP 500 with unknown error must include the body in the WARNING log."""
         import logging
 
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         bosch_body = (
             '{"status":500,"error":"sh:unknown.error","message":"Something else."}'
@@ -8719,11 +8723,11 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord()
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             with caplog.at_level(
-                logging.WARNING, logger="custom_components.bosch_shc_camera.fcm"
+                logging.WARNING, logger="custom_components.bosch_smart_camera.fcm"
             ):
                 ok = await register_fcm_with_bosch(coord)
 
@@ -8741,7 +8745,7 @@ class TestRegisterFcmWithBosch:
         FCM push still works — treat as success and save the token so the
         next restart skips the POST entirely (avoids persistent 500 spam).
         """
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         already_registered_body = '{"status":500,"error":"sh:internal.error","message":"Internal Server Error."}'
 
@@ -8756,7 +8760,7 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord(entry=SimpleNamespace(data={}))
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
@@ -8777,13 +8781,13 @@ class TestRegisterFcmWithBosch:
 
     @pytest.mark.asyncio
     async def test_timeout_returns_false(self):
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         session = MagicMock()
         session.post = MagicMock(side_effect=TimeoutError())
         coord = _stub_coord()
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
@@ -8792,7 +8796,7 @@ class TestRegisterFcmWithBosch:
     @pytest.mark.asyncio
     async def test_device_type_picks_android_for_other(self):
         """Anything other than `ios` → ANDROID."""
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         captured = {}
 
@@ -8807,7 +8811,7 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord(fcm_push_mode="android")
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             await register_fcm_with_bosch(coord)
@@ -8826,7 +8830,7 @@ class TestRegisterFcmWithBosch:
         The updated guard preserves this fast-path for the steady-state case where
         both the token and the ANDROID marker are present.
         """
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         post_called = []
 
@@ -8852,7 +8856,7 @@ class TestRegisterFcmWithBosch:
             ),
         )
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
@@ -8864,7 +8868,7 @@ class TestRegisterFcmWithBosch:
     @pytest.mark.asyncio
     async def test_new_token_triggers_post(self):
         """When no saved token exists (first run), the POST fires normally."""
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         post_called = []
 
@@ -8879,7 +8883,7 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord(entry=SimpleNamespace(data={}))
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
@@ -8889,7 +8893,7 @@ class TestRegisterFcmWithBosch:
     @pytest.mark.asyncio
     async def test_success_saves_registered_token(self):
         """On HTTP 204, save fcm_registered_token to the config entry for future skip."""
-        from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+        from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
         @asynccontextmanager
         async def _post(*args, **kw):
@@ -8901,7 +8905,7 @@ class TestRegisterFcmWithBosch:
         session.post = _post
         coord = _stub_coord(entry=SimpleNamespace(data={}))
         with patch(
-            "custom_components.bosch_shc_camera.fcm.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.fcm.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
             ok = await register_fcm_with_bosch(coord)
@@ -8919,7 +8923,7 @@ class TestRegisterFcmWithBosch:
 
 class TestGetAlertServices2:
     def test_per_type_value_returned(self):
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = _stub_coord(
             options={
@@ -8933,7 +8937,7 @@ class TestGetAlertServices2:
         """`system` and `information` fall back to `alert_notify_service`
         when their per-type field is empty. Pin so a refactor can't drop
         the fallback (would silently disable system alerts)."""
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = _stub_coord(
             options={
@@ -8948,7 +8952,7 @@ class TestGetAlertServices2:
         """`screenshot` and `video` are opt-in — empty means skip that
         step entirely. Pin so they never silently inherit the
         alert_notify_service value."""
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = _stub_coord(
             options={
@@ -8960,7 +8964,7 @@ class TestGetAlertServices2:
         assert out == []
 
     def test_video_does_not_fall_back(self):
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = _stub_coord(
             options={
@@ -8972,7 +8976,7 @@ class TestGetAlertServices2:
         assert out == []
 
     def test_strips_whitespace_around_entries(self):
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = _stub_coord(
             options={
@@ -8983,7 +8987,7 @@ class TestGetAlertServices2:
         assert out == ["notify.a", "notify.b"]
 
     def test_empty_strings_filtered(self):
-        from custom_components.bosch_shc_camera.fcm import get_alert_services
+        from custom_components.bosch_smart_camera.fcm import get_alert_services
 
         coord = _stub_coord(
             options={
@@ -8996,13 +9000,13 @@ class TestGetAlertServices2:
 
 class TestBuildNotifyData2:
     def test_message_only_no_attachment(self):
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         out = build_notify_data("notify.test_user", "Hi")
         assert out == {"message": "Hi"}
 
     def test_title_added_when_present(self):
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         out = build_notify_data("notify.test_user", "Body", title="Title")
         assert out["title"] == "Title"
@@ -9011,7 +9015,7 @@ class TestBuildNotifyData2:
     def test_mobile_app_uses_local_url(self):
         """HA Companion App reads images from /local/ URL — files served
         from /config/www/bosch_alerts/. Must NOT use file path."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         out = build_notify_data(
             "notify.mobile_app_iphone",
@@ -9023,7 +9027,7 @@ class TestBuildNotifyData2:
         assert out["data"]["push"]["sound"] == "default"
 
     def test_telegram_uses_photo_field(self):
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         out = build_notify_data(
             "notify.telegram_bot",
@@ -9034,7 +9038,7 @@ class TestBuildNotifyData2:
         assert out["data"]["caption"] == "Audio-Alarm"
 
     def test_signal_uses_attachments(self):
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         out = build_notify_data(
             "notify.signal_thomas",
@@ -9045,7 +9049,7 @@ class TestBuildNotifyData2:
 
     def test_email_uses_attachments(self):
         """Generic notify provider (email, etc.) → attachments path."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         out = build_notify_data(
             "notify.email_admin",
@@ -9057,7 +9061,7 @@ class TestBuildNotifyData2:
     def test_mobile_app_extracts_basename(self):
         """The image URL uses /local/bosch_alerts/{basename} — the file
         path's directory is stripped. Pin so HA can find the file."""
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         out = build_notify_data(
             "notify.mobile_app_xy",
@@ -9069,14 +9073,14 @@ class TestBuildNotifyData2:
 
 class TestWriteFile:
     def test_writes_bytes_to_file(self, tmp_path: Path) -> None:
-        from custom_components.bosch_shc_camera.fcm import _write_file
+        from custom_components.bosch_smart_camera.fcm import _write_file
 
         target = tmp_path / "snap.jpg"
         _write_file(str(target), b"\xff\xd8DATA\xff\xd9")
         assert target.read_bytes() == b"\xff\xd8DATA\xff\xd9"
 
     def test_overwrites_existing(self, tmp_path: Path) -> None:
-        from custom_components.bosch_shc_camera.fcm import _write_file
+        from custom_components.bosch_smart_camera.fcm import _write_file
 
         target = tmp_path / "snap.jpg"
         target.write_bytes(b"OLD")
@@ -9201,7 +9205,7 @@ def _run_send_alert(
     session_override=None,
 ):
     """Helper: call async_send_alert with a mocked aiohttp session."""
-    from custom_components.bosch_shc_camera.fcm import async_send_alert
+    from custom_components.bosch_smart_camera.fcm import async_send_alert
 
     session = session_override or MagicMock()
     session.get = MagicMock(return_value=_resp_cm_alert(404))
@@ -9213,11 +9217,11 @@ def _run_send_alert(
         ):
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(
-                    "custom_components.bosch_shc_camera.smb.sync_smb_upload",
+                    "custom_components.bosch_smart_camera.smb.sync_smb_upload",
                     MagicMock(),
                 ):
                     with patch(
-                        "custom_components.bosch_shc_camera.smb.sync_local_save",
+                        "custom_components.bosch_smart_camera.smb.sync_local_save",
                         MagicMock(),
                     ):
                         await async_send_alert(
@@ -9260,7 +9264,7 @@ class TestAsyncSendAlertScreenshotVideoOnlyConfig:
         )
 
         async def _run():
-            from custom_components.bosch_shc_camera.fcm import async_send_alert
+            from custom_components.bosch_smart_camera.fcm import async_send_alert
 
             with (
                 patch(
@@ -9305,7 +9309,7 @@ class TestAsyncSendAlertScreenshotVideoOnlyConfig:
         )
 
         async def _run():
-            from custom_components.bosch_shc_camera.fcm import async_send_alert
+            from custom_components.bosch_smart_camera.fcm import async_send_alert
 
             with (
                 patch(
@@ -9361,7 +9365,7 @@ class TestInstallFcmNoiseFilterIdempotent:
     a second filter instance to the firebase_messaging logger."""
 
     def _get_filter_count(self, logger_name: str) -> int:
-        from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+        from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
         fcm_logger = logging.getLogger(logger_name)
         return sum(1 for f in fcm_logger.filters if isinstance(f, _FCMNoiseFilter))
@@ -9369,14 +9373,14 @@ class TestInstallFcmNoiseFilterIdempotent:
     def setup_method(self):
         """Clear any pre-existing filters before each test."""
         fcm_logger = logging.getLogger("firebase_messaging.fcmpushclient")
-        from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+        from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
         fcm_logger.filters = [
             f for f in fcm_logger.filters if not isinstance(f, _FCMNoiseFilter)
         ]
 
     def test_first_call_installs_one_filter(self):
-        from custom_components.bosch_shc_camera.fcm import _install_fcm_noise_filter
+        from custom_components.bosch_smart_camera.fcm import _install_fcm_noise_filter
 
         _install_fcm_noise_filter()
         count = self._get_filter_count("firebase_messaging.fcmpushclient")
@@ -9385,7 +9389,7 @@ class TestInstallFcmNoiseFilterIdempotent:
         )
 
     def test_second_call_is_idempotent(self):
-        from custom_components.bosch_shc_camera.fcm import _install_fcm_noise_filter
+        from custom_components.bosch_smart_camera.fcm import _install_fcm_noise_filter
 
         _install_fcm_noise_filter()
         _install_fcm_noise_filter()
@@ -9395,7 +9399,7 @@ class TestInstallFcmNoiseFilterIdempotent:
         )
 
     def test_many_calls_stay_at_one(self):
-        from custom_components.bosch_shc_camera.fcm import _install_fcm_noise_filter
+        from custom_components.bosch_smart_camera.fcm import _install_fcm_noise_filter
 
         for _ in range(5):
             _install_fcm_noise_filter()
@@ -9423,7 +9427,7 @@ class TestAsyncStartFcmPushEarlyExits:
     @pytest.mark.asyncio
     async def test_already_running_returns_immediately(self):
         """fcm_running=True → function must return without touching options."""
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         coord = self._stub(fcm_running=True)
         # options intentionally absent so any options read would KeyError
@@ -9434,7 +9438,7 @@ class TestAsyncStartFcmPushEarlyExits:
     @pytest.mark.asyncio
     async def test_fcm_push_disabled_returns_early(self):
         """enable_fcm_push=False → debug log + return, no Firebase import."""
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         coord = self._stub(options={"enable_fcm_push": False})
         # Ensure firebase_messaging is NOT importable so we'd know if it tried
@@ -9446,7 +9450,7 @@ class TestAsyncStartFcmPushEarlyExits:
     @pytest.mark.asyncio
     async def test_import_error_returns_with_warning(self):
         """firebase_messaging ImportError → log warning + return."""
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         coord = self._stub()
 
@@ -9469,7 +9473,7 @@ class TestAsyncStartFcmPushEarlyExits:
     @pytest.mark.asyncio
     async def test_fcm_disabled_default_false(self):
         """options with no 'enable_fcm_push' key → defaults to False → early exit."""
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         coord = self._stub(options={})  # key absent → .get(..., False) = False
         await async_start_fcm_push(coord)
@@ -9483,7 +9487,7 @@ class TestAsyncHandleFcmPushNoToken:
 
     @pytest.mark.asyncio
     async def test_no_token_returns_without_http(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(token="")
         session = MagicMock()
@@ -9499,7 +9503,7 @@ class TestAsyncHandleFcmPushNoToken:
 
     @pytest.mark.asyncio
     async def test_none_token_returns_without_http(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(token=None)
         session = MagicMock()
@@ -9515,7 +9519,7 @@ class TestAsyncHandleFcmPushNoToken:
 
     @pytest.mark.asyncio
     async def test_no_token_does_not_update_listeners(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(token="")
         await async_handle_fcm_push(coord)
@@ -9531,7 +9535,7 @@ class TestAsyncHandleFcmPushHttpBranches:
 
     @pytest.mark.asyncio
     async def test_http_404_skips_cam(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3()
         session = MagicMock()
@@ -9548,7 +9552,7 @@ class TestAsyncHandleFcmPushHttpBranches:
 
     @pytest.mark.asyncio
     async def test_http_500_skips_cam(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3()
         session = MagicMock()
@@ -9565,7 +9569,7 @@ class TestAsyncHandleFcmPushHttpBranches:
 
     @pytest.mark.asyncio
     async def test_empty_events_list_skips_cam(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3()
         session = MagicMock()
@@ -9582,7 +9586,7 @@ class TestAsyncHandleFcmPushHttpBranches:
 
     @pytest.mark.asyncio
     async def test_http_401_skips_cam(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3()
         session = MagicMock()
@@ -9604,7 +9608,7 @@ class TestAsyncHandleFcmPushDedup:
 
     @pytest.mark.asyncio
     async def test_recent_sent_id_skips_alert(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         recent_ts = time.monotonic() - 10.0  # 10 s ago → within 60 s window
         coord = _make_push_coord3(
@@ -9631,7 +9635,7 @@ class TestAsyncHandleFcmPushDedup:
     @pytest.mark.asyncio
     async def test_stale_sent_id_beyond_60s_not_deduped(self):
         """If the same event_id was sent >60s ago it is NOT deduped (window expired)."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         old_ts = time.monotonic() - 70.0  # 70 s ago → outside 60 s window
         coord = _make_push_coord3(
@@ -9655,7 +9659,7 @@ class TestAsyncHandleFcmPushDedup:
     @pytest.mark.asyncio
     async def test_old_entries_evicted_from_sent_cache(self):
         """alert_sent_ids entries older than 120s are evicted on each call."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         very_old_ts = time.monotonic() - 130.0
         coord = _make_push_coord3(
@@ -9693,7 +9697,7 @@ class TestAsyncHandleFcmPushNewEvent:
 
     @pytest.mark.asyncio
     async def test_new_event_fires_motion_bus_event(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "MOVEMENT")
@@ -9716,7 +9720,7 @@ class TestAsyncHandleFcmPushNewEvent:
         Bosch's own event timestamp plus our local receipt time, so a
         cloud-side vs. integration-side delay can be told apart from logs.
         """
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "PERSON")
@@ -9753,7 +9757,7 @@ class TestAsyncHandleFcmPushNewEvent:
         must still surface events[1]'s own timestamp, or the exact pair
         this diagnostic exists to compare would never appear together.
         """
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = [
@@ -9792,7 +9796,7 @@ class TestAsyncHandleFcmPushNewEvent:
 
     @pytest.mark.asyncio
     async def test_new_event_creates_alert_task(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "MOVEMENT")
@@ -9811,7 +9815,7 @@ class TestAsyncHandleFcmPushNewEvent:
 
     @pytest.mark.asyncio
     async def test_new_event_updates_last_event_id(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id")
@@ -9829,7 +9833,7 @@ class TestAsyncHandleFcmPushNewEvent:
 
     @pytest.mark.asyncio
     async def test_new_event_calls_async_update_listeners(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id")
@@ -9856,7 +9860,7 @@ class TestAsyncHandleFcmPushNewEvent:
         by staying silent on a missing baseline. The `if` branch must be
         taken (and set last_event_ids as its own side effect), not the
         `elif`."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={})  # no prev_id
         events = _one_event3("first-id")
@@ -9883,7 +9887,7 @@ class TestAsyncHandleFcmPushNewEvent:
         actually fixing it — must stay silent (bootstrap-only), same as
         the pre-fix `elif` fallback did for every case, not just this
         one."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={})  # no prev_id
         coord._download_started_at = 1_800_000_000.0  # 2027-01-15T08:00:00Z
@@ -9916,7 +9920,7 @@ class TestAsyncHandleFcmPushNewEvent:
         so `_event_predates_session` must fail open (False) rather than
         block a genuinely new event just because Bosch's payload was
         missing the field this time."""
-        from custom_components.bosch_shc_camera.fcm import _event_predates_session
+        from custom_components.bosch_smart_camera.fcm import _event_predates_session
 
         coord = SimpleNamespace(_download_started_at=1_800_000_000.0)
         assert _event_predates_session(coord, {"timestamp": ""}) is False
@@ -9927,7 +9931,7 @@ class TestAsyncHandleFcmPushNewEvent:
         """A timestamp that doesn't match Bosch's expected ISO shape must
         not raise out of the FCM dispatch path — fail open (False), same
         as the missing-timestamp case above."""
-        from custom_components.bosch_shc_camera.fcm import _event_predates_session
+        from custom_components.bosch_smart_camera.fcm import _event_predates_session
 
         coord = SimpleNamespace(_download_started_at=1_800_000_000.0)
         # 19 chars (passes the length gate) but not a valid date/time, so
@@ -9940,7 +9944,7 @@ class TestAsyncHandleFcmPushNewEvent:
     @pytest.mark.asyncio
     async def test_same_event_id_as_prev_does_not_fire(self):
         """newest_id == prev_id → neither if nor elif branch → no bus fire."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "same-id"})
         events = _one_event3("same-id")
@@ -9958,7 +9962,7 @@ class TestAsyncHandleFcmPushNewEvent:
 
     @pytest.mark.asyncio
     async def test_audio_alarm_fires_audio_alarm_event(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "AUDIO_ALARM")
@@ -9988,7 +9992,7 @@ class TestAsyncHandleFcmPushMarkEventsRead:
     @pytest.mark.asyncio
     async def test_mark_events_read_true_schedules_task(self):
         """mark_events_read=True → a background task is created (fire-and-forget)."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(
             last_event_ids={CAM_ID: "old-id"},
@@ -10037,7 +10041,7 @@ class TestAsyncHandleFcmPushMarkEventsRead:
 
     @pytest.mark.asyncio
     async def test_mark_events_read_false_skips_mark(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(
             last_event_ids={CAM_ID: "old-id"},
@@ -10062,7 +10066,7 @@ class TestAsyncHandleFcmPushMarkEventsRead:
     @pytest.mark.asyncio
     async def test_mark_events_read_absent_skips_mark(self):
         """mark_events_read key absent (default) → option.get returns False → skip."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(
             last_event_ids={CAM_ID: "old-id"},
@@ -10090,7 +10094,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
 
     @pytest.mark.asyncio
     async def test_movement_with_person_tag_fires_person_event(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "MOVEMENT", ["PERSON"])
@@ -10112,7 +10116,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
 
     @pytest.mark.asyncio
     async def test_movement_without_person_tag_fires_motion_event(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "MOVEMENT", [])  # no PERSON tag
@@ -10135,7 +10139,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
     @pytest.mark.asyncio
     async def test_pure_person_event_fires_person_event(self):
         """eventType=PERSON (rare, but possible) fires person without upgrade path."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "PERSON", [])
@@ -10155,7 +10159,7 @@ class TestAsyncHandleFcmPushPersonUpgrade:
     @pytest.mark.asyncio
     async def test_person_tag_on_non_movement_not_upgraded(self):
         """PERSON tag only upgrades MOVEMENT, not AUDIO_ALARM etc."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         events = _one_event3("new-id", "AUDIO_ALARM", ["PERSON"])
@@ -10182,7 +10186,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
 
     @pytest.mark.asyncio
     async def test_master_switch_off_blocks_alert(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         master_state = MagicMock()
         master_state.state = "off"
@@ -10208,7 +10212,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
 
     @pytest.mark.asyncio
     async def test_master_switch_on_allows_alert(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         master_state = MagicMock()
         master_state.state = "on"
@@ -10231,7 +10235,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
     @pytest.mark.asyncio
     async def test_no_switch_state_allows_alert(self):
         """states.get returns None (switch not found) → no blocking → alert allowed."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord3(last_event_ids={CAM_ID: "old-id"})
         coord.hass.states.get = MagicMock(return_value=None)  # switch not found
@@ -10252,7 +10256,7 @@ class TestAsyncHandleFcmPushNotificationSwitch:
     @pytest.mark.asyncio
     async def test_type_specific_switch_off_blocks_alert(self):
         """Master ON but type-specific switch OFF → alert blocked."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         master_on = MagicMock()
         master_on.state = "on"
@@ -10291,7 +10295,7 @@ class TestAsyncMarkEventsRead:
 
     @pytest.mark.asyncio
     async def test_empty_list_returns_true(self):
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _make_push_coord3(token="tok")
         result = await async_mark_events_read(coord, [])
@@ -10299,7 +10303,7 @@ class TestAsyncMarkEventsRead:
 
     @pytest.mark.asyncio
     async def test_no_token_returns_false(self):
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _make_push_coord3(token="")
         result = await async_mark_events_read(coord, ["event-1"])
@@ -10307,7 +10311,7 @@ class TestAsyncMarkEventsRead:
 
     @pytest.mark.asyncio
     async def test_none_token_returns_false(self):
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _make_push_coord3(token=None)
         result = await async_mark_events_read(coord, ["event-1"])
@@ -10315,7 +10319,7 @@ class TestAsyncMarkEventsRead:
 
     @pytest.mark.asyncio
     async def test_http_200_returns_true(self):
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _make_push_coord3()
         session = MagicMock()
@@ -10329,7 +10333,7 @@ class TestAsyncMarkEventsRead:
 
     @pytest.mark.asyncio
     async def test_http_201_returns_true(self):
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _make_push_coord3()
         session = MagicMock()
@@ -10343,7 +10347,7 @@ class TestAsyncMarkEventsRead:
 
     @pytest.mark.asyncio
     async def test_http_204_returns_true(self):
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _make_push_coord3()
         session = MagicMock()
@@ -10357,7 +10361,7 @@ class TestAsyncMarkEventsRead:
 
     @pytest.mark.asyncio
     async def test_http_500_returns_false(self):
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _make_push_coord3()
         session = MagicMock()
@@ -10371,7 +10375,7 @@ class TestAsyncMarkEventsRead:
 
     @pytest.mark.asyncio
     async def test_exception_returns_false(self):
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _make_push_coord3()
         session = MagicMock()
@@ -10386,7 +10390,7 @@ class TestAsyncMarkEventsRead:
     @pytest.mark.asyncio
     async def test_partial_success_returns_true(self):
         """Multiple events: one fails, one succeeds → any success → True."""
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _make_push_coord3()
         call_count = 0
@@ -10410,7 +10414,7 @@ class TestAsyncMarkEventsRead:
 
     @pytest.mark.asyncio
     async def test_all_fail_returns_false(self):
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _make_push_coord3()
 
@@ -10432,7 +10436,7 @@ class TestAsyncMarkEventsRead:
     @pytest.mark.asyncio
     async def test_put_sends_correct_payload(self):
         """PUT body must include id + isRead=True."""
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _make_push_coord3()
         captured = {}
@@ -10642,7 +10646,7 @@ class TestStep2ImageUrlRetry:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -10676,7 +10680,7 @@ class TestStep2ImageUrlRetry:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -10710,7 +10714,7 @@ class TestStep2ImageUrlRetry:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -10772,7 +10776,7 @@ class TestStep2ImageUrlRetry:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -10820,7 +10824,7 @@ class TestStep2ImageUrlRetry:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -10882,7 +10886,7 @@ class TestStep2SnapshotDownload:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -10952,7 +10956,7 @@ class TestStep2SnapshotDownload:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11006,7 +11010,7 @@ class TestStep2SnapshotDownload:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11071,7 +11075,7 @@ class TestStep2SnapshotDownload:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11137,7 +11141,7 @@ class TestStep3VideoClipDirect:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11188,7 +11192,7 @@ class TestStep3VideoClipDirect:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11253,7 +11257,7 @@ class TestStep3VideoDownload:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11314,7 +11318,7 @@ class TestStep3VideoDownload:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11358,7 +11362,7 @@ class TestMarkEventsReadInSendAlert:
                     with patch(f"{MODULE}.async_mark_events_read", mock_mark):
                         with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                             with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                                from custom_components.bosch_shc_camera.fcm import (
+                                from custom_components.bosch_smart_camera.fcm import (
                                     async_send_alert,
                                 )
 
@@ -11396,7 +11400,7 @@ class TestMarkEventsReadInSendAlert:
                     with patch(f"{MODULE}.async_mark_events_read", mock_mark):
                         with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                             with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                                from custom_components.bosch_shc_camera.fcm import (
+                                from custom_components.bosch_smart_camera.fcm import (
                                     async_send_alert,
                                 )
 
@@ -11438,7 +11442,7 @@ class TestSmbUploadGate:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", mock_smb):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11483,7 +11487,7 @@ class TestSmbUploadGate:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", mock_smb):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11527,7 +11531,7 @@ class TestSmbUploadGate:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11566,7 +11570,7 @@ class TestLocalSaveGate:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", mock_save):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11611,7 +11615,7 @@ class TestLocalSaveGate:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", mock_save):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11653,7 +11657,7 @@ class TestLocalSaveGate:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11713,7 +11717,7 @@ class TestFileCleanup:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11780,7 +11784,7 @@ class TestFileCleanup:
                 with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                     with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                         with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -11855,7 +11859,7 @@ async def _run_alert2(
     timestamp="2026-05-07T10:00:00.000Z",
     session_override=None,
 ):
-    from custom_components.bosch_shc_camera.fcm import async_send_alert
+    from custom_components.bosch_smart_camera.fcm import async_send_alert
 
     session = session_override or MagicMock()
     if session_override is None:
@@ -11947,7 +11951,7 @@ class TestAsyncStartFcmPushModeBranches:
     @pytest.mark.asyncio
     async def test_polling_mode_returns_immediately(self):
         """push_mode='polling' → no FcmPushClient created, function returns."""
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         coord = self._coord_stub(push_mode="polling")
 
@@ -11964,7 +11968,7 @@ class TestAsyncStartFcmPushModeBranches:
     @pytest.mark.asyncio
     async def test_unknown_mode_uses_ios_fallback(self):
         """push_mode='badvalue' → falls through to ios _try_fcm_with_mode."""
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         coord = self._coord_stub(push_mode="weirdmode")
 
@@ -12001,7 +12005,7 @@ class TestAsyncStartFcmPushModeBranches:
         except ImportError:
             pytest.skip("firebase_messaging not installed")
 
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         coord = self._coord_stub(push_mode="ios")
         coord.entry = self._entry_stub()
@@ -12040,7 +12044,7 @@ class TestAsyncStartFcmPushModeBranches:
         except ImportError:
             pytest.skip("firebase_messaging not installed")
 
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         coord = self._coord_stub(push_mode="ios")
         coord.entry = self._entry_stub()
@@ -12079,7 +12083,7 @@ class TestStartFcmEarlyExits:
 
     @pytest.mark.asyncio
     async def test_start_fcm_already_running_returns(self):
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         coord = SimpleNamespace(
             fcm_running=True,
@@ -12089,7 +12093,7 @@ class TestStartFcmEarlyExits:
 
     @pytest.mark.asyncio
     async def test_start_fcm_option_disabled_returns(self):
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         coord = SimpleNamespace(
             fcm_running=False,
@@ -12100,7 +12104,7 @@ class TestStartFcmEarlyExits:
     @pytest.mark.asyncio
     async def test_start_fcm_option_missing_defaults_to_disabled(self):
         """options.get("enable_fcm_push", False) == False → early return."""
-        from custom_components.bosch_shc_camera.fcm import async_start_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_start_fcm_push
 
         coord = SimpleNamespace(
             fcm_running=False,
@@ -12113,7 +12117,7 @@ class TestFetchFirebaseConfig:
     @pytest.mark.asyncio
     async def test_fetch_firebase_config_returns_dict(self):
         """fetch_firebase_config must return a dict with the Bosch Firebase project info."""
-        from custom_components.bosch_shc_camera.fcm import fetch_firebase_config
+        from custom_components.bosch_smart_camera.fcm import fetch_firebase_config
 
         hass = MagicMock()
         result = await fetch_firebase_config(hass)
@@ -12129,7 +12133,7 @@ class TestFetchFirebaseConfig:
     @pytest.mark.asyncio
     async def test_fetch_firebase_config_hass_arg_ignored(self):
         """fetch_firebase_config is a pure function; hass argument is accepted but unused."""
-        from custom_components.bosch_shc_camera.fcm import fetch_firebase_config
+        from custom_components.bosch_smart_camera.fcm import fetch_firebase_config
 
         result1 = await fetch_firebase_config(MagicMock())
         result2 = await fetch_firebase_config(None)  # type: ignore[arg-type]
@@ -12143,7 +12147,7 @@ class TestHandlePushSnapshotTask:
 
     @pytest.mark.asyncio
     async def test_camera_entity_snapshot_triggered(self):
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord4(
             last_event_ids={CAM_ID: "old-evt"},
@@ -12184,7 +12188,7 @@ class TestHandlePushExceptions:
     @pytest.mark.asyncio
     async def test_timeout_error_caught_per_camera(self):
         """asyncio.TimeoutError during push event fetch must not propagate."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord4()
         session = MagicMock()
@@ -12202,7 +12206,7 @@ class TestHandlePushExceptions:
     @pytest.mark.asyncio
     async def test_generic_exception_caught_per_camera(self):
         """Any unexpected exception during push must be caught and logged, not raised."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord4()
         session = MagicMock()
@@ -12220,7 +12224,7 @@ class TestHandlePushExceptions:
     @pytest.mark.asyncio
     async def test_handle_fcm_push_mark_events_read_exception_swallowed(self):
         """Exception from async_mark_events_read inside async_handle_fcm_push is silently swallowed."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         CAM = "CAM1"
         event_id = "evt-001"
@@ -12274,7 +12278,7 @@ class TestHandlePushExceptions:
     @pytest.mark.asyncio
     async def test_non200_response_skips_camera(self):
         """Non-200 response → camera skipped, no event processing."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord4()
         session = MagicMock()
@@ -12295,7 +12299,7 @@ class TestHandlePushExceptions:
     @pytest.mark.asyncio
     async def test_empty_prev_id_sets_last_event_id(self):
         """newest_id present + prev_id=None → last_event_ids[cam] set to newest_id."""
-        from custom_components.bosch_shc_camera.fcm import async_handle_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_handle_fcm_push
 
         coord = _make_push_coord4()
         # No prior event ID → prev_id will be None (key absent)
@@ -12323,7 +12327,7 @@ class TestOnFcmPushDroppedWhenNotRunning:
     """_on_fcm_push: if fcm_running=False, push is silently dropped."""
 
     def test_push_dropped_when_not_running(self):
-        from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+        from custom_components.bosch_smart_camera.fcm import _on_fcm_push
 
         coord = _make_push_coord4()
         coord.fcm_running = False
@@ -12334,7 +12338,7 @@ class TestOnFcmPushDroppedWhenNotRunning:
         coord.hass.loop.call_soon_threadsafe.assert_not_called()
 
     def test_push_accepted_when_running(self):
-        from custom_components.bosch_shc_camera.fcm import _on_fcm_push
+        from custom_components.bosch_smart_camera.fcm import _on_fcm_push
 
         coord = _make_push_coord4()
         coord.fcm_running = True
@@ -12367,7 +12371,7 @@ class TestNotifyTypeExceptionHandled:
     @pytest.mark.asyncio
     async def test_send_alert_step1_exception_causes_early_return(self):
         """When _notify_type raises in step 1, async_send_alert logs and returns early."""
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         hass = MagicMock()
         hass.config.config_dir = "/tmp"
@@ -12418,7 +12422,7 @@ class TestNotifyTypeExceptionHandled:
         actual per-call success; this test configures step 1's service and
         makes every call to it raise, then asserts the log says the
         message was NOT delivered, not "sent"."""
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         hass = MagicMock()
         hass.config.config_dir = "/tmp"
@@ -12444,7 +12448,7 @@ class TestNotifyTypeExceptionHandled:
                 f"{MODULE}.async_get_bosch_cloud_session",
                 new=AsyncMock(return_value=session),
             ),
-            caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.fcm"),
+            caplog.at_level("DEBUG", logger="custom_components.bosch_smart_camera.fcm"),
         ):
             await async_send_alert(
                 coord,
@@ -12473,7 +12477,7 @@ class TestNotifyTypeExceptionHandled:
         """Control case for the fix above: with MULTIPLE configured services
         where at least one call succeeds, the step must still be logged as
         sent — the fix tracks "at least one delivered", not "all delivered"."""
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         call_log: list[str] = []
 
@@ -12506,7 +12510,7 @@ class TestNotifyTypeExceptionHandled:
                 f"{MODULE}.async_get_bosch_cloud_session",
                 new=AsyncMock(return_value=session),
             ),
-            caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.fcm"),
+            caplog.at_level("DEBUG", logger="custom_components.bosch_smart_camera.fcm"),
         ):
             await async_send_alert(
                 coord,
@@ -12589,7 +12593,7 @@ class TestStep2RefetchExceptionContinues:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -12621,7 +12625,7 @@ class TestStep2RefetchTransportErrorContinues:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -12663,7 +12667,7 @@ class TestStep2NoImageData:
     @pytest.mark.asyncio
     async def test_send_alert_step2_exception_is_swallowed(self):
         """Exception during snapshot download in step 2 is caught and does not propagate."""
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         call_count = 0
 
@@ -12751,7 +12755,7 @@ class TestStep3DirectClipDetected:
 
     @pytest.mark.asyncio
     async def test_send_alert_direct_clip_mp4_detected(self):
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         svc_calls: list[tuple] = []
 
@@ -12844,7 +12848,7 @@ class TestAlertStepSkipLogging:
         """The exact reported scenario: alert_notify_video="" while every
         other alert_notify_* is configured. No notify.* service call must
         happen for the video step, and the log must say so — not "sent"."""
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         clip_dl_resp = MagicMock()
         clip_dl_resp.status = 200
@@ -12882,7 +12886,7 @@ class TestAlertStepSkipLogging:
             ),
             patch(f"{MODULE}.asyncio.sleep", new=AsyncMock()),
             patch(f"{MODULE}._write_file"),
-            caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.fcm"),
+            caplog.at_level("DEBUG", logger="custom_components.bosch_smart_camera.fcm"),
         ):
             await async_send_alert(
                 coord,
@@ -12924,7 +12928,7 @@ class TestAlertStepSkipLogging:
         """Control case: with alert_notify_video actually set, the service IS
         called and the log correctly says "sent" — the fix must not
         regress the working case into always saying "skipped"."""
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         clip_dl_resp = MagicMock()
         clip_dl_resp.status = 200
@@ -12962,7 +12966,7 @@ class TestAlertStepSkipLogging:
             ),
             patch(f"{MODULE}.asyncio.sleep", new=AsyncMock()),
             patch(f"{MODULE}._write_file"),
-            caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.fcm"),
+            caplog.at_level("DEBUG", logger="custom_components.bosch_smart_camera.fcm"),
         ):
             await async_send_alert(
                 coord,
@@ -13025,9 +13029,9 @@ class TestAlertStepSkipLogging:
             patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock),
             patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()),
             patch(f"{SMB_MODULE}.sync_local_save", MagicMock()),
-            caplog.at_level("DEBUG", logger="custom_components.bosch_shc_camera.fcm"),
+            caplog.at_level("DEBUG", logger="custom_components.bosch_smart_camera.fcm"),
         ):
-            from custom_components.bosch_shc_camera.fcm import async_send_alert
+            from custom_components.bosch_smart_camera.fcm import async_send_alert
 
             await async_send_alert(
                 coord,
@@ -13135,7 +13139,7 @@ class TestStep3ClipDoneAfterPoll:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -13185,7 +13189,7 @@ class TestStep3PollException:
     @pytest.mark.asyncio
     async def test_send_alert_step3_exception_is_swallowed(self):
         """Exception during clip download in step 3 is caught and does not propagate."""
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         hass = MagicMock()
         hass.config.config_dir = "/tmp"
@@ -13315,7 +13319,7 @@ class TestMarkEventsReadGate:
     @pytest.mark.asyncio
     async def test_send_alert_mark_events_read_exception_swallowed(self):
         """async_mark_events_read called after step-3 must swallow exceptions."""
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         hass = MagicMock()
         hass.config.config_dir = "/tmp"
@@ -13403,7 +13407,7 @@ class TestSmbUploadTimeout:
                             f"{MODULE}.asyncio.wait_for",
                             side_effect=_selective_wait_for,
                         ):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -13418,11 +13422,11 @@ class TestSmbUploadTimeout:
     @pytest.mark.asyncio
     async def test_send_alert_smb_exception_swallowed(self):
         """Generic (non-timeout) exception from SMB upload is swallowed."""
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         async def _executor_job(fn, *args, **kw):
             # Allow os.makedirs (or any non-SMB call) to succeed; only raise for sync_smb_upload
-            from custom_components.bosch_shc_camera.smb import sync_smb_upload
+            from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
             if fn is sync_smb_upload:
                 raise RuntimeError("smb boom")
@@ -13504,7 +13508,7 @@ class TestLocalSaveTimeout:
                             f"{MODULE}.asyncio.wait_for",
                             side_effect=_selective_wait_for,
                         ):
-                            from custom_components.bosch_shc_camera.fcm import (
+                            from custom_components.bosch_smart_camera.fcm import (
                                 async_send_alert,
                             )
 
@@ -13519,10 +13523,10 @@ class TestLocalSaveTimeout:
     @pytest.mark.asyncio
     async def test_send_alert_local_save_exception_swallowed(self):
         """Generic (non-timeout) exception from local save is swallowed."""
-        from custom_components.bosch_shc_camera.fcm import async_send_alert
+        from custom_components.bosch_smart_camera.fcm import async_send_alert
 
         async def _executor_job(fn, *args, **kw):
-            from custom_components.bosch_shc_camera.smb import sync_local_save
+            from custom_components.bosch_smart_camera.smb import sync_local_save
 
             if fn is sync_local_save:
                 raise RuntimeError("local save boom")
@@ -13606,7 +13610,7 @@ class TestCleanupOsError:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -13650,7 +13654,7 @@ class TestLocalSaveWithoutNotifyService:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -13690,7 +13694,9 @@ class TestLocalSaveWithoutNotifyService:
         ):
             with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
-                    from custom_components.bosch_shc_camera.fcm import async_send_alert
+                    from custom_components.bosch_smart_camera.fcm import (
+                        async_send_alert,
+                    )
 
                     await async_send_alert(
                         coord,
@@ -13735,7 +13741,7 @@ class TestLocalSaveEnableToggle:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -13777,7 +13783,7 @@ class TestLocalSaveEnableToggle:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload", MagicMock()):
                     with patch(f"{SMB_MODULE}.sync_local_save") as mock_save:
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -13846,7 +13852,7 @@ class TestEventIdNotOverwrittenByConcurrentPush:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload") as mock_smb:
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -13890,7 +13896,7 @@ class TestEventIdNotOverwrittenByConcurrentPush:
             with patch(f"{MODULE}.asyncio.sleep", new_callable=AsyncMock):
                 with patch(f"{SMB_MODULE}.sync_smb_upload") as mock_smb:
                     with patch(f"{SMB_MODULE}.sync_local_save", MagicMock()):
-                        from custom_components.bosch_shc_camera.fcm import (
+                        from custom_components.bosch_smart_camera.fcm import (
                             async_send_alert,
                         )
 
@@ -13994,7 +14000,7 @@ class TestStaleClientCredsCallbackIgnoredAfterHardHeal:
 
     @pytest.mark.asyncio
     async def test_stale_client_creds_callback_is_ignored_after_hard_heal(self) -> None:
-        from custom_components.bosch_shc_camera import fcm
+        from custom_components.bosch_smart_camera import fcm
 
         _StubFcmClient.instances = []
         coord = _make_creds_race_coord()
@@ -14097,7 +14103,7 @@ class TestPeriodicReRegistration:
             f"{MODULE}.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
-            from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+            from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
             result = await register_fcm_with_bosch(coord)
         assert result is True
@@ -14106,7 +14112,7 @@ class TestPeriodicReRegistration:
     async def test_stale_registration_reposts(self) -> None:
         """Token unchanged but fcm_registered_at older than the interval → re-POST
         and refresh the timestamp (heal a dropped Bosch registration)."""
-        from custom_components.bosch_shc_camera.fcm import (
+        from custom_components.bosch_smart_camera.fcm import (
             FCM_REREGISTER_INTERVAL_SEC,
             register_fcm_with_bosch,
         )
@@ -14145,7 +14151,7 @@ class TestPeriodicReRegistration:
             f"{MODULE}.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
-            from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+            from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
             assert await register_fcm_with_bosch(coord) is True
         session.post.assert_called_once()
@@ -14158,7 +14164,7 @@ class TestPeriodicReRegistration:
             f"{MODULE}.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ):
-            from custom_components.bosch_shc_camera.fcm import register_fcm_with_bosch
+            from custom_components.bosch_smart_camera.fcm import register_fcm_with_bosch
 
             assert await register_fcm_with_bosch(coord) is True
         last = coord._update_calls[-1]["data"]
@@ -14189,8 +14195,8 @@ class TestForceHardHeal:
 
     async def test_supervisor_clears_force_hard_flag_and_purges_creds(self) -> None:
         """`fcm_force_hard_heal=True` → supervisor purges fcm_* creds and clears flag."""
-        from custom_components.bosch_shc_camera import fcm
-        from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+        from custom_components.bosch_smart_camera import fcm
+        from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
         _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
         coord = _make_heal_coord(
@@ -14238,8 +14244,8 @@ class TestForceHardHeal:
     async def test_no_force_flag_skips_hard_heal(self) -> None:
         """Without fcm_force_hard_heal=True and no staleness markers, supervisor
         takes the soft path — async_update_entry (cred-purge) is NOT called."""
-        from custom_components.bosch_shc_camera import fcm
-        from custom_components.bosch_shc_camera.fcm import _FCMNoiseFilter
+        from custom_components.bosch_smart_camera import fcm
+        from custom_components.bosch_smart_camera.fcm import _FCMNoiseFilter
 
         _FCMNoiseFilter._SHARED_STALENESS_TIMESTAMPS.clear()
         coord = _make_heal_coord(
@@ -14272,8 +14278,8 @@ def test_fast_poll_is_inside_default_motion_window() -> None:
     """A polled event must be younger than the motion window when first seen,
     otherwise the motion sensor can never turn ON in polling-only (push-dead)
     mode."""
-    import custom_components.bosch_shc_camera.coordinator as init_mod
-    from custom_components.bosch_shc_camera.const import DEFAULT_MOTION_ACTIVE_WINDOW
+    import custom_components.bosch_smart_camera.coordinator as init_mod
+    from custom_components.bosch_smart_camera.const import DEFAULT_MOTION_ACTIVE_WINDOW
 
     assert init_mod.FCM_DOWN_EVENT_POLL_SEC < DEFAULT_MOTION_ACTIVE_WINDOW
 
@@ -14364,7 +14370,7 @@ class TestAlertSentIdsEviction:
         fcm_src = (
             Path(__file__).parent.parent
             / "custom_components"
-            / "bosch_shc_camera"
+            / "bosch_smart_camera"
             / "fcm.py"
         )
         text = fcm_src.read_text()
@@ -14398,7 +14404,7 @@ class TestFCMWatchdogTempo:
         explicitly started."""
         import inspect
 
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+        from custom_components.bosch_smart_camera import BoschCameraCoordinator
 
         src = inspect.getsource(BoschCameraCoordinator.__init__)
         assert_in_source(
@@ -14413,7 +14419,7 @@ class TestFCMWatchdogTempo:
         fcm_src = (
             Path(__file__).parent.parent
             / "custom_components"
-            / "bosch_shc_camera"
+            / "bosch_smart_camera"
             / "fcm.py"
         )
         text = fcm_src.read_text()
@@ -14643,7 +14649,7 @@ class TestAlertPipelinePrefetch:
         captured_prefetch: list[bytes | None] = []
 
         async def _fake_executor(fn: Any, *args: Any, **kwargs: Any) -> None:
-            from custom_components.bosch_shc_camera import smb as _smb_mod
+            from custom_components.bosch_smart_camera import smb as _smb_mod
 
             if fn is _smb_mod.sync_smb_upload:
                 prefetch = args[3] if len(args) > 3 else kwargs.get("prefetched_image")
@@ -14686,7 +14692,7 @@ class TestAlertPipelinePrefetch:
         captured_prefetch: list[bytes | None] = []
 
         async def _fake_executor(fn: Any, *args: Any, **kwargs: Any) -> None:
-            from custom_components.bosch_shc_camera import smb as _smb_mod
+            from custom_components.bosch_smart_camera import smb as _smb_mod
 
             if fn is _smb_mod.sync_smb_upload:
                 prefetch = args[3] if len(args) > 3 else kwargs.get("prefetched_image")
@@ -15518,7 +15524,7 @@ def _resp_cm_freshinstall(status, body=b"", content_type="image/jpeg"):
 
 def _make_fresh_coord(**overrides):
     """Coordinator with default options (empty entry.options merged with defaults)."""
-    from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+    from custom_components.bosch_smart_camera.const import DEFAULT_OPTIONS
 
     hass = MagicMock()
     hass.config.config_dir = "/tmp/test-ha"
@@ -15654,7 +15660,7 @@ class TestFcmAlertSentIdsSentinel:
     def test_fcm_dedup_default_not_zero(self):
         import inspect
 
-        from custom_components.bosch_shc_camera import fcm as fcm_mod
+        from custom_components.bosch_smart_camera import fcm as fcm_mod
 
         src = inspect.getsource(fcm_mod)
         assert "_sent.get(newest_id, 0.0) > _now - 60.0" not in src, (
@@ -15665,7 +15671,7 @@ class TestFcmAlertSentIdsSentinel:
     def test_fcm_dedup_uses_neginf_default(self):
         import inspect
 
-        from custom_components.bosch_shc_camera import fcm as fcm_mod
+        from custom_components.bosch_smart_camera import fcm as fcm_mod
 
         src = inspect.getsource(fcm_mod)
         assert '_sent.get(newest_id, float("-inf")) > _now - 60.0' in src, (
@@ -15889,7 +15895,7 @@ class TestPatchClassBroadFallback:
     used to re-raise instead of degrading to the vanilla FcmPushClient."""
 
     def test_unexpected_exception_falls_back_to_none_not_raise(self):
-        from custom_components.bosch_shc_camera.fcm import _QuietFcmPushClient
+        from custom_components.bosch_smart_camera.fcm import _QuietFcmPushClient
 
         with patch.object(
             _QuietFcmPushClient,
@@ -16079,7 +16085,7 @@ class TestStopFcmPushIdempotentWithoutRunning:
 
     @pytest.mark.asyncio
     async def test_stop_closes_client_even_when_not_running(self):
-        from custom_components.bosch_shc_camera.fcm import async_stop_fcm_push
+        from custom_components.bosch_smart_camera.fcm import async_stop_fcm_push
 
         client = MagicMock(spec=["stop", "tasks"])
         client.stop = AsyncMock()
@@ -16152,7 +16158,7 @@ class TestEnsureFcmSupervisorShuttingDownGuard:
 
     @pytest.mark.asyncio
     async def test_no_supervisor_spawned_while_shutting_down(self):
-        from custom_components.bosch_shc_camera.fcm import async_ensure_fcm_supervisor
+        from custom_components.bosch_smart_camera.fcm import async_ensure_fcm_supervisor
 
         coord = _stub_coord(options={"enable_fcm_push": True}, nvr_shutting_down=True)
         await async_ensure_fcm_supervisor(coord)
@@ -16162,7 +16168,7 @@ class TestEnsureFcmSupervisorShuttingDownGuard:
 
     @pytest.mark.asyncio
     async def test_supervisor_spawned_normally_when_not_shutting_down(self):
-        from custom_components.bosch_shc_camera.fcm import async_ensure_fcm_supervisor
+        from custom_components.bosch_smart_camera.fcm import async_ensure_fcm_supervisor
 
         coord = _stub_coord(options={"enable_fcm_push": True}, nvr_shutting_down=False)
         with patch.object(
@@ -16664,7 +16670,7 @@ class TestNotificationSwitchLookupUsesEntityRegistry:
             await async_handle_fcm_push(coord)
 
         fake_registry.async_get_entity_id.assert_any_call(
-            "switch", "bosch_shc_camera", f"bosch_shc_notifications_{CAM_ID.lower()}"
+            "switch", "bosch_smart_camera", f"bosch_shc_notifications_{CAM_ID.lower()}"
         )
         # Master switch resolved to OFF -> the alert must have been
         # suppressed, meaning async_send_alert was never scheduled.
@@ -16717,7 +16723,7 @@ class TestFCMCoordinatorMixinPassesThroughCamId:
 
     @pytest.mark.asyncio
     async def test_mixin_forwards_cam_id(self):
-        from custom_components.bosch_shc_camera.fcm import FCMCoordinatorMixin
+        from custom_components.bosch_smart_camera.fcm import FCMCoordinatorMixin
 
         captured: dict[str, Any] = {}
 
@@ -16846,7 +16852,7 @@ class TestAlertImageUrlEncoded:
     under that exact name."""
 
     def test_special_char_filename_is_percent_encoded_in_url(self):
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         out = build_notify_data(
             "notify.mobile_app_iphone",
@@ -16859,7 +16865,7 @@ class TestAlertImageUrlEncoded:
         assert "#" not in url
 
     def test_plain_filename_unaffected(self):
-        from custom_components.bosch_shc_camera.fcm import build_notify_data
+        from custom_components.bosch_smart_camera.fcm import build_notify_data
 
         out = build_notify_data(
             "notify.mobile_app_iphone",
@@ -17094,7 +17100,7 @@ class TestAsyncMarkEventsRead401Visible:
 
     @pytest.mark.asyncio
     async def test_401_logged_distinctly(self, caplog):
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _stub_coord(token="tok-A")
         session = MagicMock()
@@ -17117,7 +17123,7 @@ class TestAsyncMarkEventsRead401Visible:
 
     @pytest.mark.asyncio
     async def test_partial_failure_visible_via_debug_log(self, caplog):
-        from custom_components.bosch_shc_camera.fcm import async_mark_events_read
+        from custom_components.bosch_smart_camera.fcm import async_mark_events_read
 
         coord = _stub_coord(token="tok-A")
         call_count = [0]

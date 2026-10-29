@@ -55,11 +55,11 @@ from bosch_shc_camera_client.tls_proxy import start_tls_proxy, stop_tls_proxy
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.bosch_shc_camera import BoschCameraCoordinator
-from custom_components.bosch_shc_camera.go2rtc_client import (
+from custom_components.bosch_smart_camera import BoschCameraCoordinator
+from custom_components.bosch_smart_camera.go2rtc_client import (
     unregister_go2rtc_stream,
 )
-from custom_components.bosch_shc_camera.session_state import (
+from custom_components.bosch_smart_camera.session_state import (
     BoolFieldView,
     CacheFieldView,
 )
@@ -85,7 +85,7 @@ async def _no_tls_open_connection(
 CAM_A = "11111111-1111-1111-1111-111111111111"
 CAM_B = "22222222-2222-2222-2222-222222222222"
 
-_PATCH_SESSION = "custom_components.bosch_shc_camera.async_get_bosch_cloud_session"
+_PATCH_SESSION = "custom_components.bosch_smart_camera.async_get_bosch_cloud_session"
 
 
 # Shared coordinator-stub / fake-response helpers.
@@ -787,11 +787,11 @@ class TestTokenRefreshCascadeChaos:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                "custom_components.bosch_smart_camera.async_get_bosch_cloud_session",
                 new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
-                "custom_components.bosch_shc_camera.config_flow._do_refresh",
+                "custom_components.bosch_smart_camera.config_flow._do_refresh",
                 new=AsyncMock(return_value=None),  # every attempt "completes" but fails
             ),
             patch("asyncio.sleep", new=AsyncMock()),
@@ -822,11 +822,11 @@ class TestTokenRefreshCascadeChaos:
         new_tokens = {"access_token": "tok-RECOVERED", "refresh_token": "rfr-RECOVERED"}
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                "custom_components.bosch_smart_camera.async_get_bosch_cloud_session",
                 new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
-                "custom_components.bosch_shc_camera.config_flow._do_refresh",
+                "custom_components.bosch_smart_camera.config_flow._do_refresh",
                 new=AsyncMock(return_value=new_tokens),
             ),
         ):
@@ -845,7 +845,9 @@ class TestTokenRefreshCascadeChaos:
         of outage/transient/success faults, none may hang past a bounded
         timeout, none may raise an unclassified exception, and the lock
         must end up free."""
-        from custom_components.bosch_shc_camera.config_flow import AuthServerOutageError
+        from custom_components.bosch_smart_camera.config_flow import (
+            AuthServerOutageError,
+        )
 
         rng = random.Random(20260713)
         coord = _make_coord_token_chaos()
@@ -866,16 +868,16 @@ class TestTokenRefreshCascadeChaos:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                "custom_components.bosch_smart_camera.async_get_bosch_cloud_session",
                 new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
-                "custom_components.bosch_shc_camera.config_flow._do_refresh",
+                "custom_components.bosch_smart_camera.config_flow._do_refresh",
                 new=_mixed_refresh,
             ),
             patch("asyncio.sleep", new=AsyncMock()),
-            patch("custom_components.bosch_shc_camera.ir.async_create_issue"),
-            patch("custom_components.bosch_shc_camera.ir.async_delete_issue"),
+            patch("custom_components.bosch_smart_camera.ir.async_create_issue"),
+            patch("custom_components.bosch_smart_camera.ir.async_delete_issue"),
         ):
             results = await asyncio.wait_for(
                 asyncio.gather(
@@ -1051,8 +1053,8 @@ class TestSmbFtpUnreachableChaos:
         transfer loop raises TimeoutError, but `socket.setdefaulttimeout`
         must still be reset to None afterward — no leaked global state for
         the next executor job on the same thread."""
-        from custom_components.bosch_shc_camera import smb
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera import smb
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_coord()
         fake_smb = _fake_smb_module()
@@ -1086,8 +1088,8 @@ class TestSmbFtpUnreachableChaos:
         block the event loop past the outer bound, and the very next
         upload attempt right after (same executor, same coordinator) must
         succeed normally."""
-        from custom_components.bosch_shc_camera import smb
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera import smb
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_coord()
         fake_smb = _fake_smb_module()

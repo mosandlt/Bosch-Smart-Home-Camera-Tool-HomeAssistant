@@ -10,10 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import custom_components.bosch_shc_camera.number as number_mod
-import custom_components.bosch_shc_camera.select as select_mod
-import custom_components.bosch_shc_camera.switch as switch_mod
-from custom_components.bosch_shc_camera.local_data_interface import STATE_ACTIVE
+import custom_components.bosch_smart_camera.number as number_mod
+import custom_components.bosch_smart_camera.select as select_mod
+import custom_components.bosch_smart_camera.switch as switch_mod
+from custom_components.bosch_smart_camera.local_data_interface import STATE_ACTIVE
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 

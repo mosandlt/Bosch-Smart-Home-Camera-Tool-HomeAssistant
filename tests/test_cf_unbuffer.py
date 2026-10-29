@@ -26,7 +26,7 @@ class TestWrapPlaylistResponse:
 
     def test_plain_content_type_gets_event_stream_prefix(self):
         """application/vnd.apple.mpegurl → text/event-stream; x-actual=…"""
-        from custom_components.bosch_shc_camera.cf_unbuffer import (
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
             _FLUSH_PREFIX,
             _wrap_playlist_response,
         )
@@ -45,7 +45,7 @@ class TestWrapPlaylistResponse:
 
     def test_already_event_stream_is_not_double_wrapped(self):
         """Idempotency — text/event-stream must not be wrapped again."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import (
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
             _wrap_playlist_response,
         )
 
@@ -62,7 +62,7 @@ class TestWrapPlaylistResponse:
 
     def test_none_response_passes_through(self):
         """None from the original view must not crash the wrapper."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import (
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
             _wrap_playlist_response,
         )
 
@@ -70,7 +70,7 @@ class TestWrapPlaylistResponse:
 
     def test_response_without_headers_passes_through(self):
         """Objects without headers attribute (e.g. StreamResponse) must pass through unchanged."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import (
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
             _wrap_playlist_response,
         )
 
@@ -86,7 +86,9 @@ class TestEmitSegmentChunked:
         """Body bytes are written to a StreamResponse — Content-Length header removed."""
         from aiohttp import web
 
-        from custom_components.bosch_shc_camera.cf_unbuffer import _emit_segment_chunked
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
+            _emit_segment_chunked,
+        )
 
         body = b"\x00\x01\x02\x03" * 16
         resp = MagicMock()
@@ -105,7 +107,7 @@ class TestEmitSegmentChunked:
         stream_resp.write_eof = AsyncMock()
         stream_resp.headers = {}
 
-        with patch("custom_components.bosch_shc_camera.cf_unbuffer.web") as mock_web:
+        with patch("custom_components.bosch_smart_camera.cf_unbuffer.web") as mock_web:
             mock_web.StreamResponse.return_value = stream_resp
             result = await _emit_segment_chunked(request, resp)
 
@@ -122,7 +124,9 @@ class TestEmitSegmentChunked:
     @pytest.mark.asyncio
     async def test_empty_body_returns_original_response(self):
         """No body → original response returned unchanged (nothing to re-emit)."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _emit_segment_chunked
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
+            _emit_segment_chunked,
+        )
 
         resp = MagicMock()
         resp.body = b""
@@ -133,7 +137,9 @@ class TestEmitSegmentChunked:
     @pytest.mark.asyncio
     async def test_none_body_returns_original_response(self):
         """None body → original response returned unchanged."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _emit_segment_chunked
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
+            _emit_segment_chunked,
+        )
 
         resp = MagicMock()
         resp.body = None
@@ -147,7 +153,7 @@ class TestWrapperIdempotency:
 
     def test_playlist_wrapper_sets_cf_wrapped_flag(self):
         """_make_playlist_wrapper sets _cf_wrapped on the returned coroutine."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import (
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
             _make_playlist_wrapper,
         )
 
@@ -161,7 +167,9 @@ class TestWrapperIdempotency:
 
     def test_segment_wrapper_sets_cf_wrapped_flag(self):
         """_make_segment_wrapper sets _cf_wrapped on the returned coroutine."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
+            _make_segment_wrapper,
+        )
 
         async def fake_handle(self, request, *a, **kw):
             return MagicMock()
@@ -179,7 +187,7 @@ class TestRegisterIdempotency:
         """After the first register(), _PATCHED is True — second call returns immediately."""
         import types
 
-        import custom_components.bosch_shc_camera.cf_unbuffer as mod
+        import custom_components.bosch_smart_camera.cf_unbuffer as mod
 
         # Reset module-level state for a clean test
         original_patched = mod._PATCHED
@@ -228,7 +236,7 @@ class TestRegisterIdempotency:
         """register() must not raise when homeassistant.components.stream.hls is missing."""
         import types
 
-        import custom_components.bosch_shc_camera.cf_unbuffer as mod
+        import custom_components.bosch_smart_camera.cf_unbuffer as mod
 
         original_patched = mod._PATCHED
         mod._PATCHED = False
@@ -264,7 +272,7 @@ class TestStructuralContract:
 
     def test_playlist_class_names_pinned(self):
         """_PLAYLIST_VIEW_CLASSES must target the two HLS manifest views."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import (
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
             _PLAYLIST_VIEW_CLASSES,
         )
 
@@ -275,7 +283,9 @@ class TestStructuralContract:
 
     def test_segment_class_names_pinned(self):
         """_SEGMENT_VIEW_CLASSES must target all three binary-segment views."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _SEGMENT_VIEW_CLASSES
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
+            _SEGMENT_VIEW_CLASSES,
+        )
 
         for name in ("HlsInitView", "HlsPartView", "HlsSegmentView"):
             assert name in _SEGMENT_VIEW_CLASSES, (
@@ -284,7 +294,7 @@ class TestStructuralContract:
 
     def test_flush_prefix_starts_with_text_event_stream(self):
         """cloudflared's HasPrefix check matches 'text/event-stream' — prefix must not change."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _FLUSH_PREFIX
+        from custom_components.bosch_smart_camera.cf_unbuffer import _FLUSH_PREFIX
 
         assert _FLUSH_PREFIX.startswith("text/event-stream"), (
             "_FLUSH_PREFIX must start with 'text/event-stream' for cloudflared to flush"
@@ -301,8 +311,8 @@ class TestWrapperInvocation:
         cloudflare_tunnel_hls_unbuffer option) is on; the rewrite is opt-in
         (hacs/default#8181 review round 2), unlike wrapper installation
         itself, which stays unconditional."""
-        import custom_components.bosch_shc_camera.cf_unbuffer as cf_unbuffer_mod
-        from custom_components.bosch_shc_camera.cf_unbuffer import (
+        import custom_components.bosch_smart_camera.cf_unbuffer as cf_unbuffer_mod
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
             _make_playlist_wrapper,
         )
 
@@ -326,8 +336,8 @@ class TestWrapperInvocation:
         """unbuffer_enabled=False (the default) → orig_handle still runs
         (so hls_access stamping/downstream behavior is unaffected) but the
         Content-Type must NOT be rewritten."""
-        import custom_components.bosch_shc_camera.cf_unbuffer as cf_unbuffer_mod
-        from custom_components.bosch_shc_camera.cf_unbuffer import (
+        import custom_components.bosch_smart_camera.cf_unbuffer as cf_unbuffer_mod
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
             _make_playlist_wrapper,
         )
 
@@ -347,8 +357,10 @@ class TestWrapperInvocation:
         as StreamResponse, only when unbuffer_enabled is on."""
         from aiohttp import web
 
-        import custom_components.bosch_shc_camera.cf_unbuffer as cf_unbuffer_mod
-        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+        import custom_components.bosch_smart_camera.cf_unbuffer as cf_unbuffer_mod
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
+            _make_segment_wrapper,
+        )
 
         async def fake_handle(self, request, *a, **kw):
             return web.Response(
@@ -365,7 +377,7 @@ class TestWrapperInvocation:
         stream_resp.headers = {}
 
         with (
-            patch("custom_components.bosch_shc_camera.cf_unbuffer.web") as mock_web,
+            patch("custom_components.bosch_smart_camera.cf_unbuffer.web") as mock_web,
             patch.object(cf_unbuffer_mod, "_UNBUFFER_ENABLED", True),
         ):
             mock_web.StreamResponse.return_value = stream_resp
@@ -381,8 +393,10 @@ class TestWrapperInvocation:
         NOT be re-emitted as chunked — passed through unchanged."""
         from aiohttp import web
 
-        import custom_components.bosch_shc_camera.cf_unbuffer as cf_unbuffer_mod
-        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+        import custom_components.bosch_smart_camera.cf_unbuffer as cf_unbuffer_mod
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
+            _make_segment_wrapper,
+        )
 
         orig_resp = web.Response(
             body=b"\x00" * 32, headers={"Content-Type": "video/mp4"}
@@ -399,7 +413,9 @@ class TestWrapperInvocation:
     @pytest.mark.asyncio
     async def test_segment_wrapper_passes_through_non_response(self):
         """If orig_handle returns something that's not a web.Response (e.g. StreamResponse) → pass through."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
+            _make_segment_wrapper,
+        )
 
         sentinel = object()
 
@@ -413,7 +429,9 @@ class TestWrapperInvocation:
     @pytest.mark.asyncio
     async def test_segment_wrapper_passes_through_none(self):
         """orig_handle returning None → wrapper returns None (no chunked re-emit attempt)."""
-        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
+            _make_segment_wrapper,
+        )
 
         async def fake_handle(self, request, *a, **kw):
             return None
@@ -429,8 +447,10 @@ class TestWrapperInvocation:
         chunked re-emit, so this needs _UNBUFFER_ENABLED patched True."""
         from aiohttp import web
 
-        import custom_components.bosch_shc_camera.cf_unbuffer as cf_unbuffer_mod
-        from custom_components.bosch_shc_camera.cf_unbuffer import _make_segment_wrapper
+        import custom_components.bosch_smart_camera.cf_unbuffer as cf_unbuffer_mod
+        from custom_components.bosch_smart_camera.cf_unbuffer import (
+            _make_segment_wrapper,
+        )
 
         original = web.Response(body=b"x" * 16, headers={"Content-Type": "video/mp4"})
 
@@ -443,7 +463,7 @@ class TestWrapperInvocation:
         wrapped = _make_segment_wrapper(fake_handle)
         with (
             patch(
-                "custom_components.bosch_shc_camera.cf_unbuffer._emit_segment_chunked",
+                "custom_components.bosch_smart_camera.cf_unbuffer._emit_segment_chunked",
                 side_effect=boom,
             ),
             patch.object(cf_unbuffer_mod, "_UNBUFFER_ENABLED", True),
@@ -461,7 +481,7 @@ class TestRegisterEdgeBranches:
         """A view class without a `handle` method must be skipped (continue branch)."""
         import types
 
-        import custom_components.bosch_shc_camera.cf_unbuffer as mod
+        import custom_components.bosch_smart_camera.cf_unbuffer as mod
 
         original_patched = mod._PATCHED
         mod._PATCHED = False
@@ -514,7 +534,7 @@ class TestRegisterEdgeBranches:
         """If a handle already carries _cf_wrapped, the wrapper must not be applied a second time."""
         import types
 
-        import custom_components.bosch_shc_camera.cf_unbuffer as mod
+        import custom_components.bosch_smart_camera.cf_unbuffer as mod
 
         original_patched = mod._PATCHED
         mod._PATCHED = False
@@ -565,7 +585,7 @@ class TestRegisterEdgeBranches:
 
     def test_register_swallows_outer_exception(self):
         """If the import of homeassistant.components.stream.hls raises, register() logs at WARNING and returns."""
-        import custom_components.bosch_shc_camera.cf_unbuffer as mod
+        import custom_components.bosch_smart_camera.cf_unbuffer as mod
 
         original_patched = mod._PATCHED
         mod._PATCHED = False
@@ -612,12 +632,12 @@ class TestRegisterLogLevel:
         """register() success path uses _LOGGER.info, not _LOGGER.warning."""
         from pathlib import Path
 
-        import custom_components.bosch_shc_camera.cf_unbuffer as mod
+        import custom_components.bosch_smart_camera.cf_unbuffer as mod
 
         src = (
             Path(__file__).parent.parent
             / "custom_components"
-            / "bosch_shc_camera"
+            / "bosch_smart_camera"
             / "cf_unbuffer.py"
         ).read_text()
         # After the _PATCHED = True assignment, the next log call must be info()
@@ -640,7 +660,7 @@ class TestRegisterLogLevel:
         src = (
             Path(__file__).parent.parent
             / "custom_components"
-            / "bosch_shc_camera"
+            / "bosch_smart_camera"
             / "cf_unbuffer.py"
         ).read_text()
         # Find the outer `except Exception` block (register()'s top-level handler
@@ -668,7 +688,7 @@ class TestHlsAccessTracking:
     signal (HA's Stream.available stays True for the whole session)."""
 
     def _cf(self):
-        import custom_components.bosch_shc_camera.cf_unbuffer as cf
+        import custom_components.bosch_smart_camera.cf_unbuffer as cf
 
         cf._HLS_ACCESS.clear()
         return cf
@@ -720,13 +740,13 @@ class TestHlsEvictionRaised:
     """
 
     def _cf(self):
-        import custom_components.bosch_shc_camera.cf_unbuffer as cf
+        import custom_components.bosch_smart_camera.cf_unbuffer as cf
 
         cf._HLS_ACCESS.clear()
         return cf
 
     def test_cap_raised_to_256(self):
-        from custom_components.bosch_shc_camera.cf_unbuffer import _HLS_ACCESS_MAX
+        from custom_components.bosch_smart_camera.cf_unbuffer import _HLS_ACCESS_MAX
 
         assert _HLS_ACCESS_MAX == 256
 
@@ -736,7 +756,7 @@ class TestHlsEvictionRaised:
         unbuf_src = (
             Path(__file__).parent.parent
             / "custom_components"
-            / "bosch_shc_camera"
+            / "bosch_smart_camera"
             / "cf_unbuffer.py"
         ).read_text()
         assert "_HLS_ACTIVE_WINDOW" in unbuf_src
@@ -796,7 +816,7 @@ class TestNoteHlsAccessGaps:
     """Empty-token guard and second-oldest eviction branch in _note_hls_access."""
 
     def _cf(self):
-        import custom_components.bosch_shc_camera.cf_unbuffer as cf
+        import custom_components.bosch_smart_camera.cf_unbuffer as cf
 
         cf._HLS_ACCESS.clear()
         return cf

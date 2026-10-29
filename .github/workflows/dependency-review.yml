@@ -3,7 +3,7 @@ on:
   pull_request:
     paths:
       - "requirements*.txt"
-      - "custom_components/bosch_shc_camera/manifest.json"
+      - "custom_components/bosch_smart_camera/manifest.json"
       - "package.json"
       - "package-lock.json"
 permissions:

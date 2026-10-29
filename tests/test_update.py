@@ -42,7 +42,7 @@ class TestFirmwareUpdate:
     def test_construction(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u._attr_translation_key == "firmware_update"
@@ -53,7 +53,7 @@ class TestFirmwareUpdate:
     ):
         from homeassistant.helpers.entity import EntityCategory
 
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u._attr_entity_category == EntityCategory.DIAGNOSTIC
@@ -62,7 +62,7 @@ class TestFirmwareUpdate:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """No firmware_cache → fallback to info.firmwareVersion."""
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.installed_version == "9.40.25"
@@ -71,7 +71,7 @@ class TestFirmwareUpdate:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         stub_coord.firmware_cache[CAM_ID] = {"current": "9.41.00"}
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.installed_version == "9.41.00"
@@ -83,7 +83,7 @@ class TestFirmwareUpdate:
             "current": "9.40.25",
             "upToDate": True,
         }
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.latest_version == "9.40.25"
@@ -96,7 +96,7 @@ class TestFirmwareUpdate:
             "upToDate": False,
             "update": "9.41.00",
         }
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.latest_version == "9.41.00"
@@ -109,7 +109,7 @@ class TestFirmwareUpdate:
             "current": "9.40.25",
             "upToDate": False,
         }
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.latest_version == "update available"
@@ -118,7 +118,7 @@ class TestFirmwareUpdate:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         stub_coord.firmware_cache[CAM_ID] = {"updating": True}
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.in_progress is True
@@ -126,7 +126,7 @@ class TestFirmwareUpdate:
     def test_in_progress_default_false(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.in_progress is False
@@ -134,7 +134,7 @@ class TestFirmwareUpdate:
     def test_available_follows_coordinator(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.available is True
@@ -149,7 +149,7 @@ class TestFirmwareUpdate:
             "updating": True,
             "status": "downloading",
         }
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         attrs = u.extra_state_attributes
@@ -160,7 +160,7 @@ class TestFirmwareUpdate:
     def test_device_info(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         info = u.device_info
@@ -171,7 +171,7 @@ class TestFirmwareUpdate:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Empty fw cache → latest_version delegates to installed_version (line 80)."""
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert stub_coord.firmware_cache == {}
@@ -185,7 +185,7 @@ class TestFirmwareUpdate:
         Previously defaulted to True → silently hid a pending update (B08 #1).
         """
         stub_coord.firmware_cache[CAM_ID] = {"current": "9.40.25"}
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u.latest_version is None
@@ -196,7 +196,7 @@ class TestSetupEntry:
 
     @pytest.mark.asyncio
     async def test_setup_entry_creates_one_entity_per_cam(self):
-        from custom_components.bosch_shc_camera.update import (
+        from custom_components.bosch_smart_camera.update import (
             BoschFirmwareUpdate,
             async_setup_entry,
         )
@@ -237,7 +237,7 @@ class TestSetupEntry:
 
     @pytest.mark.asyncio
     async def test_setup_entry_empty_data_yields_no_entities(self):
-        from custom_components.bosch_shc_camera.update import async_setup_entry
+        from custom_components.bosch_smart_camera.update import async_setup_entry
 
         coord = SimpleNamespace(
             data={},
@@ -262,7 +262,7 @@ class TestSetupEntry:
 
     @pytest.mark.asyncio
     async def test_new_camera_gets_entity_added_dynamically(self):
-        from custom_components.bosch_shc_camera.update import (
+        from custom_components.bosch_smart_camera.update import (
             BoschFirmwareUpdate,
             async_setup_entry,
         )
@@ -324,7 +324,7 @@ class TestAsyncInstall:
     async def test_install_delegates_to_coordinator(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         stub_coord.async_install_firmware = AsyncMock(return_value=None)
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
@@ -339,7 +339,7 @@ class TestAsyncInstall:
     ):
         """version param is ignored — the coordinator always targets its own
         cached `update` field, not whatever HA passes."""
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         stub_coord.async_install_firmware = AsyncMock(return_value=None)
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
@@ -354,7 +354,7 @@ class TestAsyncInstall:
     ):
         from homeassistant.exceptions import HomeAssistantError
 
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         stub_coord.async_install_firmware = AsyncMock(
             side_effect=HomeAssistantError("no update available")
@@ -370,7 +370,7 @@ class TestAsyncInstall:
     ):
         from homeassistant.components.update import UpdateEntityFeature
 
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u._attr_supported_features & UpdateEntityFeature.INSTALL
@@ -389,7 +389,7 @@ class TestAsyncInstall:
         """
         from homeassistant.components.update import UpdateEntityFeature
 
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u._attr_supported_features & UpdateEntityFeature.PROGRESS
@@ -417,7 +417,7 @@ class TestFirmwareUpdateNaming:
     def test_attr_name_is_none(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         name = getattr(u, "_attr_name", None)
@@ -428,7 +428,7 @@ class TestFirmwareUpdateNaming:
     def test_translation_key_is_firmware_update(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u._attr_translation_key == "firmware_update"
@@ -436,7 +436,7 @@ class TestFirmwareUpdateNaming:
     def test_has_entity_name_is_true(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.update import BoschFirmwareUpdate
+        from custom_components.bosch_smart_camera.update import BoschFirmwareUpdate
 
         u = BoschFirmwareUpdate(stub_coord, CAM_ID, stub_entry)
         assert u._attr_has_entity_name is True

@@ -13,7 +13,7 @@ import pytest
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.bosch_shc_camera.camera_list import fetch_camera_list
+from custom_components.bosch_smart_camera.camera_list import fetch_camera_list
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 
@@ -112,7 +112,7 @@ class TestFetchCameraListTimeoutRetry:
         assert cams == [{"id": CAM_A}]
         assert token == "old-token"
         assert session.get.call_count == 2
-        from custom_components.bosch_shc_camera.const import (
+        from custom_components.bosch_smart_camera.const import (
             VIDEO_INPUTS_RETRY_DELAY_SEC,
         )
 

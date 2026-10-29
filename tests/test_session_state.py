@@ -5,7 +5,7 @@ slice 2 of the coordinator rewrite — see .claude/plans/jiggly-moseying-peacock
 
 from __future__ import annotations
 
-from custom_components.bosch_shc_camera.session_state import (
+from custom_components.bosch_smart_camera.session_state import (
     CameraSessionState,
     LiveOpenedAtView,
     StreamWarmingView,
@@ -187,7 +187,9 @@ class TestFieldViewNamesMatchDataclassFields:
         import inspect
         import re
 
-        from custom_components.bosch_shc_camera import coordinator as coordinator_module
+        from custom_components.bosch_smart_camera import (
+            coordinator as coordinator_module,
+        )
 
         source = inspect.getsource(coordinator_module.BoschCameraCoordinator.__init__)
         names = re.findall(

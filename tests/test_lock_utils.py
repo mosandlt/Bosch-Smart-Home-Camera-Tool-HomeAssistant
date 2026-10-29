@@ -12,7 +12,7 @@ import asyncio
 
 import pytest
 
-from custom_components.bosch_shc_camera.lock_utils import get_or_create_lock
+from custom_components.bosch_smart_camera.lock_utils import get_or_create_lock
 
 
 class TestGetOrCreateLock:

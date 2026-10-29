@@ -1,0 +1,1111 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bosch Smart Home Camera — Accesso",
+        "description": "Scegli come vuoi accedere con il tuo Bosch SingleKey ID.",
+        "menu_options": {
+          "auto_login": "Accesso automatico (consigliato)",
+          "manual_login": "Accesso manuale (usalo se l'accesso automatico non funziona, ad es. nell'app mobile di Home Assistant)",
+          "migrate_legacy": "Migrate the existing setup (keeps login, options and entity IDs)"
+        }
+      },
+      "manual_login": {
+        "title": "Bosch Smart Home Camera — Accesso (Passaggio 1 di 2)",
+        "description": "**Procedura di accesso:**\n\n1. Copiare l'URL sottostante\n2. Aprirlo nel browser\n3. Accedere con il proprio **Bosch SingleKey ID**\n4. Il browser mostra una **pagina di errore** — è normale\n5. Copiare l'**URL completo** dalla barra degli indirizzi\n6. Fare clic su **OK** per continuare",
+        "data": {
+          "login_url": "Bosch Login URL"
+        },
+        "data_description": {
+          "login_url": "Copiare questo URL e aprirlo nel browser per effettuare l'accesso."
+        }
+      },
+      "manual_paste": {
+        "title": "Bosch Smart Home Camera — Incolla URL (Passaggio 2 di 2)",
+        "description": "Incollare l'URL di reindirizzamento dalla barra degli indirizzi del browser.\n\n**Importante:** Il codice scade dopo ~60 secondi.",
+        "data": {
+          "redirect_url": "URL di reindirizzamento",
+          "diagnostic_cloud_api_override": "Avanzato: URL API fotocamera personalizzato (solo diagnostica)"
+        },
+        "data_description": {
+          "redirect_url": "L'URL completo dalla barra degli indirizzi dopo l'accesso (contiene il codice di autorizzazione)",
+          "diagnostic_cloud_api_override": "Lasciare vuoto a meno che il supporto Bosch non abbia esplicitamente indicato un URL base API fotocamera diverso da testare — questo non attiva alcun programma beta né sblocca nulla, cambia solo il server con cui comunica l'integrazione."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Riautenticare Bosch Smart Home Camera",
+        "description": "Il token Bosch Cloud è scaduto e non può essere rinnovato automaticamente. Questo accade di solito quando il refresh token viene invalidato lato Bosch.\n\nFai clic su **Invia** per scegliere come accedere di nuovo. La configurazione esistente (entità, automazioni, opzioni) verrà preservata.",
+        "submit": "Invia"
+      },
+      "reconfigure": {
+        "title": "Riconfigurare Bosch Smart Home Camera",
+        "description": "Eseguire nuovamente il login OAuth per aggiornare le credenziali senza rimuovere l'integrazione. Tutte le entità, automazioni e opzioni esistenti vengono preservate.",
+        "submit": "Invia"
+      },
+      "migrate_legacy": {
+        "title": "Migrate existing setup",
+        "description": "Migrate the existing setup (keeps login, options and entity IDs)"
+      }
+    },
+    "error": {
+      "invalid_redirect_url": "Nessun codice di autorizzazione trovato nell'URL.",
+      "token_exchange_failed": "Accesso non riuscito — il codice potrebbe essere scaduto. Riprovare.",
+      "cannot_connect": "Impossibile connettersi ai server Bosch.",
+      "timeout": "Connessione scaduta.",
+      "invalid_cloud_api_override": "L'URL API fotocamera personalizzato deve iniziare con https://"
+    },
+    "abort": {
+      "already_configured": "Già configurato.",
+      "reauth_successful": "Riautenticazione riuscita — l'integrazione Bosch Smart Home Camera è stata aggiornata con un nuovo token. Tutte le entità, automazioni e opzioni sono state preservate.",
+      "reconfigure_successful": "Riconfigurazione riuscita — l'integrazione Bosch Smart Home Camera è stata aggiornata con un nuovo token. Tutte le entità, automazioni e opzioni sono state preservate.",
+      "missing_credentials": "Nessuna credenziale applicativa Bosch SingleKey ID registrata. Riavviare Home Assistant e riprovare — se il problema persiste, segnalare un problema.",
+      "missing_configuration": "L'integrazione Bosch Smart Home Camera non è configurata correttamente per OAuth. Riavviare Home Assistant e riprovare — se il problema persiste, segnalare un problema.",
+      "oauth_implementation_unavailable": "Il metodo di accesso selezionato non è più disponibile. Ricominciare da capo.",
+      "camera_access_denied": "L'accesso è riuscito, ma Bosch ha negato l'accesso all'API della fotocamera per questo account. Questo di solito significa che la registrazione della fotocamera dell'account non è mai stata completata. Apri l'app ufficiale Bosch Smart Camera e completa eventuali schermate di registrazione o termini di servizio mostrate, quindi riprova.",
+      "cannot_connect": "L'accesso è riuscito, ma l'API della fotocamera Bosch non è temporaneamente disponibile (limitazione della frequenza o interruzione del server). Riprova tra qualche minuto.",
+      "no_legacy_entry": "Nothing to migrate: no previous Bosch Smart Home Camera setup was found."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bosch Camera — Impostazioni",
+        "description": "**Token:** {token_status}",
+        "sections": {
+          "polling": {
+            "name": "Intervalli di polling",
+            "description": "Frequenza con cui l'integrazione comunica con il Bosch Cloud.",
+            "data": {
+              "scan_interval": "Intervallo di polling (secondi)",
+              "interval_status": "Intervallo verifica stato (secondi)",
+              "interval_events": "Intervallo verifica eventi (secondi)",
+              "snapshot_interval": "Intervallo aggiornamento Snapshot (secondi)"
+            },
+            "data_description": {
+              "scan_interval": "Frequenza con cui l'integrazione recupera i dati dal Bosch Cloud. Valore basso = più veloce, più chiamate API. Predefinito: 60",
+              "interval_status": "Frequenza con cui le telecamere vengono verificate per lo stato ONLINE/OFFLINE. Predefinito: 300 (5 min)",
+              "interval_events": "Frequenza di verifica dei nuovi eventi di movimento/audio. Con FCM Push è solo un fallback. Predefinito: 300 (5 min)",
+              "snapshot_interval": "Frequenza di aggiornamento proattivo degli Snapshot. Intervallo: 300–86400. Predefinito: 1800 (30 min)"
+            }
+          },
+          "features": {
+            "name": "Funzionalità",
+            "description": "Attivare o disattivare i tipi di entità creati dall'integrazione.",
+            "data": {
+              "enable_snapshots": "Snapshot telecamera",
+              "enable_sensors": "Sensori (Stato, WiFi, Firmware, Eventi)",
+              "enable_snapshot_button": "Interruttori e pulsanti (Stream, Privacy, Luce)",
+              "enable_binary_sensors": "Sensori allarme movimento / audio",
+              "enable_intercom": "Citofono (audio bidirezionale)",
+              "motion_active_window": "Sensore di movimento: finestra attiva (secondi)",
+              "auto_play_default": "Riproduzione automatica della scheda"
+            },
+            "data_description": {
+              "enable_snapshots": "Mostra l'ultimo JPEG attivato dal movimento come entità telecamera in HA.",
+              "enable_sensors": "Crea entità sensore per stato telecamera, segnale WiFi, firmware, eventi odierni, ultimo evento, ecc.",
+              "enable_snapshot_button": "Crea entità interruttori e pulsanti: Live Stream, Audio, Modalità Privacy, Luce telecamera, Notifiche, Aggiorna.",
+              "enable_binary_sensors": "Crea sensori binari che si attivano per 30 secondi dopo un evento di movimento o allarme audio. Utili per le automazioni.",
+              "enable_intercom": "Abilita l'entità interruttore citofono (audio bidirezionale). Disabilitato per impostazione predefinita. Consente di inviare audio all'altoparlante della telecamera.",
+              "motion_active_window": "Per quanti secondi il sensore binario di movimento rimane ATTIVO dopo un evento. Intervallo 10-300, predefinito 90.",
+              "auto_play_default": "Controlla se lo stream live si avvia automaticamente al caricamento della scheda. `auto_play` in YAML per scheda ha la priorità.\n• **Solo LAN** (consigliato): autoplay nella rete domestica; in remoto lo stream è pre-inizializzato e un overlay copre il video fino al tocco.\n• **Sempre**: autoplay in ogni sessione.\n• **Tocca per mostrare**: pre-inizializza lo stream e mostra l'overlay in ogni sessione — tocchi una volta per visualizzare il video."
+            }
+          },
+          "stream": {
+            "name": "Stream in diretta",
+            "description": "Modalità di connessione e buffering del player per il video in diretta.",
+            "data": {
+              "stream_connection_type": "Tipo di connessione stream",
+              "live_buffer_mode": "Profilo buffer player (HLS)",
+              "enable_go2rtc": "go2rtc WebRTC (streaming a bassa latenza ~2 s)",
+              "enable_green_it": "Green IT — termina automaticamente gli stream live inattivi (sperimentale, in sviluppo)",
+              "use_mjpeg_snapshot": "MJPEG inst=3 snapshot (Gen2, LAN)",
+              "snapshot_size": "Dashboard snapshot size",
+              "defer_diag_during_stream": "Sospendi letture diagnostiche durante lo streaming live",
+              "cloudflare_tunnel_hls_unbuffer": "Correzione HLS per Cloudflare Tunnel (avanzata, disattivata di default)"
+            },
+            "data_description": {
+              "stream_connection_type": "Tipo di connessione predefinito per gli stream in diretta.\n• **auto** (consigliato): Tenta prima la rete locale LAN, passa automaticamente al proxy Bosch Cloud in caso di errore.\n• **local**: Solo LAN diretto — non richiede accesso a Internet. RTSP più veloce, ma Snapshot più lenti (~6–10 s). Sessione rinnovata automaticamente ogni 50 s.\n• **remote**: Sempre tramite proxy Bosch Cloud. Snapshot più veloci (~0,4–1,9 s). Scelta predefinita consigliata quando HA non è sulla stessa LAN.\nL'entità di selezione 'Modalità Stream' sostituisce questa impostazione in fase di esecuzione senza riavvio.",
+              "live_buffer_mode": "Quanti secondi di video il player mette in buffer prima di mostrarlo. Buffer maggiore = meno interruzioni ma ritardo più elevato rispetto al tempo reale.\n• **Latenza**: buffer ridotto (~4-6 s di ritardo). Possibili interruzioni su Wi-Fi instabile.\n• **Bilanciato** (consigliato): buffer medio (~8-10 s). Robusto contro i tipici problemi Wi-Fi.\n• **Stabile**: buffer ampio (~12-15 s). Fluido anche su connessioni deboli, ma con ritardo percettibile.\nInfluisce solo sulla visualizzazione della card — nessun effetto su telecamera, registrazione o Snapshot.",
+              "enable_go2rtc": "Registra automaticamente gli stream in diretta con go2rtc integrato in HA per la riproduzione WebRTC (~2 s di latenza anziché ~10 s con HLS). Consigliato. Disabilitare solo se si utilizza una configurazione go2rtc personalizzata.",
+              "use_mjpeg_snapshot": "**Solo telecamere Gen2, LAN richiesta, sperimentale.** Quando ATTIVO: le richieste di snapshot cercano di catturare un frame JPEG direttamente dalla telecamera tramite il suo stream RTSP inst=3 MJPEG usando FFmpeg. Obiettivo ~150–300 ms vs ~500 ms via proxy cloud. **Disattivo per impostazione predefinita** — lo stack TLS integrato di FFmpeg attualmente non riesce a negoziare con il server RTSPS della telecamera sulla porta 443 (errore FFmpeg 183). Ritorna automaticamente quando FFmpeg fallisce.",
+              "snapshot_size": "How large the still images shown in dashboards and previews are. Smaller images load faster on slow links and use less data.\n• **Automatic** (default): follows the size the dashboard asks for.\n• **Small**: never wider than 320 px.\n• **Medium**: never wider than 640 px.\n• **Full**: never downscaled, even when the dashboard asks for a thumbnail.\nThe last saved snapshot (image entity, notifications, AI analysis) always keeps full resolution.",
+              "enable_green_it": "Termina automaticamente la sessione live di una telecamera quando nessuno la sta guardando — quando nessuna app, dashboard o Cast ha recuperato lo stream per circa 3 minuti. **Sperimentale — in sviluppo, disattivo per impostazione predefinita.** Il rilevamento degli spettatori non riesce ancora a vedere in modo affidabile un visualizzatore WebRTC live.",
+              "defer_diag_during_stream": "Quando ATTIVO (consigliato): le letture diagnostiche lente vengono posticipate mentre il flusso live di una camera è attivo, prevenendo contese sul canale TLS che possono causare brevi freeze durante raffiche di movimento. Le letture posticipate vengono eseguite al prossimo ciclo di polling quando il flusso è inattivo. Disattivare solo se i sensori diagnostici devono rimanere aggiornati anche durante lo streaming.",
+              "cloudflare_tunnel_hls_unbuffer": "**Avanzata, disattivata di default.** Se attivata: riscrive le intestazioni Content-Type e Transfer-Encoding che le view HLS integrate di Home Assistant (playlist principale, playlist, segmento di inizializzazione, part, segmento) inviano nelle loro risposte HTTP. Questo viene applicato tramite monkeypatching di quelle classi view del core di HA a livello di processo di Home Assistant — una volta attivata, modifica la consegna HLS per **tutte** le fotocamere di questa istanza di Home Assistant, non solo quelle Bosch, per tutto il tempo in cui Home Assistant resta in esecuzione, e non esiste un modo per disattivarla per singola fotocamera se non disattivando questa opzione e riavviando. Attivare solo se si accede a Home Assistant tramite un Cloudflare Tunnel e l'app Companion iOS si blocca nel caricamento di uno stream live su rete cellulare — è esattamente questo sintomo che risolve questo workaround."
+            }
+          },
+          "fcm": {
+            "name": "Notifiche push",
+            "description": "Ricezione eventi in tempo reale tramite FCM e servizi notify per fase.",
+            "data": {
+              "enable_fcm_push": "FCM Push — rilevamento immediato (~2 s)",
+              "fcm_push_mode": "Modalità FCM Push (auto / polling)",
+              "mark_events_read": "Segna gli eventi Bosch Cloud come letti",
+              "alert_save_snapshots": "Salva immagini/video degli alert localmente",
+              "alert_delete_after_send": "Elimina i file dopo l'invio",
+              "alert_notify_service": "Servizi di alert — fallback predefinito (separati da virgola)",
+              "alert_notify_information": "Fase 1 — notifica testuale",
+              "alert_notify_screenshot": "Fase 2 — immagine Snapshot",
+              "alert_notify_video": "Fase 3 — clip video",
+              "alert_notify_system": "Alert di sistema (errore token, pulizia NAS)",
+              "alert_notify_live_preview": "Anteprima live della telecamera nelle notifiche"
+            },
+            "data_description": {
+              "enable_fcm_push": "Ricevi eventi di movimento/audio in ~2 secondi tramite Firebase Cloud Messaging invece di effettuare polling ogni 5 minuti. Fallback automatico al polling se FCM non è disponibile. Consigliato!",
+              "fcm_push_mode": "Auto = FCM push con fallback automatico al polling in caso di errore di registrazione. Polling = ignora FCM e utilizza solo chiamate API standard.",
+              "mark_events_read": "Disattivo (predefinito): i nuovi eventi di movimento/audio restano contrassegnati come non letti nell'app Bosch — anche dopo l'elaborazione da parte di HA — in modo che l'app continui a evidenziarli come nuovi. Attivare per fare in modo che l'integrazione segni gli eventi come letti nel Bosch Cloud dopo l'elaborazione (comportamento precedente, utile quando HA è il client principale e non si desidera che l'app mostri badge 'nuovo evento' obsoleti).",
+              "alert_save_snapshots": "Mantieni le immagini e i video degli eventi scaricati in www/bosch_alerts/ (nella directory di configurazione HA). Disattivo: i file vengono eliminati circa 30 secondi dopo l'invio. Attivo: i file rimangono permanentemente sul disco e vengono serviti senza autenticazione a chiunque sulla tua LAN conosca o indovini il nome del file.",
+              "alert_delete_after_send": "Deprecato: non ha più alcun effetto. L’eliminazione dei file in www/bosch_alerts/ è ora controllata esclusivamente da «Mantieni immagini/video di avviso localmente» sopra (se disattivato, i file vengono eliminati pochi secondi dopo l’invio).",
+              "alert_notify_service": "Fallback predefinito: utilizzato quando i campi per tipo sottostanti sono vuoti. Separati da virgola. Esempi: notify.signal_messenger, notify.mobile_app_xxx. Lasciare vuoto per disabilitare gli alert.",
+              "alert_notify_information": "Servizi per la fase 1 — notifica testuale immediata. Vuoto = fallback predefinito. Es.: notify.signal_messenger, notify.mobile_app_xxx.",
+              "alert_notify_screenshot": "Servizi per la fase 2 — immagine Snapshot. Vuoto = fase ignorata (nessun fallback). Le app mobili (mobile_app_xxx) ricevono l'immagine inline; le altre come allegato.",
+              "alert_notify_video": "Servizi per la fase 3 — clip video. Vuoto = fase ignorata (nessun fallback).",
+              "alert_notify_system": "Servizi per gli alert di sistema (token scaduto, disco pieno). Vuoto = utilizza il fallback predefinito sopra.",
+              "alert_notify_live_preview": "Se attivo, le notifiche push inviate ai servizi della Companion App HA (mobile_app_*) includono l'entità della telecamera, così l'app recupera da sé una miniatura aggiornata alla consegna e apre un flusso live della telecamera all'interno della notifica quando viene espansa — il meccanismo di contenuto dinamico proprio della Companion App (solo iOS; su Android gli allegati delle notifiche supportano solo un'immagine statica, non questo meccanismo di flusso live). Si aggiunge allo scatto statico già allegato, non lo sostituisce. Disattivato di default: attivandolo, la Companion App interroga la telecamera a ogni consegna di avviso, per ogni dispositivo destinatario mobile_app_*. Nessun effetto sui servizi diversi da mobile_app (Signal, Telegram, email, ...)."
+            }
+          },
+          "events_storage": {
+            "name": "Archiviazione eventi (download / SMB / FTP)",
+            "description": "Salva i JPEG e i clip MP4 degli eventi Bosch Cloud localmente o su una condivisione NAS.",
+            "data": {
+              "enable_local_save": "Salva eventi localmente",
+              "download_path": "Cartella di salvataggio locale",
+              "enable_smb_upload": "Carica su NAS (SMB o FTP)",
+              "upload_protocol": "Protocollo di trasferimento (SMB o FTP)",
+              "smb_server": "Server (IP o hostname)",
+              "smb_share": "Nome condivisione SMB",
+              "smb_username": "Nome utente SMB",
+              "smb_password": "Password SMB",
+              "clear_smb_credentials": "Cancella server/condivisione/nome utente/password al salvataggio",
+              "smb_base_path": "Cartella base sulla condivisione",
+              "folder_pattern": "Schema sottocartella",
+              "file_pattern": "Schema nome file",
+              "smb_retention_days": "Periodo di conservazione (giorni, 0 = conserva sempre)"
+            },
+            "data_description": {
+              "enable_local_save": "Salva ogni nuovo evento di movimento/audio come JPEG + MP4 nella cartella sottostante. **Disattivo per impostazione predefinita** — attivare qui per abilitare il salvataggio locale.",
+              "download_path": "Percorso in cui archiviare i file degli eventi. Esempio: /config/bosch_events. Attivo solo quando 'Salva eventi localmente' è abilitato.",
+              "enable_smb_upload": "Carica Snapshot e clip video degli eventi su una condivisione di rete SMB/CIFS o FTP (es. FRITZ!Box NAS, Synology, condivisione Windows). SMB richiede il pacchetto smbprotocol; FTP utilizza ftplib integrata in Python.",
+              "upload_protocol": "Protocollo di trasferimento. **SMB** (predefinito) è la tipica condivisione Windows/macOS. **FTP** è significativamente più veloce su molti dispositivi NAS (es. FRITZ!Box) per numerosi file piccoli e aggira il noto problema di rinomina SMB su macOS Sequoia. Con FTP il campo nome condivisione viene ignorato; il percorso base è relativo alla radice FTP (es. `FILES/Bosch-Kameras` invece di `Bosch-Kameras`).",
+              "smb_server": "Indirizzo IP o hostname. Esempio: 192.168.1.1 (FRITZ!Box), nas.local o fritz.box",
+              "smb_share": "Nome della condivisione SMB (solo SMB). Esempio: FRITZ.NAS",
+              "smb_username": "Nome utente per l'accesso SMB",
+              "smb_password": "Password per l'accesso SMB",
+              "clear_smb_credentials": "Il modulo di Home Assistant non è in grado di rilevare in modo affidabile un campo di testo svuotato, quindi cancellare semplicemente il testo nei campi sopra e salvare non li cancella. Attiva questa opzione e salva una volta per cancellare server, condivisione, nome utente e password — questo interruttore si ripristina automaticamente su spento in seguito.",
+              "smb_base_path": "Cartella base sulla condivisione in cui vengono archiviati i file. Predefinito: Bosch-Kameras",
+              "folder_pattern": "Schema sottocartella. Variabili disponibili: `camera`, `year`, `month`, `day`, `type` (racchiudere ciascuna tra parentesi graffe nello schema). Predefinito: camera/year/month/day.",
+              "file_pattern": "Schema nome file (senza estensione). Variabili disponibili: `camera`, `date`, `time`, `type`, `id`, `year`, `month`, `day` (racchiudere ciascuna tra parentesi graffe nello schema). Predefinito: camera, date, time, type, id uniti con trattini bassi.",
+              "smb_retention_days": "Elimina automaticamente i file sul NAS più vecchi di questo numero di giorni. 0 = conserva sempre. Predefinito: 180 (6 mesi). Eseguito una volta al giorno."
+            }
+          },
+          "nvr": {
+            "name": "Mini-NVR",
+            "description": "Registrazione continua solo LAN. Scarico opzionale su SMB o FTP.",
+            "data": {
+              "enable_nvr": "Mini-NVR — registrazione continua LAN (sperimentale)",
+              "nvr_storage_target": "Destinazione archiviazione NVR",
+              "nvr_base_path": "Cartella di archiviazione NVR",
+              "nvr_smb_subpath": "Sottocartella NVR su NAS / FTP",
+              "nvr_retention_days": "Conservazione NVR (giorni)",
+              "nvr_quality": "Qualità registrazione NVR",
+              "nvr_preroll_seconds": "Buffer pre-roll (secondi)",
+              "nvr_postroll_seconds": "Cattura post-roll (secondi)",
+              "nvr_preroll_cache_dir": "Directory cache pre-roll",
+              "nvr_finalize_ring_on_event": "Recupera il segmento di pre-roll più recente in caso di evento"
+            },
+            "data_description": {
+              "enable_nvr": "Registra continuamente lo stream LOCAL di ogni telecamera su disco in segmenti MP4 da 5 minuti. Solo LAN — la registrazione si interrompe se la telecamera utilizza il relay Cloud. Aggiunge un interruttore di registrazione per ogni telecamera (disabilitato per impostazione predefinita; abilitare ogni telecamera singolarmente). Richiede ffmpeg.",
+              "nvr_storage_target": "Destinazione dei segmenti NVR completati. **Locale**: rimane nella cartella di archiviazione sottostante. **SMB / FTP**: ffmpeg scrive prima localmente (staging), poi un processo carica ogni segmento sul NAS configurato nella sezione archiviazione eventi, in una sottocartella separata. Predefinito: Locale.",
+              "nvr_base_path": "Cartella per i segmenti NVR. Ogni telecamera ottiene una sottocartella, poi una sottocartella per giorno, con segmenti MP4 da 5 minuti denominati HH-MM.mp4. Predefinito: /config/bosch_nvr. Utilizzare un mount NAS per una conservazione superiore a 1 giorno — a 5 Mbps una singola telecamera scrive circa 54 GB/giorno.",
+              "nvr_smb_subpath": "Sottocartella sotto il percorso base SMB / FTP utilizzata esclusivamente per i segmenti NVR. Predefinito: NVR. Mantiene la struttura NVR separata dai caricamenti degli eventi Cloud.",
+              "nvr_retention_days": "Elimina i segmenti NVR più vecchi di questo numero di giorni. Intervallo: 1-365. Predefinito: 3. Eseguito una volta al giorno.",
+              "nvr_quality": "**Auto** utilizza lo stream a qualità piena (inst=1, ~30 Mbps). **Bassa** utilizza lo stream a bassa larghezza di banda (inst=4, ~2 Mbps) — risparmia circa il 90% di spazio su disco a scapito della risoluzione. Solo LAN; il relay Cloud non supporta inst=4.",
+              "nvr_preroll_seconds": "Mantiene un buffer scorrevole di questo numero di secondi in RAM (/dev/shm). Quando viene rilevato un movimento, viene creato un clip che include questo pre-roll. 0 = disabilitato. Predefinito: 0. Costo RAM: ~250 KB/s per telecamera. Ha effetto solo quando la modalità Mini-NVR della telecamera è impostata su \"Bufferizzata per eventi (pre-registrazione)\" — nessun effetto in modalità \"Continua\".",
+              "nvr_postroll_seconds": "Registra dal vivo questi secondi aggiuntivi dopo un evento di movimento e li aggiunge al clip pre-roll. 0 = disabilitato (solo pre-roll). Predefinito: 0. Usato solo quando la modalità Mini-NVR della telecamera è impostata su \"Bufferizzata per eventi (pre-registrazione)\".",
+              "nvr_preroll_cache_dir": "Directory per la cache dei segmenti pre-roll. Deve essere un mount tmpfs (disco RAM) — /dev/shm/bosch_nvr_cache è il predefinito su Linux. Modificare solo se /dev/shm non è disponibile.",
+              "nvr_finalize_ring_on_event": "Normalmente il segmento di pre-roll più recente (~0-10s) viene scartato perché potrebbe essere ancora in registrazione. Se attivo, questo segmento viene brevemente finalizzato e ricollegato prima che il buffer riprenda, con un costo di circa 1 secondo di copertura per evento. Predefinito: disattivato."
+            }
+          },
+          "webhook": {
+            "name": "Consegna Webhook",
+            "description": "Inviare payload di eventi a un endpoint HTTP esterno per ogni evento di movimento / audio / persona / intrusione.",
+            "data": {
+              "enable_webhook_delivery": "Abilita consegna webhook (predefinito disattivato)",
+              "webhook_url": "URL Webhook"
+            },
+            "data_description": {
+              "enable_webhook_delivery": "Quando ATTIVO: ogni evento di movimento, allarme audio, rilevamento persone e intrusione invia un POST JSON all'URL sottostante. **Disattivato per impostazione predefinita.**",
+              "webhook_url": "Endpoint HTTP/HTTPS che riceve il JSON dell'evento. Lasciare vuoto per disabilitare. Attivo solo quando 'Abilita consegna webhook' è attivo."
+            }
+          },
+          "ptz": {
+            "name": "Controlli PTZ",
+            "description": "Mostrare i controlli di posizione predefinita per le telecamere con supporto di rotazione (solo interno 360).",
+            "data": {
+              "enable_ptz_controls": "Abilita controlli PTZ (predefinito disattivato)"
+            },
+            "data_description": {
+              "enable_ptz_controls": "Quando ATTIVO: le telecamere con supporto di rotazione ottengono un'entità di selezione della posizione predefinita (home / sinistra / destra / dietro-sinistra / dietro-destra). Solo la telecamera interna 360 supporta la rotazione. **Disattivato per impostazione predefinita** in modo che gli utenti senza telecamera 360 non vedano entità superflue."
+            }
+          },
+          "frigate": {
+            "name": "Endpoint RTSP esterni (Frigate / NVR)",
+            "description": "Endpoint RTSP persistenti e senza credenziali per registratori esterni (Frigate, BlueIris, go2rtc). La sessione di ogni telecamera si apre su richiesta. Abilitare l'interruttore principale qui; gli interruttori Alta/Bassa qualità per telecamera pubblicano gli URL degli stream.",
+            "data": {
+              "frigate_endpoints_enabled": "Abilita endpoint RTSP esterni (interruttore principale, disattivato per impostazione predefinita)",
+              "frigate_bind_host": "Host / IP di binding RTSP",
+              "frigate_bind_port": "Porta RTSP di binding",
+              "frigate_ip_allowlist": "Lista di indirizzi IP consentiti (CIDR separati da virgola)",
+              "frigate_auth_mode": "Modalità di autenticazione",
+              "frigate_token": "Segreto condiviso / password Basic-Auth",
+              "frigate_basic_user": "Nome utente Basic-Auth",
+              "frigate_idle_timeout": "Timeout sessione inattiva (secondi)",
+              "frigate_max_connections": "Max connessioni registratore simultanee per telecamera"
+            },
+            "data_description": {
+              "frigate_endpoints_enabled": "Interruttore principale per tutti gli endpoint RTSP esterni. Quando DISATTIVO (predefinito): nessuna porta RTSP viene aperta e nessuna sessione Bosch viene mantenuta. Quando ATTIVO: l'endpoint di ogni telecamera è disponibile; la sessione stream Bosch si apre quando si connette il primo client e si chiude allo scadere del timeout di inattività.",
+              "frigate_bind_host": "Indirizzo IP a cui si lega il server RTSP — scegli un'opzione predefinita o inserisci la tua. **127.0.0.1** (localhost, predefinito, più sicuro): solo l'host di Home Assistant può connettersi. **0.0.0.0**: tutte le interfacce LAN — necessario quando Frigate/BlueIris è in esecuzione su un altro host. Oppure inserisci un **IP di interfaccia specifico** (es. 192.168.1.50) per vincolare solo quella scheda di rete. Qualsiasi valore diverso da localhost è senza credenziali — abbinalo alla lista di IP consentiti o a un token.",
+              "frigate_bind_port": "**0** (predefinito): il SO sceglie una porta libera ad ogni avvio di HA o ricarica dell’integrazione — l’URL del sensore cambia. Impostare un valore fisso (es. **8556**) per mantenere l’URL stabile tra riavvii e modifiche alle impostazioni. Con più telecamere ognuna ottiene porta, porta+1, … in ordine crescente di ID telecamera.",
+              "frigate_ip_allowlist": "Elenco separato da virgole di indirizzi IP o intervalli CIDR autorizzati a connettersi. Vuoto = consenti qualsiasi client. Esempio: 192.168.1.0/24, 10.0.0.5",
+              "frigate_auth_mode": "Controllo di accesso opzionale.\n• none (predefinito): nessuna credenziale richiesta.\n• path-token: un segreto condiviso aggiunto al percorso dell'URL dello stream.\n• basic: autenticazione RTSP Basic-Auth standard con nome utente e password.",
+              "frigate_token": "Segreto condiviso usato come token nel percorso (modalità auth: path-token) o come password Basic-Auth (modalità auth: basic). Lasciare vuoto per disabilitare il controllo di accesso.",
+              "frigate_basic_user": "Nome utente per la modalità RTSP Basic-Auth. Utilizzato solo quando la modalità di autenticazione è impostata su 'basic'.",
+              "frigate_idle_timeout": "Quanti secondi la sessione della telecamera Bosch rimane attiva dopo la disconnessione dell'ultimo registratore. La sessione viene mantenuta per riconnessioni immediate. Predefinito: 30. Impostare a 0 per chiudere immediatamente quando nessun client è connesso.",
+              "frigate_max_connections": "Numero massimo di connessioni registratore simultanee per il front-door della telecamera. Le connessioni oltre questo limite vengono rifiutate immediatamente. Predefinito: 8. Aumentare se si hanno molti sub-stream o visualizzatori simultanei; ridurre per diminuire il carico sull'host HA."
+            }
+          },
+          "ai": {
+            "name": "Descrizione snapshot IA",
+            "description": "Lascia che l'IA di Home Assistant descriva ciò che la telecamera vede. Richiede un'integrazione AI Task configurata (es. OpenAI, Google, Anthropic o Ollama locale). Nota: a seconda del backend IA scelto, le immagini della telecamera e possibilmente i dati personali vengono inviati a un servizio cloud e potrebbero essere usati per il training. Per la massima privacy, usare un modello locale (es. Ollama).",
+            "data": {
+              "enable_ai_description": "Abilita descrizioni snapshot IA",
+              "ai_task_entity": "Entità AI Task (opzionale)",
+              "ai_describe_language": "Lingua delle risposte",
+              "ai_describe_prompt": "Prompt di descrizione",
+              "ai_describe_on_motion": "Descrivi automaticamente su eventi di movimento/persona",
+              "ai_notify_include_description": "Aggiungi descrizione IA alle notifiche evento",
+              "ai_cooldown_seconds": "Secondi minimi tra analisi automatiche (per telecamera)",
+              "ai_max_per_day": "Budget giornaliero analisi IA (0 = illimitato)",
+              "ai_active_time_start": "IA attiva dalle (HH:MM)",
+              "ai_active_time_end": "IA attiva fino alle (HH:MM)",
+              "ai_active_condition_entity": "Entità condizione (opzionale)",
+              "ai_active_condition_state": "Stato condizione richiesto"
+            },
+            "data_description": {
+              "enable_ai_description": "Se abilitato, diventano disponibili un servizio di descrizione snapshot e un sensore di descrizione IA per telecamera. Richiede Home Assistant 2025.8+ con almeno un'entità AI Task configurata.",
+              "ai_task_entity": "Selezionare un'entità AI Task specifica. Lasciare vuoto per usare il preferito predefinito di HA.",
+              "ai_describe_language": "Lingua in cui risponde l'IA. Selezionare dalla lista o digitare qualsiasi nome di lingua (es. Português, Русский). Predefinito: Deutsch.",
+              "ai_describe_prompt": "Il prompt inviato all'IA con ogni snapshot. Personalizzare per focalizzarsi su ciò che conta per questa telecamera.",
+              "ai_describe_on_motion": "Esegue una descrizione IA per ogni evento di movimento/persona e aggiorna il SENSORE di descrizione IA. NON aggiunge testo alle notifiche push. Debounce 30 secondi per telecamera.",
+              "ai_notify_include_description": "Aggiunge la descrizione IA direttamente nella notifica push dell'evento sul telefono. Richiede notifiche evento configurate. Aggiorna anche il sensore. Limitato da cooldown + budget giornaliero.",
+              "ai_cooldown_seconds": "Tempo minimo tra analisi IA automatiche per telecamera. Le chiamate manuali describe_snapshot ignorano questo. Predefinito 60 s; 0 disabilita il cooldown.",
+              "ai_max_per_day": "Numero massimo di analisi IA automatiche per tutte le telecamere al giorno (reset a mezzanotte). Predefinito 100; 0 = illimitato.",
+              "ai_active_time_start": "Inizio della finestra di attivazione IA (formato 24h, es. 08:00). Lasciare entrambi i campi vuoti per disabilitare il limite orario. Sono supportate finestre notturne (es. inizio 22:00 / fine 06:00).",
+              "ai_active_time_end": "Fine della finestra di attivazione IA (formato 24h, es. 22:00). Lasciare entrambi i campi vuoti per disabilitare il limite orario.",
+              "ai_active_condition_entity": "Entità il cui stato abilita o blocca le analisi IA automatiche. Lasciare vuoto per disabilitare. Esempio: zone.home con stato 0 significa che nessuno è a casa (la zona conta le persone, 0 = vuota). Oppure usare un'entità gruppo persone con stato not_home.",
+              "ai_active_condition_state": "Stato che l'entità condizione deve avere per consentire le analisi IA. Predefinito: not_home (IA attiva solo quando nessuno è a casa). Esempi: home, on, off, away. Per zone.home usare 0 (nessuno a casa)."
+            }
+          },
+          "auth": {
+            "name": "Autenticazione",
+            "description": "Forzare un nuovo accesso tramite browser o migrare al client OAuth OSS.",
+            "data": {
+              "force_relogin": "Riautenticare (accesso tramite browser)",
+              "migrate_to_oss_client": "Passa al client OAuth OSS",
+              "configure_local_password": "Set local data interface passwords"
+            },
+            "data_description": {
+              "force_relogin": "Selezionare per riautenticarsi tramite browser. Necessario solo se il refresh token è scaduto (molto raro).",
+              "migrate_to_oss_client": "Passa dal client `residential_app` legacy al client dedicato `oss_residential_app` fornito da Bosch per le integrazioni open source. L'abilitazione avvierà il flusso di riautenticazione — verrà richiesto di accedere una sola volta tramite Bosch SingleKey ID, e tutte le entità, automazioni e opzioni esistenti verranno preservate.",
+              "configure_local_password": "Stores the passwords printed on the cameras for their local data interface. Each camera has its own field in the next step."
+            }
+          },
+          "ai_analysis": {
+            "name": "Analisi camera IA",
+            "description": "Punteggio di sospetto strutturato (1-10) attivato dal movimento, con instradamento delle notifiche verso più destinazioni e attivazione opzionale di un allarme. Funzione gemella della Descrizione snapshot IA sopra (testo libero): questa funzione richiede un risultato strutturato e valutato e può instradare gli avvisi verso destinazioni di notifica diverse e attivare un servizio di allarme. Richiede un'integrazione AI Task configurata. Gestisci le destinazioni di notifica, i visitatori noti e le sostituzioni per camera dal menu dei componenti aggiuntivi dell'integrazione (sotto-voci).",
+            "data": {
+              "ai_analysis_enabled": "Abilita analisi camera IA",
+              "ai_analysis_task_entity": "Entità AI Task (opzionale)",
+              "ai_analysis_snapshot_count": "Snapshot per analisi",
+              "ai_analysis_snapshot_interval_ms": "Intervallo tra snapshot (ms)",
+              "ai_analysis_cooldown_seconds": "Secondi minimi tra le analisi (per camera)",
+              "ai_analysis_max_per_day": "Budget giornaliero di analisi (0 = illimitato)",
+              "ai_analysis_retention_days": "Conservazione cronologia allerte (giorni)",
+              "ai_analysis_repeat_context_minutes": "Finestra di contesto per allerte ripetute (minuti, 0 = disabilitato)",
+              "ai_analysis_alarm_panel_entity": "Entità pannello allarme (opzionale)",
+              "ai_analysis_alarmo_enabled": "Abilita attivazione pannello allarme",
+              "ai_analysis_alarm_trigger_service": "Servizio di attivazione allarme (domain.service)",
+              "ai_analysis_alarm_trigger_score": "Punteggio minimo per attivare l'allarme"
+            },
+            "data_description": {
+              "ai_analysis_enabled": "Interruttore principale per l'analisi camera IA strutturata. Indipendente dall'interruttore e dal budget propri della Descrizione snapshot IA: le due funzioni non condividono una quota giornaliera.",
+              "ai_analysis_task_entity": "Seleziona un'entità AI Task specifica per l'analisi strutturata. Lascia vuoto per usare l'entità AI Task selezionata per la Descrizione snapshot IA, o il predefinito di HA se nessuna è impostata.",
+              "ai_analysis_snapshot_count": "Numero di snapshot catturati in sequenza per ogni analisi (2-10). Più snapshot danno più contesto all'IA ma costano di più.",
+              "ai_analysis_snapshot_interval_ms": "Intervallo tra gli snapshot della sequenza in millisecondi (100-5000).",
+              "ai_analysis_cooldown_seconds": "Tempo minimo tra analisi automatiche per camera. Tempo di attesa separato da quello della Descrizione snapshot IA.",
+              "ai_analysis_max_per_day": "Numero massimo di analisi automatiche su tutte le camere al giorno (si azzera a mezzanotte). Budget separato da quello della Descrizione snapshot IA. 0 = illimitato.",
+              "ai_analysis_retention_days": "Per quanto tempo la cronologia delle allerte (punteggi + immagini) viene conservata su disco prima della rimozione automatica (1-90 giorni).",
+              "ai_analysis_repeat_context_minutes": "Se maggiore di 0, menziona nel prompt IA la cronologia recente delle allerte di questa camera negli ultimi N minuti, così l'attività ripetuta può essere riconosciuta come tale. 0 disabilita il contesto ripetuto.",
+              "ai_analysis_alarm_panel_entity": "Entità del pannello di controllo allarme il cui stato armato/fuori casa condiziona le condizioni delle destinazioni di notifica e l'attivazione del servizio di allarme sotto. Lascia vuoto se non usi l'instradamento tramite pannello allarme.",
+              "ai_analysis_alarmo_enabled": "Se abilitato e il pannello allarme sopra è armato, un'allerta con punteggio alto chiama il servizio di attivazione allarme sotto (es. un servizio sirena/armamento Alarmo, o qualsiasi altro domain.service).",
+              "ai_analysis_alarm_trigger_service": "Stringa domain.service chiamata all'attivazione (es. alarmo.arm_away, switch.turn_on, o qualsiasi altro servizio). Funziona con Alarmo o qualsiasi altra integrazione pannello allarme, non specifico di Alarmo.",
+              "ai_analysis_alarm_trigger_score": "Punteggio di sospetto minimo (1-10) richiesto prima di chiamare il servizio di attivazione allarme."
+            }
+          }
+        }
+      },
+      "relogin_show": {
+        "title": "Nuovo accesso — Passaggio 1 di 2",
+        "description": "Copiare l'URL sottostante, aprirlo nel browser, accedere, poi fare clic su Invia.",
+        "data": {
+          "login_url": "Bosch Login URL"
+        },
+        "data_description": {
+          "login_url": "Copiare e aprire nel browser."
+        }
+      },
+      "relogin_paste": {
+        "title": "Nuovo accesso — Passaggio 2 di 2",
+        "description": "Incollare l'URL di reindirizzamento. **Il codice scade in ~60 secondi!**",
+        "data": {
+          "redirect_url": "URL di reindirizzamento",
+          "diagnostic_cloud_api_override": "Avanzato: URL API fotocamera personalizzato (solo diagnostica)"
+        },
+        "data_description": {
+          "redirect_url": "URL completo dalla barra degli indirizzi del browser dopo l'accesso (contiene il codice di autorizzazione)",
+          "diagnostic_cloud_api_override": "Lasciare vuoto a meno che il supporto Bosch non abbia esplicitamente indicato un URL base API fotocamera diverso da testare — questo non attiva alcun programma beta né sblocca nulla, cambia solo il server con cui comunica l'integrazione."
+        }
+      },
+      "local_passwords": {
+        "title": "Local data interface passwords",
+        "description": "Enter the local data interface password printed on each camera. Leave a field empty to keep the stored password. With a stored password and an active local data interface, the live stream is opened directly on your network and never uses the cloud.\\n\\n{cameras}",
+        "data": {
+          "clear_password_for": "Remove stored password for"
+        },
+        "data_description": {
+          "clear_password_for": "Cameras selected here lose their stored password; this takes precedence over a value typed above."
+        }
+      }
+    },
+    "error": {
+      "invalid_redirect_url": "Nessun codice di autorizzazione trovato. Incollare l'URL completo.",
+      "token_exchange_failed": "Accesso non riuscito — codice scaduto. Riprovare.",
+      "cannot_connect": "Impossibile connettersi ai server Bosch.",
+      "invalid_ip_address": "Indirizzo IP non valido — inserire un indirizzo IPv4 o IPv6 valido.",
+      "invalid_ip_allowlist": "Voce allowlist non valida: {invalid_allowlist_token} — usare indirizzi IP o intervalli CIDR separati da virgola (es. 192.168.1.0/24).",
+      "invalid_cloud_api_override": "L'URL API fotocamera personalizzato deve iniziare con https://",
+      "invalid_webhook_url": "L'URL webhook deve iniziare con http:// o https://"
+    },
+    "abort": {
+      "migration_started": "Migrazione avviata — completare il flusso Riconfigura nella card dell'integrazione."
+    }
+  },
+  "entity": {
+    "image": {
+      "last_snapshot": {
+        "name": "Ultimo Snapshot"
+      },
+      "ai_latest_alert": {
+        "name": "Ultima allerta IA"
+      }
+    },
+    "switch": {
+      "live_stream": {
+        "name": "Live Stream"
+      },
+      "audio": {
+        "name": "Audio dello stream"
+      },
+      "camera_light": {
+        "name": "Luce telecamera"
+      },
+      "front_light": {
+        "name": "Luce frontale"
+      },
+      "wallwasher": {
+        "name": "Wallwasher"
+      },
+      "privacy_mode": {
+        "name": "Modalità Privacy"
+      },
+      "notifications": {
+        "name": "Notifiche"
+      },
+      "motion_detection": {
+        "name": "Rilevamento movimento"
+      },
+      "record_sound": {
+        "name": "Registra audio"
+      },
+      "auto_follow": {
+        "name": "Auto Follow"
+      },
+      "intercom": {
+        "name": "Citofono"
+      },
+      "privacy_sound": {
+        "name": "Audio privacy"
+      },
+      "timestamp_overlay": {
+        "name": "Sovrapposizione timestamp"
+      },
+      "status_led": {
+        "name": "LED di stato"
+      },
+      "motion_light": {
+        "name": "Luce al movimento"
+      },
+      "ambient_light": {
+        "name": "Luce ambientale"
+      },
+      "soft_light_fading": {
+        "name": "Dissolvenza luce progressiva"
+      },
+      "intrusion_detection": {
+        "name": "Rilevamento intrusione"
+      },
+      "image_rotation_180": {
+        "name": "Ruota immagine 180°"
+      },
+      "alarm_system_arm": {
+        "name": "Sistema d'allarme"
+      },
+      "alarm_mode": {
+        "name": "Sirena"
+      },
+      "pre_alarm": {
+        "name": "Pre-allarme"
+      },
+      "panic_alarm": {
+        "name": "Attiva sirena"
+      },
+      "nvr_recording": {
+        "name": "Registrazione Mini-NVR"
+      },
+      "nvr_event_clip": {
+        "name": "Clip evento Mini-NVR"
+      },
+      "external_stream": {
+        "name": "Pubblica URL stream esterno"
+      },
+      "frigate_high": {
+        "name": "Stream Frigate Alta"
+      },
+      "frigate_low": {
+        "name": "Stream Frigate Bassa"
+      },
+      "glass_break_detection": {
+        "name": "Rilevamento rottura vetro"
+      },
+      "fire_alarm_detection": {
+        "name": "Rilevamento allarme fumo"
+      },
+      "ai_analysis": {
+        "name": "Analisi camera IA"
+      }
+    },
+    "number": {
+      "pan_position": {
+        "name": "Posizione panoramica"
+      },
+      "speaker_level": {
+        "name": "Volume altoparlante"
+      },
+      "audio_volume": {
+        "name": "Volume dello stream"
+      },
+      "front_light_intensity": {
+        "name": "Intensità luce frontale"
+      },
+      "lens_elevation": {
+        "name": "Elevazione obiettivo"
+      },
+      "microphone_level": {
+        "name": "Livello microfono"
+      },
+      "white_balance": {
+        "name": "Temperatura colore luce frontale"
+      },
+      "top_led_brightness": {
+        "name": "Luminosità LED superiore"
+      },
+      "bottom_led_brightness": {
+        "name": "Luminosità LED inferiore"
+      },
+      "motion_light_sensitivity": {
+        "name": "Sensibilità luce al movimento"
+      },
+      "darkness_threshold": {
+        "name": "Soglia oscurità"
+      },
+      "power_led_brightness": {
+        "name": "Luminosità LED alimentazione"
+      },
+      "alarm_delay": {
+        "name": "Durata sirena"
+      },
+      "alarm_activation_delay": {
+        "name": "Ritardo attivazione allarme"
+      },
+      "pre_alarm_delay": {
+        "name": "Durata pre-allarme"
+      },
+      "intrusion_sensitivity": {
+        "name": "Sensibilità Rilevamento Intrusione"
+      },
+      "intrusion_distance": {
+        "name": "Portata Rilevamento Intrusione"
+      }
+    },
+    "button": {
+      "refresh_snapshot": {
+        "name": "Aggiorna Snapshot"
+      },
+      "soft_reset": {
+        "name": "Riavvia Fotocamera"
+      },
+      "hard_reset": {
+        "name": "Ripristina Fotocamera alle Impostazioni di Fabbrica"
+      }
+    },
+    "select": {
+      "video_quality": {
+        "name": "Qualità video",
+        "state": {
+          "auto": "Auto",
+          "high": "Alta (30 Mbps)",
+          "low": "Bassa (1,9 Mbps)"
+        }
+      },
+      "nvr_mode": {
+        "name": "Modalità Mini-NVR",
+        "state": {
+          "continuous": "Continua",
+          "event_buffered": "Bufferizzata per eventi (pre-registrazione)"
+        }
+      },
+      "motion_sensitivity": {
+        "name": "Sensibilità movimento",
+        "state": {
+          "super_high": "Molto alta",
+          "high": "Alta",
+          "medium_high": "Medio-alta",
+          "medium_low": "Medio-bassa",
+          "low": "Bassa",
+          "off": "Disattivata"
+        }
+      },
+      "fcm_push_mode": {
+        "name": "Modalità FCM Push",
+        "state": {
+          "auto": "FCM Push",
+          "polling": "Polling"
+        }
+      },
+      "stream_mode": {
+        "name": "Modalità Stream",
+        "state": {
+          "auto": "Auto (Locale → Cloud)",
+          "local": "Solo locale",
+          "remote": "Solo Cloud"
+        }
+      },
+      "detection_mode": {
+        "name": "Modalità rilevamento",
+        "state": {
+          "all_motions": "Tutti i movimenti",
+          "only_humans": "Solo persone",
+          "zones": "Zone"
+        }
+      },
+      "pan_preset": {
+        "name": "Posizione preset",
+        "state": {
+          "home": "Centro (0°)",
+          "left": "Sinistra (−60°)",
+          "right": "Destra (+60°)",
+          "back_left": "Sinistra posteriore (−120°)",
+          "back_right": "Destra posteriore (+120°)"
+        }
+      },
+      "lighting_mode": {
+        "name": "Modalità illuminazione",
+        "state": {
+          "follow_schedule": "Segui programma",
+          "ambient_light": "Luminosità ambientale",
+          "ambient_light_and_schedule": "Luminosità ambientale e programma",
+          "always_off": "Spento"
+        }
+      }
+    },
+    "binary_sensor": {
+      "motion": {
+        "name": "Movimento"
+      },
+      "audio_alarm_binary": {
+        "name": "Allarme audio"
+      },
+      "person_detected": {
+        "name": "Persona rilevata"
+      },
+      "lan_reachable": {
+        "name": "LAN Raggiungibile"
+      },
+      "ai_recent_alert": {
+        "name": "Allerta IA recente"
+      },
+      "local_data_interface": {
+        "name": "Interfaccia dati locale"
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "Firmware"
+      }
+    },
+    "light": {
+      "top_led_light": {
+        "name": "LED superiore"
+      },
+      "bottom_led_light": {
+        "name": "LED inferiore"
+      },
+      "front_light_entity": {
+        "name": "Luce frontale"
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Stato",
+        "state": {
+          "online": "Online",
+          "offline": "Offline",
+          "session_limit": "Limite di sessione",
+          "updating": "Aggiornamento firmware",
+          "unknown": "Sconosciuto"
+        }
+      },
+      "onvif_scopes": {
+        "name": "Ambiti ONVIF"
+      },
+      "rcp_version": {
+        "name": "Versione RCP"
+      },
+      "cloud_feature_flags": {
+        "name": "Flag funzionalità cloud"
+      },
+      "ai_description": {
+        "name": "Descrizione snapshot IA"
+      },
+      "cloud_maintenance": {
+        "name": "Manutenzione Bosch Cloud",
+        "state": {
+          "active": "Manutenzione in corso",
+          "scheduled": "Manutenzione programmata",
+          "past": "Manutenzione più recente",
+          "recent": "Annuncio recente",
+          "unknown": "Nessuna info sulla finestra temporale",
+          "idle": "Nessuna info di manutenzione"
+        }
+      },
+      "last_event": {
+        "name": "Ultimo evento"
+      },
+      "events_today": {
+        "name": "Eventi odierni"
+      },
+      "wifi_signal": {
+        "name": "Segnale WiFi"
+      },
+      "firmware_version": {
+        "name": "Versione firmware"
+      },
+      "ambient_light": {
+        "name": "Luce ambientale"
+      },
+      "led_dimmer": {
+        "name": "Dimmer LED"
+      },
+      "clock_offset": {
+        "name": "Scostamento orologio"
+      },
+      "motion_sensitivity": {
+        "name": "Sensibilità movimento"
+      },
+      "last_event_type": {
+        "name": "Tipo ultimo evento",
+        "state": {
+          "movement": "Movimento",
+          "person": "Persona",
+          "audio_alarm": "Allarme audio",
+          "trouble": "Anomalia",
+          "trouble_disconnect": "Anomalia (Disconnessione)",
+          "trouble_reconnect": "Anomalia (Riconnessione)",
+          "none": "Nessuno"
+        }
+      },
+      "movement_events_today": {
+        "name": "Eventi di movimento odierni"
+      },
+      "audio_events_today": {
+        "name": "Eventi audio odierni"
+      },
+      "push_status": {
+        "name": "Stato FCM Push",
+        "state": {
+          "fcm_push": "FCM Push (immediato)",
+          "polling": "Polling (fallback)",
+          "disabled": "Disabilitato"
+        }
+      },
+      "commissioned": {
+        "name": "Messa in servizio"
+      },
+      "video_source": {
+        "name": "Sorgente video",
+        "state": {
+          "local_data_interface": "Locale (interfaccia dati)",
+          "local_data_interface_problem": "Locale – problema",
+          "cloud_no_password": "Cloud (nessuna password locale)",
+          "cloud": "Cloud"
+        }
+      },
+      "schedule_rules": {
+        "name": "Regole di pianificazione"
+      },
+      "alarm_catalog": {
+        "name": "Catalogo allarmi"
+      },
+      "motion_zones": {
+        "name": "Zone di movimento"
+      },
+      "tls_cert": {
+        "name": "Certificato TLS"
+      },
+      "network_services": {
+        "name": "Servizi di rete"
+      },
+      "iva_analytics": {
+        "name": "Analisi IVA"
+      },
+      "privacy_masks": {
+        "name": "Maschere privacy"
+      },
+      "ambient_schedule": {
+        "name": "Pianificazione luce ambientale",
+        "state": {
+          "disabled": "Disabilitata",
+          "dusk_to_dawn": "Dal tramonto all'alba",
+          "manual": "Manuale"
+        }
+      },
+      "alarm_state": {
+        "name": "Stato allarme",
+        "state": {
+          "active": "Inserito",
+          "inactive": "Disinserito",
+          "unknown": "Sconosciuto",
+          "system_managed_armed": "Inserito (Sistema)",
+          "system_managed_disarmed": "Disinserito (Sistema)",
+          "armed_away": "Inserito (Assente)",
+          "armed_stay": "Inserito (Presente)",
+          "disarmed": "Disinserito"
+        }
+      },
+      "stream_status": {
+        "name": "Stato Stream",
+        "state": {
+          "idle": "Inattivo",
+          "warming_up": "Avvio in corso",
+          "connecting": "Connessione in corso",
+          "streaming": "In streaming (LAN)",
+          "streaming_remote": "In streaming (Cloud)"
+        }
+      },
+      "nvr_state": {
+        "name": "Stato Mini-NVR",
+        "state": {
+          "idle": "Inattivo",
+          "recording": "In registrazione",
+          "error": "Errore"
+        }
+      },
+      "stream_url": {
+        "name": "URL stream (principale)"
+      },
+      "frigate_url_high": {
+        "name": "URL RTSP Frigate (Alta)"
+      },
+      "frigate_url_low": {
+        "name": "URL RTSP Frigate (Bassa)"
+      },
+      "stream_url_sub": {
+        "name": "URL stream (sub)"
+      },
+      "ai_alert_score": {
+        "name": "Punteggio allerta IA"
+      },
+      "ai_alerts_24h": {
+        "name": "Allerte IA (24h)"
+      }
+    },
+    "text": {
+      "ai_scene_context": {
+        "name": "Contesto scena IA"
+      }
+    }
+  },
+  "services": {
+    "send_event_webhook": {
+      "name": "Invia Webhook Evento",
+      "description": "Attiva manualmente un POST webhook per un evento telecamera (per test).",
+      "fields": {
+        "entity_id": {
+          "name": "Entità Telecamera",
+          "description": "ID entità telecamera da includere nel payload (opzionale)"
+        },
+        "event_type": {
+          "name": "Tipo di Evento",
+          "description": "Tipo di evento da inviare tramite POST: MOVEMENT, AUDIO_ALARM, PERSON o INTRUSION"
+        }
+      }
+    },
+    "trigger_snapshot": {
+      "name": "Forza aggiornamento Snapshot",
+      "description": "Forza un aggiornamento immediato dello Snapshot per tutte le telecamere Bosch."
+    },
+    "open_live_connection": {
+      "name": "Apri connessione in diretta",
+      "description": "Apre una connessione proxy stream in diretta (H.264 30fps + audio AAC).",
+      "fields": {
+        "camera_id": {
+          "name": "ID telecamera",
+          "description": "UUID Cloud della telecamera (disponibile negli attributi dell'entità)"
+        }
+      }
+    },
+    "migrate_flat_events": {
+      "name": "Migra file eventi piatti",
+      "description": "Sposta i file degli eventi dalla struttura piatta legacy (telecamera/file.mp4) alla gerarchia per data (telecamera/anno/mese/giorno/file.mp4). Sicuro da eseguire più volte — i file già presenti nella destinazione vengono ignorati. Il risultato viene mostrato come notifica persistente."
+    },
+    "delete_event": {
+      "name": "Elimina file evento/i",
+      "description": "Elimina uno o più file di eventi locali tramite percorso esatto, oppure tutti i file di una telecamera in una data specifica.",
+      "fields": {
+        "file_path": {
+          "name": "Percorso file",
+          "description": "Percorso assoluto del singolo file evento da eliminare."
+        },
+        "camera_name": {
+          "name": "Nome telecamera",
+          "description": "Elimina tutti gli eventi di questa telecamera (combinabile con la Data per limitare l'ambito)."
+        },
+        "date": {
+          "name": "Data",
+          "description": "Limita l'eliminazione a questa data (AAAA-MM-GG). Richiede il nome telecamera."
+        }
+      }
+    },
+    "get_motion_zones": {
+      "name": "Leggi zone di movimento",
+      "description": "Legge le zone di rilevamento movimento correnti dalla telecamera. Il risultato viene scritto in una notifica persistente.",
+      "fields": {
+        "camera_id": {
+          "name": "ID telecamera",
+          "description": "UUID Cloud della telecamera (disponibile negli attributi dell'entità)"
+        }
+      }
+    },
+    "set_motion_zones": {
+      "name": "Imposta zone di movimento",
+      "description": "Scrive la configurazione delle zone di rilevamento movimento sulla telecamera.",
+      "fields": {
+        "camera_id": {
+          "name": "ID telecamera",
+          "description": "UUID Cloud della telecamera"
+        },
+        "zones": {
+          "name": "Zone",
+          "description": "Elenco di oggetti zona come restituito da Leggi zone di movimento."
+        }
+      }
+    },
+    "rename_camera": {
+      "name": "Rinomina telecamera",
+      "description": "Modifica il nome visualizzato di una telecamera nel Bosch Cloud.",
+      "fields": {
+        "camera_id": {
+          "name": "ID telecamera",
+          "description": "UUID Cloud della telecamera"
+        },
+        "name": {
+          "name": "Nuovo nome",
+          "description": "Nuovo nome visualizzato per la telecamera"
+        }
+      }
+    },
+    "describe_snapshot": {
+      "name": "Descrivi Snapshot",
+      "description": "Chiedi all'integrazione AI Task di HA di descrivere lo snapshot corrente della telecamera.",
+      "fields": {
+        "camera_id": {
+          "name": "ID Telecamera",
+          "description": "ID telecamera Bosch cloud (UUID). Usare camera_id o entity_id."
+        },
+        "entity_id": {
+          "name": "Entità Telecamera",
+          "description": "ID entità telecamera (es. camera.bosch_terrasse). Usare entity_id o camera_id."
+        },
+        "instructions": {
+          "name": "Istruzioni",
+          "description": "Prompt personalizzato per l'IA. Sostituisce l'opzione ai_describe_prompt per questa chiamata."
+        },
+        "language": {
+          "name": "Lingua",
+          "description": "Lingua della risposta AI. Sostituisce l'opzione ai_describe_language per questa chiamata. Predefinito: Deutsch."
+        },
+        "ai_task_entity": {
+          "name": "Entità AI Task",
+          "description": "Entità AI Task da usare. Lasciare vuoto per il preferito predefinito di HA."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "argument_required": {
+      "message": "{argument} è obbligatorio"
+    },
+    "argument_must_be_list": {
+      "message": "{argument} deve essere un elenco"
+    },
+    "missing_field": {
+      "message": "{kind} {index}: campo {field} mancante"
+    },
+    "value_out_of_range": {
+      "message": "{kind} {index} {field}={value} fuori dall'intervallo 0.0–1.0"
+    },
+    "index_out_of_range": {
+      "message": "Indice {index} fuori dall'intervallo (presenti {count} elementi)"
+    },
+    "not_found": {
+      "message": "{kind} {id} non trovato"
+    },
+    "live_connection_failed": {
+      "message": "Impossibile stabilire la connessione in diretta per la telecamera {cam_id_prefix} — consultare il log per le istruzioni di acquisizione mitmproxy"
+    },
+    "http_error": {
+      "message": "{action} non riuscito: HTTP {status}"
+    },
+    "http_error_with_body": {
+      "message": "{action} non riuscito: HTTP {status} — {body}"
+    },
+    "privacy_blocked": {
+      "message": "{action}: funzionalità non disponibile mentre la modalità Privacy è attiva"
+    },
+    "unexpected_error": {
+      "message": "{action} non riuscito: {error}"
+    },
+    "privacy_active": {
+      "message": "La modalità Privacy è attiva per questa telecamera — nessuna immagine live disponibile per l'analisi IA."
+    },
+    "ai_task_unavailable": {
+      "message": "Servizio AI Task non disponibile o in errore: {error}"
+    },
+    "stream_blocked_privacy_mode": {
+      "message": "{camera}: stream non disponibile — la modalità Privacy è attiva"
+    },
+    "stream_start_blocked_privacy_mode": {
+      "message": "Impossibile avviare lo stream per {camera} — la modalità Privacy è attiva. Disattivare prima la modalità Privacy."
+    },
+    "motion_sensitivity_unknown": {
+      "message": "{camera}: sensibilità movimento non ancora nota — riprovare dopo che l'integrazione ha completato il primo aggiornamento"
+    },
+    "motion_detection_enable_failed": {
+      "message": "{camera}: attivazione del rilevamento movimento non riuscita"
+    },
+    "motion_detection_disable_failed": {
+      "message": "{camera}: disattivazione del rilevamento movimento non riuscita"
+    },
+    "firmware_install_in_progress": {
+      "message": "È già in corso un'installazione del firmware"
+    },
+    "firmware_no_update_available": {
+      "message": "Nessun aggiornamento firmware attualmente disponibile per l'installazione"
+    },
+    "firmware_install_rejected": {
+      "message": "Il cloud Bosch ha rifiutato la richiesta di installazione del firmware per {target}"
+    },
+    "soft_reset_rejected": {
+      "message": "Il cloud Bosch ha rifiutato la richiesta di soft-reset (riavvio)"
+    },
+    "hard_reset_rejected": {
+      "message": "Il cloud Bosch ha rifiutato la richiesta di hard-reset (ripristino alle impostazioni di fabbrica)"
+    },
+    "not_authenticated": {
+      "message": "Non autenticato — aggiungi di nuovo l'integrazione per accedere"
+    },
+    "token_expired_renewal_failed": {
+      "message": "Il token è scaduto e il rinnovo non è riuscito — riautenticati tramite la richiesta di riautenticazione, oppure vai su Impostazioni → Integrazioni → Bosch Smart Home Camera → Configura → Forza nuovo accesso tramite browser"
+    },
+    "no_refresh_token": {
+      "message": "Nessun refresh token — è necessaria una nuova autenticazione"
+    },
+    "refresh_token_invalid": {
+      "message": "Refresh token non valido — riautenticati tramite il pulsante **Riconfigura** nella card dell'integrazione."
+    },
+    "token_refresh_failed_repeatedly": {
+      "message": "Il rinnovo del token non è riuscito più volte — riautenticati tramite il pulsante **Riconfigura** nella card dell'integrazione."
+    }
+  },
+  "issues": {
+    "token_expired": {
+      "title": "Bosch Camera — Token scaduto",
+      "description": "Il bearer token non ha potuto essere rinnovato.\n\n{message}\n\nFare clic su **Riconfigura** nella card dell'integrazione (Impostazioni → Dispositivi e servizi → Bosch Smart Home Camera) per accedere nuovamente. Le entità e le automazioni esistenti vengono preservate."
+    },
+    "auth_server_outage": {
+      "title": "Bosch Camera — Interruzione server di autenticazione",
+      "description": "Il server di autenticazione Bosch sta attualmente restituendo HTTP {error}. Si tratta di un problema lato Bosch, non di un errore di configurazione.\n\nL'integrazione riproverà automaticamente (backoff esponenziale fino a 10 minuti). Le entità non sono disponibili fino al ripristino del server — nessuna azione richiesta."
+    },
+    "doubled_prefix_entity_ids_migrated": {
+      "title": "Bosch Camera — ID entità rinominati",
+      "description": "**{count}** ID entità telecamera Bosch contenevano un prefisso duplicato `bosch_NAME_bosch_NAME_` (bug v11.0.0–v12.2.1) e sono stati rinominati nella forma corretta.\n\nEsempi: {examples}\n\n**È necessario aggiornare tutte le automazioni, script, scene e dashboard Lovelace che fanno riferimento ai vecchi ID.** Home Assistant non riscrive automaticamente i file YAML né le card Lovelace quando cambiano gli ID entità. La cronologia e le statistiche vengono migrate automaticamente.\n\nConsultare le note di rilascio v12.3.0 per la mappatura completa."
+    },
+    "smb_unavailable": {
+      "title": "Bosch Camera — Pacchetto SMB/NAS non installato",
+      "description": "**{features}** è configurato per utilizzare una condivisione di rete SMB/NAS, ma il pacchetto Python opzionale `smbprotocol` non è installato, quindi i caricamenti/le registrazioni sulla condivisione sono disabilitati.\n\nQuesto pacchetto viene normalmente installato automaticamente in base ai requisiti dell'integrazione — prova a riavviare Home Assistant una volta. Se continua a non installarsi (ad es. un'architettura OS/CPU non supportata), imposta la destinazione di archiviazione su **Locale** o **FTP** nelle opzioni dell'integrazione."
+    },
+    "local_data_interface_available": {
+      "title": "Bosch Camera — Interfaccia dati locale disponibile",
+      "description": "L'interfaccia dati locale può ora essere attivata per {camera}. Apri l'app della telecamera: Impostazioni telecamera > Altro > Interfaccia dati locale."
+    },
+    "local_data_interface_wrong_password": {
+      "title": "Bosch Camera — Password dell'interfaccia dati locale rifiutata",
+      "description": "L'interfaccia dati locale di {camera} ha rifiutato la password salvata, quindi lo streaming live resta non disponibile (il cloud non viene usato). Controlla la password sull'etichetta della telecamera in Configura > Autenticazione > password locale."
+    },
+    "local_data_interface_unreachable": {
+      "title": "Bosch Camera — Interfaccia dati locale non raggiungibile",
+      "description": "{camera} non è raggiungibile sulla rete locale da più di 10 minuti, quindi lo streaming live resta non disponibile (il cloud non viene usato). Controlla alimentazione e rete della telecamera e la password salvata in Configura > Autenticazione > password locale."
+    },
+    "local_data_interface_no_go2rtc": {
+      "title": "Bosch Camera — go2rtc necessario per l'interfaccia dati locale",
+      "description": "{camera} viene letta tramite la sua interfaccia dati locale, che richiede go2rtc come unica connessione alla telecamera (la telecamera gestisce solo poche sessioni contemporaneamente). go2rtc non è disponibile, quindi lo streaming in diretta resta non disponibile (il cloud non viene usato). Verifica che l'integrazione go2rtc sia configurata e in esecuzione."
+    },
+    "local_data_interface_no_password": {
+      "title": "Bosch Camera — L'interfaccia dati locale richiede una password",
+      "description": "L'interfaccia dati locale è attiva per {camera}. Inserisci la password dell'adesivo in Configura > Autenticazione > password locale per lo streaming completamente locale."
+    },
+    "legacy_folder": {
+      "title": "Leftover folder from the previous version",
+      "description": "Your setup was moved to the new `bosch_smart_camera` integration. The old folder `{folder}` is no longer used. Delete it and restart Home Assistant."
+    }
+  },
+  "system_health": {
+    "info": {
+      "can_reach_cloud": "Bosch Cloud raggiungibile",
+      "fcm_push_active": "Stato FCM Push",
+      "cameras_loaded": "Telecamere caricate",
+      "last_fcm_push_ago": "Ultimo FCM Push",
+      "platinum_quality": "Quality Scale"
+    }
+  }
+}

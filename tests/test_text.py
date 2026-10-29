@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.bosch_shc_camera.text import (
+from custom_components.bosch_smart_camera.text import (
     AI_SCENE_CONTEXT_MAX_LEN,
     BoschAiSceneContextText,
 )
@@ -94,7 +94,7 @@ class TestAiSceneContextTextBasics:
     def test_device_info_returns_identifiers(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        from custom_components.bosch_shc_camera import DOMAIN
+        from custom_components.bosch_smart_camera import DOMAIN
 
         ent = BoschAiSceneContextText(stub_coord, CAM_ID, stub_entry)
         info = ent.device_info
@@ -249,7 +249,7 @@ class TestAiSceneContextTextRestore:
 class TestAiSceneContextTextSetupEntry:
     @pytest.mark.asyncio
     async def test_setup_entry_creates_one_per_camera(self) -> None:
-        from custom_components.bosch_shc_camera.text import async_setup_entry
+        from custom_components.bosch_smart_camera.text import async_setup_entry
 
         coord = SimpleNamespace(
             data={
@@ -278,7 +278,7 @@ class TestAiSceneContextTextSetupEntry:
 
     @pytest.mark.asyncio
     async def test_new_camera_gets_entity_added_dynamically(self) -> None:
-        from custom_components.bosch_shc_camera.text import async_setup_entry
+        from custom_components.bosch_smart_camera.text import async_setup_entry
 
         coord = SimpleNamespace(
             data={CAM_ID: {"info": {"title": "Terrasse"}}},

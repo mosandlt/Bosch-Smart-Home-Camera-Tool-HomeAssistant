@@ -16,12 +16,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera import (
+from custom_components.bosch_smart_camera import (
     BoschCameraCoordinator,
     ldi_local,
     ldi_rest,
 )
-from custom_components.bosch_shc_camera.ldi_local import (
+from custom_components.bosch_smart_camera.ldi_local import (
     LDI_REST_POLL_SEC,
     RESULT_AUTH,
     RESULT_NO_GO2RTC,
@@ -31,14 +31,14 @@ from custom_components.bosch_shc_camera.ldi_local import (
     record_ldi_result,
     refresh_ldi_rest,
 )
-from custom_components.bosch_shc_camera.repairs import (
+from custom_components.bosch_smart_camera.repairs import (
     LDI_UNREACHABLE_GRACE_SEC,
     refresh_local_data_interface_auth_issue,
 )
 from tests.test_ldi_lifecycle import _repairs_coord
 from tests.test_ldi_local import CAM, IP, PW, _coord, _probe
 
-MODULE = "custom_components.bosch_shc_camera"
+MODULE = "custom_components.bosch_smart_camera"
 
 
 def _patched_probe(result: ldi_rest.LdiProbe) -> Any:

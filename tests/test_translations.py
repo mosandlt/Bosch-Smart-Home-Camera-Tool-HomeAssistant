@@ -39,9 +39,11 @@ from typing import Any, cast
 
 import pytest
 
-from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+from custom_components.bosch_smart_camera.const import DEFAULT_OPTIONS
 
-COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
+COMPONENT_DIR = (
+    Path(__file__).parent.parent / "custom_components" / "bosch_smart_camera"
+)
 STRINGS_PATH = COMPONENT_DIR / "strings.json"
 TRANSLATIONS_DIR = COMPONENT_DIR / "translations"
 DE_PATH = TRANSLATIONS_DIR / "de.json"

@@ -24,10 +24,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera import ai_analysis_runtime
+from custom_components.bosch_smart_camera import ai_analysis_runtime
 
 CAM_A = "cam-a"
-MODULE = "custom_components.bosch_shc_camera.ai_analysis_runtime"
+MODULE = "custom_components.bosch_smart_camera.ai_analysis_runtime"
 
 
 def _noop_create_task(coro: object, **_kwargs: object) -> MagicMock:

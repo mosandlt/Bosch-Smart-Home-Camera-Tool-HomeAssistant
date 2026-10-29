@@ -7,6 +7,14 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v18.0.0] - 2026-10-29
+
+### Changed (breaking)
+
+- **The integration is now called `bosch_smart_camera`** (was `bosch_shc_camera`), matching the Home Assistant core integration. The name in the UI is unchanged. After updating, restart Home Assistant, open **Settings → Devices & services → Add integration → Bosch Smart Home Camera** and choose **Migrate the existing setup**. The login, all options, the AI alert targets, entity IDs, history, areas and dashboards are kept; no new Bosch login is needed. The previous entry is removed by the migration. If HACS leaves the old folder `custom_components/bosch_shc_camera` behind, Home Assistant shows a repair hint; delete the folder and restart.
+- Service calls of the form `bosch_shc_camera.<service>` keep working for now and log a deprecation warning. Please switch automations and scripts to `bosch_smart_camera.<service>`. Event names (`bosch_shc_camera_motion` and friends) and entity unique IDs are unchanged.
+- The Lovelace card is served from `/bosch_smart_camera/` now; the old resource entry is removed automatically. Dashboards using `custom:bosch-camera-card` need no change.
+
 ## [v17.2.8] - 2026-10-28
 
 ### Changed

@@ -4221,7 +4221,7 @@ class BoschCameraCard extends HTMLElement {
       // race. Without this, a fresh mount (esp. mobile, which has no localStorage
       // frame to fall back on) stays blank until the 60 s refresh timer. Load the
       // proxy image directly so the snapshot appears immediately regardless.
-      if (!this._hass?.services?.bosch_shc_camera?.trigger_snapshot && !this._imageLoaded) {
+      if (!this._hass?.services?.bosch_smart_camera?.trigger_snapshot && !this._imageLoaded) {
         this._scheduleImageLoad(0);
       }
       // CARD_STALE_APP fix: pull authoritative entity states on mount so the
@@ -4844,7 +4844,7 @@ class BoschCameraCard extends HTMLElement {
     // actually calls async_camera_image instead of returning HA's internal cache.
     // Cloud API response varies (1.5–5s), so fetch at 1.5s and 4s.
     // Guard 1: skip if service not yet registered (Android companion app startup race).
-    if (!this._hass?.services?.bosch_shc_camera?.trigger_snapshot) return;
+    if (!this._hass?.services?.bosch_smart_camera?.trigger_snapshot) return;
     // Guard 2: skip if WS is mid-reconnect. Companion App resume → cached services
     // map still shows the service, but the WS call fails before reconnect completes
     // → Android shows a native error popup even when JS catches the rejection.
@@ -4853,7 +4853,7 @@ class BoschCameraCard extends HTMLElement {
     // Guard 3: skip if privacy mode is on — no point fetching a snapshot that will
     // return the privacy placeholder, and it avoids wasting a Bosch session slot.
     if (this._entities?.privacy && this._getEffectiveState(this._entities.privacy) === "on") return;
-    this._callService("bosch_shc_camera", "trigger_snapshot", { entity_id: this._entities.camera });
+    this._callService("bosch_smart_camera", "trigger_snapshot", { entity_id: this._entities.camera });
     this._scheduleImageLoad(1500);
     this._scheduleImageLoad(4000);
   }
@@ -6618,7 +6618,7 @@ class BoschCameraCard extends HTMLElement {
             </svg>
             <div class="auth-title" id="auth-title">Anmeldung abgelaufen</div>
             <div class="auth-subtitle" id="auth-subtitle">Bosch Cloud Token ungültig — erneut anmelden um die Kamera wieder zu nutzen.</div>
-            <a class="auth-btn" id="auth-reauth-btn" href="/config/integrations/integration/bosch_shc_camera" target="_top">Erneut anmelden</a>
+            <a class="auth-btn" id="auth-reauth-btn" href="/config/integrations/integration/bosch_smart_camera" target="_top">Erneut anmelden</a>
           </div>
           <div class="privacy-placeholder" id="privacy-placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -7604,8 +7604,8 @@ class BoschCameraCard extends HTMLElement {
         value: Math.max(-120, Math.min(120, pos)),
       }).then(() => {
         // Trigger backend image refresh so _cached_image is warm before card requests it
-        if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot)
-          this._callService("bosch_shc_camera", "trigger_snapshot", { entity_id: this._entities.camera });
+        if (this._hass?.services?.bosch_smart_camera?.trigger_snapshot)
+          this._callService("bosch_smart_camera", "trigger_snapshot", { entity_id: this._entities.camera });
         // Refresh snapshot after camera has had time to move (~2s)
         this._scheduleImageLoad(2000);
       }).catch((err) => console.warn("bosch-camera-card: pan set_value", err));
@@ -10099,8 +10099,8 @@ class BoschCameraCard extends HTMLElement {
 
     const startPoll = (prevBytes) => {
       // Fire backend refresh AFTER prevBytes capture — see above.
-      if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot)
-        this._callService("bosch_shc_camera", "trigger_snapshot", { entity_id: this._entities.camera });
+      if (this._hass?.services?.bosch_smart_camera?.trigger_snapshot)
+        this._callService("bosch_smart_camera", "trigger_snapshot", { entity_id: this._entities.camera });
       // First poll after 500ms — RCP refresh completes in ~100ms, so 500ms is plenty
       const startTime = Date.now();
       this._snapshotPollTimer = this._armTimer(
@@ -10629,8 +10629,8 @@ class BoschCameraCard extends HTMLElement {
     if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming && !this._isOffline) {
       this._stopLiveVideo();
       this._setLoadingOverlay(true, this._t("loading_refreshing_image"));
-      if (this._hass?.services?.bosch_shc_camera?.trigger_snapshot)
-        this._callService("bosch_shc_camera", "trigger_snapshot", { entity_id: this._entities.camera });
+      if (this._hass?.services?.bosch_smart_camera?.trigger_snapshot)
+        this._callService("bosch_smart_camera", "trigger_snapshot", { entity_id: this._entities.camera });
       this._scheduleImageLoad(3500);
       this._startRefreshTimer();
     }
@@ -11498,7 +11498,7 @@ class BoschCameraCard extends HTMLElement {
               const ruleId = btn.dataset.ruleId;
               const cId = btn.dataset.camId;
               const newActive = btn.dataset.active !== "true";
-              this._callService("bosch_shc_camera", "update_rule", {
+              this._callService("bosch_smart_camera", "update_rule", {
                 camera_id: cId, rule_id: ruleId, is_active: newActive,
               });
               // Optimistic UI. issue #45 follow-up scan (realKim-dotcom
@@ -11515,7 +11515,7 @@ class BoschCameraCard extends HTMLElement {
               e.stopPropagation();
               const ruleId = btn.dataset.ruleId;
               const cId = btn.dataset.camId;
-              this._callService("bosch_shc_camera", "delete_rule", {
+              this._callService("bosch_smart_camera", "delete_rule", {
                 camera_id: cId, rule_id: ruleId,
               });
               // Remove row optimistically
@@ -11679,7 +11679,7 @@ class BoschCameraCard extends HTMLElement {
           if (!result) return;
           const { name, start, end } = result;
           btn.classList.add("running");
-          this._callService("bosch_shc_camera", "create_rule", {
+          this._callService("bosch_smart_camera", "create_rule", {
             camera_id: camId(), name: name,
             start_time: start + ":00", end_time: end + ":00",
             weekdays: [0,1,2,3,4,5,6], is_active: true,
@@ -11691,7 +11691,7 @@ class BoschCameraCard extends HTMLElement {
 
         btn.classList.add("running");
         const data = typeof svc.data === "function" ? svc.data() : svc.data;
-        this._callService("bosch_shc_camera", svc.svc, data);
+        this._callService("bosch_smart_camera", svc.svc, data);
         if (resultEl) { resultEl.style.display = ""; resultEl.textContent = this._t("svc_running").replace("{label}", svc.label); }
         setTimeout(() => {
           btn.classList.remove("running");
@@ -14226,7 +14226,7 @@ window.customCards.push({
 // ── Phase 5: NVR Timeline Card ────────────────────────────────────────────────
 // config: { camera_entity, nvr_source_id, motion_entity, show_date }
 // nvr_source_id: media_source identifier for this camera's NVR folder,
-//   e.g. "media-source://bosch_shc_camera/N/11111111.../2026-05-08"
+//   e.g. "media-source://bosch_smart_camera/N/11111111.../2026-05-08"
 // Renders a 24-hour canvas timeline + <video> player + date navigation.
 
 class BoschNvrTimelineCard extends HTMLElement {

@@ -22,11 +22,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-from custom_components.bosch_shc_camera import snapshot_fetchers
+from custom_components.bosch_smart_camera import snapshot_fetchers
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 SNAP_URL = "https://192.0.2.149:443/snap.jpg?JpegSize=1206"
-MODULE = "custom_components.bosch_shc_camera"
+MODULE = "custom_components.bosch_smart_camera"
 
 
 def _coord() -> SimpleNamespace:

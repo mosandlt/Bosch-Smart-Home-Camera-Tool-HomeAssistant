@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.bosch_shc_camera.camera_status import (
+from custom_components.bosch_smart_camera.camera_status import (
     _check_one_camera_status,
     poll_statuses,
 )
@@ -435,7 +435,7 @@ class TestPollStatuses:
                 raise asyncio.CancelledError()
             return (cam_id, "ONLINE")
 
-        import custom_components.bosch_shc_camera.camera_status as cs
+        import custom_components.bosch_smart_camera.camera_status as cs
 
         original = cs._check_one_camera_status
         cs._check_one_camera_status = _flaky_check

@@ -30,7 +30,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-DOMAIN = "bosch_shc_camera"
+DOMAIN = "bosch_smart_camera"
 DATE_RE = re.compile(r"_(\d{4}-\d{2}-\d{2})_")  # matches "_YYYY-MM-DD_" inside filename
 YEAR_RE = re.compile(r"^\d{4}$")
 MONTH_RE = re.compile(r"^(0[1-9]|1[0-2])$")

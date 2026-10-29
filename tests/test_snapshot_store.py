@@ -39,7 +39,7 @@ def _make_hass(tmp_path: Path) -> Any:
 @pytest.mark.asyncio
 async def test_save_load_roundtrip(tmp_path: Path) -> None:
     """Persisted bytes survive a save → load cycle."""
-    from custom_components.bosch_shc_camera.snapshot_store import (
+    from custom_components.bosch_smart_camera.snapshot_store import (
         load_snapshot,
         save_snapshot,
     )
@@ -53,7 +53,7 @@ async def test_save_load_roundtrip(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_save_creates_directory(tmp_path: Path) -> None:
     """save_snapshot creates the snapshots/ directory if absent."""
-    from custom_components.bosch_shc_camera.snapshot_store import save_snapshot
+    from custom_components.bosch_smart_camera.snapshot_store import save_snapshot
 
     hass = _make_hass(tmp_path)
     snap_dir = Path(tmp_path) / ".storage" / "bosch_shc_camera" / "snapshots"
@@ -66,7 +66,7 @@ async def test_save_creates_directory(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_atomic_write_no_tmp_left(tmp_path: Path) -> None:
     """After a successful save the .tmp file is gone (replaced)."""
-    from custom_components.bosch_shc_camera.snapshot_store import save_snapshot
+    from custom_components.bosch_smart_camera.snapshot_store import save_snapshot
 
     hass = _make_hass(tmp_path)
     await save_snapshot(hass, VALID_CAM_ID, VALID_JPEG)
@@ -92,7 +92,7 @@ async def test_concurrent_saves_for_same_camera_are_serialized(tmp_path: Path) -
     import threading
     import time
 
-    from custom_components.bosch_shc_camera import snapshot_store
+    from custom_components.bosch_smart_camera import snapshot_store
 
     hass = _make_hass(tmp_path)
 
@@ -145,7 +145,7 @@ async def test_concurrent_saves_for_same_camera_are_serialized(tmp_path: Path) -
 @pytest.mark.asyncio
 async def test_overwrite_preserves_previous_on_exception(tmp_path: Path) -> None:
     """When Path.replace raises, the original file is left intact."""
-    from custom_components.bosch_shc_camera import snapshot_store
+    from custom_components.bosch_smart_camera import snapshot_store
 
     hass = _make_hass(tmp_path)
     original = b"\xff\xd8\xff\xe0" + b"\xab" * 200
@@ -173,7 +173,7 @@ async def test_tmp_file_removed_when_replace_fails(tmp_path: Path) -> None:
     On cross-device rename (NFS / Docker bind-mounts) replace() raises OSError.
     Without the finally-unlink the .tmp accumulates on disk across restarts.
     """
-    from custom_components.bosch_shc_camera import snapshot_store
+    from custom_components.bosch_smart_camera import snapshot_store
 
     hass = _make_hass(tmp_path)
     snap_dir = Path(tmp_path) / ".storage" / "bosch_shc_camera" / "snapshots"
@@ -197,7 +197,7 @@ async def test_original_replace_error_propagates_when_cleanup_also_fails(
     original replace() error — the one the caller actually needs to see — is
     what propagates, not the secondary unlink failure.
     """
-    from custom_components.bosch_shc_camera import snapshot_store
+    from custom_components.bosch_smart_camera import snapshot_store
 
     hass = _make_hass(tmp_path)
 
@@ -212,7 +212,7 @@ async def test_original_replace_error_propagates_when_cleanup_also_fails(
 @pytest.mark.asyncio
 async def test_invalid_cam_id_raises_value_error_save(tmp_path: Path) -> None:
     """save_snapshot raises ValueError for non-UUID cam_id."""
-    from custom_components.bosch_shc_camera.snapshot_store import save_snapshot
+    from custom_components.bosch_smart_camera.snapshot_store import save_snapshot
 
     hass = _make_hass(tmp_path)
     with pytest.raises(ValueError, match="UUID format"):
@@ -222,7 +222,7 @@ async def test_invalid_cam_id_raises_value_error_save(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_invalid_cam_id_raises_value_error_load(tmp_path: Path) -> None:
     """load_snapshot raises ValueError for non-UUID cam_id."""
-    from custom_components.bosch_shc_camera.snapshot_store import load_snapshot
+    from custom_components.bosch_smart_camera.snapshot_store import load_snapshot
 
     hass = _make_hass(tmp_path)
     with pytest.raises(ValueError, match="UUID format"):
@@ -232,7 +232,7 @@ async def test_invalid_cam_id_raises_value_error_load(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_path_traversal_no_file_written(tmp_path: Path) -> None:
     """Path-traversal cam_id → ValueError raised, no file created outside storage."""
-    from custom_components.bosch_shc_camera.snapshot_store import save_snapshot
+    from custom_components.bosch_smart_camera.snapshot_store import save_snapshot
 
     hass = _make_hass(tmp_path)
     with pytest.raises(ValueError):
@@ -251,7 +251,7 @@ async def test_lowercase_uuid_accepted_and_normalised(tmp_path: Path) -> None:
     may pass lower-case (e.g. after slug munging).  Both forms must succeed, and
     they must resolve to the SAME on-disk file so there is no duplicate-file split.
     """
-    from custom_components.bosch_shc_camera.snapshot_store import (
+    from custom_components.bosch_smart_camera.snapshot_store import (
         load_snapshot,
         save_snapshot,
     )
@@ -270,7 +270,7 @@ async def test_lowercase_uuid_accepted_and_normalised(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_mixed_case_uuid_accepted(tmp_path: Path) -> None:
     """BUG-6 regression: mixed-case UUIDs are also accepted and normalised."""
-    from custom_components.bosch_shc_camera.snapshot_store import (
+    from custom_components.bosch_smart_camera.snapshot_store import (
         load_snapshot,
         save_snapshot,
     )
@@ -287,7 +287,7 @@ async def test_mixed_case_uuid_accepted(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_load_missing_returns_none(tmp_path: Path) -> None:
     """load_snapshot returns None when no file exists for that cam_id."""
-    from custom_components.bosch_shc_camera.snapshot_store import load_snapshot
+    from custom_components.bosch_smart_camera.snapshot_store import load_snapshot
 
     hass = _make_hass(tmp_path)
     result = await load_snapshot(hass, VALID_CAM_ID)
@@ -299,7 +299,7 @@ async def test_load_oserror_returns_none_and_warns(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """load_snapshot on non-FileNotFoundError OSError returns None + logs WARNING."""
-    from custom_components.bosch_shc_camera import snapshot_store
+    from custom_components.bosch_smart_camera import snapshot_store
 
     hass = _make_hass(tmp_path)
 
@@ -317,7 +317,7 @@ async def test_too_small_skipped(
     """Bytes < 100 are silently skipped (DEBUG logged, no file written)."""
     import logging
 
-    from custom_components.bosch_shc_camera.snapshot_store import (
+    from custom_components.bosch_smart_camera.snapshot_store import (
         load_snapshot,
         save_snapshot,
     )
@@ -335,7 +335,7 @@ async def test_too_large_skipped(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Bytes > 10 MiB are silently skipped (WARNING logged, no file written)."""
-    from custom_components.bosch_shc_camera.snapshot_store import (
+    from custom_components.bosch_smart_camera.snapshot_store import (
         load_snapshot,
         save_snapshot,
     )
@@ -351,7 +351,7 @@ async def test_too_large_skipped(
 @pytest.mark.asyncio
 async def test_exact_min_size_accepted(tmp_path: Path) -> None:
     """Exactly 100 bytes passes the minimum size guard."""
-    from custom_components.bosch_shc_camera.snapshot_store import (
+    from custom_components.bosch_smart_camera.snapshot_store import (
         load_snapshot,
         save_snapshot,
     )
@@ -387,7 +387,7 @@ async def test_privacy_mode_skips_save(tmp_path: Path) -> None:
     fake_img_util.scale_jpeg_camera_image = lambda *a, **kw: None  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.camera.img_util", fake_img_util)
 
-    from custom_components.bosch_shc_camera.camera import BoschCamera
+    from custom_components.bosch_smart_camera.camera import BoschCamera
 
     cam_id = VALID_CAM_ID
 
@@ -433,7 +433,7 @@ async def test_privacy_mode_skips_save(tmp_path: Path) -> None:
     cam.hass = hass  # type: ignore[assignment]
 
     with patch(
-        "custom_components.bosch_shc_camera.camera.save_snapshot",
+        "custom_components.bosch_smart_camera.camera.save_snapshot",
         side_effect=_mock_save,
     ):
         await cam.async_trigger_image_refresh(delay=0)
@@ -447,7 +447,7 @@ async def test_privacy_mode_skips_save(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_sync_remove_all_deletes_storage_dir(tmp_path: Path) -> None:
     """`_sync_remove_all` deletes the whole snapshots directory tree."""
-    from custom_components.bosch_shc_camera.snapshot_store import (
+    from custom_components.bosch_smart_camera.snapshot_store import (
         _storage_dir,
         _sync_remove_all,
         save_snapshot,
@@ -466,7 +466,7 @@ async def test_sync_remove_all_deletes_storage_dir(tmp_path: Path) -> None:
 def test_sync_remove_all_missing_dir_does_not_raise(tmp_path: Path) -> None:
     """A missing snapshots directory (e.g. config entry removed before any
     snapshot was ever saved) is the ONE tolerated case — must not raise."""
-    from custom_components.bosch_shc_camera.snapshot_store import (
+    from custom_components.bosch_smart_camera.snapshot_store import (
         _storage_dir,
         _sync_remove_all,
     )
@@ -489,7 +489,7 @@ def test_sync_remove_all_propagates_real_oserror(tmp_path: Path) -> None:
     every other OSError must propagate so `async_remove_all_snapshots`'s
     caller (`async_remove_entry`) sees the failure.
     """
-    from custom_components.bosch_shc_camera.snapshot_store import (
+    from custom_components.bosch_smart_camera.snapshot_store import (
         _storage_dir,
         _sync_remove_all,
     )
@@ -510,7 +510,7 @@ async def test_async_remove_all_snapshots_delegates_to_executor(
 ) -> None:
     """`async_remove_all_snapshots` runs `_sync_remove_all` via
     `hass.async_add_executor_job` (config-entry-removal cleanup hook)."""
-    from custom_components.bosch_shc_camera.snapshot_store import (
+    from custom_components.bosch_smart_camera.snapshot_store import (
         _sync_remove_all,
         async_remove_all_snapshots,
     )
@@ -525,7 +525,7 @@ async def test_async_remove_all_snapshots_delegates_to_executor(
 
 @pytest.mark.asyncio
 async def test_snapshot_mtime(tmp_path: Path) -> None:
-    from custom_components.bosch_shc_camera.snapshot_store import (
+    from custom_components.bosch_smart_camera.snapshot_store import (
         save_snapshot,
         snapshot_mtime,
     )

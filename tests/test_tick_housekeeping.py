@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.bosch_shc_camera.tick_housekeeping import run_housekeeping
+from custom_components.bosch_smart_camera.tick_housekeeping import run_housekeeping
 
 CAM_A = "11111111-1111-1111-1111-111111111111"
 NOW = 1000.0
@@ -287,7 +287,7 @@ class TestHwVersionPersistence:
 class TestLdiStatePersistence:
     @pytest.mark.asyncio
     async def test_saves_only_active_cameras_when_changed(self):
-        from custom_components.bosch_shc_camera.local_data_interface import (
+        from custom_components.bosch_smart_camera.local_data_interface import (
             STATE_ACTIVE,
         )
 
@@ -306,7 +306,7 @@ class TestLdiStatePersistence:
 
     @pytest.mark.asyncio
     async def test_skips_save_when_unchanged(self):
-        from custom_components.bosch_shc_camera.local_data_interface import (
+        from custom_components.bosch_smart_camera.local_data_interface import (
             STATE_ACTIVE,
         )
 
@@ -321,7 +321,7 @@ class TestLdiStatePersistence:
 
     @pytest.mark.asyncio
     async def test_saves_empty_snapshot_when_interface_turned_off(self):
-        from custom_components.bosch_shc_camera.local_data_interface import (
+        from custom_components.bosch_smart_camera.local_data_interface import (
             STATE_ACTIVE,
         )
 

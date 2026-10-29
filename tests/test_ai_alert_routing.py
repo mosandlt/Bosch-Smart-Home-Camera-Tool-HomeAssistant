@@ -3,7 +3,7 @@ routing + generalized alarm/siren trigger.
 
 Consolidated single flat test module (platinum convention: one
 tests/test_<module>.py per source module) covering every test surface of
-``custom_components/bosch_shc_camera/ai_alert_routing.py``:
+``custom_components/bosch_smart_camera/ai_alert_routing.py``:
 
   1. ``_alert_targets`` — reads ``ai_target`` subentries off the config
      entry, ignoring any other subentry type, never raising on a missing
@@ -37,8 +37,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.bosch_shc_camera import ai_alert_routing
-from custom_components.bosch_shc_camera.const import (
+from custom_components.bosch_smart_camera import ai_alert_routing
+from custom_components.bosch_smart_camera.const import (
     CONF_AI_ANALYSIS_ALARM_PANEL_ENTITY,
     CONF_AI_ANALYSIS_ALARM_TRIGGER_SCORE,
     CONF_AI_ANALYSIS_ALARM_TRIGGER_SERVICE,

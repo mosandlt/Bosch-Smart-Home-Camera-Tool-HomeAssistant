@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import aiohttp
 import pytest
 
-from custom_components.bosch_shc_camera.tick_bootstrap import (
+from custom_components.bosch_smart_camera.tick_bootstrap import (
     ensure_feature_flags,
     ensure_protocol_checked,
 )

@@ -1,5 +1,5 @@
 """Tests for the AI Camera Analysis config-flow additions in
-`custom_components/bosch_shc_camera/config_flow.py`:
+`custom_components/bosch_smart_camera/config_flow.py`:
 
   - the ``ai_analysis`` OptionsFlow section (12 fields, 2 nullable
     EntitySelector fields — issue #35 nullable-selector contract)
@@ -31,14 +31,14 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.bosch_shc_camera import ai_alert_routing, ai_analysis
-from custom_components.bosch_shc_camera.config_flow import (
+from custom_components.bosch_smart_camera import ai_alert_routing, ai_analysis
+from custom_components.bosch_smart_camera.config_flow import (
     AiTargetSubentryFlowHandler,
     AiVisitorSubentryFlowHandler,
     BoschCameraConfigFlow,
     BoschCameraOptionsFlow,
 )
-from custom_components.bosch_shc_camera.const import (
+from custom_components.bosch_smart_camera.const import (
     AI_TARGET_CONDITIONS,
     CONF_AI_ANALYSIS_ALARM_PANEL_ENTITY,
     CONF_AI_ANALYSIS_ALARM_TRIGGER_SCORE,
@@ -77,7 +77,7 @@ DOMAIN_CONST = DOMAIN  # local alias, avoids shadowing import in fixtures
 
 class TestAiAnalysisSectionLayout:
     def test_ai_analysis_section_has_all_12_fields(self) -> None:
-        from custom_components.bosch_shc_camera.config_flow import OPTIONS_SECTIONS
+        from custom_components.bosch_smart_camera.config_flow import OPTIONS_SECTIONS
 
         assert OPTIONS_SECTIONS["ai_analysis"] == [
             "ai_analysis_enabled",
@@ -455,7 +455,7 @@ class TestAiTargetSubentryFlow:
         ]
 
     def test_min_score_schema_bounds(self) -> None:
-        from custom_components.bosch_shc_camera.config_flow import _ai_target_schema
+        from custom_components.bosch_smart_camera.config_flow import _ai_target_schema
 
         schema = vol.Schema(_ai_target_schema())
         base = {
@@ -478,7 +478,7 @@ class TestAiTargetSubentryFlow:
         """The condition SelectSelector's options list must be built from
         AI_TARGET_CONDITIONS — not a hand-duplicated literal list that could
         drift out of sync with ai_alert_routing._condition_matches."""
-        from custom_components.bosch_shc_camera.config_flow import _ai_target_schema
+        from custom_components.bosch_smart_camera.config_flow import _ai_target_schema
 
         schema_dict = _ai_target_schema()
         condition_key = next(
@@ -489,7 +489,7 @@ class TestAiTargetSubentryFlow:
         assert set(options) == set(AI_TARGET_CONDITIONS)
 
     def test_condition_rejects_value_outside_allowed_set(self) -> None:
-        from custom_components.bosch_shc_camera.config_flow import _ai_target_schema
+        from custom_components.bosch_smart_camera.config_flow import _ai_target_schema
 
         schema = vol.Schema(_ai_target_schema())
         with pytest.raises((vol.Invalid, vol.MultipleInvalid)):

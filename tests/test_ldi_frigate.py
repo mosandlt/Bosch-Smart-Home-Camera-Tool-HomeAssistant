@@ -13,15 +13,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera import BoschCameraCoordinator
-from custom_components.bosch_shc_camera import frigate_endpoint as fe
-from custom_components.bosch_shc_camera.remote_viewing_front_door import (
+from custom_components.bosch_smart_camera import BoschCameraCoordinator
+from custom_components.bosch_smart_camera import frigate_endpoint as fe
+from custom_components.bosch_smart_camera.remote_viewing_front_door import (
     RemoteTarget,
     _PathRewriteRelay,
 )
 from tests.test_ldi_local import CAM, RESTREAM, _coord
 
-MODULE = "custom_components.bosch_shc_camera"
+MODULE = "custom_components.bosch_smart_camera"
 LDI_LIVE: dict[str, Any] = {"_connection_type": "LOCAL", "_ldi": True}
 
 

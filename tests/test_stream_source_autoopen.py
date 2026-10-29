@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.bosch_shc_camera.camera import BoschCamera
-from custom_components.bosch_shc_camera.const import STREAM_START_SKIPPED
+from custom_components.bosch_smart_camera.camera import BoschCamera
+from custom_components.bosch_smart_camera.const import STREAM_START_SKIPPED
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 URL = "rtsps://127.0.0.1:46597/rtsp_tunnel"

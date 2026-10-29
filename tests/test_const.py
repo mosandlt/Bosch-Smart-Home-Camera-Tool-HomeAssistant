@@ -18,25 +18,25 @@ class TestDefaultOptions:
 
     def test_default_enable_local_save_is_false(self):
         """Fresh install: enable_local_save must default to False (opt-in, not auto-enabled)."""
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+        from custom_components.bosch_smart_camera.const import DEFAULT_OPTIONS
 
         assert DEFAULT_OPTIONS.get("enable_local_save") is False
 
     def test_default_download_path_is_set(self):
         """download_path has a default path but is inactive until enable_local_save=True."""
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+        from custom_components.bosch_smart_camera.const import DEFAULT_OPTIONS
 
         assert DEFAULT_OPTIONS.get("download_path") == "/config/bosch_events"
 
     def test_default_fcm_push_disabled(self):
         """Fresh install: FCM push is disabled by default — polling drives events."""
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+        from custom_components.bosch_smart_camera.const import DEFAULT_OPTIONS
 
         assert DEFAULT_OPTIONS.get("enable_fcm_push") is False
 
     def test_default_notify_service_empty(self):
         """Fresh install: no notification service configured by default."""
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+        from custom_components.bosch_smart_camera.const import DEFAULT_OPTIONS
 
         assert DEFAULT_OPTIONS.get("alert_notify_service") == ""
 
@@ -52,7 +52,7 @@ class TestCardVersionConstant:
         """`CARD_VERSION` must exist and be a non-empty string. Must stay in
         sync with `src/bosch-camera-card.js` — Lovelace resource cache
         invalidation depends on the version match."""
-        from custom_components.bosch_shc_camera.const import CARD_VERSION
+        from custom_components.bosch_smart_camera.const import CARD_VERSION
 
         assert isinstance(CARD_VERSION, str)
         assert len(CARD_VERSION) > 0
@@ -68,7 +68,7 @@ class TestMarkEventsReadOptOutDefault:
     `mark_events_read` is an option the user controls, defaulting to Off."""
 
     def test_mark_events_read_option_is_documented(self):
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+        from custom_components.bosch_smart_camera.const import DEFAULT_OPTIONS
 
         assert DEFAULT_OPTIONS.get("mark_events_read", False) is False, (
             "mark_events_read must default to False so the user controls "
@@ -80,7 +80,7 @@ class TestMarkEventsReadOptOutDefault:
         import json
         from pathlib import Path
 
-        comp = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
+        comp = Path(__file__).parent.parent / "custom_components" / "bosch_smart_camera"
         strings = json.loads((comp / "strings.json").read_text())
         sections = (
             strings.get("options", {})
@@ -107,7 +107,7 @@ class TestStreamStartSkippedSentinel:
     the sentinel must stay falsy, unique, and distinct from `None`."""
 
     def test_sentinel_is_falsy_singleton(self):
-        from custom_components.bosch_shc_camera.const import STREAM_START_SKIPPED
+        from custom_components.bosch_smart_camera.const import STREAM_START_SKIPPED
 
         assert bool(STREAM_START_SKIPPED) is False
         assert STREAM_START_SKIPPED is STREAM_START_SKIPPED

@@ -8,7 +8,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from custom_components.bosch_shc_camera.dynamic_devices import (
+from custom_components.bosch_smart_camera.dynamic_devices import (
     register_dynamic_camera_listener,
 )
 

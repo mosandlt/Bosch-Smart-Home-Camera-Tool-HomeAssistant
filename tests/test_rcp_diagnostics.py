@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.bosch_shc_camera import rcp_diagnostics
+from custom_components.bosch_smart_camera import rcp_diagnostics
 
 CAM_A = "cam-a"
 CAM_B = "cam-b"

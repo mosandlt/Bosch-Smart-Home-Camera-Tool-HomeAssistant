@@ -16,7 +16,7 @@
  *
  * Installation:
  *   1. Copy ai-alert-timeline-card.js to /config/www/ai-alert-timeline-card.js
- *      (the bosch_shc_camera integration ships + auto-registers this for you,
+ *      (the bosch_smart_camera integration ships + auto-registers this for you,
  *      same as bosch-camera-card.js — no manual step normally required).
  *   2. Card YAML:
  *        type: custom:ai-alert-timeline-card

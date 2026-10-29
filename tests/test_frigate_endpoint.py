@@ -18,8 +18,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera import frigate_endpoint as fe
-from custom_components.bosch_shc_camera.frigate_endpoint import (
+from custom_components.bosch_smart_camera import frigate_endpoint as fe
+from custom_components.bosch_smart_camera.frigate_endpoint import (
     AUTH_BASIC,
     AUTH_NONE,
     AUTH_PATH_TOKEN,
@@ -846,7 +846,7 @@ async def test_drain_requests_auth_inject_exception_falls_back_to_raw():
     buf = b"SETUP rtsp://127.0.0.1/rtsp_tunnel/t RTSP/1.0\r\nCSeq: 2\r\n\r\n"
 
     with patch(
-        "custom_components.bosch_shc_camera.frigate_endpoint._build_digest_header",
+        "custom_components.bosch_smart_camera.frigate_endpoint._build_digest_header",
         side_effect=ValueError("simulated build failure"),
     ):
         tail = await relay._drain_requests(buf)
@@ -941,7 +941,7 @@ async def test_idle_linger_cancelled_on_reconnect_does_not_signal():
     """C5 (bug-hunt 2026-07-01): a pending idle-linger is cancelled when a new
     client connects, so a recorder that briefly reconnects (segment boundary)
     doesn't get its on-demand session torn down."""
-    from custom_components.bosch_shc_camera.frigate_endpoint import _CameraServer
+    from custom_components.bosch_smart_camera.frigate_endpoint import _CameraServer
 
     calls: list[int] = []
     server = _CameraServer(
@@ -1299,7 +1299,7 @@ async def test_relay_run_finally_closes_writers():
     fake_ir.read = AsyncMock(return_value=b"")
 
     with patch(
-        "custom_components.bosch_shc_camera.frigate_endpoint.asyncio.open_connection",
+        "custom_components.bosch_smart_camera.frigate_endpoint.asyncio.open_connection",
         return_value=(fake_ir, fake_iw),
     ):
         relay._auth_dance = AsyncMock(return_value=None)

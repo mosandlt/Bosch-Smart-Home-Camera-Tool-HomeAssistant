@@ -26,7 +26,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from bosch_shc_camera_client.rcp import RcpCameraData
 
-MODULE = "custom_components.bosch_shc_camera.rcp"
+MODULE = "custom_components.bosch_smart_camera.rcp"
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 PROXY_HOST = "proxy-01.live.cbs.boschsecurity.com:42090"
 PROXY_HASH = "abc123hash"
@@ -81,7 +81,7 @@ class TestAsyncUpdateRcpDataNoSession:
 
     @pytest.mark.asyncio
     async def test_none_result_touches_no_caches(self):
-        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+        from custom_components.bosch_smart_camera.rcp import async_update_rcp_data
 
         coord = _make_coord()
 
@@ -111,7 +111,7 @@ class TestAsyncUpdateRcpDataFullyPopulated:
 
     @pytest.mark.asyncio
     async def test_all_fields_merged_into_caches(self):
-        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+        from custom_components.bosch_smart_camera.rcp import async_update_rcp_data
 
         coord = _make_coord()
         data = RcpCameraData(
@@ -156,7 +156,7 @@ class TestAsyncUpdateRcpDataPartiallyPopulated:
 
     @pytest.mark.asyncio
     async def test_only_non_none_fields_written(self):
-        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+        from custom_components.bosch_smart_camera.rcp import async_update_rcp_data
 
         coord = _make_coord()
         # Pre-existing cached value for a field this round did NOT read.
@@ -188,7 +188,7 @@ class TestAsyncUpdateRcpDataPartiallyPopulated:
     async def test_privacy_zero_is_not_treated_as_falsy_none(self):
         """0 is a valid privacy/dimmer value -- must not be skipped by an
         `if data.field:` truthiness check instead of `is not None`."""
-        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+        from custom_components.bosch_smart_camera.rcp import async_update_rcp_data
 
         coord = _make_coord()
         data = RcpCameraData(dimmer=0, privacy=0)
@@ -211,7 +211,7 @@ class TestAsyncUpdateRcpDataCallArguments:
 
     @pytest.mark.asyncio
     async def test_arguments_passed_through_correctly(self):
-        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+        from custom_components.bosch_smart_camera.rcp import async_update_rcp_data
 
         coord = _make_coord()
         mock_fetch = AsyncMock(return_value=None)
@@ -234,7 +234,7 @@ class TestAsyncUpdateRcpDataCallArguments:
     async def test_missing_cmd_failures_entry_is_created(self):
         """First-ever call for a cam_id with no pre-existing failure-counter
         entry -- getattr/.setdefault must create it, not raise KeyError."""
-        from custom_components.bosch_shc_camera.rcp import async_update_rcp_data
+        from custom_components.bosch_smart_camera.rcp import async_update_rcp_data
 
         coord = _make_coord()
         coord._rcp_cmd_failures = {}  # no entry for CAM_ID at all yet

@@ -57,12 +57,12 @@ jobs:
       # from the release tag in the download URL, not the filename itself).
       - name: Build HACS zip release asset
         run: |
-          cd custom_components/bosch_shc_camera
-          zip -r "$GITHUB_WORKSPACE/bosch_shc_camera.zip" . \
+          cd custom_components/bosch_smart_camera
+          zip -r "$GITHUB_WORKSPACE/bosch_smart_camera.zip" . \
             -x '*.pyc' -x '__pycache__/*' -x '*/__pycache__/*' -x '.gitignore' -x '.DS_Store'
           cd "$GITHUB_WORKSPACE"
           echo "--- zip contents ---"
-          unzip -l bosch_shc_camera.zip | head -20
+          unzip -l bosch_smart_camera.zip | head -20
 
       - name: Resolve tag and release channel
         id: tag
@@ -232,5 +232,5 @@ jobs:
         run: |
           # --clobber so a tag re-point (fixed-CI re-release onto the same
           # tag) replaces the asset instead of failing on an existing one.
-          gh release upload "$TAG" bosch_shc_camera.zip \
+          gh release upload "$TAG" bosch_smart_camera.zip \
             --repo "$GITHUB_REPOSITORY" --clobber

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
-SRC = ROOT / "custom_components/bosch_shc_camera"
+SRC = ROOT / "custom_components/bosch_smart_camera"
 
 # Exactly two periods (not three+, e.g. a code sample's "...") at the end of a line.
 DOUBLE_PERIOD = re.compile(r"(?<!\.)\.\.(?!\.)\s*$")

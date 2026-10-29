@@ -19,9 +19,9 @@ import aiohttp
 import pytest
 from yarl import URL
 
-from custom_components.bosch_shc_camera import BoschCameraCoordinator, ldi_go2rtc
-from custom_components.bosch_shc_camera import ldi_snapshot as snap
-from custom_components.bosch_shc_camera.camera import BoschCamera
+from custom_components.bosch_smart_camera import BoschCameraCoordinator, ldi_go2rtc
+from custom_components.bosch_smart_camera import ldi_snapshot as snap
+from custom_components.bosch_smart_camera.camera import BoschCamera
 from tests.test_camera import CAM_ID, _make_camera_impl, _make_coord_impl
 from tests.test_ldi_go2rtc import API, FakeGo2rtc, _Resp
 from tests.test_ldi_local import CAM, IP, PW, _coord
@@ -93,7 +93,7 @@ class TestFetchSnapshot:
         c = _coord_snap(go2rtc)
         c.token = None
         with patch(
-            "custom_components.bosch_shc_camera.cloud_ssl.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.cloud_ssl.async_get_bosch_cloud_session",
             new=AsyncMock(side_effect=AssertionError("cloud")),
         ):
             assert await snap.fetch_snapshot(c, CAM) == JPEG  # type: ignore[arg-type]
@@ -227,11 +227,11 @@ class TestCoordinatorSeam:
         c = SimpleNamespace(token="tok", shc_state_cache={})
         with (
             patch(
-                "custom_components.bosch_shc_camera.coordinator.ldi_wanted",
+                "custom_components.bosch_smart_camera.coordinator.ldi_wanted",
                 return_value=True,
             ),
             patch(
-                "custom_components.bosch_shc_camera.coordinator.fetch_ldi_snapshot",
+                "custom_components.bosch_smart_camera.coordinator.fetch_ldi_snapshot",
                 new=AsyncMock(return_value=JPEG),
             ) as fetch,
         ):
@@ -243,7 +243,7 @@ class TestCoordinatorSeam:
     async def test_local_digest_variant_still_never_calls_the_cloud(self) -> None:
         c = SimpleNamespace(token="tok")
         with patch(
-            "custom_components.bosch_shc_camera.coordinator.ldi_wanted",
+            "custom_components.bosch_smart_camera.coordinator.ldi_wanted",
             return_value=True,
         ):
             assert (
@@ -334,12 +334,12 @@ class TestCameraEntity:
         )
         with (
             patch(
-                "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+                "custom_components.bosch_smart_camera.camera.async_get_bosch_cloud_session",
                 new=AsyncMock(return_value=MagicMock()),
             ),
             patch.object(cam, "_async_ldi_image", new=AsyncMock()) as ldi_image,
             patch(
-                "custom_components.bosch_shc_camera.ldi_snapshot.fetch_snapshot",
+                "custom_components.bosch_smart_camera.ldi_snapshot.fetch_snapshot",
                 new=AsyncMock(),
             ) as fetch,
         ):

@@ -44,8 +44,8 @@ from unittest.mock import patch
 
 import pytest
 
-from custom_components.bosch_shc_camera import ai_alert_store
-from custom_components.bosch_shc_camera.const import CONF_AI_ANALYSIS_RETENTION_DAYS
+from custom_components.bosch_smart_camera import ai_alert_store
+from custom_components.bosch_smart_camera.const import CONF_AI_ANALYSIS_RETENTION_DAYS
 
 CAM_ID = "cam-1"
 CAM_TITLE = "Terrasse"

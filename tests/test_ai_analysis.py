@@ -2,7 +2,7 @@
 
 Consolidated single flat test module (platinum convention: one
 tests/test_<module>.py per source module) covering every test surface of
-``custom_components/bosch_shc_camera/ai_analysis.py``:
+``custom_components/bosch_smart_camera/ai_analysis.py``:
 
   1. ``ai_analysis_budget_state`` — day-rollover + unlimited (max_per_day=0).
   2. ``async_load_ai_analysis_budget`` / ``_async_save_ai_analysis_budget``
@@ -45,7 +45,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.util import dt as dt_util
 
-from custom_components.bosch_shc_camera import ai_analysis
+from custom_components.bosch_smart_camera import ai_analysis
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -499,11 +499,11 @@ class TestAsyncGenerateAiAnalysis:
     def _mock_finalize_dependencies(self) -> Any:
         with (
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_store.async_store_alert",
+                "custom_components.bosch_smart_camera.ai_alert_store.async_store_alert",
                 new=AsyncMock(return_value={"image_path": None}),
             ),
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_routing.async_route_alert",
+                "custom_components.bosch_smart_camera.ai_alert_routing.async_route_alert",
                 new=AsyncMock(),
             ),
         ):
@@ -820,11 +820,11 @@ class TestFinalizeAlert:
         result = {"score": 7, "short": "Person at door"}
         with (
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_store.async_store_alert",
+                "custom_components.bosch_smart_camera.ai_alert_store.async_store_alert",
                 new=AsyncMock(return_value={"image_path": "img.jpg"}),
             ) as mock_store,
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_routing.async_route_alert",
+                "custom_components.bosch_smart_camera.ai_alert_routing.async_route_alert",
                 new=AsyncMock(),
             ),
         ):
@@ -843,11 +843,11 @@ class TestFinalizeAlert:
         result = {"score": 6, "short": "Someone in the yard"}
         with (
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_store.async_store_alert",
+                "custom_components.bosch_smart_camera.ai_alert_store.async_store_alert",
                 new=AsyncMock(return_value={"image_path": "img.jpg"}),
             ),
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_routing.async_route_alert",
+                "custom_components.bosch_smart_camera.ai_alert_routing.async_route_alert",
                 new=AsyncMock(),
             ),
         ):
@@ -867,11 +867,11 @@ class TestFinalizeAlert:
         result = {"score": 6, "short": "Someone"}
         with (
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_store.async_store_alert",
+                "custom_components.bosch_smart_camera.ai_alert_store.async_store_alert",
                 new=AsyncMock(return_value=None),
             ),
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_routing.async_route_alert",
+                "custom_components.bosch_smart_camera.ai_alert_routing.async_route_alert",
                 new=AsyncMock(),
             ),
         ):
@@ -888,11 +888,11 @@ class TestFinalizeAlert:
         coord.hass.bus.async_fire = MagicMock()
         with (
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_store.async_store_alert",
+                "custom_components.bosch_smart_camera.ai_alert_store.async_store_alert",
                 new=AsyncMock(return_value={"image_path": None}),
             ),
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_routing.async_route_alert",
+                "custom_components.bosch_smart_camera.ai_alert_routing.async_route_alert",
                 new=AsyncMock(),
             ),
         ):
@@ -914,11 +914,11 @@ class TestFinalizeAlert:
         result = {"score": 9, "short": "Break-in"}
         with (
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_store.async_store_alert",
+                "custom_components.bosch_smart_camera.ai_alert_store.async_store_alert",
                 new=AsyncMock(return_value=None),
             ),
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_routing.async_route_alert",
+                "custom_components.bosch_smart_camera.ai_alert_routing.async_route_alert",
                 new=AsyncMock(),
             ) as mock_route,
         ):
@@ -933,11 +933,11 @@ class TestFinalizeAlert:
         result = {"score": 5, "short": "Delivery"}
         with (
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_store.async_store_alert",
+                "custom_components.bosch_smart_camera.ai_alert_store.async_store_alert",
                 new=AsyncMock(return_value=None),
             ) as mock_store,
             patch(
-                "custom_components.bosch_shc_camera.ai_alert_routing.async_route_alert",
+                "custom_components.bosch_smart_camera.ai_alert_routing.async_route_alert",
                 new=AsyncMock(),
             ),
         ):

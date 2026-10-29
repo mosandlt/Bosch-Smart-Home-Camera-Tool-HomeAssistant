@@ -44,7 +44,7 @@ class TestGH1_MotionRevert:
         present so users can manage schedule-based motion rules instead
         of relying on the auto-reverted /motion endpoint.
         """
-        comp = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
+        comp = Path(__file__).parent.parent / "custom_components" / "bosch_smart_camera"
         services = (comp / "services.yaml").read_text()
         for svc in ("create_rule", "update_rule", "delete_rule"):
             assert svc in services, (
@@ -70,11 +70,11 @@ class TestGH4_CardFrontend:
 
     def test_card_javascript_exists(self):
         """The bundled card must be present in custom_components/.../www/."""
-        comp = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
+        comp = Path(__file__).parent.parent / "custom_components" / "bosch_smart_camera"
         card = comp / "www" / "bosch-camera-card.js"
         assert card.exists(), (
             "Card auto-registration relies on the bundled JS at "
-            "custom_components/bosch_shc_camera/www/bosch-camera-card.js"
+            "custom_components/bosch_smart_camera/www/bosch-camera-card.js"
         )
 
 

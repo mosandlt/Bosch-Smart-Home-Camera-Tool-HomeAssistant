@@ -19,11 +19,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.bosch_shc_camera.config_flow import (
+from custom_components.bosch_smart_camera.config_flow import (
     OPTIONS_SECTIONS,
     BoschCameraOptionsFlow,
 )
-from custom_components.bosch_shc_camera.const import (
+from custom_components.bosch_smart_camera.const import (
     AUTO_PLAY_DEFAULT_VALUES,
     DEFAULT_OPTIONS,
 )
@@ -98,7 +98,7 @@ class TestConstants:
         """
         from homeassistant.data_entry_flow import section as _section
 
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraOptionsFlow,
         )
 

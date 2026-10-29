@@ -21,11 +21,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera import rcp_client
+from custom_components.bosch_smart_camera import rcp_client
 
 CAM_A = "cam-a"
-RCP_CLIENT_MODULE = "custom_components.bosch_shc_camera.rcp_client"
-PKG_MODULE = "custom_components.bosch_shc_camera"
+RCP_CLIENT_MODULE = "custom_components.bosch_smart_camera.rcp_client"
+PKG_MODULE = "custom_components.bosch_smart_camera"
 
 
 def _resp_cm(status: int, text: str = "", body: bytes = b""):

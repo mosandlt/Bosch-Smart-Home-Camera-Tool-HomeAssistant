@@ -1,4 +1,4 @@
-"""Tests for custom_components.bosch_shc_camera.logbook.
+"""Tests for custom_components.bosch_smart_camera.logbook.
 
 Verifies that async_describe_events registers the correct callbacks for every
 event type the integration fires, and that each callback returns the expected
@@ -20,7 +20,7 @@ import pytest
 from homeassistant.components.logbook import LOGBOOK_ENTRY_MESSAGE, LOGBOOK_ENTRY_NAME
 from homeassistant.core import Event
 
-from custom_components.bosch_shc_camera.logbook import (
+from custom_components.bosch_smart_camera.logbook import (
     EVENT_AUDIO_ALARM,
     EVENT_MOTION,
     EVENT_PERSON,
@@ -57,13 +57,13 @@ class TestRegistration:
         self.registrations = _collect_registrations(self.hass)
 
     def test_motion_registered(self) -> None:
-        assert ("bosch_shc_camera", EVENT_MOTION) in self.registrations
+        assert ("bosch_smart_camera", EVENT_MOTION) in self.registrations
 
     def test_audio_alarm_registered(self) -> None:
-        assert ("bosch_shc_camera", EVENT_AUDIO_ALARM) in self.registrations
+        assert ("bosch_smart_camera", EVENT_AUDIO_ALARM) in self.registrations
 
     def test_person_registered(self) -> None:
-        assert ("bosch_shc_camera", EVENT_PERSON) in self.registrations
+        assert ("bosch_smart_camera", EVENT_PERSON) in self.registrations
 
     def test_exactly_three_registrations(self) -> None:
         """No stray event types are registered."""
@@ -80,7 +80,7 @@ class TestMotionDescribe:
     def setup_method(self) -> None:
         hass = MagicMock()
         regs = _collect_registrations(hass)
-        self.cb = regs[("bosch_shc_camera", EVENT_MOTION)]
+        self.cb = regs[("bosch_smart_camera", EVENT_MOTION)]
 
     def test_name_contains_camera_name(self) -> None:
         ev = _make_event(EVENT_MOTION, {"camera_name": "Terrasse", "camera_id": "abc"})
@@ -136,7 +136,7 @@ class TestAudioAlarmDescribe:
     def setup_method(self) -> None:
         hass = MagicMock()
         regs = _collect_registrations(hass)
-        self.cb = regs[("bosch_shc_camera", EVENT_AUDIO_ALARM)]
+        self.cb = regs[("bosch_smart_camera", EVENT_AUDIO_ALARM)]
 
     def test_name_contains_camera_name(self) -> None:
         ev = _make_event(EVENT_AUDIO_ALARM, {"camera_name": "Eingang"})
@@ -165,7 +165,7 @@ class TestPersonDescribe:
     def setup_method(self) -> None:
         hass = MagicMock()
         regs = _collect_registrations(hass)
-        self.cb = regs[("bosch_shc_camera", EVENT_PERSON)]
+        self.cb = regs[("bosch_smart_camera", EVENT_PERSON)]
 
     def test_name_contains_camera_name(self) -> None:
         ev = _make_event(EVENT_PERSON, {"camera_name": "Kamera 360"})

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
-SRC = ROOT / "custom_components/bosch_shc_camera"
+SRC = ROOT / "custom_components/bosch_smart_camera"
 
 PLATFORM_FILES = {
     "switch.py",

@@ -50,7 +50,7 @@ def self_caplog():
     """Capture log records from the mjpeg_snapshot module logger at DEBUG."""
     import logging
 
-    logger = logging.getLogger("custom_components.bosch_shc_camera.mjpeg_snapshot")
+    logger = logging.getLogger("custom_components.bosch_smart_camera.mjpeg_snapshot")
     records: list[logging.LogRecord] = []
 
     class _H(logging.Handler):
@@ -77,7 +77,7 @@ class TestFetchMjpegSnapshot:
         """Happy path: FFmpeg exits 0, stdout is a JPEG → bytes returned."""
         proc = _mock_proc(returncode=0, stdout=FAKE_JPEG)
         with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -94,7 +94,7 @@ class TestFetchMjpegSnapshot:
             patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)),
             patch("asyncio.wait_for", side_effect=TimeoutError()),
         ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -114,7 +114,7 @@ class TestFetchMjpegSnapshot:
             patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)),
             patch("asyncio.wait_for", side_effect=TimeoutError()),
         ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -137,7 +137,7 @@ class TestFetchMjpegSnapshot:
             patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)),
             patch("asyncio.wait_for", side_effect=TimeoutError()),
         ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -153,7 +153,7 @@ class TestFetchMjpegSnapshot:
         """FFmpeg exits with code != 0 → None + warning logged."""
         proc = _mock_proc(returncode=1, stdout=b"", stderr=b"some error")
         with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -173,7 +173,7 @@ class TestFetchMjpegSnapshot:
 
         proc = _mock_proc(returncode=-9, stdout=b"", stderr=b"")
         with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -193,7 +193,7 @@ class TestFetchMjpegSnapshot:
 
         proc = _mock_proc(returncode=1, stdout=b"", stderr=b"boom")
         with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -210,7 +210,7 @@ class TestFetchMjpegSnapshot:
         """FFmpeg exits 0 but stdout is empty → None + warning logged."""
         proc = _mock_proc(returncode=0, stdout=b"")
         with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -223,7 +223,7 @@ class TestFetchMjpegSnapshot:
         not_jpeg = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100  # PNG bytes
         proc = _mock_proc(returncode=0, stdout=not_jpeg)
         with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -234,7 +234,7 @@ class TestFetchMjpegSnapshot:
     async def test_empty_host_returns_none_without_subprocess(self):
         """Missing cam_host → None immediately, no subprocess spawned."""
         with patch("asyncio.create_subprocess_exec") as mock_exec:
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -246,7 +246,7 @@ class TestFetchMjpegSnapshot:
     async def test_empty_user_returns_none_without_subprocess(self):
         """Missing user → None immediately, no subprocess spawned."""
         with patch("asyncio.create_subprocess_exec") as mock_exec:
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -258,7 +258,7 @@ class TestFetchMjpegSnapshot:
     async def test_empty_password_returns_none_without_subprocess(self):
         """Missing password → None immediately, no subprocess spawned."""
         with patch("asyncio.create_subprocess_exec") as mock_exec:
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -273,7 +273,7 @@ class TestFetchMjpegSnapshot:
             "asyncio.create_subprocess_exec",
             new=AsyncMock(side_effect=FileNotFoundError("ffmpeg not found")),
         ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -287,7 +287,7 @@ class TestFetchMjpegSnapshot:
             "asyncio.create_subprocess_exec",
             new=AsyncMock(side_effect=OSError("spawn failed")),
         ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -305,7 +305,7 @@ class TestFetchMjpegSnapshot:
             return proc
 
         with patch("asyncio.create_subprocess_exec", new=fake_exec):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -335,7 +335,7 @@ class TestFetchMjpegSnapshot:
             patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)),
             patch("asyncio.wait_for", side_effect=asyncio.CancelledError()),
         ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 
@@ -362,7 +362,7 @@ class TestFetchMjpegSnapshot:
             patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)),
             patch("asyncio.wait_for", new=fake_wait_for),
         ):
-            from custom_components.bosch_shc_camera.mjpeg_snapshot import (
+            from custom_components.bosch_smart_camera.mjpeg_snapshot import (
                 fetch_mjpeg_snapshot,
             )
 

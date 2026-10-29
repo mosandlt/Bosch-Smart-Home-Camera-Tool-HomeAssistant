@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera import maintenance_announcements
+from custom_components.bosch_smart_camera import maintenance_announcements
 
 CAM_A = "cam-a"
 
@@ -56,11 +56,11 @@ class TestAsyncRefreshMaintenance:
         fetch_mock = AsyncMock(return_value=_FakeMaintenanceWindow())
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic",
+                "custom_components.bosch_smart_camera.time.monotonic",
                 return_value=1000.0,
             ),
             patch(
-                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                "custom_components.bosch_smart_camera.maintenance.async_fetch_maintenance",
                 new=fetch_mock,
             ),
         ):
@@ -75,15 +75,15 @@ class TestAsyncRefreshMaintenance:
         new_mw = _FakeMaintenanceWindow("Wartung Kamera")
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic",
+                "custom_components.bosch_smart_camera.time.monotonic",
                 return_value=1000.0,
             ),
             patch(
-                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                "custom_components.bosch_smart_camera.maintenance.async_fetch_maintenance",
                 new=AsyncMock(return_value=new_mw),
             ),
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
+                "custom_components.bosch_smart_camera.async_get_clientsession",
                 return_value=object(),
             ),
         ):
@@ -99,15 +99,15 @@ class TestAsyncRefreshMaintenance:
         coord = _make_refresh_coord(cache=previous)
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic",
+                "custom_components.bosch_smart_camera.time.monotonic",
                 return_value=1000.0,
             ),
             patch(
-                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                "custom_components.bosch_smart_camera.maintenance.async_fetch_maintenance",
                 new=AsyncMock(side_effect=RuntimeError("boom")),
             ),
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
+                "custom_components.bosch_smart_camera.async_get_clientsession",
                 return_value=object(),
             ),
         ):
@@ -122,15 +122,15 @@ class TestAsyncRefreshMaintenance:
         coord = _make_refresh_coord(cache=previous)
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic",
+                "custom_components.bosch_smart_camera.time.monotonic",
                 return_value=1000.0,
             ),
             patch(
-                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                "custom_components.bosch_smart_camera.maintenance.async_fetch_maintenance",
                 new=AsyncMock(return_value=None),
             ),
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
+                "custom_components.bosch_smart_camera.async_get_clientsession",
                 return_value=object(),
             ),
         ):
@@ -153,19 +153,19 @@ class TestAsyncRefreshMaintenance:
         coord._async_maybe_announce_maintenance = override
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic",
+                "custom_components.bosch_smart_camera.time.monotonic",
                 return_value=1000.0,
             ),
             patch(
-                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                "custom_components.bosch_smart_camera.maintenance.async_fetch_maintenance",
                 new=AsyncMock(return_value=new_mw),
             ),
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
+                "custom_components.bosch_smart_camera.async_get_clientsession",
                 return_value=object(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.announcements.maybe_announce_maintenance",
+                "custom_components.bosch_smart_camera.announcements.maybe_announce_maintenance",
                 new=AsyncMock(
                     side_effect=AssertionError(
                         "must not call announcements module directly"
@@ -278,7 +278,7 @@ class TestAsyncHandleSessionQuotaHit:
     async def test_below_threshold_no_notification(self) -> None:
         coord = _make_quota_coord()
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1.0
         ):
             await maintenance_announcements.async_handle_session_quota_hit(coord, CAM_A)
             await maintenance_announcements.async_handle_session_quota_hit(coord, CAM_A)
@@ -290,7 +290,7 @@ class TestAsyncHandleSessionQuotaHit:
             data={CAM_A: {"info": {"title": "Terrasse"}}},
         )
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1.0
         ):
             for _ in range(3):
                 await maintenance_announcements.async_handle_session_quota_hit(
@@ -306,12 +306,12 @@ class TestAsyncHandleSessionQuotaHit:
     async def test_old_hits_outside_window_are_pruned(self) -> None:
         coord = _make_quota_coord()
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1.0
         ):
             await maintenance_announcements.async_handle_session_quota_hit(coord, CAM_A)
             await maintenance_announcements.async_handle_session_quota_hit(coord, CAM_A)
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1000.0
         ):
             await maintenance_announcements.async_handle_session_quota_hit(coord, CAM_A)
         # The two old hits (t=1.0) are outside the 300s window at t=1000 —
@@ -322,7 +322,7 @@ class TestAsyncHandleSessionQuotaHit:
     async def test_missing_cam_name_falls_back_to_id_prefix(self) -> None:
         coord = _make_quota_coord(data={})
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1.0
         ):
             for _ in range(3):
                 await maintenance_announcements.async_handle_session_quota_hit(

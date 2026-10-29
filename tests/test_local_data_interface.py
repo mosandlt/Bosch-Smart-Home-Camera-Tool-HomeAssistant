@@ -15,17 +15,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera.binary_sensor import (
+from custom_components.bosch_smart_camera.binary_sensor import (
     BoschLocalDataInterfaceBinarySensor,
     async_setup_entry,
 )
-from custom_components.bosch_shc_camera.local_data_interface import (
+from custom_components.bosch_smart_camera.local_data_interface import (
     LDI_ENDPOINT,
     firmware_supports_ldi,
     parse_firmware,
     state_from_response,
 )
-from custom_components.bosch_shc_camera.repairs import (
+from custom_components.bosch_smart_camera.repairs import (
     refresh_local_data_interface_issues,
 )
 from tests.test_slow_tier import (
@@ -35,8 +35,8 @@ from tests.test_slow_tier import (
     _slow_ctx,
 )
 
-COMP = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
-MODULE = "custom_components.bosch_shc_camera"
+COMP = Path(__file__).parent.parent / "custom_components" / "bosch_smart_camera"
+MODULE = "custom_components.bosch_smart_camera"
 
 
 # ── pure helpers ────────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ def _session(status: int, body: object = None, *, raises: bool = False) -> Magic
 async def _poll(
     coord: SimpleNamespace, session: MagicMock, *, gen2: bool = True, raw=None
 ) -> None:
-    from custom_components.bosch_shc_camera.slow_tier import _poll_slow_tier_endpoints
+    from custom_components.bosch_smart_camera.slow_tier import _poll_slow_tier_endpoints
 
     data = {CAM_A: {}}
     await _poll_slow_tier_endpoints(
@@ -413,7 +413,7 @@ class TestRepairsHint:
         coord.local_data_interface_cache[CAM_A] = {"state": "active"}
         refresh_local_data_interface_issues(coord)
         mock_ir.async_delete_issue.assert_called_once_with(
-            coord.hass, "bosch_shc_camera", f"local_data_interface_available_{CAM_A}"
+            coord.hass, "bosch_smart_camera", f"local_data_interface_available_{CAM_A}"
         )
         assert CAM_A not in coord._ldi_hint_alerted
 
@@ -441,7 +441,7 @@ class TestRepairsHint:
         mock_ir.async_create_issue.assert_not_called()
 
     def test_coordinator_delegator(self) -> None:
-        from custom_components.bosch_shc_camera.coordinator import (
+        from custom_components.bosch_smart_camera.coordinator import (
             BoschCameraCoordinator,
         )
 

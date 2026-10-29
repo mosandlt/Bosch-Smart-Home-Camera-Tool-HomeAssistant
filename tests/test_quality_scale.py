@@ -18,7 +18,9 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 
-COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
+COMPONENT_DIR = (
+    Path(__file__).parent.parent / "custom_components" / "bosch_smart_camera"
+)
 
 
 @pytest.fixture(scope="module")

@@ -1,0 +1,1111 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bosch Smart Home Camera — Inloggen",
+        "description": "Kies hoe je wilt inloggen met je Bosch SingleKey ID.",
+        "menu_options": {
+          "auto_login": "Automatisch inloggen (aanbevolen)",
+          "manual_login": "Handmatig inloggen (gebruik dit als automatisch inloggen niet werkt, bijv. in de Home Assistant-app)",
+          "migrate_legacy": "Migrate the existing setup (keeps login, options and entity IDs)"
+        }
+      },
+      "manual_login": {
+        "title": "Bosch Smart Home Camera — Inloggen (Stap 1 van 2)",
+        "description": "**Aanmeldprocedure:**\n\n1. Kopieer de URL hieronder\n2. Open deze in uw browser\n3. Log in met uw **Bosch SingleKey ID**\n4. De browser toont een **foutpagina** — dit is normaal\n5. Kopieer de **volledige URL** uit de adresbalk\n6. Klik op **OK** om door te gaan",
+        "data": {
+          "login_url": "Bosch Login URL"
+        },
+        "data_description": {
+          "login_url": "Kopieer deze URL en open hem in uw browser om in te loggen."
+        }
+      },
+      "manual_paste": {
+        "title": "Bosch Smart Home Camera — URL plakken (Stap 2 van 2)",
+        "description": "Plak de doorstuur-URL uit de adresbalk van uw browser hieronder.\n\n**Belangrijk:** De code verloopt na ~60 seconden.",
+        "data": {
+          "redirect_url": "Doorstuur-URL",
+          "diagnostic_cloud_api_override": "Geavanceerd: aangepaste camera-API-URL (alleen diagnose)"
+        },
+        "data_description": {
+          "redirect_url": "De volledige URL uit de adresbalk na het inloggen (bevat de autorisatiecode)",
+          "diagnostic_cloud_api_override": "Laat leeg tenzij Bosch-support u expliciet een andere camera-API-basis-URL heeft gegeven om te testen — dit activeert geen bètaprogramma en ontgrendelt niets, het verandert alleen met welke server de integratie communiceert."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Bosch Smart Home Camera opnieuw koppelen",
+        "description": "Uw Bosch Cloud-token is verlopen en kan niet automatisch worden vernieuwd. Dit gebeurt doorgaans wanneer het vernieuwingstoken aan de Bosch-kant ongeldig is geworden.\n\nKlik op **Verzenden** om te kiezen hoe u opnieuw wilt inloggen. Uw bestaande configuratie (entiteiten, automatiseringen, opties) blijft behouden.",
+        "submit": "Verzenden"
+      },
+      "reconfigure": {
+        "title": "Bosch Smart Home Camera opnieuw configureren",
+        "description": "Voer de OAuth-aanmelding opnieuw uit om uw inloggegevens te vernieuwen zonder de integratie te verwijderen. Alle bestaande entiteiten, automatiseringen en opties blijven behouden.",
+        "submit": "Verzenden"
+      },
+      "migrate_legacy": {
+        "title": "Migrate existing setup",
+        "description": "Migrate the existing setup (keeps login, options and entity IDs)"
+      }
+    },
+    "error": {
+      "invalid_redirect_url": "Geen autorisatiecode gevonden in de URL.",
+      "token_exchange_failed": "Aanmelden mislukt — de code is mogelijk verlopen. Probeer opnieuw.",
+      "cannot_connect": "Verbinding met Bosch-servers mislukt.",
+      "timeout": "Verbindingstime-out.",
+      "invalid_cloud_api_override": "De aangepaste camera-API-URL moet beginnen met https://"
+    },
+    "abort": {
+      "already_configured": "Al geconfigureerd.",
+      "reauth_successful": "Opnieuw koppelen geslaagd — de Bosch Smart Home Camera-integratie is bijgewerkt met een nieuw token. Alle entiteiten, automatiseringen en opties zijn behouden.",
+      "reconfigure_successful": "Herconfiguratie geslaagd — de Bosch Smart Home Camera-integratie is bijgewerkt met een nieuw token. Alle entiteiten, automatiseringen en opties zijn behouden.",
+      "missing_credentials": "Er is geen Bosch SingleKey ID-applicatiereferentie geregistreerd. Herstart Home Assistant en probeer het opnieuw — als dit blijft gebeuren, meld dan een issue.",
+      "missing_configuration": "De Bosch Smart Home Camera-integratie is niet correct ingesteld voor OAuth. Herstart Home Assistant en probeer het opnieuw — als dit blijft gebeuren, meld dan een issue.",
+      "oauth_implementation_unavailable": "De gekozen aanmeldmethode is niet meer beschikbaar. Begin opnieuw.",
+      "camera_access_denied": "Aanmelden is gelukt, maar Bosch heeft de toegang tot de camera-API voor dit account geweigerd. Dit betekent meestal dat de cameraregistratie van het account nooit is voltooid. Open de officiële Bosch Smart Camera-app en voltooi eventuele registratie- of gebruiksvoorwaardenschermen die worden getoond, en probeer het dan opnieuw.",
+      "cannot_connect": "Aanmelden is gelukt, maar de camera-API van Bosch is tijdelijk niet beschikbaar (snelheidsbeperking of serverstoring). Probeer het over een paar minuten opnieuw.",
+      "no_legacy_entry": "Nothing to migrate: no previous Bosch Smart Home Camera setup was found."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bosch Camera — Instellingen",
+        "description": "**Token:** {token_status}",
+        "sections": {
+          "polling": {
+            "name": "Polling-intervallen",
+            "description": "Hoe vaak de integratie communiceert met de Bosch Cloud.",
+            "data": {
+              "scan_interval": "Polling-interval (seconden)",
+              "interval_status": "Statuscontrole-interval (seconden)",
+              "interval_events": "Gebeurteniscontrole-interval (seconden)",
+              "snapshot_interval": "Snapshot-vernieuwingsinterval (seconden)"
+            },
+            "data_description": {
+              "scan_interval": "Hoe vaak de integratie gegevens ophaalt uit de Bosch Cloud. Lager = sneller, meer API-aanroepen. Standaard: 60",
+              "interval_status": "Hoe vaak camera's worden gecontroleerd op ONLINE/OFFLINE. Standaard: 300 (5 min)",
+              "interval_events": "Hoe vaak nieuwe bewegings-/audio-gebeurtenissen worden gecontroleerd. Met FCM Push alleen als fallback. Standaard: 300 (5 min)",
+              "snapshot_interval": "Hoe vaak camera-snapshots proactief worden vernieuwd. Bereik: 300–86400. Standaard: 1800 (30 min)"
+            }
+          },
+          "features": {
+            "name": "Functies",
+            "description": "Entiteitstypen in- of uitschakelen die de integratie aanmaakt.",
+            "data": {
+              "enable_snapshots": "Camera-snapshots",
+              "enable_sensors": "Sensoren (Status, WiFi, Firmware, Gebeurtenissen)",
+              "enable_snapshot_button": "Schakelaars & knoppen (Stream, Privacy, Licht)",
+              "enable_binary_sensors": "Bewegings-/audioalarmsensoren",
+              "enable_intercom": "Intercom (tweerichtingsaudio)",
+              "motion_active_window": "Bewegingssensor: actief venster (seconden)",
+              "auto_play_default": "Kaart auto-afspelen (standaard)"
+            },
+            "data_description": {
+              "enable_snapshots": "Toont de laatste door beweging geactiveerde JPEG als camera-entiteit in HA.",
+              "enable_sensors": "Maakt sensorentiteiten aan voor camerastatus, WiFi-signaal, firmware, gebeurtenissen vandaag, laatste gebeurtenis, enz.",
+              "enable_snapshot_button": "Maakt schakelaar- en knopentiteiten aan: Live Stream, Audio, Privacymodus, Cameralamp, Meldingen, Vernieuwen.",
+              "enable_binary_sensors": "Maakt binaire sensoren aan die 30 seconden AAN blijven na een bewegings- of audioalarmgebeurtenis. Handig voor automatiseringen.",
+              "enable_intercom": "Schakelt de intercom-entiteit (tweerichtingsaudio) in. Standaard uitgeschakeld. Maakt het mogelijk audio naar de cameraluidspreker te sturen.",
+              "motion_active_window": "Hoe lang (seconden) de binaire bewegingssensor AAN blijft na een gebeurtenis. Bereik 10-300, standaard 90.",
+              "auto_play_default": "Bepaalt of de live-stream automatisch verschijnt wanneer de kaart laadt. Per kaart te overschrijven via YAML `auto_play`.\n• **Alleen LAN** (aanbevolen): auto-tonen in het thuisnetwerk; op afstand wordt de stream voorgeladen en een overlay bedekt de video totdat je tikt.\n• **Altijd**: auto-tonen in elke sessie.\n• **Tik om te tonen**: voorlaadt de stream en toont de overlay in elke sessie — je tikt één keer om de video te tonen."
+            }
+          },
+          "stream": {
+            "name": "Live stream",
+            "description": "Verbindingsmodus en afspeelbufferinstelling voor live video.",
+            "data": {
+              "stream_connection_type": "Stream-verbindingstype",
+              "live_buffer_mode": "Afspeelbufferprofiel (HLS)",
+              "enable_go2rtc": "go2rtc WebRTC (lage-latentie streaming ~2 s)",
+              "enable_green_it": "Green IT — inactieve live-streams automatisch beëindigen (experimenteel, in ontwikkeling)",
+              "defer_diag_during_stream": "Diagnostische lezingen pauzeren tijdens live stream",
+              "use_mjpeg_snapshot": "MJPEG inst=3 snapshot (Gen2, LAN)",
+              "snapshot_size": "Dashboard snapshot size",
+              "cloudflare_tunnel_hls_unbuffer": "Cloudflare Tunnel HLS-fix (geavanceerd, standaard uit)"
+            },
+            "data_description": {
+              "stream_connection_type": "Standaard verbindingstype voor live streams.\n• **auto** (aanbevolen): Probeert eerst het lokale LAN, schakelt automatisch over naar de Bosch Cloud-proxy bij een storing.\n• **local**: Alleen direct LAN — geen internet vereist. Snellere RTSP, maar langzamere snapshots (~6–10 s). Verbinding wordt elke 50 s automatisch vernieuwd.\n• **remote**: Altijd via de Bosch Cloud-proxy. Snellere snapshots (~0,4–1,9 s). Beste keuze wanneer HA niet op hetzelfde LAN staat.\nDe selectie-entiteit 'Stream-modus' overschrijft deze instelling tijdens gebruik zonder herstart.",
+              "live_buffer_mode": "Hoeveel seconden video de speler buffert voor weergave. Meer buffer = minder onderbrekingen, maar meer vertraging ten opzichte van realtijd.\n• **Latentie**: kleine buffer (~4-6 s vertraging). Kan haperen op instabiel Wi-Fi.\n• **Evenwichtig** (aanbevolen): gemiddelde buffer (~8-10 s). Robuust bij typische Wi-Fi-onderbrekingen.\n• **Stabiel**: grote buffer (~12-15 s). Vloeiend zelfs bij zwakke verbindingen, maar merkbaar vertraagd.\nBeïnvloedt alleen de kaartweergave — geen effect op de camera, opname of snapshots.",
+              "enable_go2rtc": "Registreert live streams automatisch bij de meegeleverde go2rtc van HA voor WebRTC-weergave (~2 s latentie vs. ~10 s HLS). Aanbevolen. Schakel alleen uit als u een aangepaste go2rtc-configuratie gebruikt.",
+              "defer_diag_during_stream": "Wanneer INGESCHAKELD (aanbevolen): trage diagnostische cloud-lezingen worden uitgesteld terwijl de live stream van een camera actief is, wat TLS-kanaalconflicten voorkomt die korte stream-freezes kunnen veroorzaken tijdens bewegingsbursts. De uitgestelde lezingen worden uitgevoerd bij de volgende polling-cyclus zodra de stream inactief is. Uitschakelen alleen als diagnostische sensoren ook tijdens het streamen actueel moeten blijven.",
+              "use_mjpeg_snapshot": "**Alleen Gen2-camera's, LAN vereist, experimenteel.** Wanneer AAN: snapshotverzoeken proberen één JPEG-frame rechtstreeks van de camera te halen via de RTSP inst=3 MJPEG-stream met FFmpeg. Doel: ~150–300 ms vs ~500 ms via de cloudproxy. **Standaard UIT** — de ingebouwde TLS-stack van FFmpeg kan momenteel niet onderhandelen met de RTSPS-server van de camera op poort 443 (FFmpeg-fout 183). Valt automatisch terug wanneer FFmpeg mislukt.",
+              "snapshot_size": "How large the still images shown in dashboards and previews are. Smaller images load faster on slow links and use less data.\n• **Automatic** (default): follows the size the dashboard asks for.\n• **Small**: never wider than 320 px.\n• **Medium**: never wider than 640 px.\n• **Full**: never downscaled, even when the dashboard asks for a thumbnail.\nThe last saved snapshot (image entity, notifications, AI analysis) always keeps full resolution.",
+              "enable_green_it": "Beëindigt automatisch de livesessie van een camera wanneer niemand meer kijkt — wanneer geen app, dashboard of Cast de stream gedurende ongeveer 3 minuten heeft opgehaald. **Experimenteel — in ontwikkeling, standaard UIT.** Kijkersdetectie kan een live WebRTC-kijker nog niet betrouwbaar zien.",
+              "cloudflare_tunnel_hls_unbuffer": "**Geavanceerd, standaard uit.** Indien AAN: herschrijft de Content-Type- en Transfer-Encoding-headers die Home Assistants eigen ingebouwde HLS-streamviews (master playlist, playlist, init-segment, part, segment) in hun HTTP-responses versturen. Dit wordt toegepast via monkeypatching van die HA-core view-klassen op procesniveau van Home Assistant — eenmaal ingeschakeld verandert dit de HLS-levering voor **elke** camera-HLS-stream op deze Home Assistant-installatie, niet alleen Bosch-camera's, zolang Home Assistant blijft draaien, en er is geen manier om dit per camera weer uit te zetten, behalve door deze optie uit te schakelen en opnieuw te starten. Alleen inschakelen als je Home Assistant via een Cloudflare Tunnel benadert en de iOS Companion-app vastloopt bij het laden van een livestream via mobiele data — precies dat symptoom lost deze workaround op."
+            }
+          },
+          "fcm": {
+            "name": "Pushmeldingen",
+            "description": "Realtime gebeurtenislevering via FCM en gefaseerde meldingsdiensten.",
+            "data": {
+              "enable_fcm_push": "FCM Push — directe gebeurtenisdetectie (~2 s)",
+              "fcm_push_mode": "FCM Push-modus (auto / polling)",
+              "mark_events_read": "Bosch Cloud-gebeurtenissen als gelezen markeren",
+              "alert_save_snapshots": "Waarschuwingsafbeeldingen/-video's lokaal opslaan",
+              "alert_delete_after_send": "Bestanden verwijderen na verzenden",
+              "alert_notify_service": "Waarschuwingsdiensten — standaard fallback (kommagescheiden)",
+              "alert_notify_information": "Stap 1 — tekstmelding",
+              "alert_notify_screenshot": "Stap 2 — snapshot-afbeelding",
+              "alert_notify_video": "Stap 3 — videoclip",
+              "alert_notify_system": "Systeemwaarschuwingen (tokenfout, NAS-opruiming)",
+              "alert_notify_live_preview": "Live cameravoorbeeld in meldingen"
+            },
+            "data_description": {
+              "enable_fcm_push": "Ontvang bewegings-/audiogebeurtenissen in ~2 seconden via Firebase Cloud Messaging in plaats van elke 5 minuten te pollen. Automatische fallback naar polling als FCM uitvalt. Aanbevolen!",
+              "fcm_push_mode": "Auto = FCM push met automatische fallback naar polling bij registratiefout. Polling = FCM overgeslagen, alleen standaard API-aanroepen.",
+              "mark_events_read": "UIT (standaard): nieuwe bewegings-/audiogebeurtenissen blijven als ongelezen gemarkeerd in de Bosch-app — ook nadat HA ze heeft verwerkt — zodat de app ze als nieuw blijft markeren. AAN inschakelen zodat de integratie gebeurtenissen na verwerking als gelezen markeert in de Bosch Cloud (het eerdere gedrag, handig wanneer HA uw primaire client is en u geen verouderde 'nieuw'-badges in de app wilt zien).",
+              "alert_save_snapshots": "Gedownloade gebeurtenisafbeeldingen en -video's bewaren in www/bosch_alerts/ (in de HA-configuratiemap). UIT: bestanden worden binnen ongeveer 30 seconden na verzending verwijderd. AAN: bestanden blijven permanent op schijf staan en worden zonder authenticatie aangeboden aan iedereen op uw LAN die de bestandsnaam kent of raadt.",
+              "alert_delete_after_send": "Verouderd — heeft geen effect meer. Het verwijderen van bestanden in www/bosch_alerts/ wordt nu uitsluitend bepaald door ‘Waarschuwingsafbeeldingen/video’s lokaal bewaren’ hierboven (UIT daar = bestanden worden binnen enkele seconden na verzenden verwijderd).",
+              "alert_notify_service": "Standaard fallback: wordt gebruikt wanneer de typespecifieke velden hieronder leeg zijn. Kommagescheiden. Voorbeelden: notify.signal_messenger, notify.mobile_app_xxx. Leeg laten om waarschuwingen uit te schakelen.",
+              "alert_notify_information": "Diensten voor stap 1 — directe tekstmelding. Leeg = standaard fallback. bijv.: notify.signal_messenger, notify.mobile_app_xxx.",
+              "alert_notify_screenshot": "Diensten voor stap 2 — snapshot-afbeelding. Leeg = stap overgeslagen (geen fallback). Mobiele apps (mobile_app_xxx) ontvangen de afbeelding inline; anderen als bijlage.",
+              "alert_notify_video": "Diensten voor stap 3 — videoclip. Leeg = stap overgeslagen (geen fallback).",
+              "alert_notify_system": "Diensten voor systeemwaarschuwingen (token verlopen, schijf vol). Leeg = gebruikt standaard fallback hierboven.",
+              "alert_notify_live_preview": "Indien AAN bevatten pushmeldingen naar de HA Companion App-diensten (mobile_app_*) de camera-entiteit, zodat de app zelf een actuele miniatuur ophaalt bij aflevering en een live camerabeeld in de melding opent zodra deze wordt uitgeklapt — het eigen dynamic-content-mechanisme van de Companion App (alleen iOS; op Android ondersteunen meldingsbijlagen alleen een statische afbeelding, niet dit live-streammechanisme). Aanvullend op de reeds bijgevoegde statische momentopname, geen vervanging. Standaard UIT: bij inschakelen haalt de Companion App bij elke waarschuwing zelf beeld op van de camera, voor elk mobile_app_*-ontvangertoestel. Geen effect op niet-mobile_app-diensten (Signal, Telegram, e-mail, ...)."
+            }
+          },
+          "events_storage": {
+            "name": "Gebeurtenisopslag (download / SMB / FTP)",
+            "description": "Bosch Cloud-gebeurtenis-JPEGs en MP4-clips lokaal of op een NAS-share opslaan.",
+            "data": {
+              "enable_local_save": "Gebeurtenissen lokaal opslaan",
+              "download_path": "Lokale opslagmap",
+              "enable_smb_upload": "Uploaden naar NAS (SMB of FTP)",
+              "upload_protocol": "Uploadprotocol (SMB of FTP)",
+              "smb_server": "Server (IP of hostnaam)",
+              "smb_share": "SMB-sharenaam",
+              "smb_username": "SMB-gebruikersnaam",
+              "smb_password": "SMB-wachtwoord",
+              "clear_smb_credentials": "Server/share/gebruikersnaam/wachtwoord wissen bij opslaan",
+              "smb_base_path": "Basismap op de share",
+              "folder_pattern": "Submappatroon",
+              "file_pattern": "Bestandsnaampatroon",
+              "smb_retention_days": "Bewaartermijn (dagen, 0 = onbeperkt bewaren)"
+            },
+            "data_description": {
+              "enable_local_save": "Elke nieuwe bewegings-/audiogebeurtenis als JPEG + MP4 opslaan in de map hieronder. **Standaard uit** — hier inschakelen om lokaal opslaan te activeren.",
+              "download_path": "Locatie voor gebeurtenisbestanden. Voorbeeld: /config/bosch_events. Alleen actief als 'Gebeurtenissen lokaal opslaan' is ingeschakeld.",
+              "enable_smb_upload": "Gebeurtenis-snapshots en videoclips uploaden naar een SMB/CIFS- of FTP-netwerkshare (bijv. FRITZ!Box NAS, Synology, Windows-share). SMB vereist het smbprotocol-pakket; FTP gebruikt Python's ingebouwde ftplib.",
+              "upload_protocol": "Overdrachtsprotocol. **SMB** (standaard) is de gebruikelijke Windows/macOS-share. **FTP** is aanzienlijk sneller op veel NAS-apparaten (bijv. FRITZ!Box) voor veel kleine bestanden en omzeilt de bekende macOS-Sequoia SMB-rename-blokkade. Met FTP wordt het sharenaamveld genegeerd; het basispad is relatief aan de FTP-root (bijv. `FILES/Bosch-Kameras` in plaats van `Bosch-Kameras`).",
+              "smb_server": "IP-adres of hostnaam. Voorbeeld: 192.168.1.1 (FRITZ!Box), nas.local of fritz.box",
+              "smb_share": "Naam van de SMB-share (alleen SMB). Voorbeeld: FRITZ.NAS",
+              "smb_username": "SMB-aanmeldingsgebruikersnaam",
+              "smb_password": "SMB-aanmeldingswachtwoord",
+              "clear_smb_credentials": "Het formulier van Home Assistant kan een geleegd tekstveld niet betrouwbaar detecteren, dus het simpelweg leegmaken van de velden hierboven en opslaan wist ze niet. Zet dit aan en sla één keer op om server, share, gebruikersnaam en wachtwoord te wissen — deze schakelaar zet zichzelf daarna weer uit.",
+              "smb_base_path": "Basismap op de share waar bestanden worden opgeslagen. Standaard: Bosch-Kameras",
+              "folder_pattern": "Submappatroon. Beschikbare variabelen: `camera`, `year`, `month`, `day`, `type` (zet elke variabele tussen accolades in uw patroon). Standaard: camera/year/month/day.",
+              "file_pattern": "Bestandsnaampatroon (zonder extensie). Beschikbare variabelen: `camera`, `date`, `time`, `type`, `id`, `year`, `month`, `day` (zet elke variabele tussen accolades in uw patroon). Standaard: camera, date, time, type, id samengevoegd met underscores.",
+              "smb_retention_days": "Bestanden op de NAS die ouder zijn dan dit aantal dagen automatisch verwijderen. 0 = onbeperkt bewaren. Standaard: 180 (6 maanden). Wordt eenmaal per dag uitgevoerd."
+            }
+          },
+          "nvr": {
+            "name": "Mini-NVR",
+            "description": "Continue LAN-opname. Optionele afvoer naar SMB of FTP.",
+            "data": {
+              "enable_nvr": "Mini-NVR — continue LAN-opname (experimenteel)",
+              "nvr_storage_target": "NVR-opslagdoel",
+              "nvr_base_path": "NVR-opslagmap",
+              "nvr_smb_subpath": "NVR-submap op NAS / FTP",
+              "nvr_retention_days": "NVR-bewaartermijn (dagen)",
+              "nvr_quality": "NVR-opnamekwaliteit",
+              "nvr_preroll_seconds": "Pre-roll-buffer (seconden)",
+              "nvr_postroll_seconds": "Post-roll opname (seconden)",
+              "nvr_preroll_cache_dir": "Pre-roll-cachemap",
+              "nvr_finalize_ring_on_event": "Nieuwste pre-roll segment herstellen bij gebeurtenis"
+            },
+            "data_description": {
+              "enable_nvr": "Neemt de LOCAL-stream van elke camera continu op schijf op in MP4-segmenten van 5 minuten. Alleen LAN — opname pauzeert als de camera via de Cloud-relay loopt. Voegt een opnameschakelaar per camera toe (standaard uitgeschakeld; per camera afzonderlijk inschakelen). Vereist ffmpeg.",
+              "nvr_storage_target": "Bestemming van de voltooide NVR-segmenten. **Lokaal**: blijft in de opslagmap hieronder. **SMB / FTP**: ffmpeg schrijft eerst lokaal (staging), daarna uploadt een watcher elk segment naar de in de gebeurtenisopslagsectie geconfigureerde NAS, in een aparte submap. Standaard: Lokaal.",
+              "nvr_base_path": "Map voor NVR-segmenten. Elke camera krijgt een submap, daarna een submap per dag, met MP4-segmenten van 5 minuten genaamd HH-MM.mp4. Standaard: /config/bosch_nvr. Gebruik een NAS-mount voor bewaring langer dan 1 dag — bij 5 Mbps schrijft één camera ~54 GB/dag.",
+              "nvr_smb_subpath": "Submap onder het SMB-/FTP-basispad dat uitsluitend voor NVR-segmenten wordt gebruikt. Standaard: NVR. Houdt de NVR-structuur gescheiden van cloud-gebeurtenisuploads.",
+              "nvr_retention_days": "NVR-segmenten ouder dan dit aantal dagen automatisch verwijderen. Bereik: 1-365. Standaard: 3. Wordt eenmaal per dag uitgevoerd.",
+              "nvr_quality": "**Auto** gebruikt de volledige kwaliteitsstream (inst=1, ~30 Mbps). **Laag** gebruikt de lage-bandbreedtestream (inst=4, ~2 Mbps) — bespaart ~90% schijfruimte ten koste van resolutie. Alleen LAN; de Cloud-relay ondersteunt inst=4 niet.",
+              "nvr_preroll_seconds": "Bewaart een rollende buffer van dit aantal seconden in RAM (/dev/shm). Bij bewegingsdetectie wordt een clip gemaakt die deze pre-roll bevat. 0 = uitgeschakeld. Standaard: 0. RAM-gebruik: ~250 KB/s per camera. Heeft alleen effect wanneer de Mini-NVR-modus van de camera is ingesteld op 'Gebeurtenis-gebufferd (vooropname)' — geen effect in de modus 'Continu'.",
+              "nvr_postroll_seconds": "Neemt bij een bewegingsgebeurtenis dit aantal extra seconden live op en voegt ze toe aan de pre-roll-clip. 0 = uitgeschakeld (alleen pre-roll). Standaard: 0. Wordt alleen gebruikt wanneer de Mini-NVR-modus van de camera is ingesteld op 'Gebeurtenis-gebufferd (vooropname)'.",
+              "nvr_preroll_cache_dir": "Map voor de pre-roll-segmentcache. Moet een tmpfs-mount (RAM-schijf) zijn — /dev/shm/bosch_nvr_cache is de standaard op Linux. Alleen wijzigen als /dev/shm niet beschikbaar is.",
+              "nvr_finalize_ring_on_event": "Normaal wordt het nieuwste pre-roll segment (~0-10s) verwijderd omdat het mogelijk nog wordt opgenomen. Indien AAN wordt dit segment kort afgerond en opnieuw gekoppeld voordat de ringbuffer wordt hervat, wat ongeveer 1 seconde dekking per gebeurtenis kost. Standaard: uit."
+            }
+          },
+          "webhook": {
+            "name": "Webhook Bezorging",
+            "description": "Gebeurtenis-payloads sturen naar een extern HTTP-endpoint bij elke bewegings- / audio- / persoons- / indringingsgebeurtenis.",
+            "data": {
+              "enable_webhook_delivery": "Webhook bezorging inschakelen (standaard uitgeschakeld)",
+              "webhook_url": "Webhook URL"
+            },
+            "data_description": {
+              "enable_webhook_delivery": "Wanneer INGESCHAKELD: elke bewegings-, audioalarm-, persoonsdetectie- en indringingsgebeurtenis stuurt een JSON POST naar de URL hieronder. **Standaard uitgeschakeld.**",
+              "webhook_url": "HTTP/HTTPS-endpoint dat de gebeurtenis-JSON ontvangt. Leeg laten om uit te schakelen. Alleen actief wanneer 'Webhook bezorging inschakelen' aan is."
+            }
+          },
+          "ptz": {
+            "name": "PTZ Besturingen",
+            "description": "Pan-voorinstelling besturingen tonen voor camera's met ondersteuning voor pannen (alleen indoor 360).",
+            "data": {
+              "enable_ptz_controls": "PTZ besturingen inschakelen (standaard uitgeschakeld)"
+            },
+            "data_description": {
+              "enable_ptz_controls": "Wanneer INGESCHAKELD: camera's met pan-ondersteuning krijgen een pan-voorinstelling selectie-entiteit (home / links / rechts / achter-links / achter-rechts). Alleen de indoor 360-camera ondersteunt pannen. **Standaard uitgeschakeld** zodat gebruikers zonder 360-camera geen overbodige entiteit zien."
+            }
+          },
+          "frigate": {
+            "name": "Externe RTSP-eindpunten (Frigate / NVR)",
+            "description": "Persistente, referentievrije RTSP-eindpunten voor externe recorders (Frigate, BlueIris, go2rtc). De sessie van elke camera opent op aanvraag. Schakel hier de hoofdschakelaar in; per camera schakelen Hoge/Lage kwaliteit de stream-URLs vrij.",
+            "data": {
+              "frigate_endpoints_enabled": "Externe RTSP-eindpunten inschakelen (hoofdschakelaar, standaard uit)",
+              "frigate_bind_host": "RTSP bind-host / IP",
+              "frigate_bind_port": "RTSP-bindpoort",
+              "frigate_ip_allowlist": "IP-allowlist (kommagescheiden CIDR's)",
+              "frigate_auth_mode": "Authenticatiemodus",
+              "frigate_token": "Gedeeld geheim / Basic-Auth wachtwoord",
+              "frigate_basic_user": "Basic-Auth gebruikersnaam",
+              "frigate_idle_timeout": "Time-out inactieve sessie (seconden)",
+              "frigate_max_connections": "Max. gelijktijdige recorderverbindingen per camera"
+            },
+            "data_description": {
+              "frigate_endpoints_enabled": "Hoofdschakelaar voor alle externe RTSP-eindpunten. Wanneer UIT (standaard): er wordt geen RTSP-poort geopend en er wordt geen Bosch-sessie bijgehouden. Wanneer AAN: het eindpunt van elke camera is beschikbaar; de Bosch-stroomsessie opent wanneer de eerste client verbinding maakt en sluit na de inactieve time-out.",
+              "frigate_bind_host": "IP-adres waaraan de RTSP-server gebonden is — kies een voorinstelling of typ zelf. **127.0.0.1** (localhost, standaard, veiligst): alleen de Home Assistant-host kan verbinding maken. **0.0.0.0**: alle LAN-interfaces — vereist wanneer Frigate/BlueIris op een andere host draait. Of voer een **specifiek interface-IP** in (bijv. 192.168.1.50) om alleen die netwerkkaart te binden. Alles behalve localhost is zonder inloggegevens — combineer het met de IP-allowlist of een token.",
+              "frigate_bind_port": "**0** (standaard): het OS kiest bij elke HA-start of herlaad van de integratie een vrije poort — de sensor-URL verandert. Stel een vaste waarde in (bijv. **8556**) om de URL stabiel te houden bij herstarts en configuratiewijzigingen. Bij meerdere camera’s krijgt elke camera poort, poort+1, … in oplopende volgorde van camera-ID.",
+              "frigate_ip_allowlist": "Kommagescheiden lijst van IP-adressen of CIDR-bereiken die verbinding mogen maken. Leeg = elke client toegestaan. Voorbeeld: 192.168.1.0/24, 10.0.0.5",
+              "frigate_auth_mode": "Optionele toegangscontrole.\n• none (standaard): geen inloggegevens vereist.\n• path-token: een gedeeld geheim toegevoegd aan het stream-URL-pad.\n• basic: standaard RTSP Basic-Auth met gebruikersnaam en wachtwoord.",
+              "frigate_token": "Gedeeld geheim als padtoken (auth-modus: path-token) of Basic-Auth wachtwoord (auth-modus: basic). Leeg laten om de toegangscontrole volledig uit te schakelen.",
+              "frigate_basic_user": "Gebruikersnaam voor RTSP Basic-Auth modus. Alleen gebruikt wanneer de authenticatiemodus is ingesteld op 'basic'.",
+              "frigate_idle_timeout": "Hoeveel seconden de Bosch-camerasessie actief blijft nadat de laatste recorder verbroken heeft. Sessie actief gehouden voor directe herverbinding. Standaard: 30. Stel in op 0 om direct te sluiten wanneer er geen client verbonden is.",
+              "frigate_max_connections": "Maximum aantal gelijktijdige recorderverbindingen per camera-voordeur. Verbindingen boven deze limiet worden direct geweigerd. Standaard: 8. Verhoog als u veel sub-streams of gelijktijdige kijkers heeft; verlaag om de belasting op de HA-host te verminderen."
+            }
+          },
+          "ai": {
+            "name": "AI-snapshotomschrijving",
+            "description": "Laat de AI van Home Assistant beschrijven wat de camera ziet. Vereist een geconfigureerde AI Task-integratie (bijv. OpenAI, Google, Anthropic of lokale Ollama). Let op: afhankelijk van de gekozen AI-backend worden camerabeelden en mogelijk persoonsgegevens naar een clouddienst gestuurd en kunnen worden gebruikt voor training. Gebruik voor maximale privacy een lokaal model (bijv. Ollama).",
+            "data": {
+              "enable_ai_description": "AI-snapshotomschrijvingen inschakelen",
+              "ai_task_entity": "AI Task-entiteit (optioneel)",
+              "ai_describe_language": "Antwoordtaal",
+              "ai_describe_prompt": "Omschrijvingsprompt",
+              "ai_describe_on_motion": "Automatisch omschrijven bij bewegings-/persoonsevenementen",
+              "ai_notify_include_description": "AI-omschrijving toevoegen aan evenementmeldingen",
+              "ai_cooldown_seconds": "Minimale seconden tussen automatische analyses (per camera)",
+              "ai_max_per_day": "Dagelijks AI-analysebudget (0 = onbeperkt)",
+              "ai_active_time_start": "AI actief vanaf (UU:MM)",
+              "ai_active_time_end": "AI actief tot (UU:MM)",
+              "ai_active_condition_entity": "Conditie-entiteit (optioneel)",
+              "ai_active_condition_state": "Vereiste conditiestatus"
+            },
+            "data_description": {
+              "enable_ai_description": "Indien ingeschakeld worden een snapshot-omschrijvingsdienst en een AI-omschrijvingssensor per camera beschikbaar. Vereist Home Assistant 2025.8+ met minimaal één geconfigureerde AI Task-entiteit.",
+              "ai_task_entity": "Selecteer een specifieke AI Task-entiteit. Leeg laten voor de voorkeurinstelling van HA.",
+              "ai_describe_language": "Taal waarin de AI antwoordt. Selecteer uit de lijst of typ een willekeurige taalnaam (bijv. Português, Русский). Standaard: Deutsch.",
+              "ai_describe_prompt": "De prompt die met elke snapshot naar de AI wordt gestuurd. Aanpassen om te focussen op wat belangrijk is voor uw camera.",
+              "ai_describe_on_motion": "Voert een AI-omschrijving uit bij elk bewegings-/persoonsevenement en werkt de AI-omschrijvingsSENSOR bij. Voegt GEEN tekst toe aan pushmeldingen. 30 seconden debounce per camera.",
+              "ai_notify_include_description": "Voegt de AI-omschrijving direct IN de evenementpushmelding op uw telefoon toe. Vereist geconfigureerde evenementmeldingen. Werkt ook de sensor bij. Beperkt door cooldown + dagelijks budget.",
+              "ai_cooldown_seconds": "Minimale tijd tussen automatische AI-analyses per camera. Handmatige describe_snapshot-aanroepen negeren dit. Standaard 60 s; 0 schakelt de cooldown uit.",
+              "ai_max_per_day": "Maximaal aantal automatische AI-analyses over alle camera's per dag (reset om middernacht). Standaard 100; 0 = onbeperkt.",
+              "ai_active_time_start": "Begin van het AI-activeringsvenster (24u-formaat, bijv. 08:00). Laat beide velden leeg om tijdsbegrenzing uit te schakelen. Nachtelijke vensters worden ondersteund (bijv. 22:00 start / 06:00 einde).",
+              "ai_active_time_end": "Einde van het AI-activeringsvenster (24u-formaat, bijv. 22:00). Laat beide velden leeg om tijdsbegrenzing uit te schakelen.",
+              "ai_active_condition_entity": "Entiteit wiens status automatische AI-analyses bepaalt. Leeg laten om conditiebegrenzing uit te schakelen. Voorbeeld: zone.home met status 0 betekent dat niemand thuis is (zone telt personen, 0 = leeg). Of gebruik een personsgroep-entiteit met status not_home.",
+              "ai_active_condition_state": "Status die de conditie-entiteit moet hebben om AI-analyses toe te staan. Standaard: not_home (AI werkt alleen wanneer niemand thuis is). Voorbeelden: home, on, off, away. Voor zone.home gebruik 0 (niemand thuis)."
+            }
+          },
+          "auth": {
+            "name": "Authenticatie",
+            "description": "Vernieuwde browseraanmelding afdwingen of migreren naar de OSS OAuth-client.",
+            "data": {
+              "force_relogin": "Opnieuw koppelen (browseraanmelding)",
+              "migrate_to_oss_client": "Overschakelen naar OSS OAuth-client",
+              "configure_local_password": "Set local data interface passwords"
+            },
+            "data_description": {
+              "force_relogin": "Inschakelen om opnieuw te koppelen via de browser. Alleen nodig als het vernieuwingstoken is verlopen (zeer zeldzaam).",
+              "migrate_to_oss_client": "Schakel over van de verouderde `residential_app`-client naar de speciale `oss_residential_app`-client die Bosch biedt voor open-source-integraties. Bij inschakelen wordt de herverbindingsstroom gestart — u wordt eenmalig gevraagd in te loggen via Bosch SingleKey ID. Alle entiteiten, automatiseringen en opties blijven behouden.",
+              "configure_local_password": "Stores the passwords printed on the cameras for their local data interface. Each camera has its own field in the next step."
+            }
+          },
+          "ai_analysis": {
+            "name": "AI-camera-analyse",
+            "description": "Gestructureerde, door beweging geactiveerde verdachtheidsscore (1-10) met multi-doel meldingsroutering en optionele alarmpaneelactivering. Zusterfunctie van AI-snapshotomschrijving hierboven (vrije tekst): deze functie vraagt een gescoord, gestructureerd resultaat op en kan meldingen naar verschillende doelen routeren en een alarmservice activeren. Vereist een geconfigureerde AI Task-integratie. Beheer meldingsdoelen, bekende bezoekers en per-camera-overschrijvingen via het add-onmenu van de integratie (subitems).",
+            "data": {
+              "ai_analysis_enabled": "AI-camera-analyse inschakelen",
+              "ai_analysis_task_entity": "AI Task-entiteit (optioneel)",
+              "ai_analysis_snapshot_count": "Snapshots per analyse",
+              "ai_analysis_snapshot_interval_ms": "Interval tussen snapshots (ms)",
+              "ai_analysis_cooldown_seconds": "Minimum seconden tussen analyses (per camera)",
+              "ai_analysis_max_per_day": "Dagelijks analysebudget (0 = onbeperkt)",
+              "ai_analysis_retention_days": "Bewaartermijn waarschuwingsgeschiedenis (dagen)",
+              "ai_analysis_repeat_context_minutes": "Contextvenster voor herhaalde waarschuwingen (minuten, 0 = uitgeschakeld)",
+              "ai_analysis_alarm_panel_entity": "Alarmpaneel-entiteit (optioneel)",
+              "ai_analysis_alarmo_enabled": "Alarmpaneelactivering inschakelen",
+              "ai_analysis_alarm_trigger_service": "Alarmactiveringsservice (domain.service)",
+              "ai_analysis_alarm_trigger_score": "Minimale score om het alarm te activeren"
+            },
+            "data_description": {
+              "ai_analysis_enabled": "Hoofdschakelaar voor gestructureerde AI-camera-analyse. Onafhankelijk van de eigen schakelaar en budget van AI-snapshotomschrijving — beide functies delen geen dagelijkse limiet.",
+              "ai_analysis_task_entity": "Selecteer een specifieke AI Task-entiteit voor gestructureerde analyse. Laat leeg om terug te vallen op de AI Task-entiteit die voor AI-snapshotomschrijving is gekozen, of HA's standaard als geen van beide is ingesteld.",
+              "ai_analysis_snapshot_count": "Aantal snapshots dat in een burst wordt vastgelegd per analyse (2-10). Meer snapshots geven de AI meer context maar kosten meer.",
+              "ai_analysis_snapshot_interval_ms": "Tussenruimte tussen burst-snapshots in milliseconden (100-5000).",
+              "ai_analysis_cooldown_seconds": "Minimale tijd tussen automatische analyses per camera. Aparte afkoeltijd van die van AI-snapshotomschrijving.",
+              "ai_analysis_max_per_day": "Maximaal aantal automatische analyses over alle camera's per dag (reset om middernacht). Apart budget van dat van AI-snapshotomschrijving. 0 = onbeperkt.",
+              "ai_analysis_retention_days": "Hoe lang waarschuwingsgeschiedenis (scores + snapshotbeelden) op schijf wordt bewaard voordat deze automatisch wordt gewist (1-90 dagen).",
+              "ai_analysis_repeat_context_minutes": "Indien groter dan 0, wordt de recente waarschuwingsgeschiedenis van deze camera van de laatste N minuten in de AI-prompt vermeld, zodat herhaalde activiteit als zodanig kan worden herkend. 0 schakelt herhalingscontext uit.",
+              "ai_analysis_alarm_panel_entity": "Alarmbedieningspaneel-entiteit waarvan de ingeschakelde/afwezige status de voorwaarden van meldingsdoelen en de activering van de alarmservice hieronder bepaalt. Laat leeg indien geen alarmpaneelroutering wordt gebruikt.",
+              "ai_analysis_alarmo_enabled": "Wanneer ingeschakeld en het bovenstaande alarmpaneel is ingeschakeld, roept een waarschuwing met hoge score de onderstaande alarmactiveringsservice aan (bijv. een Alarmo-sirene/inschakelservice, of een andere domain.service).",
+              "ai_analysis_alarm_trigger_service": "Ruwe domain.service-tekenreeks die wordt aangeroepen bij activering (bijv. alarmo.arm_away, switch.turn_on, of een andere service). Werkt met Alarmo of elke andere alarmpaneelintegratie — niet Alarmo-specifiek.",
+              "ai_analysis_alarm_trigger_score": "Minimale verdachtheidsscore (1-10) vereist voordat de alarmactiveringsservice wordt aangeroepen."
+            }
+          }
+        }
+      },
+      "relogin_show": {
+        "title": "Opnieuw koppelen — Stap 1 van 2",
+        "description": "Kopieer de URL hieronder, open deze in de browser, log in en klik op Verzenden.",
+        "data": {
+          "login_url": "Bosch Login URL"
+        },
+        "data_description": {
+          "login_url": "Kopieer en open in uw browser."
+        }
+      },
+      "relogin_paste": {
+        "title": "Opnieuw koppelen — Stap 2 van 2",
+        "description": "Plak de doorstuur-URL. **Code verloopt na ~60 seconden!**",
+        "data": {
+          "redirect_url": "Doorstuur-URL",
+          "diagnostic_cloud_api_override": "Geavanceerd: aangepaste camera-API-URL (alleen diagnose)"
+        },
+        "data_description": {
+          "redirect_url": "Volledige URL uit de adresbalk van de browser na het inloggen (bevat de autorisatiecode)",
+          "diagnostic_cloud_api_override": "Laat leeg tenzij Bosch-support u expliciet een andere camera-API-basis-URL heeft gegeven om te testen — dit activeert geen bètaprogramma en ontgrendelt niets, het verandert alleen met welke server de integratie communiceert."
+        }
+      },
+      "local_passwords": {
+        "title": "Local data interface passwords",
+        "description": "Enter the local data interface password printed on each camera. Leave a field empty to keep the stored password. With a stored password and an active local data interface, the live stream is opened directly on your network and never uses the cloud.\\n\\n{cameras}",
+        "data": {
+          "clear_password_for": "Remove stored password for"
+        },
+        "data_description": {
+          "clear_password_for": "Cameras selected here lose their stored password; this takes precedence over a value typed above."
+        }
+      }
+    },
+    "error": {
+      "invalid_redirect_url": "Geen autorisatiecode gevonden. Plak de volledige URL.",
+      "token_exchange_failed": "Aanmelden mislukt — code verlopen. Probeer opnieuw.",
+      "cannot_connect": "Verbinding met Bosch-servers mislukt.",
+      "invalid_ip_address": "Ongeldig IP-adres — voer een geldig IPv4- of IPv6-adres in.",
+      "invalid_ip_allowlist": "Ongeldige allowlist-invoer: {invalid_allowlist_token} — gebruik kommagescheiden IP-adressen of CIDR-bereiken (bijv. 192.168.1.0/24).",
+      "invalid_cloud_api_override": "De aangepaste camera-API-URL moet beginnen met https://",
+      "invalid_webhook_url": "De webhook-URL moet beginnen met http:// of https://"
+    },
+    "abort": {
+      "migration_started": "Migratie gestart — voltooi de herconfiguratieflow op de integratiekaart."
+    }
+  },
+  "entity": {
+    "image": {
+      "last_snapshot": {
+        "name": "Laatste snapshot"
+      },
+      "ai_latest_alert": {
+        "name": "Laatste AI-waarschuwing"
+      }
+    },
+    "switch": {
+      "live_stream": {
+        "name": "Live Stream"
+      },
+      "audio": {
+        "name": "Stream-audio"
+      },
+      "camera_light": {
+        "name": "Cameralamp"
+      },
+      "front_light": {
+        "name": "Frontlamp"
+      },
+      "wallwasher": {
+        "name": "Wallwasher"
+      },
+      "privacy_mode": {
+        "name": "Privacymodus"
+      },
+      "notifications": {
+        "name": "Meldingen"
+      },
+      "motion_detection": {
+        "name": "Bewegingsdetectie"
+      },
+      "record_sound": {
+        "name": "Geluid opnemen"
+      },
+      "auto_follow": {
+        "name": "Auto Follow"
+      },
+      "intercom": {
+        "name": "Intercom"
+      },
+      "privacy_sound": {
+        "name": "Privacygeluid"
+      },
+      "timestamp_overlay": {
+        "name": "Tijdstempeloverlay"
+      },
+      "status_led": {
+        "name": "Status-LED"
+      },
+      "motion_light": {
+        "name": "Bewegingslamp"
+      },
+      "ambient_light": {
+        "name": "Omgevingslicht"
+      },
+      "soft_light_fading": {
+        "name": "Zachte lichtfading"
+      },
+      "intrusion_detection": {
+        "name": "Inbraakdetectie"
+      },
+      "image_rotation_180": {
+        "name": "Afbeelding 180° draaien"
+      },
+      "alarm_system_arm": {
+        "name": "Alarmsysteem"
+      },
+      "alarm_mode": {
+        "name": "Sirene"
+      },
+      "pre_alarm": {
+        "name": "Pre-alarm"
+      },
+      "panic_alarm": {
+        "name": "Sirene activeren"
+      },
+      "nvr_recording": {
+        "name": "Mini-NVR opname"
+      },
+      "nvr_event_clip": {
+        "name": "Mini-NVR gebeurtenisclip"
+      },
+      "external_stream": {
+        "name": "Externe stream-URL publiceren"
+      },
+      "frigate_high": {
+        "name": "Frigate-stream Hoog"
+      },
+      "frigate_low": {
+        "name": "Frigate-stream Laag"
+      },
+      "glass_break_detection": {
+        "name": "Glasbreukdetectie"
+      },
+      "fire_alarm_detection": {
+        "name": "Rookmelderdetectie"
+      },
+      "ai_analysis": {
+        "name": "AI-camera-analyse"
+      }
+    },
+    "number": {
+      "pan_position": {
+        "name": "Draaipositie"
+      },
+      "speaker_level": {
+        "name": "Luidspreker volume"
+      },
+      "audio_volume": {
+        "name": "Stream-volume"
+      },
+      "front_light_intensity": {
+        "name": "Frontlamp intensiteit"
+      },
+      "lens_elevation": {
+        "name": "Lenshoogte"
+      },
+      "microphone_level": {
+        "name": "Microfoon volume"
+      },
+      "white_balance": {
+        "name": "Kleurtemperatuur frontlamp"
+      },
+      "top_led_brightness": {
+        "name": "Helderheid bovenste LED"
+      },
+      "bottom_led_brightness": {
+        "name": "Helderheid onderste LED"
+      },
+      "motion_light_sensitivity": {
+        "name": "Gevoeligheid bewegingslamp"
+      },
+      "darkness_threshold": {
+        "name": "Donkerheidsdrempel"
+      },
+      "power_led_brightness": {
+        "name": "Helderheid voedings-LED"
+      },
+      "alarm_delay": {
+        "name": "Sireneduur"
+      },
+      "alarm_activation_delay": {
+        "name": "Alarmactiveringsvertraging"
+      },
+      "pre_alarm_delay": {
+        "name": "Pre-alarmduur"
+      },
+      "intrusion_sensitivity": {
+        "name": "Gevoeligheid Indringingsdetectie"
+      },
+      "intrusion_distance": {
+        "name": "Bereik Indringingsdetectie"
+      }
+    },
+    "button": {
+      "refresh_snapshot": {
+        "name": "Snapshot vernieuwen"
+      },
+      "soft_reset": {
+        "name": "Camera herstarten"
+      },
+      "hard_reset": {
+        "name": "Camera fabrieksinstellingen herstellen"
+      }
+    },
+    "select": {
+      "video_quality": {
+        "name": "Videokwaliteit",
+        "state": {
+          "auto": "Auto",
+          "high": "Hoog (30 Mbps)",
+          "low": "Laag (1,9 Mbps)"
+        }
+      },
+      "nvr_mode": {
+        "name": "Mini-NVR-modus",
+        "state": {
+          "continuous": "Continu",
+          "event_buffered": "Gebeurtenis-gebufferd (vooropname)"
+        }
+      },
+      "motion_sensitivity": {
+        "name": "Bewegingsgevoeligheid",
+        "state": {
+          "super_high": "Zeer hoog",
+          "high": "Hoog",
+          "medium_high": "Gemiddeld hoog",
+          "medium_low": "Gemiddeld laag",
+          "low": "Laag",
+          "off": "Uit"
+        }
+      },
+      "fcm_push_mode": {
+        "name": "FCM Push-modus",
+        "state": {
+          "auto": "FCM Push",
+          "polling": "Polling"
+        }
+      },
+      "stream_mode": {
+        "name": "Stream-modus",
+        "state": {
+          "auto": "Auto (Lokaal → Cloud)",
+          "local": "Alleen lokaal",
+          "remote": "Alleen Cloud"
+        }
+      },
+      "detection_mode": {
+        "name": "Detectiemodus",
+        "state": {
+          "all_motions": "Alle bewegingen",
+          "only_humans": "Alleen personen",
+          "zones": "Zones"
+        }
+      },
+      "pan_preset": {
+        "name": "Zwenkpositie",
+        "state": {
+          "home": "Midden (0°)",
+          "left": "Links (−60°)",
+          "right": "Rechts (+60°)",
+          "back_left": "Achter links (−120°)",
+          "back_right": "Achter rechts (+120°)"
+        }
+      },
+      "lighting_mode": {
+        "name": "Verlichtingsmodus",
+        "state": {
+          "follow_schedule": "Schema volgen",
+          "ambient_light": "Omgevingshelderheid",
+          "ambient_light_and_schedule": "Omgevingshelderheid en schema",
+          "always_off": "Uit"
+        }
+      }
+    },
+    "binary_sensor": {
+      "motion": {
+        "name": "Beweging"
+      },
+      "audio_alarm_binary": {
+        "name": "Audioalarm"
+      },
+      "person_detected": {
+        "name": "Persoon gedetecteerd"
+      },
+      "lan_reachable": {
+        "name": "LAN Bereikbaar"
+      },
+      "ai_recent_alert": {
+        "name": "Recente AI-waarschuwing"
+      },
+      "local_data_interface": {
+        "name": "Lokale gegevensinterface"
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "Firmware"
+      }
+    },
+    "light": {
+      "top_led_light": {
+        "name": "Bovenste LED"
+      },
+      "bottom_led_light": {
+        "name": "Onderste LED"
+      },
+      "front_light_entity": {
+        "name": "Frontlamp"
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "online": "Online",
+          "offline": "Offline",
+          "session_limit": "Sessielimiet",
+          "unknown": "Onbekend",
+          "updating": "Firmware-update"
+        }
+      },
+      "last_event": {
+        "name": "Laatste gebeurtenis"
+      },
+      "events_today": {
+        "name": "Gebeurtenissen vandaag"
+      },
+      "wifi_signal": {
+        "name": "WiFi-signaal"
+      },
+      "firmware_version": {
+        "name": "Firmwareversie"
+      },
+      "ambient_light": {
+        "name": "Omgevingslicht"
+      },
+      "led_dimmer": {
+        "name": "LED-dimmer"
+      },
+      "clock_offset": {
+        "name": "Tijdafwijking"
+      },
+      "motion_sensitivity": {
+        "name": "Bewegingsgevoeligheid"
+      },
+      "last_event_type": {
+        "name": "Laatste gebeurtenistype",
+        "state": {
+          "movement": "Beweging",
+          "person": "Persoon",
+          "audio_alarm": "Audioalarm",
+          "trouble": "Storing",
+          "trouble_disconnect": "Storing (Verbinding verbroken)",
+          "trouble_reconnect": "Storing (Opnieuw verbonden)",
+          "none": "Geen"
+        }
+      },
+      "movement_events_today": {
+        "name": "Bewegingsgebeurtenissen vandaag"
+      },
+      "audio_events_today": {
+        "name": "Audiogebeurtenissen vandaag"
+      },
+      "push_status": {
+        "name": "FCM Push-status",
+        "state": {
+          "fcm_push": "FCM Push (direct)",
+          "polling": "Polling (fallback)",
+          "disabled": "Uitgeschakeld"
+        }
+      },
+      "commissioned": {
+        "name": "Inbedrijfstelling"
+      },
+      "video_source": {
+        "name": "Videobron",
+        "state": {
+          "local_data_interface": "Lokaal (data-interface)",
+          "local_data_interface_problem": "Lokaal – probleem",
+          "cloud_no_password": "Cloud (geen lokaal wachtwoord)",
+          "cloud": "Cloud"
+        }
+      },
+      "schedule_rules": {
+        "name": "Planningsregels"
+      },
+      "alarm_catalog": {
+        "name": "Alarmcatalogus"
+      },
+      "motion_zones": {
+        "name": "Bewegingszones"
+      },
+      "tls_cert": {
+        "name": "TLS-certificaat"
+      },
+      "network_services": {
+        "name": "Netwerkdiensten"
+      },
+      "iva_analytics": {
+        "name": "IVA-analyse"
+      },
+      "privacy_masks": {
+        "name": "Privacymaskers"
+      },
+      "ambient_schedule": {
+        "name": "Omgevingslicht-planning",
+        "state": {
+          "disabled": "Uitgeschakeld",
+          "dusk_to_dawn": "Schemering tot dageraad",
+          "manual": "Handmatig"
+        }
+      },
+      "alarm_state": {
+        "name": "Alarmstatus",
+        "state": {
+          "active": "Ingeschakeld",
+          "inactive": "Uitgeschakeld",
+          "unknown": "Onbekend",
+          "system_managed_armed": "Ingeschakeld (systeem)",
+          "system_managed_disarmed": "Uitgeschakeld (systeem)",
+          "armed_away": "Ingeschakeld (weg)",
+          "armed_stay": "Ingeschakeld (thuis)",
+          "disarmed": "Uitgeschakeld"
+        }
+      },
+      "stream_status": {
+        "name": "Stream-status",
+        "state": {
+          "idle": "Inactief",
+          "warming_up": "Wordt opgestart",
+          "connecting": "Verbinding maken",
+          "streaming": "Actief (LAN)",
+          "streaming_remote": "Actief (Cloud)"
+        }
+      },
+      "nvr_state": {
+        "name": "Mini-NVR status",
+        "state": {
+          "idle": "Inactief",
+          "recording": "Opname bezig",
+          "error": "Fout"
+        }
+      },
+      "stream_url": {
+        "name": "Stream-URL (hoofd)"
+      },
+      "frigate_url_high": {
+        "name": "Frigate RTSP-URL (Hoog)"
+      },
+      "frigate_url_low": {
+        "name": "Frigate RTSP-URL (Laag)"
+      },
+      "stream_url_sub": {
+        "name": "Stream-URL (sub)"
+      },
+      "onvif_scopes": {
+        "name": "ONVIF-scopes"
+      },
+      "rcp_version": {
+        "name": "RCP-versie"
+      },
+      "cloud_feature_flags": {
+        "name": "Cloud-functiemarkeringen"
+      },
+      "ai_description": {
+        "name": "AI-snaphotomschrijving"
+      },
+      "cloud_maintenance": {
+        "name": "Bosch Cloud-onderhoud",
+        "state": {
+          "active": "Onderhoud in uitvoering",
+          "scheduled": "Onderhoud gepland",
+          "past": "Recentste onderhoud",
+          "recent": "Recente aankondiging",
+          "unknown": "Geen tijdvensterinformatie",
+          "idle": "Geen onderhoudsinformatie"
+        }
+      },
+      "ai_alert_score": {
+        "name": "AI-waarschuwingsscore"
+      },
+      "ai_alerts_24h": {
+        "name": "AI-waarschuwingen (24u)"
+      }
+    },
+    "text": {
+      "ai_scene_context": {
+        "name": "AI-scènecontext"
+      }
+    }
+  },
+  "services": {
+    "send_event_webhook": {
+      "name": "Stuur Evenement Webhook",
+      "description": "Handmatig een webhook POST activeren voor een cameragebeurtenenis (voor testen).",
+      "fields": {
+        "entity_id": {
+          "name": "Camera Entiteit",
+          "description": "Camera entiteits-ID om op te nemen in het payload (optioneel)"
+        },
+        "event_type": {
+          "name": "Gebeurtenistype",
+          "description": "Gebeurtenistype voor POST: MOVEMENT, AUDIO_ALARM, PERSON of INTRUSION"
+        }
+      }
+    },
+    "trigger_snapshot": {
+      "name": "Snapshot vernieuwen activeren",
+      "description": "Dwingt een directe snapshot-vernieuwing af voor alle Bosch-camera's."
+    },
+    "open_live_connection": {
+      "name": "Live verbinding openen",
+      "description": "Opent een live stream-proxyverbinding (H.264 30fps + AAC audio).",
+      "fields": {
+        "camera_id": {
+          "name": "Camera-ID",
+          "description": "Cloud-UUID van de camera (te vinden in de entiteitsattributen)"
+        }
+      }
+    },
+    "migrate_flat_events": {
+      "name": "Platte gebeurtenisbestanden migreren",
+      "description": "Verplaatst gebeurtenisbestanden van de verouderde platte structuur (camera/bestand.mp4) naar de datumhiërarchie (camera/jaar/maand/dag/bestand.mp4). Veilig meerdere keren uit te voeren — bestanden die al bestaan op de bestemming worden overgeslagen. Het resultaat wordt weergegeven als permanente melding."
+    },
+    "delete_event": {
+      "name": "Gebeurtenisbestand(en) verwijderen",
+      "description": "Verwijder een of meer lokale gebeurtenisbestanden op exact pad, of verwijder alle bestanden van een camera op een bepaalde datum.",
+      "fields": {
+        "file_path": {
+          "name": "Bestandspad",
+          "description": "Absoluut pad naar een enkel te verwijderen gebeurtenisbestand."
+        },
+        "camera_name": {
+          "name": "Cameranaam",
+          "description": "Verwijder alle gebeurtenissen van deze camera (combineer met Datum om het bereik te beperken)."
+        },
+        "date": {
+          "name": "Datum",
+          "description": "Verwijdering beperken tot deze datum (JJJJ-MM-DD). Vereist Cameranaam."
+        }
+      }
+    },
+    "get_motion_zones": {
+      "name": "Bewegingszones ophalen",
+      "description": "Leest de huidige bewegingsdetectiezones van de camera. Het resultaat wordt weergegeven als permanente melding.",
+      "fields": {
+        "camera_id": {
+          "name": "Camera-ID",
+          "description": "Cloud-UUID van de camera (te vinden in de entiteitsattributen)"
+        }
+      }
+    },
+    "set_motion_zones": {
+      "name": "Bewegingszones instellen",
+      "description": "Schrijft de bewegingsdetectiezoneconfiguratie naar de camera.",
+      "fields": {
+        "camera_id": {
+          "name": "Camera-ID",
+          "description": "Cloud-UUID van de camera"
+        },
+        "zones": {
+          "name": "Zones",
+          "description": "Lijst van zone-objecten zoals geretourneerd door Bewegingszones ophalen."
+        }
+      }
+    },
+    "rename_camera": {
+      "name": "Camera hernoemen",
+      "description": "Wijzigt de weergavenaam van een camera in de Bosch Cloud.",
+      "fields": {
+        "camera_id": {
+          "name": "Camera-ID",
+          "description": "Cloud-UUID van de camera"
+        },
+        "name": {
+          "name": "Nieuwe naam",
+          "description": "Nieuwe weergavenaam voor de camera"
+        }
+      }
+    },
+    "describe_snapshot": {
+      "name": "Snapshot omschrijven",
+      "description": "Vraag de AI Task-integratie van HA om de huidige camerasnap te omschrijven.",
+      "fields": {
+        "camera_id": {
+          "name": "Camera-ID",
+          "description": "Bosch cloud camera-ID (UUID). Gebruik camera_id of entity_id."
+        },
+        "entity_id": {
+          "name": "Camera-entiteit",
+          "description": "Camera-entiteit-ID (bijv. camera.bosch_terrasse). Gebruik entity_id of camera_id."
+        },
+        "instructions": {
+          "name": "Instructies",
+          "description": "Aangepaste prompt voor de AI. Overschrijft de optie ai_describe_prompt voor deze aanroep."
+        },
+        "language": {
+          "name": "Taal",
+          "description": "Taal voor het AI-antwoord. Overschrijft de optie ai_describe_language voor dit aanroep. Standaard: Deutsch."
+        },
+        "ai_task_entity": {
+          "name": "AI Task-entiteit",
+          "description": "AI Task-entiteit om te gebruiken. Leeg laten voor de voorkeurinstelling van HA."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "argument_required": {
+      "message": "{argument} is vereist"
+    },
+    "argument_must_be_list": {
+      "message": "{argument} moet een lijst zijn"
+    },
+    "missing_field": {
+      "message": "{kind} {index} mist veld {field}"
+    },
+    "value_out_of_range": {
+      "message": "{kind} {index} {field}={value} buiten bereik 0.0–1.0"
+    },
+    "index_out_of_range": {
+      "message": "Index {index} buiten bereik ({count} items aanwezig)"
+    },
+    "not_found": {
+      "message": "{kind} {id} niet gevonden"
+    },
+    "live_connection_failed": {
+      "message": "Live verbinding voor camera {cam_id_prefix} kon niet worden opgezet — zie logboek voor mitmproxy-opname-instructies"
+    },
+    "http_error": {
+      "message": "{action} mislukt: HTTP {status}"
+    },
+    "http_error_with_body": {
+      "message": "{action} mislukt: HTTP {status} — {body}"
+    },
+    "privacy_blocked": {
+      "message": "{action}: functie niet beschikbaar terwijl de privacymodus actief is"
+    },
+    "unexpected_error": {
+      "message": "{action} mislukt: {error}"
+    },
+    "privacy_active": {
+      "message": "Privacymodus is actief voor deze camera — geen live afbeelding beschikbaar voor AI-analyse."
+    },
+    "ai_task_unavailable": {
+      "message": "AI Task-dienst niet beschikbaar of mislukt: {error}"
+    },
+    "stream_blocked_privacy_mode": {
+      "message": "{camera}: stream niet beschikbaar — privacymodus is AAN"
+    },
+    "stream_start_blocked_privacy_mode": {
+      "message": "Kan stream voor {camera} niet starten — privacymodus is actief. Schakel eerst de privacymodus uit."
+    },
+    "motion_sensitivity_unknown": {
+      "message": "{camera}: bewegingsgevoeligheid nog niet bekend — probeer het opnieuw zodra de integratie de eerste update heeft voltooid"
+    },
+    "motion_detection_enable_failed": {
+      "message": "{camera}: bewegingsdetectie kon niet worden ingeschakeld"
+    },
+    "motion_detection_disable_failed": {
+      "message": "{camera}: bewegingsdetectie kon niet worden uitgeschakeld"
+    },
+    "firmware_install_in_progress": {
+      "message": "Er is al een firmware-installatie bezig"
+    },
+    "firmware_no_update_available": {
+      "message": "Er is momenteel geen firmware-update beschikbaar om te installeren"
+    },
+    "firmware_install_rejected": {
+      "message": "Bosch cloud heeft het firmware-installatieverzoek voor {target} geweigerd"
+    },
+    "soft_reset_rejected": {
+      "message": "Bosch cloud heeft het soft-reset-verzoek (herstart) geweigerd"
+    },
+    "hard_reset_rejected": {
+      "message": "Bosch cloud heeft het hard-reset-verzoek (fabrieksreset) geweigerd"
+    },
+    "not_authenticated": {
+      "message": "Niet geauthenticeerd — voeg de integratie opnieuw toe om in te loggen"
+    },
+    "token_expired_renewal_failed": {
+      "message": "Token verlopen en vernieuwing mislukt — verifieer opnieuw via de reauth-melding, of ga naar Instellingen → Integraties → Bosch Smart Home Camera → Configureren → Nieuwe browserlogin forceren"
+    },
+    "no_refresh_token": {
+      "message": "Geen refresh token — opnieuw verifiëren vereist"
+    },
+    "refresh_token_invalid": {
+      "message": "Refresh token ongeldig — verifieer opnieuw via de knop **Opnieuw configureren** op de integratiekaart."
+    },
+    "token_refresh_failed_repeatedly": {
+      "message": "Token-vernieuwing herhaaldelijk mislukt — verifieer opnieuw via de knop **Opnieuw configureren** op de integratiekaart."
+    }
+  },
+  "issues": {
+    "token_expired": {
+      "title": "Bosch Camera — Token verlopen",
+      "description": "Het bearer token kon niet worden vernieuwd.\n\n{message}\n\nKlik op **Opnieuw configureren** op de integratiekaart (Instellingen → Apparaten & diensten → Bosch Smart Home Camera) om opnieuw in te loggen. Bestaande entiteiten en automatiseringen blijven behouden."
+    },
+    "auth_server_outage": {
+      "title": "Bosch Camera — Authenticatieserver storing",
+      "description": "De Bosch-authenticatieserver geeft momenteel HTTP {error} terug. Dit is een probleem aan de Bosch-kant, niet een configuratiefout aan uw kant.\n\nDe integratie probeert het automatisch opnieuw (exponentieel uitstel tot 10 minuten). Entiteiten zijn niet beschikbaar totdat de server hersteld is — geen actie vereist."
+    },
+    "doubled_prefix_entity_ids_migrated": {
+      "title": "Bosch Camera — Entiteit-ID's hernoemd",
+      "description": "**{count}** Bosch-camera-entiteit-ID('s) bevatten een dubbel `bosch_NAME_bosch_NAME_`-voorvoegsel (bug v11.0.0–v12.2.1) en zijn hernoemd naar de correcte vorm.\n\nVoorbeelden: {examples}\n\n**U moet alle automatiseringen, scripts, scènes en Lovelace-dashboards bijwerken die de oude ID's gebruiken.** Home Assistant herschrijft YAML-bestanden en Lovelace-kaarten niet automatisch bij een wijziging van entiteit-ID's. Geschiedenis en statistieken worden automatisch gemigreerd.\n\nZie de v12.3.0 release-opmerkingen voor de volledige mapping."
+    },
+    "smb_unavailable": {
+      "title": "Bosch Camera — SMB/NAS-pakket niet geïnstalleerd",
+      "description": "**{features}** is geconfigureerd voor een SMB/NAS-netwerkshare, maar het optionele Python-pakket `smbprotocol` is niet geïnstalleerd, waardoor uploads/opnames naar de share zijn uitgeschakeld.\n\nDit pakket wordt normaal automatisch geïnstalleerd vanuit de vereisten van de integratie — probeer Home Assistant eenmaal opnieuw te starten. Als installatie nog steeds mislukt (bijv. een niet-ondersteunde OS/CPU-architectuur), zet dan het opslagdoel in de integratieopties op **Lokaal** of **FTP**."
+    },
+    "local_data_interface_available": {
+      "title": "Bosch Camera — Lokale gegevensinterface beschikbaar",
+      "description": "De lokale gegevensinterface kan nu worden ingeschakeld voor {camera}. Open de camera-app: Camera-instellingen > Meer > Lokale gegevensinterface."
+    },
+    "local_data_interface_wrong_password": {
+      "title": "Bosch Camera — Wachtwoord van lokale gegevensinterface geweigerd",
+      "description": "De lokale gegevensinterface van {camera} heeft het opgeslagen wachtwoord geweigerd, dus de livestream blijft niet beschikbaar (de cloud wordt niet gebruikt). Controleer het wachtwoord op het label van de camera onder Configureren > Authenticatie > lokaal wachtwoord."
+    },
+    "local_data_interface_unreachable": {
+      "title": "Bosch Camera — Lokale gegevensinterface onbereikbaar",
+      "description": "{camera} is al meer dan 10 minuten onbereikbaar op het lokale netwerk, dus de livestream blijft niet beschikbaar (de cloud wordt niet gebruikt). Controleer de stroom en het netwerk van de camera en het opgeslagen wachtwoord onder Configureren > Authenticatie > lokaal wachtwoord."
+    },
+    "local_data_interface_no_go2rtc": {
+      "title": "Bosch Camera — go2rtc vereist voor de lokale data-interface",
+      "description": "{camera} wordt via de lokale data-interface gelezen, en daarvoor is go2rtc nodig als enige verbinding met de camera (de camera verwerkt maar een paar sessies tegelijk). go2rtc is niet beschikbaar, dus de livestream blijft onbeschikbaar (de cloud wordt niet gebruikt). Controleer of de go2rtc-integratie is ingesteld en draait."
+    },
+    "local_data_interface_no_password": {
+      "title": "Bosch Camera — Lokale gegevensinterface heeft een wachtwoord nodig",
+      "description": "De lokale gegevensinterface is ingeschakeld voor {camera}. Voer het wachtwoord van de sticker in onder Configureren > Authenticatie > lokaal wachtwoord om volledig lokaal te streamen."
+    },
+    "legacy_folder": {
+      "title": "Leftover folder from the previous version",
+      "description": "Your setup was moved to the new `bosch_smart_camera` integration. The old folder `{folder}` is no longer used. Delete it and restart Home Assistant."
+    }
+  },
+  "system_health": {
+    "info": {
+      "can_reach_cloud": "Bosch Cloud bereikbaar",
+      "fcm_push_active": "FCM Push-status",
+      "cameras_loaded": "Camera's geladen",
+      "last_fcm_push_ago": "Laatste FCM Push",
+      "platinum_quality": "Quality Scale"
+    }
+  }
+}

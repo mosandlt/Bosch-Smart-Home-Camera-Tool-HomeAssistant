@@ -27,9 +27,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from custom_components.bosch_shc_camera import ldi_rest
+from custom_components.bosch_smart_camera import ldi_rest
 
-MOD = "custom_components.bosch_shc_camera.ldi_rest"
+MOD = "custom_components.bosch_smart_camera.ldi_rest"
 IP = "10.0.0.50"
 USER = "localuser"
 PW = "test-pw"

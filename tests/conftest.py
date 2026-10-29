@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.bosch_shc_camera.const import DOMAIN
+from custom_components.bosch_smart_camera.const import DOMAIN
 
 pytest_plugins = ("pytest_homeassistant_custom_component",)
 
@@ -52,11 +52,30 @@ def auto_stub_application_credentials_import():
     """
     with (
         patch(
-            "custom_components.bosch_shc_camera.async_import_client_credential",
+            "custom_components.bosch_smart_camera.async_import_client_credential",
             new=AsyncMock(),
         ),
         patch(
-            "custom_components.bosch_shc_camera.config_flow.async_import_client_credential",
+            "custom_components.bosch_smart_camera.config_flow.async_import_client_credential",
+            new=AsyncMock(),
+        ),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def auto_stub_legacy_migration():
+    """No pre-v18 entry to adopt in tests that run `async_setup_entry` on a bare MagicMock hass.
+
+    tests/test_legacy_migration.py exercises the real functions directly.
+    """
+    with (
+        patch(
+            "custom_components.bosch_smart_camera.async_migrate_legacy_entry",
+            new=AsyncMock(return_value=False),
+        ),
+        patch(
+            "custom_components.bosch_smart_camera.async_update_legacy_folder_issue",
             new=AsyncMock(),
         ),
     ):
@@ -94,7 +113,7 @@ def mock_oauth_token() -> dict:
 def mock_cloud_api_video_inputs() -> Generator[MagicMock, None, None]:
     """Mock the GET /v11/video_inputs endpoint."""
     with patch(
-        "custom_components.bosch_shc_camera.shc.async_get_clientsession"
+        "custom_components.bosch_smart_camera.shc.async_get_clientsession"
     ) as session:
         resp = MagicMock()
         resp.status = 200

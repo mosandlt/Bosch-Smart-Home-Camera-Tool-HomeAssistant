@@ -15,28 +15,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.components.diagnostics import async_redact_data
 
-from custom_components.bosch_shc_camera import (
+from custom_components.bosch_smart_camera import (
     BoschCameraCoordinator,
     ldi_local,
     ldi_rest,
 )
-from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
-from custom_components.bosch_shc_camera.diagnostics import TO_REDACT
-from custom_components.bosch_shc_camera.ldi_local import (
+from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
+from custom_components.bosch_smart_camera.diagnostics import TO_REDACT
+from custom_components.bosch_smart_camera.ldi_local import (
     LDI_PASSWORDS_OPTION,
     LDI_RTSP_PORT,
     LDI_USER,
     ldi_source,
     open_ldi_connection,
 )
-from custom_components.bosch_shc_camera.live_connection import (
+from custom_components.bosch_smart_camera.live_connection import (
     try_live_connection_inner,
 )
-from custom_components.bosch_shc_camera.session_state import (
+from custom_components.bosch_smart_camera.session_state import (
     CameraSessionState,
     get_or_create_session,
 )
-from custom_components.bosch_shc_camera.stream_lifecycle import (
+from custom_components.bosch_smart_camera.stream_lifecycle import (
     handle_stream_worker_error,
 )
 
@@ -44,7 +44,7 @@ CAM = "11111111-1111-1111-1111-111111111111"
 IP = "10.0.0.50"
 PW = "fake-sticker-pw"
 RESTREAM = "rtsp://127.0.0.1:18554/ldi_11111111"
-LDI = "custom_components.bosch_shc_camera.ldi_local"
+LDI = "custom_components.bosch_smart_camera.ldi_local"
 _PATH_HIGH = "/rtsp_tunnel?line=1&inst=1&enableaudio=1"
 
 
@@ -401,7 +401,7 @@ class TestInnerRouting:
         probe, ensure = _open_patches()
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                "custom_components.bosch_smart_camera.async_get_bosch_cloud_session",
                 new=cloud,
             ),
             probe,
@@ -418,7 +418,7 @@ class TestInnerRouting:
         probe, ensure = _open_patches(None)
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                "custom_components.bosch_smart_camera.async_get_bosch_cloud_session",
                 new=cloud,
             ),
             probe,
@@ -435,7 +435,7 @@ class TestInnerRouting:
         probe, ensure = _open_patches(200, None)
         with (
             patch(
-                "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+                "custom_components.bosch_smart_camera.async_get_bosch_cloud_session",
                 new=cloud,
             ),
             probe,
@@ -460,7 +460,7 @@ class TestInnerRouting:
     ) -> None:
         c = _coord(state=state, passwords=passwords, token=None)
         with patch(
-            "custom_components.bosch_shc_camera.live_connection.open_ldi_connection",
+            "custom_components.bosch_smart_camera.live_connection.open_ldi_connection",
             new=AsyncMock(),
         ) as opened:
             # token=None: normal path stops at the token gate, proving it was reached
@@ -485,7 +485,7 @@ class TestInnerRouting:
         c = _coord(privacy=True)
         c.get_stream_lock = lambda _cid: None
         with patch(
-            "custom_components.bosch_shc_camera.live_connection.open_ldi_connection",
+            "custom_components.bosch_smart_camera.live_connection.open_ldi_connection",
             new=AsyncMock(),
         ) as opened:
             res = await BoschCameraCoordinator.try_live_connection(c, CAM)  # type: ignore[arg-type]
@@ -558,7 +558,7 @@ class TestGuards:
         }
         c.try_live_connection = AsyncMock()
         with patch(
-            "custom_components.bosch_shc_camera.frigate_endpoint.ensure_ldi_stream",
+            "custom_components.bosch_smart_camera.frigate_endpoint.ensure_ldi_stream",
             new=AsyncMock(return_value=RESTREAM),
         ):
             target = await BoschCameraCoordinator._frigate_resolve_inner(c, CAM)  # type: ignore[arg-type]
@@ -729,7 +729,7 @@ class TestRedactLiveConnectionSecrets:
     """The open_live_connection log line must not leak the local password."""
 
     def test_local_password_and_url_userinfo_redacted(self) -> None:
-        from custom_components.bosch_shc_camera import _redact_creds
+        from custom_components.bosch_smart_camera import _redact_creds
 
         out = _redact_creds(
             {
@@ -755,18 +755,18 @@ class TestUnknownStatusStaysLocal:
 
     @pytest.mark.parametrize("source", ["cache", "info"])
     def test_qualifying_firmware_is_local_only(self, source: str) -> None:
-        from custom_components.bosch_shc_camera.ldi_local import ldi_wanted
+        from custom_components.bosch_smart_camera.ldi_local import ldi_wanted
 
         assert ldi_wanted(self._unknown("9.40.105", source=source), CAM)  # type: ignore[arg-type]
 
     @pytest.mark.parametrize("fw", ["9.40.104", None, "garbage"])
     def test_old_or_unknown_firmware_uses_normal_path(self, fw: str | None) -> None:
-        from custom_components.bosch_shc_camera.ldi_local import ldi_wanted
+        from custom_components.bosch_smart_camera.ldi_local import ldi_wanted
 
         assert not ldi_wanted(self._unknown(fw), CAM)  # type: ignore[arg-type]
 
     def test_known_inactive_beats_firmware(self) -> None:
-        from custom_components.bosch_shc_camera.ldi_local import ldi_wanted
+        from custom_components.bosch_smart_camera.ldi_local import ldi_wanted
 
         c = self._unknown("9.40.105")
         c.local_data_interface_cache = {CAM: {"state": "inactive"}}
@@ -779,7 +779,7 @@ class TestHeartbeatSwitchesToLocal:
     async def test_cloud_session_renewed_locally_when_interface_becomes_wanted(
         self,
     ) -> None:
-        from custom_components.bosch_shc_camera.session_renewal import (
+        from custom_components.bosch_smart_camera.session_renewal import (
             auto_renew_local_session,
         )
 
@@ -800,7 +800,7 @@ class TestHeartbeatSwitchesToLocal:
         with (
             patch("asyncio.sleep", new=AsyncMock()),
             patch(
-                "custom_components.bosch_shc_camera.session_renewal."
+                "custom_components.bosch_smart_camera.session_renewal."
                 "async_bosch_cloud_session_cm",
                 new=cloud,
             ),

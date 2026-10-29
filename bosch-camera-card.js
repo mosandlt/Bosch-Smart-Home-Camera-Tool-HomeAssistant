@@ -327,7 +327,7 @@ class BoschCameraCard extends HTMLElement {
     // _force_image_refresh makes frame_interval=0.1s so the next proxy request
     // actually calls async_camera_image instead of returning HA's internal cache.
     // Cloud API response varies (1.5–5s), so fetch at 1.5s and 4s.
-    this._callService("bosch_shc_camera", "trigger_snapshot", {});
+    this._callService("bosch_smart_camera", "trigger_snapshot", {});
     this._scheduleImageLoad(1500);
     this._scheduleImageLoad(4000);
   }
@@ -1166,7 +1166,7 @@ class BoschCameraCard extends HTMLElement {
         value: Math.max(-120, Math.min(120, pos)),
       }).then(() => {
         // Trigger backend image refresh so _cached_image is warm before card requests it
-        this._callService("bosch_shc_camera", "trigger_snapshot", {});
+        this._callService("bosch_smart_camera", "trigger_snapshot", {});
         // Refresh snapshot after camera has had time to move (~2s)
         this._scheduleImageLoad(2000);
       }).catch((err) => console.warn("bosch-camera-card: pan set_value", err));
@@ -1753,7 +1753,7 @@ class BoschCameraCard extends HTMLElement {
     }
 
     // Trigger backend image refresh
-    this._callService("bosch_shc_camera", "trigger_snapshot", {});
+    this._callService("bosch_smart_camera", "trigger_snapshot", {});
 
     // Capture current image byte count, then poll until it changes (new image ready)
     // REMOTE takes ~3-5s; LOCAL Digest auth takes ~6-15s
@@ -1945,7 +1945,7 @@ class BoschCameraCard extends HTMLElement {
     if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming) {
       this._stopLiveVideo();
       this._setLoadingOverlay(true, "Aktualisiere Bild…");
-      this._callService("bosch_shc_camera", "trigger_snapshot", {});
+      this._callService("bosch_smart_camera", "trigger_snapshot", {});
       this._scheduleImageLoad(3500);
       this._startRefreshTimer();
     }
@@ -2226,7 +2226,7 @@ class BoschCameraCard extends HTMLElement {
               const ruleId = btn.dataset.ruleId;
               const cId = btn.dataset.camId;
               const newActive = btn.dataset.active !== "true";
-              this._callService("bosch_shc_camera", "update_rule", {
+              this._callService("bosch_smart_camera", "update_rule", {
                 camera_id: cId, rule_id: ruleId, is_active: newActive,
               });
               // Optimistic UI
@@ -2242,7 +2242,7 @@ class BoschCameraCard extends HTMLElement {
               e.stopPropagation();
               const ruleId = btn.dataset.ruleId;
               const cId = btn.dataset.camId;
-              this._callService("bosch_shc_camera", "delete_rule", {
+              this._callService("bosch_smart_camera", "delete_rule", {
                 camera_id: cId, rule_id: ruleId,
               });
               // Remove row optimistically
@@ -2346,7 +2346,7 @@ class BoschCameraCard extends HTMLElement {
           const end = prompt("Endzeit (HH:MM):", "20:00");
           if (!end) return;
           btn.classList.add("running");
-          this._callService("bosch_shc_camera", "create_rule", {
+          this._callService("bosch_smart_camera", "create_rule", {
             camera_id: camId(), name: name,
             start_time: start + ":00", end_time: end + ":00",
             weekdays: [0,1,2,3,4,5,6], is_active: true,
@@ -2358,7 +2358,7 @@ class BoschCameraCard extends HTMLElement {
 
         btn.classList.add("running");
         const data = typeof svc.data === "function" ? svc.data() : svc.data;
-        this._callService("bosch_shc_camera", svc.svc, data);
+        this._callService("bosch_smart_camera", svc.svc, data);
         if (resultEl) { resultEl.style.display = ""; resultEl.textContent = `${svc.label} wird ausgeführt...`; }
         setTimeout(() => {
           btn.classList.remove("running");

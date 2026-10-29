@@ -1,4 +1,4 @@
-"""Tests for the Bosch Smart Home Camera config flow (custom_components/bosch_shc_camera/config_flow.py).
+"""Tests for the Bosch Smart Home Camera config flow (custom_components/bosch_smart_camera/config_flow.py).
 
 Covers Quality-Scale Bronze rule `config-flow-test-coverage` plus the OAuth2 /
 Keycloak plumbing, the manual-login fallback, reauth/reconfigure entry
@@ -38,12 +38,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.bosch_shc_camera.config_flow import (
+from custom_components.bosch_smart_camera.config_flow import (
     OPTIONS_SECTIONS,
     BoschCameraOptionsFlow,
     _flatten_sections,
 )
-from custom_components.bosch_shc_camera.const import (
+from custom_components.bosch_smart_camera.const import (
     CONF_AI_ACTIVE_CONDITION_ENTITY,
     CONF_AI_ACTIVE_TIME_END,
     CONF_AI_ACTIVE_TIME_START,
@@ -54,7 +54,7 @@ from custom_components.bosch_shc_camera.const import (
 )
 from tests.source_match import assert_in_source
 
-MODULE = "custom_components.bosch_shc_camera.config_flow"
+MODULE = "custom_components.bosch_smart_camera.config_flow"
 
 
 # Constants pinned
@@ -62,13 +62,13 @@ MODULE = "custom_components.bosch_shc_camera.config_flow"
 
 class TestConfigFlowConstants:
     def test_keycloak_base_is_bosch_domain(self):
-        from custom_components.bosch_shc_camera.config_flow import KEYCLOAK_BASE
+        from custom_components.bosch_smart_camera.config_flow import KEYCLOAK_BASE
 
         assert "bosch.com" in KEYCLOAK_BASE
         assert KEYCLOAK_BASE.startswith("https://")
 
     def test_client_id_is_oss(self):
-        from custom_components.bosch_shc_camera.config_flow import CLIENT_ID
+        from custom_components.bosch_smart_camera.config_flow import CLIENT_ID
 
         assert CLIENT_ID == "oss_residential_app", (
             "CLIENT_ID must be oss_residential_app — changing it breaks "
@@ -77,13 +77,13 @@ class TestConfigFlowConstants:
 
     def test_redirect_uri_manual_is_bosch_com(self):
         """Legacy bosch.com redirect used in manual (options) re-login flow."""
-        from custom_components.bosch_shc_camera.config_flow import REDIRECT_URI_MANUAL
+        from custom_components.bosch_smart_camera.config_flow import REDIRECT_URI_MANUAL
 
         assert "bosch.com" in REDIRECT_URI_MANUAL
 
     def test_scopes_include_offline_access(self):
         """offline_access scope is required for the refresh token to be issued."""
-        from custom_components.bosch_shc_camera.config_flow import SCOPES
+        from custom_components.bosch_smart_camera.config_flow import SCOPES
 
         assert "offline_access" in SCOPES, (
             "offline_access scope must be present — without it Keycloak "
@@ -92,7 +92,7 @@ class TestConfigFlowConstants:
 
     def test_client_secret_decodes(self):
         """CLIENT_SECRET is stored base64-encoded; verify it decodes to a non-empty string."""
-        from custom_components.bosch_shc_camera.config_flow import CLIENT_SECRET
+        from custom_components.bosch_smart_camera.config_flow import CLIENT_SECRET
 
         assert isinstance(CLIENT_SECRET, str)
         assert len(CLIENT_SECRET) > 0
@@ -103,7 +103,7 @@ class TestConfigFlowConstants:
 
 class TestPkcePair:
     def test_returns_two_strings(self):
-        from custom_components.bosch_shc_camera.config_flow import _pkce_pair
+        from custom_components.bosch_smart_camera.config_flow import _pkce_pair
 
         verifier, challenge = _pkce_pair()
         assert isinstance(verifier, str)
@@ -111,7 +111,7 @@ class TestPkcePair:
 
     def test_each_call_produces_unique_pair(self):
         """RFC 7636: verifier must be unique per request."""
-        from custom_components.bosch_shc_camera.config_flow import _pkce_pair
+        from custom_components.bosch_smart_camera.config_flow import _pkce_pair
 
         v1, _ = _pkce_pair()
         v2, _ = _pkce_pair()
@@ -119,7 +119,7 @@ class TestPkcePair:
 
     def test_challenge_is_sha256_of_verifier(self):
         """Verify the cryptographic relationship — RFC 7636 S256 method."""
-        from custom_components.bosch_shc_camera.config_flow import _pkce_pair
+        from custom_components.bosch_smart_camera.config_flow import _pkce_pair
 
         verifier, challenge = _pkce_pair()
         expected = (
@@ -131,14 +131,14 @@ class TestPkcePair:
 
     def test_verifier_length_meets_rfc_min(self):
         """RFC 7636 says verifier must be 43-128 chars (after url-safe base64)."""
-        from custom_components.bosch_shc_camera.config_flow import _pkce_pair
+        from custom_components.bosch_smart_camera.config_flow import _pkce_pair
 
         verifier, _ = _pkce_pair()
         assert 43 <= len(verifier) <= 128
 
     def test_challenge_no_padding(self):
         """url-safe base64 must have no `=` padding (RFC 7636 §4.2)."""
-        from custom_components.bosch_shc_camera.config_flow import _pkce_pair
+        from custom_components.bosch_smart_camera.config_flow import _pkce_pair
 
         _, challenge = _pkce_pair()
         assert "=" not in challenge
@@ -146,7 +146,7 @@ class TestPkcePair:
 
 class TestBuildAuthUrl:
     def test_contains_required_params(self):
-        from custom_components.bosch_shc_camera.config_flow import _build_auth_url
+        from custom_components.bosch_smart_camera.config_flow import _build_auth_url
 
         url = _build_auth_url("test-challenge", "test-state")
         for param in (
@@ -160,7 +160,7 @@ class TestBuildAuthUrl:
             assert param in url, f"Missing {param!r} in auth URL"
 
     def test_uses_keycloak_base(self):
-        from custom_components.bosch_shc_camera.config_flow import _build_auth_url
+        from custom_components.bosch_smart_camera.config_flow import _build_auth_url
 
         url = _build_auth_url("c", "s")
         assert "smarthome.authz.bosch.com" in url
@@ -168,34 +168,34 @@ class TestBuildAuthUrl:
 
 class TestExtractCode:
     def test_full_url_with_code(self):
-        from custom_components.bosch_shc_camera.config_flow import _extract_code
+        from custom_components.bosch_smart_camera.config_flow import _extract_code
 
         url = "https://www.bosch.com/boschcam?code=ABC123&state=xyz"
         assert _extract_code(url) == "ABC123"
 
     def test_query_string_only(self):
-        from custom_components.bosch_shc_camera.config_flow import _extract_code
+        from custom_components.bosch_smart_camera.config_flow import _extract_code
 
         assert _extract_code("?code=DEF456") == "DEF456"
 
     def test_strips_whitespace(self):
-        from custom_components.bosch_shc_camera.config_flow import _extract_code
+        from custom_components.bosch_smart_camera.config_flow import _extract_code
 
         assert _extract_code("  https://x?code=GHI789  ") == "GHI789"
 
     def test_returns_none_on_error_param(self):
         """If the URL has `error=...` in the query, treat as failed flow."""
-        from custom_components.bosch_shc_camera.config_flow import _extract_code
+        from custom_components.bosch_smart_camera.config_flow import _extract_code
 
         assert _extract_code("https://x?error=access_denied") is None
 
     def test_returns_none_when_no_code(self):
-        from custom_components.bosch_shc_camera.config_flow import _extract_code
+        from custom_components.bosch_smart_camera.config_flow import _extract_code
 
         assert _extract_code("https://x?something=else") is None
 
     def test_returns_none_on_garbage(self):
-        from custom_components.bosch_shc_camera.config_flow import _extract_code
+        from custom_components.bosch_smart_camera.config_flow import _extract_code
 
         # No query string at all → no code
         assert _extract_code("not-a-url") is None
@@ -214,7 +214,7 @@ def _make_jwt(payload: dict) -> str:
 
 class TestDetectTokenClientId:
     def test_returns_oss_residential_app(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             _detect_token_client_id,
         )
 
@@ -222,7 +222,7 @@ class TestDetectTokenClientId:
         assert _detect_token_client_id(token) == "oss_residential_app"
 
     def test_returns_legacy_residential_app(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             _detect_token_client_id,
         )
 
@@ -230,7 +230,7 @@ class TestDetectTokenClientId:
         assert _detect_token_client_id(token) == "residential_app"
 
     def test_returns_none_for_empty_token(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             _detect_token_client_id,
         )
 
@@ -239,7 +239,7 @@ class TestDetectTokenClientId:
 
     def test_returns_none_for_malformed_token(self):
         """JWT must have at least 2 dot-separated parts; malformed ones yield None."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             _detect_token_client_id,
         )
 
@@ -247,7 +247,7 @@ class TestDetectTokenClientId:
         assert _detect_token_client_id("only.one") is None
 
     def test_returns_none_when_azp_missing(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             _detect_token_client_id,
         )
 
@@ -256,7 +256,7 @@ class TestDetectTokenClientId:
 
     def test_returns_none_for_garbled_payload(self):
         """Non-JSON payload base64 — must not raise."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             _detect_token_client_id,
         )
 
@@ -269,7 +269,7 @@ class TestDetectTokenClientId:
 
 class TestRefreshErrors:
     def test_refresh_token_invalid_error_is_exception(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             RefreshTokenInvalidError,
         )
 
@@ -278,13 +278,15 @@ class TestRefreshErrors:
         assert "401" in str(err)
 
     def test_auth_server_outage_error_is_exception(self):
-        from custom_components.bosch_shc_camera.config_flow import AuthServerOutageError
+        from custom_components.bosch_smart_camera.config_flow import (
+            AuthServerOutageError,
+        )
 
         err = AuthServerOutageError("HTTP 503")
         assert isinstance(err, Exception)
 
     def test_errors_are_distinct_classes(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             AuthServerOutageError,
             RefreshTokenInvalidError,
         )
@@ -312,7 +314,7 @@ class TestDoRefresh:
 
     @pytest.mark.asyncio
     async def test_200_returns_token_dict(self):
-        from custom_components.bosch_shc_camera.config_flow import _do_refresh
+        from custom_components.bosch_smart_camera.config_flow import _do_refresh
 
         new_token = {
             "access_token": "new_at",
@@ -328,7 +330,7 @@ class TestDoRefresh:
 
     @pytest.mark.asyncio
     async def test_400_raises_refresh_token_invalid(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             RefreshTokenInvalidError,
             _do_refresh,
         )
@@ -341,7 +343,7 @@ class TestDoRefresh:
 
     @pytest.mark.asyncio
     async def test_401_raises_refresh_token_invalid(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             RefreshTokenInvalidError,
             _do_refresh,
         )
@@ -354,7 +356,7 @@ class TestDoRefresh:
 
     @pytest.mark.asyncio
     async def test_500_raises_auth_server_outage(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             AuthServerOutageError,
             _do_refresh,
         )
@@ -369,7 +371,7 @@ class TestDoRefresh:
 
     @pytest.mark.asyncio
     async def test_503_raises_auth_server_outage(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             AuthServerOutageError,
             _do_refresh,
         )
@@ -392,7 +394,7 @@ class TestDoRefresh:
         invalid-grant/reauth escalation, same class of bug as an
         unclassified timeout.
         """
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             AuthServerOutageError,
             _do_refresh,
         )
@@ -415,7 +417,7 @@ class TestDoRefresh:
         bare None return, indistinguishable from an ambiguous HTTP
         response, so repeated timeouts still incremented _token_fail_count).
         """
-        from custom_components.bosch_shc_camera.config_flow import _do_refresh
+        from custom_components.bosch_smart_camera.config_flow import _do_refresh
 
         session = MagicMock()
         session.post = MagicMock(side_effect=TimeoutError())
@@ -428,7 +430,7 @@ class TestDoRefresh:
         """aiohttp.ClientError → raised, not swallowed (see test_timeout_raises)."""
         import aiohttp
 
-        from custom_components.bosch_shc_camera.config_flow import _do_refresh
+        from custom_components.bosch_smart_camera.config_flow import _do_refresh
 
         session = MagicMock()
         session.post = MagicMock(side_effect=aiohttp.ClientError("connection refused"))
@@ -439,7 +441,7 @@ class TestDoRefresh:
     @pytest.mark.asyncio
     async def test_402_returns_none(self):
         """Unexpected 4xx (not 400/401) → None — don't raise, but don't return success."""
-        from custom_components.bosch_shc_camera.config_flow import _do_refresh
+        from custom_components.bosch_smart_camera.config_flow import _do_refresh
 
         session = MagicMock()
         session.post = MagicMock(return_value=_mock_resp(402, text="Payment Required"))
@@ -457,7 +459,7 @@ class TestBoschOAuth2Implementation:
     """Structural: the OAuth2 implementation exposes required HA contracts."""
 
     def test_name_property_returns_bosch(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -465,8 +467,8 @@ class TestBoschOAuth2Implementation:
         assert "Bosch" in impl.name
 
     def test_domain_property_returns_integration_domain(self):
-        from custom_components.bosch_shc_camera import DOMAIN as INTEGRATION_DOMAIN
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera import DOMAIN as INTEGRATION_DOMAIN
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -475,7 +477,7 @@ class TestBoschOAuth2Implementation:
 
     def test_redirect_uri_is_my_home_assistant(self):
         """Automatic callback URI — must point to my.home-assistant.io for OAuth2 auto flow."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -488,7 +490,7 @@ class TestBoschOAuth2Implementation:
 
 class TestBoschOAuth2ImplementationInit:
     def test_init_sets_hass_and_verifier(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -503,7 +505,7 @@ class TestBoschOAuth2ImplementationInit:
         explicitly — pre-existing single-arg construction (this test file,
         and any future direct instantiation) must keep behaving exactly as
         before."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             CLIENT_ID,
             CLIENT_SECRET,
             BoschOAuth2Implementation,
@@ -518,7 +520,7 @@ class TestBoschOAuth2ImplementationInit:
         constructs BoschOAuth2Implementation with the ClientCredential's
         client_id/client_secret — verify those override the defaults
         instead of being silently ignored."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -533,7 +535,7 @@ class TestBoschOAuth2ImplementationInit:
         """A ClientCredential-sourced client_id must actually be used to
         build the authorize URL, not just stored — pins the wiring, not
         just the constructor assignment."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -549,7 +551,7 @@ class TestBoschOAuth2ImplementationInit:
     async def test_custom_client_credentials_used_in_token_exchange(self):
         """A ClientCredential-sourced client_id/client_secret must be sent
         in the authorization_code token-exchange POST body."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -574,7 +576,7 @@ class TestBoschOAuth2ImplementationInit:
         in the refresh_token POST body too (AbstractOAuth2Implementation's
         own refresh path — distinct from token_auth.py's hand-rolled
         _do_refresh, which always uses the module-level constants)."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -594,7 +596,7 @@ class TestBoschOAuth2ImplementationInit:
 class TestAsyncGenerateAuthorizeUrl:
     @pytest.mark.asyncio
     async def test_stores_verifier_and_returns_url_with_challenge(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -614,7 +616,7 @@ class TestAsyncGenerateAuthorizeUrl:
 
     @pytest.mark.asyncio
     async def test_url_contains_client_id_and_scope(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             CLIENT_ID,
             BoschOAuth2Implementation,
         )
@@ -680,7 +682,7 @@ def _spy_timeout(calls: list):
 class TestAsyncResolveExternalData:
     @pytest.mark.asyncio
     async def test_exchanges_code_for_tokens(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -709,7 +711,7 @@ class TestAsyncResolveExternalData:
         """HTTP 4xx: error is logged and raise_for_status propagates it."""
         import aiohttp
 
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -738,7 +740,7 @@ class TestAsyncResolveExternalData:
         falling back to aiohttp's 300s default — a stalled Keycloak endpoint
         must raise instead of stalling the whole config flow (Core PR
         #176545 Copilot review round 16, backported)."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -764,7 +766,7 @@ class TestAsyncResolveExternalData:
 class TestAsyncRefreshToken:
     @pytest.mark.asyncio
     async def test_returns_merged_token_on_200(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -784,7 +786,7 @@ class TestAsyncRefreshToken:
     async def test_logs_on_4xx_before_raise(self):
         import aiohttp
 
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -805,7 +807,7 @@ class TestAsyncRefreshToken:
         """The token-refresh POST must likewise be bounded by the 15s
         budget instead of aiohttp's 300s default (Core PR #176545 Copilot
         review round 16, backported)."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -831,7 +833,7 @@ class TestAsyncRefreshToken:
 class TestExchangeCode:
     @pytest.mark.asyncio
     async def test_200_returns_token_dict(self):
-        from custom_components.bosch_shc_camera.config_flow import _exchange_code
+        from custom_components.bosch_smart_camera.config_flow import _exchange_code
 
         mock_session = MagicMock()
         mock_session.post.return_value = _make_mock_cm(200, {"access_token": "at"})
@@ -840,7 +842,7 @@ class TestExchangeCode:
 
     @pytest.mark.asyncio
     async def test_non_200_returns_none(self):
-        from custom_components.bosch_shc_camera.config_flow import _exchange_code
+        from custom_components.bosch_smart_camera.config_flow import _exchange_code
 
         mock_session = MagicMock()
         mock_session.post.return_value = _make_mock_cm(400, {})
@@ -849,7 +851,7 @@ class TestExchangeCode:
 
     @pytest.mark.asyncio
     async def test_timeout_returns_none(self):
-        from custom_components.bosch_shc_camera.config_flow import _exchange_code
+        from custom_components.bosch_smart_camera.config_flow import _exchange_code
 
         mock_session = MagicMock()
         cm = MagicMock()
@@ -863,7 +865,7 @@ class TestExchangeCode:
     async def test_client_error_returns_none(self):
         import aiohttp
 
-        from custom_components.bosch_shc_camera.config_flow import _exchange_code
+        from custom_components.bosch_smart_camera.config_flow import _exchange_code
 
         mock_session = MagicMock()
         cm = MagicMock()
@@ -891,7 +893,7 @@ class TestAsyncOauthCreateEntryStructure:
     """
 
     def _make_flow(self, source: str):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraConfigFlow,
         )
 
@@ -973,7 +975,7 @@ class TestCameraAccessVerification:
     PR's Copilot review round 4, 2026-07-27)."""
 
     def _make_flow(self, source="user"):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraConfigFlow,
         )
 
@@ -1020,7 +1022,7 @@ class TestCameraAccessVerification:
         test-before-configure guarantee this check exists to provide
         (backported from the Core PR's Copilot review round 7, 2026-07-27).
         """
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraConfigFlow,
         )
 
@@ -1028,7 +1030,7 @@ class TestCameraAccessVerification:
         flow.hass = MagicMock()
 
         with patch(
-            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.config_flow.async_get_bosch_cloud_session",
             AsyncMock(side_effect=TimeoutError()),
         ):
             assert await flow._async_verify_camera_access("tok") is None
@@ -1036,7 +1038,7 @@ class TestCameraAccessVerification:
     @pytest.mark.asyncio
     async def test_verify_returns_none_when_request_times_out(self) -> None:
         """A timeout inside the request is inconclusive, not a rejection."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraConfigFlow,
         )
 
@@ -1046,7 +1048,7 @@ class TestCameraAccessVerification:
         session.get = MagicMock(side_effect=TimeoutError())
 
         with patch(
-            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.config_flow.async_get_bosch_cloud_session",
             AsyncMock(return_value=session),
         ):
             assert await flow._async_verify_camera_access("tok") is None
@@ -1054,7 +1056,7 @@ class TestCameraAccessVerification:
     @pytest.mark.asyncio
     async def test_verify_returns_none_on_client_error(self) -> None:
         """A network-layer connection error is inconclusive, same as a timeout."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraConfigFlow,
         )
 
@@ -1062,7 +1064,7 @@ class TestCameraAccessVerification:
         flow.hass = MagicMock()
 
         with patch(
-            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.config_flow.async_get_bosch_cloud_session",
             AsyncMock(side_effect=aiohttp.ClientError("connection reset")),
         ):
             assert await flow._async_verify_camera_access("tok") is None
@@ -1076,7 +1078,7 @@ class TestCameraAccessVerification:
         resp.__aexit__ = AsyncMock(return_value=None)
         session.get = MagicMock(return_value=resp)
 
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraConfigFlow,
         )
 
@@ -1084,13 +1086,13 @@ class TestCameraAccessVerification:
         flow.hass = MagicMock()
 
         with patch(
-            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.config_flow.async_get_bosch_cloud_session",
             AsyncMock(return_value=session),
         ):
             assert await flow._async_verify_camera_access("tok") is False
 
     async def _verify_with_status(self, status: int) -> bool | None:
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraConfigFlow,
         )
 
@@ -1106,7 +1108,7 @@ class TestCameraAccessVerification:
         flow.hass = MagicMock()
 
         with patch(
-            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.config_flow.async_get_bosch_cloud_session",
             AsyncMock(return_value=session),
         ):
             return await flow._async_verify_camera_access("tok")
@@ -1114,7 +1116,7 @@ class TestCameraAccessVerification:
     @pytest.mark.asyncio
     async def test_verify_true_on_200_with_non_json_body(self) -> None:
         """HTTP 200 proves account access even when the body is not JSON."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraConfigFlow,
         )
 
@@ -1128,7 +1130,7 @@ class TestCameraAccessVerification:
         flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
         flow.hass = MagicMock()
         with patch(
-            "custom_components.bosch_shc_camera.config_flow.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.config_flow.async_get_bosch_cloud_session",
             AsyncMock(return_value=session),
         ):
             assert await flow._async_verify_camera_access("tok") is True
@@ -1178,7 +1180,7 @@ class TestOptionsFlowStructure:
         src = (
             Path(__file__).parent.parent
             / "custom_components"
-            / "bosch_shc_camera"
+            / "bosch_smart_camera"
             / "config_flow.py"
         ).read_text()
         for step in (
@@ -1198,7 +1200,7 @@ class TestOptionsFlowStructure:
         src = (
             Path(__file__).parent.parent
             / "custom_components"
-            / "bosch_shc_camera"
+            / "bosch_smart_camera"
             / "config_flow.py"
         ).read_text()
         step_start = src.find("async_step_relogin_paste")
@@ -1304,7 +1306,7 @@ async def test_oauth_create_entry_redacts_in_diagnostics(
     hass: HomeAssistant, mock_oauth_token: dict
 ) -> None:
     """A fresh entry stores tokens — diagnostics must redact them."""
-    from custom_components.bosch_shc_camera.diagnostics import (
+    from custom_components.bosch_smart_camera.diagnostics import (
         TO_REDACT,
         async_get_config_entry_diagnostics,
     )
@@ -1349,7 +1351,7 @@ async def test_oauth_create_entry_redacts_in_diagnostics(
 def _make_bare_flow():
     """Create a minimal BoschCameraConfigFlow stub via __new__ (bypasses
     AbstractOAuth2FlowHandler.__init__ which needs a real hass instance)."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraConfigFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraConfigFlow
 
     flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
     flow.hass = SimpleNamespace()
@@ -1442,7 +1444,9 @@ class TestConfigFlowSteps:
 
     def _make_flow(self, source="user"):
         """Create a flow instance bypassing HA's config-flow framework."""
-        from custom_components.bosch_shc_camera.config_flow import BoschCameraConfigFlow
+        from custom_components.bosch_smart_camera.config_flow import (
+            BoschCameraConfigFlow,
+        )
 
         flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
         flow.hass = MagicMock()
@@ -1470,7 +1474,9 @@ class TestConfigFlowSteps:
     def test_logger_property_returns_module_logger(self):
         import logging
 
-        from custom_components.bosch_shc_camera.config_flow import BoschCameraConfigFlow
+        from custom_components.bosch_smart_camera.config_flow import (
+            BoschCameraConfigFlow,
+        )
 
         flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
         assert isinstance(flow.logger, logging.Logger)
@@ -1495,7 +1501,7 @@ class TestConfigFlowSteps:
         implementations instead of one and break its single-implementation
         auto-pick fast path.
         """
-        import custom_components.bosch_shc_camera.config_flow as config_flow_module
+        import custom_components.bosch_smart_camera.config_flow as config_flow_module
 
         assert not hasattr(config_flow_module, "async_register_implementation"), (
             "async_register_implementation must not be imported into "
@@ -1574,7 +1580,7 @@ class TestConfigFlowSteps:
 
     def test_async_get_options_flow_returns_options_flow_instance(self):
         """async_get_options_flow must return a BoschCameraOptionsFlow (line 480)."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraConfigFlow,
         )
 
@@ -1607,7 +1613,7 @@ class TestConfigFlowSteps:
 
 def _make_flow(source: str = "user"):
     """Create a BoschCameraConfigFlow instance bypassing HA's flow framework."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraConfigFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraConfigFlow
 
     flow = BoschCameraConfigFlow.__new__(BoschCameraConfigFlow)
     flow._manual_verifier = None
@@ -1635,7 +1641,7 @@ class TestAsyncStepUserShowsMenu:
         result = await flow.async_step_user(None)
         # Fresh setup must still run the duplicate-entry guard *before* the
         # menu is shown — this proves the menu didn't replace that check.
-        flow.async_set_unique_id.assert_called_once_with("bosch_shc_camera")
+        flow.async_set_unique_id.assert_called_once_with("bosch_smart_camera")
         flow._abort_if_unique_id_configured.assert_called_once()
         flow.async_show_menu.assert_called_once()
         _, kwargs = flow.async_show_menu.call_args
@@ -1666,7 +1672,7 @@ class TestAsyncStepUserShowsMenu:
         zero credentials registered and abort with missing_credentials.
         Found by the THREE_PER_ISSUE_PER_CHANGE bug-hunt during the
         application_credentials port."""
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             CLIENT_ID,
             CLIENT_SECRET,
             DOMAIN,
@@ -1987,7 +1993,7 @@ class TestAsyncStepManualPaste:
 
 class TestOptionsFlowReloginSteps:
     def _make_options_flow(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraOptionsFlow,
         )
 
@@ -3584,7 +3590,7 @@ class TestOptionsSchemaSerializable:
 # Python keys (e.g. enable_snapshots instead of "Camera snapshots") because
 # the flat data dict was used instead of section-nested data.
 
-COMP = Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera"
+COMP = Path(__file__).parent.parent / "custom_components" / "bosch_smart_camera"
 
 TRANSLATION_FILES = {
     "strings.json": COMP / "strings.json",
@@ -3708,7 +3714,7 @@ class TestTranslationStructure:
 @pytest.mark.asyncio
 async def test_options_flow_invalid_bind_host_sets_error() -> None:
     """frigate_bind_host with a non-IP value → errors['frigate_bind_host'] == 'invalid_ip_address'."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -3731,7 +3737,7 @@ async def test_options_flow_invalid_bind_host_sets_error() -> None:
 @pytest.mark.asyncio
 async def test_options_flow_invalid_ip_allowlist_sets_error() -> None:
     """frigate_ip_allowlist with a bad CIDR → errors['frigate_ip_allowlist'] == 'invalid_ip_allowlist'."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -3757,7 +3763,7 @@ async def test_options_flow_invalid_ip_allowlist_reports_offending_token() -> No
     so the user knows WHICH entry in a comma-separated list is invalid, instead
     of only a generic error. The first invalid token in a mixed valid/invalid
     list is reported (loop breaks on first failure, same as before)."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -3791,7 +3797,7 @@ async def test_options_flow_valid_ip_allowlist_no_error_empty_placeholder() -> N
     """A fully valid allowlist sets no error — the flow proceeds straight to
     async_create_entry (mirrors the existing valid-bind-host success path),
     so async_show_form is never invoked at all."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -3814,7 +3820,7 @@ async def test_options_flow_valid_ip_allowlist_no_error_empty_placeholder() -> N
 async def test_options_flow_empty_ip_allowlist_no_error() -> None:
     """Empty/whitespace-only allowlist is valid (feature opt-out) — must not
     error, proceeds straight to async_create_entry like the valid case."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -3836,8 +3842,8 @@ async def test_options_flow_invalid_webhook_url_sets_error() -> None:
     """webhook_url without an http(s):// prefix → errors['webhook_url'] ==
     'invalid_webhook_url', mirroring the existing diagnostic_cloud_api_override
     pattern (startswith check, same error style)."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
-    from custom_components.bosch_shc_camera.const import CONF_WEBHOOK_URL
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.const import CONF_WEBHOOK_URL
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -3869,7 +3875,7 @@ async def test_options_flow_validation_error_preserves_other_edits() -> None:
     see scan_interval silently revert to 60 on the error redisplay, losing
     every edit across all ~50 fields, not just the invalid one.
     """
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
 
     entry = _make_entry(options={"scan_interval": 60})
     flow = BoschCameraOptionsFlow(entry)
@@ -3906,8 +3912,8 @@ async def test_options_flow_validation_error_preserves_other_edits() -> None:
 async def test_options_flow_valid_webhook_url_variants_no_error() -> None:
     """Both http:// and https:// prefixes are accepted (local-network webhook
     receivers commonly run plain http, matching CLAUDE.md LOCAL_OVER_REMOTE)."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
-    from custom_components.bosch_shc_camera.const import CONF_WEBHOOK_URL
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.const import CONF_WEBHOOK_URL
 
     for valid_url in (
         "https://example.com/hook",
@@ -3934,8 +3940,8 @@ async def test_options_flow_webhook_url_uppercase_scheme_no_error() -> None:
     and third-party webhook-URL generators uppercase it (e.g. HTTPS://...).
     Found during THREE_PER_ISSUE_PER_CHANGE review; the check must not
     false-positive a technically-valid uppercase-scheme URL as invalid."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
-    from custom_components.bosch_shc_camera.const import CONF_WEBHOOK_URL
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.const import CONF_WEBHOOK_URL
 
     for mixed_case_url in (
         "HTTPS://example.com/hook",
@@ -3961,8 +3967,8 @@ async def test_options_flow_empty_webhook_url_no_error() -> None:
     """Empty webhook_url is valid (feature disabled/unset) — must not error,
     same opt-out semantics as the empty-allowlist and empty-cloud-api-override
     cases elsewhere in this flow. Proceeds straight to async_create_entry."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
-    from custom_components.bosch_shc_camera.const import CONF_WEBHOOK_URL
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.const import CONF_WEBHOOK_URL
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -3984,8 +3990,8 @@ async def test_options_flow_webhook_url_whitespace_only_no_error() -> None:
     """Whitespace-only webhook_url strips to empty → treated as unset, not a
     format error (guards against a stray-space typo blocking unrelated saves).
     Proceeds straight to async_create_entry."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
-    from custom_components.bosch_shc_camera.const import CONF_WEBHOOK_URL
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.const import CONF_WEBHOOK_URL
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -4018,7 +4024,7 @@ async def test_options_flow_webhook_url_whitespace_only_no_error() -> None:
 async def test_options_flow_smb_unavailable_creates_issue_on_save() -> None:
     """enable_smb_upload+upload_protocol=smb, smbprotocol missing → issue created
     in the SAME request, not just on the next coordinator tick."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -4044,7 +4050,7 @@ async def test_options_flow_smb_unavailable_creates_issue_on_save() -> None:
 
     mock_ir.async_create_issue.assert_called_once_with(
         flow.hass,
-        "bosch_shc_camera",
+        "bosch_smart_camera",
         "smb_unavailable",
         is_fixable=False,
         is_persistent=False,
@@ -4058,7 +4064,7 @@ async def test_options_flow_smb_unavailable_creates_issue_on_save() -> None:
 @pytest.mark.asyncio
 async def test_options_flow_smb_available_deletes_issue_on_save() -> None:
     """smbprotocol installed (normal case) → no create, issue cleared on save."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -4084,7 +4090,7 @@ async def test_options_flow_smb_available_deletes_issue_on_save() -> None:
 
     mock_ir.async_create_issue.assert_not_called()
     mock_ir.async_delete_issue.assert_called_once_with(
-        flow.hass, "bosch_shc_camera", "smb_unavailable"
+        flow.hass, "bosch_smart_camera", "smb_unavailable"
     )
 
 
@@ -4096,7 +4102,7 @@ async def test_options_flow_smb_both_features_creates_issue_on_save() -> None:
     (test_init.py::test_both_features_enabled_combines_placeholder covers that
     one; this pins the same logic driven through the real section-nested
     options-flow submission shape)."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -4136,7 +4142,7 @@ async def test_options_flow_smb_both_features_creates_issue_on_save() -> None:
 async def test_options_flow_smb_not_configured_deletes_issue_on_save() -> None:
     """No SMB-dependent feature enabled → issue cleared regardless of
     smb_available(), matching _refresh_smb_unavailable_issue's own logic."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -4163,7 +4169,7 @@ async def test_options_flow_smb_check_skipped_when_hass_not_attached() -> None:
     manager, the state most of this test module's other _submit()-based
     tests exercise) → the SMB Repairs check must not raise, and must not
     touch the (unusable) issue registry."""
-    from custom_components.bosch_shc_camera.config_flow import BoschCameraOptionsFlow
+    from custom_components.bosch_smart_camera.config_flow import BoschCameraOptionsFlow
 
     entry = SimpleNamespace(
         entry_id="01TEST",
@@ -4198,7 +4204,7 @@ class TestGH5ReauthReconfigureFlow:
     pin that the flow steps + translation stay in place."""
 
     def test_reauth_step_exists(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraConfigFlow,
         )
 
@@ -4206,7 +4212,7 @@ class TestGH5ReauthReconfigureFlow:
         assert hasattr(BoschCameraConfigFlow, "async_step_reauth_confirm")
 
     def test_reconfigure_step_exists(self):
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschCameraConfigFlow,
         )
 
@@ -4221,7 +4227,7 @@ class TestGH5ReauthReconfigureFlow:
             (
                 Path(__file__).parent.parent
                 / "custom_components"
-                / "bosch_shc_camera"
+                / "bosch_smart_camera"
                 / "strings.json"
             ).read_text()
         )
@@ -4237,21 +4243,27 @@ class TestClassRenamesConfigFlow:
         """BoschCameraConfigFlow is the current class name in config_flow.py."""
         import importlib
 
-        mod = importlib.import_module("custom_components.bosch_shc_camera.config_flow")
+        mod = importlib.import_module(
+            "custom_components.bosch_smart_camera.config_flow"
+        )
         assert hasattr(mod, "BoschCameraConfigFlow")
 
     def test_bosch_camera_options_flow_importable(self):
         """BoschCameraOptionsFlow is the current class name in config_flow.py."""
         import importlib
 
-        mod = importlib.import_module("custom_components.bosch_shc_camera.config_flow")
+        mod = importlib.import_module(
+            "custom_components.bosch_smart_camera.config_flow"
+        )
         assert hasattr(mod, "BoschCameraOptionsFlow")
 
     def test_old_config_flow_names_gone(self):
         """Old SHC-prefixed config flow names must no longer exist."""
         import importlib
 
-        mod = importlib.import_module("custom_components.bosch_shc_camera.config_flow")
+        mod = importlib.import_module(
+            "custom_components.bosch_smart_camera.config_flow"
+        )
         assert not hasattr(mod, "BoschSHCCameraConfigFlow"), (
             "BoschSHCCameraConfigFlow still exists — remove the old name"
         )

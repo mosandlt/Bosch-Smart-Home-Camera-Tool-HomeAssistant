@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera import BoschCameraCoordinator, ldi_local
-from custom_components.bosch_shc_camera.ldi_local import (
+from custom_components.bosch_smart_camera import BoschCameraCoordinator, ldi_local
+from custom_components.bosch_smart_camera.ldi_local import (
     RESULT_AUTH,
     RESULT_NO_IP,
     RESULT_OK,
@@ -32,19 +32,19 @@ from custom_components.bosch_shc_camera.ldi_local import (
     record_ldi_result,
     resolve_ldi_ip,
 )
-from custom_components.bosch_shc_camera.live_connection import (
+from custom_components.bosch_smart_camera.live_connection import (
     try_live_connection_inner,
 )
-from custom_components.bosch_shc_camera.local_data_interface import LDI_ENDPOINT
-from custom_components.bosch_shc_camera.repairs import (
+from custom_components.bosch_smart_camera.local_data_interface import LDI_ENDPOINT
+from custom_components.bosch_smart_camera.repairs import (
     LDI_UNREACHABLE_GRACE_SEC,
     refresh_local_data_interface_auth_issue,
 )
-from custom_components.bosch_shc_camera.session_renewal import (
+from custom_components.bosch_smart_camera.session_renewal import (
     auto_renew_local_session,
     refresh_local_creds_from_heartbeat,
 )
-from custom_components.bosch_shc_camera.stream_lifecycle import (
+from custom_components.bosch_smart_camera.stream_lifecycle import (
     handle_stream_worker_error,
 )
 from tests.test_ldi_local import (
@@ -57,7 +57,7 @@ from tests.test_ldi_local import (
     _probe,
 )
 
-MODULE = "custom_components.bosch_shc_camera"
+MODULE = "custom_components.bosch_smart_camera"
 LDI_LIVE: dict[str, Any] = {
     "_connection_type": "LOCAL",
     "_ldi": True,
@@ -405,7 +405,7 @@ class TestRepairsIssue:
         record_ldi_result(c, CAM, RESULT_OK)  # type: ignore[arg-type]
         refresh_local_data_interface_auth_issue(c)  # type: ignore[arg-type]
         ir.async_delete_issue.assert_called_with(
-            c.hass, "bosch_shc_camera", f"local_data_interface_auth_{CAM}"
+            c.hass, "bosch_smart_camera", f"local_data_interface_auth_{CAM}"
         )
         assert CAM not in c._ldi_auth_alerted
 
@@ -508,7 +508,7 @@ class TestWatchdog:
     async def test_final_tick_saturates_counter_only_for_cloud_sessions(
         self, ldi: bool
     ) -> None:
-        from custom_components.bosch_shc_camera.switch import BoschLiveStreamSwitch
+        from custom_components.bosch_smart_camera.switch import BoschLiveStreamSwitch
 
         live: dict[str, Any] = {"_connection_type": "LOCAL"}
         if ldi:
@@ -549,7 +549,7 @@ class TestWatchdog:
 # ── recorder ────────────────────────────────────────────────────────────────
 class TestRecorder:
     def test_argv_has_no_audio_assumption(self) -> None:
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         url = "rtsp://127.0.0.1:41000/rtsp_tunnel?inst=1&fmtp=1"
         for args in (
@@ -566,7 +566,7 @@ class TestRecorder:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("ldi", "second_gives_up"), [(True, True), (False, False)])
     async def test_second_auth_failure(self, ldi: bool, second_gives_up: bool) -> None:
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
         from tests.test_recorder import (
             CAM_ID,
             _make_lifecycle_coord,
@@ -718,7 +718,7 @@ class TestPasswordHint:
     def test_created_on_active_without_password_logged_once(
         self, ir: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
-        from custom_components.bosch_shc_camera.repairs import (
+        from custom_components.bosch_smart_camera.repairs import (
             refresh_local_data_interface_password_hint,
         )
 
@@ -747,7 +747,7 @@ class TestPasswordHint:
     def test_not_created(
         self, ir: MagicMock, state: str | None, password: bool
     ) -> None:
-        from custom_components.bosch_shc_camera.repairs import (
+        from custom_components.bosch_smart_camera.repairs import (
             refresh_local_data_interface_password_hint,
         )
 
@@ -758,7 +758,7 @@ class TestPasswordHint:
 
     @patch(f"{MODULE}.ir")
     def test_cleared_when_password_set(self, ir: MagicMock) -> None:
-        from custom_components.bosch_shc_camera.repairs import (
+        from custom_components.bosch_smart_camera.repairs import (
             refresh_local_data_interface_password_hint,
         )
 
@@ -768,13 +768,13 @@ class TestPasswordHint:
         c.entry.options["local_passwords"] = {CAM: PW}
         refresh_local_data_interface_password_hint(c)
         ir.async_delete_issue.assert_called_with(
-            c.hass, "bosch_shc_camera", f"local_data_interface_no_password_{CAM}"
+            c.hass, "bosch_smart_camera", f"local_data_interface_no_password_{CAM}"
         )
         assert CAM not in c._ldi_nopw_alerted
 
     @patch(f"{MODULE}.ir")
     def test_cleared_when_interface_disabled(self, ir: MagicMock) -> None:
-        from custom_components.bosch_shc_camera.repairs import (
+        from custom_components.bosch_smart_camera.repairs import (
             refresh_local_data_interface_password_hint,
         )
 
@@ -786,7 +786,7 @@ class TestPasswordHint:
 
     @patch(f"{MODULE}.ir")
     def test_no_data_no_crash(self, ir: MagicMock) -> None:
-        from custom_components.bosch_shc_camera.repairs import (
+        from custom_components.bosch_smart_camera.repairs import (
             refresh_local_data_interface_password_hint,
         )
 
@@ -842,7 +842,7 @@ class TestFixedUsername:
         }
 
     def test_username_constant_and_no_username_option(self) -> None:
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
+        from custom_components.bosch_smart_camera.const import DEFAULT_OPTIONS
 
         assert ldi_local.LDI_USER == "localuser"
         assert not [k for k in DEFAULT_OPTIONS if "local" in k and "user" in k]

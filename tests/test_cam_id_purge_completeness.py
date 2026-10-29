@@ -27,8 +27,8 @@ from unittest.mock import AsyncMock, MagicMock
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.bosch_shc_camera import BoschCameraCoordinator
-from custom_components.bosch_shc_camera.const import DOMAIN
+from custom_components.bosch_smart_camera import BoschCameraCoordinator
+from custom_components.bosch_smart_camera.const import DOMAIN, STORAGE_PREFIX
 
 TEST_CAM_ID = "AABBCCDD-1111-2222-3333-444455556666"
 OTHER_CAM_ID = "EEFF0011-9999-8888-7777-666655554444"
@@ -736,17 +736,17 @@ async def test_async_remove_entry_deletes_nvr_intent_store(hass: HomeAssistant) 
     recording via a stale `True` entry nothing in the fresh entry ever set."""
     from homeassistant.helpers.storage import Store
 
-    from custom_components.bosch_shc_camera import async_remove_entry
+    from custom_components.bosch_smart_camera import async_remove_entry
 
     entry = _make_entry(hass)
-    await Store(hass, version=1, key=f"{DOMAIN}_nvr_user_intent").async_save(
+    await Store(hass, version=1, key=f"{STORAGE_PREFIX}_nvr_user_intent").async_save(
         {TEST_CAM_ID: True}
     )
 
     await async_remove_entry(hass, entry)
 
     reloaded = await Store(
-        hass, version=1, key=f"{DOMAIN}_nvr_user_intent"
+        hass, version=1, key=f"{STORAGE_PREFIX}_nvr_user_intent"
     ).async_load()
     assert reloaded is None
 
@@ -756,7 +756,7 @@ async def test_removed_and_readded_camera_gets_immediate_first_slow_fetch(
 ) -> None:
     """A purged camera forgets its `slow_tier_ran_once` mark, so on re-add the
     first slow-tier fetch runs even while its stream is live (not deferred)."""
-    from custom_components.bosch_shc_camera.slow_tier import _compute_cam_context
+    from custom_components.bosch_smart_camera.slow_tier import _compute_cam_context
 
     coord = BoschCameraCoordinator(hass, _make_entry(hass))
     assert coord.slow_tier_ran_once == set()

@@ -63,7 +63,7 @@ def test_refresh_button_construction(
     stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
 ):
     """Refresh button instantiates with the expected unique_id + translation_key."""
-    from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+    from custom_components.bosch_smart_camera.button import BoschRefreshSnapshotButton
 
     btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
     assert btn._attr_unique_id.startswith("bosch_shc_refresh_")
@@ -77,7 +77,7 @@ def test_refresh_button_device_info(
     stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
 ):
     """device_info propagates model name + firmware + mac."""
-    from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+    from custom_components.bosch_smart_camera.button import BoschRefreshSnapshotButton
 
     btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
     info = btn.device_info
@@ -94,7 +94,7 @@ def test_device_info_no_mac_skipped(
     stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
 ):
     """Empty mac → device_info connections is an empty set."""
-    from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+    from custom_components.bosch_smart_camera.button import BoschRefreshSnapshotButton
 
     stub_coord.data[CAM_ID]["info"]["macAddress"] = ""
     btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
@@ -115,7 +115,9 @@ class TestRefreshSnapshotPress:
         """async_press must schedule coordinator.async_request_refresh via hass.async_create_task."""
         from unittest.mock import MagicMock
 
-        from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+        from custom_components.bosch_smart_camera.button import (
+            BoschRefreshSnapshotButton,
+        )
 
         btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
         fake_hass = MagicMock()
@@ -131,7 +133,9 @@ class TestRefreshSnapshotPress:
         """When a camera entity is registered, async_press also schedules its image refresh."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+        from custom_components.bosch_smart_camera.button import (
+            BoschRefreshSnapshotButton,
+        )
 
         fake_cam = MagicMock()
         fake_cam.async_trigger_image_refresh = AsyncMock(return_value=None)
@@ -154,7 +158,9 @@ class TestRefreshSnapshotErrorHandling:
         """A done callback must be registered on the coordinator refresh task."""
         from unittest.mock import MagicMock
 
-        from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+        from custom_components.bosch_smart_camera.button import (
+            BoschRefreshSnapshotButton,
+        )
 
         btn = BoschRefreshSnapshotButton(stub_coord, CAM_ID, stub_entry)
         fake_hass = MagicMock()
@@ -170,7 +176,9 @@ class TestRefreshSnapshotErrorHandling:
         """A done callback must be registered on the image refresh task too."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+        from custom_components.bosch_smart_camera.button import (
+            BoschRefreshSnapshotButton,
+        )
 
         fake_cam = MagicMock()
         fake_cam.async_trigger_image_refresh = AsyncMock(return_value=None)
@@ -203,7 +211,7 @@ class TestSetupEntry:
         an orphan since v12.0.4). Gen1 cameras have no integrated siren;
         Gen2 cameras use BoschPanicAlarmSwitch via /panic_alarm in switch.py.
         """
-        from custom_components.bosch_shc_camera.button import (
+        from custom_components.bosch_smart_camera.button import (
             BoschHardResetButton,
             BoschRefreshSnapshotButton,
             BoschSoftResetButton,
@@ -229,7 +237,7 @@ class TestSetupEntry:
     ):
         """enable_snapshot_button=False only skips the snapshot-refresh button —
         the reset buttons aren't gated by that option and must still appear."""
-        from custom_components.bosch_shc_camera.button import (
+        from custom_components.bosch_smart_camera.button import (
             BoschHardResetButton,
             BoschRefreshSnapshotButton,
             BoschSoftResetButton,
@@ -262,7 +270,7 @@ def _make_coord() -> SimpleNamespace:
 class TestAsyncSoftResetCamera:
     @pytest.mark.asyncio
     async def test_puts_soft_reset_endpoint_with_empty_body(self):
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+        from custom_components.bosch_smart_camera import BoschCameraCoordinator
 
         coord = _make_coord()
         await BoschCameraCoordinator.async_soft_reset_camera(coord, CAM_ID)  # type: ignore[arg-type]
@@ -272,7 +280,7 @@ class TestAsyncSoftResetCamera:
     async def test_cloud_rejects_raises(self):
         from homeassistant.exceptions import HomeAssistantError
 
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+        from custom_components.bosch_smart_camera import BoschCameraCoordinator
 
         coord = _make_coord()
         coord.async_put_camera.return_value = False
@@ -283,7 +291,7 @@ class TestAsyncSoftResetCamera:
 class TestAsyncHardResetCamera:
     @pytest.mark.asyncio
     async def test_puts_hard_reset_endpoint_with_empty_body(self):
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+        from custom_components.bosch_smart_camera import BoschCameraCoordinator
 
         coord = _make_coord()
         await BoschCameraCoordinator.async_hard_reset_camera(coord, CAM_ID)  # type: ignore[arg-type]
@@ -293,7 +301,7 @@ class TestAsyncHardResetCamera:
     async def test_cloud_rejects_raises(self):
         from homeassistant.exceptions import HomeAssistantError
 
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+        from custom_components.bosch_smart_camera import BoschCameraCoordinator
 
         coord = _make_coord()
         coord.async_put_camera.return_value = False
@@ -321,21 +329,21 @@ class TestResetButtonEntities:
         """Live-tested 2026-07-08: Bosch's cloud rejects this with HTTP 404
         sh:entity.notfound despite the request matching the app exactly —
         disabled by default until Bosch's backend actually supports it."""
-        from custom_components.bosch_shc_camera.button import BoschSoftResetButton
+        from custom_components.bosch_smart_camera.button import BoschSoftResetButton
 
         btn = BoschSoftResetButton(_make_button_coord(), CAM_ID, MagicMock())
         assert btn._attr_entity_registry_enabled_default is False
 
     def test_hard_reset_button_disabled_by_default(self):
         """Destructive action — must not be silently enabled for every user."""
-        from custom_components.bosch_shc_camera.button import BoschHardResetButton
+        from custom_components.bosch_smart_camera.button import BoschHardResetButton
 
         btn = BoschHardResetButton(_make_button_coord(), CAM_ID, MagicMock())
         assert btn._attr_entity_registry_enabled_default is False
 
     @pytest.mark.asyncio
     async def test_soft_reset_button_press_calls_coordinator(self):
-        from custom_components.bosch_shc_camera.button import BoschSoftResetButton
+        from custom_components.bosch_smart_camera.button import BoschSoftResetButton
 
         coord = _make_button_coord()
         btn = BoschSoftResetButton(coord, CAM_ID, MagicMock())
@@ -344,7 +352,7 @@ class TestResetButtonEntities:
 
     @pytest.mark.asyncio
     async def test_hard_reset_button_press_calls_coordinator(self):
-        from custom_components.bosch_shc_camera.button import BoschHardResetButton
+        from custom_components.bosch_smart_camera.button import BoschHardResetButton
 
         coord = _make_button_coord()
         btn = BoschHardResetButton(coord, CAM_ID, MagicMock())
@@ -403,7 +411,9 @@ class TestRefreshSnapshotButtonNaming:
         self, _naming_stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """_attr_name must be None — translation_key provides the entity name."""
-        from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+        from custom_components.bosch_smart_camera.button import (
+            BoschRefreshSnapshotButton,
+        )
 
         btn = BoschRefreshSnapshotButton(_naming_stub_coord, CAM_ID, stub_entry)
         name = getattr(btn, "_attr_name", None)
@@ -414,7 +424,9 @@ class TestRefreshSnapshotButtonNaming:
     def test_translation_key_is_refresh_snapshot(
         self, _naming_stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+        from custom_components.bosch_smart_camera.button import (
+            BoschRefreshSnapshotButton,
+        )
 
         btn = BoschRefreshSnapshotButton(_naming_stub_coord, CAM_ID, stub_entry)
         assert btn._attr_translation_key == "refresh_snapshot"
@@ -422,7 +434,9 @@ class TestRefreshSnapshotButtonNaming:
     def test_has_entity_name_is_true(
         self, _naming_stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.button import BoschRefreshSnapshotButton
+        from custom_components.bosch_smart_camera.button import (
+            BoschRefreshSnapshotButton,
+        )
 
         btn = BoschRefreshSnapshotButton(_naming_stub_coord, CAM_ID, stub_entry)
         assert btn._attr_has_entity_name is True

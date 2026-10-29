@@ -1,4 +1,4 @@
-"""Tests for custom_components.bosch_shc_camera.media_source.
+"""Tests for custom_components.bosch_smart_camera.media_source.
 
 Consolidated from 10 previously-scattered test files into one flat module
 (HA-core platinum test layout: one test_<module>.py per source module).
@@ -32,7 +32,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.components.media_source.error import Unresolvable
 
-from custom_components.bosch_shc_camera.media_source import (
+from custom_components.bosch_smart_camera.media_source import (
     _CHUNK,
     BoschCameraMediaSource,
     BoschCameraMediaView,
@@ -47,7 +47,7 @@ from custom_components.bosch_shc_camera.media_source import (
 )
 from tests.source_match import assert_in_source
 
-MODULE = "custom_components.bosch_shc_camera.media_source"
+MODULE = "custom_components.bosch_smart_camera.media_source"
 
 CAM_FILE = "Terrasse_2026-05-07_10-00-00_MOVEMENT_11111111.mp4"
 CAM_IMG = "Terrasse_2026-05-07_10-00-00_MOVEMENT_11111111.jpg"
@@ -292,7 +292,7 @@ class TestIsMacosJunk:
         ],
     )
     def test_classification(self, name: str, expected: bool):
-        from custom_components.bosch_shc_camera.media_source import _is_macos_junk
+        from custom_components.bosch_smart_camera.media_source import _is_macos_junk
 
         assert _is_macos_junk(name) is expected
 
@@ -342,7 +342,9 @@ class TestParseFilename:
 class TestFormatEventTitle:
     def test_replaces_time_dashes_with_colons(self):
         """Time `10-00-00` -> display as `10:00:00`."""
-        from custom_components.bosch_shc_camera.media_source import _format_event_title
+        from custom_components.bosch_smart_camera.media_source import (
+            _format_event_title,
+        )
 
         result = _format_event_title(
             {
@@ -357,7 +359,9 @@ class TestFormatEventTitle:
         assert "Terrasse" in result
 
     def test_format_includes_em_dash(self):
-        from custom_components.bosch_shc_camera.media_source import _format_event_title
+        from custom_components.bosch_smart_camera.media_source import (
+            _format_event_title,
+        )
 
         result = _format_event_title(
             {
@@ -372,7 +376,9 @@ class TestFormatEventTitle:
 
 class TestFormatEventTitleEventTypes:
     def test_movement_event(self):
-        from custom_components.bosch_shc_camera.media_source import _format_event_title
+        from custom_components.bosch_smart_camera.media_source import (
+            _format_event_title,
+        )
 
         parsed = {
             "date": "2026-05-04",
@@ -387,7 +393,9 @@ class TestFormatEventTitleEventTypes:
         assert "Terrasse" in out
 
     def test_audio_event(self):
-        from custom_components.bosch_shc_camera.media_source import _format_event_title
+        from custom_components.bosch_smart_camera.media_source import (
+            _format_event_title,
+        )
 
         parsed = {
             "date": "2026-05-04",
@@ -399,7 +407,9 @@ class TestFormatEventTitleEventTypes:
         assert "AUDIO" in out
 
     def test_unknown_type_passes_through(self):
-        from custom_components.bosch_shc_camera.media_source import _format_event_title
+        from custom_components.bosch_smart_camera.media_source import (
+            _format_event_title,
+        )
 
         parsed = {
             "date": "2026-05-04",
@@ -418,7 +428,7 @@ class TestFileRegexEdgeCases:
 
     @pytest.fixture(autouse=True)
     def _import(self) -> None:
-        from custom_components.bosch_shc_camera.media_source import _FILE_RE
+        from custom_components.bosch_smart_camera.media_source import _FILE_RE
 
         self.re = _FILE_RE
 
@@ -662,7 +672,7 @@ class TestEnabledSources:
         was actually browsed/opened deep inside _SmbBackend. Now the source
         simply doesn't appear — __init__.py's _refresh_smb_unavailable_issue
         surfaces the real cause via a Repairs issue instead."""
-        from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_smart_camera import media_source as ms
 
         hass = self._build_hass(
             [
@@ -689,7 +699,7 @@ class TestEnabledSources:
     def test_smb_shown_when_smbprotocol_installed(self, tmp_path: Path):
         """Sanity counterpart: smb_available()=True (the normal case) still
         shows the SMB source exactly as before this gate was added."""
-        from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_smart_camera import media_source as ms
 
         hass = self._build_hass(
             [
@@ -757,7 +767,7 @@ class TestEnabledSourcesOSError:
         # on systems where /no doesn't exist and we can't create it.
         # We patch Path.mkdir to raise OSError to ensure the except branch fires.
         with patch(
-            "custom_components.bosch_shc_camera.media_source.Path.mkdir",
+            "custom_components.bosch_smart_camera.media_source.Path.mkdir",
             side_effect=OSError("permission denied"),
         ):
             sources = _enabled_sources(hass)
@@ -803,7 +813,7 @@ class TestEnabledSourcesFilters:
         return entry
 
     def _call(self, entry):
-        from custom_components.bosch_shc_camera import media_source as ms
+        from custom_components.bosch_smart_camera import media_source as ms
 
         hass = MagicMock()
         hass.config_entries.async_loaded_entries.return_value = [entry]
@@ -1600,7 +1610,7 @@ class TestSyncLocalSaveDownload:
     """Cover the actual HTTP download logic."""
 
     def _call(self, coord, ev, mock_urlopen_resp, cam_name="Terrasse"):
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         if mock_urlopen_resp is None:
             sync_local_save(coord, ev, "TOKEN", cam_name)
@@ -1651,7 +1661,7 @@ class TestSyncLocalSaveDownload:
     def test_unsafe_url_skipped(self, tmp_path: Path):
         coord = _coord(tmp_path)
         with patch(_URLOPEN) as mock_urlopen:
-            from custom_components.bosch_shc_camera.smb import sync_local_save
+            from custom_components.bosch_smart_camera.smb import sync_local_save
 
             sync_local_save(
                 coord,
@@ -1693,7 +1703,7 @@ class TestSyncLocalSaveDownload:
         nested_dir.mkdir(parents=True, exist_ok=True)
         (nested_dir / f"{stem}.jpg").write_bytes(b"OLD")
         with patch(_URLOPEN) as mock_urlopen:
-            from custom_components.bosch_shc_camera.smb import sync_local_save
+            from custom_components.bosch_smart_camera.smb import sync_local_save
 
             sync_local_save(coord, ev, "TOKEN", "Terrasse")
             mock_urlopen.assert_not_called()
@@ -1711,7 +1721,7 @@ class TestSyncLocalSaveDownload:
         """Events with timestamp shorter than 19 chars must be ignored."""
         coord = _coord(tmp_path)
         with patch(_URLOPEN) as mock_urlopen:
-            from custom_components.bosch_shc_camera.smb import sync_local_save
+            from custom_components.bosch_smart_camera.smb import sync_local_save
 
             sync_local_save(coord, _ev(timestamp="2026-05"), "TOKEN", "Cam")
             mock_urlopen.assert_not_called()
@@ -1722,7 +1732,7 @@ class TestSyncLocalSaveDownload:
             options={"download_path": ""}, _download_started_at=time.time() - 3600
         )
         with patch(_URLOPEN) as mock_urlopen:
-            from custom_components.bosch_shc_camera.smb import sync_local_save
+            from custom_components.bosch_smart_camera.smb import sync_local_save
 
             sync_local_save(coord, _ev(), "TOKEN", "Cam")
             mock_urlopen.assert_not_called()
@@ -1749,7 +1759,7 @@ class TestSyncLocalSaveOldEventGuard:
 
     def test_old_event_is_skipped(self, tmp_path: Path):
         """Event timestamp 2 hours before coordinator start -> no file written."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         # Coordinator started "now"
         coord = _coord(tmp_path, started_offset_s=0)
@@ -1770,7 +1780,7 @@ class TestSyncLocalSaveOldEventGuard:
 
     def test_event_just_before_cutoff_is_skipped(self, tmp_path: Path):
         """Event 90 s before start is within the guard window -> skipped."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord(tmp_path, started_offset_s=0)
         ev = {
@@ -1788,7 +1798,7 @@ class TestSyncLocalSaveOldEventGuard:
 
     def test_recent_event_is_not_skipped(self, tmp_path: Path):
         """Event after coordinator start (within 60 s slack) -> proceeds to download."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         # Coordinator started 10 minutes ago
         coord = _coord(tmp_path, started_offset_s=-600)
@@ -1817,7 +1827,7 @@ class TestSyncLocalSaveOldEventGuard:
 
     def test_event_within_60s_slack_is_not_skipped(self, tmp_path: Path):
         """Event 30 s before coordinator start is within the 60 s tolerance -> allowed."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord(tmp_path, started_offset_s=0)
 
@@ -1842,7 +1852,7 @@ class TestSyncLocalSaveOldEventGuard:
 
     def test_no_started_at_attribute_falls_through(self, tmp_path: Path):
         """Coordinator without _download_started_at (e.g. old pickled state) must not crash."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = SimpleNamespace(
             options={"download_path": str(tmp_path)},
@@ -1871,7 +1881,7 @@ class TestSafeNameSanitization:
 
     @pytest.fixture(autouse=True)
     def _import(self) -> None:
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         self.fn = _safe_name
 
@@ -2549,7 +2559,7 @@ def _make_smb_media_source(tmp_path):
     Mocks `_enabled_sources` so the dispatcher reaches `_browse_smb` with a
     `_SmbBackend` instance.
     """
-    from custom_components.bosch_shc_camera.media_source import _Source
+    from custom_components.bosch_smart_camera.media_source import _Source
 
     hass = SimpleNamespace(
         data={},
@@ -3052,8 +3062,8 @@ class TestSmbSessionReuseWithinBrowseStep:
         branch) for one single browse click. Before the fix that was 2
         independent TCP+SMB2 handshakes; after the fix it must be exactly
         1 `register_session` + 1 `delete_session` for the whole step."""
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         backend = _backend_credit_starvation()
         fake = _fake_smbclient_default()
@@ -3317,7 +3327,7 @@ class TestSmbPathTraversal:
 
 class TestEntryTitle:
     def test_returns_entry_title_when_loaded(self):
-        from custom_components.bosch_shc_camera.media_source import _entry_title
+        from custom_components.bosch_smart_camera.media_source import _entry_title
 
         entry = SimpleNamespace(entry_id="01ABC", title="My Bosch")
         hass = SimpleNamespace(
@@ -3328,7 +3338,7 @@ class TestEntryTitle:
         assert _entry_title(hass, "01ABC") == "My Bosch"
 
     def test_falls_back_to_entry_id_short_when_missing(self):
-        from custom_components.bosch_shc_camera.media_source import _entry_title
+        from custom_components.bosch_smart_camera.media_source import _entry_title
 
         hass = SimpleNamespace(
             config_entries=SimpleNamespace(
@@ -3343,7 +3353,7 @@ class TestEntryTitle:
 
 class TestNode:
     def test_default_directory_node(self):
-        from custom_components.bosch_shc_camera.media_source import _node
+        from custom_components.bosch_smart_camera.media_source import _node
 
         out = _node(identifier="root", title="Root")
         assert out.identifier == "root"
@@ -3354,7 +3364,7 @@ class TestNode:
     def test_playable_leaf(self):
         from homeassistant.components.media_player import MediaClass
 
-        from custom_components.bosch_shc_camera.media_source import _node
+        from custom_components.bosch_smart_camera.media_source import _node
 
         out = _node(
             identifier="L:01ENT/Cam/2026-05-04/file.mp4",
@@ -3369,7 +3379,7 @@ class TestNode:
         assert out.media_content_type == "video/mp4"
 
     def test_thumbnail_propagated(self):
-        from custom_components.bosch_shc_camera.media_source import _node
+        from custom_components.bosch_smart_camera.media_source import _node
 
         out = _node(
             identifier="x",
@@ -3879,7 +3889,7 @@ class TestBrowsePathAutoDetection:
         assert titles == sorted(titles, key=str.casefold)
 
     def test_unknown_entry_raises_unresolvable(self, tmp_path: Path):
-        from custom_components.bosch_shc_camera.media_source import (
+        from custom_components.bosch_smart_camera.media_source import (
             BoschCameraMediaSource,
             Unresolvable,
         )
@@ -4124,8 +4134,8 @@ class TestBrowseLocalLegacyFlat:
 
 class TestBrowseSmbCameraFirstFlatDates:
     def _browse_smb(self, identifier, cameras=None, years=None, flat_dates=None):
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = True
@@ -4166,8 +4176,8 @@ class TestBrowseSmbCameraFirstFlatDates:
 
 class TestBrowseSmbCameraFirstFlatEvents:
     def _browse_smb_flat(self, identifier, flat_events=None, image_present=True):
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         stem = "Cam_2026-05-07_10-00-00_MOVEMENT_AABBCCDD"
         image = f"{stem}.jpg" if image_present else None
@@ -4228,8 +4238,8 @@ class TestBrowseSmbCameraFirstFlatEvents:
 
 class TestBrowseSmbDateFirstEvents:
     def _browse_smb_date_first(self, identifier, events=None, image_present=True):
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         stem = "Terrasse_2026-05-07_10-00-00_MOVEMENT_AB12CD34"
         image = f"{stem}.jpg" if image_present else None
@@ -4288,8 +4298,8 @@ class TestBrowseSmbDateFirstEvents:
 
     def test_date_first_days_level(self):
         """date-first, len(rest)==2 (year/month) -> days returned."""
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = False
@@ -4306,8 +4316,8 @@ class TestBrowseSmbDateFirstEvents:
         assert any("2026-05-07" in t for t in titles)
 
     def test_date_first_too_deep_raises_unresolvable(self):
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = False
@@ -4325,8 +4335,8 @@ class TestBrowseSmb:
     def _browse(
         self, identifier, cameras=None, years=None, months=None, days=None, events=None
     ):
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         backend = MagicMock(spec=_SmbBackend)
         backend.list_cameras.return_value = cameras or []
@@ -4427,8 +4437,8 @@ class TestBrowseSmb:
 
     def test_date_first_root_lists_years(self):
         """When folder_pattern is date-first, root browse shows years."""
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = False  # date-first mode
@@ -4444,8 +4454,8 @@ class TestBrowseSmb:
 
     def test_date_first_year_lists_months(self):
         """Date-first: '01ENT/2026' -> months."""
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         backend = MagicMock(spec=_SmbBackend)
         backend.camera_first = False
@@ -4463,8 +4473,8 @@ class TestBrowseSmb:
 class TestBrowseEntryRootDispatch:
     def test_nvr_single_source_lists_cameras(self, tmp_path: Path):
         """Single NVR source: root browse goes straight to camera list."""
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         nvr_base = tmp_path / "nvr"
         (nvr_base / "Terrasse").mkdir(parents=True)
@@ -4481,8 +4491,8 @@ class TestBrowseEntryRootDispatch:
 
     def test_smb_single_source_root_shows_cameras(self):
         """Single SMB source: root browse shows camera folders (camera-first)."""
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         backend = MagicMock(spec=_SmbBackend)
         backend.list_cameras.return_value = ["Terrasse"]
@@ -4497,8 +4507,8 @@ class TestBrowseEntryRootDispatch:
 
     def test_multi_source_entry_root_shows_chooser(self, tmp_path: Path):
         """Two backends on same entry: root shows source chooser."""
-        from custom_components.bosch_shc_camera import media_source as ms
-        from custom_components.bosch_shc_camera.media_source import _Source
+        from custom_components.bosch_smart_camera import media_source as ms
+        from custom_components.bosch_smart_camera.media_source import _Source
 
         local = _LocalBackend(str(tmp_path))
         nvr_base = tmp_path / "nvr"
@@ -5346,7 +5356,7 @@ class TestServeLocalBadMime:
         request.headers = {}
 
         with patch(
-            "custom_components.bosch_shc_camera.media_source.mimetypes.guess_type",
+            "custom_components.bosch_smart_camera.media_source.mimetypes.guess_type",
             return_value=("application/octet-stream", None),
         ):
             with pytest.raises(Exception):  # web.HTTPNotFound
@@ -5798,7 +5808,7 @@ class TestSmbBackendScandirFilteredNvrInternalDirs:
     guard does not apply in file mode."""
 
     def _make_smb_backend(self):
-        from custom_components.bosch_shc_camera.media_source import _SmbBackend
+        from custom_components.bosch_smart_camera.media_source import _SmbBackend
 
         opts = {
             "smb_server": "nas.local",
@@ -5874,7 +5884,7 @@ class TestFilenameRegexCameraPrefix:
     (with-prefix) filenames."""
 
     def _regex(self):
-        from custom_components.bosch_shc_camera.media_source import _FILE_RE
+        from custom_components.bosch_smart_camera.media_source import _FILE_RE
 
         return _FILE_RE
 

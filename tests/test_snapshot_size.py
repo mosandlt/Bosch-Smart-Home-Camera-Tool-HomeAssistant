@@ -18,9 +18,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from PIL import Image
 
-from custom_components.bosch_shc_camera import ldi_snapshot as snap
-from custom_components.bosch_shc_camera.camera import BoschCamera
-from custom_components.bosch_shc_camera.const import (
+from custom_components.bosch_smart_camera import ldi_snapshot as snap
+from custom_components.bosch_smart_camera.camera import BoschCamera
+from custom_components.bosch_smart_camera.const import (
     DEFAULT_OPTIONS,
     JPEG_SIZE_MEDIUM,
     JPEG_SIZE_THUMB,
@@ -132,7 +132,7 @@ class TestCloudPath:
         cam = _with_mode(_make_camera_r6(coord=coord), mode)
         cam._async_rcp_thumbnail = AsyncMock(return_value=None)
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.camera.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=MagicMock()),
         ):
             await BoschCamera._async_camera_image_impl(cam, width=width)
@@ -147,7 +147,7 @@ class TestCloudPath:
         cam = _with_mode(_make_camera_r6(coord=coord), None)
         cam._async_rcp_thumbnail = AsyncMock(return_value=None)
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.camera.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=MagicMock()),
         ):
             await BoschCamera._async_camera_image_impl(cam, width=200)
@@ -161,7 +161,7 @@ class TestCloudPath:
         cam = _with_mode(_make_camera_r6(coord=coord), "small")
         cam._async_rcp_thumbnail = AsyncMock(return_value=b"\xff\xd8rcp")
         with patch(
-            "custom_components.bosch_shc_camera.camera.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.camera.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=MagicMock()),
         ):
             out = await BoschCamera._async_camera_image_impl(cam)
@@ -276,6 +276,6 @@ class TestLocalInterfacePath:
 
 class TestOptionsFlowWiring:
     def test_option_lives_in_the_stream_section(self) -> None:
-        from custom_components.bosch_shc_camera.config_flow import OPTIONS_SECTIONS
+        from custom_components.bosch_smart_camera.config_flow import OPTIONS_SECTIONS
 
         assert "snapshot_size" in OPTIONS_SECTIONS["stream"]

@@ -41,17 +41,23 @@ class TestParseBoschTimestamp:
     def test_is_the_library_parser(self) -> None:
         from bosch_shc_camera_client.events import parse_event_timestamp
 
-        from custom_components.bosch_shc_camera.time_utils import parse_bosch_timestamp
+        from custom_components.bosch_smart_camera.time_utils import (
+            parse_bosch_timestamp,
+        )
 
         assert parse_bosch_timestamp is parse_event_timestamp
 
     def test_out_of_range_offset_returns_none(self) -> None:
-        from custom_components.bosch_shc_camera.time_utils import parse_bosch_timestamp
+        from custom_components.bosch_smart_camera.time_utils import (
+            parse_bosch_timestamp,
+        )
 
         assert parse_bosch_timestamp("0001-01-01T00:00:00+14:00") is None
 
     def test_offset_with_zone_bracket(self) -> None:
-        from custom_components.bosch_shc_camera.time_utils import parse_bosch_timestamp
+        from custom_components.bosch_smart_camera.time_utils import (
+            parse_bosch_timestamp,
+        )
 
         dt = parse_bosch_timestamp(RAW_OFFSET)
         assert dt == RAW_OFFSET_INSTANT
@@ -59,23 +65,31 @@ class TestParseBoschTimestamp:
         assert dt != datetime(2026, 6, 18, 6, 6, 30, 499000, tzinfo=UTC)
 
     def test_z_suffix(self) -> None:
-        from custom_components.bosch_shc_camera.time_utils import parse_bosch_timestamp
+        from custom_components.bosch_smart_camera.time_utils import (
+            parse_bosch_timestamp,
+        )
 
         assert parse_bosch_timestamp(RAW_Z) == RAW_Z_INSTANT
 
     def test_naive_treated_as_utc(self) -> None:
-        from custom_components.bosch_shc_camera.time_utils import parse_bosch_timestamp
+        from custom_components.bosch_smart_camera.time_utils import (
+            parse_bosch_timestamp,
+        )
 
         assert parse_bosch_timestamp(RAW_NAIVE) == RAW_NAIVE_INSTANT
 
     def test_negative_offset(self) -> None:
-        from custom_components.bosch_shc_camera.time_utils import parse_bosch_timestamp
+        from custom_components.bosch_smart_camera.time_utils import (
+            parse_bosch_timestamp,
+        )
 
         dt = parse_bosch_timestamp("2026-06-18T00:30:00-05:00[America/New_York]")
         assert dt == datetime(2026, 6, 18, 5, 30, 0, tzinfo=UTC)
 
     def test_result_is_utc_aware(self) -> None:
-        from custom_components.bosch_shc_camera.time_utils import parse_bosch_timestamp
+        from custom_components.bosch_smart_camera.time_utils import (
+            parse_bosch_timestamp,
+        )
 
         dt = parse_bosch_timestamp(RAW_OFFSET)
         assert dt is not None
@@ -83,6 +97,8 @@ class TestParseBoschTimestamp:
 
     @pytest.mark.parametrize("bad", ["", None, "not-a-date", "2026-13-99T99:99"])
     def test_invalid_returns_none(self, bad: object) -> None:
-        from custom_components.bosch_shc_camera.time_utils import parse_bosch_timestamp
+        from custom_components.bosch_smart_camera.time_utils import (
+            parse_bosch_timestamp,
+        )
 
         assert parse_bosch_timestamp(bad) is None  # type: ignore[arg-type]

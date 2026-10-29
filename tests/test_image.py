@@ -71,7 +71,7 @@ def _build_image_entity(
     cam_id: str = CAM_ID,
 ) -> Any:
     """Construct a BoschCameraLastSnapshotImage bypassing full HA entity lifecycle."""
-    from custom_components.bosch_shc_camera.image import BoschCameraLastSnapshotImage
+    from custom_components.bosch_smart_camera.image import BoschCameraLastSnapshotImage
 
     if coordinator is None:
         coordinator = _make_coordinator(cam_id)
@@ -80,7 +80,7 @@ def _build_image_entity(
 
     # Patch ImageEntity.__init__ to skip httpx client creation (needs real event loop)
     with patch(
-        "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+        "custom_components.bosch_smart_camera.image.ImageEntity.__init__",
         lambda self, h, verify_ssl=False: None,
     ):
         entity = BoschCameraLastSnapshotImage(hass, coordinator, cam_id, entry)
@@ -98,7 +98,7 @@ async def test_image_entity_not_created_when_snapshots_disabled(
     tmp_path: Path,
 ) -> None:
     """Image entities must NOT be created when enable_snapshots=False."""
-    from custom_components.bosch_shc_camera.image import async_setup_entry
+    from custom_components.bosch_smart_camera.image import async_setup_entry
 
     coordinator = _make_coordinator()
     entry = SimpleNamespace(
@@ -111,7 +111,7 @@ async def test_image_entity_not_created_when_snapshots_disabled(
     hass = _make_hass(tmp_path)
 
     with patch(
-        "custom_components.bosch_shc_camera.image.get_options",
+        "custom_components.bosch_smart_camera.image.get_options",
         return_value={"enable_snapshots": False},
     ):
         await async_setup_entry(
@@ -128,7 +128,7 @@ async def test_image_entity_created_when_snapshots_enabled(
     tmp_path: Path,
 ) -> None:
     """Image entities ARE created when enable_snapshots=True (default)."""
-    from custom_components.bosch_shc_camera.image import (
+    from custom_components.bosch_smart_camera.image import (
         BoschCameraLastSnapshotImage,
         async_setup_entry,
     )
@@ -144,11 +144,11 @@ async def test_image_entity_created_when_snapshots_enabled(
     hass = _make_hass(tmp_path)
 
     with patch(
-        "custom_components.bosch_shc_camera.image.get_options",
+        "custom_components.bosch_smart_camera.image.get_options",
         return_value={"enable_snapshots": True},
     ):
         with patch(
-            "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+            "custom_components.bosch_smart_camera.image.ImageEntity.__init__",
             lambda self, h, verify_ssl=False: None,
         ):
             await async_setup_entry(
@@ -164,7 +164,7 @@ async def test_image_entity_created_when_snapshots_enabled(
 @pytest.mark.asyncio
 async def test_async_image_returns_disk_bytes(tmp_path: Path) -> None:
     """async_image returns disk-persisted bytes when the file exists."""
-    from custom_components.bosch_shc_camera.snapshot_store import save_snapshot
+    from custom_components.bosch_smart_camera.snapshot_store import save_snapshot
 
     hass = _make_hass(tmp_path)
     await save_snapshot(hass, CAM_ID, DISK_JPEG)
@@ -178,7 +178,7 @@ async def test_async_image_returns_disk_bytes(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_async_image_disk_takes_priority_over_ram(tmp_path: Path) -> None:
     """When both disk and RAM cache are populated, disk bytes are returned."""
-    from custom_components.bosch_shc_camera.snapshot_store import save_snapshot
+    from custom_components.bosch_smart_camera.snapshot_store import save_snapshot
 
     hass = _make_hass(tmp_path)
     await save_snapshot(hass, CAM_ID, DISK_JPEG)
@@ -355,7 +355,7 @@ async def test_async_image_caches_bytes_no_second_disk_read(tmp_path: Path) -> N
         return DISK_JPEG
 
     with patch(
-        "custom_components.bosch_shc_camera.image.load_snapshot",
+        "custom_components.bosch_smart_camera.image.load_snapshot",
         side_effect=_counting_load,
     ):
         first = await entity.async_image()
@@ -385,7 +385,7 @@ async def test_notify_refreshed_invalidates_cache(tmp_path: Path) -> None:
         return DISK_JPEG
 
     with patch(
-        "custom_components.bosch_shc_camera.image.load_snapshot",
+        "custom_components.bosch_smart_camera.image.load_snapshot",
         side_effect=_counting_load,
     ):
         await entity.async_image()  # disk read #1 → cached
@@ -423,7 +423,7 @@ async def test_ram_fallback_not_cached(tmp_path: Path) -> None:
 class TestImageEntityHooks:
     @pytest.mark.asyncio
     async def test_will_remove_pops_from_coordinator(self):
-        from custom_components.bosch_shc_camera.image import (
+        from custom_components.bosch_smart_camera.image import (
             BoschCameraLastSnapshotImage,
         )
 
@@ -432,7 +432,7 @@ class TestImageEntityHooks:
         ent._coordinator = coord
         ent._cam_id = "C"
         with patch(
-            "custom_components.bosch_shc_camera.image.ImageEntity.async_will_remove_from_hass",
+            "custom_components.bosch_smart_camera.image.ImageEntity.async_will_remove_from_hass",
             new=MagicMock(return_value=None),
         ) as super_mock:
 
@@ -445,7 +445,7 @@ class TestImageEntityHooks:
 
     def test_device_info_full_payload(self):
         """`device_info` builds the device-registry payload from cached info."""
-        from custom_components.bosch_shc_camera.image import (
+        from custom_components.bosch_smart_camera.image import (
             BoschCameraLastSnapshotImage,
         )
 
@@ -498,7 +498,7 @@ def _build_ai_alert_image_entity(
     cam_id: str = CAM_ID,
 ) -> Any:
     """Construct a BoschAiLatestAlertImage bypassing full HA entity lifecycle."""
-    from custom_components.bosch_shc_camera.image import BoschAiLatestAlertImage
+    from custom_components.bosch_smart_camera.image import BoschAiLatestAlertImage
 
     if coordinator is None:
         coordinator = _make_ai_alert_coordinator([cam_id])
@@ -507,7 +507,7 @@ def _build_ai_alert_image_entity(
     entry = _make_entry()
 
     with patch(
-        "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+        "custom_components.bosch_smart_camera.image.ImageEntity.__init__",
         lambda self, h, verify_ssl=False: None,
     ):
         entity = BoschAiLatestAlertImage(hass, coordinator, cam_id, entry)
@@ -522,7 +522,7 @@ def _build_ai_alert_image_entity(
 async def test_ai_alert_image_not_created_when_ai_analysis_disabled(
     tmp_path: Path,
 ) -> None:
-    from custom_components.bosch_shc_camera.image import async_setup_entry
+    from custom_components.bosch_smart_camera.image import async_setup_entry
 
     coordinator = _make_coordinator()
     entry = SimpleNamespace(
@@ -534,7 +534,7 @@ async def test_ai_alert_image_not_created_when_ai_analysis_disabled(
     hass = _make_hass(tmp_path)
 
     with patch(
-        "custom_components.bosch_shc_camera.image.get_options",
+        "custom_components.bosch_smart_camera.image.get_options",
         return_value={"enable_snapshots": False, "ai_analysis_enabled": False},
     ):
         await async_setup_entry(
@@ -548,7 +548,7 @@ async def test_ai_alert_image_not_created_when_ai_analysis_disabled(
 async def test_ai_alert_image_created_when_ai_analysis_enabled(
     tmp_path: Path,
 ) -> None:
-    from custom_components.bosch_shc_camera.image import (
+    from custom_components.bosch_smart_camera.image import (
         BoschAiLatestAlertImage,
         async_setup_entry,
     )
@@ -563,11 +563,11 @@ async def test_ai_alert_image_created_when_ai_analysis_enabled(
     hass = _make_hass(tmp_path)
 
     with patch(
-        "custom_components.bosch_shc_camera.image.get_options",
+        "custom_components.bosch_smart_camera.image.get_options",
         return_value={"enable_snapshots": False, "ai_analysis_enabled": True},
     ):
         with patch(
-            "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+            "custom_components.bosch_smart_camera.image.ImageEntity.__init__",
             lambda self, h, verify_ssl=False: None,
         ):
             await async_setup_entry(
@@ -589,7 +589,7 @@ async def test_new_camera_gets_entities_added_dynamically(tmp_path: Path) -> Non
     entities added automatically via the registered coordinator listener —
     no integration reload required.
     """
-    from custom_components.bosch_shc_camera.image import (
+    from custom_components.bosch_smart_camera.image import (
         BoschCameraLastSnapshotImage,
         async_setup_entry,
     )
@@ -605,11 +605,11 @@ async def test_new_camera_gets_entities_added_dynamically(tmp_path: Path) -> Non
 
     with (
         patch(
-            "custom_components.bosch_shc_camera.image.get_options",
+            "custom_components.bosch_smart_camera.image.get_options",
             return_value={"enable_snapshots": True},
         ),
         patch(
-            "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+            "custom_components.bosch_smart_camera.image.ImageEntity.__init__",
             lambda self, h, verify_ssl=False: None,
         ),
     ):
@@ -637,7 +637,7 @@ async def test_new_camera_gets_entities_added_dynamically(tmp_path: Path) -> Non
     }
 
     with patch(
-        "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+        "custom_components.bosch_smart_camera.image.ImageEntity.__init__",
         lambda self, h, verify_ssl=False: None,
     ):
         listener()
@@ -648,7 +648,7 @@ async def test_new_camera_gets_entities_added_dynamically(tmp_path: Path) -> Non
 
     # No-op: calling again with no new cameras must not add anything.
     with patch(
-        "custom_components.bosch_shc_camera.image.ImageEntity.__init__",
+        "custom_components.bosch_smart_camera.image.ImageEntity.__init__",
         lambda self, h, verify_ssl=False: None,
     ):
         listener()
@@ -663,7 +663,7 @@ class TestAiLatestAlertImageAsyncImage:
         entity = _build_ai_alert_image_entity(hass)
 
         with patch(
-            "custom_components.bosch_shc_camera.image.ai_alert_store.async_read_alert_image",
+            "custom_components.bosch_smart_camera.image.ai_alert_store.async_read_alert_image",
             AsyncMock(return_value=ALERT_JPEG),
         ):
             result = await entity.async_image()
@@ -687,7 +687,7 @@ class TestAiLatestAlertImageAsyncImage:
         entity = _build_ai_alert_image_entity(hass)
 
         with patch(
-            "custom_components.bosch_shc_camera.image.ai_alert_store.async_read_alert_image",
+            "custom_components.bosch_smart_camera.image.ai_alert_store.async_read_alert_image",
             AsyncMock(return_value=None),
         ):
             result = await entity.async_image()
@@ -701,7 +701,7 @@ class TestAiLatestAlertImageAsyncImage:
 
         reader = AsyncMock(return_value=ALERT_JPEG)
         with patch(
-            "custom_components.bosch_shc_camera.image.ai_alert_store.async_read_alert_image",
+            "custom_components.bosch_smart_camera.image.ai_alert_store.async_read_alert_image",
             reader,
         ):
             first = await entity.async_image()
@@ -726,7 +726,7 @@ class TestAiLatestAlertImageAsyncImage:
         second_jpeg = b"\xff\xd8\xff\xe0" + b"\x04" * 300
         reader = AsyncMock(side_effect=[ALERT_JPEG, second_jpeg])
         with patch(
-            "custom_components.bosch_shc_camera.image.ai_alert_store.async_read_alert_image",
+            "custom_components.bosch_smart_camera.image.ai_alert_store.async_read_alert_image",
             reader,
         ):
             first = await entity.async_image()
@@ -767,7 +767,7 @@ class TestAiLatestAlertImageEventListener:
         entity.hass = fake_hass
 
         with patch(
-            "custom_components.bosch_shc_camera.image.ImageEntity.async_added_to_hass",
+            "custom_components.bosch_smart_camera.image.ImageEntity.async_added_to_hass",
             new=AsyncMock(return_value=None),
         ):
             await entity.async_added_to_hass()
@@ -802,7 +802,7 @@ class TestAiLatestAlertImageEventListener:
         entity.async_update_token = lambda: None  # type: ignore[method-assign]
 
         with patch(
-            "custom_components.bosch_shc_camera.image.ImageEntity.async_added_to_hass",
+            "custom_components.bosch_smart_camera.image.ImageEntity.async_added_to_hass",
             new=AsyncMock(return_value=None),
         ):
             await entity.async_added_to_hass()
@@ -844,7 +844,7 @@ class TestAiLatestAlertImageEventListener:
         entity.async_update_token = lambda: None  # type: ignore[method-assign]
 
         with patch(
-            "custom_components.bosch_shc_camera.image.ImageEntity.async_added_to_hass",
+            "custom_components.bosch_smart_camera.image.ImageEntity.async_added_to_hass",
             new=AsyncMock(return_value=None),
         ):
             await entity.async_added_to_hass()
@@ -869,7 +869,7 @@ class TestAiLatestAlertImageUniqueId:
 
 class TestAiLatestAlertImageDeviceInfo:
     def test_device_info_returns_identifiers(self, tmp_path: Path) -> None:
-        from custom_components.bosch_shc_camera import DOMAIN
+        from custom_components.bosch_smart_camera import DOMAIN
 
         hass = _make_hass(tmp_path)
         entity = _build_ai_alert_image_entity(hass)

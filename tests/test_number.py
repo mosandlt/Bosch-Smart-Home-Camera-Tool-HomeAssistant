@@ -104,7 +104,7 @@ class TestPanNumber:
     def test_construction(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschPanNumber
+        from custom_components.bosch_smart_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n._attr_translation_key == "pan_position"
@@ -114,7 +114,7 @@ class TestPanNumber:
     def test_native_value_none_when_cache_empty(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschPanNumber
+        from custom_components.bosch_smart_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.native_value is None
@@ -123,7 +123,7 @@ class TestPanNumber:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         stub_coord.pan_cache[CAM_ID] = 30
-        from custom_components.bosch_shc_camera.number import BoschPanNumber
+        from custom_components.bosch_smart_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.native_value == 30
@@ -131,7 +131,7 @@ class TestPanNumber:
     def test_unavailable_when_cache_empty(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschPanNumber
+        from custom_components.bosch_smart_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.available is False
@@ -140,7 +140,7 @@ class TestPanNumber:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         stub_coord.pan_cache[CAM_ID] = 0
-        from custom_components.bosch_shc_camera.number import BoschPanNumber
+        from custom_components.bosch_smart_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.available is True
@@ -151,7 +151,7 @@ class TestPanNumber:
         """Ceiling-mounted: cam-physical +30° → user-visible -30°."""
         stub_coord.pan_cache[CAM_ID] = 30
         stub_coord.image_rotation_180[CAM_ID] = True
-        from custom_components.bosch_shc_camera.number import BoschPanNumber
+        from custom_components.bosch_smart_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.native_value == -30
@@ -161,7 +161,7 @@ class TestPanNumber:
     ):
         stub_coord.pan_cache[CAM_ID] = 30
         stub_coord.image_rotation_180[CAM_ID] = False
-        from custom_components.bosch_shc_camera.number import BoschPanNumber
+        from custom_components.bosch_smart_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         assert n.native_value == 30
@@ -172,7 +172,7 @@ class TestPanNumber:
     ):
         """User drags slider to +50 (right) on ceiling-mounted cam → send -50 to camera."""
         stub_coord.image_rotation_180[CAM_ID] = True
-        from custom_components.bosch_shc_camera.number import BoschPanNumber
+        from custom_components.bosch_smart_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         await n.async_set_native_value(50)
@@ -182,7 +182,7 @@ class TestPanNumber:
     async def test_set_value_no_invert_when_not_rotated(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschPanNumber
+        from custom_components.bosch_smart_camera.number import BoschPanNumber
 
         n = BoschPanNumber(stub_coord, CAM_ID, stub_entry, pan_limit=120)
         await n.async_set_native_value(50)
@@ -190,7 +190,7 @@ class TestPanNumber:
 
     def test_device_info(self):
         """`device_info` returns a dict wired to model/firmware (bypass __init__)."""
-        from custom_components.bosch_shc_camera.number import BoschPanNumber
+        from custom_components.bosch_smart_camera.number import BoschPanNumber
 
         e = _make_entity_guards(BoschPanNumber)
         info = e.device_info
@@ -269,55 +269,59 @@ def coord_indoor(coord: SimpleNamespace) -> SimpleNamespace:
 
 
 def _make_pan(coord, entry):
-    from custom_components.bosch_shc_camera.number import BoschPanNumber
+    from custom_components.bosch_smart_camera.number import BoschPanNumber
 
     return BoschPanNumber(coord, CAM_ID, entry, pan_limit=120)
 
 
 def _make_speaker_level(coord, entry):
-    from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+    from custom_components.bosch_smart_camera.number import BoschSpeakerLevelNumber
 
     return BoschSpeakerLevelNumber(coord, CAM_ID, entry)
 
 
 def _make_front_light_intensity(coord, entry):
-    from custom_components.bosch_shc_camera.number import BoschFrontLightIntensityNumber
+    from custom_components.bosch_smart_camera.number import (
+        BoschFrontLightIntensityNumber,
+    )
 
     return BoschFrontLightIntensityNumber(coord, CAM_ID, entry)
 
 
 def _make_lens_elevation(coord, entry):
-    from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+    from custom_components.bosch_smart_camera.number import BoschLensElevationNumber
 
     return BoschLensElevationNumber(coord, CAM_ID, entry)
 
 
 def _make_microphone_level(coord, entry):
-    from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
+    from custom_components.bosch_smart_camera.number import BoschMicrophoneLevelNumber
 
     return BoschMicrophoneLevelNumber(coord, CAM_ID, entry)
 
 
 def _make_white_balance(coord, entry):
-    from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+    from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
     return BoschWhiteBalanceNumber(coord, CAM_ID, entry)
 
 
 def _make_top_led_brightness(coord, entry):
-    from custom_components.bosch_shc_camera.number import BoschTopLedBrightnessNumber
+    from custom_components.bosch_smart_camera.number import BoschTopLedBrightnessNumber
 
     return BoschTopLedBrightnessNumber(coord, CAM_ID, entry)
 
 
 def _make_bottom_led_brightness(coord, entry):
-    from custom_components.bosch_shc_camera.number import BoschBottomLedBrightnessNumber
+    from custom_components.bosch_smart_camera.number import (
+        BoschBottomLedBrightnessNumber,
+    )
 
     return BoschBottomLedBrightnessNumber(coord, CAM_ID, entry)
 
 
 def _make_motion_light_sensitivity(coord, entry):
-    from custom_components.bosch_shc_camera.number import (
+    from custom_components.bosch_smart_camera.number import (
         BoschMotionLightSensitivityNumber,
     )
 
@@ -325,25 +329,27 @@ def _make_motion_light_sensitivity(coord, entry):
 
 
 def _make_darkness_threshold(coord, entry):
-    from custom_components.bosch_shc_camera.number import BoschDarknessThresholdNumber
+    from custom_components.bosch_smart_camera.number import BoschDarknessThresholdNumber
 
     return BoschDarknessThresholdNumber(coord, CAM_ID, entry)
 
 
 def _make_power_led_brightness(coord_indoor, entry):
-    from custom_components.bosch_shc_camera.number import BoschPowerLedBrightnessNumber
+    from custom_components.bosch_smart_camera.number import (
+        BoschPowerLedBrightnessNumber,
+    )
 
     return BoschPowerLedBrightnessNumber(coord_indoor, CAM_ID, entry)
 
 
 def _make_alarm_delay(coord_indoor, entry):
-    from custom_components.bosch_shc_camera.number import BoschAlarmDelayNumber
+    from custom_components.bosch_smart_camera.number import BoschAlarmDelayNumber
 
     return BoschAlarmDelayNumber(coord_indoor, CAM_ID, entry)
 
 
 def _make_alarm_activation_delay(coord_indoor, entry):
-    from custom_components.bosch_shc_camera.number import (
+    from custom_components.bosch_smart_camera.number import (
         BoschAlarmActivationDelayNumber,
     )
 
@@ -351,7 +357,7 @@ def _make_alarm_activation_delay(coord_indoor, entry):
 
 
 def _make_pre_alarm_delay(coord_indoor, entry):
-    from custom_components.bosch_shc_camera.number import BoschPreAlarmDelayNumber
+    from custom_components.bosch_smart_camera.number import BoschPreAlarmDelayNumber
 
     return BoschPreAlarmDelayNumber(coord_indoor, CAM_ID, entry)
 
@@ -618,7 +624,7 @@ class TestBoschSpeakerLevelNumber:
     """Verify that speaker level reads from audio_cache, not a static default."""
 
     def _make(self, audio_cache=None, cam_id=CAM_ID_GEN2_OUTDOOR, put_return=True):
-        from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+        from custom_components.bosch_smart_camera.number import BoschSpeakerLevelNumber
 
         coord = _coord(cam_id=cam_id, audio_cache=audio_cache, put_return=put_return)
         ent = _make_entity_intrusion(BoschSpeakerLevelNumber, coord, cam_id)
@@ -742,14 +748,14 @@ class TestBoschSpeakerLevelNumber:
     # --- metadata ---
 
     def test_translation_key(self):
-        from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+        from custom_components.bosch_smart_camera.number import BoschSpeakerLevelNumber
 
         coord = _coord(audio_cache={CAM_ID_GEN2_OUTDOOR: dict(_AUDIO_CFG)})
         ent = BoschSpeakerLevelNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent._attr_translation_key == "speaker_level"
 
     def test_unique_id(self):
-        from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+        from custom_components.bosch_smart_camera.number import BoschSpeakerLevelNumber
 
         coord = _coord(audio_cache={})
         ent = BoschSpeakerLevelNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
@@ -759,14 +765,14 @@ class TestBoschSpeakerLevelNumber:
         )
 
     def test_disabled_by_default(self):
-        from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+        from custom_components.bosch_smart_camera.number import BoschSpeakerLevelNumber
 
         coord = _coord(audio_cache={})
         ent = BoschSpeakerLevelNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
         assert ent.entity_registry_enabled_default is False
 
     def test_device_info(self):
-        from custom_components.bosch_shc_camera.number import BoschSpeakerLevelNumber
+        from custom_components.bosch_smart_camera.number import BoschSpeakerLevelNumber
 
         e = _make_entity_guards(BoschSpeakerLevelNumber)
         info = e.device_info
@@ -783,7 +789,9 @@ class TestBoschMicrophoneLevelNumber:
         cam_id=CAM_ID_GEN2_OUTDOOR,
         put_return=True,
     ):
-        from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
+        from custom_components.bosch_smart_camera.number import (
+            BoschMicrophoneLevelNumber,
+        )
 
         coord = _coord(
             cam_id=cam_id, hw=hw, audio_cache=audio_cache, put_return=put_return
@@ -818,7 +826,9 @@ class TestBoschMicrophoneLevelNumber:
         assert ent.available is False
 
     def test_range_is_0_to_100(self):
-        from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
+        from custom_components.bosch_smart_camera.number import (
+            BoschMicrophoneLevelNumber,
+        )
 
         coord = _coord(audio_cache={})
         ent = BoschMicrophoneLevelNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
@@ -841,7 +851,9 @@ class TestBoschMicrophoneLevelNumber:
         """Indoor II with privacy ON must not call async_put_camera — exercised
         by patching the internal `_is_gen2_indoor`/`_warn_if_privacy_on` helpers
         directly (unit-isolated variant)."""
-        from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
+        from custom_components.bosch_smart_camera.number import (
+            BoschMicrophoneLevelNumber,
+        )
 
         coord = _coord(
             cam_id=CAM_ID_GEN2_INDOOR,
@@ -856,11 +868,11 @@ class TestBoschMicrophoneLevelNumber:
 
         with (
             mock.patch(
-                "custom_components.bosch_shc_camera.number._is_gen2_indoor",
+                "custom_components.bosch_smart_camera.number._is_gen2_indoor",
                 return_value=True,
             ),
             mock.patch(
-                "custom_components.bosch_shc_camera.number._warn_if_privacy_on",
+                "custom_components.bosch_smart_camera.number._warn_if_privacy_on",
                 new_callable=AsyncMock,
                 return_value=True,
             ),
@@ -872,7 +884,9 @@ class TestBoschMicrophoneLevelNumber:
     async def test_privacy_guard_indoor_blocks_write_via_real_state(self):
         """Same guard exercised end-to-end via the real shc_state_cache
         privacy_mode flag, without mocking internal helpers."""
-        from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
+        from custom_components.bosch_smart_camera.number import (
+            BoschMicrophoneLevelNumber,
+        )
 
         coord = _coord(
             cam_id=CAM_ID,
@@ -889,7 +903,7 @@ class TestBoschMicrophoneLevelNumber:
         """Regression: number setters must gate the optimistic cache write on
         the async_put_camera() bool result — a failed PUT previously poisoned
         the cache with the user-entered value."""
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschMicrophoneLevelNumber,
         )
 
@@ -905,7 +919,7 @@ class TestBoschMicrophoneLevelNumber:
 
     @pytest.mark.asyncio
     async def test_cache_updated_on_put_success(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschMicrophoneLevelNumber,
         )
 
@@ -918,7 +932,9 @@ class TestBoschMicrophoneLevelNumber:
         assert coord.audio_cache[CAM_ID]["microphoneLevel"] == 80
 
     def test_translation_key(self):
-        from custom_components.bosch_shc_camera.number import BoschMicrophoneLevelNumber
+        from custom_components.bosch_smart_camera.number import (
+            BoschMicrophoneLevelNumber,
+        )
 
         coord = _coord(audio_cache={})
         ent = BoschMicrophoneLevelNumber(coord, CAM_ID_GEN2_OUTDOOR, _entry())
@@ -942,7 +958,7 @@ class TestAudioConfigLockConcurrency:
         must NOT even start its PUT until the speaker write (which acquired
         the shared lock first) has fully finished — proving the lock forces
         real serialization, not just accidental non-overlap."""
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschMicrophoneLevelNumber,
             BoschSpeakerLevelNumber,
         )
@@ -985,7 +1001,7 @@ class TestBoschIntrusionSensitivityNumber:
     """PIN_EVERY_MODE: min(0) / max(7) / default(3) / garbage-clamp / PUT body / write-lock."""
 
     def _make(self, cam_id=CAM_ID_GEN2_OUTDOOR, intrusion_cache=None, put_return=True):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionSensitivityNumber,
         )
 
@@ -1126,7 +1142,7 @@ class TestBoschIntrusionSensitivityNumber:
     @pytest.mark.asyncio
     async def test_gen1_not_wired_no_cache(self):
         """Gen1 has no intrusionDetectionConfig endpoint — cache stays empty, entity is unavailable."""
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionSensitivityNumber,
         )
 
@@ -1140,7 +1156,7 @@ class TestBoschIntrusionSensitivityNumber:
     # --- metadata ---
 
     def test_translation_key(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionSensitivityNumber,
         )
 
@@ -1149,7 +1165,7 @@ class TestBoschIntrusionSensitivityNumber:
         assert ent._attr_translation_key == "intrusion_sensitivity"
 
     def test_unique_id(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionSensitivityNumber,
         )
 
@@ -1161,7 +1177,7 @@ class TestBoschIntrusionSensitivityNumber:
         )
 
     def test_range_is_0_to_7(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionSensitivityNumber,
         )
 
@@ -1171,7 +1187,7 @@ class TestBoschIntrusionSensitivityNumber:
         assert ent.native_max_value == 7
 
     def test_enabled_by_default(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionSensitivityNumber,
         )
 
@@ -1182,7 +1198,7 @@ class TestBoschIntrusionSensitivityNumber:
     # --- Gen2 Indoor II also gets the entity ---
 
     def test_available_gen2_indoor(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionSensitivityNumber,
         )
 
@@ -1211,7 +1227,7 @@ class TestBoschIntrusionDistanceNumber:
     """PIN_EVERY_MODE: min(1) / max(8, was 10) / default(8 per capture) / garbage-clamp / write-lock."""
 
     def _make(self, cam_id=CAM_ID_GEN2_OUTDOOR, intrusion_cache=None, put_return=True):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionDistanceNumber,
         )
 
@@ -1387,7 +1403,7 @@ class TestBoschIntrusionDistanceNumber:
     # --- metadata ---
 
     def test_translation_key(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionDistanceNumber,
         )
 
@@ -1396,7 +1412,7 @@ class TestBoschIntrusionDistanceNumber:
         assert ent._attr_translation_key == "intrusion_distance"
 
     def test_unique_id(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionDistanceNumber,
         )
 
@@ -1408,7 +1424,7 @@ class TestBoschIntrusionDistanceNumber:
         )
 
     def test_range_is_1_to_8(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionDistanceNumber,
         )
 
@@ -1418,7 +1434,7 @@ class TestBoschIntrusionDistanceNumber:
         assert ent.native_max_value == 8  # API rejects > 8 (HTTP 400, FW 9.40.102)
 
     def test_unit_is_meters(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionDistanceNumber,
         )
 
@@ -1428,7 +1444,7 @@ class TestBoschIntrusionDistanceNumber:
         assert ent._attr_native_unit_of_measurement == "m"
 
     def test_enabled_by_default(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionDistanceNumber,
         )
 
@@ -1439,7 +1455,7 @@ class TestBoschIntrusionDistanceNumber:
     # --- Gen2 Indoor II also gets the entity ---
 
     def test_available_gen2_indoor(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionDistanceNumber,
         )
 
@@ -1457,7 +1473,7 @@ class TestBoschIntrusionDistanceNumber:
     # --- Gen1 not wired ---
 
     def test_gen1_no_cache_unavailable(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionDistanceNumber,
         )
 
@@ -1473,7 +1489,7 @@ class TestAsyncSetupEntryWiring:
     @pytest.mark.asyncio
     async def test_gen2_outdoor_gets_intrusion_entities(self):
         """Gen2 Outdoor II must produce BoschIntrusionSensitivityNumber + BoschIntrusionDistanceNumber."""
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionDistanceNumber,
             BoschIntrusionSensitivityNumber,
             async_setup_entry,
@@ -1502,7 +1518,7 @@ class TestAsyncSetupEntryWiring:
     @pytest.mark.asyncio
     async def test_gen2_indoor_gets_intrusion_entities(self):
         """Gen2 Indoor II must also produce the intrusion number entities."""
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionDistanceNumber,
             BoschIntrusionSensitivityNumber,
             async_setup_entry,
@@ -1531,7 +1547,7 @@ class TestAsyncSetupEntryWiring:
     @pytest.mark.asyncio
     async def test_gen1_does_not_get_intrusion_entities(self):
         """Gen1 must NOT get intrusion number entities (no endpoint on Gen1)."""
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschIntrusionDistanceNumber,
             BoschIntrusionSensitivityNumber,
             async_setup_entry,
@@ -1559,7 +1575,7 @@ class TestAsyncSetupEntryWiring:
 
     def test_pan_number_added_only_for_pan_cameras(self):
         """BoschPanNumber must only appear for cameras with panLimit > 0."""
-        from custom_components.bosch_shc_camera.number import async_setup_entry
+        from custom_components.bosch_smart_camera.number import async_setup_entry
 
         coord = _stub_coord_guards()
         coord.data[CAM_ID]["info"]["featureSupport"]["panLimit"] = 120
@@ -1579,7 +1595,7 @@ class TestAsyncSetupEntryWiring:
 
     def test_pan_number_skipped_for_no_pan(self):
         """BoschPanNumber must be absent when panLimit=0."""
-        from custom_components.bosch_shc_camera.number import async_setup_entry
+        from custom_components.bosch_smart_camera.number import async_setup_entry
 
         coord = _stub_coord_guards()
         coord.data[CAM_ID]["info"]["featureSupport"]["panLimit"] = 0
@@ -1599,7 +1615,7 @@ class TestAsyncSetupEntryWiring:
 
     def test_front_light_intensity_added_when_has_light(self):
         """BoschFrontLightIntensityNumber must appear when featureSupport.light=True."""
-        from custom_components.bosch_shc_camera.number import async_setup_entry
+        from custom_components.bosch_smart_camera.number import async_setup_entry
 
         coord = _stub_coord_guards()
         coord.data[CAM_ID]["info"]["featureSupport"]["light"] = True
@@ -1619,7 +1635,7 @@ class TestAsyncSetupEntryWiring:
 
     def test_gen2_entities_added_for_gen2_outdoor(self):
         """LensElevation + MicrophoneLevel must appear for Gen2 cameras."""
-        from custom_components.bosch_shc_camera.number import async_setup_entry
+        from custom_components.bosch_smart_camera.number import async_setup_entry
 
         coord = _stub_coord_guards()
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Outdoor"
@@ -1642,7 +1658,7 @@ class TestAsyncSetupEntryWiring:
 
     def test_gen2_outdoor_lights_present(self):
         """WhiteBalance + TopLed + BottomLed brightness must appear for Gen2 Outdoor."""
-        from custom_components.bosch_shc_camera.number import async_setup_entry
+        from custom_components.bosch_smart_camera.number import async_setup_entry
 
         coord = _stub_coord_guards()
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Outdoor"
@@ -1665,7 +1681,7 @@ class TestAsyncSetupEntryWiring:
 
     def test_indoor_ii_alarm_entities_added(self):
         """AlarmDelay + PreAlarmDelay must appear for HOME_Eyes_Indoor."""
-        from custom_components.bosch_shc_camera.number import async_setup_entry
+        from custom_components.bosch_smart_camera.number import async_setup_entry
 
         coord = _stub_coord_guards()
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Indoor"
@@ -1688,7 +1704,7 @@ class TestAsyncSetupEntryWiring:
 
     def test_white_balance_not_added_for_indoor_ii(self):
         """WhiteBalanceNumber must NOT appear for HOME_Eyes_Indoor (no RGB lights)."""
-        from custom_components.bosch_shc_camera.number import async_setup_entry
+        from custom_components.bosch_smart_camera.number import async_setup_entry
 
         coord = _stub_coord_guards()
         coord.data[CAM_ID]["info"]["hardwareVersion"] = "HOME_Eyes_Indoor"
@@ -1773,7 +1789,9 @@ def _coord2(
 
 
 def _make_front_light_intensity_r2(shc_state_cache=None):
-    from custom_components.bosch_shc_camera.number import BoschFrontLightIntensityNumber
+    from custom_components.bosch_smart_camera.number import (
+        BoschFrontLightIntensityNumber,
+    )
 
     coord = _coord2(shc_state_cache=shc_state_cache or {CAM_ID: {}})
     coord.async_cloud_set_light_component = AsyncMock()
@@ -1832,7 +1850,7 @@ class TestFrontLightIntensityNumber:
     def test_native_value_scaled_from_cache(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschFrontLightIntensityNumber,
         )
 
@@ -1843,7 +1861,7 @@ class TestFrontLightIntensityNumber:
     def test_native_value_none_when_missing(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschFrontLightIntensityNumber,
         )
 
@@ -1859,7 +1877,7 @@ class TestFrontLightIntensityNumber:
         """Regression: with no front-light data cached the entity must report
         unavailable, not 'unknown' (available=True + native_value=None). Matches
         the cache-gating of the sibling number entities."""
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschFrontLightIntensityNumber,
         )
 
@@ -1870,7 +1888,7 @@ class TestFrontLightIntensityNumber:
     def test_available_with_cache(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschFrontLightIntensityNumber,
         )
 
@@ -1889,7 +1907,7 @@ class TestFrontLightIntensityNumber:
         )
 
     def test_device_info(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschFrontLightIntensityNumber,
         )
 
@@ -1899,7 +1917,7 @@ class TestFrontLightIntensityNumber:
 
 
 def _make_lens_elevation_r2(elevation_cache=None):
-    from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+    from custom_components.bosch_smart_camera.number import BoschLensElevationNumber
 
     coord = _coord2(lens_elevation_cache=elevation_cache or {})
     sw = BoschLensElevationNumber.__new__(BoschLensElevationNumber)
@@ -1922,7 +1940,7 @@ class TestLensElevationNumber:
     def test_native_value_none_when_missing(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+        from custom_components.bosch_smart_camera.number import BoschLensElevationNumber
 
         entity = BoschLensElevationNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert entity.native_value is None, "Must return None when not yet fetched"
@@ -1938,7 +1956,7 @@ class TestLensElevationNumber:
     def test_range_constants(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+        from custom_components.bosch_smart_camera.number import BoschLensElevationNumber
 
         entity = BoschLensElevationNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert entity._attr_native_min_value == 0.5, "Min elevation must be 0.5 m"
@@ -1959,7 +1977,7 @@ class TestLensElevationNumber:
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Pins float-rounding of the elevation value sent in the PUT body."""
-        from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+        from custom_components.bosch_smart_camera.number import BoschLensElevationNumber
 
         entity = BoschLensElevationNumber(stub_coord_gen2, CAM_ID, stub_entry)
         entity.async_write_ha_state = MagicMock()
@@ -1976,7 +1994,7 @@ class TestLensElevationNumber:
     async def test_cache_untouched_on_put_failure(self):
         """Regression: a failed PUT must not poison the cache with the
         user-entered value (native_value reads that cache directly)."""
-        from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+        from custom_components.bosch_smart_camera.number import BoschLensElevationNumber
 
         coord = _stub_coord_guards(async_put_camera=AsyncMock(return_value=False))
         e = _make_entity_guards(BoschLensElevationNumber, coord)
@@ -1987,7 +2005,7 @@ class TestLensElevationNumber:
 
     @pytest.mark.asyncio
     async def test_cache_set_on_put_success(self):
-        from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+        from custom_components.bosch_smart_camera.number import BoschLensElevationNumber
 
         coord = _stub_coord_guards(async_put_camera=AsyncMock(return_value=True))
         e = _make_entity_guards(BoschLensElevationNumber, coord)
@@ -1996,7 +2014,7 @@ class TestLensElevationNumber:
 
     def test_gen2_base_device_info(self):
         """`_BoschGen2NumberBase.device_info` covered via any Gen2 subclass."""
-        from custom_components.bosch_shc_camera.number import BoschLensElevationNumber
+        from custom_components.bosch_smart_camera.number import BoschLensElevationNumber
 
         e = _make_entity_guards(BoschLensElevationNumber)
         info = e.device_info
@@ -2014,7 +2032,7 @@ def _mock_aiohttp_session(status=200):
 
 
 def _make_white_balance_r2(lighting_switch_cache=None):
-    from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+    from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
     coord = _coord2(lighting_switch_cache=lighting_switch_cache or {})
     sw = BoschWhiteBalanceNumber.__new__(BoschWhiteBalanceNumber)
@@ -2046,7 +2064,7 @@ class TestWhiteBalanceNumber:
     ):
         """Via the real constructor: freshly built entity with no lighting
         cache and no remembered _wb_value must read as None."""
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
         entity = BoschWhiteBalanceNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert entity.native_value is None, "Must return None when lighting cache empty"
@@ -2054,7 +2072,7 @@ class TestWhiteBalanceNumber:
     def test_caches_last_wb_value(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
         stub_coord_gen2.lighting_switch_cache[CAM_ID] = {
             "frontLightSettings": {"brightness": 80, "whiteBalance": 0.3}
@@ -2070,7 +2088,7 @@ class TestWhiteBalanceNumber:
     def test_range_minus_one_to_one(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
         entity = BoschWhiteBalanceNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert entity._attr_native_min_value == -1.0, "Min white balance must be -1.0"
@@ -2080,7 +2098,7 @@ class TestWhiteBalanceNumber:
         """`available` requires coordinator.last_update_success AND a populated
         lighting cache — writing before the cache is populated would PUT
         zero-defaults and clobber real settings (bug-hunt 2026-06-02)."""
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord_guards(
             lighting_switch_cache={CAM_ID: {"frontLightSettings": {}}}
@@ -2089,14 +2107,14 @@ class TestWhiteBalanceNumber:
         assert e.available is True
 
     def test_available_false_when_cache_empty(self):
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord_guards()  # lighting_switch_cache={} by default
         e = _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
         assert e.available is False
 
     def test_available_false_when_coord_failed(self):
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord_guards(last_update_success=False)
         e = _make_entity_guards(BoschWhiteBalanceNumber, coord=coord)
@@ -2161,7 +2179,7 @@ class TestWhiteBalanceNumber:
         """Success updates the value and the local cache (from the body just
         sent); a failed write changes neither (bug-hunt 2026-06-02 — was a raw
         Bearer PUT that silently failed on 401)."""
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord_guards(
             lighting_switch_cache={CAM_ID: {"frontLightSettings": {"brightness": 40}}}
@@ -2183,7 +2201,7 @@ class TestWhiteBalanceNumber:
         """A light write must merge ONLY its own group into the shared lighting
         cache, not overwrite the whole snapshot — otherwise a concurrent
         sibling write to another light group is clobbered (bug-hunt 2026-06-02)."""
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord_guards(
             lighting_switch_cache={
@@ -2205,7 +2223,7 @@ class TestWhiteBalanceNumber:
     @pytest.mark.asyncio
     async def test_keeps_front_brightness_in_put(self):
         """The PUT must carry the front light's current brightness."""
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord_guards(
             lighting_switch_cache={CAM_ID: {"frontLightSettings": {"brightness": 40}}}
@@ -2223,7 +2241,7 @@ class TestWhiteBalanceNumber:
         """Regression (verified live on Eyes Outdoor II): front light switched
         on via the front-light switch leaves cached brightness 0. The PUT
         used to send that 0 and turned the lamp off."""
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord_guards(
             lighting_switch_cache={CAM_ID: {"frontLightSettings": {"brightness": 0}}}
@@ -2243,8 +2261,8 @@ class TestWhiteBalanceNumber:
     async def test_light_off_holds_value_without_put(self):
         """The camera ignores whiteBalance at brightness 0 (verified live), so
         a value set while the front light is off is held, not sent."""
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
-        from custom_components.bosch_shc_camera.shc import (
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.shc import (
             get_pending_front_white_balance,
         )
 
@@ -2265,8 +2283,8 @@ class TestWhiteBalanceNumber:
     async def test_pending_dropped_when_light_on_elsewhere(self):
         """Bosch app turns the light on → the held value must not shadow the
         camera's real white balance."""
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
-        from custom_components.bosch_shc_camera.shc import (
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.shc import (
             get_pending_front_white_balance,
             set_pending_front_white_balance,
         )
@@ -2287,7 +2305,7 @@ class TestWhiteBalanceNumber:
 
 
 def _make_top_led_r2(lighting_switch_cache=None):
-    from custom_components.bosch_shc_camera.number import BoschTopLedBrightnessNumber
+    from custom_components.bosch_smart_camera.number import BoschTopLedBrightnessNumber
 
     coord = _coord2(lighting_switch_cache=lighting_switch_cache or {})
     sw = BoschTopLedBrightnessNumber.__new__(BoschTopLedBrightnessNumber)
@@ -2343,7 +2361,7 @@ class TestTopLedBrightnessNumber:
         """`available` requires last_update_success AND a populated lighting
         cache (bug-hunt 2026-06-02 — avoids writing zero-defaults before
         populate)."""
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschTopLedBrightnessNumber,
         )
 
@@ -2359,7 +2377,7 @@ class TestTopLedBrightnessNumber:
         assert e.available is False
 
     def test_available_false_when_cache_empty(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschTopLedBrightnessNumber,
         )
 
@@ -2375,7 +2393,7 @@ class TestTopLedBrightnessNumber:
         there). Success updates brightness + the local cache from the body
         sent (bug-hunt 2026-06-02 — was a raw Bearer PUT silently failing on
         401)."""
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschTopLedBrightnessNumber,
         )
 
@@ -2402,7 +2420,7 @@ class TestBottomLedBrightnessNumber:
         """A failed write (async_put_camera returns False — it swallows the
         connection/timeout/401 internally) must NOT crash the setter and must
         leave `_brightness` at the prior value (no optimistic update)."""
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschBottomLedBrightnessNumber,
         )
 
@@ -2423,7 +2441,7 @@ class TestBottomLedBrightnessNumber:
 
 
 def _make_motion_light_sens_r2(motion_light_cache=None):
-    from custom_components.bosch_shc_camera.number import (
+    from custom_components.bosch_smart_camera.number import (
         BoschMotionLightSensitivityNumber,
     )
 
@@ -2467,7 +2485,7 @@ class TestMotionLightSensitivityNumber:
 
 
 def _make_darkness_threshold_r2(global_lighting_cache=None):
-    from custom_components.bosch_shc_camera.number import BoschDarknessThresholdNumber
+    from custom_components.bosch_smart_camera.number import BoschDarknessThresholdNumber
 
     coord = _coord2(global_lighting_cache=global_lighting_cache or {})
     sw = BoschDarknessThresholdNumber.__new__(BoschDarknessThresholdNumber)
@@ -2506,7 +2524,7 @@ class TestDarknessThresholdNumber:
     def test_available_true_when_cache_populated(self):
         """`available` requires both coordinator-ok AND non-empty
         `global_lighting_cache` for this cam_id."""
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschDarknessThresholdNumber,
         )
 
@@ -2516,7 +2534,7 @@ class TestDarknessThresholdNumber:
         assert e.available is True
 
     def test_available_false_when_cache_empty(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschDarknessThresholdNumber,
         )
 
@@ -2527,7 +2545,9 @@ class TestDarknessThresholdNumber:
 
 
 def _make_power_led_r2(icon_led_cache=None):
-    from custom_components.bosch_shc_camera.number import BoschPowerLedBrightnessNumber
+    from custom_components.bosch_smart_camera.number import (
+        BoschPowerLedBrightnessNumber,
+    )
 
     coord = _coord2(icon_led_brightness_cache=icon_led_cache or {})
     sw = BoschPowerLedBrightnessNumber.__new__(BoschPowerLedBrightnessNumber)
@@ -2579,7 +2599,7 @@ class TestPowerLedBrightnessNumber:
 
 
 def _make_alarm_delay_r2(alarm_settings=None):
-    from custom_components.bosch_shc_camera.number import BoschAlarmDelayNumber
+    from custom_components.bosch_smart_camera.number import BoschAlarmDelayNumber
 
     coord = _coord2(
         alarm_settings_cache={CAM_ID: alarm_settings}
@@ -2638,7 +2658,7 @@ class TestAudioVolumeNumber:
     def test_default_volume_when_unset(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+        from custom_components.bosch_smart_camera.number import BoschAudioVolumeNumber
 
         stub_coord_gen2.audio_volume = {}
         e = BoschAudioVolumeNumber(stub_coord_gen2, CAM_ID, stub_entry)
@@ -2648,7 +2668,7 @@ class TestAudioVolumeNumber:
     async def test_set_value_stores_no_api_call(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+        from custom_components.bosch_smart_camera.number import BoschAudioVolumeNumber
 
         stub_coord_gen2.audio_volume = {}
         e = BoschAudioVolumeNumber(stub_coord_gen2, CAM_ID, stub_entry)
@@ -2664,7 +2684,7 @@ class TestAudioVolumeNumber:
     ):
         from homeassistant.components.number import NumberMode
 
-        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+        from custom_components.bosch_smart_camera.number import BoschAudioVolumeNumber
 
         e = BoschAudioVolumeNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert e._attr_native_min_value == 0
@@ -2674,8 +2694,8 @@ class TestAudioVolumeNumber:
     def test_device_info_groups_under_camera_device(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.const import DOMAIN
-        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+        from custom_components.bosch_smart_camera.const import DOMAIN
+        from custom_components.bosch_smart_camera.number import BoschAudioVolumeNumber
 
         e = BoschAudioVolumeNumber(stub_coord_gen2, CAM_ID, stub_entry)
         di = e.device_info
@@ -2686,7 +2706,7 @@ class TestAudioVolumeNumber:
     def test_available_when_camera_online(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+        from custom_components.bosch_smart_camera.number import BoschAudioVolumeNumber
 
         e = BoschAudioVolumeNumber(stub_coord_gen2, CAM_ID, stub_entry)
         assert e.available is True
@@ -2695,7 +2715,7 @@ class TestAudioVolumeNumber:
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Greys out together with the camera's other controls when offline."""
-        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+        from custom_components.bosch_smart_camera.number import BoschAudioVolumeNumber
 
         stub_coord_gen2.is_camera_online = lambda cid: False
         e = BoschAudioVolumeNumber(stub_coord_gen2, CAM_ID, stub_entry)
@@ -2704,7 +2724,7 @@ class TestAudioVolumeNumber:
     def test_unavailable_when_coordinator_update_failed(
         self, stub_coord_gen2: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.number import BoschAudioVolumeNumber
+        from custom_components.bosch_smart_camera.number import BoschAudioVolumeNumber
 
         stub_coord_gen2.last_update_success = False
         e = BoschAudioVolumeNumber(stub_coord_gen2, CAM_ID, stub_entry)
@@ -2755,7 +2775,7 @@ class TestAlarmDelayPrivacyGuard:
     def _make_entity(self, coord, klass_name="BoschAlarmDelayNumber"):
         import importlib
 
-        mod = importlib.import_module("custom_components.bosch_shc_camera.number")
+        mod = importlib.import_module("custom_components.bosch_smart_camera.number")
         klass = getattr(mod, klass_name)
         entry = SimpleNamespace(data={}, options={})
         entity = klass.__new__(klass)
@@ -2831,7 +2851,7 @@ def _coord_light_write_failure(**overrides: object) -> SimpleNamespace:
 @pytest.mark.asyncio
 class TestFrontLightIntensityNumberWarnsOnFailure:
     async def test_set_value_failure_warns(self, caplog: pytest.LogCaptureFixture):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschFrontLightIntensityNumber,
         )
 
@@ -2844,7 +2864,7 @@ class TestFrontLightIntensityNumberWarnsOnFailure:
         assert any("failed on all paths" in r.message for r in caplog.records)
 
     async def test_set_value_success_is_silent(self, caplog: pytest.LogCaptureFixture):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschFrontLightIntensityNumber,
         )
 
@@ -2871,7 +2891,7 @@ class TestFrontLightIntensityNumberWarnsOnFailure:
 # generic entity's event_lookup_fn=None branches.
 class TestBoschNumberEntityBareDescriptionGuards:
     def _make_bare_entity(self):
-        from custom_components.bosch_shc_camera.number import (
+        from custom_components.bosch_smart_camera.number import (
             BoschNumberEntity,
             BoschNumberEntityDescription,
         )
@@ -2906,7 +2926,7 @@ class TestWhiteBalanceSingleLockBlock:
     a concurrent front-light turn_off cannot be undone between the steps."""
 
     def _entity(self):
-        from custom_components.bosch_shc_camera.number import BoschWhiteBalanceNumber
+        from custom_components.bosch_smart_camera.number import BoschWhiteBalanceNumber
 
         coord = _stub_coord_guards(
             lighting_switch_cache={CAM_ID: {"frontLightSettings": {"brightness": 0}}}
@@ -2917,7 +2937,7 @@ class TestWhiteBalanceSingleLockBlock:
 
     @pytest.mark.asyncio
     async def test_enable_put_runs_while_lock_held(self):
-        from custom_components.bosch_shc_camera.shc import get_lighting_lock
+        from custom_components.bosch_smart_camera.shc import get_lighting_lock
 
         coord, e = self._entity()
         held: list[bool] = []

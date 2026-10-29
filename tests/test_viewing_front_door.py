@@ -18,11 +18,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera.frigate_endpoint import (
+from custom_components.bosch_smart_camera.frigate_endpoint import (
     AUTH_NONE,
     FrontDoorRunner,
 )
-from custom_components.bosch_shc_camera.viewing_front_door import (
+from custom_components.bosch_smart_camera.viewing_front_door import (
     start_viewing_front_door,
     stop_viewing_front_door,
     viewing_resolve_inner,

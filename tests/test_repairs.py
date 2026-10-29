@@ -22,8 +22,8 @@ import pytest
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 CAM_ID_2 = "22222222-2222-2222-2222-222222222222"
 
-MODULE = "custom_components.bosch_shc_camera"
-DOMAIN = "bosch_shc_camera"
+MODULE = "custom_components.bosch_smart_camera"
+DOMAIN = "bosch_smart_camera"
 
 
 def _make_coord() -> SimpleNamespace:
@@ -39,7 +39,7 @@ def _make_coord() -> SimpleNamespace:
 class TestAsyncCreateFixFlow:
     @pytest.mark.asyncio
     async def test_resolves_coordinator_and_cam_id(self):
-        from custom_components.bosch_shc_camera.repairs import (
+        from custom_components.bosch_smart_camera.repairs import (
             FirmwareUpdateRepairFlow,
             async_create_fix_flow,
         )
@@ -60,7 +60,7 @@ class TestAsyncCreateFixFlow:
 
     @pytest.mark.asyncio
     async def test_no_loaded_entry_yields_none_coordinator(self):
-        from custom_components.bosch_shc_camera.repairs import async_create_fix_flow
+        from custom_components.bosch_smart_camera.repairs import async_create_fix_flow
 
         hass = SimpleNamespace(
             config_entries=SimpleNamespace(async_loaded_entries=lambda domain: [])
@@ -75,7 +75,7 @@ class TestAsyncCreateFixFlow:
 
     @pytest.mark.asyncio
     async def test_missing_data_yields_empty_cam_id(self):
-        from custom_components.bosch_shc_camera.repairs import async_create_fix_flow
+        from custom_components.bosch_smart_camera.repairs import async_create_fix_flow
 
         hass = SimpleNamespace(
             config_entries=SimpleNamespace(async_loaded_entries=lambda domain: [])
@@ -89,7 +89,7 @@ class TestAsyncCreateFixFlow:
 class TestFirmwareUpdateRepairFlow:
     @pytest.mark.asyncio
     async def test_init_step_shows_confirm_form_with_placeholders(self):
-        from custom_components.bosch_shc_camera.repairs import (
+        from custom_components.bosch_smart_camera.repairs import (
             FirmwareUpdateRepairFlow,
         )
 
@@ -109,7 +109,7 @@ class TestFirmwareUpdateRepairFlow:
 
     @pytest.mark.asyncio
     async def test_confirm_installs_and_creates_entry(self):
-        from custom_components.bosch_shc_camera.repairs import (
+        from custom_components.bosch_smart_camera.repairs import (
             FirmwareUpdateRepairFlow,
         )
 
@@ -125,7 +125,7 @@ class TestFirmwareUpdateRepairFlow:
     async def test_confirm_install_failure_aborts(self):
         from homeassistant.exceptions import HomeAssistantError
 
-        from custom_components.bosch_shc_camera.repairs import (
+        from custom_components.bosch_smart_camera.repairs import (
             FirmwareUpdateRepairFlow,
         )
 
@@ -142,7 +142,7 @@ class TestFirmwareUpdateRepairFlow:
 
     @pytest.mark.asyncio
     async def test_no_coordinator_aborts_immediately(self):
-        from custom_components.bosch_shc_camera.repairs import (
+        from custom_components.bosch_smart_camera.repairs import (
             FirmwareUpdateRepairFlow,
         )
 
@@ -157,7 +157,7 @@ class TestFirmwareUpdateRepairFlow:
     async def test_no_coordinator_never_shows_form(self):
         """Guard runs before the user_input branch — no coordinator means no
         form should ever be shown, since there's nothing to install."""
-        from custom_components.bosch_shc_camera.repairs import (
+        from custom_components.bosch_smart_camera.repairs import (
             FirmwareUpdateRepairFlow,
         )
 
@@ -182,7 +182,7 @@ class TestFirmwareUpdateRepairFlow:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-REPAIRS_MODULE = "custom_components.bosch_shc_camera.repairs"
+REPAIRS_MODULE = "custom_components.bosch_smart_camera.repairs"
 NVR_GRACE_SEC = 300.0  # mirrors coordinator.NVR_NOT_RECORDING_GRACE_SEC
 
 
@@ -221,7 +221,7 @@ def _make_coord_nvr_not_recording(
 
 
 def _call_nvr_not_recording(coord: SimpleNamespace) -> None:
-    from custom_components.bosch_shc_camera.repairs import (
+    from custom_components.bosch_smart_camera.repairs import (
         refresh_nvr_not_recording_issue,
     )
 
@@ -249,7 +249,7 @@ class TestNvrNotRecordingRepairs:
         )
 
         with caplog.at_level(
-            logging.WARNING, logger="custom_components.bosch_shc_camera.repairs"
+            logging.WARNING, logger="custom_components.bosch_smart_camera.repairs"
         ):
             mock_monotonic.return_value = 1000.0
             _call_nvr_not_recording(coord)  # first-observed-true — no issue yet
@@ -374,7 +374,7 @@ class TestNvrNotRecordingRepairs:
             data={CAM_ID: {"info": {"title": "Terrasse"}}},
             nvr_user_intent={CAM_ID: False},
         )
-        logger_name = "custom_components.bosch_shc_camera.repairs"
+        logger_name = "custom_components.bosch_smart_camera.repairs"
 
         with caplog.at_level(logging.WARNING, logger=logger_name):
             mock_monotonic.return_value = 0.0
@@ -511,12 +511,12 @@ class TestNvrNotRecordingRepairs:
     def test_delegator_calls_module_function(self) -> None:
         """coordinator._refresh_nvr_not_recording_issue is a thin delegator —
         same unbound-method-call pattern used for the sibling checks."""
-        from custom_components.bosch_shc_camera import BoschCameraCoordinator
+        from custom_components.bosch_smart_camera import BoschCameraCoordinator
 
         coord = _make_coord_nvr_not_recording(enable_nvr=False, data={})
 
         with patch(
-            "custom_components.bosch_shc_camera.repairs.refresh_nvr_not_recording_issue"
+            "custom_components.bosch_smart_camera.repairs.refresh_nvr_not_recording_issue"
         ) as mock_refresh:
             BoschCameraCoordinator._refresh_nvr_not_recording_issue(coord)
 

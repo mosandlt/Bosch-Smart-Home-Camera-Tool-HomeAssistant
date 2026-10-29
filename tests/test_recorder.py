@@ -2,7 +2,7 @@
 
 Consolidated single flat test module (platinum convention: one
 tests/test_<module>.py per source module) covering every test surface of
-``custom_components/bosch_shc_camera/recorder.py``:
+``custom_components/bosch_smart_camera/recorder.py``:
 
   1. ``should_record`` (LAN-only gate)
      — must return True iff switch ON ∧ conn_type=LOCAL ∧ camera ONLINE.
@@ -63,7 +63,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera import recorder
+from custom_components.bosch_smart_camera import recorder
 from tests.source_match import assert_in_source
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
@@ -92,26 +92,26 @@ class TestShouldRecord:
     """All eight combinations of (switch, conn_type, online) — only one yields True."""
 
     def test_all_three_true_returns_true(self):
-        from custom_components.bosch_shc_camera.recorder import should_record
+        from custom_components.bosch_smart_camera.recorder import should_record
 
         coord = _make_gate_coord(conn_type="LOCAL", online=True)
         assert should_record(coord, CAM_ID, switch_on=True) is True
 
     def test_switch_off_returns_false(self):
-        from custom_components.bosch_shc_camera.recorder import should_record
+        from custom_components.bosch_smart_camera.recorder import should_record
 
         coord = _make_gate_coord(conn_type="LOCAL", online=True)
         assert should_record(coord, CAM_ID, switch_on=False) is False
 
     def test_remote_connection_returns_false(self):
         """LAN-only is a hard line — no fallback to cloud relay (concept §2)."""
-        from custom_components.bosch_shc_camera.recorder import should_record
+        from custom_components.bosch_smart_camera.recorder import should_record
 
         coord = _make_gate_coord(conn_type="REMOTE", online=True)
         assert should_record(coord, CAM_ID, switch_on=True) is False
 
     def test_camera_offline_returns_false(self):
-        from custom_components.bosch_shc_camera.recorder import should_record
+        from custom_components.bosch_smart_camera.recorder import should_record
 
         coord = _make_gate_coord(conn_type="LOCAL", online=False)
         assert should_record(coord, CAM_ID, switch_on=True) is False
@@ -124,7 +124,7 @@ class TestShouldRecord:
     ):
         """Cloud status OFFLINE: a camera served over its local data interface
         and seen on the LAN is still recorded."""
-        import custom_components.bosch_shc_camera.recorder as recorder_mod
+        import custom_components.bosch_smart_camera.recorder as recorder_mod
 
         monkeypatch.setattr(
             recorder_mod, "ldi_serviceable", lambda coord, cam_id: serviceable
@@ -134,7 +134,7 @@ class TestShouldRecord:
 
     def test_no_live_connection_returns_false(self):
         """Unknown cam_id (not in `live_connections`) → not LOCAL → False."""
-        from custom_components.bosch_shc_camera.recorder import should_record
+        from custom_components.bosch_smart_camera.recorder import should_record
 
         coord = SimpleNamespace(
             live_connections={},
@@ -145,19 +145,19 @@ class TestShouldRecord:
     def test_unknown_connection_type_returns_false(self):
         """A connection_type the gate doesn't know about must NOT enable
         recording — fail-closed."""
-        from custom_components.bosch_shc_camera.recorder import should_record
+        from custom_components.bosch_smart_camera.recorder import should_record
 
         coord = _make_gate_coord(conn_type="WHATEVER", online=True)
         assert should_record(coord, CAM_ID, switch_on=True) is False
 
     def test_remote_and_offline_returns_false(self):
-        from custom_components.bosch_shc_camera.recorder import should_record
+        from custom_components.bosch_smart_camera.recorder import should_record
 
         coord = _make_gate_coord(conn_type="REMOTE", online=False)
         assert should_record(coord, CAM_ID, switch_on=True) is False
 
     def test_switch_off_and_remote_returns_false(self):
-        from custom_components.bosch_shc_camera.recorder import should_record
+        from custom_components.bosch_smart_camera.recorder import should_record
 
         coord = _make_gate_coord(conn_type="REMOTE", online=True)
         assert should_record(coord, CAM_ID, switch_on=False) is False
@@ -170,12 +170,12 @@ class TestSecondsSinceEvent:
     `_event_predates_session`."""
 
     def test_empty_timestamp_returns_none(self):
-        from custom_components.bosch_shc_camera.recorder import _seconds_since_event
+        from custom_components.bosch_smart_camera.recorder import _seconds_since_event
 
         assert _seconds_since_event("") is None
 
     def test_too_short_timestamp_returns_none(self):
-        from custom_components.bosch_shc_camera.recorder import _seconds_since_event
+        from custom_components.bosch_smart_camera.recorder import _seconds_since_event
 
         assert _seconds_since_event("2027") is None
 
@@ -183,12 +183,12 @@ class TestSecondsSinceEvent:
         """19 chars (passes the length gate) but not a valid date/time, so
         `time.strptime()` raises ValueError — must fail open (None), not
         raise, so a malformed Bosch payload never crashes event dispatch."""
-        from custom_components.bosch_shc_camera.recorder import _seconds_since_event
+        from custom_components.bosch_smart_camera.recorder import _seconds_since_event
 
         assert _seconds_since_event("2027-13-45T99:99:99") is None
 
     def test_recent_timestamp_returns_small_age(self):
-        from custom_components.bosch_shc_camera.recorder import _seconds_since_event
+        from custom_components.bosch_smart_camera.recorder import _seconds_since_event
 
         recent = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
         age = _seconds_since_event(recent)
@@ -205,7 +205,7 @@ class TestSecondsSinceEvent:
         near 0, not near 7200."""
         from datetime import UTC, datetime, timedelta
 
-        from custom_components.bosch_shc_camera.recorder import _seconds_since_event
+        from custom_components.bosch_smart_camera.recorder import _seconds_since_event
 
         now_utc = datetime.now(UTC)
         # Same instant, but expressed in +02:00 local wall-clock time —
@@ -228,7 +228,7 @@ class TestBuildFfmpegArgs:
     ``-segment_atclocktime 1`` (segments would no longer wall-align)."""
 
     def test_argv_starts_with_ffmpeg_binary(self):
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%Y-%m-%d/%H-%M.mp4")
         assert args[0] == "ffmpeg"
@@ -236,7 +236,7 @@ class TestBuildFfmpegArgs:
     def test_uses_c_copy_no_transcode(self):
         """Concept §3.2 / §9 — `-c copy` is non-negotiable. Re-encoding on a Pi
         would be lossy and burn CPU; Bosch already encodes 1080p H.264."""
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%Y-%m-%d/%H-%M.mp4")
         # `-c copy` must appear as a contiguous pair somewhere in argv
@@ -248,14 +248,14 @@ class TestBuildFfmpegArgs:
     def test_uses_rtsp_transport_tcp(self):
         """The TLS proxy uses TCP-interleaved RTSP; UDP-RTP through the loopback
         proxy is fragile. Force TCP."""
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%Y-%m-%d/%H-%M.mp4")
         idx = args.index("-rtsp_transport")
         assert args[idx + 1] == "tcp"
 
     def test_default_segment_time_is_300(self):
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%Y-%m-%d/%H-%M.mp4")
         idx = args.index("-segment_time")
@@ -264,7 +264,7 @@ class TestBuildFfmpegArgs:
     def test_segment_time_override(self):
         """Caller can override segment length (used in tests / future shorter
         segments). Pinned so the kwarg name doesn't drift."""
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args(
             "rtsp://x/y",
@@ -277,21 +277,21 @@ class TestBuildFfmpegArgs:
     def test_segment_atclocktime_enabled(self):
         """Wall-clock alignment — concept §3.2: `show me 14:35` doesn't fall
         mid-segment."""
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%H-%M.mp4")
         idx = args.index("-segment_atclocktime")
         assert args[idx + 1] == "1"
 
     def test_segment_format_mp4(self):
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%H-%M.mp4")
         idx = args.index("-segment_format")
         assert args[idx + 1] == "mp4"
 
     def test_strftime_enabled(self):
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%H-%M.mp4")
         idx = args.index("-strftime")
@@ -300,7 +300,7 @@ class TestBuildFfmpegArgs:
     def test_strftime_mkdir_enabled(self):
         """ffmpeg auto-creates the per-day folder from the strftime path —
         otherwise the recorder would 404 on the first segment of every day."""
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%H-%M.mp4")
         idx = args.index("-strftime_mkdir")
@@ -309,14 +309,14 @@ class TestBuildFfmpegArgs:
     def test_movflags_faststart(self):
         """`+faststart` lets the segment be browser-playable while still being
         written — required for the timeline UI's "play latest" affordance."""
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%H-%M.mp4")
         idx = args.index("-movflags")
         assert args[idx + 1] == "+faststart"
 
     def test_input_url_is_passed_with_dash_i(self):
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         url = "rtsp://user:pass@127.0.0.1:34567/?inst=4"
         args = _build_ffmpeg_args(url, "/tmp/out/%H-%M.mp4")
@@ -325,7 +325,7 @@ class TestBuildFfmpegArgs:
 
     def test_output_pattern_is_last_arg(self):
         """ffmpeg expects the output spec at the end of argv after `-f segment`."""
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         pattern = "/tmp/out/%Y-%m-%d/%H-%M.mp4"
         args = _build_ffmpeg_args("rtsp://x/y", pattern)
@@ -334,7 +334,7 @@ class TestBuildFfmpegArgs:
     def test_includes_all_streams_with_map_0(self):
         """Concept §10 decision 3: include audio in MVP. `-map 0` selects all
         streams from the input, which keeps both video and AAC audio."""
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%H-%M.mp4")
         idx = args.index("-map")
@@ -343,7 +343,7 @@ class TestBuildFfmpegArgs:
     def test_reset_timestamps_enabled(self):
         """Each segment must start at PTS 0 — otherwise mp4 duration math is
         wrong and HA's media player can mis-render the seekbar."""
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%H-%M.mp4")
         idx = args.index("-reset_timestamps")
@@ -353,7 +353,7 @@ class TestBuildFfmpegArgs:
         """-reconnect is an HTTP-only flag that crashes ffmpeg on rtsp:// inputs
         (rc=8, 'Option reconnect not found'). Confirmed on live HA 2026-05-08.
         Watcher (_watch_recorder) handles respawn instead."""
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         args = _build_ffmpeg_args("rtsp://x/y", "/tmp/out/%H-%M.mp4")
         assert "-reconnect" not in args
@@ -365,7 +365,7 @@ class TestQualitySwitch(unittest.TestCase):
     through to it."""
 
     def _apply(self, url, quality):
-        from custom_components.bosch_shc_camera.recorder import _apply_quality
+        from custom_components.bosch_smart_camera.recorder import _apply_quality
 
         return _apply_quality(url, quality)
 
@@ -398,7 +398,7 @@ class TestQualitySwitch(unittest.TestCase):
         assert "?" in result
 
     def test_low_quality_in_ffmpeg_args(self):
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         url = "rtsp://user:pass@127.0.0.1:9000/rtsp_tunnel?inst=1"
         args = _build_ffmpeg_args(url, "/tmp/out/%H-%M.mp4", quality="low")
@@ -407,7 +407,7 @@ class TestQualitySwitch(unittest.TestCase):
         assert "inst=1" not in joined
 
     def test_auto_quality_in_ffmpeg_args_preserves_inst1(self):
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         url = "rtsp://user:pass@127.0.0.1:9000/rtsp_tunnel?inst=1"
         args = _build_ffmpeg_args(url, "/tmp/out/%H-%M.mp4", quality="auto")
@@ -416,7 +416,7 @@ class TestQualitySwitch(unittest.TestCase):
         assert "inst=4" not in joined
 
     def test_ffmpeg_args_default_quality_is_auto(self):
-        from custom_components.bosch_shc_camera.recorder import _build_ffmpeg_args
+        from custom_components.bosch_smart_camera.recorder import _build_ffmpeg_args
 
         url = "rtsp://user:pass@127.0.0.1:9000/rtsp_tunnel?inst=1"
         args = _build_ffmpeg_args(url, "/tmp/out/%H-%M.mp4")
@@ -427,7 +427,7 @@ class TestQualitySwitch(unittest.TestCase):
 class TestSegmentPattern:
     def test_basic_layout(self):
         """`{base}/{cam}/%Y-%m-%d/%H-%M.mp4` — pinned per concept §4.1."""
-        from custom_components.bosch_shc_camera.recorder import _segment_pattern
+        from custom_components.bosch_smart_camera.recorder import _segment_pattern
 
         result = _segment_pattern("/config/bosch_nvr", "Terrasse")
         # Must include the camera name as a path component
@@ -440,7 +440,7 @@ class TestSegmentPattern:
     def test_camera_name_sanitized_via_safe_name(self):
         """Camera names are user-controlled (Bosch app title); a `../` traversal
         attempt must be defanged via `_safe_name`."""
-        from custom_components.bosch_shc_camera.recorder import _segment_pattern
+        from custom_components.bosch_smart_camera.recorder import _segment_pattern
 
         result = _segment_pattern("/config/bosch_nvr", "../../etc/passwd")
         # `..` must not survive as an actual path traversal segment
@@ -458,14 +458,14 @@ class TestSegmentPattern:
 
     def test_camera_name_with_spaces_preserved(self):
         """`_safe_name` keeps spaces (per smb tests). User-readable folders."""
-        from custom_components.bosch_shc_camera.recorder import _segment_pattern
+        from custom_components.bosch_smart_camera.recorder import _segment_pattern
 
         result = _segment_pattern("/config/bosch_nvr", "Bosch Eingang")
         assert "Bosch Eingang" in result
 
     def test_segment_dir_is_prefix_of_pattern(self):
         """`_segment_dir(b, c)` must be a strict prefix of `_segment_pattern(b, c)`."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _segment_dir,
             _segment_pattern,
         )
@@ -477,7 +477,7 @@ class TestSegmentPattern:
     def test_pattern_renders_valid_path_via_strftime(self):
         """Spot-check: ``time.strftime`` over the pattern must produce a
         sensible YYYY-MM-DD/HH-MM.mp4 path."""
-        from custom_components.bosch_shc_camera.recorder import _segment_pattern
+        from custom_components.bosch_smart_camera.recorder import _segment_pattern
 
         pattern = _segment_pattern("/config/bosch_nvr", "Terrasse")
         # Pin to a fixed timestamp: 2026-05-06 14:35:00 UTC.
@@ -488,7 +488,7 @@ class TestSegmentPattern:
 
 class TestPrerollDirAndPattern(unittest.TestCase):
     def test_preroll_dir_safe_name(self):
-        from custom_components.bosch_shc_camera.recorder import _preroll_dir
+        from custom_components.bosch_smart_camera.recorder import _preroll_dir
 
         d = _preroll_dir("/dev/shm/cache", "Terrasse Kamera")
         assert d.startswith("/dev/shm/cache/")
@@ -497,13 +497,13 @@ class TestPrerollDirAndPattern(unittest.TestCase):
         assert ".." not in d
 
     def test_preroll_dir_path_traversal_stripped(self):
-        from custom_components.bosch_shc_camera.recorder import _preroll_dir
+        from custom_components.bosch_smart_camera.recorder import _preroll_dir
 
         d = _preroll_dir("/dev/shm/cache", "../../etc/passwd")
         assert "etc" not in d or d.startswith("/dev/shm/cache/")
 
     def test_preroll_pattern_contains_cam(self):
-        from custom_components.bosch_shc_camera.recorder import _preroll_pattern
+        from custom_components.bosch_smart_camera.recorder import _preroll_pattern
 
         p = _preroll_pattern("/dev/shm/cache", "Terrasse")
         assert "Terrasse" in p
@@ -520,7 +520,7 @@ class TestListPrerollSegments:
         Pin: caller (prune / list_files) must never crash on a transient
         OSError — pre-roll is best-effort.
         """
-        from custom_components.bosch_shc_camera.recorder import _list_preroll_segments
+        from custom_components.bosch_smart_camera.recorder import _list_preroll_segments
 
         cam_dir = tmp_path / "cam"
         cam_dir.mkdir()
@@ -543,7 +543,7 @@ class TestListPrerollSegments:
         concatenator — ffmpeg would otherwise fail mid-stream with an
         invalid-moov error.
         """
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
             _list_preroll_segments,
         )
@@ -562,14 +562,14 @@ class TestListPrerollSegments:
 
     def test_missing_directory_returns_empty(self, tmp_path: Path):
         """Pin: non-existent cam_dir returns [] (idempotent first call)."""
-        from custom_components.bosch_shc_camera.recorder import _list_preroll_segments
+        from custom_components.bosch_smart_camera.recorder import _list_preroll_segments
 
         result = _list_preroll_segments(str(tmp_path / "does-not-exist"))
         assert result == []
 
     def test_directory_entry_skipped(self, tmp_path: Path):
         """A subdirectory inside cam_dir must be skipped (non-file entry)."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
             _list_preroll_segments,
         )
@@ -589,7 +589,7 @@ class TestListPrerollSegments:
 
     def test_stat_oserror_is_skipped(self, tmp_path: Path):
         """If os.stat raises OSError (file vanished after listdir), skip it."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
             _list_preroll_segments,
         )
@@ -620,7 +620,7 @@ class TestListPrerollSegments:
     ):
         """A file that vanishes between `os.listdir` and `os.stat` must be
         skipped silently (race-condition tolerance)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         good = tmp_path / "000100.mp4"
         bad = tmp_path / "000200.mp4"
@@ -654,7 +654,7 @@ class TestListPrerollSegments:
 
     def test_returns_empty_when_dir_missing(self, tmp_path: Path):
         """Calling with a nonexistent path returns [] without raising."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         result = recorder._list_preroll_segments(str(tmp_path / "no_such_dir"))
         assert result == []
@@ -663,7 +663,7 @@ class TestListPrerollSegments:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ):
         """`OSError` from `os.listdir` (e.g. EACCES) is swallowed — return []."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         def _bad_listdir(_p):
             raise OSError("EACCES")
@@ -673,14 +673,14 @@ class TestListPrerollSegments:
         assert result == []
 
     def test_empty_dir_returns_empty(self):
-        from custom_components.bosch_shc_camera.recorder import _list_preroll_segments
+        from custom_components.bosch_smart_camera.recorder import _list_preroll_segments
 
         with tempfile.TemporaryDirectory() as d:
             result = _list_preroll_segments(d)
             assert result == []
 
     def test_sorted_oldest_first(self):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
             _list_preroll_segments,
         )
@@ -697,7 +697,7 @@ class TestListPrerollSegments:
             assert mtimes == sorted(mtimes)
 
     def test_skips_small_files(self):
-        from custom_components.bosch_shc_camera.recorder import _list_preroll_segments
+        from custom_components.bosch_smart_camera.recorder import _list_preroll_segments
 
         with tempfile.TemporaryDirectory() as d:
             # Write a file below the minimum size
@@ -718,7 +718,7 @@ class TestPrunePrerollCache:
         don't keep stale files alive. Critical defense against the
         /dev/shm cache growing without limit.
         """
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
             prune_preroll_cache,
         )
@@ -745,7 +745,7 @@ class TestPrunePrerollCache:
 
     def test_under_max_keeps_everything(self, tmp_path: Path):
         """When count ≤ max_segments, no deletes."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
             prune_preroll_cache,
         )
@@ -762,7 +762,7 @@ class TestPrunePrerollCache:
     def test_unlink_oserror_continues(self, tmp_path: Path):
         """If unlink raises mid-prune, the loop continues — file might
         have already vanished due to a parallel sweep."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
             prune_preroll_cache,
         )
@@ -782,7 +782,7 @@ class TestPrunePrerollCache:
         assert deleted == 0
 
     def test_keeps_max_segments(self):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
             prune_preroll_cache,
         )
@@ -799,7 +799,7 @@ class TestPrunePrerollCache:
             assert len(remaining) == 3
 
     def test_deletes_oldest_by_name(self):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
             prune_preroll_cache,
         )
@@ -819,7 +819,7 @@ class TestPrunePrerollCache:
             assert remaining == ["seg03.mp4", "seg04.mp4"]
 
     def test_no_op_when_under_limit(self):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _PREROLL_MIN_SIZE_BYTES,
             prune_preroll_cache,
         )
@@ -835,7 +835,7 @@ class TestPrunePrerollCache:
 
 class TestBuildPrerollFfmpegArgs(unittest.TestCase):
     def test_no_segment_atclocktime(self):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _build_preroll_ffmpeg_args,
         )
 
@@ -845,7 +845,7 @@ class TestBuildPrerollFfmpegArgs(unittest.TestCase):
         assert "-segment_atclocktime" not in args
 
     def test_no_strftime_mkdir(self):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _build_preroll_ffmpeg_args,
         )
 
@@ -856,7 +856,7 @@ class TestBuildPrerollFfmpegArgs(unittest.TestCase):
 
     def test_no_reconnect(self):
         """-reconnect* are HTTP-only; crash ffmpeg rc=8 on rtsp:// inputs (confirmed 2026-05-08)."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _build_preroll_ffmpeg_args,
         )
 
@@ -869,7 +869,7 @@ class TestBuildPrerollFfmpegArgs(unittest.TestCase):
         assert "-reconnect_delay_max" not in args
 
     def test_10s_segments(self):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _PREROLL_SEGMENT_SECONDS,
             _build_preroll_ffmpeg_args,
         )
@@ -882,7 +882,7 @@ class TestBuildPrerollFfmpegArgs(unittest.TestCase):
         assert args[idx + 1] == str(_PREROLL_SEGMENT_SECONDS)
 
     def test_uses_copy_codec(self):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _build_preroll_ffmpeg_args,
         )
 
@@ -893,7 +893,7 @@ class TestBuildPrerollFfmpegArgs(unittest.TestCase):
         assert args[args.index("-c") + 1] == "copy"
 
     def test_pattern_at_end(self):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _build_preroll_ffmpeg_args,
         )
 
@@ -905,7 +905,7 @@ class TestBuildPrerollFfmpegArgs(unittest.TestCase):
         """GitHub #64: rc=234 'unspecified size' on the ring's own RTSP
         session -- ffmpeg needs a bigger probe window than the 5s/5MB
         default to find SPS/PPS."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _build_preroll_ffmpeg_args,
         )
 
@@ -922,7 +922,7 @@ class TestBuildPrerollFfmpegArgs(unittest.TestCase):
         """GitHub #64 follow-up: the ring previously ignored nvr_quality
         entirely and always requested the full inst=1 stream, unlike the
         continuous recorder."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _build_preroll_ffmpeg_args,
         )
 
@@ -937,7 +937,7 @@ class TestBuildPrerollFfmpegArgs(unittest.TestCase):
         )
 
     def test_default_quality_is_auto_unchanged_url(self):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _build_preroll_ffmpeg_args,
         )
 
@@ -1057,7 +1057,9 @@ class TestCreateMotionClipArgs:
     """Pin `create_motion_clip_args` ffmpeg argv shape."""
 
     def test_concat_format(self):
-        from custom_components.bosch_shc_camera.recorder import create_motion_clip_args
+        from custom_components.bosch_smart_camera.recorder import (
+            create_motion_clip_args,
+        )
 
         args = create_motion_clip_args(["/tmp/a.mp4", "/tmp/b.mp4"], "/tmp/out.mp4")
         assert "-f" in args
@@ -1065,13 +1067,17 @@ class TestCreateMotionClipArgs:
         assert args[concat_idx + 1] == "concat"
 
     def test_output_path_is_last(self):
-        from custom_components.bosch_shc_camera.recorder import create_motion_clip_args
+        from custom_components.bosch_smart_camera.recorder import (
+            create_motion_clip_args,
+        )
 
         args = create_motion_clip_args(["/tmp/a.mp4"], "/tmp/motion_clip.mp4")
         assert "/tmp/motion_clip.mp4" == args[-1]
 
     def test_copy_codec(self):
-        from custom_components.bosch_shc_camera.recorder import create_motion_clip_args
+        from custom_components.bosch_smart_camera.recorder import (
+            create_motion_clip_args,
+        )
 
         args = create_motion_clip_args(["/tmp/a.mp4"], "/tmp/out.mp4")
         assert "-c" in args
@@ -1079,13 +1085,17 @@ class TestCreateMotionClipArgs:
         assert args[c_idx + 1] == "copy"
 
     def test_faststart(self):
-        from custom_components.bosch_shc_camera.recorder import create_motion_clip_args
+        from custom_components.bosch_smart_camera.recorder import (
+            create_motion_clip_args,
+        )
 
         args = create_motion_clip_args(["/tmp/a.mp4"], "/tmp/out.mp4")
         assert "+faststart" in " ".join(args)
 
     def test_references_concat_file(self):
-        from custom_components.bosch_shc_camera.recorder import create_motion_clip_args
+        from custom_components.bosch_smart_camera.recorder import (
+            create_motion_clip_args,
+        )
 
         args = create_motion_clip_args(["/tmp/a.mp4"], "/tmp/out.mp4")
         # The concat list file should be referenced as -i <something>
@@ -1098,7 +1108,9 @@ class TestCreateMotionClipArgs:
         `-safe 0`; dropping that flag would silently break clips on
         every install where `/config/bosch_nvr/...` paths are absolute
         (i.e. all of them)."""
-        from custom_components.bosch_shc_camera.recorder import create_motion_clip_args
+        from custom_components.bosch_smart_camera.recorder import (
+            create_motion_clip_args,
+        )
 
         argv = create_motion_clip_args(["/tmp/a.mp4", "/tmp/b.mp4"], "/tmp/out.mp4")
         # Find the -f concat -safe 0 sequence
@@ -1120,7 +1132,9 @@ class TestCreateMotionClip:
 
     def _seed_preroll(self, tmp_path, count: int = 2):
         """Create `count` valid pre-roll segments in tmp_path/<CAM_TITLE>/."""
-        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+        from custom_components.bosch_smart_camera.recorder import (
+            _PREROLL_MIN_SIZE_BYTES,
+        )
 
         cam_dir = tmp_path / CAM_TITLE
         cam_dir.mkdir()
@@ -1136,7 +1150,7 @@ class TestCreateMotionClip:
         Pin: a misconfigured host (no ffmpeg) must not break the motion
         pipeline for other cameras; this entry just returns False.
         """
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_preroll_coord(tmp_path)
         self._seed_preroll(tmp_path)
@@ -1158,7 +1172,7 @@ class TestCreateMotionClip:
         Pin: pre-flight write failure bypasses the spawn so we don't
         leak an orphaned ffmpeg trying to read a missing concat file.
         """
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_preroll_coord(tmp_path)
         self._seed_preroll(tmp_path)
@@ -1182,7 +1196,7 @@ class TestCreateMotionClip:
     @pytest.mark.asyncio
     async def test_oserror_on_spawn_returns_false(self, tmp_path: Path):
         """Generic OSError (e.g. EAGAIN fork-limit) during spawn → False."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_preroll_coord(tmp_path)
         self._seed_preroll(tmp_path)
@@ -1200,8 +1214,10 @@ class TestCreateMotionClip:
     async def test_communicate_timeout_returns_false(self, tmp_path: Path):
         """If ffmpeg's communicate() hangs past the timeout, kill it and
         return False."""
-        from custom_components.bosch_shc_camera import recorder
-        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+        from custom_components.bosch_smart_camera import recorder
+        from custom_components.bosch_smart_camera.recorder import (
+            _PREROLL_MIN_SIZE_BYTES,
+        )
 
         # Write two real pre-roll segments so list_preroll_files returns
         # something — it always drops the newest (possibly still being
@@ -1248,7 +1264,7 @@ class TestCreateMotionClip:
         """`proc.kill()` raises because ffmpeg already exited between the
         communicate() timeout and the kill; the helper must return False
         without propagating the exception."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         async def _executor(fn, *args):
             return fn(*args)
@@ -1304,8 +1320,10 @@ class TestCreateMotionClip:
     async def test_concat_unlink_oserror_swallowed(self, tmp_path: Path):
         """OSError when removing the concat file after a successful clip must
         be swallowed."""
-        from custom_components.bosch_shc_camera import recorder
-        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+        from custom_components.bosch_smart_camera import recorder
+        from custom_components.bosch_smart_camera.recorder import (
+            _PREROLL_MIN_SIZE_BYTES,
+        )
 
         cam_name = CAM_TITLE
         cache_dir = str(tmp_path / "cache")
@@ -1358,7 +1376,7 @@ class TestCreateMotionClip:
         second occurrence for the SAME camera before any clip has shipped
         must fall back to DEBUG rather than re-warning every event.
         """
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         cam_id = next(iter(coord.data.keys()))
@@ -1375,7 +1393,7 @@ class TestCreateMotionClip:
     @pytest.mark.asyncio
     async def test_success_returns_true(self):
         """Mock subprocess → rc=0 → returns True."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         cam_id = next(iter(coord.data.keys()))
@@ -1418,7 +1436,7 @@ class TestCreateMotionClip:
     async def test_ffmpeg_not_found_via_phase_coord(self):
         """FileNotFoundError on spawn → returns False gracefully (using the
         MagicMock-hass coordinator stub shape)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         cam_id = next(iter(coord.data.keys()))
@@ -1448,7 +1466,7 @@ class TestCreateMotionClip:
     @pytest.mark.asyncio
     async def test_ffmpeg_rc_nonzero_returns_false(self):
         """ffmpeg exits with rc=1 → returns False."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         cam_id = next(iter(coord.data.keys()))
@@ -1483,7 +1501,7 @@ class TestStageSegmentsForConcat:
     under ffmpeg's concat demuxer after it was already selected."""
 
     def test_hardlinks_every_segment(self, tmp_path: Path):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _stage_segments_for_concat,
         )
 
@@ -1507,7 +1525,7 @@ class TestStageSegmentsForConcat:
     def test_survives_original_deleted_after_staging(self, tmp_path: Path):
         """The whole point: once staged, deleting the original must NOT
         affect the staged copy's content (tmpfs hardlink semantics)."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _stage_segments_for_concat,
         )
 
@@ -1531,7 +1549,7 @@ class TestStageSegmentsForConcat:
         tighter residual race) is silently skipped — the caller still gets
         the segments that DID survive, instead of an exception aborting the
         whole clip."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _stage_segments_for_concat,
         )
 
@@ -1548,7 +1566,7 @@ class TestStageSegmentsForConcat:
         assert os.path.isfile(staged[0])
 
     def test_empty_input_returns_empty(self, tmp_path: Path):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _stage_segments_for_concat,
         )
 
@@ -1558,7 +1576,7 @@ class TestStageSegmentsForConcat:
     def test_unwritable_stage_dir_returns_empty(self, tmp_path: Path):
         """`os.makedirs` failing (e.g. permission denied) must degrade to
         "nothing staged", not raise into the caller."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _stage_segments_for_concat,
         )
 
@@ -1578,7 +1596,7 @@ class TestSweepOrphanedStageDirs:
     concurrent assembly's own fresh stage dir must never be touched."""
 
     def test_removes_old_orphan(self, tmp_path: Path):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _STAGE_ORPHAN_MAX_AGE_SECONDS,
             _sweep_orphaned_stage_dirs,
         )
@@ -1597,7 +1615,7 @@ class TestSweepOrphanedStageDirs:
     def test_leaves_fresh_stage_dir_untouched(self, tmp_path: Path):
         """A concurrent in-flight assembly's stage dir is only seconds old
         — must survive a sweep triggered by an unrelated ring respawn."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _sweep_orphaned_stage_dirs,
         )
 
@@ -1612,7 +1630,7 @@ class TestSweepOrphanedStageDirs:
         assert (stage / "0000_seg.mp4").exists()
 
     def test_no_stage_root_is_a_noop(self, tmp_path: Path):
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _sweep_orphaned_stage_dirs,
         )
 
@@ -1624,7 +1642,7 @@ class TestSweepOrphanedStageDirs:
     def test_ignores_non_directory_entries(self, tmp_path: Path):
         """A stray file directly under `_stage/` (not a clip subdirectory)
         must be skipped, not raise."""
-        from custom_components.bosch_shc_camera.recorder import (
+        from custom_components.bosch_smart_camera.recorder import (
             _STAGE_ORPHAN_MAX_AGE_SECONDS,
             _sweep_orphaned_stage_dirs,
         )
@@ -1653,7 +1671,7 @@ class TestSweepOrphanedStageDirs:
         let the FIRST (isdir's internal) stat succeed and only fail the
         SECOND (explicit) one.
         """
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         cam_dir = tmp_path / "cam"
         stage = cam_dir / "_stage" / "racy-clip"
@@ -1682,7 +1700,7 @@ class TestCleanupStageDir:
     happy path in staging-race tests)."""
 
     def test_removes_files_and_dir(self, tmp_path: Path):
-        from custom_components.bosch_shc_camera.recorder import _cleanup_stage_dir
+        from custom_components.bosch_smart_camera.recorder import _cleanup_stage_dir
 
         stage = tmp_path / "_stage" / "clip"
         stage.mkdir(parents=True)
@@ -1694,7 +1712,7 @@ class TestCleanupStageDir:
         assert not stage.exists()
 
     def test_nonexistent_dir_swallowed(self, tmp_path: Path):
-        from custom_components.bosch_shc_camera.recorder import _cleanup_stage_dir
+        from custom_components.bosch_smart_camera.recorder import _cleanup_stage_dir
 
         # os.listdir on a nonexistent path raises inside the outer try —
         # must not propagate.
@@ -1707,7 +1725,7 @@ class TestCleanupStageDir:
         removed, and `os.rmdir` is still attempted afterward (it will fail
         too, on the still-present file, but that failure is ALSO
         swallowed by the outer except)."""
-        from custom_components.bosch_shc_camera.recorder import _cleanup_stage_dir
+        from custom_components.bosch_smart_camera.recorder import _cleanup_stage_dir
 
         stage = tmp_path / "_stage" / "clip"
         stage.mkdir(parents=True)
@@ -1981,7 +1999,7 @@ class TestCreateMotionClipExtraSegments:
     @pytest.mark.asyncio
     async def test_extra_segments_appended_after_preroll(self):
         """Concat file content lists preroll paths first, then extras, in order."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         cam_id = next(iter(coord.data.keys()))
@@ -2045,7 +2063,7 @@ class TestCreateMotionClipExtraSegments:
     async def test_extra_segments_only_no_preroll(self):
         """Zero pre-roll segments + extra_segments present → still assembles
         (post-roll-only clip)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         cam_id = next(iter(coord.data.keys()))
@@ -2077,7 +2095,7 @@ class TestCreateMotionClipExtraSegments:
     @pytest.mark.asyncio
     async def test_no_preroll_no_extra_returns_false(self):
         """Neither pre-roll nor extra_segments → nothing to concat, False."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         cam_id = next(iter(coord.data.keys()))
@@ -2098,8 +2116,10 @@ class TestListPrerollFiles:
     first before concatenating)."""
 
     def test_returns_sorted_paths_minus_newest(self):
-        import custom_components.bosch_shc_camera.recorder as recorder
-        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+        import custom_components.bosch_smart_camera.recorder as recorder
+        from custom_components.bosch_smart_camera.recorder import (
+            _PREROLL_MIN_SIZE_BYTES,
+        )
 
         cam_id = CAM_ID_SHORT
         with tempfile.TemporaryDirectory() as cache_dir:
@@ -2128,8 +2148,10 @@ class TestListPrerollFiles:
         """Only one segment on disk — it's almost certainly the one
         actively being written, so it must NOT be returned (no reliable
         pre-roll yet, not a partial/corrupt clip)."""
-        import custom_components.bosch_shc_camera.recorder as recorder
-        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+        import custom_components.bosch_smart_camera.recorder as recorder
+        from custom_components.bosch_smart_camera.recorder import (
+            _PREROLL_MIN_SIZE_BYTES,
+        )
 
         cam_id = CAM_ID_SHORT
         with tempfile.TemporaryDirectory() as cache_dir:
@@ -2146,7 +2168,7 @@ class TestListPrerollFiles:
             assert paths == []
 
     def test_no_segments_returns_empty(self):
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         with tempfile.TemporaryDirectory() as cache_dir:
@@ -2164,8 +2186,10 @@ class TestNewestPrerollPath:
     itself needs its own dedicated coverage)."""
 
     def test_returns_newest_by_mtime(self):
-        import custom_components.bosch_shc_camera.recorder as recorder
-        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+        import custom_components.bosch_smart_camera.recorder as recorder
+        from custom_components.bosch_smart_camera.recorder import (
+            _PREROLL_MIN_SIZE_BYTES,
+        )
 
         with tempfile.TemporaryDirectory() as cam_dir:
             now = time.time()
@@ -2179,13 +2203,13 @@ class TestNewestPrerollPath:
             assert result.endswith("a.mp4")
 
     def test_empty_dir_returns_none(self):
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         with tempfile.TemporaryDirectory() as cam_dir:
             assert recorder._newest_preroll_path(cam_dir) is None
 
     def test_missing_dir_returns_none(self):
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         assert recorder._newest_preroll_path("/nonexistent/path/xyz") is None
 
@@ -2212,7 +2236,7 @@ class TestSyncNvrCleanup:
     def test_zero_retention_disables_cleanup(self):
         """Hard guard: retention_days <= 0 must NOT delete anything (would
         otherwise wipe the user's archive on a config-flow off-by-one)."""
-        from custom_components.bosch_shc_camera.recorder import sync_nvr_cleanup
+        from custom_components.bosch_smart_camera.recorder import sync_nvr_cleanup
 
         coord = self._coord(retention_days=0)
         with (
@@ -2225,7 +2249,7 @@ class TestSyncNvrCleanup:
             rm.assert_not_called()
 
     def test_missing_base_path_returns_cleanly(self):
-        from custom_components.bosch_shc_camera.recorder import sync_nvr_cleanup
+        from custom_components.bosch_smart_camera.recorder import sync_nvr_cleanup
 
         coord = self._coord()
         with patch("os.path.isdir", return_value=False), patch("os.walk") as walk:
@@ -2234,7 +2258,7 @@ class TestSyncNvrCleanup:
 
     def test_only_files_older_than_cutoff_removed(self):
         """Files with mtime < cutoff are deleted; newer ones are kept."""
-        from custom_components.bosch_shc_camera.recorder import sync_nvr_cleanup
+        from custom_components.bosch_smart_camera.recorder import sync_nvr_cleanup
 
         coord = self._coord(retention_days=3)
         now = time.time()
@@ -2277,7 +2301,7 @@ class TestSyncNvrCleanup:
     def test_never_removes_directories_in_first_pass(self):
         """First pass touches only files; directory removal happens in a
         separate `rmdir` pass that respects "directory must be empty"."""
-        from custom_components.bosch_shc_camera.recorder import sync_nvr_cleanup
+        from custom_components.bosch_smart_camera.recorder import sync_nvr_cleanup
 
         coord = self._coord(retention_days=3)
 
@@ -2299,7 +2323,7 @@ class TestSyncNvrCleanup:
         """Even if the user's base path is empty, ``sync_nvr_cleanup`` must
         NOT rmdir the base path itself — that would break the next start_recorder
         which expects the dir to exist."""
-        from custom_components.bosch_shc_camera.recorder import sync_nvr_cleanup
+        from custom_components.bosch_smart_camera.recorder import sync_nvr_cleanup
 
         coord = self._coord(base_path="/config/bosch_nvr", retention_days=3)
 
@@ -2375,7 +2399,7 @@ def _make_lifecycle_coord(
     # fixture's default) never touches this — start_recorder's fast path
     # checks the URL first and only reads get_session().stream_ready_event
     # when it needs to wait.
-    from custom_components.bosch_shc_camera.session_state import (
+    from custom_components.bosch_smart_camera.session_state import (
         get_or_create_session as _get_or_create_session,
     )
 
@@ -2423,7 +2447,7 @@ class TestNvrCleanupRealFiles:
     def test_zero_retention_disables_cleanup(self, tmp_path: Path):
         """retention_days <= 0 → skip entirely. Hard rule: never delete
         all files just because user fat-fingered the option."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_retention_days"] = 0
@@ -2440,14 +2464,14 @@ class TestNvrCleanupRealFiles:
         )
 
     def test_missing_base_path_no_op(self):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path="/nonexistent/path/that/does/not/exist")
         # Must not raise
         recorder.sync_nvr_cleanup(coord)
 
     def test_deletes_files_older_than_cutoff(self, tmp_path: Path):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_retention_days"] = 7
@@ -2470,7 +2494,7 @@ class TestNvrCleanupRealFiles:
     def test_prunes_empty_date_dirs_but_not_camera_root(self, tmp_path: Path):
         """After deleting files, empty date folders are removed. Camera
         root + base_path itself must NEVER be removed."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_retention_days"] = 7
@@ -2491,7 +2515,7 @@ class TestNvrCleanupRealFiles:
     def test_keeps_files_at_or_after_cutoff(self, tmp_path: Path):
         """Boundary: file with mtime == cutoff must NOT be deleted
         (condition is `<`, not `<=`)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_retention_days"] = 7
@@ -2509,7 +2533,7 @@ class TestNvrCleanupRealFiles:
     def test_unreadable_file_skipped_not_crash(self, tmp_path: Path):
         """File that os.stat fails on (race: file disappeared mid-walk) must
         be silently skipped, not crash the cleanup loop."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         cam_dir = tmp_path / "Cam"
@@ -2587,7 +2611,7 @@ def _tail_for(proc: MagicMock) -> recorder._StderrTail:
 class TestStartRecorder:
     @pytest.mark.asyncio
     async def test_skipped_when_not_local(self, tmp_path: Path):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(conn_type="REMOTE", base_path=str(tmp_path))
         with patch.object(asyncio, "create_subprocess_exec") as spawn:
@@ -2605,7 +2629,7 @@ class TestStartRecorder:
         this test still exercises the full "never becomes ready" exhaustion
         path without any real wall-clock delay.
         """
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.live_connections[CAM_ID]["rtspsUrl"] = ""
@@ -2624,7 +2648,7 @@ class TestStartRecorder:
     async def test_skipped_when_proxy_url_is_https(self, tmp_path: Path):
         """If only the rtsps:// URL is set (not rewritten through proxy),
         skip — recording over TLS to the camera bypasses our proxy."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.live_connections[CAM_ID]["rtspsUrl"] = "rtsps://camera.lan/x"
@@ -2642,7 +2666,7 @@ class TestStartRecorder:
     @pytest.mark.asyncio
     async def test_happy_path_spawns_ffmpeg(self, tmp_path: Path):
         """LOCAL + valid proxy URL → spawn, register process, register watcher."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         proc = _mock_proc(returncode=None)
@@ -2668,7 +2692,7 @@ class TestStartRecorder:
         directly patches `_spawn_stderr_drain_task` and asserts it fires
         exactly once, with the process just spawned and this camera's id,
         so deleting/breaking that call site is caught here."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         proc = _mock_proc(returncode=None)
@@ -2695,7 +2719,7 @@ class TestStartRecorder:
         forever after a give-up — a fresh successful spawn (manual toggle,
         or the stream-up hook reviving the recorder on the next LOCAL
         session) must clear it."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.nvr_error_state[CAM_ID] = "ffmpeg crashed twice"
@@ -2712,7 +2736,7 @@ class TestStartRecorder:
     async def test_replaces_existing_process(self, tmp_path: Path):
         """Calling start_recorder while one is already running must stop
         the old before spawning new — required for cred rotation."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         old_proc = _mock_proc(returncode=None)
@@ -2732,7 +2756,7 @@ class TestStartRecorder:
     @pytest.mark.asyncio
     async def test_ffmpeg_not_found_fails_silently(self, tmp_path: Path):
         """Missing ffmpeg binary must not crash HA — log error + return."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         with patch.object(
@@ -2746,7 +2770,7 @@ class TestStartRecorder:
     @pytest.mark.asyncio
     async def test_oserror_on_spawn_returns(self, tmp_path: Path):
         """Generic OSError (permissions, OOM, fork limit) — log + return."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         with patch.object(
@@ -2761,7 +2785,7 @@ class TestStartRecorder:
     async def test_makedirs_failure_aborts_spawn(self, tmp_path: Path):
         """If we can't create the segment dir (read-only fs, no perms),
         skip the spawn — ffmpeg would just fail later anyway."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
 
@@ -2782,8 +2806,8 @@ class TestStartRecorder:
         flips to non-LOCAL (user toggled stream off, or teardown fired —
         which also clears stream_ready_event, see stream_lifecycle.py),
         `start_recorder` must return silently without starting ffmpeg."""
-        from custom_components.bosch_shc_camera import recorder
-        from custom_components.bosch_shc_camera.session_state import (
+        from custom_components.bosch_smart_camera import recorder
+        from custom_components.bosch_smart_camera.session_state import (
             get_or_create_session,
         )
 
@@ -2821,8 +2845,8 @@ class TestStartRecorder:
     async def test_rtsp_url_appears_during_wait_continues(self):
         """If the URL lands (stream_ready_event fires) before the wait
         times out, start_recorder continues past the wait block."""
-        from custom_components.bosch_shc_camera import recorder
-        from custom_components.bosch_shc_camera.session_state import (
+        from custom_components.bosch_smart_camera import recorder
+        from custom_components.bosch_smart_camera.session_state import (
             get_or_create_session,
         )
 
@@ -2871,9 +2895,9 @@ class TestStartRecorder:
         constant — this is the actual root cause, independent of whether
         the event happens to fire in time in any single test run.
         """
-        from custom_components.bosch_shc_camera import recorder
-        from custom_components.bosch_shc_camera.models import MODELS
-        from custom_components.bosch_shc_camera.session_state import (
+        from custom_components.bosch_smart_camera import recorder
+        from custom_components.bosch_smart_camera.models import MODELS
+        from custom_components.bosch_smart_camera.session_state import (
             get_or_create_session,
         )
 
@@ -2922,7 +2946,7 @@ class TestStartRecorderDateDirPreCreation(unittest.TestCase):
 
     def test_date_dirs_created_before_ffmpeg_spawn(self):
         """start_recorder pre-creates YYYY-MM-DD subdirs under staging/<cam>/."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
 
@@ -2964,8 +2988,8 @@ class TestStartRecorderDateDirPreCreation(unittest.TestCase):
 
     def test_date_dirs_created_under_staging_not_base(self):
         """Date dirs must be inside _staging/<cam>/, not directly under base path."""
-        import custom_components.bosch_shc_camera.recorder as recorder
-        from custom_components.bosch_shc_camera.recorder import _STAGING_DIRNAME
+        import custom_components.bosch_smart_camera.recorder as recorder
+        from custom_components.bosch_smart_camera.recorder import _STAGING_DIRNAME
 
         cam_id = CAM_ID_SHORT
         base_path = "/config/bosch_nvr"
@@ -3015,7 +3039,7 @@ class TestEventOnlyMode(unittest.TestCase):
 
     def test_event_only_skips_main_ffmpeg(self):
         """nvr_event_only=True must NOT spawn the main segment recorder."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(
@@ -3047,7 +3071,7 @@ class TestEventOnlyMode(unittest.TestCase):
 
     def test_event_only_starts_preroll(self):
         """nvr_event_only=True must start the pre-roll recorder when preroll_seconds > 0."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(
@@ -3081,7 +3105,7 @@ class TestEventOnlyMode(unittest.TestCase):
 
     def test_event_only_skips_preroll_when_seconds_zero(self):
         """nvr_event_only=True but preroll_seconds=0 must not start pre-roll."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(
@@ -3113,7 +3137,7 @@ class TestEventOnlyMode(unittest.TestCase):
 
     def test_normal_mode_still_spawns_main_ffmpeg(self):
         """Sanity: without nvr_event_only, the main recorder still spawns."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(
@@ -3158,7 +3182,7 @@ class TestPerCameraNvrModeOverrideMixedFleet:
         """Global nvr_event_only=True (event-buffered default) but CAM_A has
         a 'continuous' override → CAM_A must still spawn the main ffmpeg
         recorder, not just a pre-roll ring."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_a = "AAAAAAAA"
         coord = _make_phase_coord(
@@ -3193,7 +3217,7 @@ class TestPerCameraNvrModeOverrideMixedFleet:
         """Global nvr_event_only=False (continuous default) but CAM_B has an
         'event_buffered' override → CAM_B must run only the pre-roll ring,
         no main ffmpeg recorder."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_b = "BBBBBBBB"
         coord = _make_phase_coord(
@@ -3235,7 +3259,7 @@ class TestPerCameraNvrModeOverrideMixedFleet:
         cameras, each resolving to a DIFFERENT effective mode at the same
         time — proving the override is genuinely per-camera, not accidentally
         shared/global state."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_glass, cam_premises = "AAAAAAAA", "BBBBBBBB"
         coord = _make_phase_coord(
@@ -3290,7 +3314,7 @@ class TestPerCameraNvrModeOverrideMixedFleet:
 class TestStopRecorder:
     @pytest.mark.asyncio
     async def test_no_op_when_not_running(self):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         # No process registered
@@ -3300,7 +3324,7 @@ class TestStopRecorder:
 
     @pytest.mark.asyncio
     async def test_already_exited_quick_return(self):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=0)  # already exited
@@ -3311,7 +3335,7 @@ class TestStopRecorder:
 
     @pytest.mark.asyncio
     async def test_clean_sigterm_exit(self):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=None)
@@ -3325,7 +3349,7 @@ class TestStopRecorder:
     @pytest.mark.asyncio
     async def test_sigkill_escalation_on_timeout(self):
         """If ffmpeg ignores SIGTERM for 5 s, escalate to SIGKILL."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=None)
@@ -3358,7 +3382,7 @@ class TestStopRecorder:
     async def test_process_lookup_error_on_sigterm_safely_returns(self):
         """If the process died between our check and SIGTERM (race), the
         ProcessLookupError must be swallowed."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=None)
@@ -3370,7 +3394,7 @@ class TestStopRecorder:
     @pytest.mark.asyncio
     async def test_kill_process_lookup_error_swallowed(self):
         """If proc.kill() raises ProcessLookupError after SIGTERM timeout, swallow it."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=None)
@@ -3399,7 +3423,7 @@ class TestStopRecorder:
     @pytest.mark.asyncio
     async def test_second_wait_timeout_logs_warning_no_raise(self):
         """After SIGKILL, if wait_for times out again, log warning but don't raise."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=None)
@@ -3427,7 +3451,7 @@ class TestStopRecorder:
     @pytest.mark.asyncio
     async def test_stop_recorder_calls_stop_preroll(self):
         """stop_recorder must call stop_preroll_recorder to kill the pre-roll ffmpeg."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -3450,7 +3474,7 @@ class TestStopRecorder:
 class TestStopAll:
     @pytest.mark.asyncio
     async def test_stops_every_running_recorder(self):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc_a = _mock_proc(returncode=0)
@@ -3463,7 +3487,7 @@ class TestStopAll:
 
     @pytest.mark.asyncio
     async def test_empty_dict_is_safe(self):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         coord.nvr_processes.clear()
@@ -3472,7 +3496,7 @@ class TestStopAll:
     @pytest.mark.asyncio
     async def test_stop_all_calls_stop_all_preroll(self):
         """stop_all must call stop_all_preroll before stopping main recorders."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         coord.nvr_processes = {"cam1": MagicMock()}
@@ -3498,7 +3522,7 @@ class TestNvrShutdownRace:
 
     @pytest.mark.asyncio
     async def test_start_recorder_refuses_to_spawn_when_shutting_down(self):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -3512,7 +3536,7 @@ class TestNvrShutdownRace:
 
     @pytest.mark.asyncio
     async def test_spawn_preroll_refuses_when_shutting_down(self):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -3529,7 +3553,7 @@ class TestNvrShutdownRace:
     async def test_shutting_down_defaults_false_on_bare_stub(self):
         """A coordinator stub predating this fix (no `nvr_shutting_down`
         attribute at all) must behave exactly as before — spawn allowed."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -3549,7 +3573,7 @@ class TestNvrShutdownRace:
         call is still in flight) but present in `camera_entities` must
         still have its per-cam lock acquired by the unload sweep — closes
         the exact gap a stale `list(nvr_processes.keys())` snapshot had."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         coord.camera_entities = {"cam-new": MagicMock()}
@@ -3569,7 +3593,7 @@ class TestNvrShutdownRace:
         """stop_all must not touch a camera's process until it can acquire
         that camera's `get_nvr_recorder_lock` — proves it cannot race a
         concurrent in-flight start_recorder holding the same lock."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=None)
@@ -3592,7 +3616,7 @@ class TestNvrShutdownRace:
 class TestPrerollRecorderLifecycle(unittest.TestCase):
     def test_start_preroll_requires_local_session(self):
         """No LOCAL session → preroll recorder not spawned."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -3607,7 +3631,7 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
 
     def test_start_preroll_stores_process(self):
         """Valid LOCAL session → process stored in nvr_preroll_processes."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -3629,7 +3653,7 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
         """stop_preroll_recorder pops process from dict and sends SIGTERM."""
         import signal as _signal
 
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -3650,7 +3674,7 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
 
     def test_stop_preroll_noop_when_no_process(self):
         """stop_preroll_recorder is a no-op when no process registered."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -3663,7 +3687,7 @@ class TestPrerollRecorderLifecycle(unittest.TestCase):
 
     def test_stop_all_preroll_stops_all(self):
         """stop_all_preroll calls stop for every cam in nvr_preroll_processes."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         coord = _make_phase_coord()
 
@@ -3692,7 +3716,7 @@ class TestStartPrerollRecorderSerialization:
 
     @pytest.mark.asyncio
     async def test_concurrent_calls_do_not_overlap_spawns(self, tmp_path: Path):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -3728,7 +3752,7 @@ class TestStartPrerollRecorderSerialization:
         tracked — the first caller's process was cleanly stopped by the
         second caller's leading stop_preroll_recorder(), not silently
         overwritten while still running (the actual leak in #44)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -3764,7 +3788,7 @@ class TestStartPrerollRecorder:
     async def test_skipped_when_not_local(self, tmp_path: Path):
         """`_connection_type != "LOCAL"` → early return. No spawn, no proc
         registered. Pre-roll is LAN-only by design."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(conn_type="REMOTE", base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -3778,7 +3802,7 @@ class TestStartPrerollRecorder:
     @pytest.mark.asyncio
     async def test_skipped_when_rtsp_url_missing(self, tmp_path: Path):
         """rtspsUrl empty / not rtsp:// → return."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -3794,7 +3818,7 @@ class TestStartPrerollRecorder:
     async def test_happy_path_full_local(self, tmp_path: Path):
         """LOCAL + valid rtsp:// URL → walks the full path: makedirs,
         spawn, register proc, prune-on-spawn, register watcher task."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -3837,7 +3861,7 @@ class TestStartPrerollRecorder:
         `_spawn_stderr_drain_task` is actually wired to the real spawned
         preroll process at `_spawn_preroll_recorder_locked`'s real call
         site, not just that the drain function works when called directly."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -3870,7 +3894,7 @@ class TestStartPrerollRecorder:
         full inst=1 stream regardless of the user's nvr_quality option
         (unlike the continuous recorder). Proves the actual spawned argv
         carries the option, not just that the pure builder accepts it."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -3899,7 +3923,7 @@ class TestStartPrerollRecorder:
         """The orphan `_stage/*` sweep on ring spawn is best-effort — a
         failure there (e.g. permission denied) must not abort the spawn
         itself."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -3930,7 +3954,7 @@ class TestStartPrerollRecorder:
         """`create_subprocess_exec` → `FileNotFoundError`. Must log error +
         return WITHOUT registering proc or task — otherwise stop_preroll
         would later iterate over a None proc."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -3952,7 +3976,7 @@ class TestStartPrerollRecorder:
     async def test_spawn_oserror_cleanup(self, tmp_path: Path):
         """Generic OSError on spawn — same cleanup invariant as the
         FileNotFoundError path."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -3972,7 +3996,7 @@ class TestStartPrerollRecorder:
     async def test_makedirs_failure_aborts(self, tmp_path: Path):
         """OSError during cache_dir creation → return, no spawn. Read-only
         fs / permission denied / NFS hiccup."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -3994,7 +4018,7 @@ class TestStartPrerollRecorder:
     @pytest.mark.asyncio
     async def test_prune_exception_swallowed(self, tmp_path: Path):
         """If prune_preroll_cache raises any Exception, start_preroll continues."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -4019,7 +4043,7 @@ class TestStartPrerollRecorder:
     @pytest.mark.asyncio
     async def test_preroll_tasks_auto_created_when_absent(self, tmp_path: Path):
         """If coordinator has no nvr_preroll_tasks attr, it is created."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -4059,7 +4083,7 @@ class TestSpawnPrerollRecorderIdempotency:
     async def test_skips_spawn_when_a_ring_writer_is_already_alive(
         self, tmp_path: Path
     ):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -4081,7 +4105,7 @@ class TestSpawnPrerollRecorderIdempotency:
         """A registered process that already exited (returncode set, e.g.
         crashed and not yet cleaned up) must NOT block a genuine respawn —
         this guard is specifically about an ALIVE process, not any entry."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -4103,7 +4127,7 @@ class TestSpawnPrerollRecorderIdempotency:
     async def test_no_prior_process_spawns_normally(self, tmp_path: Path):
         """Control: no entry at all → the guard must not block a genuine
         first spawn."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)
@@ -4131,7 +4155,7 @@ class TestStopPrerollRecorder:
         Race: process died between our SIGTERM-timeout and the SIGKILL call.
         Must be swallowed so stop_preroll_recorder still completes cleanly.
         """
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_preroll_coord(tmp_path)
         proc = _mock_proc(returncode=None)
@@ -4161,7 +4185,7 @@ class TestStopPrerollRecorder:
         TimeoutError; the watchdog must remain non-blocking so the
         integration unload path can finish.
         """
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_preroll_coord(tmp_path)
         proc = _mock_proc(returncode=None)
@@ -4183,7 +4207,7 @@ class TestStopPrerollRecorder:
     @pytest.mark.asyncio
     async def test_no_process_registered_is_no_op(self, tmp_path: Path):
         """Pin idempotency: calling stop on a cam with no live process is safe."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_preroll_coord(tmp_path)
         # No process registered
@@ -4194,7 +4218,7 @@ class TestStopPrerollRecorder:
     @pytest.mark.asyncio
     async def test_already_exited_returns_quickly(self, tmp_path: Path):
         """If returncode is already set, send_signal is never called."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_preroll_coord(tmp_path)
         proc = _mock_proc(returncode=0)
@@ -4207,7 +4231,7 @@ class TestStopPrerollRecorder:
     @pytest.mark.asyncio
     async def test_send_signal_process_lookup_error_returns(self):
         """ProcessLookupError from send_signal means process is already gone — return."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=None)
@@ -4222,7 +4246,7 @@ class TestStopPrerollRecorder:
 
     def test_cancels_watcher_task(self):
         """stop_preroll_recorder must cancel the periodic prune-watcher task."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -4247,7 +4271,7 @@ class TestStopPrerollRecorder:
         clean within the grace window — stop_and_finalize_preroll_recorder
         depends on this to know whether the newest segment's moov atom can
         be trusted (issue #43 follow-up feature)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_preroll_coord(tmp_path)
         proc = _mock_proc(returncode=None)
@@ -4261,7 +4285,7 @@ class TestStopPrerollRecorder:
     async def test_returns_false_on_hard_kill(self, tmp_path: Path):
         """A SIGTERM timeout forcing a hard kill must return False — no
         moov-atom guarantee on the segment that was mid-write."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_preroll_coord(tmp_path)
         proc = _mock_proc(returncode=None)
@@ -4274,7 +4298,7 @@ class TestStopPrerollRecorder:
     @pytest.mark.asyncio
     async def test_returns_false_when_nothing_to_stop(self, tmp_path: Path):
         """No active process registered → nothing was stopped → False."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_preroll_coord(tmp_path)
         result = await recorder.stop_preroll_recorder(coord, CAM_ID)
@@ -4299,7 +4323,7 @@ class TestStopAndFinalizePrerollRecorder:
     @pytest.mark.asyncio
     async def test_no_active_process_returns_false_empty(self):
         """Ring not running for this camera yet — nothing to finalize."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         # nvr_preroll_processes has no entry for CAM_ID_SHORT.
@@ -4310,7 +4334,7 @@ class TestStopAndFinalizePrerollRecorder:
     async def test_dead_process_returns_false_empty(self):
         """A process handle that already exited must be treated as
         nothing-to-finalize, same as no handle at all."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         proc = _mock_proc(returncode=0)
@@ -4323,7 +4347,7 @@ class TestStopAndFinalizePrerollRecorder:
         """The ring writer is alive but has produced no segments yet
         (`_newest_preroll_path` returns None) — must not stop a perfectly
         healthy ring writer for no benefit."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         coord.hass.async_add_executor_job = AsyncMock(
@@ -4352,7 +4376,7 @@ class TestStopAndFinalizePrerollRecorder:
         (including the newest, since a clean exit guarantees its moov atom)
         — does NOT restart the ring (that's the caller's job, after it has
         built the clip from this list)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord(
             opts={
@@ -4407,7 +4431,7 @@ class TestStopAndFinalizePrerollRecorder:
         GitHub #50 fix: the old implementation fell back to a second
         drop-newest scan here, losing a SECOND segment on top of the
         untrustworthy one."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord(
             opts={
@@ -4453,7 +4477,7 @@ class TestStopAndFinalizePrerollRecorder:
         it's already gone, or a permissions race), that must not raise into
         the caller — best-effort cleanup only, same discipline as every
         other cache-prune path in this module."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord(
             opts={
@@ -4494,7 +4518,7 @@ class TestStopAndFinalizePrerollRecorder:
         recorder lock must stay held for the whole stop sequence so a
         concurrent start_preroll_recorder/switch-toggle can't race in
         between and leak a second untracked ring writer."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         coord.hass.async_add_executor_job = AsyncMock(
@@ -4528,7 +4552,7 @@ class TestRestartPrerollRecorderAfterFinalize:
 
     @pytest.mark.asyncio
     async def test_spawns_under_lock(self):
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_phase_coord()
         lock = coord.get_nvr_recorder_lock(CAM_ID_SHORT)
@@ -4553,7 +4577,7 @@ class TestWatchRecorder:
     async def test_clean_exit_no_respawn(self):
         """Process exited cleanly AND was already removed from
         nvr_processes → no respawn (replacement / clean stop scenario)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=0)
@@ -4567,7 +4591,7 @@ class TestWatchRecorder:
     async def test_no_respawn_when_gate_closed(self):
         """ffmpeg crashed but should_record now False (cam offline / switch
         toggled off / went REMOTE) → don't respawn."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(conn_type="REMOTE")  # gate now closed
         proc = _mock_proc(returncode=1, stderr_data=b"connection refused")
@@ -4585,7 +4609,7 @@ class TestWatchRecorder:
     async def test_first_crash_triggers_respawn(self):
         """ffmpeg crashes within respawn window AND gate still open →
         respawn after delay."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()  # LOCAL, online
         proc = _mock_proc(returncode=1, stderr_data=b"transient")
@@ -4605,7 +4629,7 @@ class TestWatchRecorder:
     async def test_second_crash_within_window_gives_up(self):
         """Two crashes inside the respawn window → set error_state, no respawn.
         Defends against an infinite restart loop when the camera is dead."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         # Mark a recent crash
@@ -4628,7 +4652,7 @@ class TestWatchRecorder:
         retry without counting toward the 2-crash give-up threshold — a
         second back-to-back auth-failure must NOT set nvr_error_state or
         skip the respawn, unlike a genuine repeated crash."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         # Simulate the reported sequence: a crash was already recorded
@@ -4664,7 +4688,7 @@ class TestWatchRecorder:
         push, leaving recording permanently stopped with zero user-visible
         signal (same "external trigger never fires again" shape as the
         fixed #51 bug). Must be caught, logged, and surfaced."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=1, stderr_data=b"transient")
@@ -4689,7 +4713,7 @@ class TestWatchRecorder:
     async def test_respawn_raising_unexpectedly_sets_error_state_auth_retry_path(self):
         """Same fix, exercised via the auth-retry respawn call instead of
         the transient-crash one."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         coord.nvr_recent_crash[CAM_ID] = time.monotonic() - 5
@@ -4716,7 +4740,7 @@ class TestWatchRecorder:
     async def test_auth_failure_case_insensitive_and_lowercase_401(self):
         """The marker match must be case-insensitive and also catch a bare
         '401' without the word 'Unauthorized' in the tail."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=8, stderr_data=b"HTTP/1.1 401 \n")
@@ -4738,7 +4762,7 @@ class TestWatchRecorder:
     async def test_auth_failure_no_respawn_when_gate_closed_after_sleep(self):
         """Same gate-recheck-after-sleep discipline as the normal crash path
         must apply to the auth-failure path too."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=8, stderr_data=b"401 unauthorized")
@@ -4765,7 +4789,7 @@ class TestWatchRecorder:
     @pytest.mark.asyncio
     async def test_gate_closed_after_sleep_no_respawn(self):
         """If should_record returns False after the respawn sleep, don't respawn."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         coord.nvr_recent_crash = {CAM_ID: float("-inf")}
@@ -4818,7 +4842,7 @@ class TestWatchRecorder:
         moment the process exits (exactly what a live drain leaves behind)
         and confirm it reaches the respawn-gating marker logic (ENOSPC)
         even though `proc.stderr.read` is never called at all."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=1)  # no stderr mock at all
@@ -4846,7 +4870,7 @@ class TestWatchRecorder:
         pulled from the live-drained tail, not just fire some log line.
         Mutation-tested gap: this assertion did not previously exist for
         the main recorder path (only the preroll ring had it)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(returncode=-11)
@@ -4885,7 +4909,7 @@ class TestDrainStderrLive:
         Without a live reader, `proc.wait()` never returns (write() blocks
         on the full pipe) — this test asserts the whole drain+wait sequence
         completes well within a bounded timeout, i.e. it does NOT hang."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -4946,7 +4970,7 @@ class TestDrainStderrLive:
     async def test_returns_on_none_stderr(self):
         """`proc.stderr` can be None (e.g. never piped) — must return
         immediately, not raise."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         tail = recorder._StderrTail()
         await asyncio.wait_for(recorder._drain_stderr_live(None, tail), timeout=1.0)
@@ -4956,7 +4980,7 @@ class TestDrainStderrLive:
     async def test_returns_on_eof(self):
         """A closed/exhausted stream (read() returns b"") ends the loop
         without raising."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         stderr = AsyncMock()
         stderr.read = AsyncMock(return_value=b"")
@@ -4969,7 +4993,7 @@ class TestDrainStderrLive:
         """Reading from an already-broken/closed pipe raises ValueError in
         practice — must be swallowed, not propagated (matches the old
         post-exit drain's broad exception tolerance for this exact case)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         stderr = AsyncMock()
         stderr.read = AsyncMock(side_effect=ValueError("stream closed"))
@@ -4981,7 +5005,7 @@ class TestDrainStderrLive:
     async def test_swallows_connection_error(self):
         """A broken pipe on the read side raises ConnectionError — also
         swallowed."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         stderr = AsyncMock()
         stderr.read = AsyncMock(side_effect=ConnectionResetError("broken pipe"))
@@ -4994,7 +5018,7 @@ class TestDrainStderrLive:
         """`asyncio.CancelledError` must NOT be swallowed — this task is
         tracked in `bg_tasks` and must be cleanly cancellable on integration
         unload like every other tracked background task."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         stderr = AsyncMock()
 
@@ -5015,7 +5039,7 @@ class TestDrainStderrLive:
         must roll — keep only the newest bytes, not grow unbounded (a
         long-lived continuous recorder with lots of warnings must not leak
         memory)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         chunks = [b"a" * 1500, b"b" * 1500]  # 3000 total > 2048 max
 
@@ -5048,7 +5072,7 @@ class TestWatchPrerollRecorder:
         wakeup we set `proc.returncode = 0` so the early-return triggers
         and the loop exits cleanly.
         """
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         proc = _mock_proc(returncode=None)
@@ -5093,7 +5117,7 @@ class TestWatchPrerollRecorder:
     async def test_exits_when_proc_missing_from_dict(self, tmp_path: Path):
         """If `nvr_preroll_processes[cam_id]` is gone (clean stop / crash
         race), the watcher must exit on the next tick."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         # Note: NO proc registered for CAM_ID
@@ -5119,7 +5143,7 @@ class TestWatchPrerollRecorder:
     async def test_prune_exception_swallowed_then_proc_exits(self, tmp_path: Path):
         """`prune_preroll_cache` raising must not kill the watcher. After the
         swallow we let the proc exit on the next tick so the test terminates."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         proc = _mock_proc(returncode=None)
@@ -5159,7 +5183,7 @@ class TestWatchPrerollRecorder:
         fake_sleep returns on the first call, then raises CancelledError on
         the second so the loop executes exactly one prune iteration.
         """
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -5209,7 +5233,7 @@ class TestWatchPrerollRecorder:
     def test_exits_when_process_gone_short_cam_id(self):
         """`_watch_preroll_recorder` exits naturally when the process is no
         longer registered (short-form cam_id variant)."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -5229,7 +5253,7 @@ class TestWatchPrerollRecorder:
 
     def test_exits_when_process_exited_short_cam_id(self):
         """Watcher exits when proc.returncode is not None (ffmpeg finished)."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -5248,7 +5272,7 @@ class TestWatchPrerollRecorder:
 
     def test_start_preroll_creates_watcher_task(self):
         """start_preroll_recorder must register a background prune-watcher task."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(cam_id=cam_id)
@@ -5281,7 +5305,7 @@ class TestWatchPrerollRecorder:
         disk, a one-time INFO proof-of-life log fires and the cam_id is
         recorded in `_nvr_preroll_first_segment_logged` — but only once, not
         on every subsequent tick."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord._nvr_preroll_first_segment_logged = set()
@@ -5303,7 +5327,7 @@ class TestWatchPrerollRecorder:
             patch.object(recorder, "_prune_and_count", _fake_prune_and_count),
             patch("asyncio.sleep", _fake_sleep),
             caplog.at_level(
-                "INFO", logger="custom_components.bosch_shc_camera.recorder"
+                "INFO", logger="custom_components.bosch_smart_camera.recorder"
             ),
         ):
             await recorder._watch_preroll_recorder(
@@ -5335,7 +5359,7 @@ class TestWatchPrerollHealth:
         """If the process was already popped/replaced (an intentional stop
         or a fresh respawn already happened) by the time we wake, this is
         NOT a crash — must be a silent no-op."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = MagicMock()
@@ -5362,7 +5386,7 @@ class TestWatchPrerollHealth:
         whatever cancelled it. Must log a debug line with the observable
         pid/returncode, then re-raise (cancellation must still propagate —
         this is diagnostics, not cancellation suppression)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = MagicMock()
@@ -5391,7 +5415,7 @@ class TestWatchPrerollHealth:
         """A genuine unexpected exit (process still the tracked one) with
         the gate open and no recent prior crash → respawn after the normal
         backoff delay."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = MagicMock()
@@ -5420,7 +5444,7 @@ class TestWatchPrerollHealth:
         """Two crashes within `_RESPAWN_WINDOW_SECONDS` → the second one
         does NOT respawn (crash-loop guard), matching `_watch_recorder`'s
         discipline for the main recorder."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         coord._nvr_preroll_last_crash[CAM_ID] = time.monotonic()
@@ -5454,7 +5478,7 @@ class TestWatchPrerollHealth:
         this function exists specifically to close the 'external trigger
         never fires again' gap from #51. Must be caught, logged, and
         surfaced, not silently kill this background task."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = MagicMock()
@@ -5480,7 +5504,7 @@ class TestWatchPrerollHealth:
     async def test_no_respawn_when_gate_closed(self):
         """`should_record` False (switch off, camera offline, or gone
         REMOTE) → no respawn, even though this was a genuine crash."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         coord.nvr_user_intent[CAM_ID] = False
@@ -5501,7 +5525,7 @@ class TestWatchPrerollHealth:
         """Config-entry unload/HA-stop in progress → never respawn (would
         race `stop_all_preroll`'s sweep, same discipline as
         `_spawn_preroll_recorder_locked`'s own `nvr_shutting_down` guard)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         coord.nvr_shutting_down = True
@@ -5522,7 +5546,7 @@ class TestWatchPrerollHealth:
         """The gate is re-checked AFTER the backoff sleep too — a switch
         toggled off while we were waiting to respawn must still be honored,
         not just the check taken before the sleep."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = MagicMock()
@@ -5549,7 +5573,7 @@ class TestWatchPrerollHealth:
     async def test_logs_stderr_tail_on_crash(self, caplog):
         """The crash must be loud (WARNING log with the stderr tail) —
         this was the core of the reported gap: previously totally silent."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = MagicMock()
@@ -5579,7 +5603,7 @@ class TestWatchPrerollHealth:
         failing the whole health-check — same diagnostic-value guarantee
         the old post-exit-read-with-timeout path gave, now sourced from the
         live tail buffer instead."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = MagicMock()
@@ -5606,7 +5630,7 @@ class TestWatchPrerollHealth:
         a config-entry unload starting DURING the wait must still be
         honored, not just a pre-sleep snapshot (same discipline already
         verified for the switch-intent re-read)."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = MagicMock()
@@ -5642,7 +5666,7 @@ class TestPrerollWiring(unittest.TestCase):
         nvr_preroll_seconds > 0 AND mode is 'event_buffered' — the ring's
         output is only ever consumed by event_buffered's motion-clip
         assembly (GitHub #54)."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(
@@ -5689,7 +5713,7 @@ class TestPrerollWiring(unittest.TestCase):
         degrading the continuous recorder's own footage during the event
         burst. The ring must NOT spawn here even with
         nvr_preroll_seconds > 0."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(
@@ -5732,7 +5756,7 @@ class TestPrerollWiring(unittest.TestCase):
 
     def test_start_recorder_skips_preroll_when_seconds_zero(self):
         """start_recorder must NOT call start_preroll_recorder when nvr_preroll_seconds=0."""
-        import custom_components.bosch_shc_camera.recorder as recorder
+        import custom_components.bosch_smart_camera.recorder as recorder
 
         cam_id = CAM_ID_SHORT
         coord = _make_phase_coord(
@@ -5891,7 +5915,7 @@ class TestNvrSwitchTurnOnOff:
 
     @pytest.mark.asyncio
     async def test_async_turn_on_calls_start_recorder(self):
-        from custom_components.bosch_shc_camera.switch import (
+        from custom_components.bosch_smart_camera.switch import (
             BoschNvrRecordingSwitch,
         )
 
@@ -5912,7 +5936,7 @@ class TestNvrSwitchTurnOnOff:
         """GitHub #70 bug-hunt POLISH 2: turn_on must kick a coordinator
         refresh so the 'NVR enabled but not recording' Repairs issue clears
         promptly instead of waiting up to one scan_interval."""
-        from custom_components.bosch_shc_camera.switch import (
+        from custom_components.bosch_smart_camera.switch import (
             BoschNvrRecordingSwitch,
         )
 
@@ -5937,7 +5961,7 @@ class TestNvrSwitchTurnOnOff:
 
     @pytest.mark.asyncio
     async def test_async_turn_off_calls_stop_recorder(self):
-        from custom_components.bosch_shc_camera.switch import (
+        from custom_components.bosch_smart_camera.switch import (
             BoschNvrRecordingSwitch,
         )
 
@@ -5950,7 +5974,7 @@ class TestNvrSwitchTurnOnOff:
     def test_unique_id_matches_concept_doc(self):
         """`bosch_shc_nvr_recording_<lowercased-cam-id>` — pinned so users'
         dashboards / automations don't break across versions."""
-        from custom_components.bosch_shc_camera.switch import (
+        from custom_components.bosch_smart_camera.switch import (
             BoschNvrRecordingSwitch,
         )
 
@@ -5960,7 +5984,7 @@ class TestNvrSwitchTurnOnOff:
 
     def test_translation_key_set(self):
         """Single source of truth for UI strings — `nvr_recording`."""
-        from custom_components.bosch_shc_camera.switch import (
+        from custom_components.bosch_smart_camera.switch import (
             BoschNvrRecordingSwitch,
         )
 
@@ -5970,7 +5994,7 @@ class TestNvrSwitchTurnOnOff:
 
     def test_entity_disabled_by_default(self):
         """Opt-in feature — must not auto-add to the entity registry as enabled."""
-        from custom_components.bosch_shc_camera.switch import (
+        from custom_components.bosch_smart_camera.switch import (
             BoschNvrRecordingSwitch,
         )
 
@@ -5979,7 +6003,7 @@ class TestNvrSwitchTurnOnOff:
         assert sw.entity_registry_enabled_default is False
 
     def test_is_on_reflects_user_intent(self):
-        from custom_components.bosch_shc_camera.switch import (
+        from custom_components.bosch_smart_camera.switch import (
             BoschNvrRecordingSwitch,
         )
 
@@ -5994,7 +6018,7 @@ class TestNvrSwitchTurnOnOff:
         Same gate as `should_record` minus the user-intent check (the switch
         widget itself stays interactive even when the underlying conditions
         aren't met for recording)."""
-        from custom_components.bosch_shc_camera.switch import (
+        from custom_components.bosch_smart_camera.switch import (
             BoschNvrRecordingSwitch,
         )
 
@@ -6007,7 +6031,7 @@ class TestNvrSwitchTurnOnOff:
         assert sw.available is False
 
     def test_available_false_when_camera_offline(self):
-        from custom_components.bosch_shc_camera.switch import (
+        from custom_components.bosch_smart_camera.switch import (
             BoschNvrRecordingSwitch,
         )
 
@@ -6027,7 +6051,7 @@ class TestSwitchSetupGate:
         be constructed without raising. (Full setup_entry is too async-heavy
         for a unit test; this catches the most common breakage — mismatched
         constructor signature after a refactor.)"""
-        from custom_components.bosch_shc_camera.switch import (
+        from custom_components.bosch_smart_camera.switch import (
             BoschNvrRecordingSwitch,
         )
 
@@ -6385,7 +6409,8 @@ class TestNvrCleanupFtpSubpath:
         with (
             patch.object(recorder, "_ftp_connect", create=True),
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+                "custom_components.bosch_smart_camera.smb._ftp_connect",
+                return_value=ftp,
             ),
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
@@ -6396,7 +6421,7 @@ class TestNvrCleanupFtpSubpath:
     def test_ftp_zero_retention_skipped(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="ftp", retention_days=0)
         # Should never even try to connect.
-        with patch("custom_components.bosch_shc_camera.smb._ftp_connect") as conn:
+        with patch("custom_components.bosch_smart_camera.smb._ftp_connect") as conn:
             recorder._sync_nvr_cleanup_ftp(coord)
             conn.assert_not_called()
 
@@ -6668,7 +6693,7 @@ class TestUploadSmb:
         with (
             patch.dict(sys.modules, {"smbclient": smb_mock}),
             patch(
-                "custom_components.bosch_shc_camera.smb.smb_makedirs",
+                "custom_components.bosch_smart_camera.smb.smb_makedirs",
                 side_effect=OSError("mkdir failed"),
             ),
         ):
@@ -6692,7 +6717,7 @@ class TestUploadSmb:
         )
         with (
             patch.dict(sys.modules, {"smbclient": smb_mock}),
-            patch("custom_components.bosch_shc_camera.smb.smb_makedirs"),
+            patch("custom_components.bosch_smart_camera.smb.smb_makedirs"),
         ):
             ok = recorder._upload_smb(
                 coord,
@@ -6726,7 +6751,7 @@ class TestUploadSmb:
         )
         with (
             patch.dict(sys.modules, {"smbclient": smb_mock}),
-            patch("custom_components.bosch_shc_camera.smb.smb_makedirs"),
+            patch("custom_components.bosch_smart_camera.smb.smb_makedirs"),
         ):
             ok = recorder._upload_smb(
                 coord,
@@ -6754,7 +6779,7 @@ class TestUploadFtp:
     def test_returns_false_on_login_failure(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="ftp")
         with patch(
-            "custom_components.bosch_shc_camera.smb._ftp_connect",
+            "custom_components.bosch_smart_camera.smb._ftp_connect",
             side_effect=OSError("login refused"),
         ):
             ok = recorder._upload_ftp(
@@ -6771,10 +6796,11 @@ class TestUploadFtp:
         ftp = MagicMock()
         with (
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+                "custom_components.bosch_smart_camera.smb._ftp_connect",
+                return_value=ftp,
             ),
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_makedirs",
+                "custom_components.bosch_smart_camera.smb._ftp_makedirs",
                 side_effect=OSError("mkdir refused"),
             ),
         ):
@@ -6794,9 +6820,10 @@ class TestUploadFtp:
         ftp.storbinary.side_effect = OSError("transfer aborted")
         with (
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+                "custom_components.bosch_smart_camera.smb._ftp_connect",
+                return_value=ftp,
             ),
-            patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"),
+            patch("custom_components.bosch_smart_camera.smb._ftp_makedirs"),
         ):
             ok = recorder._upload_ftp(
                 coord,
@@ -6813,9 +6840,10 @@ class TestUploadFtp:
         ftp = MagicMock()
         with (
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+                "custom_components.bosch_smart_camera.smb._ftp_connect",
+                return_value=ftp,
             ),
-            patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"),
+            patch("custom_components.bosch_smart_camera.smb._ftp_makedirs"),
         ):
             ok = recorder._upload_ftp(
                 coord,
@@ -6837,9 +6865,10 @@ class TestUploadFtp:
         ftp.quit.side_effect = OSError("connection broken")
         with (
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+                "custom_components.bosch_smart_camera.smb._ftp_connect",
+                return_value=ftp,
             ),
-            patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"),
+            patch("custom_components.bosch_smart_camera.smb._ftp_makedirs"),
         ):
             recorder._upload_ftp(
                 coord,
@@ -7368,7 +7397,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ftp.delete.return_value = None
 
         with patch(
-            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            "custom_components.bosch_smart_camera.smb._ftp_connect", return_value=ftp
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
         # B13-6 regression pin: delete must use the absolute path, not just the filename.
@@ -7401,7 +7430,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_connect",
+                "custom_components.bosch_smart_camera.smb._ftp_connect",
                 return_value=ftp,
             ),
             patch.object(recorder.time, "monotonic", fake_monotonic),
@@ -7450,7 +7479,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_connect",
+                "custom_components.bosch_smart_camera.smb._ftp_connect",
                 return_value=ftp,
             ),
             patch.object(recorder.time, "monotonic", fake_monotonic),
@@ -7469,7 +7498,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ftp = MagicMock()
         ftp.cwd.side_effect = ftplib.error_perm("550 not found")
         with patch(
-            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            "custom_components.bosch_smart_camera.smb._ftp_connect", return_value=ftp
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
         ftp.delete.assert_not_called()
@@ -7481,7 +7510,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ftp = MagicMock()
         ftp.retrlines.side_effect = OSError("listing failed")
         with patch(
-            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            "custom_components.bosch_smart_camera.smb._ftp_connect", return_value=ftp
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
@@ -7504,7 +7533,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ftp.retrlines.side_effect = fake_retrlines
         ftp.sendcmd.side_effect = OSError("MDTM unsupported")
         with patch(
-            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            "custom_components.bosch_smart_camera.smb._ftp_connect", return_value=ftp
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
         ftp.delete.assert_not_called()
@@ -7529,7 +7558,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ftp.sendcmd.return_value = "213 20260101010000"
         ftp.delete.side_effect = OSError("permission denied")
         with patch(
-            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            "custom_components.bosch_smart_camera.smb._ftp_connect", return_value=ftp
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
@@ -7567,7 +7596,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
 
         ftp.retrlines.side_effect = fake_retrlines
         with patch(
-            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            "custom_components.bosch_smart_camera.smb._ftp_connect", return_value=ftp
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
@@ -7579,7 +7608,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ftp.retrlines.side_effect = lambda cmd, cb: None  # empty
         ftp.quit.side_effect = OSError("connection lost")
         with patch(
-            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            "custom_components.bosch_smart_camera.smb._ftp_connect", return_value=ftp
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
@@ -7610,7 +7639,7 @@ class TestSyncNvrCleanupFtpDeepWalk:
         ftp.delete.return_value = None
 
         with patch(
-            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            "custom_components.bosch_smart_camera.smb._ftp_connect", return_value=ftp
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
 
@@ -7632,9 +7661,10 @@ class TestUploadFtpCloseFallback:
         ftp.close.side_effect = OSError("b")
         with (
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+                "custom_components.bosch_smart_camera.smb._ftp_connect",
+                return_value=ftp,
             ),
-            patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"),
+            patch("custom_components.bosch_smart_camera.smb._ftp_makedirs"),
         ):
             # Exception from close() in the inner finally must not propagate.
             recorder._upload_ftp(
@@ -7698,7 +7728,7 @@ class TestFtpCleanupConnectFailure:
     def test_connect_failure_returns_silently(self, tmp_path: Path):
         coord = _make_coord(tmp_path, target="ftp")
         with patch(
-            "custom_components.bosch_shc_camera.smb._ftp_connect",
+            "custom_components.bosch_smart_camera.smb._ftp_connect",
             side_effect=OSError("login refused"),
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
@@ -7725,7 +7755,7 @@ class TestFtpCleanupShortAndDotDotLines:
 
         ftp.retrlines.side_effect = fake_retrlines
         with patch(
-            "custom_components.bosch_shc_camera.smb._ftp_connect", return_value=ftp
+            "custom_components.bosch_smart_camera.smb._ftp_connect", return_value=ftp
         ):
             recorder._sync_nvr_cleanup_ftp(coord)
         ftp.delete.assert_not_called()
@@ -7901,7 +7931,7 @@ class TestNvrRecentCrashSentinel:
     def test_first_crash_default_is_not_zero(self):
         import inspect
 
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         src = inspect.getsource(recorder)
         assert "nvr_recent_crash.get(cam_id, 0.0)" not in src, (
@@ -7912,7 +7942,7 @@ class TestNvrRecentCrashSentinel:
     def test_first_crash_uses_neginf_default(self):
         import inspect
 
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         src = inspect.getsource(recorder)
         assert_in_source(src, 'nvr_recent_crash.get(cam_id, float("-inf"))')
@@ -7925,7 +7955,9 @@ class TestNvrRecentCrashSentinel:
         guard fires → respawn suppressed on the FIRST crash. After the fix:
         prev_crash=float('-inf') → (30 - (-inf)) = inf >= 60 → respawn allowed.
         """
-        from custom_components.bosch_shc_camera.recorder import _RESPAWN_WINDOW_SECONDS
+        from custom_components.bosch_smart_camera.recorder import (
+            _RESPAWN_WINDOW_SECONDS,
+        )
 
         RESPAWN_WINDOW = _RESPAWN_WINDOW_SECONDS
         low_monotonic_now = RESPAWN_WINDOW * 0.5
@@ -7958,7 +7990,7 @@ class TestStartRecorderCredRotationRace:
         with the stale, already-invalidated URL captured earlier in
         start_recorder — it must re-read live_connections one more time
         right before spawning."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         stale_url = coord.live_connections[CAM_ID]["rtspsUrl"]
@@ -7998,7 +8030,7 @@ class TestStartRecorderCredRotationRace:
         while start_recorder awaits the makedirs job, the final re-read
         under the lock must detect this and abort rather than spawn ffmpeg
         against a stream that no longer exists."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
 
@@ -8019,7 +8051,7 @@ class TestStartRecorderCredRotationRace:
         """start_recorder's final re-read+spawn must run under the SAME
         per-camera lock instance refresh_local_creds_from_heartbeat uses,
         so the two can never interleave mid-mutation."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         proc = _mock_proc(returncode=None)
@@ -8066,7 +8098,7 @@ class TestStartRecorderCredRotationRace:
         caller's process was actually torn down (SIGTERM sent), not
         silently orphaned.
         """
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
 
@@ -8126,7 +8158,7 @@ class TestWatchRecorderBoundedAuthRetry:
         auth-retry respawn resetting `nvr_auth_retry_count` before the
         next 401 could ever accumulate past 1, which a fake respawn that
         skips `start_recorder` entirely cannot catch."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         spawn_count = [0]
@@ -8178,7 +8210,7 @@ class TestWatchRecorderBoundedAuthRetry:
         """A lone 401 (the common transient-race case) must retry without
         touching nvr_error_state — the bounded cap must not make the
         common case worse."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord()
         proc = _mock_proc(
@@ -8203,7 +8235,7 @@ class TestWatchRecorderBoundedAuthRetry:
         """After one 401 retry, a later successful spawn must clear the
         auth-retry counter — a later isolated 401 must not inherit the
         prior streak toward the give-up cap."""
-        from custom_components.bosch_shc_camera import recorder
+        from custom_components.bosch_smart_camera import recorder
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.nvr_auth_retry_count[CAM_ID] = recorder._MAX_CONSECUTIVE_AUTH_RETRIES
@@ -8534,7 +8566,7 @@ class TestAssembleAndShipMotionClip:
                 return_value=[str(tmp_path / "pre0.mp4")],
             ),
             patch(
-                "custom_components.bosch_shc_camera.recorder.time.time",
+                "custom_components.bosch_smart_camera.recorder.time.time",
                 return_value=event_time,
             ),
             patch("asyncio.sleep", side_effect=_fake_sleep),
@@ -8604,7 +8636,7 @@ class TestAssembleAndShipMotionClip:
                 return_value=[str(tmp_path / "pre0.mp4")],
             ),
             patch(
-                "custom_components.bosch_shc_camera.recorder.time.time",
+                "custom_components.bosch_smart_camera.recorder.time.time",
                 return_value=event_time,
             ),
             patch("asyncio.sleep", side_effect=_fake_sleep),
@@ -8815,7 +8847,7 @@ class TestAssembleAndShipMotionClip:
                 new=AsyncMock(),
             ) as mock_restart,
             patch(
-                "custom_components.bosch_shc_camera.recorder.time.time",
+                "custom_components.bosch_smart_camera.recorder.time.time",
                 return_value=event_time,
             ),
             patch("asyncio.sleep", side_effect=_fake_sleep),
@@ -8995,7 +9027,7 @@ class TestNewestSegmentIsFinalized:
         with (
             patch("asyncio.create_subprocess_exec", return_value=proc),
             patch(
-                "custom_components.bosch_shc_camera.recorder."
+                "custom_components.bosch_smart_camera.recorder."
                 "TIMEOUT_RECORDER_SEGMENT_PROBE",
                 0.01,
             ),
@@ -9020,7 +9052,7 @@ class TestNewestSegmentIsFinalized:
         with (
             patch("asyncio.create_subprocess_exec", return_value=proc),
             patch(
-                "custom_components.bosch_shc_camera.recorder."
+                "custom_components.bosch_smart_camera.recorder."
                 "TIMEOUT_RECORDER_SEGMENT_PROBE",
                 0.01,
             ),
@@ -9043,12 +9075,12 @@ class TestNewestSegmentIsFinalized:
         with (
             patch("asyncio.create_subprocess_exec", return_value=proc),
             patch(
-                "custom_components.bosch_shc_camera.recorder."
+                "custom_components.bosch_smart_camera.recorder."
                 "TIMEOUT_RECORDER_SEGMENT_PROBE",
                 0.01,
             ),
             patch(
-                "custom_components.bosch_shc_camera.recorder."
+                "custom_components.bosch_smart_camera.recorder."
                 "TIMEOUT_RECORDER_KILL_WAIT",
                 0.01,
             ),
@@ -9061,7 +9093,9 @@ class TestStopPrerollRecorderCachePrune:
 
     @pytest.mark.asyncio
     async def test_leftover_segments_removed_on_stop(self, tmp_path: Path):
-        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+        from custom_components.bosch_smart_camera.recorder import (
+            _PREROLL_MIN_SIZE_BYTES,
+        )
 
         coord = _make_preroll_coord(tmp_path)
         cam_dir = tmp_path / CAM_TITLE
@@ -9080,7 +9114,9 @@ class TestStopPrerollRecorderCachePrune:
     async def test_no_process_still_prunes_cache(self, tmp_path: Path):
         """Even with no live process (e.g. crashed before this call), a
         stale ring file left from a prior run must still be cleaned up."""
-        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+        from custom_components.bosch_smart_camera.recorder import (
+            _PREROLL_MIN_SIZE_BYTES,
+        )
 
         coord = _make_preroll_coord(tmp_path)
         cam_dir = tmp_path / CAM_TITLE
@@ -9112,7 +9148,9 @@ class TestStopPrerollRecorderCachePrune:
         (`prune_cache=False`) must NOT wipe the ring — only a genuine stop
         (the default) does. Without this, every LOCAL-session/cred-rotation
         renewal wiped the pre-roll buffer to empty, defeating its purpose."""
-        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+        from custom_components.bosch_smart_camera.recorder import (
+            _PREROLL_MIN_SIZE_BYTES,
+        )
 
         coord = _make_preroll_coord(tmp_path)
         cam_dir = tmp_path / CAM_TITLE
@@ -9133,7 +9171,9 @@ class TestStopPrerollRecorderCachePrune:
         with an existing ring (its own leading stop_preroll_recorder call)
         must not wipe the pre-existing segments — only the periodic
         prune-to-max_segs watcher/prune-on-spawn should ever trim them."""
-        from custom_components.bosch_shc_camera.recorder import _PREROLL_MIN_SIZE_BYTES
+        from custom_components.bosch_smart_camera.recorder import (
+            _PREROLL_MIN_SIZE_BYTES,
+        )
 
         coord = _make_lifecycle_coord(base_path=str(tmp_path))
         coord.options["nvr_preroll_cache_dir"] = str(tmp_path)

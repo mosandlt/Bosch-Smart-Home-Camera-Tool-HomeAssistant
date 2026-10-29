@@ -6,7 +6,7 @@ Thanks for taking the time to contribute!
 
 - Use the [issue tracker](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues) and pick the matching template.
 - Include camera model + hardware version (Gen1 `INDOOR`/`OUTDOOR`, Gen2 `HOME_Eyes_Indoor`/`HOME_Eyes_Outdoor`), HA core version, and integration version (`manifest.json`).
-- For bugs, attach DEBUG-level logs filtered to `custom_components.bosch_shc_camera`.
+- For bugs, attach DEBUG-level logs filtered to `custom_components.bosch_smart_camera`.
 
 ## Pull requests
 

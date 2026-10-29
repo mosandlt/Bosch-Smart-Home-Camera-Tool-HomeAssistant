@@ -1,0 +1,9079 @@
+/**
+ * Bosch Camera Card — Custom Lovelace Card
+ * Repo:    https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant
+ * Docs:    https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/blob/main/docs/card-architecture.md
+ * License: MIT
+ *
+ * This file is auto-generated from src/bosch-camera-card.js by
+ * scripts/build-card.mjs. Do not edit directly — edit the src file and
+ * rebuild. Comments are stripped to reduce the gzipped payload size.
+ */
+const EVENT_KIND_LABELS = {
+  person: {
+    en: "Person",
+    de: "Person",
+    es: "Persona",
+    fr: "Personne",
+    it: "Persona",
+    nl: "Persoon",
+    pl: "Osoba",
+    pt: "Pessoa",
+    ru: "Человек",
+    uk: "Людина",
+    zh: "人员"
+  },
+  audio_alarm: {
+    en: "Sound",
+    de: "Geräusch",
+    es: "Sonido",
+    fr: "Son",
+    it: "Suono",
+    nl: "Geluid",
+    pl: "Dźwięk",
+    pt: "Som",
+    ru: "Звук",
+    uk: "Звук",
+    zh: "声音"
+  }
+};
+
+const CARD_VERSION = "14.2.1";
+
+function clampWebrtcTimeoutMsForDisplay(raw) {
+  const n = Number(raw);
+  if (raw === undefined || raw === null || !Number.isFinite(n)) return 5e3;
+  return Math.min(3e4, Math.max(1e3, Math.round(n)));
+}
+
+console.info(`%c BOSCH-CAMERA-CARD %c v${CARD_VERSION} `, "color: #fff; background: #ea0016; font-weight: 700;", "color: #ea0016; background: #fff; font-weight: 700;");
+
+let _boschFsExitAt = 0;
+
+let _boschFsOwner = null;
+
+const _boschAudioRegistry = new Map;
+
+function _boschAudioRegister(entityId, card) {
+  if (!entityId) return false;
+  if (!_boschAudioRegistry.has(entityId)) {
+    _boschAudioRegistry.set(entityId, new Set);
+  }
+  const group = _boschAudioRegistry.get(entityId);
+  group.add(card);
+  return group.size > 1;
+}
+
+function _boschAudioUnregister(entityId, card) {
+  if (!entityId) return;
+  const group = _boschAudioRegistry.get(entityId);
+  if (!group) return;
+  group.delete(card);
+  if (group.size === 0) _boschAudioRegistry.delete(entityId);
+}
+
+const _boschPipCards = new Set;
+
+let _boschPipActive = null;
+
+function _boschPipSetActive(card) {
+  _boschPipActive = card;
+  for (const c of _boschPipCards) {
+    try {
+      c._reflectPipState();
+    } catch (_) {}
+  }
+}
+
+const AUTO_PLAY_MODES = [ "lan", "always", "never" ];
+
+const BACKGROUND_TEARDOWN_GRACE_MS = 6e4;
+
+const REWARM_TURN_ON_DELAY_MS = 5500;
+
+const STALL_RECOVERY_WINDOW_MS = 9e4;
+
+const STALL_RECOVERY_THRESHOLD = 3;
+
+const CARD_I18N = {
+  en: {
+    play_gate_label: "Start stream",
+    play_gate_hint_remote: "You're on a remote connection — tap to start",
+    play_gate_hint_default: "Tap to start the live stream",
+    loading: "Loading…",
+    hls_mode_banner: "HLS mode · higher latency (no WebRTC over remote tunnel)",
+    cam_missing_title: "Camera not found",
+    cam_missing_sub: "This camera entity does not exist — check the card's camera_entity setting.",
+    delete: "Delete",
+    height: "Height",
+    pick_color: "Pick colour",
+    volume: "Volume",
+    audio_tap_for_sound: "Tap for sound",
+    audio_mute: "Mute sound",
+    audio_unmute: "Enable sound",
+    audio_available_when_live: "Sound available once the live stream is running",
+    sound_label: "Sound",
+    enable_sound: "Enable sound",
+    siren_confirm: "Really trigger the siren?",
+    siren_triggering: "Triggering siren…",
+    siren_unavailable: "Siren not available for this camera.",
+    schedules_zones: "Schedules & zones",
+    nvr_no_recordings: "No recordings for this day",
+    nvr_segments_suffix: "segment(s) — click to play",
+    nvr_load_error: "Error loading segments",
+    nvr_loading_stream: "Loading stream…",
+    nvr_playing: "Playing",
+    nvr_segment_error: "Error loading segment",
+    nvr_loading_recordings: "Loading recordings…",
+    stream_warming_up: "Camera is waking up…",
+    stream_connecting: "Establishing connection…",
+    stream_loading_hls: "Loading HLS stream…",
+    stream_starting: "Starting stream…",
+    stream_reconnecting: "Reconnecting…",
+    stream_retrying: "Retrying stream…",
+    loading_image: "Loading image…",
+    loading_refreshing: "Refreshing…",
+    loading_refreshing_image: "Refreshing image…",
+    loading_hint_remote: "Cloud stream — first image in ~30–45 s, then stable",
+    loading_hint_local: "LAN stream — usually ~10–20 s, up to 35 s",
+    loading_hint_connecting: "Establishing camera connection…",
+    pill_snapshot_aria: "Take snapshot",
+    pill_stream_title: "Live stream",
+    pill_stream_aria: "Start or stop live stream",
+    pill_audio_title: "Sound",
+    pill_privacy_title: "Privacy mode",
+    pill_privacy_aria: "Toggle privacy mode",
+    pill_light_title: "Light",
+    pill_light_aria: "Toggle light",
+    pill_fullscreen_title: "Fullscreen",
+    pill_fullscreen_aria: "Fullscreen",
+    pill_pip_title: "Picture in Picture",
+    pill_pip_aria: "Picture in Picture (floating window)",
+    pill_more_title: "More options",
+    pill_more_aria: "More options",
+    pan_left_title: "Pan left",
+    pan_left_aria: "Pan camera left",
+    pan_right_title: "Pan right",
+    pan_right_aria: "Pan camera right",
+    maint_title: "Bosch cloud maintenance in progress",
+    maint_title_planned: "Bosch cloud maintenance scheduled",
+    maint_notice: "Maintenance notice",
+    maint_details: "Details on the Bosch Community",
+    maint_body: "Live image and snapshots may be limited during this window.",
+    maint_active: "in progress",
+    maint_announced: "announced",
+    maint_check_status: "Check status: Bosch Community",
+    maint_dismiss: "Dismiss",
+    privacy_stale_prefix_snapshot: "Last snapshot:",
+    maint_auto_return: "The cameras come back automatically once the cloud responds.",
+    privacy_stale_label: "Privacy mode — last image",
+    privacy_stale_prefix: "Last event:",
+    offline_title: "Camera Offline",
+    offline_no_conn: "No connection to Bosch Cloud",
+    offline_last_seen: "Last seen:",
+    ai_caption_prefix: "AI:",
+    multi_audio_muted: "Audio muted (another tab is playing audio for this camera)",
+    ed_cam_entity: "Camera entity *",
+    ed_cam_entity_hint: "Required — all other entities are derived automatically from the camera name.",
+    ed_no_cams: "No Bosch cameras detected. Enter <code>camera.bosch_xxx</code> manually, or finish the Bosch integration setup first.",
+    ed_not_set: "(not set yet)",
+    ed_title: "Title",
+    ed_title_opt_single: "(optional, overrides friendly name)",
+    ed_title_opt: "(optional)",
+    ed_title_ph_single: "e.g. Garden",
+    ed_title_ph_overview: "Bosch Cameras",
+    ed_h_design: "Design",
+    ed_h_design_all: "Design (for all tiles)",
+    ed_apple_style: "Apple-style glass overlay (default on)",
+    ed_theme: "Theme",
+    ed_theme_auto: "Auto (detect via user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Mode",
+    ed_mode_auto: "Auto (system light/dark)",
+    ed_mode_day: "Day",
+    ed_mode_night: "Night",
+    ed_minimal_single: "Minimal layout (more-menu hides all switches at first)",
+    ed_minimal_overview: "Minimal layout (switches behind the more-menu) — recommended for the grid",
+    ed_compact_single: "Compact tile (for overview grid: video + title pill only, no pill bar)",
+    ed_compact_overview: "Compact tile (video + title pill only, no pill bar)",
+    ed_show_title: "Show title pill (off = video only, no name overlay)",
+    ed_show_last_event: "Show last-event badge",
+    ed_show_audio: "Show audio button (sound + volume)",
+    ed_pan_overlay: "Pan arrows on the video (360 cameras)",
+    ed_pan_overlay_auto: "Auto (on hover, touch and fullscreen)",
+    ed_pan_overlay_always: "Always visible",
+    ed_pan_overlay_never: "Hidden (use the menu row)",
+    ed_hide_redundant_privacy: "Hide the redundant privacy row (already on the pill bar)",
+    ed_use_card_audio: "Use card audio settings (decouple from the global audio entities)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Integration default (don't override)",
+    ed_autoplay_lan: "LAN (auto-start on home network only)",
+    ed_autoplay_always: "Always",
+    ed_autoplay_never: "Never (tap-to-play gate)",
+    ed_autoplay_hint: "Controls when the live stream starts on its own. Empty keeps the integration-wide default untouched; a choice overrides it per card.",
+    ed_columns: "Columns",
+    ed_columns_auto: "Auto (breakpoint)",
+    ed_columns_1: "1 – full width",
+    ed_breakpoint: "Breakpoint – min width per tile (px)",
+    ed_breakpoint_hint: "On Auto: 1 column below, 2+ columns above this value. Default: 650 px",
+    ed_h_display: "Display",
+    ed_show_offline: "Show offline cameras",
+    ed_bosch_sort: "Sort by Bosch app order",
+    ed_h_advanced: "Advanced",
+    ed_border_radius: "Corner radius (CSS, e.g. 16px)",
+    ed_box_shadow: "Box shadow (CSS)",
+    ed_disable_webrtc: "Disable WebRTC (HLS only)",
+    ed_disable_webrtc_hint: "Always use HLS, skip the WebRTC connect attempt entirely — for setups where WebRTC (e.g. over a VPN) never works reliably.",
+    ed_webrtc_timeout: "WebRTC connect timeout (ms)",
+    ed_webrtc_timeout_hint: "How long to wait for WebRTC before falling back to HLS. Lower for a faster fallback on unreliable connections.",
+    ed_show_motion_zones: "Show motion-zone overlay",
+    ed_fs_auto_hide: "Auto-hide fullscreen controls after idle",
+    ed_motion_overlay: "Highlight motion in the live view (browser-side, while the card is open)",
+    ed_motion_objects: "Recognise people, animals and vehicles in the motion box (experimental; downloads a ~5 MB model from the internet)",
+    ed_motion_zones: "Motion ignore areas in % (x,y,width,height; separate several with ;)",
+    motion_label: "Motion",
+    accordion_notif_types: "Notification Types",
+    accordion_advanced: "Advanced",
+    accordion_auto_security: "Automation & Security",
+    accordion_automations: "Automations",
+    accordion_light_camera: "Light & Camera",
+    accordion_diagnostics: "Diagnostics",
+    accordion_services: "Services",
+    light_details_header: "Brightness & Colors",
+    light_front: "Front light",
+    light_top: "Top light",
+    light_bottom: "Bottom light",
+    light_top_bottom: "Top + Bottom",
+    light_slider_front: "Front",
+    light_slider_top: "Top",
+    light_slider_bottom: "Bottom",
+    light_slider_colortemp: "Color temp.",
+    privacy_short: "Privacy",
+    notif_section_title: "Notifications",
+    intercom_label: "Intercom",
+    quality_label: "Quality",
+    quality_auto: "Auto",
+    quality_high: "High (30 Mbps)",
+    quality_low: "Low (1.9 Mbps)",
+    quality_remote_fallback_hint: "Over a remote/VPN connection, \"Low\" may still use ~7.5 Mbps — Bosch's remote proxy doesn't support the 1.9 Mbps stream.",
+    notif_movement: "Movement",
+    notif_person: "Person",
+    notif_audio: "Audio",
+    notif_trouble: "Trouble",
+    notif_camera_alarm: "Camera alarm",
+    diag_timestamp: "Timestamp",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Motion detection",
+    record_sound: "Record sound",
+    privacy_sound: "Privacy sound",
+    light_on_motion: "Light on motion",
+    light_always_on: "Always on",
+    intrusion_detection: "Intrusion detection",
+    motion_sensitivity: "Sensitivity",
+    alarm_armed: "Alarm armed",
+    siren_75db: "Siren (75 dB)",
+    pre_alarm_led: "Pre-alarm (red LED)",
+    power_led: "Power LED",
+    color_temperature: "Color temperature",
+    color_top: "Top color",
+    color_bottom: "Bottom color",
+    status_led: "Status LED",
+    microphone_label: "Microphone",
+    show_motion_zones_btn: "Show motion zones",
+    show_privacy_masks_btn: "Show privacy masks",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Ambient light",
+    diag_motion_today: "Motion today",
+    diag_audio_today: "Audio today",
+    diag_schedules: "Schedules",
+    diag_motion_zones: "Motion zones",
+    diag_privacy_masks: "Privacy masks",
+    info_status: "Status",
+    info_connection: "Connection",
+    info_reaction: "Reaction",
+    info_reaction_tooltip: "Bosch API reaction time (LOCAL=500 ms, REMOTE=1000 ms). Not the player buffer — that's set via 'Buffer behavior' in the integration options.",
+    svc_snapshot: "Snapshot",
+    svc_read_zones: "Read zones",
+    svc_friends: "Friends",
+    svc_create_rule: "Create rule",
+    svc_light_schedule: "Light schedule",
+    svc_siren: "Siren",
+    svc_rule_creating: 'Creating rule "{name}"…',
+    svc_running: "{label} running…",
+    svc_done: "{label} done.",
+    pan_full_left_title: "Far left",
+    pan_full_left_aria: "Pan camera all the way left",
+    pan_left_short_title: "Left",
+    pan_center_title: "Center",
+    pan_center_aria: "Center camera",
+    pan_right_short_title: "Right",
+    pan_full_right_title: "Far right",
+    pan_full_right_aria: "Pan camera all the way right",
+    pill_pip_blocked_title: "Picture-in-Picture is active for another camera",
+    pill_fullscreen_exit_title: "Exit fullscreen",
+    pill_stream_title_start: "Start live stream",
+    pill_stream_title_stop: "Stop live stream",
+    schedules_none: "No schedules",
+    auth_expired_title: "Login expired",
+    auth_expired_sub: "Bosch cloud token invalid — sign in again to use the camera.",
+    auth_reauth_btn: "Sign in again",
+    maint_title_recent: "Bosch cloud maintenance announced",
+    outage_cam_singular: "camera",
+    outage_cam_plural: "cameras",
+    outage_auto_return_suffix: "will come back automatically once the cloud responds.",
+    outage_cloud_unreachable: "Bosch cloud unreachable",
+    outage_waiting_for_server: "waiting for the Bosch servers.",
+    no_bosch_cameras_found: "No Bosch cameras found.",
+    lan_reachable: "LAN reachable",
+    lan_not_reachable: "LAN not reachable",
+    lan_status_unknown: "LAN status unknown",
+    lan_cam_not_reachable: "Camera not reachable locally",
+    lan_status_unknown_cloud: "Status unknown — cloud data missing",
+    notif_maint_active_title: "Cloud maintenance in progress",
+    notif_maint_scheduled_title: "Cloud maintenance scheduled",
+    notif_maint_past_title: "Cloud maintenance ended",
+    notif_maint_limited_note: "Live view and snapshots may be limited.",
+    notif_maint_begin_label: "Start:",
+    notif_maint_end_label: "End:",
+    notif_maint_ended_prefix: "Ended",
+    notif_maint_resumed_note: "Cloud services should be back to normal.",
+    notif_details_link: "Details at Bosch →",
+    notif_cam_status_header: "Camera status",
+    notif_all_clear: "No Bosch cloud maintenance scheduled. All cameras reachable.",
+    badge_connecting: "Connecting",
+    stream_taking_longer: "Taking longer than expected, still trying…",
+    tap_to_play_label: "Tap to play",
+    tap_to_play_hint: 'Or enable "Auto-play videos" in the HA app settings',
+    lan_turn_on_title: "Turn {label} on",
+    lan_turn_off_title: "Turn {label} off",
+    state_on_short: "ON",
+    state_off_short: "OFF",
+    last_event_overlay_prefix: "Last:",
+    rule_default_name: "Rule {n}",
+    create_rule_title: "Create rule",
+    create_rule_name_label: "Rule name",
+    create_rule_name_default: "New rule",
+    create_rule_start_label: "Start time",
+    create_rule_end_label: "End time",
+    create_rule_cancel: "Cancel",
+    create_rule_submit: "Create",
+    weekday_sun: "Sun",
+    weekday_mon: "Mon",
+    weekday_tue: "Tue",
+    weekday_wed: "Wed",
+    weekday_thu: "Thu",
+    weekday_fri: "Fri",
+    weekday_sat: "Sat"
+  },
+  de: {
+    play_gate_label: "Stream starten",
+    play_gate_hint_remote: "Du bist remote — antippen zum Starten",
+    play_gate_hint_default: "Antippen, um den Live-Stream zu starten",
+    loading: "Lädt…",
+    hls_mode_banner: "HLS-Modus · höhere Latenz (kein WebRTC über Remote-Tunnel)",
+    cam_missing_title: "Kamera nicht vorhanden",
+    cam_missing_sub: "Diese Kamera-Entität existiert nicht — bitte camera_entity in der Karten-Konfiguration prüfen.",
+    delete: "Löschen",
+    height: "Höhe",
+    pick_color: "Farbe wählen",
+    volume: "Lautstärke",
+    audio_tap_for_sound: "Tippen für Ton",
+    audio_mute: "Ton stummschalten",
+    audio_unmute: "Ton einschalten",
+    audio_available_when_live: "Ton verfügbar, sobald der Live-Stream läuft",
+    sound_label: "Ton",
+    enable_sound: "Ton einschalten",
+    siren_confirm: "Sirene wirklich auslösen?",
+    siren_triggering: "Sirene wird ausgelöst…",
+    siren_unavailable: "Sirene nicht verfügbar für diese Kamera.",
+    schedules_zones: "Zeitpläne & Zonen",
+    nvr_no_recordings: "Keine Aufnahmen für diesen Tag",
+    nvr_segments_suffix: "Segment(e) — klicken zum Abspielen",
+    nvr_load_error: "Fehler beim Laden der Segmente",
+    nvr_loading_stream: "Lade Stream…",
+    nvr_playing: "Wiedergabe",
+    nvr_segment_error: "Fehler beim Laden des Segments",
+    nvr_loading_recordings: "Lade Aufnahmen…",
+    stream_warming_up: "Kamera wird aufgeweckt…",
+    stream_connecting: "Verbindung wird aufgebaut…",
+    stream_loading_hls: "HLS wird geladen…",
+    stream_starting: "Stream wird gestartet…",
+    stream_reconnecting: "Verbindung wird neu aufgebaut…",
+    stream_retrying: "Stream wird erneut versucht…",
+    loading_image: "Bild wird geladen…",
+    loading_refreshing: "Aktualisiere…",
+    loading_refreshing_image: "Aktualisiere Bild…",
+    loading_hint_remote: "Cloud-Stream — ca. 30–45 s bis erstes Bild, danach stabil",
+    loading_hint_local: "LAN-Stream — meist ca. 10–20 s, max. 35 s",
+    loading_hint_connecting: "Verbindung zur Kamera wird aufgebaut…",
+    pill_snapshot_aria: "Snapshot aufnehmen",
+    pill_stream_title: "Live-Stream",
+    pill_stream_aria: "Live-Stream starten oder stoppen",
+    pill_audio_title: "Ton",
+    pill_privacy_title: "Privat-Modus",
+    pill_privacy_aria: "Privat-Modus umschalten",
+    pill_light_title: "Licht",
+    pill_light_aria: "Licht umschalten",
+    pill_fullscreen_title: "Vollbild",
+    pill_fullscreen_aria: "Vollbild",
+    pill_pip_title: "Bild-im-Bild",
+    pill_pip_aria: "Bild-im-Bild (schwebendes Fenster)",
+    pill_more_title: "Mehr Optionen",
+    pill_more_aria: "Mehr Optionen",
+    pan_left_title: "Nach links schwenken",
+    pan_left_aria: "Kamera nach links schwenken",
+    pan_right_title: "Nach rechts schwenken",
+    pan_right_aria: "Kamera nach rechts schwenken",
+    maint_title: "Bosch-Cloud-Wartung läuft",
+    maint_title_planned: "Bosch-Cloud-Wartung geplant",
+    maint_notice: "Wartungsmeldung",
+    maint_details: "Details in der Bosch Community",
+    maint_body: "Live-Bild und Snapshots können in diesem Zeitfenster eingeschränkt sein.",
+    maint_active: "läuft",
+    maint_announced: "angekündigt",
+    maint_check_status: "Status prüfen: Bosch Community",
+    maint_dismiss: "Schließen",
+    privacy_stale_prefix_snapshot: "Letzter Snapshot:",
+    maint_auto_return: "Die Kameras kommen automatisch zurück, sobald die Cloud antwortet.",
+    privacy_stale_label: "Privatmodus — letztes Bild",
+    privacy_stale_prefix: "Letztes Ereignis:",
+    offline_title: "Kamera Offline",
+    offline_no_conn: "Keine Verbindung zur Bosch Cloud",
+    offline_last_seen: "Zuletzt gesehen:",
+    ai_caption_prefix: "KI:",
+    multi_audio_muted: "Ton stummgeschaltet (eine andere Karte gibt Ton für diese Kamera aus)",
+    ed_cam_entity: "Kamera-Entity *",
+    ed_cam_entity_hint: "Pflichtfeld — alle anderen Entities werden automatisch aus dem Camera-Namen abgeleitet.",
+    ed_no_cams: "Keine Bosch-Kameras erkannt. Trage <code>camera.bosch_xxx</code> manuell ein, oder schließe das Bosch-Integration-Setup zuerst ab.",
+    ed_not_set: "(noch nicht gesetzt)",
+    ed_title: "Titel",
+    ed_title_opt_single: "(optional, überschreibt Friendly-Name)",
+    ed_title_opt: "(optional)",
+    ed_title_ph_single: "z.B. Garten",
+    ed_title_ph_overview: "Bosch Kameras",
+    ed_h_design: "Design",
+    ed_h_design_all: "Design (für alle Kacheln)",
+    ed_apple_style: "Apple-Style Glass-Overlay aktiv (Default an)",
+    ed_theme: "Theme",
+    ed_theme_auto: "Auto (Erkennung via User-Agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Modus",
+    ed_mode_auto: "Auto (System Hell/Dunkel)",
+    ed_mode_day: "Tag",
+    ed_mode_night: "Nacht",
+    ed_minimal_single: "Minimal-Layout (Mehr-Menü versteckt zunächst alle Switches)",
+    ed_minimal_overview: "Minimal-Layout (Switches hinter dem Mehr-Menü) — empfohlen fürs Grid",
+    ed_compact_single: "Compact-Tile (für Overview-Grid: nur Video + Title-Pill, keine Pill-Bar)",
+    ed_compact_overview: "Compact-Tile (nur Video + Title-Pill, keine Pill-Bar)",
+    ed_show_title: "Titel-Pill anzeigen (aus = nur Video, ohne Namens-Overlay)",
+    ed_show_last_event: "Letztes-Ereignis-Badge anzeigen",
+    ed_show_audio: "Audio-Button anzeigen (Ton + Lautstärke)",
+    ed_pan_overlay: "Schwenk-Pfeile auf dem Video (360-Grad-Kameras)",
+    ed_pan_overlay_auto: "Automatisch (bei Hover, Touch und Vollbild)",
+    ed_pan_overlay_always: "Immer sichtbar",
+    ed_pan_overlay_never: "Ausgeblendet (Menü-Reihe nutzen)",
+    ed_hide_redundant_privacy: "Redundante Privat-Schalterzeile ausblenden (schon in der Pill-Bar)",
+    ed_use_card_audio: "Karten-eigene Audio-Einstellungen (von den globalen Audio-Entitäten entkoppeln)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Integration-Vorgabe (nicht überschreiben)",
+    ed_autoplay_lan: "LAN (Auto-Start nur im Heimnetz)",
+    ed_autoplay_always: "Immer",
+    ed_autoplay_never: "Nie (Tap-to-Play Gate)",
+    ed_autoplay_hint: "Steuert wann der Live-Stream automatisch loslegt. Leer lässt die Integration-weite Voreinstellung unangetastet; eine Auswahl überschreibt sie pro Karte.",
+    ed_columns: "Spalten",
+    ed_columns_auto: "Auto (Breakpoint)",
+    ed_columns_1: "1 – volle Breite",
+    ed_breakpoint: "Breakpoint – Mindestbreite pro Kachel (px)",
+    ed_breakpoint_hint: "Bei Auto: 1 Spalte unter, 2+ Spalten über diesem Wert. Standard: 650 px",
+    ed_h_display: "Anzeige",
+    ed_show_offline: "Offline-Kameras anzeigen",
+    ed_bosch_sort: "Nach Bosch-App-Reihenfolge sortieren",
+    ed_h_advanced: "Erweitert",
+    ed_border_radius: "Eckenradius (CSS, z.B. 16px)",
+    ed_box_shadow: "Schlagschatten (CSS)",
+    ed_disable_webrtc: "WebRTC deaktivieren (nur HLS)",
+    ed_disable_webrtc_hint: "Immer HLS verwenden, WebRTC-Verbindungsversuch komplett überspringen — für Setups, bei denen WebRTC (z. B. über VPN) nie zuverlässig funktioniert.",
+    ed_webrtc_timeout: "WebRTC-Verbindungs-Timeout (ms)",
+    ed_webrtc_timeout_hint: "Wie lange auf WebRTC gewartet wird, bevor auf HLS zurückgefallen wird. Niedriger für schnelleren Fallback bei unzuverlässigen Verbindungen.",
+    ed_show_motion_zones: "Bewegungszonen-Overlay anzeigen",
+    ed_fs_auto_hide: "Vollbild-Bedienelemente bei Inaktivität automatisch ausblenden",
+    ed_motion_overlay: "Bewegung im Livebild markieren (im Browser, solange die Karte geöffnet ist)",
+    ed_motion_objects: "Personen, Tiere und Fahrzeuge in der Bewegungsbox erkennen (experimentell; lädt ein ca. 5-MB-Modell aus dem Internet)",
+    ed_motion_zones: "Bewegungs-Ignorierbereiche in % (x,y,Breite,Höhe; mehrere mit ; trennen)",
+    motion_label: "Bewegung",
+    accordion_notif_types: "Benachrichtigungs-Typen",
+    accordion_advanced: "Erweitert",
+    accordion_auto_security: "Automatik & Sicherheit",
+    accordion_automations: "Automationen",
+    accordion_light_camera: "Licht & Kamera",
+    accordion_diagnostics: "Diagnose",
+    accordion_services: "Services",
+    light_details_header: "Helligkeit & Farben",
+    light_front: "Frontlicht",
+    light_top: "Oberes Licht",
+    light_bottom: "Unteres Licht",
+    light_top_bottom: "Oben + Unten",
+    light_slider_front: "Front",
+    light_slider_top: "Oben",
+    light_slider_bottom: "Unten",
+    light_slider_colortemp: "Farbt.",
+    privacy_short: "Privat",
+    notif_section_title: "Benachrichtigungen",
+    intercom_label: "Gegensprech.",
+    quality_label: "Qualität",
+    quality_auto: "Auto",
+    quality_high: "Hoch (30 Mbps)",
+    quality_low: "Niedrig (1.9 Mbps)",
+    quality_remote_fallback_hint: "Bei einer Remote-/VPN-Verbindung kann „Niedrig“ trotzdem ~7,5 Mbps verwenden — Boschs Remote-Proxy unterstützt den 1,9-Mbps-Stream nicht.",
+    notif_movement: "Bewegung",
+    notif_person: "Person",
+    notif_audio: "Audio",
+    notif_trouble: "Störung",
+    notif_camera_alarm: "Kamera-Alarm",
+    diag_timestamp: "Zeitstempel",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Bewegungserkennung",
+    record_sound: "Ton aufnehmen",
+    privacy_sound: "Privat-Ton",
+    light_on_motion: "Licht bei Bewegung",
+    light_always_on: "Dauerlicht",
+    intrusion_detection: "Einbrucherkennung",
+    motion_sensitivity: "Empfindlichkeit",
+    alarm_armed: "Alarmanlage scharf",
+    siren_75db: "Sirene (75 dB)",
+    pre_alarm_led: "Pre-Alarm (rote LED)",
+    power_led: "Power-LED",
+    color_temperature: "Farbtemperatur",
+    color_top: "Farbe Oben",
+    color_bottom: "Farbe Unten",
+    status_led: "Status-LED",
+    microphone_label: "Mikrofon",
+    show_motion_zones_btn: "Motion-Zonen anzeigen",
+    show_privacy_masks_btn: "Privacy-Masken anzeigen",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Umgebungslicht",
+    diag_motion_today: "Bewegung heute",
+    diag_audio_today: "Audio heute",
+    diag_schedules: "Zeitpläne",
+    diag_motion_zones: "Motion-Zonen",
+    diag_privacy_masks: "Privacy-Masken",
+    info_status: "Status",
+    info_connection: "Verbindung",
+    info_reaction: "Reaktion",
+    info_reaction_tooltip: "Bosch-API Reaktionszeit (LOCAL=500 ms, REMOTE=1000 ms). Nicht der Player-Puffer — den stellt 'Puffer-Verhalten' in den Integrations-Einstellungen ein.",
+    svc_snapshot: "Snapshot",
+    svc_read_zones: "Zonen lesen",
+    svc_friends: "Freunde",
+    svc_create_rule: "Regel erstellen",
+    svc_light_schedule: "Licht-Zeitplan",
+    svc_siren: "Sirene",
+    svc_rule_creating: 'Regel "{name}" wird erstellt...',
+    svc_running: "{label} wird ausgeführt...",
+    svc_done: "{label} abgeschlossen.",
+    pan_full_left_title: "Ganz links",
+    pan_full_left_aria: "Kamera ganz nach links schwenken",
+    pan_left_short_title: "Links",
+    pan_center_title: "Mitte",
+    pan_center_aria: "Kamera zentrieren",
+    pan_right_short_title: "Rechts",
+    pan_full_right_title: "Ganz rechts",
+    pan_full_right_aria: "Kamera ganz nach rechts schwenken",
+    pill_pip_blocked_title: "Bild-im-Bild läuft für eine andere Kamera",
+    pill_fullscreen_exit_title: "Vollbild verlassen",
+    pill_stream_title_start: "Live-Stream starten",
+    pill_stream_title_stop: "Live-Stream stoppen",
+    schedules_none: "Keine Zeitpläne",
+    auth_expired_title: "Anmeldung abgelaufen",
+    auth_expired_sub: "Bosch Cloud Token ungültig — erneut anmelden um die Kamera wieder zu nutzen.",
+    auth_reauth_btn: "Erneut anmelden",
+    maint_title_recent: "Bosch-Cloud-Wartung angekündigt",
+    outage_cam_singular: "Kamera",
+    outage_cam_plural: "Kameras",
+    outage_auto_return_suffix: "kommen automatisch zurück, sobald die Cloud antwortet.",
+    outage_cloud_unreachable: "Bosch-Cloud nicht erreichbar",
+    outage_waiting_for_server: "warten auf die Bosch-Server.",
+    no_bosch_cameras_found: "Keine Bosch-Kameras gefunden.",
+    lan_reachable: "LAN erreichbar",
+    lan_not_reachable: "LAN nicht erreichbar",
+    lan_status_unknown: "LAN-Status unbekannt",
+    lan_cam_not_reachable: "Kamera lokal nicht erreichbar",
+    lan_status_unknown_cloud: "Status unbekannt — Cloud-Daten fehlen",
+    notif_maint_active_title: "Cloud-Wartung läuft",
+    notif_maint_scheduled_title: "Cloud-Wartung geplant",
+    notif_maint_past_title: "Cloud-Wartung beendet",
+    notif_maint_limited_note: "Live-Bild und Snapshots ggf. eingeschränkt.",
+    notif_maint_begin_label: "Beginn:",
+    notif_maint_end_label: "Ende:",
+    notif_maint_ended_prefix: "Beendet",
+    notif_maint_resumed_note: "Cloud-Dienste sollten wieder normal funktionieren.",
+    notif_details_link: "Details bei Bosch →",
+    notif_cam_status_header: "Kamera-Status",
+    notif_all_clear: "Keine Bosch-Cloud-Wartung geplant. Alle Kameras erreichbar.",
+    badge_connecting: "Verbinde",
+    stream_taking_longer: "Dauert länger als erwartet, wird weiter versucht…",
+    tap_to_play_label: "Zum Abspielen tippen",
+    tap_to_play_hint: "Oder in den HA-App-Einstellungen „Videos automatisch abspielen“ aktivieren",
+    lan_turn_on_title: "{label} einschalten",
+    lan_turn_off_title: "{label} ausschalten",
+    state_on_short: "AN",
+    state_off_short: "AUS",
+    last_event_overlay_prefix: "Letztes:",
+    rule_default_name: "Regel {n}",
+    create_rule_title: "Regel erstellen",
+    create_rule_name_label: "Regel-Name",
+    create_rule_name_default: "Neue Regel",
+    create_rule_start_label: "Startzeit",
+    create_rule_end_label: "Endzeit",
+    create_rule_cancel: "Abbrechen",
+    create_rule_submit: "Erstellen",
+    weekday_sun: "So",
+    weekday_mon: "Mo",
+    weekday_tue: "Di",
+    weekday_wed: "Mi",
+    weekday_thu: "Do",
+    weekday_fri: "Fr",
+    weekday_sat: "Sa"
+  },
+  es: {
+    play_gate_label: "Iniciar stream",
+    play_gate_hint_remote: "Estás en una conexión remota — toca para iniciar",
+    play_gate_hint_default: "Toca para iniciar el stream en directo",
+    loading: "Cargando…",
+    hls_mode_banner: "Modo HLS · mayor latencia (sin WebRTC por túnel remoto)",
+    cam_missing_title: "Cámara no encontrada",
+    cam_missing_sub: "Esta entidad de cámara no existe — revisa el ajuste camera_entity de la tarjeta.",
+    delete: "Eliminar",
+    height: "Altura",
+    pick_color: "Elegir color",
+    volume: "Volumen",
+    audio_tap_for_sound: "Toca para activar el sonido",
+    audio_mute: "Silenciar sonido",
+    audio_unmute: "Activar sonido",
+    audio_available_when_live: "Sonido disponible cuando el stream en directo esté activo",
+    sound_label: "Sonido",
+    enable_sound: "Activar sonido",
+    siren_confirm: "¿Activar realmente la sirena?",
+    siren_triggering: "Activando sirena…",
+    siren_unavailable: "Sirena no disponible para esta cámara.",
+    schedules_zones: "Programaciones y zonas",
+    nvr_no_recordings: "Sin grabaciones para este día",
+    nvr_segments_suffix: "segmento(s) — clic para reproducir",
+    nvr_load_error: "Error al cargar los segmentos",
+    maint_title: "Mantenimiento de Bosch Cloud en curso",
+    maint_title_planned: "Mantenimiento de Bosch Cloud programado",
+    maint_notice: "Aviso de mantenimiento",
+    maint_details: "Detalles en la Bosch Community",
+    maint_body: "La imagen en directo y los snapshots pueden estar limitados durante este período.",
+    maint_active: "en curso",
+    maint_announced: "anunciado",
+    maint_check_status: "Comprobar estado: Bosch Community",
+    maint_dismiss: "Descartar",
+    privacy_stale_prefix_snapshot: "Última instantánea:",
+    maint_auto_return: "Las cámaras vuelven automáticamente cuando Bosch Cloud responde.",
+    privacy_stale_label: "Modo privacidad — última imagen",
+    privacy_stale_prefix: "Último evento:",
+    offline_title: "Cámara sin conexión",
+    offline_no_conn: "Sin conexión con Bosch Cloud",
+    offline_last_seen: "Visto por última vez:",
+    ai_caption_prefix: "IA:",
+    multi_audio_muted: "Audio silenciado (otra tarjeta reproduce audio de esta cámara)",
+    ed_cam_entity: "Entidad de cámara *",
+    ed_cam_entity_hint: "Obligatorio — el resto de entidades se derivan automáticamente del nombre de la cámara.",
+    ed_no_cams: "No se detectaron cámaras Bosch. Introduce <code>camera.bosch_xxx</code> manualmente o completa primero la configuración de la integración Bosch.",
+    ed_not_set: "(no configurado aún)",
+    ed_title: "Título",
+    ed_title_opt_single: "(opcional, reemplaza el nombre descriptivo)",
+    ed_title_opt: "(opcional)",
+    ed_title_ph_single: "p. ej. Jardín",
+    ed_title_ph_overview: "Bosch Cámaras",
+    ed_h_design: "Diseño",
+    ed_h_design_all: "Diseño (para todos los mosaicos)",
+    ed_apple_style: "Superposición de cristal estilo Apple (activo por defecto)",
+    ed_theme: "Tema",
+    ed_theme_auto: "Auto (detectar mediante user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Modo",
+    ed_mode_auto: "Auto (claro/oscuro del sistema)",
+    ed_mode_day: "Día",
+    ed_mode_night: "Noche",
+    ed_minimal_single: "Diseño mínimo (el menú adicional oculta todos los interruptores inicialmente)",
+    ed_minimal_overview: "Diseño mínimo (interruptores en el menú adicional) — recomendado para la cuadrícula",
+    ed_compact_single: "Mosaico compacto (para cuadrícula de resumen: solo vídeo + píldora de título, sin barra de píldoras)",
+    ed_compact_overview: "Mosaico compacto (solo vídeo + píldora de título, sin barra de píldoras)",
+    ed_show_title: "Mostrar píldora de título (desactivado = solo vídeo, sin superposición de nombre)",
+    ed_show_last_event: "Mostrar insignia del último evento",
+    ed_show_audio: "Mostrar botón de audio (sonido + volumen)",
+    ed_pan_overlay: "Flechas de giro sobre el vídeo (cámaras 360)",
+    ed_pan_overlay_auto: "Automático (al pasar el ratón, táctil y pantalla completa)",
+    ed_pan_overlay_always: "Siempre visible",
+    ed_pan_overlay_never: "Oculto (usar la fila del menú)",
+    ed_hide_redundant_privacy: "Ocultar la fila de privacidad redundante (ya en la barra)",
+    ed_use_card_audio: "Usar ajustes de audio de la tarjeta (desacoplar de las entidades de audio globales)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Predeterminado de la integración (sin anular)",
+    ed_autoplay_lan: "LAN (inicio automático solo en la red doméstica)",
+    ed_autoplay_always: "Siempre",
+    ed_autoplay_never: "Nunca (pantalla de toque para reproducir)",
+    ed_autoplay_hint: "Controla cuándo el stream en directo se inicia solo. Vacío mantiene el predeterminado global de la integración; una selección lo anula por tarjeta.",
+    ed_columns: "Columnas",
+    ed_columns_auto: "Auto (punto de ruptura)",
+    ed_columns_1: "1 – ancho completo",
+    ed_breakpoint: "Punto de ruptura – ancho mínimo por mosaico (px)",
+    ed_breakpoint_hint: "En Auto: 1 columna por debajo, 2+ columnas por encima de este valor. Predeterminado: 650 px",
+    ed_h_display: "Visualización",
+    ed_show_offline: "Mostrar cámaras sin conexión",
+    ed_bosch_sort: "Ordenar según el orden de la app Bosch",
+    ed_h_advanced: "Avanzado",
+    ed_border_radius: "Radio de esquina (CSS, p. ej. 16px)",
+    ed_box_shadow: "Sombra (CSS)",
+    ed_disable_webrtc: "Desactivar WebRTC (solo HLS)",
+    ed_disable_webrtc_hint: "Usar siempre HLS, omitiendo por completo el intento de conexión WebRTC — para configuraciones donde WebRTC (p. ej. por VPN) nunca funciona de forma fiable.",
+    ed_webrtc_timeout: "Tiempo de espera de conexión WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Cuánto esperar a WebRTC antes de recurrir a HLS. Reduce el valor para un cambio más rápido en conexiones poco fiables.",
+    ed_show_motion_zones: "Mostrar superposición de zonas de movimiento",
+    ed_fs_auto_hide: "Ocultar automáticamente los controles de pantalla completa tras inactividad",
+    ed_motion_overlay: "Resaltar movimiento en la vista en vivo (en el navegador, mientras la tarjeta esté abierta)",
+    ed_motion_objects: "Reconocer personas, animales y vehículos en el recuadro de movimiento (experimental; descarga un modelo de ~5 MB de internet)",
+    ed_motion_zones: "Zonas a ignorar en % (x,y,ancho,alto; varias con ;)",
+    motion_label: "Movimiento",
+    accordion_notif_types: "Tipos de notificación",
+    accordion_advanced: "Avanzado",
+    accordion_auto_security: "Automatización y seguridad",
+    accordion_automations: "Automatizaciones",
+    accordion_light_camera: "Luz y cámara",
+    accordion_diagnostics: "Diagnóstico",
+    accordion_services: "Servicios",
+    light_details_header: "Brillo y colores",
+    light_front: "Luz frontal",
+    light_top: "Luz superior",
+    light_bottom: "Luz inferior",
+    light_top_bottom: "Superior + Inferior",
+    light_slider_front: "Frontal",
+    light_slider_top: "Superior",
+    light_slider_bottom: "Inferior",
+    light_slider_colortemp: "Temp. color",
+    privacy_short: "Privacidad",
+    notif_section_title: "Notificaciones",
+    intercom_label: "Intercomunicador",
+    quality_label: "Calidad",
+    quality_auto: "Auto",
+    quality_high: "Alta (30 Mbps)",
+    quality_low: "Baja (1.9 Mbps)",
+    quality_remote_fallback_hint: 'En una conexión remota/VPN, "Baja" puede seguir usando ~7,5 Mbps — el proxy remoto de Bosch no admite el flujo de 1,9 Mbps.',
+    notif_movement: "Movimiento",
+    notif_person: "Persona",
+    notif_audio: "Audio",
+    notif_trouble: "Fallo",
+    notif_camera_alarm: "Alarma de cámara",
+    diag_timestamp: "Marca de tiempo",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Detección de movimiento",
+    record_sound: "Grabar sonido",
+    privacy_sound: "Sonido privado",
+    light_on_motion: "Luz con movimiento",
+    light_always_on: "Siempre encendida",
+    intrusion_detection: "Detección de intrusión",
+    motion_sensitivity: "Sensibilidad",
+    alarm_armed: "Alarma armada",
+    siren_75db: "Sirena (75 dB)",
+    pre_alarm_led: "Pre-alarma (LED rojo)",
+    power_led: "LED de encendido",
+    color_temperature: "Temperatura de color",
+    color_top: "Color superior",
+    color_bottom: "Color inferior",
+    status_led: "LED de estado",
+    microphone_label: "Micrófono",
+    show_motion_zones_btn: "Mostrar zonas de movimiento",
+    show_privacy_masks_btn: "Mostrar máscaras de privacidad",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Luz ambiental",
+    diag_motion_today: "Movimiento hoy",
+    diag_audio_today: "Audio hoy",
+    diag_schedules: "Horarios",
+    diag_motion_zones: "Zonas de movimiento",
+    diag_privacy_masks: "Máscaras de privacidad",
+    info_status: "Estado",
+    info_connection: "Conexión",
+    info_reaction: "Reacción",
+    info_reaction_tooltip: "Tiempo de reacción de la API de Bosch (LOCAL=500 ms, REMOTE=1000 ms). No es el búfer del reproductor — eso se ajusta en 'Comportamiento del búfer' en las opciones de la integración.",
+    svc_snapshot: "Instantánea",
+    svc_read_zones: "Leer zonas",
+    svc_friends: "Amigos",
+    svc_create_rule: "Crear regla",
+    svc_light_schedule: "Horario de luz",
+    svc_siren: "Sirena",
+    svc_rule_creating: 'Creando regla "{name}"…',
+    svc_running: "{label} en ejecución…",
+    svc_done: "{label} completado.",
+    pan_full_left_title: "Extremo izquierdo",
+    pan_full_left_aria: "Girar la cámara totalmente a la izquierda",
+    pan_left_short_title: "Izquierda",
+    pan_center_title: "Centro",
+    pan_center_aria: "Centrar cámara",
+    pan_right_short_title: "Derecha",
+    pan_full_right_title: "Extremo derecho",
+    pan_full_right_aria: "Girar la cámara totalmente a la derecha",
+    pill_pip_blocked_title: "Imagen en imagen activo para otra cámara",
+    pill_fullscreen_exit_title: "Salir de pantalla completa",
+    pill_stream_title_start: "Iniciar transmisión en vivo",
+    pill_stream_title_stop: "Detener transmisión en vivo",
+    schedules_none: "Sin horarios",
+    auth_expired_title: "Sesión caducada",
+    auth_expired_sub: "Token de Bosch Cloud no válido — inicia sesión de nuevo para usar la cámara.",
+    auth_reauth_btn: "Iniciar sesión de nuevo",
+    maint_title_recent: "Mantenimiento de Bosch Cloud anunciado",
+    outage_cam_singular: "cámara",
+    outage_cam_plural: "cámaras",
+    outage_auto_return_suffix: "volverán automáticamente en cuanto la nube responda.",
+    outage_cloud_unreachable: "Bosch Cloud inaccesible",
+    outage_waiting_for_server: "esperando a los servidores de Bosch.",
+    no_bosch_cameras_found: "No se encontraron cámaras Bosch.",
+    lan_reachable: "LAN accesible",
+    lan_not_reachable: "LAN no accesible",
+    lan_status_unknown: "Estado de LAN desconocido",
+    lan_cam_not_reachable: "Cámara no accesible localmente",
+    lan_status_unknown_cloud: "Estado desconocido — faltan datos de la nube",
+    notif_maint_active_title: "Mantenimiento de la nube en curso",
+    notif_maint_scheduled_title: "Mantenimiento de la nube programado",
+    notif_maint_past_title: "Mantenimiento de la nube finalizado",
+    notif_maint_limited_note: "La imagen en vivo y las instantáneas pueden estar limitadas.",
+    notif_maint_begin_label: "Inicio:",
+    notif_maint_end_label: "Fin:",
+    notif_maint_ended_prefix: "Finalizado",
+    notif_maint_resumed_note: "Los servicios en la nube deberían volver a la normalidad.",
+    notif_details_link: "Detalles en Bosch →",
+    notif_cam_status_header: "Estado de la cámara",
+    notif_all_clear: "No hay mantenimiento de Bosch Cloud programado. Todas las cámaras accesibles.",
+    badge_connecting: "Conectando",
+    stream_taking_longer: "Está tardando más de lo esperado, seguimos intentando…",
+    tap_to_play_label: "Toca para reproducir",
+    tap_to_play_hint: "O activa «Reproducir vídeos automáticamente» en los ajustes de la app de HA",
+    lan_turn_on_title: "Encender {label}",
+    lan_turn_off_title: "Apagar {label}",
+    state_on_short: "ON",
+    state_off_short: "OFF",
+    last_event_overlay_prefix: "Último:",
+    rule_default_name: "Regla {n}",
+    create_rule_title: "Crear regla",
+    create_rule_name_label: "Nombre de la regla",
+    create_rule_name_default: "Nueva regla",
+    create_rule_start_label: "Hora de inicio",
+    create_rule_end_label: "Hora de fin",
+    create_rule_cancel: "Cancelar",
+    create_rule_submit: "Crear",
+    weekday_sun: "Dom",
+    weekday_mon: "Lun",
+    weekday_tue: "Mar",
+    weekday_wed: "Mié",
+    weekday_thu: "Jue",
+    weekday_fri: "Vie",
+    weekday_sat: "Sáb"
+  },
+  fr: {
+    play_gate_label: "Démarrer le flux",
+    play_gate_hint_remote: "Vous êtes en connexion distante — appuyer pour démarrer",
+    play_gate_hint_default: "Appuyer pour démarrer le flux en direct",
+    loading: "Chargement…",
+    hls_mode_banner: "Mode HLS · latence plus élevée (pas de WebRTC via le tunnel distant)",
+    cam_missing_title: "Caméra introuvable",
+    cam_missing_sub: "Cette entité de caméra n'existe pas — vérifiez le paramètre camera_entity de la carte.",
+    delete: "Supprimer",
+    height: "Hauteur",
+    pick_color: "Choisir une couleur",
+    volume: "Volume",
+    audio_tap_for_sound: "Appuyer pour le son",
+    audio_mute: "Couper le son",
+    audio_unmute: "Activer le son",
+    audio_available_when_live: "Son disponible une fois le flux en direct actif",
+    sound_label: "Son",
+    enable_sound: "Activer le son",
+    siren_confirm: "Vraiment déclencher la sirène ?",
+    siren_triggering: "Déclenchement de la sirène…",
+    siren_unavailable: "Sirène non disponible pour cette caméra.",
+    schedules_zones: "Planifications & zones",
+    nvr_no_recordings: "Aucun enregistrement pour ce jour",
+    nvr_segments_suffix: "segment(s) — cliquer pour lire",
+    nvr_load_error: "Erreur lors du chargement des segments",
+    maint_title: "Maintenance Bosch Cloud en cours",
+    maint_title_planned: "Maintenance Bosch Cloud planifiée",
+    maint_notice: "Avis de maintenance",
+    maint_details: "Détails sur la Bosch Community",
+    maint_body: "L'image en direct et les snapshots peuvent être limités pendant cette fenêtre.",
+    maint_active: "en cours",
+    maint_announced: "annoncée",
+    maint_check_status: "Vérifier le statut : Bosch Community",
+    maint_dismiss: "Fermer",
+    privacy_stale_prefix_snapshot: "Dernier instantané :",
+    maint_auto_return: "Les caméras reviennent automatiquement dès que le cloud répond.",
+    privacy_stale_label: "Mode confidentialité — dernière image",
+    privacy_stale_prefix: "Dernier événement :",
+    offline_title: "Caméra hors ligne",
+    offline_no_conn: "Pas de connexion au cloud Bosch",
+    offline_last_seen: "Vu pour la dernière fois :",
+    ai_caption_prefix: "IA:",
+    multi_audio_muted: "Son coupé (une autre carte diffuse le son de cette caméra)",
+    ed_cam_entity: "Entité caméra *",
+    ed_cam_entity_hint: "Obligatoire — toutes les autres entités sont dérivées automatiquement du nom de la caméra.",
+    ed_no_cams: "Aucune caméra Bosch détectée. Saisir <code>camera.bosch_xxx</code> manuellement, ou terminer d'abord la configuration de l'intégration Bosch.",
+    ed_not_set: "(non défini)",
+    ed_title: "Titre",
+    ed_title_opt_single: "(optionnel, remplace le nom convivial)",
+    ed_title_opt: "(optionnel)",
+    ed_title_ph_single: "ex. Jardin",
+    ed_title_ph_overview: "Bosch Caméras",
+    ed_h_design: "Design",
+    ed_h_design_all: "Design (pour toutes les tuiles)",
+    ed_apple_style: "Superposition verre style Apple (activé par défaut)",
+    ed_theme: "Thème",
+    ed_theme_auto: "Auto (détection via agent utilisateur)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Mode",
+    ed_mode_auto: "Auto (clair/sombre système)",
+    ed_mode_day: "Jour",
+    ed_mode_night: "Nuit",
+    ed_minimal_single: "Mise en page minimale (le menu plus masque tous les interrupteurs au départ)",
+    ed_minimal_overview: "Mise en page minimale (interrupteurs dans le menu plus) — recommandé pour la grille",
+    ed_compact_single: "Tuile compacte (pour la grille : vidéo + pastille de titre uniquement, sans barre de pastilles)",
+    ed_compact_overview: "Tuile compacte (vidéo + pastille de titre uniquement, sans barre de pastilles)",
+    ed_show_title: "Afficher la pastille de titre (désactivé = vidéo uniquement, sans nom)",
+    ed_show_last_event: "Afficher le badge du dernier événement",
+    ed_show_audio: "Afficher le bouton audio (son + volume)",
+    ed_pan_overlay: "Flèches de panoramique sur la vidéo (caméras 360)",
+    ed_pan_overlay_auto: "Auto (au survol, tactile et plein écran)",
+    ed_pan_overlay_always: "Toujours visible",
+    ed_pan_overlay_never: "Masqué (utiliser la rangée du menu)",
+    ed_hide_redundant_privacy: "Masquer la ligne de confidentialité redondante (déjà dans la barre)",
+    ed_use_card_audio: "Utiliser les réglages audio de la carte (découpler des entités audio globales)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Défaut de l'intégration (ne pas remplacer)",
+    ed_autoplay_lan: "LAN (démarrage automatique sur le réseau domestique uniquement)",
+    ed_autoplay_always: "Toujours",
+    ed_autoplay_never: "Jamais (appuyer pour lire)",
+    ed_autoplay_hint: "Contrôle quand le flux en direct démarre automatiquement. Vide conserve le défaut global de l'intégration ; un choix le remplace par carte.",
+    ed_columns: "Colonnes",
+    ed_columns_auto: "Auto (point de rupture)",
+    ed_columns_1: "1 – pleine largeur",
+    ed_breakpoint: "Point de rupture – largeur minimale par tuile (px)",
+    ed_breakpoint_hint: "En Auto : 1 colonne en dessous, 2+ colonnes au-dessus de cette valeur. Défaut : 650 px",
+    ed_h_display: "Affichage",
+    ed_show_offline: "Afficher les caméras hors ligne",
+    ed_bosch_sort: "Trier selon l'ordre de l'app Bosch",
+    ed_h_advanced: "Avancé",
+    ed_border_radius: "Rayon des coins (CSS, p. ex. 16px)",
+    ed_box_shadow: "Ombre portée (CSS)",
+    ed_disable_webrtc: "Désactiver WebRTC (HLS uniquement)",
+    ed_disable_webrtc_hint: "Toujours utiliser HLS, en ignorant complètement la tentative de connexion WebRTC — pour les configurations où WebRTC (par ex. via VPN) ne fonctionne jamais de manière fiable.",
+    ed_webrtc_timeout: "Délai de connexion WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Durée d'attente de WebRTC avant de basculer vers HLS. Réduisez pour un repli plus rapide sur les connexions peu fiables.",
+    ed_show_motion_zones: "Afficher la superposition des zones de mouvement",
+    ed_fs_auto_hide: "Masquer automatiquement les commandes plein écran après inactivité",
+    ed_motion_overlay: "Mettre en évidence le mouvement dans la vue en direct (dans le navigateur, tant que la carte est ouverte)",
+    ed_motion_objects: "Reconnaître personnes, animaux et véhicules dans le cadre de mouvement (expérimental ; télécharge un modèle d'environ 5 Mo depuis Internet)",
+    ed_motion_zones: "Zones à ignorer en % (x,y,largeur,hauteur ; séparer par ;)",
+    motion_label: "Mouvement",
+    accordion_notif_types: "Types de notification",
+    accordion_advanced: "Avancé",
+    accordion_auto_security: "Automatisation et sécurité",
+    accordion_automations: "Automatisations",
+    accordion_light_camera: "Lumière et caméra",
+    accordion_diagnostics: "Diagnostic",
+    accordion_services: "Services",
+    light_details_header: "Luminosité et couleurs",
+    light_front: "Lumière avant",
+    light_top: "Lumière supérieure",
+    light_bottom: "Lumière inférieure",
+    light_top_bottom: "Haut + Bas",
+    light_slider_front: "Avant",
+    light_slider_top: "Haut",
+    light_slider_bottom: "Bas",
+    light_slider_colortemp: "Temp. couleur",
+    privacy_short: "Confidentialité",
+    notif_section_title: "Notifications",
+    intercom_label: "Interphone",
+    quality_label: "Qualité",
+    quality_auto: "Auto",
+    quality_high: "Élevée (30 Mbps)",
+    quality_low: "Faible (1.9 Mbps)",
+    quality_remote_fallback_hint: "Sur une connexion distante/VPN, « Faible » peut quand même utiliser ~7,5 Mbps — le proxy distant de Bosch ne prend pas en charge le flux à 1,9 Mbps.",
+    notif_movement: "Mouvement",
+    notif_person: "Personne",
+    notif_audio: "Audio",
+    notif_trouble: "Anomalie",
+    notif_camera_alarm: "Alarme caméra",
+    diag_timestamp: "Horodatage",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Détection de mouvement",
+    record_sound: "Enregistrer le son",
+    privacy_sound: "Son privé",
+    light_on_motion: "Lumière sur mouvement",
+    light_always_on: "Toujours allumée",
+    intrusion_detection: "Détection d'intrusion",
+    motion_sensitivity: "Sensibilité",
+    alarm_armed: "Alarme armée",
+    siren_75db: "Sirène (75 dB)",
+    pre_alarm_led: "Pré-alarme (LED rouge)",
+    power_led: "LED d'alimentation",
+    color_temperature: "Température de couleur",
+    color_top: "Couleur supérieure",
+    color_bottom: "Couleur inférieure",
+    status_led: "LED d'état",
+    microphone_label: "Microphone",
+    show_motion_zones_btn: "Afficher les zones de mouvement",
+    show_privacy_masks_btn: "Afficher les masques de confidentialité",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Luminosité ambiante",
+    diag_motion_today: "Mouvement aujourd'hui",
+    diag_audio_today: "Audio aujourd'hui",
+    diag_schedules: "Horaires",
+    diag_motion_zones: "Zones de mouvement",
+    diag_privacy_masks: "Masques de confidentialité",
+    info_status: "Statut",
+    info_connection: "Connexion",
+    info_reaction: "Réaction",
+    info_reaction_tooltip: "Temps de réaction de l'API Bosch (LOCAL=500 ms, REMOTE=1000 ms). Pas le tampon du lecteur — celui-ci se règle via « Comportement du tampon » dans les options de l'intégration.",
+    svc_snapshot: "Instantané",
+    svc_read_zones: "Lire les zones",
+    svc_friends: "Amis",
+    svc_create_rule: "Créer une règle",
+    svc_light_schedule: "Horaire lumière",
+    svc_siren: "Sirène",
+    svc_rule_creating: "Création de la règle « {name} »…",
+    svc_running: "{label} en cours…",
+    svc_done: "{label} terminé.",
+    pan_full_left_title: "Extrême gauche",
+    pan_full_left_aria: "Pivoter la caméra tout à fait à gauche",
+    pan_left_short_title: "Gauche",
+    pan_center_title: "Centre",
+    pan_center_aria: "Centrer la caméra",
+    pan_right_short_title: "Droite",
+    pan_full_right_title: "Extrême droite",
+    pan_full_right_aria: "Pivoter la caméra tout à fait à droite",
+    pill_pip_blocked_title: "Image dans l'image active pour une autre caméra",
+    pill_fullscreen_exit_title: "Quitter le plein écran",
+    pill_stream_title_start: "Démarrer le direct",
+    pill_stream_title_stop: "Arrêter le direct",
+    schedules_none: "Aucun horaire",
+    auth_expired_title: "Connexion expirée",
+    auth_expired_sub: "Jeton Bosch Cloud invalide — reconnectez-vous pour utiliser la caméra.",
+    auth_reauth_btn: "Se reconnecter",
+    maint_title_recent: "Maintenance Bosch Cloud annoncée",
+    outage_cam_singular: "caméra",
+    outage_cam_plural: "caméras",
+    outage_auto_return_suffix: "reviendront automatiquement dès que le cloud répondra.",
+    outage_cloud_unreachable: "Bosch Cloud inaccessible",
+    outage_waiting_for_server: "en attente des serveurs Bosch.",
+    no_bosch_cameras_found: "Aucune caméra Bosch trouvée.",
+    lan_reachable: "LAN accessible",
+    lan_not_reachable: "LAN inaccessible",
+    lan_status_unknown: "État LAN inconnu",
+    lan_cam_not_reachable: "Caméra inaccessible localement",
+    lan_status_unknown_cloud: "État inconnu — données cloud manquantes",
+    notif_maint_active_title: "Maintenance cloud en cours",
+    notif_maint_scheduled_title: "Maintenance cloud planifiée",
+    notif_maint_past_title: "Maintenance cloud terminée",
+    notif_maint_limited_note: "L'image en direct et les instantanés peuvent être limités.",
+    notif_maint_begin_label: "Début :",
+    notif_maint_end_label: "Fin :",
+    notif_maint_ended_prefix: "Terminée",
+    notif_maint_resumed_note: "Les services cloud devraient revenir à la normale.",
+    notif_details_link: "Détails chez Bosch →",
+    notif_cam_status_header: "État des caméras",
+    notif_all_clear: "Aucune maintenance Bosch Cloud prévue. Toutes les caméras accessibles.",
+    badge_connecting: "Connexion",
+    stream_taking_longer: "Cela prend plus de temps que prévu, nouvelle tentative…",
+    tap_to_play_label: "Appuyez pour lire",
+    tap_to_play_hint: "Ou activez « Lecture automatique des vidéos » dans les paramètres de l'app HA",
+    lan_turn_on_title: "Activer {label}",
+    lan_turn_off_title: "Désactiver {label}",
+    state_on_short: "ON",
+    state_off_short: "OFF",
+    last_event_overlay_prefix: "Dernier :",
+    rule_default_name: "Règle {n}",
+    create_rule_title: "Créer une règle",
+    create_rule_name_label: "Nom de la règle",
+    create_rule_name_default: "Nouvelle règle",
+    create_rule_start_label: "Heure de début",
+    create_rule_end_label: "Heure de fin",
+    create_rule_cancel: "Annuler",
+    create_rule_submit: "Créer",
+    weekday_sun: "Dim",
+    weekday_mon: "Lun",
+    weekday_tue: "Mar",
+    weekday_wed: "Mer",
+    weekday_thu: "Jeu",
+    weekday_fri: "Ven",
+    weekday_sat: "Sam"
+  },
+  it: {
+    play_gate_label: "Avvia stream",
+    play_gate_hint_remote: "Connessione remota — tocca per avviare",
+    play_gate_hint_default: "Tocca per avviare il live stream",
+    loading: "Caricamento…",
+    hls_mode_banner: "Modalità HLS · latenza maggiore (niente WebRTC sul tunnel remoto)",
+    cam_missing_title: "Telecamera non trovata",
+    cam_missing_sub: "Questa entità telecamera non esiste — controlla l'impostazione camera_entity della scheda.",
+    delete: "Elimina",
+    height: "Altezza",
+    pick_color: "Scegli colore",
+    volume: "Volume",
+    audio_tap_for_sound: "Tocca per l'audio",
+    audio_mute: "Disattiva audio",
+    audio_unmute: "Attiva audio",
+    audio_available_when_live: "Audio disponibile non appena il live stream è in esecuzione",
+    sound_label: "Audio",
+    enable_sound: "Attiva audio",
+    siren_confirm: "Attivare davvero la sirena?",
+    siren_triggering: "Attivazione sirena…",
+    siren_unavailable: "Sirena non disponibile per questa telecamera.",
+    schedules_zones: "Pianificazioni e zone",
+    nvr_no_recordings: "Nessuna registrazione per questo giorno",
+    nvr_segments_suffix: "segmento/i — clicca per riprodurre",
+    nvr_load_error: "Errore nel caricamento dei segmenti",
+    maint_title: "Manutenzione Bosch Cloud in corso",
+    maint_title_planned: "Manutenzione Bosch Cloud programmata",
+    maint_notice: "Avviso di manutenzione",
+    maint_details: "Dettagli sulla Bosch Community",
+    maint_body: "Immagine in diretta e Snapshot potrebbero essere limitati durante questa finestra.",
+    maint_active: "in corso",
+    maint_announced: "annunciata",
+    maint_check_status: "Verifica stato: Bosch Community",
+    maint_dismiss: "Chiudi",
+    privacy_stale_prefix_snapshot: "Ultima istantanea:",
+    maint_auto_return: "Le telecamere tornano automaticamente non appena il cloud risponde.",
+    privacy_stale_label: "Modalità privacy — ultima immagine",
+    privacy_stale_prefix: "Ultimo evento:",
+    offline_title: "Telecamera offline",
+    offline_no_conn: "Nessuna connessione al cloud Bosch",
+    offline_last_seen: "Visto l'ultima volta:",
+    ai_caption_prefix: "IA:",
+    multi_audio_muted: "Audio disattivato (un'altra scheda riproduce l'audio di questa telecamera)",
+    ed_cam_entity: "Entità telecamera *",
+    ed_cam_entity_hint: "Obbligatorio — tutte le altre entità vengono derivate automaticamente dal nome della telecamera.",
+    ed_no_cams: "Nessuna telecamera Bosch rilevata. Inserisci <code>camera.bosch_xxx</code> manualmente, oppure completa prima la configurazione dell'integrazione Bosch.",
+    ed_not_set: "(non ancora impostato)",
+    ed_title: "Titolo",
+    ed_title_opt_single: "(opzionale, sovrascrive il nome descrittivo)",
+    ed_title_opt: "(opzionale)",
+    ed_title_ph_single: "es. Giardino",
+    ed_title_ph_overview: "Bosch Telecamere",
+    ed_h_design: "Design",
+    ed_h_design_all: "Design (per tutte le celle)",
+    ed_apple_style: "Overlay vetro in stile Apple (attivo per impostazione predefinita)",
+    ed_theme: "Tema",
+    ed_theme_auto: "Auto (rileva tramite user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Modalità",
+    ed_mode_auto: "Auto (chiaro/scuro di sistema)",
+    ed_mode_day: "Giorno",
+    ed_mode_night: "Notte",
+    ed_minimal_single: "Layout minimale (il menu «altro» nasconde tutti gli interruttori inizialmente)",
+    ed_minimal_overview: "Layout minimale (interruttori nel menu «altro») — consigliato per la griglia",
+    ed_compact_single: "Cella compatta (per la griglia: solo video + pill titolo, nessuna barra pill)",
+    ed_compact_overview: "Cella compatta (solo video + pill titolo, nessuna barra pill)",
+    ed_show_title: "Mostra pill titolo (off = solo video, nessuna sovrimpressione nome)",
+    ed_show_last_event: "Mostra badge ultimo evento",
+    ed_show_audio: "Mostra pulsante audio (suono + volume)",
+    ed_pan_overlay: "Frecce di rotazione sul video (telecamere 360)",
+    ed_pan_overlay_auto: "Auto (al passaggio del mouse, tocco e schermo intero)",
+    ed_pan_overlay_always: "Sempre visibile",
+    ed_pan_overlay_never: "Nascosto (usa la riga del menu)",
+    ed_hide_redundant_privacy: "Nascondi la riga privacy ridondante (già nella barra)",
+    ed_use_card_audio: "Usa le impostazioni audio della scheda (disaccoppia dalle entità audio globali)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Impostazione predefinita dell'integrazione (non sovrascrivere)",
+    ed_autoplay_lan: "LAN (avvio automatico solo sulla rete domestica)",
+    ed_autoplay_always: "Sempre",
+    ed_autoplay_never: "Mai (overlay tocca-per-riprodurre)",
+    ed_autoplay_hint: "Controlla quando il live stream si avvia autonomamente. Vuoto mantiene il valore predefinito dell'integrazione; una scelta lo sovrascrive per card.",
+    ed_columns: "Colonne",
+    ed_columns_auto: "Auto (breakpoint)",
+    ed_columns_1: "1 – larghezza piena",
+    ed_breakpoint: "Breakpoint – larghezza minima per cella (px)",
+    ed_breakpoint_hint: "Con Auto: 1 colonna sotto, 2+ colonne sopra questo valore. Predefinito: 650 px",
+    ed_h_display: "Visualizzazione",
+    ed_show_offline: "Mostra telecamere offline",
+    ed_bosch_sort: "Ordina secondo l'ordine dell'app Bosch",
+    ed_h_advanced: "Avanzate",
+    ed_border_radius: "Raggio angoli (CSS, es. 16px)",
+    ed_box_shadow: "Ombra (CSS)",
+    ed_disable_webrtc: "Disattiva WebRTC (solo HLS)",
+    ed_disable_webrtc_hint: "Usa sempre HLS, saltando completamente il tentativo di connessione WebRTC — per configurazioni in cui WebRTC (ad es. tramite VPN) non funziona mai in modo affidabile.",
+    ed_webrtc_timeout: "Timeout di connessione WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Quanto attendere WebRTC prima di passare a HLS. Riduci per un fallback più rapido su connessioni inaffidabili.",
+    ed_show_motion_zones: "Mostra overlay zone di movimento",
+    ed_fs_auto_hide: "Nascondi automaticamente i controlli a schermo intero dopo inattività",
+    ed_motion_overlay: "Evidenzia il movimento nella vista live (nel browser, finché la scheda è aperta)",
+    ed_motion_objects: "Riconoscere persone, animali e veicoli nel riquadro di movimento (sperimentale; scarica un modello da ~5 MB da internet)",
+    ed_motion_zones: "Aree da ignorare in % (x,y,larghezza,altezza; separare con ;)",
+    motion_label: "Movimento",
+    accordion_notif_types: "Tipi di notifica",
+    accordion_advanced: "Avanzate",
+    accordion_auto_security: "Automazione e sicurezza",
+    accordion_automations: "Automazioni",
+    accordion_light_camera: "Luce e telecamera",
+    accordion_diagnostics: "Diagnostica",
+    accordion_services: "Servizi",
+    light_details_header: "Luminosità e colori",
+    light_front: "Luce frontale",
+    light_top: "Luce superiore",
+    light_bottom: "Luce inferiore",
+    light_top_bottom: "Superiore + Inferiore",
+    light_slider_front: "Frontale",
+    light_slider_top: "Superiore",
+    light_slider_bottom: "Inferiore",
+    light_slider_colortemp: "Temp. colore",
+    privacy_short: "Privacy",
+    notif_section_title: "Notifiche",
+    intercom_label: "Citofono",
+    quality_label: "Qualità",
+    quality_auto: "Auto",
+    quality_high: "Alta (30 Mbps)",
+    quality_low: "Bassa (1.9 Mbps)",
+    quality_remote_fallback_hint: 'Su una connessione remota/VPN, "Bassa" potrebbe comunque usare ~7,5 Mbps — il proxy remoto di Bosch non supporta lo stream a 1,9 Mbps.',
+    notif_movement: "Movimento",
+    notif_person: "Persona",
+    notif_audio: "Audio",
+    notif_trouble: "Anomalia",
+    notif_camera_alarm: "Allarme telecamera",
+    diag_timestamp: "Timestamp",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Rilevamento movimento",
+    record_sound: "Registra suono",
+    privacy_sound: "Suono privacy",
+    light_on_motion: "Luce su movimento",
+    light_always_on: "Sempre accesa",
+    intrusion_detection: "Rilevamento intrusione",
+    motion_sensitivity: "Sensibilità",
+    alarm_armed: "Allarme inserito",
+    siren_75db: "Sirena (75 dB)",
+    pre_alarm_led: "Pre-allarme (LED rosso)",
+    power_led: "LED di alimentazione",
+    color_temperature: "Temperatura colore",
+    color_top: "Colore superiore",
+    color_bottom: "Colore inferiore",
+    status_led: "LED di stato",
+    microphone_label: "Microfono",
+    show_motion_zones_btn: "Mostra zone di movimento",
+    show_privacy_masks_btn: "Mostra maschere privacy",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Luce ambientale",
+    diag_motion_today: "Movimento oggi",
+    diag_audio_today: "Audio oggi",
+    diag_schedules: "Pianificazioni",
+    diag_motion_zones: "Zone di movimento",
+    diag_privacy_masks: "Maschere privacy",
+    info_status: "Stato",
+    info_connection: "Connessione",
+    info_reaction: "Reazione",
+    info_reaction_tooltip: "Tempo di reazione dell'API Bosch (LOCAL=500 ms, REMOTE=1000 ms). Non è il buffer del player — si imposta in 'Comportamento buffer' nelle opzioni dell'integrazione.",
+    svc_snapshot: "Istantanea",
+    svc_read_zones: "Leggi zone",
+    svc_friends: "Amici",
+    svc_create_rule: "Crea regola",
+    svc_light_schedule: "Programma luce",
+    svc_siren: "Sirena",
+    svc_rule_creating: 'Creazione regola "{name}"…',
+    svc_running: "{label} in esecuzione…",
+    svc_done: "{label} completato.",
+    pan_full_left_title: "Tutto a sinistra",
+    pan_full_left_aria: "Ruota la telecamera tutta a sinistra",
+    pan_left_short_title: "Sinistra",
+    pan_center_title: "Centro",
+    pan_center_aria: "Centra telecamera",
+    pan_right_short_title: "Destra",
+    pan_full_right_title: "Tutto a destra",
+    pan_full_right_aria: "Ruota la telecamera tutta a destra",
+    pill_pip_blocked_title: "Immagine nell'immagine attiva per un'altra telecamera",
+    pill_fullscreen_exit_title: "Esci da schermo intero",
+    pill_stream_title_start: "Avvia streaming live",
+    pill_stream_title_stop: "Ferma streaming live",
+    schedules_none: "Nessuna pianificazione",
+    auth_expired_title: "Accesso scaduto",
+    auth_expired_sub: "Token Bosch Cloud non valido — accedi di nuovo per usare la fotocamera.",
+    auth_reauth_btn: "Accedi di nuovo",
+    maint_title_recent: "Manutenzione Bosch Cloud annunciata",
+    outage_cam_singular: "fotocamera",
+    outage_cam_plural: "fotocamere",
+    outage_auto_return_suffix: "torneranno automaticamente non appena il cloud risponderà.",
+    outage_cloud_unreachable: "Bosch Cloud non raggiungibile",
+    outage_waiting_for_server: "in attesa dei server Bosch.",
+    no_bosch_cameras_found: "Nessuna fotocamera Bosch trovata.",
+    lan_reachable: "LAN raggiungibile",
+    lan_not_reachable: "LAN non raggiungibile",
+    lan_status_unknown: "Stato LAN sconosciuto",
+    lan_cam_not_reachable: "Fotocamera non raggiungibile localmente",
+    lan_status_unknown_cloud: "Stato sconosciuto — dati cloud mancanti",
+    notif_maint_active_title: "Manutenzione cloud in corso",
+    notif_maint_scheduled_title: "Manutenzione cloud pianificata",
+    notif_maint_past_title: "Manutenzione cloud terminata",
+    notif_maint_limited_note: "L'immagine live e gli snapshot potrebbero essere limitati.",
+    notif_maint_begin_label: "Inizio:",
+    notif_maint_end_label: "Fine:",
+    notif_maint_ended_prefix: "Terminata",
+    notif_maint_resumed_note: "I servizi cloud dovrebbero tornare alla normalità.",
+    notif_details_link: "Dettagli su Bosch →",
+    notif_cam_status_header: "Stato fotocamera",
+    notif_all_clear: "Nessuna manutenzione Bosch Cloud pianificata. Tutte le fotocamere raggiungibili.",
+    badge_connecting: "Connessione",
+    stream_taking_longer: "Sta richiedendo più tempo del previsto, nuovo tentativo…",
+    tap_to_play_label: "Tocca per avviare",
+    tap_to_play_hint: "Oppure attiva «Riproduzione automatica video» nelle impostazioni dell'app HA",
+    lan_turn_on_title: "Accendi {label}",
+    lan_turn_off_title: "Spegni {label}",
+    state_on_short: "ON",
+    state_off_short: "OFF",
+    last_event_overlay_prefix: "Ultimo:",
+    rule_default_name: "Regola {n}",
+    create_rule_title: "Crea regola",
+    create_rule_name_label: "Nome regola",
+    create_rule_name_default: "Nuova regola",
+    create_rule_start_label: "Ora di inizio",
+    create_rule_end_label: "Ora di fine",
+    create_rule_cancel: "Annulla",
+    create_rule_submit: "Crea",
+    weekday_sun: "Dom",
+    weekday_mon: "Lun",
+    weekday_tue: "Mar",
+    weekday_wed: "Mer",
+    weekday_thu: "Gio",
+    weekday_fri: "Ven",
+    weekday_sat: "Sab"
+  },
+  nl: {
+    play_gate_label: "Stream starten",
+    play_gate_hint_remote: "U bent op een externe verbinding — tik om te starten",
+    play_gate_hint_default: "Tik om de live stream te starten",
+    loading: "Laden…",
+    hls_mode_banner: "HLS-modus · hogere latentie (geen WebRTC via externe tunnel)",
+    cam_missing_title: "Camera niet gevonden",
+    cam_missing_sub: "Deze camera-entiteit bestaat niet — controleer de camera_entity-instelling van de kaart.",
+    delete: "Verwijderen",
+    height: "Hoogte",
+    pick_color: "Kleur kiezen",
+    volume: "Volume",
+    audio_tap_for_sound: "Tik voor geluid",
+    audio_mute: "Geluid dempen",
+    audio_unmute: "Geluid inschakelen",
+    audio_available_when_live: "Geluid beschikbaar zodra de live stream actief is",
+    sound_label: "Geluid",
+    enable_sound: "Geluid inschakelen",
+    siren_confirm: "Sirene echt activeren?",
+    siren_triggering: "Sirene wordt geactiveerd…",
+    siren_unavailable: "Sirene niet beschikbaar voor deze camera.",
+    schedules_zones: "Schema's & zones",
+    nvr_no_recordings: "Geen opnames voor deze dag",
+    nvr_segments_suffix: "segment(en) — klik om af te spelen",
+    nvr_load_error: "Fout bij laden van segmenten",
+    maint_title: "Bosch cloud-onderhoud actief",
+    maint_title_planned: "Bosch cloud-onderhoud gepland",
+    maint_notice: "Onderhoudsmelding",
+    maint_details: "Details op de Bosch Community",
+    maint_body: "Live beeld en snapshots kunnen beperkt zijn tijdens dit venster.",
+    maint_active: "actief",
+    maint_announced: "aangekondigd",
+    maint_check_status: "Status controleren: Bosch Community",
+    maint_dismiss: "Sluiten",
+    privacy_stale_prefix_snapshot: "Laatste momentopname:",
+    maint_auto_return: "De camera's komen automatisch terug zodra de cloud reageert.",
+    privacy_stale_label: "Privacymodus — laatste afbeelding",
+    privacy_stale_prefix: "Laatste gebeurtenis:",
+    offline_title: "Camera offline",
+    offline_no_conn: "Geen verbinding met Bosch Cloud",
+    offline_last_seen: "Laatst gezien:",
+    ai_caption_prefix: "AI:",
+    multi_audio_muted: "Geluid gedempt (een andere kaart speelt audio af voor deze camera)",
+    ed_cam_entity: "Camera-entiteit *",
+    ed_cam_entity_hint: "Verplicht — alle andere entiteiten worden automatisch afgeleid van de cameranaam.",
+    ed_no_cams: "Geen Bosch-camera's gevonden. Voer <code>camera.bosch_xxx</code> handmatig in, of voltooi eerst de Bosch-integratieconfiguratie.",
+    ed_not_set: "(nog niet ingesteld)",
+    ed_title: "Titel",
+    ed_title_opt_single: "(optioneel, overschrijft de beschrijvende naam)",
+    ed_title_opt: "(optioneel)",
+    ed_title_ph_single: "bijv. Tuin",
+    ed_title_ph_overview: "Bosch Camera's",
+    ed_h_design: "Ontwerp",
+    ed_h_design_all: "Ontwerp (voor alle tegels)",
+    ed_apple_style: "Apple-stijl glazen overlay (standaard aan)",
+    ed_theme: "Thema",
+    ed_theme_auto: "Auto (detecteren via user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Modus",
+    ed_mode_auto: "Auto (systeem licht/donker)",
+    ed_mode_day: "Dag",
+    ed_mode_night: "Nacht",
+    ed_minimal_single: "Minimale indeling (meer-menu verbergt alle schakelaars aanvankelijk)",
+    ed_minimal_overview: "Minimale indeling (schakelaars achter het meer-menu) — aanbevolen voor het raster",
+    ed_compact_single: "Compacte tegel (voor overzichtsraster: video + titelpil, geen pilbalk)",
+    ed_compact_overview: "Compacte tegel (video + titelpil, geen pilbalk)",
+    ed_show_title: "Titelpil tonen (uit = alleen video, geen naamoverlay)",
+    ed_show_last_event: "Badge laatste gebeurtenis tonen",
+    ed_show_audio: "Audioknop tonen (geluid + volume)",
+    ed_pan_overlay: "Draaipijlen op de video (360-camera's)",
+    ed_pan_overlay_auto: "Automatisch (bij hover, touch en volledig scherm)",
+    ed_pan_overlay_always: "Altijd zichtbaar",
+    ed_pan_overlay_never: "Verborgen (gebruik de menurij)",
+    ed_hide_redundant_privacy: "Verberg de overbodige privacyrij (al in de pillenbalk)",
+    ed_use_card_audio: "Kaart-eigen audio-instellingen (loskoppelen van de globale audio-entiteiten)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Integratiestandaard (niet overschrijven)",
+    ed_autoplay_lan: "LAN (automatisch starten alleen op thuisnetwerk)",
+    ed_autoplay_always: "Altijd",
+    ed_autoplay_never: "Nooit (tik-om-te-spelen-scherm)",
+    ed_autoplay_hint: "Bepaalt wanneer de live stream vanzelf start. Leeg laat de integratiestandaard ongewijzigd; een keuze overschrijft die per kaart.",
+    ed_columns: "Kolommen",
+    ed_columns_auto: "Auto (breekpunt)",
+    ed_columns_1: "1 – volledige breedte",
+    ed_breakpoint: "Breekpunt – minimale breedte per tegel (px)",
+    ed_breakpoint_hint: "Bij Auto: 1 kolom eronder, 2+ kolommen erboven. Standaard: 650 px",
+    ed_h_display: "Weergave",
+    ed_show_offline: "Offline camera's tonen",
+    ed_bosch_sort: "Sorteren op Bosch-app-volgorde",
+    ed_h_advanced: "Geavanceerd",
+    ed_border_radius: "Hoekradius (CSS, bijv. 16px)",
+    ed_box_shadow: "Slagschaduw (CSS)",
+    ed_disable_webrtc: "WebRTC uitschakelen (alleen HLS)",
+    ed_disable_webrtc_hint: "Altijd HLS gebruiken, de WebRTC-verbindingspoging volledig overslaan — voor situaties waarin WebRTC (bijv. via VPN) nooit betrouwbaar werkt.",
+    ed_webrtc_timeout: "WebRTC-verbindingstimeout (ms)",
+    ed_webrtc_timeout_hint: "Hoe lang op WebRTC wachten voordat wordt teruggevallen op HLS. Verlaag voor een snellere terugval bij onbetrouwbare verbindingen.",
+    ed_show_motion_zones: "Bewegingszone-overlay tonen",
+    ed_fs_auto_hide: "Volledig scherm-bediening automatisch verbergen bij inactiviteit",
+    ed_motion_overlay: "Beweging markeren in de livebeeld (in de browser, zolang de kaart open is)",
+    ed_motion_objects: "Personen, dieren en voertuigen herkennen in het bewegingskader (experimenteel; downloadt een model van ~5 MB van internet)",
+    ed_motion_zones: "Negeergebieden in % (x,y,breedte,hoogte; scheid met ;)",
+    motion_label: "Beweging",
+    accordion_notif_types: "Meldingstypen",
+    accordion_advanced: "Geavanceerd",
+    accordion_auto_security: "Automatisering & Beveiliging",
+    accordion_automations: "Automatiseringen",
+    accordion_light_camera: "Licht & Camera",
+    accordion_diagnostics: "Diagnose",
+    accordion_services: "Services",
+    light_details_header: "Helderheid & Kleuren",
+    light_front: "Voorlicht",
+    light_top: "Bovenlicht",
+    light_bottom: "Onderlicht",
+    light_top_bottom: "Boven + Onder",
+    light_slider_front: "Voor",
+    light_slider_top: "Boven",
+    light_slider_bottom: "Onder",
+    light_slider_colortemp: "Kleurtemp.",
+    privacy_short: "Privacy",
+    notif_section_title: "Meldingen",
+    intercom_label: "Intercom",
+    quality_label: "Kwaliteit",
+    quality_auto: "Auto",
+    quality_high: "Hoog (30 Mbps)",
+    quality_low: "Laag (1.9 Mbps)",
+    quality_remote_fallback_hint: 'Bij een externe/VPN-verbinding kan "Laag" nog steeds ~7,5 Mbps gebruiken — Bosch\'s externe proxy ondersteunt de 1,9 Mbps-stream niet.',
+    notif_movement: "Beweging",
+    notif_person: "Persoon",
+    notif_audio: "Audio",
+    notif_trouble: "Storing",
+    notif_camera_alarm: "Cameraalarm",
+    diag_timestamp: "Tijdstempel",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Bewegingsdetectie",
+    record_sound: "Geluid opnemen",
+    privacy_sound: "Privacygeluid",
+    light_on_motion: "Licht bij beweging",
+    light_always_on: "Altijd aan",
+    intrusion_detection: "Inbraakdetectie",
+    motion_sensitivity: "Gevoeligheid",
+    alarm_armed: "Alarm ingeschakeld",
+    siren_75db: "Sirene (75 dB)",
+    pre_alarm_led: "Voor-alarm (rode LED)",
+    power_led: "Voedings-LED",
+    color_temperature: "Kleurtemperatuur",
+    color_top: "Kleur boven",
+    color_bottom: "Kleur onder",
+    status_led: "Status-LED",
+    microphone_label: "Microfoon",
+    show_motion_zones_btn: "Bewegingszones tonen",
+    show_privacy_masks_btn: "Privacymaskers tonen",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Omgevingslicht",
+    diag_motion_today: "Beweging vandaag",
+    diag_audio_today: "Audio vandaag",
+    diag_schedules: "Schema's",
+    diag_motion_zones: "Bewegingszones",
+    diag_privacy_masks: "Privacymaskers",
+    info_status: "Status",
+    info_connection: "Verbinding",
+    info_reaction: "Reactie",
+    info_reaction_tooltip: "Bosch API-reactietijd (LOCAL=500 ms, REMOTE=1000 ms). Niet de spelerbuffer — die stel je in via 'Bufferedrag' in de integratie-opties.",
+    svc_snapshot: "Snapshot",
+    svc_read_zones: "Zones lezen",
+    svc_friends: "Vrienden",
+    svc_create_rule: "Regel maken",
+    svc_light_schedule: "Lichtschema",
+    svc_siren: "Sirene",
+    svc_rule_creating: 'Regel "{name}" wordt aangemaakt…',
+    svc_running: "{label} wordt uitgevoerd…",
+    svc_done: "{label} voltooid.",
+    pan_full_left_title: "Helemaal links",
+    pan_full_left_aria: "Camera helemaal naar links draaien",
+    pan_left_short_title: "Links",
+    pan_center_title: "Midden",
+    pan_center_aria: "Camera centreren",
+    pan_right_short_title: "Rechts",
+    pan_full_right_title: "Helemaal rechts",
+    pan_full_right_aria: "Camera helemaal naar rechts draaien",
+    pill_pip_blocked_title: "Beeld-in-beeld actief voor een andere camera",
+    pill_fullscreen_exit_title: "Volledig scherm verlaten",
+    pill_stream_title_start: "Livestream starten",
+    pill_stream_title_stop: "Livestream stoppen",
+    schedules_none: "Geen schema's",
+    auth_expired_title: "Aanmelding verlopen",
+    auth_expired_sub: "Bosch Cloud-token ongeldig — meld je opnieuw aan om de camera te gebruiken.",
+    auth_reauth_btn: "Opnieuw aanmelden",
+    maint_title_recent: "Bosch Cloud-onderhoud aangekondigd",
+    outage_cam_singular: "camera",
+    outage_cam_plural: "camera's",
+    outage_auto_return_suffix: "komen automatisch terug zodra de cloud reageert.",
+    outage_cloud_unreachable: "Bosch Cloud niet bereikbaar",
+    outage_waiting_for_server: "wachten op de Bosch-servers.",
+    no_bosch_cameras_found: "Geen Bosch-camera's gevonden.",
+    lan_reachable: "LAN bereikbaar",
+    lan_not_reachable: "LAN niet bereikbaar",
+    lan_status_unknown: "LAN-status onbekend",
+    lan_cam_not_reachable: "Camera lokaal niet bereikbaar",
+    lan_status_unknown_cloud: "Status onbekend — cloudgegevens ontbreken",
+    notif_maint_active_title: "Cloud-onderhoud bezig",
+    notif_maint_scheduled_title: "Cloud-onderhoud gepland",
+    notif_maint_past_title: "Cloud-onderhoud beëindigd",
+    notif_maint_limited_note: "Live-beeld en snapshots kunnen beperkt zijn.",
+    notif_maint_begin_label: "Start:",
+    notif_maint_end_label: "Einde:",
+    notif_maint_ended_prefix: "Beëindigd",
+    notif_maint_resumed_note: "Cloudservices zouden weer normaal moeten werken.",
+    notif_details_link: "Details bij Bosch →",
+    notif_cam_status_header: "Camerastatus",
+    notif_all_clear: "Geen Bosch Cloud-onderhoud gepland. Alle camera's bereikbaar.",
+    badge_connecting: "Verbinden",
+    stream_taking_longer: "Duurt langer dan verwacht, we blijven het proberen…",
+    tap_to_play_label: "Tik om af te spelen",
+    tap_to_play_hint: "Of schakel “Video's automatisch afspelen” in bij de HA-app-instellingen",
+    lan_turn_on_title: "{label} inschakelen",
+    lan_turn_off_title: "{label} uitschakelen",
+    state_on_short: "AAN",
+    state_off_short: "UIT",
+    last_event_overlay_prefix: "Laatste:",
+    rule_default_name: "Regel {n}",
+    create_rule_title: "Regel aanmaken",
+    create_rule_name_label: "Regelnaam",
+    create_rule_name_default: "Nieuwe regel",
+    create_rule_start_label: "Starttijd",
+    create_rule_end_label: "Eindtijd",
+    create_rule_cancel: "Annuleren",
+    create_rule_submit: "Aanmaken",
+    weekday_sun: "Zo",
+    weekday_mon: "Ma",
+    weekday_tue: "Di",
+    weekday_wed: "Wo",
+    weekday_thu: "Do",
+    weekday_fri: "Vr",
+    weekday_sat: "Za"
+  },
+  pl: {
+    play_gate_label: "Uruchom strumień",
+    play_gate_hint_remote: "Jesteś połączony zdalnie — dotknij, aby uruchomić",
+    play_gate_hint_default: "Dotknij, aby uruchomić transmisję na żywo",
+    loading: "Ładowanie…",
+    hls_mode_banner: "Tryb HLS · większe opóźnienie (brak WebRTC przez zdalny tunel)",
+    cam_missing_title: "Nie znaleziono kamery",
+    cam_missing_sub: "Ta encja kamery nie istnieje — sprawdź ustawienie camera_entity karty.",
+    delete: "Usuń",
+    height: "Wysokość",
+    pick_color: "Wybierz kolor",
+    volume: "Głośność",
+    audio_tap_for_sound: "Dotknij, aby włączyć dźwięk",
+    audio_mute: "Wycisz dźwięk",
+    audio_unmute: "Włącz dźwięk",
+    audio_available_when_live: "Dźwięk dostępny po uruchomieniu transmisji na żywo",
+    sound_label: "Dźwięk",
+    enable_sound: "Włącz dźwięk",
+    siren_confirm: "Na pewno uruchomić syrenę?",
+    siren_triggering: "Uruchamianie syreny…",
+    siren_unavailable: "Syrena niedostępna dla tej kamery.",
+    schedules_zones: "Harmonogramy i strefy",
+    nvr_no_recordings: "Brak nagrań dla tego dnia",
+    nvr_segments_suffix: "segment(y) — kliknij, aby odtworzyć",
+    nvr_load_error: "Błąd ładowania segmentów",
+    maint_title: "Trwa konserwacja chmury Bosch",
+    maint_title_planned: "Zaplanowana konserwacja chmury Bosch",
+    maint_notice: "Komunikat o konserwacji",
+    maint_details: "Szczegóły na Bosch Community",
+    maint_body: "Podgląd na żywo i migawki mogą być ograniczone w tym czasie.",
+    maint_active: "w toku",
+    maint_announced: "ogłoszona",
+    maint_check_status: "Sprawdź status: Bosch Community",
+    maint_dismiss: "Zamknij",
+    privacy_stale_prefix_snapshot: "Ostatni zrzut:",
+    maint_auto_return: "Kamery wrócą automatycznie po przywróceniu chmury.",
+    privacy_stale_label: "Tryb prywatności — ostatni obraz",
+    privacy_stale_prefix: "Ostatnie zdarzenie:",
+    offline_title: "Kamera offline",
+    offline_no_conn: "Brak połączenia z chmurą Bosch",
+    offline_last_seen: "Ostatnio widziano:",
+    ai_caption_prefix: "AI:",
+    multi_audio_muted: "Dźwięk wyciszony (inna karta odtwarza dźwięk tej kamery)",
+    ed_cam_entity: "Encja kamery *",
+    ed_cam_entity_hint: "Wymagane — wszystkie pozostałe encje są automatycznie wyprowadzane z nazwy kamery.",
+    ed_no_cams: "Nie wykryto kamer Bosch. Wpisz <code>camera.bosch_xxx</code> ręcznie lub najpierw zakończ konfigurację integracji Bosch.",
+    ed_not_set: "(jeszcze nie ustawiono)",
+    ed_title: "Tytuł",
+    ed_title_opt_single: "(opcjonalnie, zastępuje przyjazną nazwę)",
+    ed_title_opt: "(opcjonalnie)",
+    ed_title_ph_single: "np. Ogród",
+    ed_title_ph_overview: "Bosch Kamery",
+    ed_h_design: "Wygląd",
+    ed_h_design_all: "Wygląd (dla wszystkich kafelków)",
+    ed_apple_style: "Szklana nakładka w stylu Apple (domyślnie włączona)",
+    ed_theme: "Motyw",
+    ed_theme_auto: "Auto (wykryj na podstawie user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Tryb",
+    ed_mode_auto: "Auto (jasny/ciemny systemowy)",
+    ed_mode_day: "Dzienny",
+    ed_mode_night: "Nocny",
+    ed_minimal_single: "Minimalny układ (menu rozwijane ukrywa wszystkie przełączniki na początku)",
+    ed_minimal_overview: "Minimalny układ (przełączniki w menu rozwijanym) — zalecane dla siatki",
+    ed_compact_single: "Kompaktowy kafelek (dla siatki: tylko wideo i pasek tytułu, bez paska przycisków)",
+    ed_compact_overview: "Kompaktowy kafelek (tylko wideo i pasek tytułu, bez paska przycisków)",
+    ed_show_title: "Pokaż pasek tytułu (wył. = tylko wideo, bez nakładki nazwy)",
+    ed_show_last_event: "Pokaż znacznik ostatniego zdarzenia",
+    ed_show_audio: "Pokaż przycisk audio (dźwięk i głośność)",
+    ed_pan_overlay: "Strzałki obrotu na wideo (kamery 360)",
+    ed_pan_overlay_auto: "Automatycznie (po najechaniu, dotyk i pełny ekran)",
+    ed_pan_overlay_always: "Zawsze widoczne",
+    ed_pan_overlay_never: "Ukryte (użyj wiersza menu)",
+    ed_hide_redundant_privacy: "Ukryj zbędny wiersz prywatności (już na pasku)",
+    ed_use_card_audio: "Użyj ustawień audio karty (odłącz od globalnych encji audio)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Domyślne integracji (bez nadpisania)",
+    ed_autoplay_lan: "LAN (automatyczny start tylko w sieci domowej)",
+    ed_autoplay_always: "Zawsze",
+    ed_autoplay_never: "Nigdy (brama dotyk-aby-odtworzyć)",
+    ed_autoplay_hint: "Określa, kiedy transmisja na żywo uruchamia się samoczynnie. Puste zachowuje domyślne ustawienie całej integracji; wybranie opcji nadpisuje je osobno dla tej karty.",
+    ed_columns: "Kolumny",
+    ed_columns_auto: "Auto (punkt przełamania)",
+    ed_columns_1: "1 – pełna szerokość",
+    ed_breakpoint: "Punkt przełamania — minimalna szerokość kafelka (px)",
+    ed_breakpoint_hint: "Przy Auto: 1 kolumna poniżej, 2+ kolumny powyżej tej wartości. Domyślnie: 650 px",
+    ed_h_display: "Wyświetlanie",
+    ed_show_offline: "Pokaż kamery offline",
+    ed_bosch_sort: "Sortuj według kolejności w aplikacji Bosch",
+    ed_h_advanced: "Zaawansowane",
+    ed_border_radius: "Promień zaokrąglenia (CSS, np. 16px)",
+    ed_box_shadow: "Cień (CSS)",
+    ed_disable_webrtc: "Wyłącz WebRTC (tylko HLS)",
+    ed_disable_webrtc_hint: "Zawsze używaj HLS, całkowicie pomijając próbę połączenia WebRTC — dla konfiguracji, w których WebRTC (np. przez VPN) nigdy nie działa niezawodnie.",
+    ed_webrtc_timeout: "Limit czasu połączenia WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Jak długo czekać na WebRTC przed przełączeniem na HLS. Zmniejsz dla szybszego przełączenia przy niestabilnych połączeniach.",
+    ed_show_motion_zones: "Pokaż nakładkę stref ruchu",
+    ed_fs_auto_hide: "Automatycznie ukrywaj elementy sterujące pełnego ekranu po bezczynności",
+    ed_motion_overlay: "Zaznacz ruch w podglądzie na żywo (w przeglądarce, gdy karta jest otwarta)",
+    ed_motion_objects: "Rozpoznawaj osoby, zwierzęta i pojazdy w ramce ruchu (eksperymentalne; pobiera model ok. 5 MB z internetu)",
+    ed_motion_zones: "Obszary ignorowane w % (x,y,szerokość,wysokość; rozdziel średnikiem)",
+    motion_label: "Ruch",
+    accordion_notif_types: "Typy powiadomień",
+    accordion_advanced: "Zaawansowane",
+    accordion_auto_security: "Automatyka i bezpieczeństwo",
+    accordion_automations: "Automatyzacje",
+    accordion_light_camera: "Światło i kamera",
+    accordion_diagnostics: "Diagnostyka",
+    accordion_services: "Usługi",
+    light_details_header: "Jasność i kolory",
+    light_front: "Światło przednie",
+    light_top: "Górne światło",
+    light_bottom: "Dolne światło",
+    light_top_bottom: "Góra + Dół",
+    light_slider_front: "Przód",
+    light_slider_top: "Góra",
+    light_slider_bottom: "Dół",
+    light_slider_colortemp: "Temp. barwowa",
+    privacy_short: "Prywatność",
+    notif_section_title: "Powiadomienia",
+    intercom_label: "Domofon",
+    quality_label: "Jakość",
+    quality_auto: "Auto",
+    quality_high: "Wysoka (30 Mbps)",
+    quality_low: "Niska (1.9 Mbps)",
+    quality_remote_fallback_hint: "Przy zdalnym/VPN połączeniu opcja „Niska” może nadal używać ~7,5 Mbps — zdalny serwer proxy Bosch nie obsługuje strumienia 1,9 Mbps.",
+    notif_movement: "Ruch",
+    notif_person: "Osoba",
+    notif_audio: "Audio",
+    notif_trouble: "Usterka",
+    notif_camera_alarm: "Alarm kamery",
+    diag_timestamp: "Znacznik czasu",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Wykrywanie ruchu",
+    record_sound: "Nagrywaj dźwięk",
+    privacy_sound: "Dźwięk prywatności",
+    light_on_motion: "Światło przy ruchu",
+    light_always_on: "Zawsze włączone",
+    intrusion_detection: "Wykrywanie włamania",
+    motion_sensitivity: "Czułość",
+    alarm_armed: "Alarm uzbrojony",
+    siren_75db: "Syrena (75 dB)",
+    pre_alarm_led: "Przed-alarm (czerwona LED)",
+    power_led: "LED zasilania",
+    color_temperature: "Temperatura barwowa",
+    color_top: "Kolor góra",
+    color_bottom: "Kolor dół",
+    status_led: "LED statusu",
+    microphone_label: "Mikrofon",
+    show_motion_zones_btn: "Pokaż strefy ruchu",
+    show_privacy_masks_btn: "Pokaż maski prywatności",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Światło otoczenia",
+    diag_motion_today: "Ruch dzisiaj",
+    diag_audio_today: "Audio dzisiaj",
+    diag_schedules: "Harmonogramy",
+    diag_motion_zones: "Strefy ruchu",
+    diag_privacy_masks: "Maski prywatności",
+    info_status: "Status",
+    info_connection: "Połączenie",
+    info_reaction: "Reakcja",
+    info_reaction_tooltip: "Czas reakcji API Bosch (LOCAL=500 ms, REMOTE=1000 ms). Nie bufor odtwarzacza — ten ustawia się w 'Zachowanie bufora' w opcjach integracji.",
+    svc_snapshot: "Zrzut",
+    svc_read_zones: "Odczytaj strefy",
+    svc_friends: "Znajomi",
+    svc_create_rule: "Utwórz regułę",
+    svc_light_schedule: "Harmonogram światła",
+    svc_siren: "Syrena",
+    svc_rule_creating: 'Tworzenie reguły "{name}"…',
+    svc_running: "{label} w trakcie…",
+    svc_done: "{label} zakończone.",
+    pan_full_left_title: "Całkiem w lewo",
+    pan_full_left_aria: "Obróć kamerę całkiem w lewo",
+    pan_left_short_title: "Lewo",
+    pan_center_title: "Środek",
+    pan_center_aria: "Wyśrodkuj kamerę",
+    pan_right_short_title: "Prawo",
+    pan_full_right_title: "Całkiem w prawo",
+    pan_full_right_aria: "Obróć kamerę całkiem w prawo",
+    pill_pip_blocked_title: "Obraz w obrazie aktywny dla innej kamery",
+    pill_fullscreen_exit_title: "Zakończ pełny ekran",
+    pill_stream_title_start: "Rozpocznij transmisję na żywo",
+    pill_stream_title_stop: "Zatrzymaj transmisję na żywo",
+    schedules_none: "Brak harmonogramów",
+    auth_expired_title: "Sesja wygasła",
+    auth_expired_sub: "Nieprawidłowy token Bosch Cloud — zaloguj się ponownie, aby korzystać z kamery.",
+    auth_reauth_btn: "Zaloguj się ponownie",
+    maint_title_recent: "Ogłoszono konserwację Bosch Cloud",
+    outage_cam_singular: "kamera",
+    outage_cam_plural: "kamery",
+    outage_auto_return_suffix: "wrócą automatycznie, gdy chmura odpowie.",
+    outage_cloud_unreachable: "Bosch Cloud niedostępny",
+    outage_waiting_for_server: "oczekiwanie na serwery Bosch.",
+    no_bosch_cameras_found: "Nie znaleziono kamer Bosch.",
+    lan_reachable: "LAN dostępny",
+    lan_not_reachable: "LAN niedostępny",
+    lan_status_unknown: "Nieznany status LAN",
+    lan_cam_not_reachable: "Kamera niedostępna lokalnie",
+    lan_status_unknown_cloud: "Status nieznany — brak danych z chmury",
+    notif_maint_active_title: "Trwa konserwacja chmury",
+    notif_maint_scheduled_title: "Zaplanowana konserwacja chmury",
+    notif_maint_past_title: "Konserwacja chmury zakończona",
+    notif_maint_limited_note: "Obraz na żywo i migawki mogą być ograniczone.",
+    notif_maint_begin_label: "Początek:",
+    notif_maint_end_label: "Koniec:",
+    notif_maint_ended_prefix: "Zakończono",
+    notif_maint_resumed_note: "Usługi chmurowe powinny wrócić do normy.",
+    notif_details_link: "Szczegóły u Bosch →",
+    notif_cam_status_header: "Status kamery",
+    notif_all_clear: "Brak zaplanowanej konserwacji Bosch Cloud. Wszystkie kamery dostępne.",
+    badge_connecting: "Łączenie",
+    stream_taking_longer: "Trwa to dłużej niż oczekiwano, wciąż próbujemy…",
+    tap_to_play_label: "Dotknij, aby odtworzyć",
+    tap_to_play_hint: "Lub włącz „Automatyczne odtwarzanie wideo” w ustawieniach aplikacji HA",
+    lan_turn_on_title: "Włącz {label}",
+    lan_turn_off_title: "Wyłącz {label}",
+    state_on_short: "WŁ",
+    state_off_short: "WYŁ",
+    last_event_overlay_prefix: "Ostatnie:",
+    rule_default_name: "Reguła {n}",
+    create_rule_title: "Utwórz regułę",
+    create_rule_name_label: "Nazwa reguły",
+    create_rule_name_default: "Nowa reguła",
+    create_rule_start_label: "Czas rozpoczęcia",
+    create_rule_end_label: "Czas zakończenia",
+    create_rule_cancel: "Anuluj",
+    create_rule_submit: "Utwórz",
+    weekday_sun: "Nd",
+    weekday_mon: "Pn",
+    weekday_tue: "Wt",
+    weekday_wed: "Śr",
+    weekday_thu: "Czw",
+    weekday_fri: "Pt",
+    weekday_sat: "Sb"
+  },
+  pt: {
+    play_gate_label: "Iniciar stream",
+    play_gate_hint_remote: "Está numa ligação remota — toque para iniciar",
+    play_gate_hint_default: "Toque para iniciar o stream ao vivo",
+    loading: "A carregar…",
+    hls_mode_banner: "Modo HLS · maior latência (sem WebRTC pelo túnel remoto)",
+    cam_missing_title: "Câmara não encontrada",
+    cam_missing_sub: "Esta entidade de câmara não existe — verifique a definição camera_entity do cartão.",
+    delete: "Eliminar",
+    height: "Altura",
+    pick_color: "Escolher cor",
+    volume: "Volume",
+    audio_tap_for_sound: "Toque para som",
+    audio_mute: "Desativar som",
+    audio_unmute: "Ativar som",
+    audio_available_when_live: "Som disponível assim que o stream ao vivo estiver a funcionar",
+    sound_label: "Som",
+    enable_sound: "Ativar som",
+    siren_confirm: "Ativar a sirene mesmo assim?",
+    siren_triggering: "A ativar sirene…",
+    siren_unavailable: "Sirene não disponível para esta câmara.",
+    schedules_zones: "Agendamentos e zonas",
+    nvr_no_recordings: "Sem gravações para este dia",
+    nvr_segments_suffix: "segmento(s) — clique para reproduzir",
+    nvr_load_error: "Erro ao carregar segmentos",
+    maint_title: "Manutenção da cloud Bosch em curso",
+    maint_title_planned: "Manutenção da cloud Bosch agendada",
+    maint_notice: "Aviso de manutenção",
+    maint_details: "Detalhes na Bosch Community",
+    maint_body: "A imagem ao vivo e os snapshots podem estar limitados durante esta janela.",
+    maint_active: "em curso",
+    maint_announced: "anunciada",
+    maint_check_status: "Verificar estado: Bosch Community",
+    maint_dismiss: "Dispensar",
+    privacy_stale_prefix_snapshot: "Último instantâneo:",
+    maint_auto_return: "As câmaras voltam automaticamente assim que a cloud responder.",
+    privacy_stale_label: "Modo privacidade — última imagem",
+    privacy_stale_prefix: "Último evento:",
+    offline_title: "Câmara offline",
+    offline_no_conn: "Sem ligação à Bosch Cloud",
+    offline_last_seen: "Visto pela última vez:",
+    ai_caption_prefix: "IA:",
+    multi_audio_muted: "Áudio desativado (outro cartão está a reproduzir áudio desta câmara)",
+    ed_cam_entity: "Entidade de câmara *",
+    ed_cam_entity_hint: "Obrigatório — todas as outras entidades são derivadas automaticamente do nome da câmara.",
+    ed_no_cams: "Nenhuma câmara Bosch detectada. Introduza <code>camera.bosch_xxx</code> manualmente ou conclua primeiro a configuração da integração Bosch.",
+    ed_not_set: "(não definido ainda)",
+    ed_title: "Título",
+    ed_title_opt_single: "(opcional, substitui o nome amigável)",
+    ed_title_opt: "(opcional)",
+    ed_title_ph_single: "ex. Jardim",
+    ed_title_ph_overview: "Bosch Câmaras",
+    ed_h_design: "Design",
+    ed_h_design_all: "Design (para todos os mosaicos)",
+    ed_apple_style: "Sobreposição de vidro estilo Apple (ativado por predefinição)",
+    ed_theme: "Tema",
+    ed_theme_auto: "Auto (detetar via agente de utilizador)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Modo",
+    ed_mode_auto: "Auto (claro/escuro do sistema)",
+    ed_mode_day: "Dia",
+    ed_mode_night: "Noite",
+    ed_minimal_single: "Disposição mínima (o menu adicional oculta todos os interruptores inicialmente)",
+    ed_minimal_overview: "Disposição mínima (interruptores no menu adicional) — recomendado para a grelha",
+    ed_compact_single: "Mosaico compacto (para grelha de visão geral: apenas vídeo + pílula de título, sem barra de pílulas)",
+    ed_compact_overview: "Mosaico compacto (apenas vídeo + pílula de título, sem barra de pílulas)",
+    ed_show_title: "Mostrar pílula de título (desativado = apenas vídeo, sem sobreposição de nome)",
+    ed_show_last_event: "Mostrar distintivo do último evento",
+    ed_show_audio: "Mostrar botão de áudio (som + volume)",
+    ed_pan_overlay: "Setas de rotação no vídeo (câmaras 360)",
+    ed_pan_overlay_auto: "Automático (ao passar o rato, toque e ecrã inteiro)",
+    ed_pan_overlay_always: "Sempre visível",
+    ed_pan_overlay_never: "Oculto (usar a linha do menu)",
+    ed_hide_redundant_privacy: "Ocultar a linha de privacidade redundante (já na barra)",
+    ed_use_card_audio: "Usar definições de áudio do cartão (desacoplar das entidades de áudio globais)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Predefinição da integração (não substituir)",
+    ed_autoplay_lan: "LAN (iniciar automaticamente apenas na rede doméstica)",
+    ed_autoplay_always: "Sempre",
+    ed_autoplay_never: "Nunca (ecrã de toque para reproduzir)",
+    ed_autoplay_hint: "Controla quando o stream ao vivo inicia por si mesmo. Vazio mantém a predefinição global da integração; uma opção substitui-a por cartão.",
+    ed_columns: "Colunas",
+    ed_columns_auto: "Auto (ponto de quebra)",
+    ed_columns_1: "1 – largura total",
+    ed_breakpoint: "Ponto de quebra – largura mínima por mosaico (px)",
+    ed_breakpoint_hint: "Em Auto: 1 coluna abaixo, 2+ colunas acima deste valor. Predefinição: 650 px",
+    ed_h_display: "Visualização",
+    ed_show_offline: "Mostrar câmaras offline",
+    ed_bosch_sort: "Ordenar pela ordem da app Bosch",
+    ed_h_advanced: "Avançado",
+    ed_border_radius: "Raio dos cantos (CSS, ex. 16px)",
+    ed_box_shadow: "Sombra (CSS)",
+    ed_disable_webrtc: "Desativar WebRTC (apenas HLS)",
+    ed_disable_webrtc_hint: "Usar sempre HLS, ignorando completamente a tentativa de ligação WebRTC — para configurações em que o WebRTC (por ex. via VPN) nunca funciona de forma fiável.",
+    ed_webrtc_timeout: "Tempo limite de ligação WebRTC (ms)",
+    ed_webrtc_timeout_hint: "Quanto tempo esperar pelo WebRTC antes de recorrer ao HLS. Reduza para um recurso mais rápido em ligações pouco fiáveis.",
+    ed_show_motion_zones: "Mostrar sobreposição de zonas de movimento",
+    ed_fs_auto_hide: "Ocultar automaticamente os controlos de ecrã inteiro após inatividade",
+    ed_motion_overlay: "Realçar movimento na vista em direto (no navegador, enquanto o cartão estiver aberto)",
+    ed_motion_objects: "Reconhecer pessoas, animais e veículos na caixa de movimento (experimental; descarrega um modelo de ~5 MB da internet)",
+    ed_motion_zones: "Áreas a ignorar em % (x,y,largura,altura; várias com ;)",
+    motion_label: "Movimento",
+    accordion_notif_types: "Tipos de notificação",
+    accordion_advanced: "Avançado",
+    accordion_auto_security: "Automação e segurança",
+    accordion_automations: "Automações",
+    accordion_light_camera: "Luz e câmara",
+    accordion_diagnostics: "Diagnóstico",
+    accordion_services: "Serviços",
+    light_details_header: "Brilho e cores",
+    light_front: "Luz frontal",
+    light_top: "Luz superior",
+    light_bottom: "Luz inferior",
+    light_top_bottom: "Superior + Inferior",
+    light_slider_front: "Frontal",
+    light_slider_top: "Superior",
+    light_slider_bottom: "Inferior",
+    light_slider_colortemp: "Temp. cor",
+    privacy_short: "Privacidade",
+    notif_section_title: "Notificações",
+    intercom_label: "Intercomunicador",
+    quality_label: "Qualidade",
+    quality_auto: "Auto",
+    quality_high: "Alta (30 Mbps)",
+    quality_low: "Baixa (1.9 Mbps)",
+    quality_remote_fallback_hint: 'Numa ligação remota/VPN, "Baixa" pode continuar a usar ~7,5 Mbps — o proxy remoto da Bosch não suporta o stream de 1,9 Mbps.',
+    notif_movement: "Movimento",
+    notif_person: "Pessoa",
+    notif_audio: "Áudio",
+    notif_trouble: "Falha",
+    notif_camera_alarm: "Alarme da câmara",
+    diag_timestamp: "Marca temporal",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Deteção de movimento",
+    record_sound: "Gravar som",
+    privacy_sound: "Som de privacidade",
+    light_on_motion: "Luz ao movimento",
+    light_always_on: "Sempre ligada",
+    intrusion_detection: "Deteção de intrusão",
+    motion_sensitivity: "Sensibilidade",
+    alarm_armed: "Alarme armado",
+    siren_75db: "Sirene (75 dB)",
+    pre_alarm_led: "Pré-alarme (LED vermelho)",
+    power_led: "LED de alimentação",
+    color_temperature: "Temperatura de cor",
+    color_top: "Cor superior",
+    color_bottom: "Cor inferior",
+    status_led: "LED de estado",
+    microphone_label: "Microfone",
+    show_motion_zones_btn: "Mostrar zonas de movimento",
+    show_privacy_masks_btn: "Mostrar máscaras de privacidade",
+    diag_wifi: "WiFi",
+    diag_firmware: "Firmware",
+    diag_ambient_light: "Luz ambiente",
+    diag_motion_today: "Movimento hoje",
+    diag_audio_today: "Áudio hoje",
+    diag_schedules: "Horários",
+    diag_motion_zones: "Zonas de movimento",
+    diag_privacy_masks: "Máscaras de privacidade",
+    info_status: "Estado",
+    info_connection: "Ligação",
+    info_reaction: "Reação",
+    info_reaction_tooltip: "Tempo de reação da API Bosch (LOCAL=500 ms, REMOTE=1000 ms). Não é o buffer do leitor — esse é definido em 'Comportamento do buffer' nas opções da integração.",
+    svc_snapshot: "Captura",
+    svc_read_zones: "Ler zonas",
+    svc_friends: "Amigos",
+    svc_create_rule: "Criar regra",
+    svc_light_schedule: "Horário de luz",
+    svc_siren: "Sirene",
+    svc_rule_creating: 'A criar regra "{name}"…',
+    svc_running: "{label} em execução…",
+    svc_done: "{label} concluído.",
+    pan_full_left_title: "Extremo esquerdo",
+    pan_full_left_aria: "Rodar a câmara totalmente para a esquerda",
+    pan_left_short_title: "Esquerda",
+    pan_center_title: "Centro",
+    pan_center_aria: "Centrar câmara",
+    pan_right_short_title: "Direita",
+    pan_full_right_title: "Extremo direito",
+    pan_full_right_aria: "Rodar a câmara totalmente para a direita",
+    pill_pip_blocked_title: "Imagem em imagem ativo para outra câmara",
+    pill_fullscreen_exit_title: "Sair do ecrã inteiro",
+    pill_stream_title_start: "Iniciar transmissão ao vivo",
+    pill_stream_title_stop: "Parar transmissão ao vivo",
+    schedules_none: "Sem horários",
+    auth_expired_title: "Sessão expirada",
+    auth_expired_sub: "Token da Bosch Cloud inválido — inicie sessão novamente para usar a câmara.",
+    auth_reauth_btn: "Iniciar sessão novamente",
+    maint_title_recent: "Manutenção da Bosch Cloud anunciada",
+    outage_cam_singular: "câmara",
+    outage_cam_plural: "câmaras",
+    outage_auto_return_suffix: "voltarão automaticamente assim que a cloud responder.",
+    outage_cloud_unreachable: "Bosch Cloud inacessível",
+    outage_waiting_for_server: "a aguardar os servidores Bosch.",
+    no_bosch_cameras_found: "Nenhuma câmara Bosch encontrada.",
+    lan_reachable: "LAN acessível",
+    lan_not_reachable: "LAN inacessível",
+    lan_status_unknown: "Estado da LAN desconhecido",
+    lan_cam_not_reachable: "Câmara inacessível localmente",
+    lan_status_unknown_cloud: "Estado desconhecido — faltam dados da cloud",
+    notif_maint_active_title: "Manutenção da cloud em curso",
+    notif_maint_scheduled_title: "Manutenção da cloud agendada",
+    notif_maint_past_title: "Manutenção da cloud terminada",
+    notif_maint_limited_note: "A imagem em direto e as capturas podem estar limitadas.",
+    notif_maint_begin_label: "Início:",
+    notif_maint_end_label: "Fim:",
+    notif_maint_ended_prefix: "Terminada",
+    notif_maint_resumed_note: "Os serviços cloud devem voltar ao normal.",
+    notif_details_link: "Detalhes na Bosch →",
+    notif_cam_status_header: "Estado da câmara",
+    notif_all_clear: "Sem manutenção da Bosch Cloud agendada. Todas as câmaras acessíveis.",
+    badge_connecting: "Ligando",
+    stream_taking_longer: "Está a demorar mais do que o esperado, a continuar a tentar…",
+    tap_to_play_label: "Toque para reproduzir",
+    tap_to_play_hint: "Ou ative “Reprodução automática de vídeos” nas definições da app HA",
+    lan_turn_on_title: "Ligar {label}",
+    lan_turn_off_title: "Desligar {label}",
+    state_on_short: "ON",
+    state_off_short: "OFF",
+    last_event_overlay_prefix: "Último:",
+    rule_default_name: "Regra {n}",
+    create_rule_title: "Criar regra",
+    create_rule_name_label: "Nome da regra",
+    create_rule_name_default: "Nova regra",
+    create_rule_start_label: "Hora de início",
+    create_rule_end_label: "Hora de fim",
+    create_rule_cancel: "Cancelar",
+    create_rule_submit: "Criar",
+    weekday_sun: "Dom",
+    weekday_mon: "Seg",
+    weekday_tue: "Ter",
+    weekday_wed: "Qua",
+    weekday_thu: "Qui",
+    weekday_fri: "Sex",
+    weekday_sat: "Sáb"
+  },
+  ru: {
+    play_gate_label: "Запустить трансляцию",
+    play_gate_hint_remote: "Вы подключены удалённо — нажмите для запуска",
+    play_gate_hint_default: "Нажмите для запуска прямой трансляции",
+    loading: "Загрузка…",
+    hls_mode_banner: "Режим HLS · выше задержка (без WebRTC через удалённый туннель)",
+    cam_missing_title: "Камера не найдена",
+    cam_missing_sub: "Этот объект камеры не существует — проверьте параметр camera_entity карточки.",
+    delete: "Удалить",
+    height: "Высота",
+    pick_color: "Выбрать цвет",
+    volume: "Громкость",
+    audio_tap_for_sound: "Нажмите для звука",
+    audio_mute: "Выключить звук",
+    audio_unmute: "Включить звук",
+    audio_available_when_live: "Звук доступен после запуска прямой трансляции",
+    sound_label: "Звук",
+    enable_sound: "Включить звук",
+    siren_confirm: "Действительно активировать сирену?",
+    siren_triggering: "Активация сирены…",
+    siren_unavailable: "Сирена недоступна для этой камеры.",
+    schedules_zones: "Расписания и зоны",
+    nvr_no_recordings: "Записей за этот день нет",
+    nvr_segments_suffix: "сегмент(ов) — нажмите для воспроизведения",
+    nvr_load_error: "Ошибка загрузки сегментов",
+    maint_title: "Техническое обслуживание Bosch Cloud выполняется",
+    maint_title_planned: "Техническое обслуживание Bosch Cloud запланировано",
+    maint_notice: "Уведомление об обслуживании",
+    maint_details: "Подробности на Bosch Community",
+    maint_body: "Прямое изображение и снимки могут быть ограничены в этот период.",
+    maint_active: "выполняется",
+    maint_announced: "объявлено",
+    maint_check_status: "Проверить статус: Bosch Community",
+    maint_dismiss: "Закрыть",
+    privacy_stale_prefix_snapshot: "Последний снимок:",
+    maint_auto_return: "Камеры вернутся автоматически после восстановления облака.",
+    privacy_stale_label: "Режим приватности — последнее изображение",
+    privacy_stale_prefix: "Последнее событие:",
+    offline_title: "Камера офлайн",
+    offline_no_conn: "Нет соединения с облаком Bosch",
+    offline_last_seen: "Последний раз в сети:",
+    ai_caption_prefix: "ИИ:",
+    multi_audio_muted: "Звук отключён (другая карточка воспроизводит звук этой камеры)",
+    ed_cam_entity: "Сущность камеры *",
+    ed_cam_entity_hint: "Обязательно — все остальные сущности определяются автоматически по имени камеры.",
+    ed_no_cams: "Камеры Bosch не обнаружены. Введите <code>camera.bosch_xxx</code> вручную или сначала завершите настройку интеграции Bosch.",
+    ed_not_set: "(не задано)",
+    ed_title: "Заголовок",
+    ed_title_opt_single: "(необязательно, переопределяет дружественное имя)",
+    ed_title_opt: "(необязательно)",
+    ed_title_ph_single: "напр. Сад",
+    ed_title_ph_overview: "Bosch Камеры",
+    ed_h_design: "Оформление",
+    ed_h_design_all: "Оформление (для всех плиток)",
+    ed_apple_style: "Стеклянный оверлей в стиле Apple (по умолчанию включён)",
+    ed_theme: "Тема",
+    ed_theme_auto: "Auto (определить по user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Режим",
+    ed_mode_auto: "Auto (системный светлый/тёмный)",
+    ed_mode_day: "День",
+    ed_mode_night: "Ночь",
+    ed_minimal_single: "Компактный макет (дополнительное меню скрывает все переключатели)",
+    ed_minimal_overview: "Компактный макет (переключатели за дополнительным меню) — рекомендуется для сетки",
+    ed_compact_single: "Уменьшенная плитка (для сетки: только видео + плашка заголовка, без панели)",
+    ed_compact_overview: "Уменьшенная плитка (только видео + плашка заголовка, без панели)",
+    ed_show_title: "Показывать плашку заголовка (выкл = только видео, без имени)",
+    ed_show_last_event: "Показывать значок последнего события",
+    ed_show_audio: "Показывать кнопку звука (звук + громкость)",
+    ed_pan_overlay: "Стрелки поворота на видео (камеры 360)",
+    ed_pan_overlay_auto: "Авто (при наведении, касании и полном экране)",
+    ed_pan_overlay_always: "Всегда видимы",
+    ed_pan_overlay_never: "Скрыто (использовать строку меню)",
+    ed_hide_redundant_privacy: "Скрыть дублирующую строку приватности (уже на панели)",
+    ed_use_card_audio: "Использовать настройки звука карточки (отвязать от глобальных аудио-сущностей)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Настройка интеграции (не переопределять)",
+    ed_autoplay_lan: "LAN (автозапуск только в домашней сети)",
+    ed_autoplay_always: "Всегда",
+    ed_autoplay_never: "Никогда (нажать для показа)",
+    ed_autoplay_hint: "Управляет автоматическим запуском прямой трансляции. Пусто — сохраняет общую настройку интеграции; выбор переопределяет её для этой карточки.",
+    ed_columns: "Столбцы",
+    ed_columns_auto: "Auto (точка перехода)",
+    ed_columns_1: "1 — во всю ширину",
+    ed_breakpoint: "Точка перехода — мин. ширина плитки (px)",
+    ed_breakpoint_hint: "При Auto: 1 столбец ниже, 2+ столбца выше этого значения. По умолчанию: 650 px",
+    ed_h_display: "Отображение",
+    ed_show_offline: "Показывать офлайн-камеры",
+    ed_bosch_sort: "Сортировать по порядку в приложении Bosch",
+    ed_h_advanced: "Дополнительно",
+    ed_border_radius: "Радиус скругления (CSS, напр. 16px)",
+    ed_box_shadow: "Тень (CSS)",
+    ed_disable_webrtc: "Отключить WebRTC (только HLS)",
+    ed_disable_webrtc_hint: "Всегда использовать HLS, полностью пропуская попытку подключения WebRTC — для случаев, когда WebRTC (например, через VPN) никогда не работает надёжно.",
+    ed_webrtc_timeout: "Таймаут подключения WebRTC (мс)",
+    ed_webrtc_timeout_hint: "Сколько ждать WebRTC перед переключением на HLS. Уменьшите значение для более быстрого переключения при нестабильном соединении.",
+    ed_show_motion_zones: "Показывать зоны движения",
+    ed_fs_auto_hide: "Автоматически скрывать элементы управления в полноэкранном режиме при бездействии",
+    ed_motion_overlay: "Выделять движение в прямом эфире (в браузере, пока карточка открыта)",
+    ed_motion_objects: "Распознавать людей, животных и транспорт в рамке движения (экспериментально; загружает модель ~5 МБ из интернета)",
+    ed_motion_zones: "Игнорируемые области в % (x,y,ширина,высота; через ;)",
+    motion_label: "Движение",
+    accordion_notif_types: "Типы уведомлений",
+    accordion_advanced: "Дополнительно",
+    accordion_auto_security: "Автоматизация и безопасность",
+    accordion_automations: "Автоматизации",
+    accordion_light_camera: "Свет и камера",
+    accordion_diagnostics: "Диагностика",
+    accordion_services: "Сервисы",
+    light_details_header: "Яркость и цвета",
+    light_front: "Переднее освещение",
+    light_top: "Верхний свет",
+    light_bottom: "Нижний свет",
+    light_top_bottom: "Верх + Низ",
+    light_slider_front: "Перед",
+    light_slider_top: "Верх",
+    light_slider_bottom: "Низ",
+    light_slider_colortemp: "Цвет. темп.",
+    privacy_short: "Приватность",
+    notif_section_title: "Уведомления",
+    intercom_label: "Домофон",
+    quality_label: "Качество",
+    quality_auto: "Авто",
+    quality_high: "Высокое (30 Мбит/с)",
+    quality_low: "Низкое (1.9 Мбит/с)",
+    quality_remote_fallback_hint: "При удалённом/VPN-соединении режим «Низкое» всё равно может использовать ~7,5 Мбит/с — удалённый прокси Bosch не поддерживает поток 1,9 Мбит/с.",
+    notif_movement: "Движение",
+    notif_person: "Человек",
+    notif_audio: "Аудио",
+    notif_trouble: "Неисправность",
+    notif_camera_alarm: "Тревога камеры",
+    diag_timestamp: "Метка времени",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Обнаружение движения",
+    record_sound: "Запись звука",
+    privacy_sound: "Звук приватности",
+    light_on_motion: "Свет при движении",
+    light_always_on: "Постоянно вкл.",
+    intrusion_detection: "Обнаружение вторжения",
+    motion_sensitivity: "Чувствительность",
+    alarm_armed: "Сигнализация на охране",
+    siren_75db: "Сирена (75 дБ)",
+    pre_alarm_led: "Пред-тревога (красный LED)",
+    power_led: "LED питания",
+    color_temperature: "Цветовая температура",
+    color_top: "Цвет верха",
+    color_bottom: "Цвет низа",
+    status_led: "LED статуса",
+    microphone_label: "Микрофон",
+    show_motion_zones_btn: "Показать зоны движения",
+    show_privacy_masks_btn: "Показать маски приватности",
+    diag_wifi: "WiFi",
+    diag_firmware: "Прошивка",
+    diag_ambient_light: "Освещённость",
+    diag_motion_today: "Движение сегодня",
+    diag_audio_today: "Аудио сегодня",
+    diag_schedules: "Расписания",
+    diag_motion_zones: "Зоны движения",
+    diag_privacy_masks: "Маски приватности",
+    info_status: "Статус",
+    info_connection: "Соединение",
+    info_reaction: "Реакция",
+    info_reaction_tooltip: "Время реакции API Bosch (LOCAL=500 мс, REMOTE=1000 мс). Не буфер плеера — он настраивается в разделе «Поведение буфера» в параметрах интеграции.",
+    svc_snapshot: "Снимок",
+    svc_read_zones: "Считать зоны",
+    svc_friends: "Друзья",
+    svc_create_rule: "Создать правило",
+    svc_light_schedule: "Расписание света",
+    svc_siren: "Сирена",
+    svc_rule_creating: "Создание правила «{name}»…",
+    svc_running: "{label} выполняется…",
+    svc_done: "{label} завершено.",
+    pan_full_left_title: "Крайний левый",
+    pan_full_left_aria: "Повернуть камеру полностью влево",
+    pan_left_short_title: "Влево",
+    pan_center_title: "Центр",
+    pan_center_aria: "Центрировать камеру",
+    pan_right_short_title: "Вправо",
+    pan_full_right_title: "Крайний правый",
+    pan_full_right_aria: "Повернуть камеру полностью вправо",
+    pill_pip_blocked_title: "Картинка в картинке активна для другой камеры",
+    pill_fullscreen_exit_title: "Выйти из полноэкранного режима",
+    pill_stream_title_start: "Начать прямую трансляцию",
+    pill_stream_title_stop: "Остановить прямую трансляцию",
+    schedules_none: "Нет расписаний",
+    auth_expired_title: "Сессия истекла",
+    auth_expired_sub: "Токен Bosch Cloud недействителен — войдите снова, чтобы использовать камеру.",
+    auth_reauth_btn: "Войти снова",
+    maint_title_recent: "Объявлено обслуживание Bosch Cloud",
+    outage_cam_singular: "камера",
+    outage_cam_plural: "камеры",
+    outage_auto_return_suffix: "вернутся автоматически, как только облако ответит.",
+    outage_cloud_unreachable: "Bosch Cloud недоступен",
+    outage_waiting_for_server: "ожидание серверов Bosch.",
+    no_bosch_cameras_found: "Камеры Bosch не найдены.",
+    lan_reachable: "LAN доступна",
+    lan_not_reachable: "LAN недоступна",
+    lan_status_unknown: "Статус LAN неизвестен",
+    lan_cam_not_reachable: "Камера недоступна локально",
+    lan_status_unknown_cloud: "Статус неизвестен — нет данных из облака",
+    notif_maint_active_title: "Обслуживание облака выполняется",
+    notif_maint_scheduled_title: "Запланировано обслуживание облака",
+    notif_maint_past_title: "Обслуживание облака завершено",
+    notif_maint_limited_note: "Прямая трансляция и снимки могут быть ограничены.",
+    notif_maint_begin_label: "Начало:",
+    notif_maint_end_label: "Конец:",
+    notif_maint_ended_prefix: "Завершено",
+    notif_maint_resumed_note: "Облачные сервисы должны вернуться в норму.",
+    notif_details_link: "Подробности на сайте Bosch →",
+    notif_cam_status_header: "Статус камеры",
+    notif_all_clear: "Обслуживание Bosch Cloud не запланировано. Все камеры доступны.",
+    badge_connecting: "Подключение",
+    stream_taking_longer: "Это занимает больше времени, чем ожидалось, продолжаем попытки…",
+    tap_to_play_label: "Нажмите для воспроизведения",
+    tap_to_play_hint: "Или включите «Автовоспроизведение видео» в настройках приложения HA",
+    lan_turn_on_title: "Включить {label}",
+    lan_turn_off_title: "Выключить {label}",
+    state_on_short: "ВКЛ",
+    state_off_short: "ВЫКЛ",
+    last_event_overlay_prefix: "Последнее:",
+    rule_default_name: "Правило {n}",
+    create_rule_title: "Создать правило",
+    create_rule_name_label: "Название правила",
+    create_rule_name_default: "Новое правило",
+    create_rule_start_label: "Время начала",
+    create_rule_end_label: "Время окончания",
+    create_rule_cancel: "Отмена",
+    create_rule_submit: "Создать",
+    weekday_sun: "Вс",
+    weekday_mon: "Пн",
+    weekday_tue: "Вт",
+    weekday_wed: "Ср",
+    weekday_thu: "Чт",
+    weekday_fri: "Пт",
+    weekday_sat: "Сб"
+  },
+  uk: {
+    play_gate_label: "Розпочати трансляцію",
+    play_gate_hint_remote: "Ви у віддаленій мережі — торкніться для запуску",
+    play_gate_hint_default: "Торкніться, щоб розпочати пряму трансляцію",
+    loading: "Завантаження…",
+    hls_mode_banner: "Режим HLS · більша затримка (без WebRTC через віддалений тунель)",
+    cam_missing_title: "Камеру не знайдено",
+    cam_missing_sub: "Цей об'єкт камери не існує — перевірте параметр camera_entity картки.",
+    delete: "Видалити",
+    height: "Висота",
+    pick_color: "Вибрати колір",
+    volume: "Гучність",
+    audio_tap_for_sound: "Торкніться для звуку",
+    audio_mute: "Вимкнути звук",
+    audio_unmute: "Увімкнути звук",
+    audio_available_when_live: "Звук доступний після запуску прямої трансляції",
+    sound_label: "Звук",
+    enable_sound: "Увімкнути звук",
+    siren_confirm: "Справді активувати сирену?",
+    siren_triggering: "Активація сирени…",
+    siren_unavailable: "Сирена недоступна для цієї камери.",
+    schedules_zones: "Розклади та зони",
+    nvr_no_recordings: "Немає записів за цей день",
+    nvr_segments_suffix: "сегмент(ів) — натисніть для відтворення",
+    nvr_load_error: "Помилка завантаження сегментів",
+    maint_title: "Технічне обслуговування хмари Bosch",
+    maint_title_planned: "Заплановане технічне обслуговування хмари Bosch",
+    maint_notice: "Повідомлення про обслуговування",
+    maint_details: "Подробиці на Bosch Community",
+    maint_body: "Пряме зображення та знімки можуть бути обмежені в цей період.",
+    maint_active: "виконується",
+    maint_announced: "анонсовано",
+    maint_check_status: "Перевірити статус: Bosch Community",
+    maint_dismiss: "Закрити",
+    privacy_stale_prefix_snapshot: "Останній знімок:",
+    maint_auto_return: "Камери повернуться автоматично після відновлення хмари.",
+    privacy_stale_label: "Режим приватності — останнє зображення",
+    privacy_stale_prefix: "Остання подія:",
+    offline_title: "Камера офлайн",
+    offline_no_conn: "Немає з'єднання з хмарою Bosch",
+    offline_last_seen: "Востаннє в мережі:",
+    ai_caption_prefix: "ШІ:",
+    multi_audio_muted: "Звук вимкнено (інша картка відтворює звук цієї камери)",
+    ed_cam_entity: "Об'єкт камери *",
+    ed_cam_entity_hint: "Обов'язково — всі інші об'єкти визначаються автоматично за назвою камери.",
+    ed_no_cams: "Камери Bosch не виявлено. Введіть <code>camera.bosch_xxx</code> вручну або спочатку завершіть налаштування інтеграції Bosch.",
+    ed_not_set: "(не задано)",
+    ed_title: "Назва",
+    ed_title_opt_single: "(необов'язково, замінює зручну назву)",
+    ed_title_opt: "(необов'язково)",
+    ed_title_ph_single: "напр. Сад",
+    ed_title_ph_overview: "Bosch Камери",
+    ed_h_design: "Дизайн",
+    ed_h_design_all: "Дизайн (для всіх плиток)",
+    ed_apple_style: "Скляне накладення у стилі Apple (увімкнено за замовчуванням)",
+    ed_theme: "Тема",
+    ed_theme_auto: "Auto (визначати через user agent)",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "Режим",
+    ed_mode_auto: "Auto (системна світла/темна тема)",
+    ed_mode_day: "День",
+    ed_mode_night: "Ніч",
+    ed_minimal_single: "Мінімальний макет (додаткове меню приховує всі перемикачі спочатку)",
+    ed_minimal_overview: "Мінімальний макет (перемикачі в додатковому меню) — рекомендовано для сітки",
+    ed_compact_single: "Компактна плитка (для сітки огляду: лише відео + плашка назви, без панелі плашок)",
+    ed_compact_overview: "Компактна плитка (лише відео + плашка назви, без панелі плашок)",
+    ed_show_title: "Показувати плашку назви (вимк = лише відео, без накладення імені)",
+    ed_show_last_event: "Показувати значок останньої події",
+    ed_show_audio: "Показувати кнопку аудіо (звук + гучність)",
+    ed_pan_overlay: "Стрілки повороту на відео (камери 360)",
+    ed_pan_overlay_auto: "Авто (під час наведення, дотику та повного екрана)",
+    ed_pan_overlay_always: "Завжди видимі",
+    ed_pan_overlay_never: "Приховано (використовуйте рядок меню)",
+    ed_hide_redundant_privacy: "Сховати дубльований рядок приватності (уже на панелі)",
+    ed_use_card_audio: "Використовувати налаштування звуку картки (відв'язати від глобальних аудіосутностей)",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "Типове значення інтеграції (не перевизначати)",
+    ed_autoplay_lan: "LAN (автозапуск лише в домашній мережі)",
+    ed_autoplay_always: "Завжди",
+    ed_autoplay_never: "Ніколи (вікно «торкніться для відтворення»)",
+    ed_autoplay_hint: "Керує автоматичним запуском прямої трансляції. Порожньо зберігає загальне значення інтеграції; вибір перевизначає його для цієї картки.",
+    ed_columns: "Стовпці",
+    ed_columns_auto: "Auto (контрольна точка)",
+    ed_columns_1: "1 – на всю ширину",
+    ed_breakpoint: "Контрольна точка – мінімальна ширина плитки (px)",
+    ed_breakpoint_hint: "При Auto: 1 стовпець нижче, 2+ стовпці вище цього значення. За замовчуванням: 650 px",
+    ed_h_display: "Відображення",
+    ed_show_offline: "Показувати камери в режимі офлайн",
+    ed_bosch_sort: "Сортувати за порядком у додатку Bosch",
+    ed_h_advanced: "Додатково",
+    ed_border_radius: "Радіус заокруглення (CSS, напр. 16px)",
+    ed_box_shadow: "Тінь (CSS)",
+    ed_disable_webrtc: "Вимкнути WebRTC (лише HLS)",
+    ed_disable_webrtc_hint: "Завжди використовувати HLS, повністю пропускаючи спробу з'єднання WebRTC — для налаштувань, де WebRTC (наприклад, через VPN) ніколи не працює надійно.",
+    ed_webrtc_timeout: "Тайм-аут з'єднання WebRTC (мс)",
+    ed_webrtc_timeout_hint: "Скільки чекати на WebRTC перед переходом на HLS. Зменшіть значення для швидшого переходу при нестабільному з'єднанні.",
+    ed_show_motion_zones: "Показувати зони руху",
+    ed_fs_auto_hide: "Автоматично приховувати елементи керування на весь екран при бездіяльності",
+    ed_motion_overlay: "Виділяти рух у прямому ефірі (у браузері, поки картку відкрито)",
+    ed_motion_objects: "Розпізнавати людей, тварин і транспорт у рамці руху (експериментально; завантажує модель ~5 МБ з інтернету)",
+    ed_motion_zones: "Ігноровані області у % (x,y,ширина,висота; через ;)",
+    motion_label: "Рух",
+    accordion_notif_types: "Типи сповіщень",
+    accordion_advanced: "Додатково",
+    accordion_auto_security: "Автоматизація та безпека",
+    accordion_automations: "Автоматизації",
+    accordion_light_camera: "Світло та камера",
+    accordion_diagnostics: "Діагностика",
+    accordion_services: "Сервіси",
+    light_details_header: "Яскравість і кольори",
+    light_front: "Переднє освітлення",
+    light_top: "Верхнє світло",
+    light_bottom: "Нижнє світло",
+    light_top_bottom: "Верх + Низ",
+    light_slider_front: "Перед",
+    light_slider_top: "Верх",
+    light_slider_bottom: "Низ",
+    light_slider_colortemp: "Кол. темп.",
+    privacy_short: "Приватність",
+    notif_section_title: "Сповіщення",
+    intercom_label: "Домофон",
+    quality_label: "Якість",
+    quality_auto: "Авто",
+    quality_high: "Висока (30 Мбіт/с)",
+    quality_low: "Низька (1.9 Мбіт/с)",
+    quality_remote_fallback_hint: "У віддаленому/VPN-з'єднанні режим «Низька» все одно може використовувати ~7,5 Мбіт/с — віддалений проксі Bosch не підтримує потік 1,9 Мбіт/с.",
+    notif_movement: "Рух",
+    notif_person: "Людина",
+    notif_audio: "Аудіо",
+    notif_trouble: "Несправність",
+    notif_camera_alarm: "Тривога камери",
+    diag_timestamp: "Мітка часу",
+    diag_autofollow: "Auto-Follow",
+    motion_detection: "Виявлення руху",
+    record_sound: "Записувати звук",
+    privacy_sound: "Звук приватності",
+    light_on_motion: "Світло при русі",
+    light_always_on: "Постійно увімк.",
+    intrusion_detection: "Виявлення вторгнення",
+    motion_sensitivity: "Чутливість",
+    alarm_armed: "Сигналізація на охороні",
+    siren_75db: "Сирена (75 дБ)",
+    pre_alarm_led: "Перед-тривога (червоний LED)",
+    power_led: "LED живлення",
+    color_temperature: "Колірна температура",
+    color_top: "Колір верху",
+    color_bottom: "Колір низу",
+    status_led: "LED статусу",
+    microphone_label: "Мікрофон",
+    show_motion_zones_btn: "Показати зони руху",
+    show_privacy_masks_btn: "Показати маски приватності",
+    diag_wifi: "WiFi",
+    diag_firmware: "Прошивка",
+    diag_ambient_light: "Освітленість",
+    diag_motion_today: "Рух сьогодні",
+    diag_audio_today: "Аудіо сьогодні",
+    diag_schedules: "Розклади",
+    diag_motion_zones: "Зони руху",
+    diag_privacy_masks: "Маски приватності",
+    info_status: "Статус",
+    info_connection: "З'єднання",
+    info_reaction: "Реакція",
+    info_reaction_tooltip: "Час реакції API Bosch (LOCAL=500 мс, REMOTE=1000 мс). Не буфер плеєра — він налаштовується в «Поведінка буфера» в параметрах інтеграції.",
+    svc_snapshot: "Знімок",
+    svc_read_zones: "Зчитати зони",
+    svc_friends: "Друзі",
+    svc_create_rule: "Створити правило",
+    svc_light_schedule: "Розклад світла",
+    svc_siren: "Сирена",
+    svc_rule_creating: "Створення правила «{name}»…",
+    svc_running: "{label} виконується…",
+    svc_done: "{label} завершено.",
+    pan_full_left_title: "Крайній лівий",
+    pan_full_left_aria: "Повернути камеру повністю ліворуч",
+    pan_left_short_title: "Ліворуч",
+    pan_center_title: "Центр",
+    pan_center_aria: "Центрувати камеру",
+    pan_right_short_title: "Праворуч",
+    pan_full_right_title: "Крайній правий",
+    pan_full_right_aria: "Повернути камеру повністю праворуч",
+    pill_pip_blocked_title: "Картинка в картинці активна для іншої камери",
+    pill_fullscreen_exit_title: "Вийти з повноекранного режиму",
+    pill_stream_title_start: "Почати пряму трансляцію",
+    pill_stream_title_stop: "Зупинити пряму трансляцію",
+    schedules_none: "Немає розкладів",
+    auth_expired_title: "Сесію завершено",
+    auth_expired_sub: "Токен Bosch Cloud недійсний — увійдіть знову, щоб використовувати камеру.",
+    auth_reauth_btn: "Увійти знову",
+    maint_title_recent: "Оголошено обслуговування Bosch Cloud",
+    outage_cam_singular: "камера",
+    outage_cam_plural: "камери",
+    outage_auto_return_suffix: "повернуться автоматично, щойно хмара відповість.",
+    outage_cloud_unreachable: "Bosch Cloud недоступний",
+    outage_waiting_for_server: "очікування серверів Bosch.",
+    no_bosch_cameras_found: "Камери Bosch не знайдено.",
+    lan_reachable: "LAN доступна",
+    lan_not_reachable: "LAN недоступна",
+    lan_status_unknown: "Статус LAN невідомий",
+    lan_cam_not_reachable: "Камера недоступна локально",
+    lan_status_unknown_cloud: "Статус невідомий — немає даних із хмари",
+    notif_maint_active_title: "Обслуговування хмари триває",
+    notif_maint_scheduled_title: "Заплановано обслуговування хмари",
+    notif_maint_past_title: "Обслуговування хмари завершено",
+    notif_maint_limited_note: "Пряма трансляція та знімки можуть бути обмежені.",
+    notif_maint_begin_label: "Початок:",
+    notif_maint_end_label: "Кінець:",
+    notif_maint_ended_prefix: "Завершено",
+    notif_maint_resumed_note: "Хмарні служби мають повернутися до норми.",
+    notif_details_link: "Деталі на сайті Bosch →",
+    notif_cam_status_header: "Статус камери",
+    notif_all_clear: "Обслуговування Bosch Cloud не заплановано. Усі камери доступні.",
+    badge_connecting: "Підключення",
+    stream_taking_longer: "Це триває довше, ніж очікувалося, продовжуємо спроби…",
+    tap_to_play_label: "Торкніться, щоб відтворити",
+    tap_to_play_hint: "Або увімкніть «Автовідтворення відео» в налаштуваннях застосунку HA",
+    lan_turn_on_title: "Увімкнути {label}",
+    lan_turn_off_title: "Вимкнути {label}",
+    state_on_short: "УВІМК",
+    state_off_short: "ВИМК",
+    last_event_overlay_prefix: "Останнє:",
+    rule_default_name: "Правило {n}",
+    create_rule_title: "Створити правило",
+    create_rule_name_label: "Назва правила",
+    create_rule_name_default: "Нове правило",
+    create_rule_start_label: "Час початку",
+    create_rule_end_label: "Час завершення",
+    create_rule_cancel: "Скасувати",
+    create_rule_submit: "Створити",
+    weekday_sun: "Нд",
+    weekday_mon: "Пн",
+    weekday_tue: "Вт",
+    weekday_wed: "Ср",
+    weekday_thu: "Чт",
+    weekday_fri: "Пт",
+    weekday_sat: "Сб"
+  },
+  "zh-Hans": {
+    play_gate_label: "启动直播",
+    play_gate_hint_remote: "您正在远程连接 — 点击启动",
+    play_gate_hint_default: "点击启动实时直播",
+    loading: "加载中…",
+    hls_mode_banner: "HLS 模式 · 延迟更高（远程隧道无 WebRTC）",
+    cam_missing_title: "未找到摄像头",
+    cam_missing_sub: "此摄像头实体不存在 — 请检查卡片的 camera_entity 设置。",
+    delete: "删除",
+    height: "高度",
+    pick_color: "选择颜色",
+    volume: "音量",
+    audio_tap_for_sound: "点击开启声音",
+    audio_mute: "静音",
+    audio_unmute: "开启声音",
+    audio_available_when_live: "实时直播运行后方可使用声音",
+    sound_label: "声音",
+    enable_sound: "开启声音",
+    siren_confirm: "确定触发警报器？",
+    siren_triggering: "正在触发警报器…",
+    siren_unavailable: "此摄像头不支持警报器。",
+    schedules_zones: "计划与区域",
+    nvr_no_recordings: "当天无录像",
+    nvr_segments_suffix: "个片段 — 点击播放",
+    nvr_load_error: "加载片段出错",
+    maint_title: "Bosch 云端维护进行中",
+    maint_title_planned: "Bosch 云端维护已计划",
+    maint_notice: "维护通知",
+    maint_details: "详情见 Bosch Community",
+    maint_body: "维护期间实时画面和快照可能受限。",
+    maint_active: "进行中",
+    maint_announced: "已公告",
+    maint_check_status: "查看状态：Bosch Community",
+    maint_dismiss: "关闭",
+    privacy_stale_prefix_snapshot: "最新快照：",
+    maint_auto_return: "云端恢复后摄像头将自动重新连接。",
+    privacy_stale_label: "隐私模式 — 最后一张图像",
+    privacy_stale_prefix: "最近事件：",
+    offline_title: "摄像头离线",
+    offline_no_conn: "无法连接 Bosch 云",
+    offline_last_seen: "最后在线：",
+    ai_caption_prefix: "AI:",
+    multi_audio_muted: "已静音（另一个卡片正在播放此摄像头的音频）",
+    ed_cam_entity: "摄像头实体 *",
+    ed_cam_entity_hint: "必填 — 所有其他实体均根据摄像头名称自动派生。",
+    ed_no_cams: "未检测到 Bosch 摄像头。请手动输入 <code>camera.bosch_xxx</code>，或先完成 Bosch 集成配置。",
+    ed_not_set: "（尚未设置）",
+    ed_title: "标题",
+    ed_title_opt_single: "（可选，覆盖友好名称）",
+    ed_title_opt: "（可选）",
+    ed_title_ph_single: "例如：花园",
+    ed_title_ph_overview: "Bosch 摄像头",
+    ed_h_design: "外观",
+    ed_h_design_all: "外观（适用于所有磁贴）",
+    ed_apple_style: "Apple 风格玻璃遮罩（默认开启）",
+    ed_theme: "主题",
+    ed_theme_auto: "Auto（通过 user agent 自动检测）",
+    ed_theme_ios: "iOS (Apple Home)",
+    ed_theme_android: "Android (Material You)",
+    ed_mode: "模式",
+    ed_mode_auto: "Auto（跟随系统亮色/暗色）",
+    ed_mode_day: "白天",
+    ed_mode_night: "夜间",
+    ed_minimal_single: "简洁布局（更多菜单默认隐藏所有开关）",
+    ed_minimal_overview: "简洁布局（开关收入更多菜单）— 推荐用于网格视图",
+    ed_compact_single: "紧凑磁贴（用于概览网格：仅视频 + 标题标签，无控制栏）",
+    ed_compact_overview: "紧凑磁贴（仅视频 + 标题标签，无控制栏）",
+    ed_show_title: "显示标题标签（关闭 = 仅视频，无名称叠加）",
+    ed_show_last_event: "显示最新事件徽章",
+    ed_show_audio: "显示音频按钮（声音 + 音量）",
+    ed_pan_overlay: "视频上的转向箭头（360 摄像头）",
+    ed_pan_overlay_auto: "自动（悬停、触摸和全屏时）",
+    ed_pan_overlay_always: "始终显示",
+    ed_pan_overlay_never: "隐藏（使用菜单行）",
+    ed_hide_redundant_privacy: "隐藏多余的隐私行（药丸栏中已有）",
+    ed_use_card_audio: "使用卡片自己的音频设置（与全局音频实体解耦）",
+    ed_h_autoplay: "Auto-Play",
+    ed_autoplay_default: "使用集成默认值（不覆盖）",
+    ed_autoplay_lan: "LAN（仅在家庭网络中自动启动）",
+    ed_autoplay_always: "始终",
+    ed_autoplay_never: "从不（点击播放）",
+    ed_autoplay_hint: "控制实时直播何时自动启动。留空保持集成全局默认值；选择后将逐卡覆盖。",
+    ed_columns: "列数",
+    ed_columns_auto: "Auto（断点自适应）",
+    ed_columns_1: "1 — 全宽",
+    ed_breakpoint: "断点 — 每个磁贴的最小宽度（px）",
+    ed_breakpoint_hint: "Auto 模式：低于此值时为 1 列，高于时为 2+ 列。默认：650 px",
+    ed_h_display: "显示",
+    ed_show_offline: "显示离线摄像头",
+    ed_bosch_sort: "按 Bosch 应用顺序排序",
+    ed_h_advanced: "高级",
+    ed_border_radius: "圆角半径（CSS，如 16px）",
+    ed_box_shadow: "阴影（CSS）",
+    ed_disable_webrtc: "禁用 WebRTC（仅 HLS）",
+    ed_disable_webrtc_hint: "始终使用 HLS，完全跳过 WebRTC 连接尝试——适用于 WebRTC（例如通过 VPN）从不可靠工作的场景。",
+    ed_webrtc_timeout: "WebRTC 连接超时（毫秒）",
+    ed_webrtc_timeout_hint: "在回退到 HLS 之前等待 WebRTC 的时间。降低此值可在不稳定的连接上更快回退。",
+    ed_show_motion_zones: "显示移动区域叠加",
+    ed_fs_auto_hide: "全屏时空闲后自动隐藏控件",
+    ed_motion_overlay: "在实时画面中标出移动（在浏览器中运行，卡片打开时有效）",
+    ed_motion_objects: "在移动框中识别人、动物和车辆（实验性；会从互联网下载约 5 MB 的模型）",
+    ed_motion_zones: "忽略区域（百分比：x,y,宽,高；多个用 ; 分隔）",
+    motion_label: "移动",
+    accordion_notif_types: "通知类型",
+    accordion_advanced: "高级",
+    accordion_auto_security: "自动化与安全",
+    accordion_automations: "自动化",
+    accordion_light_camera: "灯光与摄像头",
+    accordion_diagnostics: "诊断",
+    accordion_services: "服务",
+    light_details_header: "亮度与颜色",
+    light_front: "前灯",
+    light_top: "上灯",
+    light_bottom: "下灯",
+    light_top_bottom: "上 + 下",
+    light_slider_front: "前",
+    light_slider_top: "上",
+    light_slider_bottom: "下",
+    light_slider_colortemp: "色温",
+    privacy_short: "隐私",
+    notif_section_title: "通知",
+    intercom_label: "对讲",
+    quality_label: "画质",
+    quality_auto: "自动",
+    quality_high: "高 (30 Mbps)",
+    quality_low: "低 (1.9 Mbps)",
+    quality_remote_fallback_hint: '在远程/VPN 连接下，"低"画质可能仍使用约 7.5 Mbps —— Bosch 远程代理不支持 1.9 Mbps 的流。',
+    notif_movement: "移动",
+    notif_person: "人员",
+    notif_audio: "音频",
+    notif_trouble: "故障",
+    notif_camera_alarm: "摄像头警报",
+    diag_timestamp: "时间戳",
+    diag_autofollow: "自动跟随",
+    motion_detection: "移动侦测",
+    record_sound: "录制声音",
+    privacy_sound: "隐私声音",
+    light_on_motion: "移动触发灯光",
+    light_always_on: "常亮",
+    intrusion_detection: "入侵检测",
+    motion_sensitivity: "灵敏度",
+    alarm_armed: "警报已布防",
+    siren_75db: "警笛 (75 dB)",
+    pre_alarm_led: "预警报（红色LED）",
+    power_led: "电源指示灯",
+    color_temperature: "色温",
+    color_top: "上部颜色",
+    color_bottom: "下部颜色",
+    status_led: "状态指示灯",
+    microphone_label: "麦克风",
+    show_motion_zones_btn: "显示移动区域",
+    show_privacy_masks_btn: "显示隐私遮罩",
+    diag_wifi: "WiFi",
+    diag_firmware: "固件",
+    diag_ambient_light: "环境光",
+    diag_motion_today: "今日移动",
+    diag_audio_today: "今日音频",
+    diag_schedules: "计划",
+    diag_motion_zones: "移动区域",
+    diag_privacy_masks: "隐私遮罩",
+    info_status: "状态",
+    info_connection: "连接",
+    info_reaction: "响应",
+    info_reaction_tooltip: "Bosch API 响应时间（本地=500毫秒，远程=1000毫秒）。不是播放器缓冲区——缓冲区在集成选项的“缓冲行为”中设置。",
+    svc_snapshot: "快照",
+    svc_read_zones: "读取区域",
+    svc_friends: "好友",
+    svc_create_rule: "创建规则",
+    svc_light_schedule: "灯光计划",
+    svc_siren: "警笛",
+    svc_rule_creating: "正在创建规则「{name}」…",
+    svc_running: "{label} 运行中…",
+    svc_done: "{label} 已完成。",
+    pan_full_left_title: "最左",
+    pan_full_left_aria: "将摄像头转到最左侧",
+    pan_left_short_title: "左",
+    pan_center_title: "居中",
+    pan_center_aria: "居中摄像头",
+    pan_right_short_title: "右",
+    pan_full_right_title: "最右",
+    pan_full_right_aria: "将摄像头转到最右侧",
+    pill_pip_blocked_title: "画中画正用于另一台摄像头",
+    pill_fullscreen_exit_title: "退出全屏",
+    pill_stream_title_start: "开始直播",
+    pill_stream_title_stop: "停止直播",
+    schedules_none: "暂无计划",
+    auth_expired_title: "登录已过期",
+    auth_expired_sub: "Bosch Cloud 令牌无效 — 请重新登录以使用摄像头。",
+    auth_reauth_btn: "重新登录",
+    maint_title_recent: "已宣布 Bosch Cloud 维护",
+    outage_cam_singular: "台摄像头",
+    outage_cam_plural: "台摄像头",
+    outage_auto_return_suffix: "将在云端响应后自动恢复。",
+    outage_cloud_unreachable: "无法连接 Bosch Cloud",
+    outage_waiting_for_server: "正在等待 Bosch 服务器。",
+    no_bosch_cameras_found: "未找到 Bosch 摄像头。",
+    lan_reachable: "局域网可达",
+    lan_not_reachable: "局域网不可达",
+    lan_status_unknown: "局域网状态未知",
+    lan_cam_not_reachable: "摄像头本地不可达",
+    lan_status_unknown_cloud: "状态未知 — 缺少云端数据",
+    notif_maint_active_title: "云端维护进行中",
+    notif_maint_scheduled_title: "云端维护已计划",
+    notif_maint_past_title: "云端维护已结束",
+    notif_maint_limited_note: "实时画面和快照可能受限。",
+    notif_maint_begin_label: "开始：",
+    notif_maint_end_label: "结束：",
+    notif_maint_ended_prefix: "已结束",
+    notif_maint_resumed_note: "云服务应已恢复正常。",
+    notif_details_link: "在 Bosch 查看详情 →",
+    notif_cam_status_header: "摄像头状态",
+    notif_all_clear: "未计划 Bosch Cloud 维护。所有摄像头均可达。",
+    badge_connecting: "连接中",
+    stream_taking_longer: "耗时比预期长，仍在重试…",
+    tap_to_play_label: "点击播放",
+    tap_to_play_hint: "或在 HA 应用设置中启用“自动播放视频”",
+    lan_turn_on_title: "开启{label}",
+    lan_turn_off_title: "关闭{label}",
+    state_on_short: "开",
+    state_off_short: "关",
+    last_event_overlay_prefix: "最近：",
+    rule_default_name: "规则 {n}",
+    create_rule_title: "创建规则",
+    create_rule_name_label: "规则名称",
+    create_rule_name_default: "新规则",
+    create_rule_start_label: "开始时间",
+    create_rule_end_label: "结束时间",
+    create_rule_cancel: "取消",
+    create_rule_submit: "创建",
+    weekday_sun: "周日",
+    weekday_mon: "周一",
+    weekday_tue: "周二",
+    weekday_wed: "周三",
+    weekday_thu: "周四",
+    weekday_fri: "周五",
+    weekday_sat: "周六"
+  }
+};
+
+const CARD_LANGS = [ "de", "en", "es", "fr", "it", "nl", "pl", "pt", "ru", "uk", "zh-Hans" ];
+
+function cardLang(hass) {
+  const l = (hass && hass.language || "en").toLowerCase();
+  if (l.startsWith("zh")) return "zh-Hans";
+  const pre = l.slice(0, 2);
+  return CARD_LANGS.find(k => k.toLowerCase() === pre) || "en";
+}
+
+function cardT(hass, key) {
+  const lang = cardLang(hass);
+  return CARD_I18N[lang] && CARD_I18N[lang][key] || CARD_I18N.en[key] || key;
+}
+
+const BOSCH_BUFFER_PROFILES = {
+  latency: {
+    liveSyncDurationCount: 2,
+    liveMaxLatencyDurationCount: 4,
+    maxBufferLength: 8,
+    maxMaxBufferLength: 14,
+    lowLatencyMode: true
+  },
+  balanced: {
+    liveSyncDurationCount: 4,
+    liveMaxLatencyDurationCount: 8,
+    maxBufferLength: 14,
+    maxMaxBufferLength: 22,
+    lowLatencyMode: true
+  },
+  stable: {
+    liveSyncDurationCount: 6,
+    liveMaxLatencyDurationCount: 12,
+    maxBufferLength: 22,
+    maxMaxBufferLength: 28,
+    lowLatencyMode: true
+  }
+};
+
+function makeLLHlsStrippingPlaylistLoader(BaseLoader) {
+  let warnedOnce = false;
+  return class BoschLLHlsStrippingLoader extends BaseLoader {
+    load(context, config, callbacks) {
+      const wrappedCallbacks = {
+        ...callbacks,
+        onSuccess: (response, stats, ctx, networkDetails) => {
+          if (typeof response.data === "string") {
+            const before = response.data;
+            response.data = response.data.replace(/CAN-BLOCK-RELOAD=YES/gi, "CAN-BLOCK-RELOAD=NO").replace(/,?CAN-SKIP-UNTIL=[\d.]+/gi, "").replace(/^#EXT-X-PART:.*$/gim, "").replace(/^#EXT-X-PRELOAD-HINT:.*$/gim, "").replace(/^#EXT-X-PART-INF:.*$/gim, "").replace(/^#EXT-X-SKIP:.*$/gim, "");
+            if (!warnedOnce && response.data !== before) {
+              warnedOnce = true;
+              console.warn("bosch-camera-card: pLoader stripped LL-HLS advertisement from a real manifest fetch (url:", context.url, ")");
+            }
+          }
+          callbacks.onSuccess(response, stats, ctx, networkDetails);
+        }
+      };
+      super.load(context, config, wrappedCallbacks);
+    }
+  };
+}
+
+class BoschCameraCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({
+      mode: "open"
+    });
+    this._hass = null;
+    this._config = null;
+    this._timers = new Map;
+    this._fsAutoHideWired = false;
+    this._fsControlsHidden = false;
+    this._fsIdleTimer = null;
+    this._fsLastActivityAt = 0;
+    this._fsActivityHandler = null;
+    this._fsTouchHandler = null;
+    this._refreshTimer = null;
+    this._imgTimestamp = Date.now();
+    this._lastStreaming = null;
+    this._streamConnecting = false;
+    this._connectSteps = null;
+    this._waitingForStream = false;
+    this._lastMotionCoordKey = null;
+    this._lastPrivacyMaskKey = null;
+    this._lastPrivacy = null;
+    this._imageLoaded = false;
+    this._loadingOverlay = false;
+    this._loadingTimeout = null;
+    this._storageKey = null;
+    this._loadRetries = 0;
+    this._snapshotPollTimer = null;
+    this._liveVideoActive = false;
+    this._liveStreamStalled = false;
+    this._hiddenTeardownTimer = null;
+    this._startingLiveVideo = false;
+    this._hls = null;
+    this._staleSourceSeen = false;
+    this._lastRewarmAt = 0;
+    this._rewarmPending = false;
+    this._streamDropCount = 0;
+    this._remoteSkipWebRTC = (() => {
+      const ua = navigator.userAgent || "";
+      const isCompanion = /Home\s?Assistant/i.test(ua);
+      const isIOS = /iPhone|iPod|iPad/i.test(ua) || /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+      const isAndroid = /Android/i.test(ua);
+      const isMobileBrowser = !isCompanion && (isIOS || isAndroid);
+      if (!isCompanion && !isMobileBrowser) return false;
+      return this._isExternalHost();
+    })();
+    this._androidAudioMuted = /Android/i.test(navigator.userAgent || "");
+    this._lastAudioState = null;
+    this._lastVolumeState = null;
+    this._stoppingLiveVideo = false;
+    this._reconnectingLiveVideo = false;
+    this._trackMuteTimer = null;
+    this._stallWorker = null;
+    this._prevFramesDecoded = null;
+    this._framesDecodedSeenAt = 0;
+    this._statsCheckInFlight = false;
+    this._hlsNetworkErrorCount = 0;
+    this._waitForStreamRetryTimer = null;
+    this._streamTransport = null;
+    this._HLS_BANNER_AUTO_HIDE_MS = 18e4;
+    this._hlsBannerAutoHideTimer = null;
+    this._hlsBannerDismissed = false;
+    this._preferHlsThisSession = false;
+    this._webrtcFirstFrameTimer = null;
+    this._nativeHlsLoadTimer = null;
+    this._webrtcStatsPrev = null;
+    this._webrtcDeadPolls = 0;
+    this._webrtcRecoveryStreak = 0;
+    this._deadStreamRecoveryStreak = 0;
+    this._stallRecoveryTimestamps = [];
+    this._deadStreamRebuildPending = false;
+    this._startGen = 0;
+    this._rewarmSkipGate = false;
+    this._statsCachePc = null;
+    this._statsCacheAt = 0;
+    this._statsCachePromise = null;
+    this._timerStreaming = false;
+    this._optimistic = {};
+    this._optimisticTimers = {};
+    this._errorFeedbackTimers = {};
+    this._entityToBtnId = {};
+    this._visibilityHandler = null;
+    this._lastEventState = null;
+    this._lastSnapshotAt = null;
+    this._aiCaptionSig = null;
+    this._aiCaptionTimer = null;
+    this._aiCaptionShownAt = 0;
+    this._lastFrameTime = 0;
+    this._streamStartTime = 0;
+    this._awaitingFresh = false;
+    this._showMotionZones = false;
+    this._showPrivacyMasks = false;
+    this._lastRulesKey = null;
+    this._PRIVACY_COOLDOWN_MS = 5e3;
+    this._privacyCooldownUntil = 0;
+    this._privacyCooldownTimer = null;
+    this._STREAM_COOLDOWN_MS = 5e3;
+    this._streamCooldownUntil = 0;
+    this._streamCooldownTimer = null;
+    this._ZOOM_MAX = 4;
+    this._zoom = {
+      scale: 1,
+      tx: 0,
+      ty: 0,
+      prevDist: -1,
+      lastTap: 0
+    };
+    this._zoomPointers = new Map;
+    this._zoomHandlers = null;
+    this._onThemeBroadcast = this._onThemeBroadcast.bind(this);
+    this._onModeBroadcast = this._onModeBroadcast.bind(this);
+    this._activeTheme = "ios";
+    this._activeMode = "night";
+  }
+  connectedCallback() {
+    _boschPipCards.add(this);
+    this._preferHlsThisSession = false;
+    this._webrtcRecoveryStreak = 0;
+    this._deadStreamRecoveryStreak = 0;
+    this._stallRecoveryTimestamps = [];
+    this._rewarmSkipGate = false;
+    this._deadStreamRebuildPending = false;
+    this._hasEverDecodedFrames = false;
+    this._clearTimer(this._hlsBannerAutoHideTimer);
+    this._hlsBannerAutoHideTimer = null;
+    this._hlsBannerDismissed = false;
+    this._visibilityHandler = () => this._onVisibilityChange();
+    document.addEventListener("visibilitychange", this._visibilityHandler);
+    this._pagehideHandler = () => {
+      const v = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+      if (this._ownsNativePresentation(v)) return;
+      this._stopLiveVideo();
+    };
+    window.addEventListener("pagehide", this._pagehideHandler);
+    this._pageshowHandler = e => {
+      if (e.persisted) this._resumeLiveStreamIfNeeded();
+    };
+    window.addEventListener("pageshow", this._pageshowHandler);
+    this._resumeHandler = () => this._resumeLiveStreamIfNeeded();
+    document.addEventListener("resume", this._resumeHandler);
+    window.addEventListener("bosch-card-theme-change", this._onThemeBroadcast);
+    window.addEventListener("bosch-card-mode-change", this._onModeBroadcast);
+    this._onFullscreenChange = () => {
+      if (!this._isNativeFullscreen()) {
+        _boschFsExitAt = Date.now();
+        this._resetZoom();
+      }
+      this._updateFullscreenButtonState();
+    };
+    document.addEventListener("fullscreenchange", this._onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", this._onFullscreenChange);
+    document.addEventListener("mozfullscreenchange", this._onFullscreenChange);
+    document.addEventListener("MSFullscreenChange", this._onFullscreenChange);
+  }
+  setConfig(config) {
+    if (!config.camera_entity || typeof config.camera_entity !== "string") {
+      throw new Error("bosch-camera-card: camera_entity must be a non-empty string");
+    }
+    this._config = {
+      camera_entity: config.camera_entity,
+      title: config.title || null,
+      refresh_interval_streaming: config.refresh_interval_streaming ?? 2,
+      show_motion_zones: config.show_motion_zones ?? false,
+      snapshot_during_warmup: config.snapshot_during_warmup !== false,
+      minimal: config.minimal === true,
+      auto_play: AUTO_PLAY_MODES.includes(config.auto_play) ? config.auto_play : null,
+      apple_style: config.apple_style !== false,
+      theme: [ "ios", "android", "auto" ].includes(config.theme) ? config.theme : "ios",
+      mode: [ "auto", "day", "night" ].includes(config.mode) ? config.mode : "auto",
+      border_radius: typeof config.border_radius === "string" ? config.border_radius : null,
+      box_shadow: typeof config.box_shadow === "string" ? config.box_shadow : null,
+      compact: config.compact === true,
+      show_title: config.show_title !== false,
+      show_last_event: config.show_last_event !== false,
+      privacy_stale_source: config.privacy_stale_source === "event" ? "event" : "snapshot",
+      show_audio: config.show_audio !== false,
+      pan_overlay: [ "auto", "always", "never" ].includes(config.pan_overlay) ? config.pan_overlay : "auto",
+      hide_redundant_privacy: config.hide_redundant_privacy !== false,
+      use_card_audio_settings: config.use_card_audio_settings === true,
+      audio_default: [ "on", "off", "backend" ].includes(config.audio_default) ? config.audio_default : "backend",
+      ai_description_overlay: config.ai_description_overlay !== false,
+      ai_description_in_privacy: config.ai_description_in_privacy !== false,
+      ai_description_overlay_timeout: config.ai_description_overlay_timeout === undefined ? 12 : Number(config.ai_description_overlay_timeout),
+      fullscreen_auto_hide_controls: config.fullscreen_auto_hide_controls !== false,
+      motion_overlay: config.motion_overlay === true,
+      motion_overlay_threshold: Math.min(100, Math.max(1, Number(config.motion_overlay_threshold) || 28)),
+      motion_overlay_objects: config.motion_overlay_objects === true,
+      motion_overlay_min_area: Math.min(100, Math.max(.1, Number(config.motion_overlay_min_area) || .25)),
+      motion_overlay_ignore_timestamp: config.motion_overlay_ignore_timestamp !== false,
+      motion_overlay_ignore_zones: Array.isArray(config.motion_overlay_ignore_zones) ? config.motion_overlay_ignore_zones.map(z => ({
+        x: Number(z?.x),
+        y: Number(z?.y),
+        w: Number(z?.w),
+        h: Number(z?.h)
+      })).filter(z => [ z.x, z.y, z.w, z.h ].every(Number.isFinite) && z.w > 0 && z.h > 0) : [],
+      disable_webrtc: config.disable_webrtc === true,
+      webrtc_connect_timeout_ms: typeof config.webrtc_connect_timeout_ms === "number" ? config.webrtc_connect_timeout_ms : undefined
+    };
+    if (this._inFullscreen && this._inFullscreen()) this._syncFsAutoHide(true);
+    const newStorageKey = `bosch_cam_${config.camera_entity}`;
+    if (this._storageKey && this._storageKey !== newStorageKey) {
+      try {
+        localStorage.removeItem(this._storageKey);
+      } catch (_) {}
+      this._imageLoaded = false;
+    }
+    this._storageKey = newStorageKey;
+    const base = config.camera_entity.replace(/^camera\./, "");
+    this._base = base;
+    this._entities = {
+      camera: config.camera_entity,
+      switch: config.switch_entity || `switch.${base}_live_stream`,
+      audio: config.audio_entity || `switch.${base}_audio`,
+      audioVolume: config.audio_volume_entity || `number.${base}_audio_volume`,
+      light: config.light_entity || `switch.${base}_camera_light`,
+      privacy: config.privacy_entity || `switch.${base}_privacy_mode`,
+      notifications: config.notifications_entity || `switch.${base}_notifications`,
+      intercom: config.intercom_entity || `switch.${base}_intercom`,
+      speaker: config.speaker_entity || `number.${base}_speaker_level`,
+      pan: config.pan_entity || `number.${base}_pan_position`,
+      quality: config.quality_entity === false ? null : config.quality_entity || `select.${base}_video_quality`,
+      push_status: config.push_status_entity || "sensor.bosch_camera_event_detection",
+      status: config.status_entity || `sensor.${base}_status`,
+      events_today: config.events_today_entity || `sensor.${base}_events_today`,
+      last_event: config.last_event_entity || `sensor.${base}_last_event`,
+      last_event_type: config.last_event_type_entity || `sensor.${base}_last_event_type`,
+      timestamp: config.timestamp_entity || `switch.${base}_timestamp_overlay`,
+      autofollow: config.autofollow_entity || `switch.${base}_auto_follow`,
+      motion: config.motion_entity || `switch.${base}_motion_detection`,
+      recordSound: config.record_sound_entity || `switch.${base}_record_sound`,
+      privacySound: config.privacy_sound_entity || `switch.${base}_privacy_sound`,
+      notifMovement: config.notif_movement_entity || `switch.${base}_movement_notifications`,
+      notifPerson: config.notif_person_entity || `switch.${base}_person_notifications`,
+      notifAudio: config.notif_audio_entity || `switch.${base}_audio_notifications`,
+      notifTrouble: config.notif_trouble_entity || `switch.${base}_trouble_notifications`,
+      notifAlarm: config.notif_alarm_entity || `switch.${base}_camera_alarm_notifications`,
+      wifi: config.wifi_entity || `sensor.${base}_wifi_signal`,
+      firmware: config.firmware_entity || `sensor.${base}_firmware_version`,
+      ambient: config.ambient_entity || `sensor.${base}_ambient_light`,
+      movementToday: config.movement_today_entity || `sensor.${base}_movement_events_today`,
+      audioToday: config.audio_today_entity || `sensor.${base}_audio_events_today`,
+      motionZones: config.motion_zones_entity || `sensor.${base}_motion_zones`,
+      privacyMasks: config.privacy_masks_entity || `sensor.${base}_privacy_masks`,
+      streamStatus: config.stream_status_entity || `sensor.${base}_stream_status`,
+      ambientSchedule: config.ambient_schedule_entity || `sensor.${base}_dauerlicht_zeitplan`,
+      scheduleRules: config.rules_entity || `sensor.${base}_schedule_rules`,
+      frontLight: config.front_light_entity || `switch.${base}_front_light`,
+      wallwasher: config.wallwasher_entity || `switch.${base}_wallwasher`,
+      frontLightIntensity: config.front_light_intensity_entity || `number.${base}_front_light_intensity`,
+      siren: config.siren_entity || `button.${base}_siren`,
+      statusLed: config.status_led_entity || `switch.${base}_status_led`,
+      lensElevation: config.lens_elevation_entity || `number.${base}_lens_elevation`,
+      micLevel: config.mic_level_entity || `number.${base}_microphone_level`,
+      colorTemp: config.color_temp_entity || `number.${base}_color_temperature`,
+      motionLight: config.motion_light_entity || `switch.${base}_licht_bei_bewegung`,
+      ambientLight: config.ambient_light_entity || `switch.${base}_dauerlicht`,
+      intrusionDetection: config.intrusion_entity || `switch.${base}_einbrucherkennung`,
+      motionSensitivity: config.motion_sensitivity_entity || `number.${base}_bewegungslicht_empfindlichkeit`,
+      automations: config.automations || [],
+      _autoDiscoverAutomations: !config.automations || config.automations.length === 0,
+      topLedLight: config.top_led_light_entity || `light.${base}_oberes_licht`,
+      bottomLedLight: config.bottom_led_light_entity || `light.${base}_unteres_licht`,
+      frontLightEntity: config.front_light_color_entity || `light.${base}_frontlicht`,
+      topBrightness: config.top_brightness_entity || `number.${base}_helligkeit_oberes_licht`,
+      bottomBrightness: config.bottom_brightness_entity || `number.${base}_helligkeit_unteres_licht`,
+      alarmSystemArm: config.alarm_system_arm_entity || `switch.${base}_alarmanlage`,
+      alarmMode: config.alarm_mode_entity || `switch.${base}_sirene`,
+      preAlarm: config.pre_alarm_entity || `switch.${base}_pre_alarm`,
+      alarmState: config.alarm_state_entity || `sensor.${base}_alarm_status`,
+      sirenDuration: config.siren_duration_entity || `number.${base}_sirenen_dauer`,
+      alarmActivationDelay: config.alarm_activation_delay_entity || `number.${base}_alarm_verzogerung`,
+      preAlarmDelay: config.prealarm_delay_entity || `number.${base}_pre_alarm_dauer`,
+      powerLedBrightness: config.power_led_entity || `number.${base}_power_led`,
+      imageRotation180: config.image_rotation_180_entity || `switch.${base}_bild_180deg_drehen`,
+      aiDescription: config.ai_description_entity || `sensor.${base}_ai_description`
+    };
+    this._showMotionZones = this._config.show_motion_zones;
+    this.classList.toggle("minimal", this._config.minimal);
+    this.classList.toggle("apple-style", this._config.apple_style);
+    this.classList.toggle("compact", this._config.compact);
+    this.classList.toggle("no-title", !this._config.show_title);
+    this.classList.toggle("no-last-event", !this._config.show_last_event);
+    this.classList.toggle("pan-overlay-always", this._config.pan_overlay === "always");
+    this.classList.toggle("pan-overlay-never", this._config.pan_overlay === "never");
+    this.classList.toggle("dedupe-privacy", this._config.hide_redundant_privacy && this._config.apple_style && !this._config.compact);
+    this._applyOsClass();
+    this._applyTheme(this._resolveTheme());
+    this._applyMode(this._resolveMode());
+    this.classList.toggle("overflow-open", this._config.apple_style && !this._config.minimal && !this._config.compact);
+    if (this._config.border_radius) this.style.setProperty("--bosch-card-radius", this._config.border_radius); else this.style.removeProperty("--bosch-card-radius");
+    if (this._config.box_shadow) this.style.setProperty("--bosch-card-shadow", this._config.box_shadow); else this.style.removeProperty("--bosch-card-shadow");
+    this._render();
+    this._restoreCachedImage();
+    this._startRefreshTimer();
+    this._loadHlsJs().catch(() => {});
+    const prevEntity = this._audioRegisteredEntity;
+    if (prevEntity !== config.camera_entity) {
+      if (prevEntity) _boschAudioUnregister(prevEntity, this);
+      this._audioRegisteredEntity = config.camera_entity;
+      this._isSecondaryAudioInstance = _boschAudioRegister(config.camera_entity, this);
+    }
+  }
+  _resolveTheme() {
+    const cfg = this._config?.theme || "ios";
+    if (cfg === "ios" || cfg === "android") return cfg;
+    return this._detectTheme();
+  }
+  _detectTheme() {
+    const ua = (navigator.userAgent || "").toLowerCase();
+    if (/android/.test(ua)) return "android";
+    return "ios";
+  }
+  _applyTheme(theme) {
+    this.classList.toggle("theme-ios", theme === "ios");
+    this.classList.toggle("theme-android", theme === "android");
+    this._activeTheme = theme;
+    this._refreshThemeSwitcher();
+  }
+  _setUserTheme(theme) {
+    try {
+      if (theme === "auto") window.localStorage?.removeItem("bosch-card-theme"); else if (theme === "ios" || theme === "android") window.localStorage?.setItem("bosch-card-theme", theme);
+    } catch {}
+    window.dispatchEvent(new CustomEvent("bosch-card-theme-change", {
+      detail: {
+        theme: theme
+      }
+    }));
+  }
+  _applyOsClass() {
+    const ua = navigator.userAgent || "";
+    const touch = (navigator.maxTouchPoints || 0) > 1;
+    let os = "other";
+    if (/Windows|Win32|Win64/i.test(ua)) os = "windows"; else if (/iPhone|iPad|iPod/i.test(ua) || /Macintosh/i.test(ua) && touch) os = "ios"; else if (/Macintosh|Mac OS X/i.test(ua)) os = "macos"; else if (/Android/i.test(ua)) os = "android"; else if (/Linux|X11|CrOS/i.test(ua)) os = "linux";
+    for (const c of [ "windows", "macos", "ios", "android", "linux", "other" ]) {
+      this.classList.toggle("os-" + c, c === os);
+    }
+  }
+  _onThemeBroadcast(_ev) {
+    this._applyTheme(this._resolveTheme());
+  }
+  _refreshThemeSwitcher() {
+    const sw = this.shadowRoot?.getElementById("ap-theme-switcher");
+    if (!sw) return;
+    let stored = null;
+    try {
+      stored = window.localStorage?.getItem("bosch-card-theme");
+    } catch {}
+    const cfgTheme = this._config?.theme;
+    const selected = stored === "ios" || stored === "android" ? stored : cfgTheme === "ios" || cfgTheme === "android" ? cfgTheme : "auto";
+    sw.querySelectorAll("[data-theme]").forEach(b => {
+      b.classList.toggle("on", b.getAttribute("data-theme") === selected);
+      b.setAttribute("aria-pressed", b.getAttribute("data-theme") === selected ? "true" : "false");
+    });
+  }
+  _resolveMode() {
+    const cfg = this._config?.mode || "auto";
+    if (cfg === "day" || cfg === "night") return cfg;
+    return this._detectMode();
+  }
+  _detectMode() {
+    try {
+      if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) return "night";
+    } catch {}
+    return "day";
+  }
+  _applyMode(mode) {
+    this.classList.toggle("mode-day", mode === "day");
+    this.classList.toggle("mode-night", mode === "night");
+    this._activeMode = mode;
+    this._refreshModeSwitcher();
+  }
+  _setUserMode(mode) {
+    try {
+      if (mode === "auto") window.localStorage?.removeItem("bosch-card-mode"); else if (mode === "day" || mode === "night") window.localStorage?.setItem("bosch-card-mode", mode);
+    } catch {}
+    window.dispatchEvent(new CustomEvent("bosch-card-mode-change", {
+      detail: {
+        mode: mode
+      }
+    }));
+  }
+  _onModeBroadcast(_ev) {
+    this._applyMode(this._resolveMode());
+  }
+  _markLiveBadge() {
+    const badge = this.shadowRoot?.getElementById("stream-badge");
+    if (badge) badge.className = "stream-badge streaming";
+    const apBadge = this.shadowRoot?.getElementById("ap-badge");
+    if (apBadge) {
+      apBadge.className = "ap-badge live";
+      apBadge.textContent = "Live";
+    }
+    const apBtnStream = this.shadowRoot?.getElementById("ap-btn-stream");
+    if (apBtnStream) apBtnStream.classList.remove("connecting");
+    this._refreshAudioToggle();
+  }
+  _refreshAudioToggle() {
+    this._refreshAudioPill();
+    if (!this._liveVideoActive) return;
+    const video = this.shadowRoot?.getElementById("cam-video");
+    const b = this.shadowRoot?.getElementById("btn-audio");
+    if (!video || !b || b.style.display === "none") return;
+    b.classList.toggle("on", !video.muted);
+    b.classList.toggle("tap-hint", !!video.muted);
+    const lbl = b.querySelector(".sw-left span");
+    if (lbl) lbl.textContent = video.muted ? this._t("enable_sound") : this._t("sound_label");
+    b.setAttribute("title", video.muted ? this._t("audio_tap_for_sound") : this._t("audio_mute"));
+  }
+  _isIOS() {
+    const ua = navigator.userAgent || "";
+    return /iPhone|iPod|iPad/i.test(ua) || /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+  }
+  _isExternalHost() {
+    const h = (location.hostname || "").toLowerCase();
+    if (!h) return false;
+    if (h === "localhost" || h === "127.0.0.1" || h === "::1") return false;
+    if (h.endsWith(".local")) return false;
+    if (/^10\./.test(h)) return false;
+    if (/^192\.168\./.test(h)) return false;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+    if (/^fe80:/i.test(h)) return false;
+    return true;
+  }
+  _isMobileClient() {
+    const ua = navigator.userAgent || "";
+    const isCompanion = /Home\s?Assistant\//i.test(ua) || typeof location !== "undefined" && (location.search || "").includes("external_auth=1") || !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.getExternalAuth) || !!window.externalApp;
+    return isCompanion || this._isIOS() || /Android/i.test(ua);
+  }
+  _hasHover() {
+    try {
+      return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+    } catch (_) {
+      return true;
+    }
+  }
+  _wireAudioPill() {
+    const noSlider = this._isIOS() || !this._hasHover();
+    this.classList.toggle("audio-no-volume", noSlider);
+    this.classList.toggle("audio-hidden", !!(this._config && this._config.show_audio === false));
+    if (this._audioPopDismiss) {
+      document.removeEventListener("pointerdown", this._audioPopDismiss);
+      this._audioPopDismiss = null;
+    }
+    const slider = this.shadowRoot.getElementById("ap-vol");
+    if (slider && !noSlider) {
+      if (this._volSliderHandler) slider.removeEventListener("input", this._volSliderHandler);
+      this._volSliderHandler = e => this._setVideoVolume(parseFloat(e.target.value));
+      slider.addEventListener("input", this._volSliderHandler);
+      const v = this._liveVideoActive ? this.shadowRoot.getElementById("cam-video") : null;
+      const restVol = this._useCardAudio() ? this._cardVolume() : this._entityVolume();
+      slider.value = v ? String(v.volume) : String(restVol);
+    }
+    this._refreshAudioPill();
+  }
+  _setVideoVolume(v) {
+    if (this._isIOS()) return;
+    const video = this.shadowRoot.getElementById("cam-video");
+    if (video) {
+      try {
+        video.volume = v;
+      } catch (_) {}
+      video.muted = this._isSecondaryAudio() ? true : v === 0;
+      if (!video.muted && video.paused) video.play().catch(() => {});
+    }
+    if (this._useCardAudio()) this._cardSaveVolume(v); else this._setBackendVolume(v);
+    this._refreshAudioPill();
+  }
+  _useCardAudio() {
+    return !!(this._config && this._config.use_card_audio_settings);
+  }
+  _audioDefaultMode() {
+    const m = this._config && this._config.audio_default;
+    return m === "on" || m === "off" ? m : "backend";
+  }
+  _audioDecoupled() {
+    return this._useCardAudio() || this._audioDefaultMode() !== "backend";
+  }
+  _disableWebRTC() {
+    return this._config?.disable_webrtc === true;
+  }
+  _webrtcConnectTimeoutMs() {
+    return clampWebrtcTimeoutMsForDisplay(this._config?.webrtc_connect_timeout_ms);
+  }
+  _cardVolKey() {
+    return `bosch_card_volume_${this._entities?.camera || ""}`;
+  }
+  _cardMuteKey() {
+    return `bosch_card_audio_on_${this._entities?.camera || ""}`;
+  }
+  _cardVolume() {
+    try {
+      const v = parseFloat(localStorage.getItem(this._cardVolKey()));
+      return v >= 0 && v <= 1 ? v : .5;
+    } catch (_) {
+      return .5;
+    }
+  }
+  _cardSaveVolume(v) {
+    try {
+      localStorage.setItem(this._cardVolKey(), String(v));
+    } catch (_) {}
+  }
+  _cardWantUnmuted() {
+    try {
+      return localStorage.getItem(this._cardMuteKey()) === "1";
+    } catch (_) {
+      return false;
+    }
+  }
+  _cardSaveUnmuted(on) {
+    try {
+      localStorage.setItem(this._cardMuteKey(), on ? "1" : "0");
+    } catch (_) {}
+  }
+  _entityVolume() {
+    const n = parseFloat(this._hass?.states[this._entities.audioVolume]?.state);
+    return n >= 0 && n <= 100 ? n / 100 : .5;
+  }
+  _setBackendVolume(v01) {
+    if (!this._hass || !this._entities.audioVolume) return;
+    const pct = Math.round(Math.max(0, Math.min(1, v01)) * 100);
+    if (parseFloat(this._hass.states[this._entities.audioVolume]?.state) === pct) return;
+    this._hass.callService("number", "set_value", {
+      entity_id: this._entities.audioVolume,
+      value: pct
+    });
+  }
+  _isSecondaryAudio() {
+    const id = this._audioRegisteredEntity || this._config && this._config.camera_entity;
+    if (!id) return false;
+    const group = _boschAudioRegistry.get(id);
+    if (!group || group.size <= 1) return false;
+    return group.values().next().value !== this;
+  }
+  _applyAudioPreference(video) {
+    if (!video || this._isIOS()) return;
+    try {
+      video.volume = this._useCardAudio() ? this._cardVolume() : this._entityVolume();
+    } catch (_) {}
+    if (this._isSecondaryAudio()) video.muted = true;
+  }
+  _armStartUnmute() {
+    if (this._isIOS() || this._androidAudioMuted) return;
+    if (this._audioDecoupled()) return;
+    if (this._isSecondaryAudio()) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) {
+        let ctx = BoschCameraCard._audioUnlockCtx;
+        if (!ctx) {
+          ctx = new Ctx;
+          BoschCameraCard._audioUnlockCtx = ctx;
+        }
+        if (ctx.state !== "running") Promise.resolve(ctx.resume()).catch(() => {});
+      }
+    } catch (_) {}
+    this._unmuteOnStart = true;
+  }
+  _tryStartUnmute(video, inGesture = false) {
+    if (!video || !video.muted || this._androidAudioMuted) return;
+    if (this._isIOS() && !inGesture) return;
+    this._unmuteOnStart = false;
+    if (this._audioDecoupled()) return;
+    if (this._isSecondaryAudio()) return;
+    if (this._getEffectiveState(this._entities.audio) !== "on") return;
+    video.muted = false;
+    if (video.paused) Promise.resolve(video.play()).catch(() => {});
+    this._refreshAudioToggle();
+    this._refreshAudioPill();
+  }
+  _refreshAudioPill() {
+    const btn = this.shadowRoot?.getElementById("ap-btn-audio");
+    if (!btn) return;
+    const privacyOn = this._getEffectiveState(this._entities.privacy) === "on";
+    const live = !!this._liveVideoActive && !privacyOn;
+    this.classList.toggle("audio-inactive", !live);
+    const video = live ? this.shadowRoot.getElementById("cam-video") : null;
+    const audible = video ? !video.muted && video.volume > 0 : false;
+    btn.classList.toggle("on", audible);
+    btn.setAttribute("aria-pressed", String(audible));
+    btn.setAttribute("aria-disabled", String(!live));
+    const label = !live ? this._t("audio_available_when_live") : this._isSecondaryAudio() ? this._t("multi_audio_muted") : audible ? this._t("audio_mute") : this._t("audio_unmute");
+    btn.setAttribute("aria-label", label);
+    btn.setAttribute("title", label);
+  }
+  _refreshModeSwitcher() {
+    const sw = this.shadowRoot?.getElementById("ap-mode-switcher");
+    if (!sw) return;
+    let stored = null;
+    try {
+      stored = window.localStorage?.getItem("bosch-card-mode");
+    } catch {}
+    const cfgMode = this._config?.mode;
+    const selected = stored === "day" || stored === "night" ? stored : cfgMode === "day" || cfgMode === "night" ? cfgMode : "auto";
+    sw.querySelectorAll("[data-mode]").forEach(b => {
+      b.classList.toggle("on", b.getAttribute("data-mode") === selected);
+      b.setAttribute("aria-pressed", b.getAttribute("data-mode") === selected ? "true" : "false");
+    });
+  }
+  _hassFingerprint(hass) {
+    if (!hass || !hass.states) return "";
+    let fp = "";
+    const ents = this._entities || {};
+    for (const k in ents) {
+      const v = ents[k];
+      if (typeof v === "string" && v.indexOf(".") > 0) {
+        const s = hass.states[v];
+        fp += v + "=" + (s ? s.state + "@" + s.last_updated : "_") + ";";
+      }
+    }
+    const me = this._config && this._config.maintenance_entity;
+    if (me) {
+      const s = hass.states[me];
+      fp += me + "=" + (s ? s.state + "@" + s.last_updated : "_") + ";";
+    }
+    return fp;
+  }
+  set hass(hass) {
+    const firstHass = !this._hass;
+    this._hass = hass;
+    if (this._entities._autoDiscoverAutomations && hass) {
+      if (!this._autoDiscoveryDone) {
+        this._autoDiscoveryDone = true;
+        this._discoverAutomationsViaWs(hass);
+      }
+    }
+    if (firstHass) {
+      this._lastHassFp = this._hassFingerprint(hass);
+    } else {
+      const fp = this._hassFingerprint(hass);
+      if (fp === this._lastHassFp) return;
+      this._lastHassFp = fp;
+    }
+    this._applyImageRotation180();
+    if (firstHass) this._maybeAutoPlay();
+    this._update();
+    if (firstHass) {
+      this._awaitingFresh = true;
+      const _privacyNow = this._optimistic?.[this._entities?.privacy] !== undefined ? this._optimistic[this._entities.privacy] === "on" : this._hass?.states?.[this._entities?.privacy]?.state === "on";
+      const _connectingNow = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
+      if (this._imageLoaded && !_privacyNow && !_connectingNow) {
+        this._setLoadingOverlay(true, this._t("loading_refreshing"));
+      }
+      this._triggerFreshSnapshot();
+      if (!this._hass?.services?.bosch_smart_camera?.trigger_snapshot && !this._imageLoaded) {
+        this._scheduleImageLoad(0);
+      }
+      this._pullFreshSwitchStates();
+      setTimeout(() => this._maybeAutoPlay(), 800);
+    }
+  }
+  _maybeAutoPlay() {
+    this._evaluateGateForStreamTransition();
+  }
+  _evaluateGateForStreamTransition() {
+    if (!this._hass || !this._entities.switch) return;
+    const switchEnt = this._hass.states[this._entities.switch];
+    if (!switchEnt) return;
+    const curr = switchEnt.state;
+    const prev = this._lastEvaluatedSwitchState;
+    this._lastEvaluatedSwitchState = curr;
+    if (curr !== "on") {
+      if (this._playGateActive) this._hidePlayGate();
+      return;
+    }
+    if (this._rewarmSkipGate) {
+      this._rewarmSkipGate = false;
+      return;
+    }
+    if (prev === "on") return;
+    const camEnt = this._hass.states[this._entities.camera];
+    if (camEnt && camEnt.state === "unavailable") return;
+    const mode = this._getAutoPlayMode();
+    if (mode === "always") return;
+    if (mode === "lan" && this._isLanSession()) return;
+    this._showPlayGate();
+  }
+  _localizeTapToPlayOverlay(overlay) {
+    const lbl = overlay.querySelector(".ttp-label");
+    if (lbl) lbl.textContent = this._t("tap_to_play_label");
+    const hint = overlay.querySelector(".ttp-hint");
+    if (hint) hint.textContent = this._t("tap_to_play_hint");
+  }
+  _showPlayGate() {
+    this._playGateActive = true;
+    this._waitingForStream = false;
+    this._streamConnecting = false;
+    this._startingLiveVideo = false;
+    if (this._connectSteps) {
+      this._connectSteps.forEach(t => clearTimeout(t));
+      this._connectSteps = null;
+    }
+    this._setLoadingOverlay(false);
+    const el = this.shadowRoot?.getElementById("auto-play-gate");
+    if (!el) return;
+    const isLan = this._isLanSession();
+    const hint = el.querySelector(".apg-hint");
+    if (hint) {
+      hint.textContent = this._t(isLan ? "play_gate_hint_default" : "play_gate_hint_remote");
+    }
+    const lbl = el.querySelector(".apg-label");
+    if (lbl) lbl.textContent = this._t("play_gate_label");
+    el.classList.add("visible");
+  }
+  _hidePlayGate() {
+    this._playGateActive = false;
+    const el = this.shadowRoot?.getElementById("auto-play-gate");
+    if (el) el.classList.remove("visible");
+  }
+  _onPlayGateTap() {
+    this._armStartUnmute();
+    this._hidePlayGate();
+    this._update();
+  }
+  _getAutoPlayMode() {
+    const cfgMode = this._config?.auto_play;
+    if (cfgMode && AUTO_PLAY_MODES.includes(cfgMode)) return cfgMode;
+    const camAttrs = this._hass?.states[this._entities.camera]?.attributes || {};
+    const attrMode = camAttrs.auto_play_default;
+    if (attrMode && AUTO_PLAY_MODES.includes(attrMode)) return attrMode;
+    return "lan";
+  }
+  _isLanSession() {
+    if (!this._hass) return false;
+    const cfg = this._hass.config || {};
+    if (cfg.internal_url) {
+      try {
+        if (window.location.origin === new URL(cfg.internal_url).origin) return true;
+      } catch (_) {}
+    }
+    if (cfg.external_url) {
+      try {
+        if (window.location.origin === new URL(cfg.external_url).origin) return false;
+      } catch (_) {}
+    }
+    const h = (window.location.hostname || "").toLowerCase();
+    if (!h) return false;
+    if (h === "localhost" || h === "127.0.0.1" || h === "::1") return true;
+    if (h.endsWith(".local") || h.endsWith(".fritz.box") || h.endsWith(".lan")) return true;
+    if (/^192\.168\./.test(h)) return true;
+    if (/^10\./.test(h)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+    if (/^fe80:/i.test(h)) return true;
+    return false;
+  }
+  _t(key) {
+    return cardT(this._hass, key);
+  }
+  _applyImageRotation180() {
+    if (!this._hass || !this.shadowRoot) return;
+    const wrap = this.shadowRoot.querySelector(".img-wrapper");
+    if (!wrap) return;
+    const ent = this._hass.states[this._entities.imageRotation180];
+    const on = ent && ent.state === "on";
+    wrap.classList.toggle("rotated-180", !!on);
+  }
+  disconnectedCallback() {
+    _boschPipCards.delete(this);
+    if (_boschPipActive === this) this._setBackgroundKeepAlive(false);
+    if (_boschPipActive === this) _boschPipSetActive(null);
+    this._stopRefreshTimer();
+    this._clearTimer(this._aiCaptionTimer);
+    this._aiCaptionTimer = null;
+    if (this._volSliderHandler) {
+      const slider = this.shadowRoot && this.shadowRoot.getElementById("ap-vol");
+      if (slider) slider.removeEventListener("input", this._volSliderHandler);
+      this._volSliderHandler = null;
+    }
+    if (this._visibilityHandler) {
+      document.removeEventListener("visibilitychange", this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
+    if (this._pagehideHandler) {
+      window.removeEventListener("pagehide", this._pagehideHandler);
+      this._pagehideHandler = null;
+    }
+    if (this._pageshowHandler) {
+      window.removeEventListener("pageshow", this._pageshowHandler);
+      this._pageshowHandler = null;
+    }
+    if (this._resumeHandler) {
+      document.removeEventListener("resume", this._resumeHandler);
+      this._resumeHandler = null;
+    }
+    this._clearTimer(this._fsWireTimer);
+    this._fsWireTimer = null;
+    if (this._fsClickOut) {
+      document.removeEventListener("pointerup", this._fsClickOut);
+      this._fsClickOut = null;
+    }
+    if (this._fsKeyDown) {
+      document.removeEventListener("keydown", this._fsKeyDown);
+      this._fsKeyDown = null;
+    }
+    if (this._fsAutoHideWired) this._unwireFsAutoHide();
+    this._clearTimer(this._loadingTimeout);
+    this._clearTimer(this._snapshotPollTimer);
+    Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
+    this._clearTimer(this._privacyCooldownTimer);
+    this._privacyCooldownTimer = null;
+    this._clearTimer(this._streamCooldownTimer);
+    this._streamCooldownTimer = null;
+    this._clearTimer(this._panPosTimer);
+    this._panPosTimer = null;
+    if (this._audioPopDismiss) {
+      document.removeEventListener("pointerdown", this._audioPopDismiss);
+      this._audioPopDismiss = null;
+    }
+    if (this._errorFeedbackTimers) {
+      Object.values(this._errorFeedbackTimers).forEach(t => clearTimeout(t));
+      this._errorFeedbackTimers = {};
+    }
+    this._stopLiveVideo();
+    if (this._audioRegisteredEntity) {
+      _boschAudioUnregister(this._audioRegisteredEntity, this);
+      this._audioRegisteredEntity = null;
+    }
+    window.removeEventListener("bosch-card-theme-change", this._onThemeBroadcast);
+    window.removeEventListener("bosch-card-mode-change", this._onModeBroadcast);
+    if (this._onFullscreenChange) {
+      document.removeEventListener("fullscreenchange", this._onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", this._onFullscreenChange);
+      document.removeEventListener("mozfullscreenchange", this._onFullscreenChange);
+      document.removeEventListener("MSFullscreenChange", this._onFullscreenChange);
+      this._onFullscreenChange = null;
+    }
+    if (this._zoomHandlers) {
+      const {el: el, onDown: onDown, onMove: onMove, onUp: onUp, onWheel: onWheel} = this._zoomHandlers;
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
+      el.removeEventListener("wheel", onWheel);
+      this._zoomHandlers = null;
+    }
+    this._clearAllTimers();
+  }
+  _startRefreshTimer() {
+    this._stopRefreshTimer();
+    if (this._liveVideoActive || this._startingLiveVideo) return;
+    if (this._isStreaming()) return;
+    let interval;
+    if (document.visibilityState === "hidden") {
+      interval = 1800;
+    } else {
+      interval = 60;
+    }
+    const base = interval * 1e3;
+    const jitter = Math.floor(Math.random() * Math.min(1e4, base));
+    this._refreshKickoff = this._armTimer(() => {
+      this._triggerFreshSnapshot();
+      this._refreshTimer = this._armInterval(() => {
+        this._triggerFreshSnapshot();
+      }, base);
+    }, base + jitter);
+  }
+  _onVisibilityChange() {
+    if (document.visibilityState === "hidden") {
+      this._scheduleHiddenTeardown();
+      this._startRefreshTimer();
+      return;
+    }
+    if (document.visibilityState === "visible") {
+      if (this._hiddenTeardownTimer) {
+        clearTimeout(this._hiddenTeardownTimer);
+        this._hiddenTeardownTimer = null;
+      }
+      if (!this._liveVideoActive) {
+        setTimeout(() => {
+          if (this.isConnected && document.visibilityState === "visible" && !this._liveVideoActive) {
+            this._triggerFreshSnapshot();
+          }
+        }, 500);
+        this._pullFreshSwitchStates();
+      }
+      this._resumeLiveStreamIfNeeded();
+    }
+    this._startRefreshTimer();
+  }
+  _resumeLiveStreamIfNeeded() {
+    if (!this.isConnected || !this._hass) return;
+    if (document.visibilityState === "hidden") return;
+    if (this._entities?.privacy && this._getEffectiveState(this._entities.privacy) === "on") return;
+    this._completeRewarmIfPending();
+    if (!this._isStreaming()) return;
+    if (!this._liveVideoActive) {
+      if (this._startingLiveVideo || this._waitingForStream || this._reconnectingLiveVideo) return;
+      this._reconnectingLiveVideo = true;
+      setTimeout(() => {
+        this._reconnectingLiveVideo = false;
+        if (this.isConnected && this._isStreaming() && document.visibilityState !== "hidden" && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream) {
+          this._startLiveVideo();
+        }
+      }, 500);
+      return;
+    }
+    const video = this.shadowRoot?.getElementById("cam-video");
+    if (video && video.paused) {
+      Promise.resolve(video.play()).catch(err => {
+        if (err && err.name === "NotAllowedError" && this._isIOS()) {
+          const overlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
+          if (overlay && !overlay.classList.contains("visible")) {
+            this._localizeTapToPlayOverlay(overlay);
+            overlay.classList.add("visible");
+            if (this._tapToPlayResume) overlay.removeEventListener("pointerup", this._tapToPlayResume);
+            const resume = () => {
+              overlay.classList.remove("visible");
+              overlay.removeEventListener("pointerup", resume);
+              this._tapToPlayResume = null;
+              video.muted = true;
+              video.play().catch(() => {});
+            };
+            this._tapToPlayResume = resume;
+            overlay.addEventListener("pointerup", resume);
+          }
+          return;
+        }
+        this._reconnectingLiveVideo = true;
+        this._stopLiveVideo();
+        setTimeout(() => {
+          this._reconnectingLiveVideo = false;
+          if (this.isConnected && this._isStreaming() && document.visibilityState !== "hidden") {
+            this._startLiveVideo();
+          }
+        }, 500);
+      });
+      return;
+    }
+    if (video) {
+      const t0 = performance.now();
+      const ct0 = video.currentTime;
+      setTimeout(() => {
+        if (!this.isConnected || document.visibilityState !== "visible") return;
+        if (!this._liveVideoActive || this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+        const v = this.shadowRoot?.getElementById("cam-video");
+        if (!v || v.paused) return;
+        const rvfcSupported = typeof v.requestVideoFrameCallback === "function";
+        const freshFrame = v._boschLastFrameAt != null && v._boschLastFrameAt > t0;
+        const timeAdvanced = v.currentTime > ct0 + .05;
+        const liveProof = freshFrame || timeAdvanced && (!!this._hls || !rvfcSupported && !this._isIOS());
+        if (!liveProof) {
+          this._scheduleLiveRecovery("no fresh frame within 3s of tab-return");
+        }
+      }, 3e3);
+    }
+  }
+  _scheduleHiddenTeardown() {
+    if (this._hiddenTeardownTimer) return;
+    if (!this._liveVideoActive) return;
+    this._hiddenTeardownTimer = setTimeout(() => {
+      this._hiddenTeardownTimer = null;
+      if (document.visibilityState !== "hidden") return;
+      if (!this.isConnected || !this._liveVideoActive) return;
+      if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+      const video = this.shadowRoot?.getElementById("cam-video");
+      if (this._ownsNativePresentation(video)) return;
+      this._stopLiveVideo();
+    }, BACKGROUND_TEARDOWN_GRACE_MS);
+  }
+  _setLiveStalled(stalled) {
+    if (this._liveStreamStalled === stalled) return;
+    this._liveStreamStalled = stalled;
+    if (this.isConnected && document.visibilityState === "visible") this._update();
+  }
+  async _pullFreshSwitchStates() {
+    if (!this._hass) return;
+    const ids = [ this._entities.camera, this._entities.switch, this._entities.privacy, this._entities.audio, this._entities.light ].filter(id => id && this._hass.states[id]);
+    let changed = false;
+    for (const id of ids) {
+      try {
+        const fresh = await this._hass.callApi("GET", `states/${id}`);
+        if (fresh && fresh.state && this._hass.states[id]?.state !== fresh.state) {
+          delete this._optimistic[id];
+          changed = true;
+        }
+      } catch (e) {}
+    }
+    if (changed) this._update();
+  }
+  _stopRefreshTimer() {
+    this._clearTimer(this._refreshKickoff);
+    this._refreshKickoff = null;
+    this._clearTimer(this._refreshTimer);
+    this._refreshTimer = null;
+  }
+  _isStreaming() {
+    if (!this._hass) return false;
+    const switchId = this._entities.switch;
+    if (switchId in this._optimistic) return this._optimistic[switchId] === "on";
+    const sw = this._hass.states[switchId];
+    if (sw) return sw.state === "on";
+    const cam = this._hass.states[this._entities.camera];
+    if (cam?.attributes?.streaming_state) return cam.attributes.streaming_state === "active";
+    return cam?.state === "streaming";
+  }
+  _triggerFreshSnapshot() {
+    if (!this._hass?.services?.bosch_smart_camera?.trigger_snapshot) return;
+    if (this._hass.connected === false) return;
+    if (this._hass.connection && this._hass.connection.connected === false) return;
+    if (this._entities?.privacy && this._getEffectiveState(this._entities.privacy) === "on") return;
+    this._callService("bosch_smart_camera", "trigger_snapshot", {
+      entity_id: this._entities.camera
+    });
+    this._scheduleImageLoad(1500);
+    this._scheduleImageLoad(4e3);
+  }
+  _render() {
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; font-family: var(--primary-font-family, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif); }\n        ha-card {\n          overflow: hidden;\n          /* Flatten the card into one compositing layer so the rounded-corner clip\n             is rasterised ONCE. Without this, fading an overlay (loading spinner,\n             privacy) in over the hardware-composited <video> made all four corners\n             flicker on macOS — the border-radius clip was re-evaluated per frame\n             against the video plane. isolation:isolate fixes it cross-browser and,\n             unlike transform/will-change, does NOT create a containing block for\n             the position:fixed fullscreen overlay. 2026-06-15. */\n          isolation: isolate;\n          /* Own --bosch-card-* vars (issue #21), not the global --ha-card-*\n             radius/shadow tokens — a dashboard theme that zeroes those must not\n             strip our card geometry. Background DOES follow the theme (intended). */\n          border-radius: var(--bosch-card-radius, var(--ha-card-border-radius, 12px));\n          background: var(--ha-card-background, var(--card-background-color, #1c1c1e));\n          box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, 0 2px 8px rgba(0,0,0,.3)));\n        }\n\n        /* Header */\n        .header {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 12px 14px 8px;\n        }\n        .header-left { display: flex; align-items: center; gap: 8px; }\n        .title {\n          font-size: 15px; font-weight: 600;\n          color: var(--primary-text-color, #e5e5ea);\n          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;\n        }\n        .status-dot {\n          width: 8px; height: 8px; border-radius: 50%;\n          background: #636366; flex-shrink: 0; transition: background 0.3s;\n        }\n        .status-dot.online  { background: #30d158; }\n        .status-dot.offline { background: #ff453a; }\n\n        /* Stream badge */\n        .stream-badge {\n          display: inline-flex; align-items: center; gap: 5px;\n          font-size: 11px; font-weight: 600; letter-spacing: .4px;\n          text-transform: uppercase; padding: 3px 8px; border-radius: 20px;\n          transition: all 0.3s; white-space: nowrap;\n        }\n        .stream-badge.idle       { background: rgba(99,99,102,.25); color: #8e8e93; }\n        .stream-badge.streaming  { background: rgba(0,122,255,.2); color: #0a84ff; box-shadow: 0 0 0 1px rgba(0,122,255,.3); }\n        .stream-badge.connecting { background: rgba(255,159,10,.2); color: #ff9f0a; box-shadow: 0 0 0 1px rgba(255,159,10,.3); }\n        .stream-badge.offline    { background: rgba(255,69,58,.15); color: #ff453a; }\n        .stream-badge.offline .dot { background: #ff453a; }\n        .stream-badge .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }\n        .stream-badge.idle .dot       { background: #636366; }\n        .stream-badge.streaming .dot  { background: #0a84ff; animation: pulse 1.5s infinite; }\n        .stream-badge.connecting .dot { background: #ff9f0a; animation: pulse 0.8s infinite; }\n        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }\n\n        /* iOS HLS info banner — sits absolutely at the top of the camera\n           area so it stays readable over the video frame, never on the\n           letterbox bars (which are pure black and gave 0 contrast).\n           top:54px clears the .ap-top title-pill/status-badge row (top:12px\n           + ~30px pill height + gap) so the two overlays stack instead of\n           overlapping — before this fix the banner text rendered directly\n           behind the pill/badge (z-index 5 vs 13), visible as garbled text\n           squeezed between them on mobile/remote-tunnel HLS fallback\n           (2026-07-18 Thomas report, reproduced on iOS Companion App). */\n        .ios-hls-banner {\n          display: none;\n          position: absolute; top: 54px; left: 8px; right: 8px;\n          z-index: 5;\n          align-items: center; justify-content: center;\n          gap: 6px; padding: 5px 10px;\n          background: rgba(0,0,0,.6); backdrop-filter: blur(6px);\n          -webkit-backdrop-filter: blur(6px);\n          border: 1px solid rgba(255,255,255,.15);\n          border-radius: 8px;\n          font-size: 12px; font-weight: 500; color: #fff;\n          pointer-events: none;\n          text-shadow: 0 1px 2px rgba(0,0,0,.5);\n        }\n        .ios-hls-banner.visible { display: flex; }\n        .ios-hls-banner span { white-space: nowrap; }\n\n        /* Tap-to-play overlay — shown when Android WebView blocks autoplay\n           (HA app "Autoplay videos" setting is off). z-index 9 = above video,\n           below loading-overlay (10). */\n        .tap-to-play-overlay {\n          display: none;\n          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 9;\n          flex-direction: column; align-items: center; justify-content: center;\n          gap: 10px;\n          background: rgba(0,0,0,.55);\n          backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);\n          cursor: pointer;\n        }\n        .tap-to-play-overlay.visible { display: flex; }\n        .tap-to-play-overlay svg {\n          width: 56px; height: 56px; fill: rgba(255,255,255,.9);\n          filter: drop-shadow(0 2px 8px rgba(0,0,0,.5));\n        }\n        .tap-to-play-overlay .ttp-label {\n          font-size: 13px; font-weight: 500; color: rgba(255,255,255,.85);\n          text-shadow: 0 1px 3px rgba(0,0,0,.6);\n        }\n        .tap-to-play-overlay .ttp-hint {\n          font-size: 11px; color: rgba(255,255,255,.5);\n          text-align: center; max-width: 200px; line-height: 1.4;\n        }\n\n        /* Auto-play gate — shown when auto_play_default decides the user\n           should explicitly tap to reveal the live video. z-index 11 sits\n           above the video (1) and the tap-to-play overlay (9) but BELOW\n           loading-overlay (10) — except loading is hidden while the gate\n           is active so this is a non-issue. The snapshot remains visible\n           through a translucent backdrop so the user sees which camera. */\n        .auto-play-gate {\n          display: none;\n          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 11;\n          flex-direction: column; align-items: center; justify-content: center;\n          gap: 8px;\n          /* No backdrop-filter — Thomas wants to see the sharp snapshot\n             behind the play button so he can decide based on the current\n             camera image. Dimming only via low-opacity black overlay. */\n          background: rgba(0,0,0,.25);\n          cursor: pointer;\n          transition: background 0.15s;\n        }\n        .auto-play-gate.visible { display: flex; }\n        .auto-play-gate:hover { background: rgba(0,0,0,.4); }\n        /* Hide the HLS-fallback banner while the play gate is up — the\n           transport hint is irrelevant until the user actually starts\n           the stream, just clutters the view. */\n        .img-wrapper:has(.auto-play-gate.visible) .ios-hls-banner {\n          display: none !important;\n        }\n        .auto-play-gate svg {\n          width: 64px; height: 64px; fill: rgba(255,255,255,.95);\n          filter: drop-shadow(0 2px 12px rgba(0,0,0,.6));\n          transition: transform 0.12s;\n        }\n        .auto-play-gate:active svg { transform: scale(0.92); }\n        .auto-play-gate .apg-label {\n          font-size: 15px; font-weight: 600; color: rgba(255,255,255,.95);\n          text-shadow: 0 1px 4px rgba(0,0,0,.7);\n        }\n        .auto-play-gate .apg-hint {\n          font-size: 11px; color: rgba(255,255,255,.7);\n          text-align: center; max-width: 240px; line-height: 1.4;\n          text-shadow: 0 1px 3px rgba(0,0,0,.6);\n        }\n\n        /* Push status badge */\n        .push-badge {\n          display: inline-flex; align-items: center; gap: 4px;\n          font-size: 10px; font-weight: 600; letter-spacing: .3px;\n          text-transform: uppercase; padding: 2px 6px; border-radius: 12px;\n          white-space: nowrap;\n        }\n        .push-badge.push  { background: rgba(48,209,88,.15); color: #30d158; }\n        .push-badge.poll { background: rgba(99,99,102,.2); color: #8e8e93; }\n        .push-badge .pdot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }\n        .push-badge.push .pdot  { background: #30d158; }\n        .push-badge.poll .pdot { background: #636366; }\n\n        /* Connection type badge (LAN / Cloud) */\n        .conn-badge {\n          display: inline-flex; align-items: center; gap: 4px;\n          font-size: 10px; font-weight: 600; letter-spacing: .3px;\n          padding: 2px 7px; border-radius: 12px; white-space: nowrap;\n        }\n        .conn-badge.local  { background: rgba(48,209,88,.15); color: #30d158; }\n        .conn-badge.remote { background: rgba(99,99,102,.2); color: #8e8e93; }\n        .conn-badge.hidden { display: none; }\n\n        /* Camera image area */\n        .img-wrapper { position: relative; width: 100%; background: #000; line-height: 0; aspect-ratio: 16/9; }\n        /* Round the media + every full-bleed overlay to the card radius. Their\n           SQUARE corners otherwise flicker against ha-card's rounded overflow clip\n           whenever the card re-composites — e.g. on hover-out (the lift/shadow +\n           auto-hiding pill bar) or a snapshot-refresh "camera wakeup" repaint over\n           the GPU-composited video. Each child clipping its own corners removes the\n           per-frame ancestor-clip fight. Reset in fullscreen (no card radius there).\n           2026-06-15 (corner-flicker — Thomas: overlays had no corner radius). */\n        .cam-img, .cam-video, .loading-overlay, .privacy-placeholder,\n        .offline-overlay, .auth-overlay, .tap-to-play-overlay, .auto-play-gate {\n          border-radius: var(--bosch-card-radius, var(--ha-card-border-radius, 12px));\n        }\n        :host(.fs-active) .cam-img, :host(.fs-active) .cam-video,\n        :host(.fs-active) .loading-overlay, :host(.fs-active) .privacy-placeholder,\n        :host(.fs-active) .offline-overlay, :host(.fs-active) .auth-overlay,\n        :host(.fs-active) .tap-to-play-overlay, :host(.fs-active) .auto-play-gate {\n          border-radius: 0;\n        }\n        .cam-img {\n          width: 100%; height: 100%; display: block; object-fit: cover;\n          min-height: 160px; transition: opacity 0.3s;\n        }\n        .cam-img.hidden { opacity: 0; }\n\n        /* Live video element — absolute so it overlays the snapshot image\n           without layout shift. Image stays visible underneath until video\n           fires "playing" event, avoiding the black gap. */\n        .cam-video {\n          position: absolute; top: 0; right: 0; bottom: 0; left: 0;\n          width: 100%; height: 100%; display: block; object-fit: cover;\n          min-height: 160px; background: transparent;\n        }\n\n        /* Image rotation 180° (ceiling-mounted indoor cameras).\n           Pure CSS transform — zero CPU, zero latency, GPU-composited.\n           Toggled by the integration's switch.<base>_bild_180_drehen entity.\n           Only the <video> is rotated here: the <img> is loaded from\n           /api/camera_proxy/, which is already rotated server-side by\n           camera.async_camera_image() (PIL) — rotating it again would\n           cancel out and the dashboard snapshot would look upright. */\n        .img-wrapper.rotated-180 .cam-video {\n          transform: rotate(180deg);\n        }\n\n        /* Fullscreen — native API (desktop/Android) */\n        .img-wrapper:fullscreen,\n        .img-wrapper:-webkit-full-screen {\n          background: #000;\n          display: flex; align-items: center; justify-content: center;\n          width: 100vw; height: 100vh;\n        }\n        .img-wrapper:fullscreen .cam-img,\n        .img-wrapper:-webkit-full-screen .cam-img,\n        .img-wrapper:fullscreen .cam-video,\n        .img-wrapper:-webkit-full-screen .cam-video {\n          width: 100vw; height: 100vh;\n          object-fit: contain; min-height: unset;\n        }\n        /* Fullscreen — CSS fallback for iOS Safari (position:fixed overlay) */\n        :host(.fs-active) {\n          position: fixed !important; top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important;\n          z-index: 9999 !important; background: #000 !important;\n          display: flex !important; align-items: center !important; justify-content: center !important;\n        }\n        /* Hide header, controls and other elements in fullscreen */\n        :host(.fs-active) .header,\n        :host(.fs-active) .info-row,\n        :host(.fs-active) .btn-row,\n        :host(.fs-active) .switch-rows,\n        :host(.fs-active) .quality-section,\n        :host(.fs-active) .accordion { display: none !important; }\n        :host(.fs-active) .img-wrapper { aspect-ratio: unset; width: 100vw; height: 100vh; touch-action: none; }\n        :host(.fs-active) .cam-img,\n        :host(.fs-active) .cam-video { object-fit: contain; min-height: unset; }\n        :host(.fs-active) ha-card { width: 100vw; height: 100vh; border-radius: 0 !important; overflow: hidden; }\n        :host(.fs-active) .cam-img,\n        :host(.fs-active) .cam-video { width: 100vw; height: 100vh; object-fit: contain; min-height: unset; }\n        /* Keep Apple-style overlays on top of everything in fullscreen so\n           they remain reachable for tap-to-exit and toggle clicks. Browser\n           chromes (especially iOS) push the video layer aggressively to the\n           foreground; the explicit high z-index ensures the glass pill +\n           pill-bar stay above without changing layout. */\n        :host(.fs-active) .ap-top,\n        :host(.fs-active) .ap-pill-bar,\n        .img-wrapper:fullscreen .ap-top,\n        .img-wrapper:fullscreen .ap-pill-bar,\n        .img-wrapper:-webkit-full-screen .ap-top,\n        .img-wrapper:-webkit-full-screen .ap-pill-bar { z-index: 10000; }\n        /* Restore the control bar in fullscreen even on COMPACT (overview) tiles.\n           compact hides .ap-pill-bar in the grid; without this it stayed hidden\n           when a tile is tapped to fullscreen, so the audio / privacy / fullscreen\n           pills were unreachable on the overview card (Thomas: "beide Karten"). */\n        :host(.fs-active) .ap-pill-bar,\n        .img-wrapper:fullscreen .ap-pill-bar,\n        .img-wrapper:-webkit-full-screen .ap-pill-bar { display: flex !important; }\n        /* …but an OFFLINE camera has no controls to offer — the rule above\n           force-shows the pill bar in fullscreen (to restore it on overview\n           tiles), which overrode the cam-offline hiding (no !important). Keep the\n           pill bar + top row hidden in fullscreen while offline. Higher\n           specificity (.fs-active.cam-offline) + !important wins. (2026-06-17) */\n        :host(.fs-active.cam-offline) .ap-pill-bar,\n        :host(.fs-active.cam-offline) .ap-top { display: none !important; }\n\n        /* Fullscreen controls auto-hide after 10s idle (Thomas, 2026-07-13).\n           .fs-controls-hidden is a plain JS-driven host class (NOT gated on\n           :fullscreen/.fs-active in the selector) so it works uniformly for\n           BOTH the native Fullscreen API path and the CSS-fallback (.fs-active,\n           iOS) path from one place — the JS side only ever adds this class while\n           one of those two is actually active (see _syncFsAutoHide). Opacity +\n           pointer-events, never display:none, so the fade is smooth and toggling\n           it back doesn't force a reflow. .ap-vol-pop is a DESCENDANT of\n           .ap-pill-bar (inside .ap-audio-wrap) so it fades with the parent\n           for free — no separate selector needed, and pointer-events:none also\n           cascades to it so a floating, unanchored volume popup can't linger. */\n        :host(.fs-controls-hidden) .ap-pill-bar {\n          opacity: 0 !important; pointer-events: none !important;\n        }\n        /* .ap-vol-pop needs its OWN override here, not just the parent's: the\n           parent's opacity:0 already hides it visually (opacity applies to the\n           whole subtree, not just the element it's set on), but pointer-events\n           is an INHERITED property — an explicit declaration on the element\n           itself (the :hover/.show rule below, which sets pointer-events:auto\n           on .ap-vol-pop directly) always wins over an inherited value, no\n           matter how the ancestor's own pointer-events is specified/!important.\n           Without this, hovering the audio button, then going idle for 10s\n           with the mouse stationary over the (now invisible) popup, left its\n           slider still clickable/draggable at that screen position — found by\n           the 2026-07-13 auto-hide bug-hunt (agent #3). */\n        :host(.fs-controls-hidden) .ap-vol-pop { pointer-events: none !important; }\n        /* Idle cursor hides too (nice-to-have) — scoped to the hidden state so\n           it never affects the normal (non-fullscreen) card. */\n        :host(.fs-controls-hidden) .img-wrapper,\n        :host(.fs-controls-hidden) .cam-img,\n        :host(.fs-controls-hidden) .cam-video { cursor: none; }\n\n        /* ── Pan edge-arrow overlay (#33) ──────────────────────────────────\n           Big left/right chevrons on the video edges. Inside .img-wrapper so\n           the Fullscreen API keeps them (only the fullscreened node + its\n           descendants paint). Reveal logic: fade in on hover (desktop), always\n           on touch-only devices, always in fullscreen, always when pinned via\n           pan_overlay:"always". Hidden entirely via pan_overlay:"never". */\n        .pan-overlay {\n          position: absolute; inset: 0; z-index: 9;\n          pointer-events: none; opacity: 0;\n          transition: opacity .2s ease;\n        }\n        .img-wrapper:hover .pan-overlay { opacity: 1; }\n        @media (hover: none) { .pan-overlay { opacity: 1; } }\n        :host(.pan-overlay-always) .pan-overlay { opacity: 1; }\n        :host(.pan-overlay-never) .pan-overlay { display: none !important; }\n        .pan-edge {\n          position: absolute; top: 50%; transform: translateY(-50%);\n          width: 44px; height: 64px; padding: 0; border: none; cursor: pointer;\n          touch-action: manipulation;\n          display: flex; align-items: center; justify-content: center;\n          pointer-events: auto; color: #fff;\n          background: rgba(0,0,0,.34);\n          -webkit-backdrop-filter: blur(8px) saturate(1.4);\n          backdrop-filter: blur(8px) saturate(1.4);\n          border-radius: 14px;\n          transition: background .15s ease, transform .1s ease, opacity .15s ease;\n        }\n        .pan-edge svg { width: 26px; height: 26px; }\n        .pan-edge-left { left: 10px; }\n        .pan-edge-right { right: 10px; }\n        .pan-edge:hover { background: rgba(0,0,0,.52); }\n        .pan-edge:active { transform: translateY(-50%) scale(.9); }\n        .pan-edge[disabled] { opacity: .25; pointer-events: none; cursor: default; }\n        /* Day-mode chrome: lighter glass so the dark icon stays legible. */\n        :host(.apple-style.mode-day) .pan-edge { background: rgba(255,255,255,.42); color: #1c1c1e; }\n        :host(.apple-style.mode-day) .pan-edge:hover { background: rgba(255,255,255,.62); }\n        .pan-overlay-pos {\n          position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%);\n          padding: 3px 11px; border-radius: 999px;\n          background: rgba(0,0,0,.5); color: #fff;\n          font-size: 13px; font-weight: 600; letter-spacing: .3px;\n          -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);\n          opacity: 0; transition: opacity .25s ease; pointer-events: none;\n        }\n        .pan-overlay-pos.flash { opacity: 1; }\n        /* Compact (overview) tiles: edge-arrows only get in the way at tile\n           size, so show them ONLY once a tile is opened to fullscreen. */\n        :host(.compact) .pan-overlay { display: none; }\n        :host(.compact.fs-active) .pan-overlay { display: block; }\n        /* In fullscreen: bump above the video layer (iOS pushes <video> up),\n           keep visible, and enlarge the hit targets for touch. */\n        :host(.fs-active) .pan-overlay,\n        .img-wrapper:fullscreen .pan-overlay,\n        .img-wrapper:-webkit-full-screen .pan-overlay { z-index: 10000; opacity: 1; }\n        :host(.fs-active) .pan-edge,\n        .img-wrapper:fullscreen .pan-edge,\n        .img-wrapper:-webkit-full-screen .pan-edge { width: 54px; height: 88px; }\n        :host(.fs-active) .pan-edge svg,\n        .img-wrapper:fullscreen .pan-edge svg,\n        .img-wrapper:-webkit-full-screen .pan-edge svg { width: 32px; height: 32px; }\n\n        /* Motion zones SVG overlay */\n        .motion-zones-overlay {\n          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 5;\n          width: 100%; height: 100%;\n          pointer-events: none; opacity: 0;\n          transition: opacity 0.3s;\n        }\n        .motion-zones-overlay.visible { opacity: 1; }\n        .motion-zones-overlay rect {\n          fill: rgba(0, 122, 255, 0.15);\n          stroke: rgba(0, 122, 255, 0.6);\n          stroke-width: 0.5;\n        }\n        .motion-zones-overlay rect:nth-child(2) { fill: rgba(52, 199, 89, 0.15); stroke: rgba(52, 199, 89, 0.6); }\n        .motion-zones-overlay rect:nth-child(3) { fill: rgba(255, 159, 10, 0.15); stroke: rgba(255, 159, 10, 0.6); }\n        .motion-zones-overlay rect:nth-child(4) { fill: rgba(255, 69, 58, 0.15); stroke: rgba(255, 69, 58, 0.6); }\n        .motion-zones-overlay rect:nth-child(5) { fill: rgba(175, 82, 222, 0.15); stroke: rgba(175, 82, 222, 0.6); }\n        /* Gen2 polygon zones use per-zone colors from API */\n        .motion-zones-overlay polygon { fill-opacity: 0.15; stroke-width: 2; stroke-opacity: 0.6; }\n        /* Privacy mask SVG overlay */\n        .privacy-mask-overlay {\n          position: absolute; top: 0; left: 0; width: 100%; height: 100%;\n          pointer-events: none; z-index: 5;\n          opacity: 0; transition: opacity 0.3s;\n        }\n        .privacy-mask-overlay.visible { opacity: 1; }\n        .privacy-mask-overlay rect, .privacy-mask-overlay polygon {\n          fill: rgba(0, 0, 0, 0.5); stroke: rgba(0, 0, 0, 0.8); stroke-width: 1.5;\n        }\n\n        /* Loading overlay — must be above both cam-img and cam-video */\n        .loading-overlay {\n          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 10;\n          display: flex; flex-direction: column; align-items: center; justify-content: center;\n          background: rgba(0,0,0,.85);\n          gap: 12px;\n          opacity: 0; transition: opacity 0.3s; pointer-events: none;\n        }\n        .loading-overlay.visible { opacity: 1; pointer-events: auto; }\n        /* Semi-transparent overlay when refreshing an existing image — old image stays visible, spinner on top */\n        .loading-overlay.refreshing { background: rgba(0,0,0,.4); }\n        /* Camera offline → the offline-overlay (z8) owns the screen. The loading\n           spinner (z10) must NEVER appear over "Kamera Offline", regardless of\n           which path raised it: the template ships .visible by default, and\n           _restoreCachedImage adds .visible via direct DOM (bypassing the JS\n           guard in _setLoadingOverlay). This CSS wins independent of timing. */\n        :host(.cam-offline) .loading-overlay { opacity: 0 !important; pointer-events: none !important; }\n        /* SVG spinner with SMIL <animateTransform> — replaces the CSS @keyframes\n           div-spinner because iOS Safari + HA mobile WebView were rendering the\n           CSS-animated rotation as static (animation paused on opacity:0→1\n           parent transition inside shadow DOM). SMIL animations run independently\n           of CSS animation scheduling and work reliably across all WebKit versions. */\n        .spinner {\n          width: 36px; height: 36px;\n          flex: 0 0 auto;\n          display: block;\n        }\n        .loading-text {\n          font-size: 13px; color: rgba(255,255,255,.75); font-weight: 500;\n        }\n        .loading-hint {\n          font-size: 11px; color: rgba(255,255,255,.5); font-weight: 400;\n          margin-top: 4px; display: block; text-align: center; max-width: 220px;\n        }\n        .loading-hint:empty { display: none; }\n\n        /* Offline overlay — shown when status sensor is OFFLINE */\n        .offline-overlay {\n          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 8;\n          display: none;\n          flex-direction: column; align-items: center; justify-content: center;\n          background: rgba(20, 20, 20, 0.42);\n          backdrop-filter: grayscale(70%) blur(6px);\n          -webkit-backdrop-filter: grayscale(70%) blur(6px);\n          gap: 10px;\n          pointer-events: none;\n        }\n        .offline-overlay.visible { display: flex; }\n        .offline-overlay svg {\n          width: 48px; height: 48px;\n          stroke: #ff453a; stroke-width: 2; fill: none;\n          filter: drop-shadow(0 0 8px rgba(255, 69, 58, 0.5));\n        }\n        .offline-overlay .offline-title {\n          font-size: 18px; font-weight: 700; color: #ff453a;\n          letter-spacing: 1px; text-transform: uppercase;\n          text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 10px rgba(0, 0, 0, 0.6);\n        }\n        .offline-overlay .offline-subtitle {\n          text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 8px rgba(0, 0, 0, 0.6);\n          font-size: 12px; color: rgba(255,255,255,.85);\n          font-weight: 400; max-width: 80%; text-align: center; line-height: 1.4;\n        }\n\n        /* Auth/integration overlay — shown when camera entity is unavailable\n           (coordinator failed, e.g. Bosch Cloud refresh token rejected) */\n        .auth-overlay {\n          position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 9;\n          display: none;\n          flex-direction: column; align-items: center; justify-content: center;\n          background: rgba(20, 20, 20, 0.88);\n          backdrop-filter: blur(4px);\n          -webkit-backdrop-filter: blur(4px);\n          gap: 14px;\n          pointer-events: auto;\n        }\n        .auth-overlay.visible { display: flex; }\n        .auth-overlay svg {\n          width: 48px; height: 48px;\n          stroke: #ff9f0a; stroke-width: 2; fill: none;\n          filter: drop-shadow(0 0 8px rgba(255, 159, 10, 0.5));\n        }\n        .auth-overlay .auth-title {\n          font-size: 16px; font-weight: 700; color: #ff9f0a;\n          letter-spacing: 0.5px; text-align: center;\n          text-shadow: 0 0 10px rgba(255, 159, 10, 0.35);\n        }\n        .auth-overlay .auth-subtitle {\n          font-size: 12px; color: rgba(255,255,255,.75);\n          font-weight: 400; max-width: 85%; text-align: center; line-height: 1.45;\n        }\n        .auth-overlay .auth-btn {\n          margin-top: 4px;\n          padding: 8px 18px;\n          background: #ff9f0a; color: #1a1a1a;\n          border: none; border-radius: 8px;\n          font-size: 13px; font-weight: 600;\n          cursor: pointer;\n          text-decoration: none;\n          transition: filter .15s;\n        }\n        .auth-overlay .auth-btn:hover { filter: brightness(1.1); }\n        .auth-overlay .auth-btn:active { filter: brightness(0.9); }\n\n        /* Image overlay (last event / events today) */\n        .img-overlay {\n          position: absolute; bottom: 0; left: 0; right: 0;\n          padding: 20px 12px 8px;\n          background: linear-gradient(transparent, rgba(0,0,0,.55));\n          display: flex; align-items: flex-end; justify-content: space-between;\n          pointer-events: none;\n        }\n        .last-event-overlay, .events-overlay { font-size: 11px; color: rgba(255,255,255,.8); }\n\n        /* Info row */\n        .info-row {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 8px 14px; gap: 10px;\n        }\n        .info-item { display: flex; flex-direction: column; gap: 1px; min-width: 0; }\n        .info-label {\n          font-size: 10px; text-transform: uppercase; letter-spacing: .5px;\n          color: var(--secondary-text-color, #8e8e93);\n        }\n        .info-value {\n          font-size: 13px; color: var(--primary-text-color, #e5e5ea);\n          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;\n        }\n\n        /* Buttons */\n        .btn-row { display: flex; gap: 8px; padding: 8px 12px 12px; }\n        .btn {\n          flex: 1; display: flex; align-items: center; justify-content: center;\n          gap: 6px; padding: 9px 10px; border-radius: 10px; border: none;\n          cursor: pointer; font-size: 13px; font-weight: 500; font-family: inherit;\n          transition: opacity 0.15s, transform 0.1s;\n          -webkit-tap-highlight-color: transparent;\n        }\n        .btn:active { transform: scale(.97); opacity: .8; }\n        .btn:disabled { opacity: .5; cursor: default; }\n        .btn-snapshot { background: rgba(99,99,102,.2); color: var(--primary-text-color, #e5e5ea); }\n        .btn-snapshot.loading { background: rgba(99,99,102,.35); }\n        .btn-stream    { background: rgba(10,132,255,.18); color: #0a84ff; }\n        .btn-stream.active { background: rgba(255,69,58,.18); color: #ff453a; }\n        .btn-fullscreen { background: rgba(99,99,102,.15); color: var(--secondary-text-color, #8e8e93); flex: 0 0 auto; padding: 9px 12px; }\n        .btn-privacy-inline { background: rgba(99,99,102,.15); color: var(--secondary-text-color, #8e8e93); flex: 0 0 auto; padding: 9px 12px; display: none; }\n        .btn-privacy-inline.on { background: rgba(255,69,58,.18); color: #ff453a; }\n        :host(.minimal) .btn-privacy-inline { display: inline-flex; }\n        :host(.minimal) .switch-rows > .privacy-row { display: none; }\n        /* Dedupe (#15/#27): drop the "Privat" row when the pill bar already\n           carries a privacy button (apple-style). The pill button + this row\n           drive the same entity, so showing both is redundant. */\n        :host(.dedupe-privacy) .switch-rows > .privacy-row { display: none; }\n        /* Keep the dedupe in the minimal overflow-open tray too. The\n           minimal.overflow-open .sw-row reveal above (specificity 0,5,0)\n           otherwise out-specifies the dedupe rule (0,4,0) and brings the\n           "Privat" row back when the overflow menu is opened on an overview\n           tile / minimal card. This guard is 0,6,0, so it wins.\n           #15/#27 (RkcCorian: row still showed via the overflow tray). */\n        :host(.dedupe-privacy.minimal.overflow-open) .switch-rows > .privacy-row { display: none; }\n        .btn-overflow { background: rgba(99,99,102,.15); color: var(--secondary-text-color, #8e8e93); flex: 0 0 auto; padding: 9px 12px; display: none; }\n        :host(.minimal) .btn-overflow { display: inline-flex; }\n        :host(.minimal.overflow-open) .btn-overflow { background: rgba(10,132,255,.18); color: #0a84ff; }\n\n        /* Minimal layout: hide everything non-essential until user taps ⋮.\n         * Visible baseline: image, btn-row (Snapshot/Stream/⋮/Vollbild),\n         * Privacy toggle. The overflow-open class (toggled by the ⋮ button) re-\n         * reveals the hidden sections as a single flat panel — no separate popup\n         * needed, just a progressive disclosure of existing controls. */\n        :host(.minimal) .info-row { display: none; }\n        :host(.minimal) .switch-rows { display: none; }\n        :host(.minimal) .btn-row { padding-bottom: 8px; }\n        :host(.minimal) .accordion,\n        :host(.minimal) .pan-row,\n        :host(.minimal) .pan-slider-row,\n        :host(.minimal) .automation-row,\n        :host(.minimal) .quality-section { display: none; }\n        :host(.minimal.overflow-open) .info-row { display: flex; }\n        :host(.minimal.overflow-open) .switch-rows { display: flex; padding: 0 12px 12px; }\n        :host(.minimal.overflow-open) .switch-rows > .sw-row { display: flex; }\n        :host(.minimal.overflow-open) .accordion,\n        :host(.minimal.overflow-open) .pan-row,\n        :host(.minimal.overflow-open) .pan-slider-row,\n        :host(.minimal.overflow-open) .automation-row { display: block; }\n        /* Quality auto-appears on every card now (2026-07-20) — in minimal\n           mode (overview tiles default) it must stay behind the ⋮ menu like\n           every other secondary control, not sit as its own always-visible\n           row (Thomas, live screenshot 2026-07-20: it was showing inline on\n           the overview grid). Only reveal it in the overflow tray when the\n           section itself is actually populated (hasQuality, tracked via\n           this JS-driven style.display rather than the CSS "display:none"\n           default) — same guard the JS toggle in _update() already applies. */\n        :host(.minimal.overflow-open) .quality-section:not([style*="display: none"]) { display: block; }\n        :host(.minimal.overflow-open) .pan-row { display: flex; }\n        .btn svg { width: 16px; height: 16px; flex-shrink: 0; }\n        .btn-spinner {\n          width: 14px; height: 14px;\n          border: 2px solid rgba(255,255,255,.3);\n          border-top-color: currentColor;\n          border-radius: 50%;\n          animation: spin 0.8s linear infinite;\n          flex-shrink: 0;\n        }\n\n        /* Switch rows — Ton / Licht / Privat */\n        .switch-rows { display: flex; flex-direction: column; padding: 0 12px 12px; gap: 2px; }\n        .sw-row {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 9px 4px; cursor: pointer; border-radius: 8px;\n          -webkit-tap-highlight-color: transparent;\n          transition: background 0.15s;\n        }\n        .sw-row:active { background: rgba(99,99,102,.12); }\n        .sw-left {\n          display: flex; align-items: center; gap: 10px;\n          color: var(--primary-text-color, #e5e5ea); font-size: 13px; font-weight: 500;\n        }\n        .sw-left svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--secondary-text-color, #8e8e93); }\n        .sw-row.on .sw-left svg { color: #0a84ff; }\n        .sw-row.privacy-row.on .sw-left svg { color: #ff453a; }\n        /* iOS-style toggle */\n        .sw-toggle {\n          width: 44px; height: 26px; border-radius: 13px;\n          background: rgba(99,99,102,.4); border: none; padding: 0;\n          position: relative; flex-shrink: 0; cursor: pointer;\n          transition: background 0.25s;\n        }\n        .sw-row.on    .sw-toggle { background: #30d158; }\n        /* Audio "tap for sound" hint (issue #22): the stream starts muted by the\n           browser autoplay policy, so the Ton row reads off until a tap unmutes.\n           A gentle pulse on the toggle draws the eye to it. */\n        .sw-row.tap-hint .sw-toggle { animation: bosch-audio-hint 1.6s ease-in-out infinite; }\n        @keyframes bosch-audio-hint {\n          0%, 100% { box-shadow: 0 0 0 0 rgba(255,159,10,0); }\n          50%      { box-shadow: 0 0 0 3px rgba(255,159,10,.4); }\n        }\n        .sw-row.privacy-row.on .sw-toggle { background: #ff453a; }\n        .sw-thumb {\n          width: 22px; height: 22px; border-radius: 50%; background: #fff;\n          position: absolute; top: 2px; left: 2px;\n          box-shadow: 0 1px 4px rgba(0,0,0,.4);\n          transition: transform 0.25s cubic-bezier(.4,0,.2,1);\n        }\n        .sw-row.on .sw-thumb { transform: translateX(18px); }\n\n        /* Pending: request in flight — subtle fade while waiting for HA/Bosch confirm */\n        .sw-row.pending,\n        .btn.pending { opacity: 0.7; }\n        .sw-row.pending .sw-toggle,\n        .btn.pending { animation: pendingPulse 1.2s ease-in-out infinite; }\n        @keyframes pendingPulse { 0%,100%{filter:brightness(1)} 50%{filter:brightness(0.75)} }\n        /* Error: 2s red outline + short shake to signal failed service call */\n        .sw-row.error,\n        .btn.error { animation: errorFlash 0.6s ease-in-out 0s 3; box-shadow: 0 0 0 2px rgba(255,69,58,.55); }\n        @keyframes errorFlash {\n          0%,100% { box-shadow: 0 0 0 2px rgba(255,69,58,.55); }\n          50%     { box-shadow: 0 0 0 3px rgba(255,69,58,.15); }\n        }\n\n        /* Privacy placeholder — shown when no image + privacy mode is ON.\n           Was rgba(0,0,0,.82) which read as a hard black wall over the\n           camera. Mid-tone .55 + a subtle backdrop blur lets a hint of the\n           dimmed camera image show through, signalling "privacy on but the\n           camera is fine" rather than "this view is dead". */\n        .privacy-placeholder {\n          position: absolute; top: 0; right: 0; bottom: 0; left: 0;\n          /* Above the loading-overlay (z-index 10) so toggling privacy ON while a\n             stream is still connecting shows the lock, not a spinner. 2026-06-15. */\n          z-index: 11;\n          display: flex; flex-direction: column; align-items: center; justify-content: center;\n          background: rgba(20,20,22,.4);\n          backdrop-filter: grayscale(50%) blur(6px);\n          -webkit-backdrop-filter: grayscale(50%) blur(6px);\n          gap: 10px;\n          opacity: 0; transition: opacity 0.3s; pointer-events: none;\n        }\n        .privacy-placeholder.visible { opacity: 1; }\n        .privacy-placeholder svg { width: 44px; height: 44px; color: rgba(255,255,255,.85); filter: drop-shadow(0 1px 3px rgba(0,0,0,.5)); }\n        .privacy-placeholder span { font-size: 13px; color: rgba(255,255,255,.9); font-weight: 500; text-shadow: 0 1px 3px rgba(0,0,0,.6); }\n        /* Stale-image badge: shown below the lock label when privacy is ON and\n           a last-event timestamp is available.  Uses a slightly smaller font +\n           softer opacity so it reads as supplementary info, not an alarm.  The\n           .privacy-stale-badge wrapper is a glass pill (matches ap-glass aesthetic)\n           to visually separate the timestamp from the "Privatmodus" label above. */\n        .privacy-stale-badge {\n          display: none;\n          align-items: center; gap: 5px;\n          padding: 4px 10px;\n          border-radius: 999px;\n          background: rgba(255,255,255,.10);\n          backdrop-filter: blur(6px);\n          -webkit-backdrop-filter: blur(6px);\n          border: 1px solid rgba(255,255,255,.13);\n          font-size: 11px; color: rgba(255,255,255,.55); font-weight: 400;\n          max-width: calc(100% - 24px);\n          text-align: center; line-height: 1.3;\n          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;\n        }\n        .privacy-stale-badge.visible { display: inline-flex; }\n        .privacy-stale-badge { text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85); }\n        /* Day mode: lighter overlay with darker glyph for legibility */\n        :host(.apple-style.mode-day) .privacy-placeholder {\n          background: rgba(240,240,242,.42);\n        }\n        :host(.apple-style.mode-day) .privacy-placeholder svg { color: rgba(28,28,30,.8); filter: none; }\n        :host(.apple-style.mode-day) .privacy-placeholder span { color: rgba(28,28,30,.85); text-shadow: 0 1px 2px rgba(255,255,255,.5); }\n        :host(.apple-style.mode-day) .privacy-stale-badge {\n          background: rgba(0,0,0,.08); border-color: rgba(0,0,0,.10);\n          color: rgba(28,28,30,.55);\n        }\n\n        /* Quality select */\n        .quality-section { padding: 0 12px 12px; }\n        .quality-row { display: flex; align-items: center; gap: 10px; }\n        .quality-label { font-size: 13px; color: var(--secondary-text-color, #8e8e93); flex-shrink: 0; }\n        .quality-select {\n          flex: 1; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.12);\n          border-radius: 8px; color: var(--primary-text-color, #e5e5ea); font-size: 13px;\n          padding: 6px 10px; cursor: pointer; font-family: inherit;\n          -webkit-appearance: none; appearance: none;\n        }\n        .quality-select:focus { outline: none; background: rgba(255,255,255,.15); }\n        .quality-select option { background: #2c2c2e; color: #e5e5ea; }\n\n        /* Pan controls */\n        .pan-section { padding: 0 12px 12px; }\n        .pan-row { display: flex; align-items: center; gap: 6px; }\n        .pan-btn {\n          background: rgba(128,128,128,.15); border: none; border-radius: 6px;\n          color: var(--primary-text-color, #333); cursor: pointer; padding: 6px 10px; flex: 1;\n          font-family: inherit; -webkit-tap-highlight-color: transparent;\n          transition: background 0.15s;\n          display: flex; align-items: center; justify-content: center;\n        }\n        .pan-btn svg { width: 18px; height: 18px; flex-shrink: 0; }\n        .pan-btn:hover  { background: rgba(128,128,128,.25); }\n        .pan-btn:active { background: rgba(128,128,128,.35); }\n        .pan-pos { margin-left: auto; font-size: 12px; opacity: .7; color: var(--primary-text-color, #e5e5ea); white-space: nowrap; }\n\n        /* Accordion sections */\n        .accordion { border-top: 1px solid rgba(255,255,255,.06); }\n        .accordion-header {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 10px 14px; cursor: pointer;\n          -webkit-tap-highlight-color: transparent;\n          transition: background 0.15s;\n        }\n        .accordion-header:active { background: rgba(99,99,102,.08); }\n        .accordion-title {\n          font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px;\n          color: var(--secondary-text-color, #8e8e93);\n        }\n        .accordion-chevron {\n          width: 16px; height: 16px; color: var(--secondary-text-color, #8e8e93);\n          transition: transform 0.25s ease;\n          flex-shrink: 0;\n        }\n        .accordion.open .accordion-chevron { transform: rotate(180deg); }\n        .accordion-body {\n          max-height: 0; overflow: hidden;\n          transition: max-height 0.3s ease;\n        }\n        .accordion.open .accordion-body { max-height: 600px; }\n        .accordion-content { padding: 0 12px 12px; }\n        .accordion-content .sw-row { padding: 7px 4px; }\n\n        /* Service grid inside accordion */\n        .svc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px 0; }\n        .svc-btn { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); color: var(--primary-text-color, #e1e1e1); font-size: 11px; cursor: pointer; transition: background .15s; }\n        .svc-btn:hover { background: rgba(255,255,255,.08); }\n        .svc-btn:active { background: rgba(255,255,255,.12); }\n        .svc-btn svg { width: 16px; height: 16px; flex-shrink: 0; }\n        .svc-btn.running { opacity: 0.5; pointer-events: none; }\n        /* Rule row inside accordion */\n        .rule-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 4px; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,.04); }\n        .rule-row .rule-info { flex: 1; min-width: 0; }\n        .rule-row .rule-name { font-weight: 500; color: var(--primary-text-color, #e1e1e1); }\n        .rule-row .rule-time { color: #999; font-size: 11px; }\n        .rule-row .rule-days { color: #888; font-size: 10px; }\n        .rule-row .rule-toggle { cursor: pointer; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,.15); background: transparent; color: #999; font-size: 11px; margin-left: 6px; }\n        .rule-row .rule-toggle.active { background: rgba(52,199,89,.15); color: #34c759; border-color: rgba(52,199,89,.3); }\n        .rule-row .rule-delete { cursor: pointer; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,59,48,.2); background: transparent; color: #666; font-size: 11px; margin-left: 4px; }\n        .rule-row .rule-delete:hover { background: rgba(255,59,48,.15); color: #ff3b30; }\n        /* Diagnostic row inside accordion */\n        .diag-row {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 6px 4px;\n        }\n        .diag-label {\n          font-size: 13px; color: var(--secondary-text-color, #8e8e93);\n          display: flex; align-items: center; gap: 8px;\n        }\n        .diag-label svg { width: 16px; height: 16px; flex-shrink: 0; }\n        .diag-value {\n          font-size: 13px; color: var(--primary-text-color, #e5e5ea); font-weight: 500;\n        }\n      </style>\n\n      <style>\n        /* ========================================================\n         * Apple-style overlay layer (v13.0.0)\n         * Active only when host has .apple-style class. Adds:\n         *   - glass title-pill + status badge overlaying top of video\n         *   - glass pill-bar with circular buttons overlaying bottom of video\n         *   - hides legacy .header / .info-row / .btn-row\n         * ====================================================== */\n        :host(.apple-style) ha-card {\n          /* Card-specific vars (issue #21) — NOT the global --ha-card-* theme\n             tokens. A user whose dashboard theme zeroes --ha-card-border-radius\n             must still get the apple-style rounding by default; the optional\n             border_radius / box_shadow card config sets --bosch-card-* to\n             opt into a custom look without us inheriting the global theme value. */\n          border-radius: var(--bosch-card-radius, var(--ha-card-border-radius, 22px));\n          box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, 0 4px 24px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.06)));\n          border-width: var(--ha-card-border-width, 0);\n        }\n        @media (prefers-color-scheme: dark) {\n          :host(.apple-style) ha-card {\n            box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, 0 6px 28px rgba(0,0,0,.55), 0 1px 3px rgba(0,0,0,.4)));\n          }\n        }\n        /* Hover affordance (issue #15.1): a soft elevation on pointer devices.\n           SHADOW-ONLY — no transform/scale — so there is zero geometry change on\n           hover: no sub-pixel edge shimmer (#15) and nothing that could become a\n           containing block for the fullscreen/zoom overlay. The themed\n           --ha-card-box-shadow shows at rest; the hover replaces it with the\n           bigger elevation (RkcCorian, #15/#21). */\n        :host(.apple-style) ha-card { transition: box-shadow .18s ease; }\n        @media (hover: hover) and (pointer: fine) {\n          /* Plain elevation — NOT layered onto var(--ha-card-box-shadow): when\n             that var resolves to none, a 'none, shadow' list is invalid CSS and\n             the whole declaration is dropped (no hover at all). A single\n             elevation is valid for every theme and reads as the lift. */\n          :host(.apple-style) ha-card:hover {\n            box-shadow: 0 8px 22px rgba(0,0,0,.30);\n          }\n        }\n        :host(.apple-style) .header,\n        :host(.apple-style) .info-row,\n        :host(.apple-style) .btn-row { display: none !important; }\n        /* Legacy on-video text overlays ("Letztes: ..." / "30 Events heute")\n           clash with the glass title-pill + status badge. The same info now\n           lives in the Apple-style overlays, so suppress the old layer. */\n        :host(.apple-style) .img-overlay { display: none !important; }\n\n        /* In Apple mode, switch-rows + accordions collapse via max-height\n           transition (smooth slide) instead of hard display:none → block.\n           display:none breaks the transition; max-height:0 + overflow:hidden\n           achieves the same visual hiding while remaining animatable. */\n        :host(.apple-style) .switch-rows,\n        :host(.apple-style) .accordion,\n        :host(.apple-style) .pan-row {\n          max-height: 0;\n          overflow: hidden;\n          opacity: 0;\n          /* max-height:0 does NOT clip padding/borders (content-box), so the\n             switch-rows' 12px bottom padding + each accordion's 1px divider\n             rendered as a white strip below the video when collapsed (issue:\n             white gap, 2026-05-29). Zero them while collapsed; restore on open. */\n          padding-top: 0;\n          padding-bottom: 0;\n          border-top-width: 0;\n          border-bottom-width: 0;\n          transition: max-height .35s cubic-bezier(.4,0,.2,1),\n                      opacity .25s ease;\n        }\n        :host(.apple-style.overflow-open) .switch-rows,\n        :host(.apple-style.overflow-open) .accordion,\n        :host(.apple-style.overflow-open) .pan-row {\n          max-height: 2000px;\n          opacity: 1;\n        }\n        :host(.apple-style.overflow-open) .switch-rows { padding: 0 12px 12px; }\n        :host(.apple-style.overflow-open) .accordion { border-top-width: 1px; }\n        /* Default .pan-section { padding: 0 12px 12px } produces a 12 px\n           white bar below the image when pan-row is hidden (apple-style,\n           overflow closed). Drop padding to zero in that state; bring the\n           breathing room back only when the section actually shows content. */\n        :host(.apple-style) .pan-section { padding: 0; }\n        :host(.apple-style.overflow-open) .pan-section { padding: 0 12px 12px; }\n\n        /* Suppress redundant top-right "connecting" badge while the central\n           loading overlay is up — both convey the same state, and the overlay\n           carries the timer/hint ("ca. 25–35 s bis erstes Bild"). Once the\n           overlay hides, the badge re-appears as LIVE / OFFLINE / etc. */\n        :host(.apple-style) .img-wrapper:has(.loading-overlay.visible) .ap-badge.connecting {\n          display: none;\n        }\n\n        /* Glass material primitive ------------------------------- */\n        /* Near-opaque night glass (.92) — earlier mid-tone .42/.55 left the\n           backdrop bleeding through, making text + icons washed out during\n           snapshot-loading (bright loading-overlay backdrop) and on bright\n           daylight scenes. Sacrifice some glass-transparency for guaranteed\n           contrast on every backdrop. The blur still gives the soft Material\n           edges where the pill meets the video. Border bumped to 1px so it\n           renders cleanly on high-DPI mobile (.5px collapsed to 0 on some\n           devices, leaving the pill rim invisible). */\n        .ap-glass {\n          background: rgba(22,22,24,.92);\n          backdrop-filter: blur(20px) saturate(1.4);\n          -webkit-backdrop-filter: blur(20px) saturate(1.4);\n          border: 1px solid rgba(255,255,255,.12);\n          color: #fff;\n          box-shadow: 0 2px 8px rgba(0,0,0,.22);\n          /* GPU composite layer — prevents scroll-flicker on iOS WKWebView */\n          transform: translateZ(0);\n          will-change: transform;\n        }\n        /* Mobile WebKit (HA Companion / iOS Safari) doesn't always honour\n           backdrop-filter — fall back to a slightly denser solid tint so the\n           glass pill stays legible without the blur. */\n        @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {\n          .ap-glass { background: rgba(20,20,22,.72); }\n        }\n\n        /* Top overlay (title pill + status badge) ---------------- */\n        .ap-top {\n          position: absolute; top: 12px; left: 12px; right: 12px;\n          display: flex; align-items: center; justify-content: space-between;\n          gap: 8px; z-index: 13; pointer-events: none;\n        }\n        .ap-top > * { pointer-events: auto; }\n        .ap-title-pill {\n          display: inline-flex; align-items: center; gap: 8px;\n          padding: 8px 14px 8px 11px; border-radius: 999px;\n          font-size: 14px; font-weight: 600;\n          letter-spacing: .005em;\n          max-width: 70%;\n          line-height: 1;\n        }\n        .ap-title-pill .ap-title-text {\n          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\n          /* No text-shadow — relying on solid pill bg for contrast. Earlier\n             multi-layer shadows + halos washed the glyph on certain mobile\n             renderers. Plain glyph on near-opaque pill is the safe bet. */\n          text-shadow: none;\n          /* Force-visible against fragile mobile renderers — color inherits\n             from .ap-glass / mode-day override but pinning it here means\n             no parent class can accidentally null it out via shorthand. */\n          color: inherit;\n        }\n        .ap-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #8e8e93; }\n        .ap-dot.online   { background: #30d158; box-shadow: 0 0 0 3px rgba(48,209,88,.22); }\n        /* Privacy = "shielded" via iOS systemPurple — Apple convention for\n           locked / private states. Old .warn (orange) reflexively read as\n           "caution / warning" which mismatches a deliberate privacy state. */\n        .ap-dot.privacy  { background: #af52de; box-shadow: 0 0 0 3px rgba(175,82,222,.22); }\n        .ap-dot.warn     { background: #ff9f0a; box-shadow: 0 0 0 3px rgba(255,159,10,.22); }\n        .ap-dot.offline  { background: #ff453a; }\n\n        .ap-top-right { display: inline-flex; align-items: center; gap: 6px; }\n        .ap-badge {\n          display: inline-flex; align-items: center; gap: 6px;\n          padding: 6px 10px; border-radius: 999px;\n          font-size: 11px; font-weight: 700; letter-spacing: .04em;\n          text-transform: uppercase;\n        }\n        .ap-badge.live {\n          background: rgba(255,59,48,.88); color: #fff;\n          border: 0.5px solid rgba(255,255,255,.22);\n        }\n        .ap-badge.live::before {\n          content: ""; width: 5px; height: 5px; border-radius: 50%;\n          background: #fff; animation: ap-pulse 1.4s ease-in-out infinite;\n        }\n        @keyframes ap-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }\n        .ap-badge.connecting {\n          /* WCAG fix: dark text on amber (was white-on-amber = 2.7:1, fails AA).\n             Dark on amber yields ~11:1, well above threshold. */\n          background: rgba(255,159,10,.95); color: #1a1a1a;\n          border: 0.5px solid rgba(255,255,255,.2);\n        }\n        .ap-badge.offline  { background: rgba(120,120,128,.55); color: #fff; border: 0.5px solid rgba(255,255,255,.18); }\n        .ap-badge.hidden   { display: none; }\n\n        /* Bottom pill-bar overlay -------------------------------- */\n        .ap-pill-bar {\n          position: absolute; left: 50%; bottom: 12px;\n          transform: translateX(-50%);\n          display: inline-flex; align-items: center;\n          gap: 6px; padding: 6px;\n          border-radius: 999px; z-index: 6;\n          max-width: calc(100% - 24px);\n          /* With the PiP button the bar holds up to 8 controls; in a narrow\n             minimal overview tile that exceeds max-width. Scroll horizontally\n             instead of clipping the row, and hide the scrollbar chrome. */\n          overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;\n          /* Fullscreen auto-hide fade (see .fs-controls-hidden below) — harmless\n             outside fullscreen since opacity never changes there. */\n          transition: opacity .3s ease;\n        }\n        .ap-pill-btn {\n          width: 42px; height: 42px; border-radius: 50%;\n          display: inline-flex; align-items: center; justify-content: center;\n          background: rgba(255,255,255,.12);\n          border: 0.5px solid rgba(255,255,255,.18);\n          color: #fff; cursor: pointer;\n          padding: 0; flex-shrink: 0;\n          touch-action: manipulation;\n          transition: background .15s ease, transform .12s ease;\n        }\n        .ap-pill-btn:hover { background: rgba(255,255,255,.22); }\n        .ap-pill-btn:active { transform: scale(.92); }\n        .ap-pill-btn svg { width: 19px; height: 19px; fill: #fff; pointer-events: none; }\n        .ap-pill-btn.on { background: rgba(255,255,255,.93); }\n        .ap-pill-btn.on svg { fill: #1c1c1e; }\n        .ap-pill-btn.danger { background: rgba(255,59,48,.85); border-color: rgba(255,255,255,.22); }\n        .ap-pill-btn.danger:hover { background: rgba(255,59,48,1); }\n        .ap-pill-btn.connecting { background: rgba(255,159,10,.85); border-color: rgba(255,255,255,.22); }\n        .ap-pill-btn:disabled { opacity: .4; cursor: default; }\n        .ap-pill-btn:disabled:hover { background: rgba(255,255,255,.12); }\n        .ap-pill-btn[hidden] { display: none !important; }\n        /* Privacy cooldown (#27): dim + block + a small countdown badge so the\n           user waits the backend's 5s cooldown instead of hammering the button. */\n        .cooldown { pointer-events: none; opacity: .5; cursor: not-allowed; }\n        .ap-pill-btn.cooldown { position: relative; }\n        .ap-pill-btn.cooldown::after {\n          content: attr(data-cd) "s";\n          position: absolute; top: -5px; right: -5px;\n          min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box;\n          border-radius: 8px; background: #ff453a; color: #fff;\n          font-size: 9px; font-weight: 700; line-height: 15px; text-align: center;\n        }\n        /* Audio pill: tap = mute/unmute; hover (desktop) reveals a volume slider.\n           Icon swaps speaker-waves (.on = audible) / speaker-slash (muted). On iOS\n           the slider is hidden (JS volume is read-only there) → clean mute pill. */\n        .ap-audio-wrap { position: relative; display: inline-flex; }\n        .ap-pill-btn .ap-ico-on { display: none; }\n        .ap-pill-btn.on .ap-ico-off { display: none; }\n        .ap-pill-btn.on .ap-ico-on { display: block; }\n        .ap-vol-pop {\n          position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);\n          background: rgba(22,22,24,.92);\n          -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4);\n          border: 1px solid rgba(255,255,255,.14); border-radius: 14px;\n          padding: 10px 14px; box-shadow: 0 6px 20px rgba(0,0,0,.3);\n          opacity: 0; pointer-events: none; transition: opacity .15s ease; z-index: 30;\n        }\n        /* Invisible bridge across the gap between the popup and the button, so\n           moving the mouse up to the slider never leaves the hover area and the\n           popup doesn't vanish (Thomas: "Lautstärke verschwindet beim Mausbewegen"). */\n        .ap-vol-pop::after { content: ""; position: absolute; top: 100%; left: 0; right: 0; height: 16px; }\n        .ap-audio-wrap:hover .ap-vol-pop, .ap-vol-pop.show { opacity: 1; pointer-events: auto; }\n        .ap-vol-pop input[type="range"] {\n          width: 110px; accent-color: #fff; cursor: pointer; display: block;\n        }\n        :host(.audio-no-volume) .ap-vol-pop { display: none; }\n        :host(.audio-hidden) .ap-audio-wrap { display: none; }\n        /* Audio is meaningful only while live video plays — dim + disable the\n           pill (and hide the volume popup) when there is no stream. */\n        /* Audio is stream-contextual — hide the whole control while no live\n           stream is playing (it reappears with the stop button on start) instead\n           of greying it out. 2026-06-15 (hide-until-needed). */\n        :host(.audio-inactive) .ap-audio-wrap { display: none; }\n        :host(.audio-inactive) .ap-vol-pop { display: none; }\n\n        /* Phone-narrow: keep all buttons visible, shrink slightly */\n        @media (max-width: 380px) {\n          .ap-pill-btn { width: 38px; height: 38px; }\n          .ap-pill-btn svg { width: 17px; height: 17px; }\n          .ap-pill-bar { gap: 4px; padding: 4px; }\n        }\n\n\n        /* Img-wrapper needs relative + own stacking context so the absolute\n           overlays cannot escape upward over the HA tab bar / sidebar when\n           the card is rendered tall in a panel:true view. isolation:isolate\n           creates a new stacking context; contain:paint clips rendering to\n           the wrapper box so partially-scrolled overlays do not bleed past\n           the visible region. (No backticks inside CSS comments — this CSS\n           is itself inside a JS template literal.) */\n        :host(.apple-style) .img-wrapper {\n          border-radius: 0;\n          position: relative;\n          isolation: isolate;\n          contain: paint;\n          overflow: hidden;\n        }\n        /* Belt-and-braces: keep overlay z-index low — the wrapper's new\n           stacking context confines them anyway, but a low value protects\n           against future ancestors that might break isolation. */\n        /* BUG FIX (2026-06-15): raise ap-top above the privacy-placeholder\n           (z-index 11) so the camera name title pill stays visible in privacy\n           mode. Default was z-index:2 which the privacy overlay (z:11) covered.\n           13 = above privacy-placeholder(11) + pill-bar(12); ap-top is top-left,\n           pill-bar is bottom-center — they don't overlap so shared z:13 is safe.\n           pointer-events:none on .ap-top itself avoids blocking privacy overlay taps. */\n        :host(.apple-style) .ap-top { z-index: 13; }\n        /* The control pill bar must stay TAPPABLE above the full-cover overlays\n           (tap-to-play 9, loading 10, pinned-reveal 11) — otherwise those\n           overlays swallowed taps on the Stop button and the user could not end\n           a stream while it showed "antippen zum Starten" / was warming up\n           (reported 2026-06-03). ap-top (13) sits above it for the title pill. */\n        :host(.apple-style) .ap-pill-bar { z-index: 12; }\n\n        /* ========================================================\n         * Material You (Android / M3) theme overrides\n         * Active when host has .theme-android. Swaps the glass blur for\n         * solid M3 surface tones, bumps the card to the M3 large container\n         * radius (28px), and recolors button states with M3 tonal tokens.\n         * Default theme (.theme-ios) keeps the iOS look above untouched.\n         * ====================================================== */\n        :host(.apple-style.theme-android) ha-card {\n          /* M3 large radius (28px) as the Android default; the optional\n             border_radius card config (--bosch-card-radius) overrides it\n             (issue #21). !important still beats ha-card's base rule. */\n          border-radius: var(--bosch-card-radius, var(--ha-card-border-radius, 28px)) !important;\n        }\n        :host(.apple-style.theme-android) .ap-glass {\n          background: rgba(73, 69, 79, .92);   /* M3 surface-variant dark */\n          backdrop-filter: none;\n          -webkit-backdrop-filter: none;\n          border: 0;\n          color: #E6E0E9;                       /* M3 on-surface dark */\n          box-shadow: 0 1px 3px rgba(0,0,0,.3);\n        }\n        :host(.apple-style.theme-android) .ap-title-pill {\n          border-radius: 8px;                   /* M3 chip shape */\n          font-family: var(--primary-font-family, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);\n          font-weight: 500;\n        }\n        :host(.apple-style.theme-android) .ap-title-pill .ap-title-text {\n          text-shadow: none;                    /* Solid surface needs no shadow */\n        }\n        :host(.apple-style.theme-android) .ap-badge {\n          border-radius: 8px;\n          font-family: var(--primary-font-family, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);\n          letter-spacing: 0;\n          font-weight: 500;\n        }\n        :host(.apple-style.theme-android) .ap-badge.live {\n          background: rgba(242, 184, 181, .95); /* M3 error dark tonal */\n          color: #601410;                       /* M3 on-error-container dark */\n          border: 0;\n        }\n        :host(.apple-style.theme-android) .ap-badge.connecting {\n          background: rgba(232, 222, 248, .95); /* M3 secondary-container dark */\n          color: #1D192B;\n          border: 0;\n        }\n        :host(.apple-style.theme-android) .ap-badge.privacy {\n          background: rgba(208, 188, 255, .95); /* M3 primary-container dark */\n          color: #381E72;                       /* M3 on-primary-container dark */\n          border: 0;\n        }\n        :host(.apple-style.theme-android) .ap-badge.offline {\n          background: rgba(73, 69, 79, .92);\n          /* WCAG fix: was #CAC4D0 on surface-variant = 4.1:1 (borderline fail\n             for 11px font). #E6E0E9 = M3 on-surface = ~6.5:1. */\n          color: #E6E0E9;\n          border: 0;\n        }\n        :host(.apple-style.theme-android) .ap-pill-bar {\n          background: rgba(73, 69, 79, .92);\n          backdrop-filter: none;\n          -webkit-backdrop-filter: none;\n          border: 0;\n          border-radius: 28px;                  /* M3 large radius for the bar */\n        }\n        :host(.apple-style.theme-android) .ap-pill-btn {\n          background: transparent;\n          border: 0;\n          color: #E6E0E9;\n        }\n        :host(.apple-style.theme-android) .ap-pill-btn svg { fill: #E6E0E9; }\n        :host(.apple-style.theme-android) .ap-pill-btn:hover {\n          /* M3 state layer: 8% opacity overlay of on-surface */\n          background: rgba(230, 224, 233, .08);\n        }\n        :host(.apple-style.theme-android) .ap-pill-btn:active {\n          /* M3 pressed state: 12% opacity overlay */\n          background: rgba(230, 224, 233, .12);\n        }\n        :host(.apple-style.theme-android) .ap-pill-btn.on {\n          background: #D0BCFF;                  /* M3 primary dark */\n        }\n        :host(.apple-style.theme-android) .ap-pill-btn.on svg { fill: #381E72; }\n        :host(.apple-style.theme-android) .ap-pill-btn.danger {\n          background: #F2B8B5;                  /* M3 error dark */\n        }\n        :host(.apple-style.theme-android) .ap-pill-btn.danger svg { fill: #601410; }\n        :host(.apple-style.theme-android) .ap-pill-btn.connecting {\n          background: #E8DEF8;                  /* M3 secondary-container dark */\n        }\n        :host(.apple-style.theme-android) .ap-pill-btn.connecting svg { fill: #1D192B; }\n        :host(.apple-style.theme-android) .ap-dot.online   { background: #6FE899; box-shadow: 0 0 0 3px rgba(111,232,153,.18); }\n        :host(.apple-style.theme-android) .ap-dot.warn     { background: #FFB68A; box-shadow: 0 0 0 3px rgba(255,182,138,.18); }\n        :host(.apple-style.theme-android) .ap-dot.offline  { background: #F2B8B5; }\n\n        /* Theme switcher row inside the Mehr menu (visible when overflow-open) */\n        .ap-theme-switcher {\n          align-items: center; justify-content: space-between;\n          padding: 12px 14px;\n          font-size: 14px;\n          border-top: 0.5px solid rgba(120,120,128,.18);\n        }\n        .ap-theme-toggle {\n          display: inline-flex; align-items: center; gap: 4px;\n          padding: 3px; border-radius: 999px;\n          background: rgba(120,120,128,.16);\n        }\n        .ap-theme-toggle button {\n          font: inherit; font-size: 13px; font-weight: 500;\n          padding: 6px 14px; border-radius: 999px;\n          background: transparent; border: 0;\n          /* WCAG fix: #8e8e93 on white = 2.85:1 (fails AA). #6c6c70 = ~4.6:1. */\n          color: var(--secondary-text-color, #6c6c70);\n          cursor: pointer;\n          transition: background .15s ease, color .15s ease;\n        }\n        /* currentColor fallback works in both light + dark mode without\n           requiring the user to explicitly set mode-night class. */\n        .ap-theme-toggle button:hover { color: var(--primary-text-color, currentColor); }\n        .ap-theme-toggle button.on {\n          background: var(--card-background-color, #fff);\n          color: var(--primary-text-color, #1c1c1e);\n          box-shadow: 0 1px 2px rgba(0,0,0,.12);\n        }\n        :host(.apple-style.theme-android) .ap-theme-toggle { border-radius: 8px; padding: 2px; }\n        :host(.apple-style.theme-android) .ap-theme-toggle button { border-radius: 8px; }\n        :host(.apple-style.theme-android) .ap-theme-toggle button.on {\n          background: #D0BCFF; color: #381E72;\n        }\n\n        /* ========================================================\n         * Day/Night card-chrome mode (v13.0.1)\n         * .mode-day  -> force light card (white bg, dark text)\n         * .mode-night -> force dark card (M3 dark / iOS systemBackground dark)\n         * No class -> auto, inherit from HA theme CSS vars\n         * Glass overlays on the video are unaffected — they stay dark for\n         * legibility regardless of the chrome mode.\n         * ====================================================== */\n        :host(.apple-style.mode-day) ha-card {\n          background: #ffffff;\n          color: #1c1c1e;\n        }\n        :host(.apple-style.mode-night) ha-card {\n          background: #1c1c1e;\n          color: #ffffff;\n        }\n        /* Android M3 light surface tones when both apple+android+day are on */\n        :host(.apple-style.theme-android.mode-day) ha-card {\n          background: #FEF7FF !important;\n          color: #1D1B20 !important;\n        }\n        :host(.apple-style.theme-android.mode-night) ha-card {\n          background: #211F26 !important;\n          color: #E6E0E9 !important;\n        }\n        /* Force text + secondary-text + divider variables under day mode so\n           switch-row labels, accordion chevrons, slider track edges follow.\n           Night mode also pins the variables explicitly so the user gets a\n           consistent dark card even when HA's active theme is light. */\n        :host(.apple-style.mode-day) {\n          --primary-text-color: #1c1c1e;\n          --secondary-text-color: rgba(60,60,67,.6);\n          --divider-color: rgba(60,60,67,.12);\n          --card-background-color: #ffffff;\n        }\n        :host(.apple-style.mode-night) {\n          --primary-text-color: #ffffff;\n          --secondary-text-color: rgba(235,235,245,.6);\n          --divider-color: rgba(84,84,88,.5);\n          --card-background-color: #1c1c1e;\n        }\n        :host(.apple-style.theme-android.mode-day) {\n          --primary-text-color: #1D1B20;\n          --secondary-text-color: #49454F;\n          --divider-color: rgba(73,69,79,.2);\n          --card-background-color: #FEF7FF;\n        }\n        :host(.apple-style.theme-android.mode-night) {\n          --primary-text-color: #E6E0E9;\n          --secondary-text-color: #CAC4D0;\n          --divider-color: rgba(202,196,208,.2);\n          --card-background-color: #211F26;\n        }\n\n        /* === Day mode lightens the video-overlay glass but keeps the text/\n         *     icons white ===\n         * Earlier attempt at a white-pill in day mode broke text visibility\n         * because dark text on a glass-blended-with-bright-backdrop dropped\n         * below the contrast threshold. Solution: keep text + icons white\n         * (always works on dark glass) but make the glass itself lighter +\n         * more transparent in day so the video shows through and the\n         * overall card feels brighter. Night stays denser/darker. The blur\n         * radius is also higher in day so the lighter glass still feels\n         * like a Material, not a tint film. iOS-day only — :not(.theme-android)\n         * prevents this rule from poaching the Android M3 surface-variant\n         * treatment when both mode-day + theme-android are active. */\n        :host(.apple-style.mode-day:not(.theme-android)) .ap-glass {\n          background: rgba(55,55,60,.42);\n          backdrop-filter: blur(28px) saturate(1.6) brightness(1.05);\n          -webkit-backdrop-filter: blur(28px) saturate(1.6) brightness(1.05);\n          border-color: rgba(255,255,255,.22);\n        }\n        /* The pill-bar's inactive buttons get a brighter inner tint in day\n           so they read clearly as tappable surfaces inside the lighter pill,\n           and the icon stroke gets a touch more weight against the brighter\n           backdrop. Active (.on) buttons stay solid white-tile to read as\n           the primary "selected" state. Danger stays systemRed. */\n        :host(.apple-style.mode-day:not(.theme-android)) .ap-pill-btn {\n          background: rgba(255,255,255,.22);\n          border-color: rgba(255,255,255,.28);\n        }\n        :host(.apple-style.mode-day:not(.theme-android)) .ap-pill-btn:hover { background: rgba(255,255,255,.32); }\n        /* Active "on" button in day mode reads as a raised solid-white tile:\n           full-opacity background, soft drop shadow + thin bright rim, dark\n           icon at full contrast. The combination pops cleanly against the\n           transparent grey pill backdrop without needing a saturated accent\n           colour — matches Apple Home's "selected control" treatment. */\n        :host(.apple-style.mode-day) .ap-pill-btn.on {\n          background: #ffffff;\n          border-color: rgba(255,255,255,.85);\n          box-shadow:\n            0 3px 10px rgba(0,0,0,.32),\n            0 0 0 1px rgba(255,255,255,.5) inset;\n        }\n        :host(.apple-style.mode-day) .ap-pill-btn.on svg { fill: #1c1c1e; }\n        :host(.apple-style.mode-day) .ap-pill-btn.on:hover { background: #ffffff; }\n\n        /* Camera-state ACTIVE buttons: Stream + Privacy get systemRed (a\n           non-neutral hardware state). Light gets amber — a lamp/bulb is\n           conventionally yellow/amber when on (think of every smart-bulb\n           UI ever shipped). Splitting these avoids the audit's "everything\n           red" collision when stream + offline + light are all active at\n           once. Fullscreen.on falls through to the generic white-tile\n           rule above (viewing-mode, not hardware-state). */\n        :host(.apple-style) .ap-pill-btn#ap-btn-stream.on,\n        :host(.apple-style) .ap-pill-btn#ap-btn-privacy.on {\n          background: rgba(255,59,48,.92);\n          border-color: rgba(255,255,255,.22);\n          box-shadow: none;\n        }\n        :host(.apple-style) .ap-pill-btn#ap-btn-stream.on svg,\n        :host(.apple-style) .ap-pill-btn#ap-btn-privacy.on svg { fill: #fff; }\n        :host(.apple-style.mode-day) .ap-pill-btn#ap-btn-stream.on,\n        :host(.apple-style.mode-day) .ap-pill-btn#ap-btn-privacy.on {\n          background: rgba(255,59,48,.95);\n          box-shadow:\n            0 3px 10px rgba(255,59,48,.35),\n            0 0 0 1px rgba(255,255,255,.3) inset;\n        }\n        /* Light = amber (iOS systemYellow / M3 tertiary tonal) — lamp metaphor */\n        :host(.apple-style) .ap-pill-btn#ap-btn-light.on {\n          background: rgba(255,179,0,.92);\n          border-color: rgba(255,255,255,.22);\n          box-shadow: none;\n        }\n        :host(.apple-style) .ap-pill-btn#ap-btn-light.on svg { fill: #1c1c1e; }\n        :host(.apple-style.mode-day) .ap-pill-btn#ap-btn-light.on {\n          background: rgba(255,179,0,.95);\n          box-shadow:\n            0 3px 10px rgba(255,179,0,.4),\n            0 0 0 1px rgba(255,255,255,.4) inset;\n        }\n        /* Android-theme: M3 error tonal for Stream + Privacy, tertiary for Light */\n        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-stream.on,\n        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-privacy.on {\n          background: #F2B8B5;\n        }\n        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-stream.on svg,\n        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-privacy.on svg { fill: #601410; }\n        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-light.on {\n          background: #FFD8A8;                  /* M3 tertiary-container dark */\n        }\n        :host(.apple-style.theme-android) .ap-pill-btn#ap-btn-light.on svg { fill: #4F2500; }\n        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-stream.on,\n        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-privacy.on {\n          background: #B3261E;\n        }\n        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-stream.on svg,\n        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-privacy.on svg { fill: #fff; }\n        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-light.on {\n          background: #7D5260;                  /* M3 tertiary light */\n        }\n        :host(.apple-style.theme-android.mode-day) .ap-pill-btn#ap-btn-light.on svg { fill: #fff; }\n        /* Day-mode badge gets the same lighter treatment so it doesn't pop\n           as a saturated solid color against the airy overlay. */\n        :host(.apple-style.mode-day) .ap-badge.live {\n          background: rgba(255,59,48,.85); border-color: rgba(255,255,255,.22);\n        }\n\n        /* Mode switcher row inside the Mehr menu */\n        .ap-mode-switcher {\n          align-items: center; justify-content: space-between;\n          padding: 12px 14px;\n          font-size: 14px;\n          border-top: 0.5px solid var(--divider-color, rgba(120,120,128,.18));\n        }\n        .ap-mode-toggle {\n          display: inline-flex; align-items: center; gap: 4px;\n          padding: 3px; border-radius: 999px;\n          background: rgba(120,120,128,.16);\n        }\n        .ap-mode-toggle button {\n          font: inherit; font-size: 13px; font-weight: 500;\n          padding: 6px 14px; border-radius: 999px;\n          background: transparent; border: 0;\n          /* WCAG fix: matches theme-toggle (was #8e8e93 = 2.85:1, fails AA). */\n          color: var(--secondary-text-color, #6c6c70);\n          cursor: pointer;\n          transition: background .15s ease, color .15s ease;\n        }\n        .ap-mode-toggle button:hover { color: var(--primary-text-color, #1c1c1e); }\n        .ap-mode-toggle button.on {\n          background: var(--card-background-color, #fff);\n          color: var(--primary-text-color, #1c1c1e);\n          box-shadow: 0 1px 2px rgba(0,0,0,.12);\n        }\n        :host(.apple-style.theme-android) .ap-mode-toggle { border-radius: 8px; padding: 2px; }\n        :host(.apple-style.theme-android) .ap-mode-toggle button { border-radius: 8px; }\n        :host(.apple-style.theme-android) .ap-mode-toggle button.on {\n          background: #D0BCFF; color: #381E72;\n        }\n\n        /* === Accessibility + animation polish ============================ */\n        /* Focus-visible: keyboard navigation feedback. systemBlue ring with\n           2px offset on the pill-bar; tighter 1px on the toggle chips so\n           it fits inside the toggle track. */\n        :host(.apple-style) .ap-pill-btn:focus-visible {\n          outline: 2px solid #0a84ff;\n          outline-offset: 2px;\n        }\n        :host(.apple-style) .ap-theme-toggle button:focus-visible,\n        :host(.apple-style) .ap-mode-toggle button:focus-visible {\n          outline: 2px solid #0a84ff;\n          outline-offset: 1px;\n        }\n\n        /* prefers-reduced-motion: suppress all animations + transitions for\n           users with vestibular sensitivity or who set "Reduce Motion" in\n           iOS / macOS Accessibility. WCAG 2.1 SC 2.3.3. */\n        @media (prefers-reduced-motion: reduce) {\n          :host(.apple-style) *,\n          :host(.apple-style) *::before,\n          :host(.apple-style) *::after {\n            animation-duration: 0.01ms !important;\n            animation-iteration-count: 1 !important;\n            transition-duration: 0.01ms !important;\n          }\n        }\n\n        /* prefers-contrast: more (high-contrast OS preference, e.g. macOS\n           "Increase Contrast"). Bumps glass to near-opaque + adds visible\n           hairline borders so the design degrades gracefully. */\n        @media (prefers-contrast: more) {\n          :host(.apple-style) .ap-glass {\n            background: rgba(0,0,0,.95) !important;\n            border: 1.5px solid #fff !important;\n          }\n          :host(.apple-style.mode-day) .ap-glass {\n            background: #fff !important;\n            color: #000 !important;\n            border: 1.5px solid #000 !important;\n          }\n          :host(.apple-style) .ap-pill-btn { border-width: 1.5px !important; }\n        }\n\n        /* Android × Day combined override (higher specificity than the\n           iOS-Day rule) — M3 spec for light mode: solid surface-variant\n           light tint instead of glass blur. */\n        :host(.apple-style.theme-android.mode-day) .ap-glass {\n          background: rgba(231,224,236,.96);    /* M3 surface-variant light */\n          backdrop-filter: none;\n          -webkit-backdrop-filter: none;\n          border: 0;\n          color: #1D1B20;\n          box-shadow: 0 1px 3px rgba(0,0,0,.15);\n        }\n        :host(.apple-style.theme-android.mode-day) .ap-pill-bar {\n          background: rgba(231,224,236,.96);\n        }\n        :host(.apple-style.theme-android.mode-day) .ap-pill-btn { color: #1D1B20; }\n        :host(.apple-style.theme-android.mode-day) .ap-pill-btn svg { fill: #1D1B20; }\n        :host(.apple-style.theme-android.mode-day) .ap-title-pill .ap-title-text { color: #1D1B20; }\n\n        /* Android theme: drop the iOS-style press-scale because M3 design\n           uses a state-layer overlay (radial ripple in spec, opacity-tint\n           in our implementation) rather than the iOS bounce. */\n        :host(.apple-style.theme-android) .ap-pill-btn:active { transform: none; }\n\n        /* Offline cameras (apple-style): minimalist treatment per user\n           preference — just the camera name (already in the top-left glass\n           pill) and a centered "OFFLINE" label + last-seen subtitle. No\n           icons, no pill-bar — there's nothing meaningful to tap when the\n           camera is unreachable. */\n        /* Compact tile mode: hide pill-bar + status badge so the card reduces\n           to just video + title-pill — used by overview grid for Apple-Home-\n           style tile rows. Click on the video opens fullscreen. */\n        :host(.apple-style.compact) .ap-pill-bar,\n        :host(.apple-style.compact) .ap-badge { display: none; }\n\n        /* Last-event indicator: small glass pill bottom-right of the video\n           showing "🕐 14:23" when the camera fired a motion/audio/person\n           event recently. Hidden while streaming live (the LIVE badge takes\n           that real estate). Wired in JS via _updateLastEventBadge(). */\n        .ap-last-event {\n          position: absolute;\n          right: 12px; bottom: 12px;\n          z-index: 4;\n          display: none;\n          align-items: center; gap: 6px;\n          padding: 5px 10px 5px 8px;\n          border-radius: 999px;\n          font-size: 11px; font-weight: 600;\n          background: rgba(22,22,24,.78);\n          backdrop-filter: blur(14px) saturate(1.3);\n          -webkit-backdrop-filter: blur(14px) saturate(1.3);\n          color: #fff;\n          border: .5px solid rgba(255,255,255,.14);\n          pointer-events: none;\n        }\n        .ap-last-event.visible { display: inline-flex; }\n        .ap-last-event svg { width: 12px; height: 12px; fill: currentColor; opacity: .8; }\n        :host(.apple-style.compact) .ap-last-event { right: 8px; bottom: 8px; padding: 4px 8px; font-size: 10px; }\n        /* Hide when streaming is active — the LIVE badge already occupies\n           the visual attention budget; the last-event indicator only adds\n           value during idle/snapshot mode. */\n        :host(.apple-style) .ap-last-event.hide-during-stream { display: none; }\n\n        /* AI snapshot description caption — small glass pill at the bottom-left\n           of the video. Mutually exclusive real-estate with the last-event pill\n           (which sits at bottom-right). Hidden when sensor absent / config off.\n           Max 3 lines of text with ellipsis on the third line so it never\n           obscures the pill-bar above it. Scoped to single card only (compact\n           tiles are too narrow — hidden via :host(.compact)). */\n        .ap-ai-caption {\n          display: none; /* hidden by default; JS adds .visible to show */\n        }\n        .ap-ai-caption.visible {\n          position: absolute;\n          inset-inline-start: 12px; bottom: 72px;  /* above pill-bar (54px) + 12px gap + 6px margin; RTL-safe */\n          z-index: 4;\n          padding: 5px 10px 5px 8px;\n          border-radius: 10px;\n          max-width: calc(60% - 12px);\n          font-size: 11px; font-weight: 400; line-height: 1.4;\n          background: rgba(22,22,24,.78);\n          backdrop-filter: blur(14px) saturate(1.3);\n          -webkit-backdrop-filter: blur(14px) saturate(1.3);\n          color: rgba(255,255,255,.85);\n          border: .5px solid rgba(255,255,255,.14);\n          pointer-events: none;\n          /* Line-clamp: max 3 visible lines then ellipsis */\n          overflow: hidden;\n          display: block;\n          display: -webkit-box;\n          -webkit-line-clamp: 3;\n          -webkit-box-orient: vertical;\n        }\n        /* Only render in apple-style layout (which has position:relative img-wrapper);\n           legacy layout has no positioned overlay ancestor so position:absolute\n           would land unpredictably. */\n        :host(:not(.apple-style)) .ap-ai-caption { display: none !important; }\n        /* Hide on compact tiles — too little horizontal space */\n        :host(.compact) .ap-ai-caption { display: none !important; }\n        /* Day mode legibility */\n        :host(.apple-style.mode-day) .ap-ai-caption {\n          background: rgba(240,240,242,.82); color: rgba(28,28,30,.88);\n          border-color: rgba(0,0,0,.10);\n        }\n\n        /* Element-hiding toggles (issue #15): show_title:false / show_last_event:false. */\n        :host(.no-title) .ap-top { display: none; }\n        /* .ap-top is gone here, so the HLS banner has nothing to clear —\n           reclaim the top:8px position instead of leaving a dead gap. */\n        :host(.no-title) .ios-hls-banner { top: 8px; }\n        :host(.no-last-event) .ap-last-event { display: none !important; }\n\n        :host(.apple-style.cam-offline) .ap-pill-bar { display: none; }\n        :host(.apple-style.cam-offline) .offline-overlay svg { display: none; }\n        /* When the camera is offline, the offline-overlay is the single\n           source of truth. Suppress every other overlay that would otherwise\n           stack on top: the privacy-placeholder (last-known privacy state)\n           bleeds through with its own lock icon and "Privat-Modus aktiv"\n           label, and the last-event pill at bottom-right adds another\n           competing piece of chrome. Both hidden to leave only the title\n           pill + OFFLINE label visible. */\n        :host(.apple-style.cam-offline) .privacy-placeholder,\n        :host(.apple-style.cam-offline) .ap-last-event,\n        :host(.apple-style.cam-offline) .ap-ai-caption { display: none !important; }\n        /* The offline-overlay already shows the camera name on its own line\n           (.offline-cam-name), so the top-left title pill is redundant when\n           offline. On short/compact tiles the centered "Kamera Offline" pill\n           landed on top of the title pill, superimposing two texts into glyph\n           soup (issue: garbled offline label, 2026-05-29). Hide the top pill\n           when offline — the overlay is the single source of truth. */\n        :host(.apple-style.cam-offline) .ap-top { display: none !important; }\n        /* Offline cameras can't be operated, so in the default EXPANDED layout\n           (minimal NOT enabled) the control stack — switches, light/pan/\n           diagnostics accordions, theme/mode switchers — is just noise. Hide it\n           all, keeping ONLY the Automations accordion (those run HA-side and\n           still work while the camera is down). When minimal IS enabled the\n           whole stack is collapsed behind the ⋮ anyway, so this is scoped to\n           :not(.minimal). (2026-05-29 user feedback: offline shows too much.) */\n        :host(.apple-style.cam-offline:not(.minimal)) .switch-rows,\n        :host(.apple-style.cam-offline:not(.minimal)) .pan-row,\n        :host(.apple-style.cam-offline:not(.minimal)) .pan-section,\n        :host(.apple-style.cam-offline:not(.minimal)) .ap-theme-switcher,\n        :host(.apple-style.cam-offline:not(.minimal)) .ap-mode-switcher,\n        :host(.apple-style.cam-offline:not(.minimal)) .accordion:not(#acc-automations) {\n          display: none !important;\n        }\n        /* Offline overlay: light glass tint over the last cached snapshot so\n           it stays visible behind. The OFFLINE label + last-seen\n           text sit in a single glass pill centered on the video — same\n           material as the title-pill so the layer reads as a coherent\n           "system overlay" instead of a separate widget. */\n        :host(.apple-style.cam-offline) .offline-overlay {\n          background: rgba(20,20,22,.42);\n          animation: none;\n          gap: 0;\n          align-items: center; justify-content: center;\n        }\n        :host(.apple-style.cam-offline) .offline-overlay .offline-title,\n        :host(.apple-style.cam-offline) .offline-overlay .offline-subtitle {\n          color: #fff;\n        }\n        :host(.apple-style.cam-offline) .offline-overlay .offline-title {\n          background: rgba(22,22,24,.92);\n          backdrop-filter: blur(20px) saturate(1.4);\n          -webkit-backdrop-filter: blur(20px) saturate(1.4);\n          border: 1px solid rgba(255,255,255,.12);\n          box-shadow: 0 2px 8px rgba(0,0,0,.22);\n          padding: 9px 18px;\n          border-radius: 999px;\n          font-size: 14px;\n          font-weight: 700;\n          letter-spacing: .14em;\n        }\n        :host(.apple-style.cam-offline) .offline-overlay .offline-subtitle {\n          font-size: 11px;\n          margin-top: 8px;\n          opacity: .75;\n          text-shadow: 0 1px 2px rgba(0,0,0,.6);\n        }\n        /* Camera friendly_name on its own line between the OFFLINE pill and\n           the last-seen subtitle. Visible only in apple-style cam-offline\n           state; legacy / non-offline render path stays untouched. */\n        .offline-cam-name { display: none; }\n        :host(.apple-style.cam-offline) .offline-overlay .offline-cam-name {\n          display: block;\n          margin-top: 10px;\n          font-size: 17px;\n          font-weight: 600;\n          letter-spacing: .005em;\n          color: #fff;\n          text-shadow: 0 1px 2px rgba(0,0,0,.6);\n        }\n\n        /* Theme + Mode switcher rows: animate via max-height too so they\n           slide in/out alongside the switch-rows when Mehr is toggled. */\n        :host(.apple-style) .ap-theme-switcher,\n        :host(.apple-style) .ap-mode-switcher {\n          display: flex;\n          max-height: 0;\n          overflow: hidden;\n          opacity: 0;\n          padding-top: 0;\n          padding-bottom: 0;\n          /* 0.5px border-top renders even at max-height:0 → contributes to the\n             white gap below the video. Zero it while collapsed (issue: white\n             gap, 2026-05-29); restore on open. */\n          border-top-width: 0;\n          transition: max-height .35s cubic-bezier(.4,0,.2,1),\n                      opacity .25s ease, padding .25s ease;\n        }\n        :host(.apple-style.overflow-open) .ap-theme-switcher,\n        :host(.apple-style.overflow-open) .ap-mode-switcher {\n          max-height: 80px;\n          opacity: 1;\n          padding-top: 12px;\n          padding-bottom: 12px;\n          border-top-width: 0.5px;\n        }\n\n        /* Snapshot success flash: 280ms green pulse on the snapshot button\n           after a service call returns. Triggered by JS adding .ok-flash. */\n        @keyframes ap-snapshot-flash {\n          0%   { background: rgba(48,209,88,.85); transform: scale(1); }\n          50%  { background: rgba(48,209,88,.95); transform: scale(1.04); }\n          100% { background: rgba(255,255,255,.12); transform: scale(1); }\n        }\n        :host(.apple-style) .ap-pill-btn#ap-btn-snapshot.ok-flash {\n          animation: ap-snapshot-flash .42s ease-out;\n        }\n      </style>\n\n      <ha-card>\n        <div class="header">\n          <div class="header-left">\n            <div class="status-dot unknown" id="status-dot"></div>\n            <span class="title" id="title">Bosch Camera</span>\n          </div>\n          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:auto">\n            <div class="push-badge poll" id="push-badge">\n              <div class="pdot"></div>\n              <span id="push-label">poll</span>\n            </div>\n            <div class="conn-badge hidden" id="conn-badge"></div>\n            <div class="stream-badge idle" id="stream-badge">\n              <div class="dot"></div>\n              <span id="stream-label"></span>\n            </div>\n          </div>\n        </div>\n\n        <div class="img-wrapper" id="img-wrapper">\n          <img class="cam-img hidden" id="cam-img" alt="Camera" style="cursor:pointer" />\n          <video class="cam-video" id="cam-video" autoplay muted playsinline webkit-playsinline preload="auto" disableremoteplayback style="display:none; cursor:pointer"></video>\n          <div class="ios-hls-banner" id="ios-hls-banner">\n            <span id="ios-hls-banner-text">ℹ HLS-Modus (kein WebRTC über Tunnel)</span>\n          </div>\n          <div class="tap-to-play-overlay" id="tap-to-play-overlay">\n            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>\n            <span class="ttp-label">Zum Abspielen tippen</span>\n            <span class="ttp-hint">Oder in den HA-App-Einstellungen „Videos automatisch abspielen" aktivieren</span>\n          </div>\n          <div class="auto-play-gate" id="auto-play-gate">\n            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>\n            <span class="apg-label">Stream starten</span>\n            <span class="apg-hint">Antippen, um den Live-Stream zu starten</span>\n          </div>\n          <div class="loading-overlay visible" id="loading-overlay">\n            <svg class="spinner" width="36" height="36" viewBox="0 0 40 40" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">\n              <circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="3"/>\n              <circle cx="20" cy="20" r="16" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-dasharray="25 75">\n                <animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 20 20" to="360 20 20" dur="0.8s" repeatCount="indefinite"/>\n              </circle>\n            </svg>\n            <span class="loading-text" id="loading-text">${this._t("loading_image")}</span>\n            <span class="loading-hint" id="loading-hint"></span>\n          </div>\n          <div class="offline-overlay" id="offline-overlay">\n            <svg viewBox="0 0 24 24">\n              <path d="M1 1l22 22"/>\n              <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/>\n              <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/>\n              <path d="M10.71 5.05A16 16 0 0 1 22.58 9"/>\n              <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/>\n              <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>\n              <line x1="12" y1="20" x2="12.01" y2="20"/>\n            </svg>\n            <div class="offline-title" id="offline-title">Kamera Offline</div>\n            <div class="offline-cam-name" id="offline-cam-name"></div>\n            <div class="offline-subtitle" id="offline-subtitle">Keine Verbindung zur Bosch Cloud</div>\n          </div>\n          <div class="auth-overlay" id="auth-overlay">\n            <svg viewBox="0 0 24 24">\n              <path d="M12 2L3 7v6c0 5 3.5 9.4 9 11 5.5-1.6 9-6 9-11V7l-9-5z"/>\n              <line x1="12" y1="9" x2="12" y2="13"/>\n              <line x1="12" y1="17" x2="12.01" y2="17"/>\n            </svg>\n            <div class="auth-title" id="auth-title">Anmeldung abgelaufen</div>\n            <div class="auth-subtitle" id="auth-subtitle">Bosch Cloud Token ungültig — erneut anmelden um die Kamera wieder zu nutzen.</div>\n            <a class="auth-btn" id="auth-reauth-btn" href="/config/integrations/integration/bosch_smart_camera" target="_top">Erneut anmelden</a>\n          </div>\n          <div class="privacy-placeholder" id="privacy-placeholder">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">\n              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>\n              <path d="M7 11V7a5 5 0 0110 0v4"/>\n            </svg>\n            <span id="privacy-placeholder-label">Privat-Modus aktiv</span>\n            \x3c!-- Stale-image badge: shown when privacy=ON + last event ts available --\x3e\n            <span class="privacy-stale-badge" id="privacy-stale-badge"></span>\n          </div>\n          <svg class="motion-zones-overlay" id="motion-zones-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>\n          <svg class="privacy-mask-overlay" id="privacy-mask-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>\n          <div class="img-overlay">\n            <span class="last-event-overlay" id="last-event-overlay"></span>\n            <span class="events-overlay" id="events-overlay"></span>\n          </div>\n\n          \x3c!-- Apple-style "letzte Bewegung" indicator — small glass pill\n               in the bottom-right of the video that surfaces the camera's\n               most recent motion/audio/person event timestamp when idle. --\x3e\n          <span class="ap-last-event" id="ap-last-event">\n            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/></svg>\n            <span id="ap-last-event-text"></span>\n          </span>\n\n          \x3c!-- AI snapshot description caption — glass pill at bottom-left,\n               shown when sensor.*_ki_snapshot_beschreibung has a description.\n               Hidden on compact tiles (insufficient width). --\x3e\n          <div class="ap-ai-caption" id="ap-ai-caption"></div>\n\n          \x3c!-- Apple-style overlays (v2.17.0) — rendered always, gated via CSS :host(.apple-style) --\x3e\n          <div class="ap-top">\n            <div class="ap-title-pill ap-glass">\n              <span class="ap-dot" id="ap-dot"></span>\n              <span class="ap-title-text" id="ap-title-text">Bosch Camera</span>\n            </div>\n            <div class="ap-top-right">\n              <span class="ap-badge hidden" id="ap-badge"></span>\n            </div>\n          </div>\n\n          <div class="ap-pill-bar ap-glass">\n            <button class="ap-pill-btn" id="ap-btn-snapshot" title="Snapshot" aria-label="${this._t("pill_snapshot_aria")}">\n              <svg viewBox="0 0 24 24"><path d="M9 2 7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.17L15 2H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>\n            </button>\n            <button class="ap-pill-btn" id="ap-btn-stream" title="${this._t("pill_stream_title")}" aria-label="${this._t("pill_stream_aria")}" aria-pressed="false">\n              <svg viewBox="0 0 24 24" id="ap-stream-icon"><path d="M8 5v14l11-7L8 5z"/></svg>\n            </button>\n            <div class="ap-audio-wrap" id="ap-audio-wrap">\n              <button class="ap-pill-btn" id="ap-btn-audio" title="${this._t("pill_audio_title")}" aria-label="${this._t("audio_mute")}" aria-pressed="false">\n                <svg viewBox="0 0 24 24" class="ap-ico-on"><path d="M3 9v6h4l5 5V4L7 9H3zm11 .03v5.94A4.5 4.5 0 0 0 16.5 12 4.5 4.5 0 0 0 14 9.03zM14 4.23v2.06a7 7 0 0 1 0 11.42v2.06a9 9 0 0 0 0-15.54z"/></svg>\n                <svg viewBox="0 0 24 24" class="ap-ico-off"><path d="M3 9v6h4l5 5V4L7 9H3zm13.59 3 2.7-2.7-1.42-1.42L15.17 10.6 12.46 7.88 11.05 9.3 13.76 12l-2.71 2.71 1.41 1.41 2.71-2.7 2.7 2.7 1.42-1.41z"/></svg>\n              </button>\n              <div class="ap-vol-pop" id="ap-vol-pop" role="group" aria-label="${this._t("volume")}">\n                <input type="range" id="ap-vol" min="0" max="1" step="0.05" value="1" aria-label="${this._t("volume")}" />\n              </div>\n            </div>\n            <button class="ap-pill-btn" id="ap-btn-privacy" title="${this._t("pill_privacy_title")}" aria-label="${this._t("pill_privacy_aria")}" aria-pressed="false">\n              <svg viewBox="0 0 24 24"><path d="M12 1 4 5v6c0 5.5 3.8 10.7 8 12 4.2-1.3 8-6.5 8-12V5l-8-4z"/></svg>\n            </button>\n            <button class="ap-pill-btn" id="ap-btn-light" title="${this._t("pill_light_title")}" aria-label="${this._t("pill_light_aria")}" aria-pressed="false">\n              <svg viewBox="0 0 24 24"><path d="M9 21h6v-1H9v1zm3-19a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2z"/></svg>\n            </button>\n            <button class="ap-pill-btn" id="ap-btn-fullscreen" title="${this._t("pill_fullscreen_title")}" aria-label="${this._t("pill_fullscreen_aria")}">\n              <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>\n            </button>\n            <button class="ap-pill-btn" id="ap-btn-pip" title="${this._t("pill_pip_title")}" aria-label="${this._t("pill_pip_aria")}">\n              <svg viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"/></svg>\n            </button>\n            <button class="ap-pill-btn" id="ap-btn-more" title="${this._t("pill_more_title")}" aria-label="${this._t("pill_more_aria")}" aria-haspopup="true" aria-expanded="false">\n              <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/></svg>\n            </button>\n          </div>\n\n          \x3c!-- Pan edge-arrows (#33) — large glass chevrons on the left/right\n               edge of the video. A child of .img-wrapper so they survive the\n               Fullscreen API (only the fullscreened element + its descendants\n               render). Gated to cameras with a pan entity (_update toggles\n               display + disables the end stops at ±120°). Layout-agnostic:\n               works in apple + legacy designs and single + overview tiles. --\x3e\n          <div class="pan-overlay" id="pan-overlay" style="display:none">\n            <button class="pan-edge pan-edge-left" id="pan-edge-left" title="${this._t("pan_left_title")}" aria-label="${this._t("pan_left_aria")}">\n              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false"><polyline points="15 18 9 12 15 6"/></svg>\n            </button>\n            <span class="pan-overlay-pos" id="pan-overlay-pos" aria-hidden="true">0°</span>\n            <button class="pan-edge pan-edge-right" id="pan-edge-right" title="${this._t("pan_right_title")}" aria-label="${this._t("pan_right_aria")}">\n              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false"><polyline points="9 18 15 12 9 6"/></svg>\n            </button>\n          </div>\n        </div>\n\n        <div class="info-row">\n          <div class="info-item">\n            <span class="info-label">${this._t("info_status")}</span>\n            <span class="info-value" id="info-status">—</span>\n          </div>\n          <div class="info-item">\n            <span class="info-label">${this._t("info_connection")}</span>\n            <span class="info-value" id="info-connection">—</span>\n          </div>\n          <div class="info-item" style="text-align:right" title="${this._t("info_reaction_tooltip")}">\n            <span class="info-label">${this._t("info_reaction")}</span>\n            <span class="info-value" id="info-buffering">—</span>\n          </div>\n        </div>\n\n        <div class="btn-row">\n            <button class="btn btn-snapshot" id="btn-snapshot" aria-label="${this._t("pill_snapshot_aria")}">\n              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">\n                <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>\n                <circle cx="12" cy="13" r="4"/>\n              </svg>\n              <span id="btn-snapshot-label">Snapshot</span>\n            </button>\n            <button class="btn btn-privacy-inline" id="btn-privacy-inline" title="${this._t("pill_privacy_title")}" aria-label="${this._t("pill_privacy_aria")}" aria-pressed="false">\n              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">\n                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>\n                <path d="M7 11V7a5 5 0 0110 0v4"/>\n              </svg>\n            </button>\n            <button class="btn btn-stream" id="btn-stream" aria-label="${this._t("pill_stream_aria")}" aria-pressed="false">\n              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">\n                <polygon points="23 7 16 12 23 17 23 7"/>\n                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>\n              </svg>\n              <span id="btn-stream-label">Live Stream</span>\n            </button>\n            <button class="btn btn-overflow" id="btn-overflow" title="${this._t("pill_more_title")}" aria-label="${this._t("pill_more_aria")}" aria-haspopup="true" aria-expanded="false">\n              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">\n                <circle cx="12" cy="5" r="2"/>\n                <circle cx="12" cy="12" r="2"/>\n                <circle cx="12" cy="19" r="2"/>\n              </svg>\n            </button>\n            <button class="btn btn-fullscreen" id="btn-fullscreen" title="${this._t("pill_fullscreen_title")}" aria-label="${this._t("pill_fullscreen_aria")}">\n              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">\n                <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>\n              </svg>\n            </button>\n          </div>\n\n          \x3c!-- Theme (iOS/Android) + day/night Mode are config-only (YAML theme: / mode:);\n               the in-card switcher buttons were removed 2026-05-30 (Thomas / issue #15).\n               Defaults: theme=ios, mode=auto. --\x3e\n\n          <div class="switch-rows">\n            <div class="sw-row" id="btn-light">\n              <div class="sw-left">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n                  <circle cx="12" cy="12" r="5"/>\n                  <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>\n                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>\n                  <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>\n                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>\n                </svg>\n                <span>${this._t("pill_light_title")}</span>\n              </div>\n              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n            </div>\n            \x3c!-- Light sub-controls: toggles + expandable details --\x3e\n            <div class="light-sub-controls" id="light-sub-controls" style="display:none;padding:0 0 0 28px;border-left:2px solid rgba(255,204,0,.3);margin:0 0 0 16px">\n              <div class="sw-row" id="btn-front-light" style="padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg><span style="font-size:13px">${this._t("light_front")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>\n              <div class="sw-row" id="btn-top-led" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M12 2v8l6-4M12 2v8l-6-4"/></svg><span style="font-size:13px">${this._t("light_top")}</span></div><div id="top-led-color-mini" style="width:14px;height:14px;border-radius:50%;border:1px solid #666;margin-right:4px"></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>\n              <div class="sw-row" id="btn-bottom-led" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M12 22v-8l6 4M12 22v-8l-6 4"/></svg><span style="font-size:13px">${this._t("light_bottom")}</span></div><div id="bottom-led-color-mini" style="width:14px;height:14px;border-radius:50%;border:1px solid #666;margin-right:4px"></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>\n              <div class="sw-row" id="btn-wallwasher" style="display:none;padding:3px 4px"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M9 18h6M10 22h4M12 2v1"/><path d="M18 12a6 6 0 10-12 0c0 2.21 1.34 4.1 3 5h6c1.66-.9 3-2.79 3-5z"/></svg><span style="font-size:13px">${this._t("light_top_bottom")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>\n              <div id="light-details-toggle" style="padding:4px;cursor:pointer;display:flex;align-items:center;gap:6px;color:#888;font-size:12px;user-select:none"><svg id="light-details-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:12px;height:12px;transition:transform .2s"><polyline points="6 9 12 15 18 9"/></svg><span>${this._t("light_details_header")}</span></div>\n              <div id="light-details-body" style="display:none">\n                <div id="intensity-row" style="display:flex;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">${this._t("light_slider_front")}</span><input type="range" id="intensity-slider" min="0" max="100" step="5" style="flex:1;accent-color:#fc0;height:4px"><span id="intensity-value" style="min-width:28px;text-align:right;color:#999">—</span></div>\n                <div id="top-bri-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">${this._t("light_slider_top")}</span><input type="range" id="top-bri-slider" min="0" max="100" step="5" style="flex:1;accent-color:#4DFF7D;height:4px"><span id="top-bri-value" style="min-width:28px;text-align:right;color:#999">—</span></div>\n                <div id="bottom-bri-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">${this._t("light_slider_bottom")}</span><input type="range" id="bottom-bri-slider" min="0" max="100" step="5" style="flex:1;accent-color:#FF453A;height:4px"><span id="bottom-bri-value" style="min-width:28px;text-align:right;color:#999">—</span></div>\n                <div id="colortemp-row" style="display:none;align-items:center;gap:8px;padding:2px 4px;font-size:12px"><span style="white-space:nowrap;min-width:36px">${this._t("light_slider_colortemp")}</span><input type="range" id="colortemp-slider" min="-100" max="100" step="5" style="flex:1;accent-color:#f90;height:4px;background:linear-gradient(to right,#69f,#fff,#f90)"><span id="colortemp-value" style="min-width:28px;text-align:right;color:#999">—</span></div>\n              </div>\n            </div>\n            <div class="sw-row privacy-row" id="btn-privacy">\n              <div class="sw-left">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>\n                  <path d="M7 11V7a5 5 0 0110 0v4"/>\n                </svg>\n                <span>${this._t("privacy_short")}</span>\n              </div>\n              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n            </div>\n            <div class="sw-row" id="btn-notifications">\n              <div class="sw-left">\n                <svg id="notif-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n                  <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>\n                  <path d="M13.73 21a2 2 0 01-3.46 0"/>\n                </svg>\n                <svg id="notif-icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">\n                  <path d="M13.73 21a2 2 0 01-3.46 0"/>\n                  <path d="M18.63 13A17.89 17.89 0 0118 8"/>\n                  <path d="M6.26 6.26A5.86 5.86 0 006 8c0 7-3 9-3 9h14"/>\n                  <path d="M18 8a6 6 0 00-9.33-5"/>\n                  <line x1="1" y1="1" x2="23" y2="23"/>\n                </svg>\n                <span>${this._t("notif_section_title")}</span>\n              </div>\n              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n            </div>\n            <div class="sw-row" id="btn-intercom" style="display:none">\n              <div class="sw-left">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n                  <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>\n                  <path d="M19 10v2a7 7 0 01-14 0v-2"/>\n                  <line x1="12" y1="19" x2="12" y2="23"/>\n                  <line x1="8" y1="23" x2="16" y2="23"/>\n                </svg>\n                <span>${this._t("intercom_label")}</span>\n              </div>\n              <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n            </div>\n          </div>\n\n          <div class="pan-section" id="pan-section" style="display:none">\n            <div class="pan-row">\n              <button class="pan-btn" id="pan-full-left"  title="${this._t("pan_full_left_title")}" aria-label="${this._t("pan_full_left_aria")}">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">\n                  <polyline points="11 18 5 12 11 6"/><polyline points="18 18 12 12 18 6"/>\n                </svg>\n              </button>\n              <button class="pan-btn" id="pan-left"       title="${this._t("pan_left_short_title")}" aria-label="${this._t("pan_left_aria")}">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">\n                  <polyline points="15 18 9 12 15 6"/>\n                </svg>\n              </button>\n              <button class="pan-btn" id="pan-center"     title="${this._t("pan_center_title")}" aria-label="${this._t("pan_center_aria")}">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">\n                  <circle cx="12" cy="12" r="3"/>\n                  <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>\n                  <line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>\n                </svg>\n              </button>\n              <button class="pan-btn" id="pan-right"      title="${this._t("pan_right_short_title")}" aria-label="${this._t("pan_right_aria")}">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">\n                  <polyline points="9 18 15 12 9 6"/>\n                </svg>\n              </button>\n              <button class="pan-btn" id="pan-full-right" title="${this._t("pan_full_right_title")}" aria-label="${this._t("pan_full_right_aria")}">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" focusable="false">\n                  <polyline points="13 18 19 12 13 6"/><polyline points="6 18 12 12 6 6"/>\n                </svg>\n              </button>\n              <span   class="pan-pos" id="pan-position">0°</span>\n            </div>\n          </div>\n\n          <div class="quality-section" id="quality-section" style="display:none">\n            <div class="quality-row">\n              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"\n                   style="width:16px;height:16px;flex-shrink:0;color:var(--secondary-text-color,#8e8e93)">\n                <rect x="2" y="7" width="20" height="15" rx="2"/>\n                <polyline points="17 2 12 7 7 2"/>\n              </svg>\n              <span class="quality-label">${this._t("quality_label")}</span>\n              <select class="quality-select" id="quality-select">\n                <option value="auto">${this._t("quality_auto")}</option>\n                <option value="high">${this._t("quality_high")}</option>\n                <option value="low">${this._t("quality_low")}</option>\n              </select>\n            </div>\n            <span class="hint quality-remote-fallback-hint" id="quality-remote-fallback-hint" style="display:none">${this._t("quality_remote_fallback_hint")}</span>\n          </div>\n\n          \x3c!-- Accordion: Notification Types --\x3e\n          <div class="accordion" id="acc-notif-types">\n            <div class="accordion-header" id="acc-notif-types-header">\n              <span class="accordion-title">${this._t("accordion_notif_types")}</span>\n              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>\n            </div>\n            <div class="accordion-body">\n              <div class="accordion-content">\n                <div class="sw-row" id="btn-notif-movement">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>\n                    <span>${this._t("notif_movement")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n                <div class="sw-row" id="btn-notif-person">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>\n                    <span>${this._t("notif_person")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n                <div class="sw-row" id="btn-notif-audio">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg>\n                    <span>${this._t("notif_audio")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n                <div class="sw-row" id="btn-notif-trouble">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>\n                    <span>${this._t("notif_trouble")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n                <div class="sw-row" id="btn-notif-alarm">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>\n                    <span>${this._t("notif_camera_alarm")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n              </div>\n            </div>\n          </div>\n\n          \x3c!-- Accordion: Advanced Controls --\x3e\n          <div class="accordion" id="acc-advanced">\n            <div class="accordion-header" id="acc-advanced-header">\n              <span class="accordion-title">${this._t("accordion_advanced")}</span>\n              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>\n            </div>\n            <div class="accordion-body">\n              <div class="accordion-content">\n                <div class="sw-row" id="btn-timestamp">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>\n                    <span>${this._t("diag_timestamp")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n                <div class="sw-row" id="btn-autofollow">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/></svg>\n                    <span>${this._t("diag_autofollow")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n                <div class="sw-row" id="btn-motion">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>\n                    <span>${this._t("motion_detection")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n                <div class="sw-row" id="btn-record-sound">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>\n                    <span>${this._t("record_sound")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n                <div class="sw-row" id="btn-privacy-sound">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg>\n                    <span>${this._t("privacy_sound")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n              </div>\n            </div>\n          </div>\n\n          \x3c!-- Gen2 Accordion: Automatik & Sicherheit --\x3e\n          <div class="accordion" id="acc-gen2-auto" style="display:none">\n            <div class="accordion-header" id="acc-gen2-auto-header">\n              <span class="accordion-title">${this._t("accordion_auto_security")}</span>\n              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>\n            </div>\n            <div class="accordion-body">\n              <div class="accordion-content">\n                <div class="sw-row" id="btn-motion-light" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg><span>${this._t("light_on_motion")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>\n                <div class="sw-row" id="btn-ambient-light" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg><span>${this._t("light_always_on")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>\n                <div class="sw-row" id="btn-intrusion" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span>${this._t("intrusion_detection")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>\n                <div id="motion-sens-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">${this._t("motion_sensitivity")}</span><input type="range" id="motion-sens-slider" min="1" max="5" step="1" style="flex:1;accent-color:#ff9500;height:4px"><span id="motion-sens-value" style="min-width:16px;text-align:right;color:#999">—</span></div>\n                \x3c!-- Gen2 Indoor II — Alarm system (75 dB siren) --\x3e\n                <div class="sw-row" id="btn-alarm-arm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg><span>${this._t("alarm_armed")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>\n                <div class="sw-row" id="btn-alarm-mode" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="7"/><path d="M12 9v4l2 2M5 3L2 6M19 3l3 3"/></svg><span>${this._t("siren_75db")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>\n                <div class="sw-row" id="btn-prealarm" style="padding:4px 0;display:none"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg><span>${this._t("pre_alarm_led")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>\n                <div id="power-led-row" style="display:none;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">${this._t("power_led")}</span><input type="range" id="power-led-slider" min="0" max="100" step="5" style="flex:1;accent-color:#ff9500;height:4px"><span id="power-led-value" style="min-width:34px;text-align:right;color:#999">—</span></div>\n              </div>\n            </div>\n          </div>\n\n          \x3c!-- Automations Accordion (alle Kameras, konfigurierbar) --\x3e\n          <div class="accordion" id="acc-automations" style="display:none">\n            <div class="accordion-header" id="acc-automations-header">\n              <span class="accordion-title">${this._t("accordion_automations")}</span>\n              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>\n            </div>\n            <div class="accordion-body">\n              <div class="accordion-content">\n                <div id="automations-container"></div>\n              </div>\n            </div>\n          </div>\n\n          \x3c!-- Gen2 Accordion: Licht & Kamera --\x3e\n          <div class="accordion" id="acc-gen2-light" style="display:none">\n            <div class="accordion-header" id="acc-gen2-light-header">\n              <span class="accordion-title">${this._t("accordion_light_camera")}</span>\n              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>\n            </div>\n            <div class="accordion-body">\n              <div class="accordion-content">\n                <div id="colortemp-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><span style="white-space:nowrap">${this._t("color_temperature")}</span><input type="range" id="colortemp-slider" min="-100" max="100" step="5" style="flex:1;accent-color:#f90;height:4px;background:linear-gradient(to right,#69f,#fff,#f90)"><span id="colortemp-value" style="min-width:32px;text-align:right;color:#999">—</span></div>\n                <div id="rgb-lights-row" style="padding:4px 0;font-size:13px">\n                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span style="flex:1">${this._t("color_top")}</span><div id="top-led-color" style="width:24px;height:24px;border-radius:50%;border:2px solid #444;cursor:pointer" title="${this._t("pick_color")}"></div><input type="color" id="top-led-picker" style="display:none"></div>\n                  <div style="display:flex;align-items:center;gap:10px"><span style="flex:1">${this._t("color_bottom")}</span><div id="bottom-led-color" style="width:24px;height:24px;border-radius:50%;border:2px solid #444;cursor:pointer" title="${this._t("pick_color")}"></div><input type="color" id="bottom-led-picker" style="display:none"></div>\n                </div>\n                <div class="sw-row" id="btn-status-led" style="padding:4px 0"><div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>${this._t("status_led")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button></div>\n                <div id="mic-level-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg><span style="white-space:nowrap">${this._t("microphone_label")}</span><input type="range" id="mic-slider" min="0" max="100" step="5" style="flex:1;accent-color:#0a84ff;height:4px"><span id="mic-value" style="min-width:28px;text-align:right;color:#999">—</span></div>\n                <div id="lens-elev-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M12 22V2M5 12l7-10 7 10"/></svg><span style="white-space:nowrap">${this._t("height")}</span><input type="range" id="lens-slider" min="50" max="500" step="5" style="flex:1;accent-color:#30d158;height:4px"><span id="lens-value" style="min-width:36px;text-align:right;color:#999">—</span></div>\n              </div>\n            </div>\n          </div>\n\n          \x3c!-- Accordion: Diagnostics & Services --\x3e\n          <div class="accordion" id="acc-diagnostics">\n            <div class="accordion-header" id="acc-diagnostics-header">\n              <span class="accordion-title">${this._t("accordion_diagnostics")}</span>\n              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>\n            </div>\n            <div class="accordion-body">\n              <div class="accordion-content">\n                <div class="diag-row" id="diag-wifi">\n                  <span class="diag-label">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0114.08 0"/><path d="M1.42 9a16 16 0 0121.16 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>\n                    ${this._t("diag_wifi")}\n                  </span>\n                  <span class="diag-value" id="diag-wifi-val">—</span>\n                </div>\n                <div class="diag-row" id="diag-firmware">\n                  <span class="diag-label">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/></svg>\n                    ${this._t("diag_firmware")}\n                  </span>\n                  <span class="diag-value" id="diag-firmware-val">—</span>\n                </div>\n                <div class="diag-row" id="diag-ambient">\n                  <span class="diag-label">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>\n                    ${this._t("diag_ambient_light")}\n                  </span>\n                  <span class="diag-value" id="diag-ambient-val">—</span>\n                </div>\n                <div class="diag-row" id="diag-movement-today">\n                  <span class="diag-label">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>\n                    ${this._t("diag_motion_today")}\n                  </span>\n                  <span class="diag-value" id="diag-movement-today-val">—</span>\n                </div>\n                <div class="diag-row" id="diag-audio-today">\n                  <span class="diag-label">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg>\n                    ${this._t("diag_audio_today")}\n                  </span>\n                  <span class="diag-value" id="diag-audio-today-val">—</span>\n                </div>\n              </div>\n            </div>\n          </div>\n\n          \x3c!-- Accordion: Schedules & Zones --\x3e\n          <div class="accordion" id="acc-schedules">\n            <div class="accordion-header" id="acc-schedules-header">\n              <span class="accordion-title">${this._t("schedules_zones")}</span>\n              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>\n            </div>\n            <div class="accordion-body">\n              <div class="accordion-content">\n                <div class="diag-row">\n                  <span class="diag-label">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>\n                    ${this._t("diag_schedules")}\n                  </span>\n                  <span class="diag-value" id="diag-rules-count">—</span>\n                </div>\n                <div id="rules-list" style="padding:0 4px"></div>\n                <div class="sw-row" id="btn-show-zones">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>\n                    <span>${this._t("show_motion_zones_btn")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n                <div class="sw-row" id="btn-show-masks">\n                  <div class="sw-left">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>\n                    <span>${this._t("show_privacy_masks_btn")}</span>\n                  </div>\n                  <button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>\n                </div>\n                <div class="diag-row">\n                  <span class="diag-label">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>\n                    ${this._t("diag_motion_zones")}\n                  </span>\n                  <span class="diag-value" id="diag-zones-count">—</span>\n                </div>\n                <div class="diag-row">\n                  <span class="diag-label">\n                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>\n                    ${this._t("diag_privacy_masks")}\n                  </span>\n                  <span class="diag-value" id="diag-masks-count">—</span>\n                </div>\n              </div>\n            </div>\n          </div>\n\n          \x3c!-- Accordion: Services --\x3e\n          <div class="accordion" id="acc-services">\n            <div class="accordion-header" id="acc-services-header">\n              <span class="accordion-title">${this._t("accordion_services")}</span>\n              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>\n            </div>\n            <div class="accordion-body">\n              <div class="accordion-content">\n                <div class="svc-grid" id="svc-grid"></div>\n                <div id="svc-result" style="font-size:11px;color:#999;padding:4px 0;display:none"></div>\n              </div>\n            </div>\n          </div>\n\n      </ha-card>\n    `;
+    const img = this.shadowRoot.getElementById("cam-img");
+    img.addEventListener("load", () => this._onImageLoaded());
+    img.addEventListener("error", () => this._onImageError());
+    img.addEventListener("click", () => this._requestFullscreen());
+    const vid = this.shadowRoot.getElementById("cam-video");
+    vid.addEventListener("click", () => this._requestFullscreen());
+    vid.addEventListener("enterpictureinpicture", () => {
+      _boschPipSetActive(this);
+      this._setBackgroundKeepAlive(true);
+      this._setPipMetadata();
+    });
+    vid.addEventListener("leavepictureinpicture", () => {
+      if (_boschPipActive === this) _boschPipSetActive(null);
+      this._setBackgroundKeepAlive(false);
+      this._resumeLiveStreamIfNeeded();
+      this._clearPipMetadata();
+      this._refreshAudioToggle();
+      this._refreshAudioPill();
+    });
+    vid.addEventListener("webkitpresentationmodechanged", () => {
+      const mode = vid.webkitPresentationMode;
+      if (mode === "picture-in-picture") {
+        _boschPipSetActive(this);
+        this._setBackgroundKeepAlive(true);
+        this._setPipMetadata();
+      } else if (_boschPipActive === this) {
+        _boschPipSetActive(null);
+        this._setBackgroundKeepAlive(false);
+        this._resumeLiveStreamIfNeeded();
+        this._clearPipMetadata();
+        this._refreshAudioToggle();
+        this._refreshAudioPill();
+      }
+      this._reflectPipState();
+    });
+    this.shadowRoot.getElementById("btn-snapshot").addEventListener("click", () => this._onSnapshotClick());
+    this.shadowRoot.getElementById("btn-stream").addEventListener("click", () => this._toggleStream());
+    const apg = this.shadowRoot.getElementById("auto-play-gate");
+    if (apg) apg.addEventListener("pointerup", () => this._onPlayGateTap());
+    this.shadowRoot.getElementById("btn-fullscreen").addEventListener("click", () => this._requestFullscreen());
+    this._wireZoom(this.shadowRoot.getElementById("img-wrapper"));
+    this.shadowRoot.getElementById("btn-overflow").addEventListener("click", () => {
+      this.classList.toggle("overflow-open");
+    });
+    this.shadowRoot.getElementById("btn-privacy-inline").addEventListener("click", () => this._togglePrivacy());
+    const apBindClick = (id, fn) => {
+      const el = this.shadowRoot.getElementById(id);
+      if (el) el.addEventListener("click", fn);
+    };
+    apBindClick("ap-btn-snapshot", () => this._onSnapshotClick());
+    apBindClick("ap-btn-stream", () => this._toggleStream());
+    apBindClick("ap-btn-privacy", () => this._togglePrivacy());
+    apBindClick("ap-btn-light", () => this._toggleSwitchWithRollback(this._entities.light));
+    apBindClick("ap-btn-fullscreen", () => this._requestFullscreen());
+    apBindClick("ap-btn-pip", () => this._togglePiP());
+    const pipBtn = this.shadowRoot.getElementById("ap-btn-pip");
+    const pipVid = this.shadowRoot.getElementById("cam-video");
+    const hasPipApi = document.pictureInPictureEnabled || !!(pipVid && typeof pipVid.webkitSetPresentationMode === "function");
+    if (pipBtn && !hasPipApi) pipBtn.hidden = true;
+    this._reflectPipState();
+    this._wireAudioPill();
+    apBindClick("ap-btn-audio", () => {
+      this._toggleAudio();
+      this._refreshAudioPill();
+    });
+    apBindClick("ap-btn-more", () => {
+      this.classList.toggle("overflow-open");
+      this._syncMoreButton();
+      this._refreshThemeSwitcher();
+    });
+    this._syncMoreButton();
+    const themeSwitcher = this.shadowRoot.getElementById("ap-theme-switcher");
+    if (themeSwitcher) {
+      themeSwitcher.querySelectorAll("[data-theme]").forEach(b => {
+        b.addEventListener("click", () => {
+          const t = b.getAttribute("data-theme");
+          this._setUserTheme(t);
+          this._applyTheme(this._resolveTheme());
+        });
+      });
+      this._refreshThemeSwitcher();
+    }
+    const modeSwitcher = this.shadowRoot.getElementById("ap-mode-switcher");
+    if (modeSwitcher) {
+      modeSwitcher.querySelectorAll("[data-mode]").forEach(b => {
+        b.addEventListener("click", () => {
+          const m = b.getAttribute("data-mode");
+          this._setUserMode(m);
+          this._applyMode(this._resolveMode());
+        });
+      });
+      this._refreshModeSwitcher();
+    }
+    this.shadowRoot.getElementById("btn-light").addEventListener("click", () => this._toggleSwitchWithRollback(this._entities.light));
+    this.shadowRoot.getElementById("btn-privacy").addEventListener("click", () => this._togglePrivacy());
+    this.shadowRoot.getElementById("btn-notifications").addEventListener("click", () => this._toggleSwitch(this._entities.notifications));
+    this.shadowRoot.getElementById("btn-intercom")?.addEventListener("click", () => this._toggleSwitch(this._entities.intercom));
+    this.shadowRoot.getElementById("btn-front-light")?.addEventListener("click", () => this._toggleSwitch(this._entities.frontLight));
+    this.shadowRoot.getElementById("btn-wallwasher")?.addEventListener("click", () => this._toggleSwitch(this._entities.wallwasher));
+    const lightDetailsToggle = this.shadowRoot.getElementById("light-details-toggle");
+    if (lightDetailsToggle) {
+      lightDetailsToggle.addEventListener("click", () => {
+        const body = this.shadowRoot.getElementById("light-details-body");
+        const chevron = this.shadowRoot.getElementById("light-details-chevron");
+        if (body) {
+          const open = body.style.display !== "none";
+          body.style.display = open ? "none" : "";
+          if (chevron) chevron.style.transform = open ? "" : "rotate(180deg)";
+        }
+      });
+    }
+    const topBriSlider = this.shadowRoot.getElementById("top-bri-slider");
+    if (topBriSlider) {
+      topBriSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("top-bri-value");
+        if (v) v.textContent = topBriSlider.value + "%";
+      });
+      topBriSlider.addEventListener("change", () => {
+        if (!this._hass) return;
+        const pct = parseInt(topBriSlider.value);
+        if (this._entities.topLedLight && this._hass.states[this._entities.topLedLight]) {
+          this._hass.callService("light", "turn_on", {
+            entity_id: this._entities.topLedLight,
+            brightness: Math.max(1, Math.round(pct * 255 / 100))
+          }).catch(e => console.warn("bosch-camera-card: top-bri", e));
+        } else if (this._entities.topBrightness) {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.topBrightness,
+            value: pct
+          }).catch(e => console.warn("bosch-camera-card: top-bri", e));
+        }
+      });
+    }
+    const botBriSlider = this.shadowRoot.getElementById("bottom-bri-slider");
+    if (botBriSlider) {
+      botBriSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("bottom-bri-value");
+        if (v) v.textContent = botBriSlider.value + "%";
+      });
+      botBriSlider.addEventListener("change", () => {
+        if (!this._hass) return;
+        const pct = parseInt(botBriSlider.value);
+        if (this._entities.bottomLedLight && this._hass.states[this._entities.bottomLedLight]) {
+          this._hass.callService("light", "turn_on", {
+            entity_id: this._entities.bottomLedLight,
+            brightness: Math.max(1, Math.round(pct * 255 / 100))
+          }).catch(e => console.warn("bosch-camera-card: bot-bri", e));
+        } else if (this._entities.bottomBrightness) {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.bottomBrightness,
+            value: pct
+          }).catch(e => console.warn("bosch-camera-card: bot-bri", e));
+        }
+      });
+    }
+    this.shadowRoot.getElementById("btn-top-led")?.querySelector(".sw-toggle")?.addEventListener("click", () => {
+      if (!this._hass || !this._entities.topLedLight) return;
+      const st = this._hass.states[this._entities.topLedLight]?.state;
+      this._callService("light", st === "on" ? "turn_off" : "turn_on", {
+        entity_id: this._entities.topLedLight
+      });
+    });
+    this.shadowRoot.getElementById("btn-bottom-led")?.querySelector(".sw-toggle")?.addEventListener("click", () => {
+      if (!this._hass || !this._entities.bottomLedLight) return;
+      const st = this._hass.states[this._entities.bottomLedLight]?.state;
+      this._callService("light", st === "on" ? "turn_off" : "turn_on", {
+        entity_id: this._entities.bottomLedLight
+      });
+    });
+    const intensitySlider = this.shadowRoot.getElementById("intensity-slider");
+    if (intensitySlider) {
+      let debounce = null;
+      intensitySlider.addEventListener("input", () => {
+        const valEl = this.shadowRoot.getElementById("intensity-value");
+        if (valEl) valEl.textContent = intensitySlider.value + "%";
+      });
+      intensitySlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.frontLightIntensity) return;
+        clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.frontLightIntensity,
+            value: parseInt(intensitySlider.value)
+          }).catch(err => console.warn("bosch-camera-card: intensity", err));
+        }, 200);
+      });
+    }
+    const statusLedBtn = this.shadowRoot.getElementById("btn-status-led");
+    if (statusLedBtn) statusLedBtn.querySelector(".sw-toggle")?.addEventListener("click", () => this._toggleSwitch(this._entities.statusLed));
+    const intrusionBtn = this.shadowRoot.getElementById("btn-intrusion");
+    if (intrusionBtn) intrusionBtn.querySelector(".sw-toggle")?.addEventListener("click", () => this._toggleSwitch(this._entities.intrusionDetection));
+    const alarmArmBtn = this.shadowRoot.getElementById("btn-alarm-arm");
+    if (alarmArmBtn) alarmArmBtn.querySelector(".sw-toggle")?.addEventListener("click", () => this._toggleSwitch(this._entities.alarmSystemArm));
+    const alarmModeBtn = this.shadowRoot.getElementById("btn-alarm-mode");
+    if (alarmModeBtn) alarmModeBtn.querySelector(".sw-toggle")?.addEventListener("click", () => this._toggleSwitch(this._entities.alarmMode));
+    const preAlarmBtn = this.shadowRoot.getElementById("btn-prealarm");
+    if (preAlarmBtn) preAlarmBtn.querySelector(".sw-toggle")?.addEventListener("click", () => this._toggleSwitch(this._entities.preAlarm));
+    const powerLedSlider = this.shadowRoot.getElementById("power-led-slider");
+    if (powerLedSlider) {
+      let powerLedDebounce = null;
+      powerLedSlider.addEventListener("input", () => {
+        const valEl = this.shadowRoot.getElementById("power-led-value");
+        if (valEl) valEl.textContent = powerLedSlider.value + "%";
+      });
+      powerLedSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.powerLedBrightness) return;
+        clearTimeout(powerLedDebounce);
+        powerLedDebounce = setTimeout(() => {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.powerLedBrightness,
+            value: parseInt(powerLedSlider.value)
+          }).catch(err => console.warn("bosch-camera-card: power-led", err));
+        }, 200);
+      });
+    }
+    const autoContainer = this.shadowRoot.getElementById("automations-container");
+    if (autoContainer && this._entities.automations?.length) {
+      autoContainer.innerHTML = "";
+      this._entities.automations.forEach((eid, i) => {
+        const row = document.createElement("div");
+        row.className = "sw-row";
+        row.id = `btn-auto-${i}`;
+        row.style.padding = "4px 0";
+        row.innerHTML = `<div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg><span class="auto-label">${eid.split(".").pop().replace(/_/g, " ")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>`;
+        row.querySelector(".sw-toggle").addEventListener("click", () => {
+          if (!this._hass) return;
+          const st = this._hass.states[eid]?.state;
+          this._callService("automation", st === "on" ? "turn_off" : "turn_on", {
+            entity_id: eid
+          });
+        });
+        autoContainer.appendChild(row);
+      });
+    }
+    const motSensSlider = this.shadowRoot.getElementById("motion-sens-slider");
+    if (motSensSlider) {
+      motSensSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("motion-sens-value");
+        if (v) v.textContent = motSensSlider.value;
+      });
+      motSensSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.motionSensitivity) return;
+        this._hass.callService("number", "set_value", {
+          entity_id: this._entities.motionSensitivity,
+          value: parseInt(motSensSlider.value)
+        }).catch(err => console.warn("bosch-camera-card: motion-sensitivity", err));
+      });
+    }
+    const motionLightBtn = this.shadowRoot.getElementById("btn-motion-light");
+    if (motionLightBtn) motionLightBtn.querySelector(".sw-toggle")?.addEventListener("click", () => this._toggleSwitch(this._entities.motionLight));
+    const ambientLightBtn = this.shadowRoot.getElementById("btn-ambient-light");
+    if (ambientLightBtn) ambientLightBtn.querySelector(".sw-toggle")?.addEventListener("click", () => this._toggleSwitch(this._entities.ambientLight));
+    const topColorCircle = this.shadowRoot.getElementById("top-led-color");
+    const topPicker = this.shadowRoot.getElementById("top-led-picker");
+    if (topColorCircle && topPicker) {
+      topColorCircle.addEventListener("click", () => topPicker.click());
+      topPicker.addEventListener("change", () => {
+        if (!this._hass || !this._entities.topLedLight) return;
+        const hex = topPicker.value;
+        const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+        this._hass.callService("light", "turn_on", {
+          entity_id: this._entities.topLedLight,
+          rgb_color: [ r, g, b ],
+          brightness: 200
+        }).catch(e => console.warn("bosch-camera-card: top-led-color", e));
+        topColorCircle.style.background = hex;
+      });
+    }
+    const botColorCircle = this.shadowRoot.getElementById("bottom-led-color");
+    const botPicker = this.shadowRoot.getElementById("bottom-led-picker");
+    if (botColorCircle && botPicker) {
+      botColorCircle.addEventListener("click", () => botPicker.click());
+      botPicker.addEventListener("change", () => {
+        if (!this._hass || !this._entities.bottomLedLight) return;
+        const hex = botPicker.value;
+        const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+        this._hass.callService("light", "turn_on", {
+          entity_id: this._entities.bottomLedLight,
+          rgb_color: [ r, g, b ],
+          brightness: 200
+        }).catch(e => console.warn("bosch-camera-card: bottom-led-color", e));
+        botColorCircle.style.background = hex;
+      });
+    }
+    const ctSlider = this.shadowRoot.getElementById("colortemp-slider");
+    if (ctSlider) {
+      let ctDebounce = null;
+      ctSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("colortemp-value");
+        const val = parseInt(ctSlider.value);
+        if (v) v.textContent = val === 0 ? "neutral" : val < 0 ? "kalt" : "warm";
+      });
+      ctSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.colorTemp) return;
+        clearTimeout(ctDebounce);
+        ctDebounce = setTimeout(() => {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.colorTemp,
+            value: parseFloat((parseInt(ctSlider.value) / 100).toFixed(2))
+          }).catch(err => console.warn("bosch-camera-card: colortemp", err));
+        }, 200);
+      });
+    }
+    const micSlider = this.shadowRoot.getElementById("mic-slider");
+    if (micSlider) {
+      let micDebounce = null;
+      micSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("mic-value");
+        if (v) v.textContent = micSlider.value + "%";
+      });
+      micSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.micLevel) return;
+        clearTimeout(micDebounce);
+        micDebounce = setTimeout(() => {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.micLevel,
+            value: parseInt(micSlider.value)
+          }).catch(err => console.warn("bosch-camera-card: mic-level", err));
+        }, 200);
+      });
+    }
+    const lensSlider = this.shadowRoot.getElementById("lens-slider");
+    if (lensSlider) {
+      let lensDebounce = null;
+      lensSlider.addEventListener("input", () => {
+        const v = this.shadowRoot.getElementById("lens-value");
+        if (v) v.textContent = (parseInt(lensSlider.value) / 100).toFixed(2) + " m";
+      });
+      lensSlider.addEventListener("change", () => {
+        if (!this._hass || !this._entities.lensElevation) return;
+        clearTimeout(lensDebounce);
+        lensDebounce = setTimeout(() => {
+          this._hass.callService("number", "set_value", {
+            entity_id: this._entities.lensElevation,
+            value: parseFloat((parseInt(lensSlider.value) / 100).toFixed(2))
+          }).catch(err => console.warn("bosch-camera-card: lens-elevation", err));
+        }, 200);
+      });
+    }
+    const PAN_STEP = 30;
+    const setPan = pos => {
+      if (!this._hass || !this._entities.pan) return;
+      this._hass.callService("number", "set_value", {
+        entity_id: this._entities.pan,
+        value: Math.max(-120, Math.min(120, pos))
+      }).then(() => {
+        if (this._hass?.services?.bosch_smart_camera?.trigger_snapshot) this._callService("bosch_smart_camera", "trigger_snapshot", {
+          entity_id: this._entities.camera
+        });
+        this._scheduleImageLoad(2e3);
+      }).catch(err => console.warn("bosch-camera-card: pan set_value", err));
+    };
+    const getCurPan = () => parseFloat(this._hass?.states[this._entities.pan]?.state || 0);
+    this.shadowRoot.getElementById("pan-full-left")?.addEventListener("click", () => setPan(-120));
+    this.shadowRoot.getElementById("pan-left")?.addEventListener("click", () => setPan(getCurPan() - PAN_STEP));
+    this.shadowRoot.getElementById("pan-center")?.addEventListener("click", () => setPan(0));
+    this.shadowRoot.getElementById("pan-right")?.addEventListener("click", () => setPan(getCurPan() + PAN_STEP));
+    this.shadowRoot.getElementById("pan-full-right")?.addEventListener("click", () => setPan(120));
+    const flashPanPos = val => {
+      const badge = this.shadowRoot.getElementById("pan-overlay-pos");
+      if (!badge) return;
+      badge.textContent = `${val > 0 ? "+" : ""}${val}°`;
+      badge.classList.add("flash");
+      this._clearTimer(this._panPosTimer);
+      this._panPosTimer = this._armTimer(() => badge.classList.remove("flash"), 1500);
+    };
+    this.shadowRoot.getElementById("pan-edge-left")?.addEventListener("click", () => {
+      const v = Math.max(-120, getCurPan() - PAN_STEP);
+      setPan(v);
+      flashPanPos(v);
+    });
+    this.shadowRoot.getElementById("pan-edge-right")?.addEventListener("click", () => {
+      const v = Math.min(120, getCurPan() + PAN_STEP);
+      setPan(v);
+      flashPanPos(v);
+    });
+    const qualitySel = this.shadowRoot.getElementById("quality-select");
+    if (qualitySel) {
+      qualitySel.addEventListener("change", () => this._onQualityChange(qualitySel.value));
+    }
+    [ "acc-notif-types", "acc-advanced", "acc-diagnostics", "acc-schedules", "acc-services", "acc-gen2-auto", "acc-gen2-light", "acc-automations" ].forEach(id => {
+      this.shadowRoot.getElementById(`${id}-header`)?.addEventListener("click", () => {
+        const acc = this.shadowRoot.getElementById(id);
+        if (acc) acc.classList.toggle("open");
+      });
+    });
+    this.shadowRoot.getElementById("btn-notif-movement")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifMovement));
+    this.shadowRoot.getElementById("btn-notif-person")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifPerson));
+    this.shadowRoot.getElementById("btn-notif-audio")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifAudio));
+    this.shadowRoot.getElementById("btn-notif-trouble")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifTrouble));
+    this.shadowRoot.getElementById("btn-notif-alarm")?.addEventListener("click", () => this._toggleSwitch(this._entities.notifAlarm));
+    this._renderServiceButtons();
+    this.shadowRoot.getElementById("btn-show-zones")?.addEventListener("click", () => {
+      this._showMotionZones = !this._showMotionZones;
+      const btn = this.shadowRoot.getElementById("btn-show-zones");
+      if (btn) btn.classList.toggle("on", this._showMotionZones);
+      this._lastMotionCoordKey = null;
+      if (this._hass) this._updateMotionZones(this._hass, this._entities);
+    });
+    this.shadowRoot.getElementById("btn-show-masks")?.addEventListener("click", () => {
+      this._showPrivacyMasks = !this._showPrivacyMasks;
+      const btn = this.shadowRoot.getElementById("btn-show-masks");
+      if (btn) btn.classList.toggle("on", this._showPrivacyMasks);
+      this._lastPrivacyMaskKey = null;
+      if (this._hass) this._updatePrivacyMasks(this._hass, this._entities);
+    });
+    this.shadowRoot.getElementById("btn-timestamp")?.addEventListener("click", () => this._toggleSwitch(this._entities.timestamp));
+    this.shadowRoot.getElementById("btn-autofollow")?.addEventListener("click", () => this._toggleSwitch(this._entities.autofollow));
+    this.shadowRoot.getElementById("btn-motion")?.addEventListener("click", () => this._toggleSwitch(this._entities.motion));
+    this.shadowRoot.getElementById("btn-record-sound")?.addEventListener("click", () => this._toggleSwitch(this._entities.recordSound));
+    this.shadowRoot.getElementById("btn-privacy-sound")?.addEventListener("click", () => this._toggleSwitch(this._entities.privacySound));
+    this._imgTimestamp = Date.now();
+    this._scheduleImageLoad(0);
+  }
+  _scheduleImageLoad(delayMs = 0) {
+    if (delayMs <= 0) {
+      this._imgTimestamp = Date.now();
+      this._updateImage();
+    } else {
+      setTimeout(() => {
+        this._imgTimestamp = Date.now();
+        this._updateImage();
+      }, delayMs);
+    }
+  }
+  _updateImage() {
+    const img = this.shadowRoot.getElementById("cam-img");
+    if (!img || !this._hass) return;
+    if (this._isOffline && this._imageLoaded) return;
+    const camEntity = this._entities.camera;
+    const token = this._hass.states[camEntity]?.attributes?.access_token || "";
+    const dispW = Math.round(this.offsetWidth || 640);
+    const url = `/api/camera_proxy/${camEntity}?token=${token}&time=${this._imgTimestamp}&width=${dispW}`;
+    if (this._imageLoaded) {
+      const preload = new window.Image;
+      preload.onload = () => {
+        img.src = url;
+      };
+      preload.onerror = () => {
+        this._setLoadingOverlay(false);
+      };
+      preload.src = url;
+    } else {
+      img.src = url;
+    }
+  }
+  _onImageLoaded() {
+    const img = this.shadowRoot.getElementById("cam-img");
+    const src = img?.src || "";
+    const isCache = src.startsWith("data:");
+    const tiny = !!img && (img.naturalWidth < 16 || img.naturalHeight < 16);
+    if (tiny) return;
+    this._imageLoaded = true;
+    this._loadRetries = 0;
+    if (img) img.classList.remove("hidden");
+    if (!isCache) {
+      this._lastSnapshotAt = Date.now();
+      if (this._aiCaptionShownAt && Date.now() - this._aiCaptionShownAt > 3e3) {
+        this._hideAiCaption();
+      }
+    }
+    const stillConnecting = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
+    if (isCache && this._awaitingFresh) {
+      this._setLoadingOverlay(true, this._t("loading_refreshing"));
+    } else if (!stillConnecting) {
+      this._awaitingFresh = false;
+      this._setLoadingOverlay(false);
+    } else {
+      this._awaitingFresh = false;
+    }
+    if (!isCache && !this._isStreaming()) this._cacheImage();
+  }
+  _onImageError() {
+    if (!this._imageLoaded) {
+      const MAX_RETRIES = 5;
+      if (this._loadRetries < MAX_RETRIES) {
+        this._loadRetries++;
+        setTimeout(() => {
+          this._imgTimestamp = Date.now();
+          this._updateImage();
+        }, 3e3);
+      } else {
+        this._awaitingFresh = false;
+        this._setLoadingOverlay(false);
+      }
+      return;
+    }
+    this._awaitingFresh = false;
+    this._setLoadingOverlay(false);
+  }
+  _setLoadingOverlay(visible, text) {
+    if (visible && this._isOffline) return;
+    if (text === undefined) text = this._t("loading_image");
+    const streamStarting = this._streamConnecting || this._waitingForStream || this._startingLiveVideo;
+    if (!visible && streamStarting) return;
+    if (visible && streamStarting && text === this._t("loading_image")) return;
+    const overlay = this.shadowRoot.getElementById("loading-overlay");
+    const loadText = this.shadowRoot.getElementById("loading-text");
+    const hintEl = this.shadowRoot.getElementById("loading-hint");
+    const img = this.shadowRoot.getElementById("cam-img");
+    this._loadingOverlay = visible;
+    if (overlay) {
+      overlay.classList.toggle("visible", visible);
+      overlay.classList.toggle("refreshing", visible && this._imageLoaded);
+    }
+    if (loadText) loadText.textContent = text;
+    if (hintEl) {
+      if (visible && (this._streamConnecting || this._startingLiveVideo || this._waitingForStream)) {
+        const ct = this._hass?.states?.[this._entities?.switch]?.attributes?.connection_type;
+        if (ct === "REMOTE") hintEl.textContent = this._t("loading_hint_remote"); else if (ct === "LOCAL") hintEl.textContent = this._t("loading_hint_local"); else hintEl.textContent = this._t("loading_hint_connecting");
+      } else {
+        hintEl.textContent = "";
+      }
+    }
+    if (img) img.classList.toggle("hidden", !this._imageLoaded);
+    if (visible) {
+      this._clearTimer(this._loadingTimeout);
+      const isStreamStart = this._startingLiveVideo || this._waitingForStream || this._liveVideoActive;
+      const safetyMs = isStreamStart ? 12e4 : 15e3;
+      this._loadingTimeout = this._armTimer(() => this._setLoadingOverlay(false), safetyMs);
+    } else {
+      this._clearTimer(this._loadingTimeout);
+      this._loadingTimeout = null;
+    }
+  }
+  _restoreCachedImage() {
+    if (!this._storageKey) return;
+    try {
+      const cached = localStorage.getItem(this._storageKey);
+      if (!cached) return;
+      if (cached.length < 1e3) {
+        localStorage.removeItem(this._storageKey);
+        return;
+      }
+      const img = this.shadowRoot.getElementById("cam-img");
+      if (img) {
+        img.src = cached;
+        img.classList.remove("hidden");
+      }
+      this._imageLoaded = true;
+      this._awaitingFresh = true;
+      this._setLoadingOverlay(true, this._t("loading_refreshing"));
+    } catch (_) {}
+  }
+  _cacheImage() {
+    if (!this._storageKey) return;
+    const img = this.shadowRoot.getElementById("cam-img");
+    if (!img || !img.naturalWidth || !img.naturalHeight) return;
+    if (img.naturalWidth < 16 || img.naturalHeight < 16) return;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      const dataUrl = canvas.toDataURL("image/jpeg", .85);
+      localStorage.setItem(this._storageKey, dataUrl);
+    } catch (_) {}
+  }
+  _loadHlsJs() {
+    if (window.Hls) return Promise.resolve(window.Hls);
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/hls.js@1.6.16/dist/hls.min.js";
+      s.integrity = "sha384-5E8B0pTlZZJMabWpC0fyYf6OUpe15jJij34BqBAh4NXoHAlLNOjCPRrwtOXOQFAn";
+      s.crossOrigin = "anonymous";
+      s.onload = () => resolve(window.Hls);
+      s.onerror = () => reject(new Error("hls.js load failed"));
+      document.head.appendChild(s);
+    });
+  }
+  async _startLiveVideo(attempt = 1) {
+    if (!this._hass) return;
+    const video = this.shadowRoot.getElementById("cam-video");
+    const img = this.shadowRoot.getElementById("cam-img");
+    if (!video) return;
+    const gen = ++this._startGen;
+    this._deadStreamRebuildPending = false;
+    this._stopRefreshTimer();
+    this._startingLiveVideo = true;
+    const audioOn = this._getEffectiveState(this._entities.audio) === "on";
+    const activateVideo = () => {
+      video.style.display = "block";
+      this._liveVideoActive = true;
+      this._liveStreamStalled = false;
+      this._startingLiveVideo = false;
+      this._motionStart(video);
+      this._reflectPipState();
+      this._refreshAudioPill();
+      this._refreshAudioToggle();
+      if ((this._remoteSkipWebRTC || this._preferHlsThisSession || this._isMobileClient()) && this._streamTransport === "hls") {
+        const banner = this.shadowRoot?.getElementById("ios-hls-banner");
+        if (banner) {
+          const bt = banner.querySelector("#ios-hls-banner-text");
+          if (bt) bt.textContent = `ℹ ${this._t("hls_mode_banner")}`;
+          banner.classList.add("visible");
+        }
+      }
+      const clearOverlay = () => {
+        if (img) img.style.display = "none";
+        this._startingLiveVideo = false;
+        this._waitingForStream = false;
+        if (this._streamConnecting) {
+          this._streamConnecting = false;
+          if (this._connectSteps) {
+            this._connectSteps.forEach(t => clearTimeout(t));
+            this._connectSteps = null;
+          }
+        }
+        this._setLoadingOverlay(false);
+        this._applyAudioPreference(video);
+        if (this._unmuteOnStart) {
+          this._tryStartUnmute(video);
+        }
+        this._staleSourceSeen = false;
+        if (!this._stallRecoveryTimestamps || this._stallRecoveryTimestamps.length === 0) {
+          this._lastRewarmAt = 0;
+        }
+        this._streamDropCount = 0;
+        this._deadStreamRecoveryStreak = 0;
+        this._markLiveBadge();
+        video.removeEventListener("playing", clearOverlay);
+      };
+      video.addEventListener("playing", clearOverlay, {
+        once: true
+      });
+      if (!video._boschPauseGuard) {
+        video._boschPauseGuard = true;
+        video._boschPauseGuardFn = () => {
+          if (this._stoppingLiveVideo || !this._liveVideoActive || !this.isConnected) return;
+          if (!video.srcObject && !video.currentSrc && !video.getAttribute("src")) return;
+          const reMuteAndResume = () => {
+            video.muted = true;
+            Promise.resolve(video.play()).catch(() => {});
+            this._refreshAudioToggle();
+            this._refreshAudioPill();
+            if (!this._isSecondaryAudio() && this._getEffectiveState(this._entities.audio) === "on") {
+              this._armAutoUnmute();
+            }
+          };
+          if (!video.muted) {
+            Promise.resolve(video.play()).catch(reMuteAndResume);
+            return;
+          }
+          reMuteAndResume();
+        };
+        video.addEventListener("pause", video._boschPauseGuardFn);
+      }
+      if (typeof video.requestVideoFrameCallback === "function") {
+        if (video._boschRvfcHandle != null && typeof video.cancelVideoFrameCallback === "function") {
+          try {
+            video.cancelVideoFrameCallback(video._boschRvfcHandle);
+          } catch {}
+        }
+        video._boschLastFrameAt = null;
+        const onFrame = () => {
+          video._boschLastFrameAt = performance.now();
+          this._webrtcRecoveryStreak = 0;
+          if (this._liveStreamStalled) this._setLiveStalled(false);
+          if (this._liveVideoActive && (video.srcObject || video.currentSrc || video.getAttribute("src"))) {
+            video._boschRvfcHandle = video.requestVideoFrameCallback(onFrame);
+          } else {
+            video._boschRvfcHandle = null;
+          }
+        };
+        video._boschRvfcHandle = video.requestVideoFrameCallback(onFrame);
+      }
+      if (this._streamTransport === "webrtc") {
+        this._armWebrtcDeadTrackWatchdog(video);
+      }
+      this._clearTimer(this._activateSafetyTimer);
+      this._activateSafetyTimer = this._armTimer(() => {
+        if (!this.isConnected) return;
+        if (!video.paused && video.currentTime > 0) {
+          clearOverlay();
+        } else {
+          this._setLoadingOverlay(false);
+        }
+      }, 12e4);
+      this._clearTimer(this._stallChecker);
+      let lastTime = 0;
+      let stallCount = 0;
+      this._stallChecker = this._armInterval(() => {
+        if (!this._liveVideoActive || !video) {
+          this._clearTimer(this._stallChecker);
+          return;
+        }
+        const ownsPip = this._ownsNativePresentation(video);
+        if (document.visibilityState === "hidden" && !ownsPip) {
+          lastTime = video.currentTime;
+          stallCount = 0;
+          return;
+        }
+        const frameFrozen = video._boschLastFrameAt != null && performance.now() - video._boschLastFrameAt > 1e4;
+        const frozen = video.currentTime === lastTime;
+        const pausedWhileLive = video.paused && !this._stoppingLiveVideo;
+        if (frameFrozen) this._setLiveStalled(true);
+        if (frozen || pausedWhileLive || frameFrozen) {
+          if (video.paused) Promise.resolve(video.play()).catch(() => {});
+          stallCount++;
+          const frameFrozenEscalate = frameFrozen && !this._isIOS();
+          if (stallCount >= 3 || frameFrozenEscalate) {
+            console.warn("bosch-camera-card: live video stalled/paused/frozen, recovering");
+            stallCount = 0;
+            if (this._hls && this._hls.liveSyncPosition && !video.paused && !frameFrozen) {
+              video.currentTime = this._hls.liveSyncPosition;
+            } else {
+              this._scheduleLiveRecovery(frameFrozen ? "no presented frame >10s" : "stall checker ~15s");
+            }
+          }
+        } else {
+          stallCount = 0;
+        }
+        lastTime = video.currentTime;
+        if (!this._isIOS()) {
+          this._checkWebrtcFreeze().then(statsFrozen => {
+            if (statsFrozen && this._liveVideoActive) {
+              this._setLiveStalled(true);
+              this._scheduleLiveRecovery("webrtc framesDecoded frozen >10s");
+            }
+          });
+        }
+      }, 5e3);
+      this._startLiveStallWorker();
+    };
+    if (this._remoteSkipWebRTC) {
+      console.debug("bosch-camera-card: remote endpoint — short WebRTC attempt, HLS fallback if it doesn't connect fast");
+    }
+    if (this._disableWebRTC()) {
+      console.debug("bosch-camera-card: disable_webrtc configured — skipping WebRTC, going straight to HLS");
+    } else if (this._preferHlsThisSession) {
+      console.debug("bosch-camera-card: sticky HLS this session — skipping WebRTC, going straight to HLS");
+    } else try {
+      try {
+        await this._startWebRTC(video, activateVideo);
+        return;
+      } catch (webrtcErr) {
+        if (webrtcErr?.webrtcAbandoned) return;
+        const m = String(webrtcErr?.message || webrtcErr);
+        const expectedRace = m.includes("does not support WebRTC") || m.includes("frontend_stream_types");
+        if (expectedRace) {
+          console.debug("bosch-camera-card: WebRTC race miss, falling back to HLS:", m);
+        } else if (this._isStaleSourceError(m)) {
+          this._staleSourceSeen = true;
+          console.warn("bosch-camera-card: WebRTC source stale (dead proxy/rotated creds), will rebuild backend stream:", m);
+        } else {
+          console.warn("bosch-camera-card: WebRTC failed, falling back to HLS:", m);
+        }
+        if (this._webrtcPc) {
+          try {
+            this._webrtcPc.close();
+          } catch {}
+          this._webrtcPc = null;
+        }
+        if (this._webrtcUnsub) {
+          try {
+            this._webrtcUnsub();
+          } catch {}
+          this._webrtcUnsub = null;
+        }
+      }
+    } catch (outer) {}
+    this._streamTransport = "hls";
+    try {
+      const result = await this._hass.callWS({
+        type: "camera/stream",
+        entity_id: this._entities.camera
+      });
+      if (this._startGen !== gen) return;
+      if (!result?.url) throw new Error("no url");
+      video.muted = true;
+      const startPlay = () => {
+        video.muted = true;
+        video.play().then(() => {}).catch(err => {
+          if (err.name === "NotAllowedError") {
+            const overlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
+            if (overlay) {
+              this._localizeTapToPlayOverlay(overlay);
+              overlay.classList.add("visible");
+              if (this._tapToPlayResume) overlay.removeEventListener("pointerup", this._tapToPlayResume);
+              const resume = () => {
+                overlay.classList.remove("visible");
+                overlay.removeEventListener("pointerup", resume);
+                this._tapToPlayResume = null;
+                video.muted = true;
+                video.play().catch(() => {});
+              };
+              this._tapToPlayResume = resume;
+              overlay.addEventListener("pointerup", resume);
+            }
+            return;
+          }
+          console.warn("bosch-camera-card: muted play failed:", err.message);
+          setTimeout(() => {
+            if (!this.isConnected) return;
+            const v = this.shadowRoot?.getElementById("cam-video");
+            if (!v) return;
+            v.muted = true;
+            Promise.resolve(v.play()).catch(e2 => {
+              if (e2 && e2.name === "NotAllowedError") return;
+              console.warn("bosch-camera-card: muted play retry failed, reconnecting:", e2?.message);
+              if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+              this._reconnectingLiveVideo = true;
+              this._stopLiveVideo();
+              if (this._isStreaming && this._isStreaming()) {
+                setTimeout(() => {
+                  if (!this.isConnected) return;
+                  this._reconnectingLiveVideo = false;
+                  this._reconnectAfterStreamDrop();
+                }, 2e3);
+              } else {
+                this._reconnectingLiveVideo = false;
+              }
+            });
+          }, 2e3);
+        });
+      };
+      let Hls = null;
+      try {
+        Hls = await this._loadHlsJs();
+      } catch (e) {
+        console.warn("bosch-camera-card: hls.js load failed, will try native HLS:", e?.message);
+      }
+      if (this._startGen !== gen) return;
+      if (Hls && Hls.isSupported()) {
+        if (this._hls) {
+          this._hls.destroy();
+          this._hls = null;
+        }
+        const camAttrsForBuf = this._hass?.states?.[this._entities.camera]?.attributes || {};
+        const bufModeKey = camAttrsForBuf.live_buffer_mode || "balanced";
+        const bufProfile = BOSCH_BUFFER_PROFILES[bufModeKey] || BOSCH_BUFFER_PROFILES.balanced;
+        const isExternal = this._isExternalHost();
+        console.warn("bosch-camera-card: HLS starting — external:", isExternal, "bufProfile:", bufModeKey, bufProfile);
+        const hls = new Hls({
+          enableWorker: true,
+          ...bufProfile,
+          ...isExternal ? {
+            lowLatencyMode: false
+          } : {},
+          ...isExternal && Hls.DefaultConfig?.loader ? {
+            pLoader: makeLLHlsStrippingPlaylistLoader(Hls.DefaultConfig.loader)
+          } : {},
+          manifestLoadingMaxRetry: 10,
+          levelLoadingMaxRetry: 10,
+          fragLoadingMaxRetry: 10
+        });
+        this._hls = hls;
+        hls.on(Hls.Events.MANIFEST_PARSED, startPlay);
+        this._stallCount = 0;
+        hls.on(Hls.Events.FRAG_LOADED, () => {
+          this._stallCount = 0;
+          this._hlsNetworkErrorCount = 0;
+        });
+        let _didLiveSeek = false;
+        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          if (_didLiveSeek) return;
+          const lsp = hls.liveSyncPosition;
+          if (lsp != null && video && lsp - video.currentTime > 6) {
+            _didLiveSeek = true;
+            console.debug("bosch-camera-card: seeking HLS to live edge", lsp, "from", video.currentTime);
+            video.currentTime = lsp;
+          }
+        });
+        hls.on(Hls.Events.ERROR, (_ev, data) => {
+          if (data.details === "bufferStalledError") {
+            this._stallCount = (this._stallCount || 0) + 1;
+            if (video && hls.liveSyncPosition) {
+              video.currentTime = hls.liveSyncPosition;
+            }
+            if (this._stallCount >= 3) {
+              console.warn("bosch-camera-card: 3 buffer stalls, reconnecting HLS");
+              this._stallCount = 0;
+              this._reconnectingLiveVideo = true;
+              this._stopLiveVideo();
+              if (this._isStreaming && this._isStreaming()) {
+                setTimeout(() => {
+                  if (!this.isConnected) return;
+                  this._reconnectingLiveVideo = false;
+                  this._reconnectAfterStreamDrop();
+                }, 1e3);
+              } else {
+                this._reconnectingLiveVideo = false;
+              }
+            }
+            return;
+          }
+          if (!data.fatal) return;
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            this._hlsNetworkErrorCount = (this._hlsNetworkErrorCount || 0) + 1;
+            if (this._hlsNetworkErrorCount <= 3) {
+              hls.startLoad();
+            } else {
+              this._hlsNetworkErrorCount = 0;
+              console.warn("bosch-camera-card: hls.js fatal NETWORK_ERROR persists, reconnecting", data);
+              this._reconnectingLiveVideo = true;
+              this._stopLiveVideo();
+              if (this._isStreaming && this._isStreaming()) {
+                setTimeout(() => {
+                  if (!this.isConnected) return;
+                  this._reconnectingLiveVideo = false;
+                  this._reconnectAfterStreamDrop();
+                }, 2e3);
+              } else {
+                this._reconnectingLiveVideo = false;
+              }
+            }
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            this._hlsMediaErrorCount = (this._hlsMediaErrorCount || 0) + 1;
+            if (this._hlsMediaErrorCount <= 3) {
+              hls.recoverMediaError();
+            } else {
+              this._hlsMediaErrorCount = 0;
+              console.warn("bosch-camera-card: hls.js fatal MEDIA_ERROR persists, reconnecting", data);
+              this._reconnectingLiveVideo = true;
+              this._stopLiveVideo();
+              if (this._isStreaming && this._isStreaming()) {
+                setTimeout(() => {
+                  if (!this.isConnected) return;
+                  this._reconnectingLiveVideo = false;
+                  this._reconnectAfterStreamDrop();
+                }, 2e3);
+              } else {
+                this._reconnectingLiveVideo = false;
+              }
+            }
+          } else {
+            console.warn("bosch-camera-card: hls.js fatal error, reconnecting", data);
+            this._reconnectingLiveVideo = true;
+            this._stopLiveVideo();
+            if (this._isStreaming && this._isStreaming()) {
+              setTimeout(() => {
+                if (!this.isConnected) return;
+                this._reconnectingLiveVideo = false;
+                this._reconnectAfterStreamDrop();
+              }, 2e3);
+            } else {
+              this._reconnectingLiveVideo = false;
+            }
+          }
+        });
+        hls.loadSource(result.url);
+        hls.attachMedia(video);
+        this._clearTimer(this._hlsKeepaliveTimer);
+        this._hlsKeepaliveTimer = this._armInterval(() => {
+          if (this._hls && this._liveVideoActive) {
+            this._hls.startLoad(-1);
+          }
+        }, 2e4);
+      } else if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
+        video.src = result.url;
+        startPlay();
+        this._armNativeHlsLoadWatchdog(video, result.url);
+      } else {
+        throw new Error("HLS not supported");
+      }
+      activateVideo();
+    } catch (e) {
+      if (this._staleSourceSeen && this._isStreaming()) {
+        this._staleSourceSeen = false;
+        if (this._maybeForceBackendRewarm()) return;
+      }
+      if (attempt < 5) {
+        setTimeout(() => {
+          if (!this.isConnected) return;
+          const cam = this._hass?.states[this._entities.camera];
+          if (cam?.state === "streaming") {
+            this._startLiveVideo(attempt + 1);
+          } else if (this._isStreaming() && !this._waitingForStream) {
+            this._waitingForStream = true;
+            this._setLoadingOverlay(true, this._t("stream_reconnecting"));
+            this._waitForStreamReady();
+          } else {
+            this._startingLiveVideo = false;
+            this._waitingForStream = false;
+            this._startRefreshTimer();
+          }
+        }, 1500);
+      } else {
+        const retryDelay = attempt <= 6 ? 5e3 : 1e4;
+        console.warn(`bosch-camera-card: stream not available (attempt ${attempt}), retrying in ${retryDelay / 1e3}s`, e);
+        this._liveVideoActive = false;
+        this._startingLiveVideo = false;
+        this._startRefreshTimer();
+        setTimeout(() => {
+          if (this._isStreaming && this._isStreaming() && !this._liveVideoActive && !this._startingLiveVideo) {
+            this._waitingForStream = true;
+            this._setLoadingOverlay(true, this._t("stream_retrying"));
+            this._waitForStreamReady();
+          }
+        }, retryDelay);
+      }
+    }
+  }
+  async _startWebRTC(video, activateVideo) {
+    if (typeof RTCPeerConnection === "undefined") {
+      throw new Error("RTCPeerConnection unavailable — skip to HLS");
+    }
+    const entityId = this._entities.camera;
+    let rtcConfig = {
+      iceServers: [ {
+        urls: "stun:stun.home-assistant.io:80"
+      } ]
+    };
+    try {
+      const settings = await this._hass.callWS({
+        type: "camera/webrtc/get_client_config",
+        entity_id: entityId
+      });
+      if (settings?.configuration) rtcConfig = settings.configuration;
+    } catch (e) {
+      console.debug("bosch-camera-card: get_client_config unavailable, using default STUN:", e?.message);
+    }
+    const pc = new RTCPeerConnection(rtcConfig);
+    this._webrtcPc = pc;
+    pc.addEventListener("connectionstatechange", () => {
+      if (this._webrtcPc !== pc) return;
+      if (!this._liveVideoActive) return;
+      if (pc.connectionState === "failed") {
+        this._scheduleLiveRecovery("webrtc connectionState failed");
+      }
+    });
+    pc.addTransceiver("video", {
+      direction: "recvonly"
+    });
+    pc.addTransceiver("audio", {
+      direction: "recvonly"
+    });
+    const remoteStream = new MediaStream;
+    let webrtcResolve = null;
+    let webrtcReject = null;
+    let webrtcTimeout = null;
+    pc.ontrack = ev => {
+      if (this._webrtcPc !== pc) return;
+      remoteStream.addTrack(ev.track);
+      if (ev.track.kind === "video") {
+        ev.track.onunmute = () => {
+          if (this._webrtcPc !== pc) return;
+          this._clearTimer(this._trackMuteTimer);
+          this._trackMuteTimer = null;
+        };
+        ev.track.onmute = () => {
+          if (this._webrtcPc !== pc) return;
+          if (!this._liveVideoActive) return;
+          this._clearTimer(this._trackMuteTimer);
+          this._trackMuteTimer = this._armTimer(() => {
+            this._trackMuteTimer = null;
+            if (this._webrtcPc !== pc) return;
+            if (ev.track.muted && this._liveVideoActive) {
+              this._scheduleLiveRecovery("webrtc video track muted >6s");
+            }
+          }, 6e3);
+        };
+      }
+      if (video.srcObject !== remoteStream) {
+        this._streamTransport = "webrtc";
+        video.srcObject = remoteStream;
+        video.muted = true;
+        video.play().catch(() => {});
+        activateVideo();
+      }
+      if (webrtcTimeout) {
+        clearTimeout(webrtcTimeout);
+        webrtcTimeout = null;
+      }
+      if (webrtcResolve) {
+        webrtcResolve();
+        webrtcResolve = null;
+      }
+    };
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    const unsub = await this._hass.connection.subscribeMessage(event => {
+      if (!pc || pc.signalingState === "closed" || pc.signalingState === "failed") return;
+      if (event.type === "answer") {
+        pc.setRemoteDescription({
+          type: "answer",
+          sdp: event.answer
+        }).catch(e => console.debug("bosch-camera-card: setRemoteDescription skipped (pc closing):", e?.message));
+      } else if (event.type === "candidate") {
+        pc.addIceCandidate(event.candidate).catch(e => console.debug("bosch-camera-card: addIceCandidate skipped (pc closing):", e?.message));
+      } else if (event.type === "error") {
+        const msg = event.message || "webrtc_offer_error";
+        const isRace = typeof msg === "string" && (msg.includes("does not support WebRTC") || msg.includes("frontend_stream_types"));
+        if (isRace) {
+          console.debug("bosch-camera-card: WebRTC offer rejected (HA stream-type race), fast-falling to HLS:", msg);
+        } else {
+          console.warn("bosch-camera-card: WebRTC error:", msg);
+        }
+        if (webrtcTimeout) clearTimeout(webrtcTimeout);
+        if (webrtcReject) webrtcReject(new Error(typeof msg === "string" ? msg : "webrtc_offer_error"));
+      }
+    }, {
+      type: "camera/webrtc/offer",
+      entity_id: entityId,
+      offer: offer.sdp
+    });
+    this._webrtcUnsub = unsub;
+    try {
+      await new Promise((resolve, reject) => {
+        webrtcResolve = resolve;
+        webrtcReject = reject;
+        const attemptMs = this._webrtcConnectTimeoutMs();
+        const timeout = setTimeout(() => reject(new Error("WebRTC: no track within " + attemptMs + "ms")), attemptMs);
+        webrtcTimeout = timeout;
+        if (video.srcObject === remoteStream) {
+          clearTimeout(timeout);
+          webrtcTimeout = null;
+          resolve();
+          return;
+        }
+        pc.addEventListener("iceconnectionstatechange", () => {
+          if (pc.iceConnectionState === "failed") {
+            clearTimeout(timeout);
+            reject(new Error("WebRTC: ICE failed"));
+          }
+        });
+      });
+    } catch (err) {
+      if (this._webrtcPc !== pc) {
+        try {
+          pc.close();
+        } catch {}
+        if (typeof unsub === "function") {
+          try {
+            unsub();
+          } catch {}
+        }
+        const abandoned = new Error("WebRTC attempt abandoned (superseded by a newer attempt)");
+        abandoned.webrtcAbandoned = true;
+        throw abandoned;
+      }
+      throw err;
+    }
+  }
+  _reconnectAfterStreamDrop() {
+    if (!this._isStreaming()) return;
+    this._streamDropCount = (this._streamDropCount || 0) + 1;
+    if (this._streamDropCount >= 2) {
+      if (this._maybeForceBackendRewarm()) this._streamDropCount = 0;
+      return;
+    }
+    const cam = this._hass?.states[this._entities.camera];
+    if (cam?.state === "streaming") {
+      this._startLiveVideo();
+    } else if (!this._waitingForStream) {
+      this._waitingForStream = true;
+      this._setLoadingOverlay(true, this._t("stream_reconnecting"));
+      this._waitForStreamReady();
+    }
+  }
+  _isStaleSourceError(msg) {
+    const m = String(msg || "").toLowerCase();
+    return m.includes("wrong user/pass") || m.includes("connection refused") || m.includes("exec/rtsp") || m.includes("describe failed") || m.includes("404");
+  }
+  _maybeForceBackendRewarm() {
+    const now = Date.now();
+    if (this._lastRewarmAt && now - this._lastRewarmAt < 2e4) return false;
+    const sw = this._entities.switch;
+    if (!sw || !this._hass?.states?.[sw]) return false;
+    this._lastRewarmAt = now;
+    console.warn("bosch-camera-card: go2rtc source stale — forcing backend stream rebuild via", sw);
+    this._reconnectingLiveVideo = true;
+    this._stopLiveVideo();
+    this._waitingForStream = true;
+    this._setLoadingOverlay(true, this._t("stream_reconnecting"));
+    this._callService("switch", "turn_off", {
+      entity_id: sw
+    });
+    this._rewarmPending = true;
+    this._rewarmSwitchEntity = sw;
+    this._rewarmTurnOnTimer = this._armTimer(() => this._fireRewarmTurnOn(), REWARM_TURN_ON_DELAY_MS);
+    return true;
+  }
+  _fireRewarmTurnOn() {
+    if (!this._rewarmPending) return;
+    this._rewarmPending = false;
+    this._rewarmTurnOnTimer = null;
+    const sw = this._rewarmSwitchEntity;
+    this._rewarmSwitchEntity = null;
+    if (!sw) return;
+    this._rewarmSkipGate = true;
+    this._callService("switch", "turn_on", {
+      entity_id: sw
+    });
+    this._waitingForStream = true;
+    setTimeout(() => {
+      if (this._waitingForStream) this._waitForStreamReady();
+    }, 1e3);
+  }
+  _completeRewarmIfPending() {
+    if (!this._rewarmPending) return;
+    const elapsed = Date.now() - this._lastRewarmAt;
+    if (elapsed < REWARM_TURN_ON_DELAY_MS) {
+      this._clearTimer(this._rewarmTurnOnTimer);
+      this._rewarmTurnOnTimer = this._armTimer(() => this._fireRewarmTurnOn(), REWARM_TURN_ON_DELAY_MS - elapsed);
+      return;
+    }
+    this._clearTimer(this._rewarmTurnOnTimer);
+    this._rewarmTurnOnTimer = null;
+    this._fireRewarmTurnOn();
+  }
+  _startLiveStallWorker() {
+    this._stopLiveStallWorker();
+    if (typeof Worker !== "function") return;
+    try {
+      const src = "let t=setInterval(function(){postMessage(0);},5000);" + "onmessage=function(e){if(e.data==='stop'){clearInterval(t);close();}};";
+      const blob = new Blob([ src ], {
+        type: "application/javascript"
+      });
+      const url = URL.createObjectURL(blob);
+      this._stallWorker = new Worker(url);
+      URL.revokeObjectURL(url);
+      this._stallWorker.onmessage = () => this._liveStallTickFromWorker();
+      this._stallWorker.onerror = () => this._stopLiveStallWorker();
+    } catch {
+      this._stallWorker = null;
+    }
+  }
+  _stopLiveStallWorker() {
+    if (this._stallWorker) {
+      try {
+        this._stallWorker.postMessage("stop");
+      } catch {}
+      try {
+        this._stallWorker.terminate();
+      } catch {}
+      this._stallWorker = null;
+    }
+  }
+  _liveStallTickFromWorker() {
+    if (document.visibilityState !== "hidden") return;
+    if (!this._liveVideoActive) return;
+    if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    const video = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+    if (!video) return;
+    const ownsPip = this._ownsNativePresentation(video);
+    if (!ownsPip) return;
+    const frameFrozen = video._boschLastFrameAt != null && performance.now() - video._boschLastFrameAt > 1e4;
+    if (frameFrozen && !this._isIOS()) {
+      this._scheduleLiveRecovery("no presented frame >10s (bg worker)");
+      return;
+    }
+    if (!this._isIOS()) {
+      this._checkWebrtcFreeze().then(statsFrozen => {
+        if (statsFrozen && this._liveVideoActive) {
+          this._scheduleLiveRecovery("webrtc framesDecoded frozen >10s (bg worker)");
+        }
+      });
+    }
+  }
+  _getStatsCached(pc) {
+    const now = performance.now();
+    if (this._statsCachePc === pc && this._statsCachePromise && now - this._statsCacheAt < 1e3) {
+      return this._statsCachePromise;
+    }
+    this._statsCachePc = pc;
+    this._statsCacheAt = now;
+    this._statsCachePromise = pc.getStats();
+    return this._statsCachePromise;
+  }
+  async _checkWebrtcFreeze() {
+    if (this._streamTransport !== "webrtc") return false;
+    const pc = this._webrtcPc;
+    if (!pc || typeof pc.getStats !== "function") return false;
+    if (this._statsCheckInFlight) return false;
+    this._statsCheckInFlight = true;
+    try {
+      const stats = await this._getStatsCached(pc);
+      let framesDecoded = null;
+      stats.forEach(r => {
+        if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video") && typeof r.framesDecoded === "number" && (framesDecoded == null || r.framesDecoded > framesDecoded)) {
+          framesDecoded = r.framesDecoded;
+        }
+      });
+      if (framesDecoded == null) return false;
+      const now = performance.now();
+      if (this._prevFramesDecoded == null || framesDecoded > this._prevFramesDecoded) {
+        this._prevFramesDecoded = framesDecoded;
+        this._framesDecodedSeenAt = now;
+        return false;
+      }
+      return this._framesDecodedSeenAt > 0 && now - this._framesDecodedSeenAt > 1e4;
+    } catch {
+      return false;
+    } finally {
+      this._statsCheckInFlight = false;
+    }
+  }
+  async _webrtcStatsSnapshot() {
+    const pc = this._webrtcPc;
+    if (!pc || typeof pc.getStats !== "function") return null;
+    try {
+      const stats = await this._getStatsCached(pc);
+      let frames = null, bytes = 0;
+      stats.forEach(r => {
+        if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video") && typeof r.framesDecoded === "number" && (frames == null || r.framesDecoded > frames)) {
+          frames = r.framesDecoded;
+          bytes = typeof r.bytesReceived === "number" ? r.bytesReceived : 0;
+        }
+      });
+      if (frames == null) return null;
+      return {
+        frames: frames,
+        bytes: bytes
+      };
+    } catch {
+      return null;
+    }
+  }
+  _armWebrtcDeadTrackWatchdog(video) {
+    this._clearTimer(this._webrtcFirstFrameTimer);
+    this._webrtcFirstFrameTimer = null;
+    this._webrtcStatsPrev = null;
+    this._webrtcDeadPolls = 0;
+    const FIRST_POLL_MS = 2500;
+    const POLL_MS = 2e3;
+    const MAX_MS = 9e3;
+    let visibleElapsed = 0;
+    let lastTick = performance.now();
+    const poll = async () => {
+      this._webrtcFirstFrameTimer = null;
+      if (!this.isConnected || !this._liveVideoActive) return;
+      if (this._streamTransport !== "webrtc") return;
+      if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+      if (document.visibilityState !== "visible") {
+        lastTick = null;
+        this._webrtcFirstFrameTimer = this._armTimer(poll, POLL_MS);
+        return;
+      }
+      const nowTs = performance.now();
+      if (lastTick != null) visibleElapsed += nowTs - lastTick;
+      lastTick = nowTs;
+      if (video._boschLastFrameAt != null) {
+        this._webrtcRecoveryStreak = 0;
+        return;
+      }
+      const snap = await this._webrtcStatsSnapshot();
+      if (!this.isConnected || !this._liveVideoActive || this._streamTransport !== "webrtc") return;
+      const pastDeadline = visibleElapsed >= MAX_MS;
+      if (snap == null) {
+        if (pastDeadline) return;
+        this._webrtcFirstFrameTimer = this._armTimer(poll, POLL_MS);
+        return;
+      }
+      if (snap.frames > 0) {
+        this._webrtcRecoveryStreak = 0;
+        this._hasEverDecodedFrames = true;
+        return;
+      }
+      if (this._webrtcStatsPrev != null) {
+        const dBytes = snap.bytes - this._webrtcStatsPrev.bytes;
+        if (dBytes <= 0) {
+          this._forceHlsFallback("no RTP bytes (CGNAT cut)");
+          return;
+        }
+        this._webrtcDeadPolls++;
+        if (this._webrtcDeadPolls >= 2) {
+          this._forceHlsFallback("bytes flowing but 0 frames decoded");
+          return;
+        }
+      }
+      this._webrtcStatsPrev = snap;
+      if (pastDeadline) {
+        this._forceHlsFallback("0 frames decoded within deadline");
+        return;
+      }
+      this._webrtcFirstFrameTimer = this._armTimer(poll, POLL_MS);
+    };
+    this._webrtcFirstFrameTimer = this._armTimer(poll, FIRST_POLL_MS);
+  }
+  _forceHlsFallback(reason) {
+    if (!this.isConnected || !this._liveVideoActive) return;
+    if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    if (this._preferHlsThisSession) return;
+    console.warn("bosch-camera-card: WebRTC dead — switching to HLS (" + reason + ")");
+    this._preferHlsThisSession = true;
+    this._scheduleLiveRecovery("dead webrtc track → HLS");
+  }
+  _armNativeHlsLoadWatchdog(video, url) {
+    this._clearTimer(this._nativeHlsLoadTimer);
+    this._nativeHlsLoadTimer = null;
+    const onPlaying = () => {
+      this._clearTimer(this._nativeHlsLoadTimer);
+      this._nativeHlsLoadTimer = null;
+    };
+    video.addEventListener("playing", onPlaying, {
+      once: true
+    });
+    this._nativeHlsLoadTimer = this._armTimer(() => {
+      this._nativeHlsLoadTimer = null;
+      if (!this.isConnected || !this._liveVideoActive) return;
+      if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+      const v = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+      if (!v) return;
+      if (!v.paused && v.currentTime > 0) return;
+      console.warn("bosch-camera-card: native HLS stalled at load (>8s) — hard reload");
+      try {
+        v.removeAttribute("src");
+        v.load();
+        v.src = url;
+        v.load();
+        Promise.resolve(v.play()).catch(() => {});
+      } catch {}
+    }, 8e3);
+  }
+  _scheduleLiveRecovery(reason) {
+    if (!this.isConnected) return;
+    if (!this._liveVideoActive) return;
+    if (this._reconnectingLiveVideo || this._stoppingLiveVideo) return;
+    {
+      const v = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+      if (this._ownsNativePresentation(v)) return;
+      if (document.visibilityState === "hidden") return;
+    }
+    const recVideo = this.shadowRoot && this.shadowRoot.getElementById("cam-video");
+    const neverRendered = !recVideo || recVideo._boschLastFrameAt == null && !this._hasEverDecodedFrames;
+    if (this._streamTransport === "webrtc" && !this._preferHlsThisSession && neverRendered) {
+      this._webrtcRecoveryStreak = (this._webrtcRecoveryStreak || 0) + 1;
+      if (this._webrtcRecoveryStreak >= 2) {
+        console.warn("bosch-camera-card: repeated WebRTC recovery with no rendered frame — switching to HLS for this session");
+        this._preferHlsThisSession = true;
+      }
+    }
+    if (neverRendered) {
+      this._deadStreamRecoveryStreak = (this._deadStreamRecoveryStreak || 0) + 1;
+    } else {
+      this._deadStreamRecoveryStreak = 0;
+    }
+    if (reason !== "quality changed") {
+      const nowForStall = Date.now();
+      this._stallRecoveryTimestamps = (this._stallRecoveryTimestamps || []).filter(t => nowForStall - t < STALL_RECOVERY_WINDOW_MS);
+      this._stallRecoveryTimestamps.push(nowForStall);
+      if (this._stallRecoveryTimestamps.length >= STALL_RECOVERY_THRESHOLD && this._maybeForceBackendRewarm()) {
+        this._stallRecoveryTimestamps = [];
+        return;
+      }
+    }
+    console.warn("bosch-camera-card: live recovery (" + reason + ")");
+    this._reconnectingLiveVideo = true;
+    this._setLiveStalled(true);
+    this._stopLiveVideo();
+    if (this.isConnected && this._isStreaming && this._isStreaming()) {
+      const rebuildDelay = this._deadStreamRecoveryStreak > 1 ? Math.min(1e3 * 2 ** Math.min(this._deadStreamRecoveryStreak - 1, 4), 16e3) : 1e3;
+      this._deadStreamRebuildPending = true;
+      this._armTimer(() => {
+        this._deadStreamRebuildPending = false;
+        this._reconnectingLiveVideo = false;
+        if (this.isConnected && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream && document.visibilityState !== "hidden") {
+          this._startLiveVideo();
+        }
+      }, rebuildDelay);
+    } else {
+      this._deadStreamRebuildPending = false;
+      this._reconnectingLiveVideo = false;
+    }
+  }
+  _armTimer(fn, delay) {
+    const id = setTimeout(() => {
+      this._timers.delete(id);
+      fn();
+    }, delay);
+    this._timers.set(id, "timeout");
+    return id;
+  }
+  _armInterval(fn, delay) {
+    const id = setInterval(fn, delay);
+    this._timers.set(id, "interval");
+    return id;
+  }
+  _clearTimer(id) {
+    if (id == null) return;
+    const type = this._timers.get(id);
+    if (type === "interval") clearInterval(id); else clearTimeout(id);
+    this._timers.delete(id);
+  }
+  _loadObjectModel() {
+    if (window.__boschCocoModel) return window.__boschCocoModel;
+    const load = (src, integrity) => new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.integrity = integrity;
+      s.crossOrigin = "anonymous";
+      s.onload = resolve;
+      s.onerror = () => reject(new Error(`load failed: ${src}`));
+      document.head.appendChild(s);
+    });
+    window.__boschCocoModel = (async () => {
+      if (!window.cocoSsd) {
+        if (!window.tf) await load("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js", "sha384-vE8hbVJ4lezako5rlvE7bY0BVzWlFhZncPlckrqNwcUQpVtgbENTgZ8TBbnPjZre");
+        await load("https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js", "sha384-7qLdgfEQyO9ZQi9ArRHigK+IBto4XPk468jAqc+fnsXaZIcMAhQeLwzggRK7aESl");
+      }
+      return window.cocoSsd.load({
+        base: "lite_mobilenet_v2"
+      });
+    })();
+    window.__boschCocoModel.catch(() => {
+      window.__boschCocoModel = null;
+    });
+    return window.__boschCocoModel;
+  }
+  _motionStart(video) {
+    this._motionStop();
+    if (!this._config?.motion_overlay || !video) return;
+    const W = 96, H = 54;
+    const work = document.createElement("canvas");
+    work.width = W;
+    work.height = H;
+    const wctx = work.getContext("2d", {
+      willReadFrequently: true
+    });
+    const ov = document.createElement("canvas");
+    ov.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3";
+    video.parentElement.appendChild(ov);
+    this._motionCanvas = ov;
+    this._motionActive = false;
+    let prev = null, quiet = 0, failures = 0, onScreen = true;
+    const mask = new Uint8Array(W * H);
+    const hist = new Uint32Array(511);
+    const grayBuf = new Uint8Array(W * H);
+    let boxes = [], warm = 0;
+    const MIN_BLOB = 15;
+    const label = this._t("motion_label");
+    let objBusy = false, objLast = 0, objFails = 0;
+    const gen = this._motionGen = (this._motionGen || 0) + 1;
+    this._motionObjects = [];
+    const OBJ_NAMES = {
+      person: "Person",
+      cat: "Cat",
+      dog: "Dog",
+      bird: "Bird",
+      car: "Car",
+      bicycle: "Bicycle",
+      motorcycle: "Motorcycle",
+      truck: "Truck",
+      horse: "Horse"
+    };
+    const classify = () => {
+      objBusy = true;
+      objLast = Date.now();
+      const vw = video.videoWidth, vh = video.videoHeight;
+      this._loadObjectModel().then(m => gen === this._motionGen ? m.detect(video, 6, .5) : []).then(res => {
+        if (gen !== this._motionGen || video.videoWidth !== vw || video.videoHeight !== vh) return;
+        objFails = 0;
+        this._motionObjects = res.filter(r => OBJ_NAMES[r.class] && r.score >= .5).map(r => ({
+          cls: r.class,
+          score: r.score,
+          bbox: r.bbox,
+          t: Date.now()
+        }));
+        const classes = [ ...new Set(this._motionObjects.map(o => o.cls)) ];
+        if (classes.length) this.dispatchEvent(new CustomEvent("bosch-card-objects", {
+          detail: {
+            objects: classes
+          },
+          bubbles: true,
+          composed: true
+        }));
+      }).catch(() => {
+        objFails++;
+        objLast = Date.now() + 1e4;
+      }).finally(() => {
+        objBusy = false;
+      });
+    };
+    const keep = new Uint8Array(W * H), seen = new Uint8Array(W * H), stack = new Uint16Array(W * H);
+    const cfg = this._config;
+    const ignore = new Uint8Array(W * H);
+    const zones = [ ...cfg.motion_overlay_ignore_zones ];
+    if (cfg.motion_overlay_ignore_timestamp) zones.push({
+      x: .78,
+      y: .86,
+      w: .22,
+      h: .11
+    });
+    for (const z of zones) {
+      const x0 = Math.max(0, Math.floor(z.x * W)), x1 = Math.min(W, Math.ceil((z.x + z.w) * W));
+      const y0 = Math.max(0, Math.floor(z.y * H)), y1 = Math.min(H, Math.ceil((z.y + z.h) * H));
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) ignore[y * W + x] = 1;
+    }
+    if (typeof IntersectionObserver === "function") {
+      this._motionIO = new IntersectionObserver(e => {
+        onScreen = e[e.length - 1].isIntersecting;
+      });
+      this._motionIO.observe(video);
+    }
+    const setActive = (on, area) => {
+      if (on === this._motionActive) return;
+      this._motionActive = on;
+      this.dispatchEvent(new CustomEvent("bosch-card-motion", {
+        detail: {
+          active: on,
+          area: area
+        },
+        bubbles: true,
+        composed: true
+      }));
+    };
+    this._motionTimer = setInterval(() => {
+      if (document.hidden || !onScreen || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+        prev = null;
+        quiet = 0;
+        boxes = [];
+        warm = 0;
+        const pc = ov.getContext("2d");
+        pc.setTransform(1, 0, 0, 1, 0, 0);
+        pc.clearRect(0, 0, ov.width, ov.height);
+        setActive(false, 0);
+        return;
+      }
+      let data;
+      try {
+        wctx.drawImage(video, 0, 0, W, H);
+        data = wctx.getImageData(0, 0, W, H).data;
+      } catch (e) {
+        if (e?.name === "SecurityError" || ++failures >= 3) this._motionStop();
+        return;
+      }
+      failures = 0;
+      const gray = grayBuf;
+      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+        gray[j] = data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29 >> 8;
+      }
+      if (!prev) {
+        prev = Float32Array.from(gray);
+        return;
+      }
+      hist.fill(0);
+      let samples = 0;
+      for (let k = 0; k < gray.length; k++) {
+        if (!ignore[k]) {
+          hist[Math.round(gray[k] - prev[k]) + 255]++;
+          samples++;
+        }
+      }
+      let shift = 0;
+      for (let d = 0, acc = 0; d < hist.length && samples; d++) {
+        acc += hist[d];
+        if (acc * 2 > samples) {
+          shift = d - 255;
+          break;
+        }
+      }
+      const lim = cfg.motion_overlay_threshold * .75;
+      shift = Math.max(-lim, Math.min(lim, shift));
+      for (let k = 0; k < gray.length; k++) {
+        mask[k] = !ignore[k] && Math.abs(gray[k] - prev[k] - shift) > cfg.motion_overlay_threshold ? 1 : 0;
+      }
+      let n = 0;
+      keep.fill(0);
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          if (!mask[y * W + x]) continue;
+          let nb = 0;
+          for (let yy = Math.max(0, y - 1); yy <= Math.min(H - 1, y + 1); yy++) {
+            for (let xx = Math.max(0, x - 1); xx <= Math.min(W - 1, x + 1); xx++) nb += mask[yy * W + xx];
+          }
+          if (nb >= 3) {
+            keep[y * W + x] = 1;
+            n++;
+          }
+        }
+      }
+      for (let k = 0; k < gray.length; k++) prev[k] += shift + (gray[k] - prev[k] - shift) * .15;
+      const area = n * 100 / (W * H);
+      const moving = ++warm > 4 && area >= cfg.motion_overlay_min_area;
+      const dets = [];
+      if (moving) {
+        seen.fill(0);
+        for (let s0 = 0; s0 < keep.length; s0++) {
+          if (!keep[s0] || seen[s0]) continue;
+          let top = 0, cnt = 0, bx0 = W, by0 = H, bx1 = -1, by1 = -1;
+          stack[top++] = s0;
+          seen[s0] = 1;
+          while (top) {
+            const k = stack[--top], kx = k % W, ky = (k - kx) / W;
+            if (keep[k]) {
+              cnt++;
+              if (kx < bx0) bx0 = kx;
+              if (kx > bx1) bx1 = kx;
+              if (ky < by0) by0 = ky;
+              if (ky > by1) by1 = ky;
+            }
+            for (let yy = Math.max(0, ky - 2); yy <= Math.min(H - 1, ky + 2); yy++) {
+              for (let xx = Math.max(0, kx - 2); xx <= Math.min(W - 1, kx + 2); xx++) {
+                const q = yy * W + xx;
+                if (keep[q] && !seen[q]) {
+                  seen[q] = 1;
+                  stack[top++] = q;
+                }
+              }
+            }
+          }
+          if (cnt >= MIN_BLOB) dets.push({
+            x0: bx0,
+            y0: by0,
+            x1: bx1 + 1,
+            y1: by1 + 1,
+            cnt: cnt
+          });
+        }
+        dets.sort((p, q) => q.cnt - p.cnt);
+        const floor = dets.length ? Math.max(MIN_BLOB, dets[0].cnt * .25) : 0;
+        let kept = dets.filter(d => d.cnt >= floor);
+        if (kept.length >= 4) kept = kept.filter(d => d.cnt >= dets[0].cnt * .5);
+        if (kept.length >= 4) kept = [];
+        dets.splice(0, dets.length, ...kept);
+      }
+      const used = new Set;
+      for (const bx of boxes) {
+        let best = -1, bd = 14 * 14;
+        const cx = (bx.x0 + bx.x1) / 2, cy = (bx.y0 + bx.y1) / 2;
+        dets.forEach((d, i) => {
+          if (used.has(i)) return;
+          const dx = (d.x0 + d.x1) / 2 - cx, dy = (d.y0 + d.y1) / 2 - cy;
+          if (dx * dx + dy * dy < bd) {
+            bd = dx * dx + dy * dy;
+            best = i;
+          }
+        });
+        if (best < 0) {
+          bx.quiet++;
+          continue;
+        }
+        used.add(best);
+        const d = dets[best];
+        bx.x0 += (d.x0 - bx.x0) * .5;
+        bx.y0 += (d.y0 - bx.y0) * .5;
+        bx.x1 += (d.x1 - bx.x1) * .5;
+        bx.y1 += (d.y1 - bx.y1) * .5;
+        bx.quiet = 0;
+        bx.cnt = d.cnt;
+      }
+      dets.forEach((d, i) => {
+        if (!used.has(i)) boxes.push({
+          ...d,
+          quiet: 0
+        });
+      });
+      boxes = boxes.filter(bx => bx.quiet < 4).sort((p, q) => q.cnt - p.cnt).slice(0, 3);
+      this._motionBoxes = boxes;
+      const w = video.clientWidth, h = video.clientHeight, dpr = window.devicePixelRatio || 1;
+      ov.style.cssText = `position:absolute;left:${video.offsetLeft}px;top:${video.offsetTop}px;width:${w}px;height:${h}px;pointer-events:none;z-index:3`;
+      if (ov.width !== Math.round(w * dpr) || ov.height !== Math.round(h * dpr)) {
+        ov.width = Math.round(w * dpr);
+        ov.height = Math.round(h * dpr);
+      }
+      const c = ov.getContext("2d");
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.clearRect(0, 0, w, h);
+      if (moving) quiet = 0; else quiet++;
+      if (boxes.length) {
+        const cover = getComputedStyle(video).objectFit === "cover";
+        const sc = (cover ? Math.max : Math.min)(w / video.videoWidth, h / video.videoHeight);
+        const ox = (w - video.videoWidth * sc) / 2, oy = (h - video.videoHeight * sc) / 2;
+        const kx = video.videoWidth * sc / W, ky = video.videoHeight * sc / H;
+        const rot = this.shadowRoot.getElementById("img-wrapper")?.classList.contains("rotated-180");
+        c.strokeStyle = "#ff3b30";
+        c.lineWidth = 2;
+        c.fillStyle = "#ff3b30";
+        c.font = "12px sans-serif";
+        let biggest = boxes[0];
+        for (const bx of boxes) if (bx.cnt > biggest.cnt) biggest = bx;
+        for (const bx of boxes) {
+          let rx = ox + bx.x0 * kx, ry = oy + bx.y0 * ky, rw = (bx.x1 - bx.x0) * kx, rh = (bx.y1 - bx.y0) * ky;
+          if (rot) {
+            rx = w - rx - rw;
+            ry = h - ry - rh;
+          }
+          c.strokeRect(rx, ry, rw, rh);
+          if (bx === biggest) c.fillText(`${label} ${(biggest.cnt * 100 / (W * H)).toFixed(1)}%`, rx + 4, Math.max(12, ry - 4));
+        }
+      }
+      if (cfg.motion_overlay_objects && objFails < 3) {
+        if (moving && !objBusy && Date.now() - objLast > 1e3) classify();
+        this._motionObjects = this._motionObjects.filter(o => Date.now() - o.t < 2500);
+        if (this._motionObjects.length) {
+          const cover = getComputedStyle(video).objectFit === "cover";
+          const sc = (cover ? Math.max : Math.min)(w / video.videoWidth, h / video.videoHeight);
+          const ox = (w - video.videoWidth * sc) / 2, oy = (h - video.videoHeight * sc) / 2;
+          const rot = this.shadowRoot.getElementById("img-wrapper")?.classList.contains("rotated-180");
+          c.strokeStyle = "#34c759";
+          c.fillStyle = "#34c759";
+          c.lineWidth = 2;
+          c.font = "bold 12px sans-serif";
+          for (const o of this._motionObjects) {
+            let [bx, by, bw, bh] = o.bbox;
+            let rx = ox + bx * sc, ry = oy + by * sc;
+            bw *= sc;
+            bh *= sc;
+            if (rot) {
+              rx = w - rx - bw;
+              ry = h - ry - bh;
+            }
+            c.strokeRect(rx, ry, bw, bh);
+            c.fillText(`${OBJ_NAMES[o.cls]} ${Math.round(o.score * 100)}%`, rx + 4, Math.max(12, ry - 4));
+          }
+        }
+      }
+      setActive(moving || this._motionActive && quiet < 8, area);
+    }, 250);
+  }
+  _motionStop() {
+    this._motionGen = (this._motionGen || 0) + 1;
+    if (this._motionTimer) {
+      clearInterval(this._motionTimer);
+      this._motionTimer = null;
+    }
+    if (this._motionIO) {
+      this._motionIO.disconnect();
+      this._motionIO = null;
+    }
+    if (this._motionCanvas) {
+      this._motionCanvas.remove();
+      this._motionCanvas = null;
+    }
+    if (this._motionActive) {
+      this._motionActive = false;
+      this.dispatchEvent(new CustomEvent("bosch-card-motion", {
+        detail: {
+          active: false,
+          area: 0
+        },
+        bubbles: true,
+        composed: true
+      }));
+    }
+  }
+  _clearAllTimers() {
+    for (const [id, type] of this._timers) {
+      if (type === "interval") clearInterval(id); else clearTimeout(id);
+    }
+    this._timers.clear();
+  }
+  _stopLiveVideo() {
+    this._stoppingLiveVideo = true;
+    this._startGen++;
+    this._motionStop();
+    this._disarmAutoUnmute();
+    if (this._hls) {
+      this._hls.destroy();
+      this._hls = null;
+    }
+    this._clearTimer(this._stallChecker);
+    this._stallChecker = null;
+    this._stopLiveStallWorker();
+    this._clearTimer(this._trackMuteTimer);
+    this._trackMuteTimer = null;
+    this._clearTimer(this._webrtcFirstFrameTimer);
+    this._webrtcFirstFrameTimer = null;
+    this._clearTimer(this._nativeHlsLoadTimer);
+    this._nativeHlsLoadTimer = null;
+    this._clearTimer(this._hlsKeepaliveTimer);
+    this._hlsKeepaliveTimer = null;
+    this._clearTimer(this._activateSafetyTimer);
+    this._activateSafetyTimer = null;
+    this._clearTimer(this._uptimeTimer);
+    this._uptimeTimer = null;
+    this._waitingForStream = false;
+    if (this._webrtcPc) {
+      this._webrtcPc.close();
+      this._webrtcPc = null;
+    }
+    if (this._webrtcUnsub) {
+      try {
+        this._webrtcUnsub();
+      } catch {}
+      this._webrtcUnsub = null;
+    }
+    const video = this.shadowRoot.getElementById("cam-video");
+    const img = this.shadowRoot.getElementById("cam-img");
+    if (video) {
+      if (video._boschPauseGuardFn) {
+        video.removeEventListener("pause", video._boschPauseGuardFn);
+        video._boschPauseGuardFn = null;
+        video._boschPauseGuard = false;
+      }
+      if (document.pictureInPictureElement === video && !this._reconnectingLiveVideo) {
+        document.exitPictureInPicture().catch(() => {});
+      }
+      if (video._boschRvfcHandle != null && typeof video.cancelVideoFrameCallback === "function") {
+        try {
+          video.cancelVideoFrameCallback(video._boschRvfcHandle);
+        } catch {}
+      }
+      video._boschRvfcHandle = null;
+      video._boschLastFrameAt = null;
+      video.pause();
+      video.srcObject = null;
+      video.removeAttribute("src");
+      video.load();
+      video.style.display = "none";
+    }
+    if (img) img.style.display = "block";
+    this._liveVideoActive = false;
+    this._liveStreamStalled = false;
+    this._prevFramesDecoded = null;
+    this._framesDecodedSeenAt = 0;
+    this._statsCheckInFlight = false;
+    this._webrtcStatsPrev = null;
+    this._statsCachePc = null;
+    this._statsCachePromise = null;
+    this._webrtcDeadPolls = 0;
+    this._hlsNetworkErrorCount = 0;
+    if (this._waitForStreamRetryTimer) {
+      clearTimeout(this._waitForStreamRetryTimer);
+      this._waitForStreamRetryTimer = null;
+    }
+    if (this._hiddenTeardownTimer) {
+      clearTimeout(this._hiddenTeardownTimer);
+      this._hiddenTeardownTimer = null;
+    }
+    this._startingLiveVideo = false;
+    if (!this._reconnectingLiveVideo) this._unmuteOnStart = false;
+    this._streamConnecting = false;
+    if (this._connectSteps) {
+      this._connectSteps.forEach(t => clearTimeout(t));
+      this._connectSteps = null;
+    }
+    this._clearTimer(this._loadingTimeout);
+    this._loadingTimeout = null;
+    this._staleSourceSeen = false;
+    this._lastAudioState = null;
+    this._lastVolumeState = null;
+    const tapOverlay = this.shadowRoot?.getElementById("tap-to-play-overlay");
+    if (tapOverlay) {
+      tapOverlay.classList.remove("visible");
+      if (this._tapToPlayResume) {
+        tapOverlay.removeEventListener("pointerup", this._tapToPlayResume);
+        this._tapToPlayResume = null;
+      }
+    }
+    this._stoppingLiveVideo = false;
+    this._reconnectingLiveVideo = false;
+    this._streamTransport = null;
+    this._reflectPipState();
+    this._refreshAudioPill();
+    this._refreshAudioToggle();
+  }
+  _onSnapshotClick() {
+    const btn = this.shadowRoot.getElementById("btn-snapshot");
+    const label = this.shadowRoot.getElementById("btn-snapshot-label");
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add("loading");
+      const spinner = document.createElement("div");
+      spinner.className = "btn-spinner";
+      spinner.id = "snapshot-spinner";
+      btn.insertBefore(spinner, btn.firstChild);
+    }
+    if (label) label.textContent = this._t("loading");
+    this._setLoadingOverlay(true, this._t("loading_refreshing_image"));
+    const privStates = this._hass?.states;
+    const privacyOn = privStates && this._entities.privacy in privStates && privStates[this._entities.privacy]?.state === "on";
+    if (privacyOn) {
+      if (label) label.textContent = "Snapshot";
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove("loading");
+        const sp = btn.querySelector("#snapshot-spinner");
+        if (sp) sp.remove();
+      }
+      this._setLoadingOverlay(false);
+      return;
+    }
+    const token = this._hass?.states[this._entities.camera]?.attributes?.access_token || "";
+    const dispW = Math.round(this.offsetWidth || 640);
+    const currUrl = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}&width=${dispW}`;
+    const startPoll = prevBytes => {
+      if (this._hass?.services?.bosch_smart_camera?.trigger_snapshot) this._callService("bosch_smart_camera", "trigger_snapshot", {
+        entity_id: this._entities.camera
+      });
+      const startTime = Date.now();
+      this._snapshotPollTimer = this._armTimer(() => this._pollSnapshotImage(prevBytes, startTime), 500);
+    };
+    fetch(currUrl).then(r => r.ok ? r.blob() : null).then(blob => startPoll(blob ? blob.size : 0)).catch(() => startPoll(0));
+  }
+  _pollSnapshotImage(prevBytes, startTime) {
+    const TIMEOUT = 6e3;
+    const INTERVAL = 1e3;
+    const elapsed = Date.now() - startTime;
+    if (!this._hass) {
+      this._finishSnapshot();
+      return;
+    }
+    const token = this._hass.states[this._entities.camera]?.attributes?.access_token || "";
+    const dispW2 = Math.round(this.offsetWidth || 640);
+    const url = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}&width=${dispW2}`;
+    fetch(url).then(r => r.ok ? r.blob() : Promise.reject(r.status)).then(blob => {
+      const changed = prevBytes === 0 || Math.abs(blob.size - prevBytes) > 200;
+      if (changed || elapsed >= TIMEOUT) {
+        this._showSnapshotBlob(blob);
+      } else {
+        this._snapshotPollTimer = this._armTimer(() => this._pollSnapshotImage(prevBytes, startTime), INTERVAL);
+      }
+    }).catch(() => {
+      if (elapsed < TIMEOUT) {
+        this._snapshotPollTimer = this._armTimer(() => this._pollSnapshotImage(prevBytes, startTime), INTERVAL);
+      } else {
+        this._finishSnapshot();
+      }
+    });
+  }
+  _showSnapshotBlob(blob) {
+    if (!blob || blob.size < 500) {
+      this._finishSnapshot();
+      return;
+    }
+    const reader = new FileReader;
+    reader.onload = e => {
+      const dataUrl = e.target.result;
+      const img = this.shadowRoot.getElementById("cam-img");
+      if (img) {
+        img.src = dataUrl;
+        img.classList.remove("hidden");
+        this._imageLoaded = true;
+        this._awaitingFresh = false;
+      }
+      this._setLoadingOverlay(false);
+      try {
+        if (this._storageKey) localStorage.setItem(this._storageKey, dataUrl);
+      } catch (_) {}
+      this._finishSnapshot();
+    };
+    reader.onerror = () => {
+      this._awaitingFresh = false;
+      this._finishSnapshot();
+    };
+    reader.readAsDataURL(blob);
+  }
+  _finishSnapshot() {
+    this._clearTimer(this._snapshotPollTimer);
+    this._snapshotPollTimer = null;
+    const btn = this.shadowRoot.getElementById("btn-snapshot");
+    const label = this.shadowRoot.getElementById("btn-snapshot-label");
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      const sp = btn.querySelector("#snapshot-spinner");
+      if (sp) sp.remove();
+    }
+    if (label) label.textContent = "Snapshot";
+    this._setLoadingOverlay(false);
+    const apSnap = this.shadowRoot.getElementById("ap-btn-snapshot");
+    if (apSnap) {
+      apSnap.classList.remove("ok-flash");
+      void apSnap.offsetWidth;
+      apSnap.classList.add("ok-flash");
+      setTimeout(() => apSnap.classList.remove("ok-flash"), 450);
+    }
+  }
+  _update() {
+    if (!this._hass || !this._config) return;
+    const hass = this._hass;
+    const ents = this._entities;
+    {
+      const banner = this.shadowRoot?.getElementById("ios-hls-banner");
+      if (banner) {
+        const showHls = (this._remoteSkipWebRTC || this._preferHlsThisSession || this._isMobileClient()) && this._streamTransport === "hls" && !!this._liveVideoActive;
+        if (showHls && !this._hlsBannerAutoHideTimer && !this._hlsBannerDismissed) {
+          this._hlsBannerAutoHideTimer = this._armTimer(() => {
+            this._hlsBannerAutoHideTimer = null;
+            this._hlsBannerDismissed = true;
+            banner.classList.remove("visible");
+          }, this._HLS_BANNER_AUTO_HIDE_MS);
+        } else if (!showHls) {
+          this._clearTimer(this._hlsBannerAutoHideTimer);
+          this._hlsBannerAutoHideTimer = null;
+          this._hlsBannerDismissed = false;
+        }
+        const displayHls = showHls && !this._hlsBannerDismissed;
+        if (displayHls) {
+          const bt = banner.querySelector("#ios-hls-banner-text");
+          if (bt) bt.textContent = `ℹ ${this._t("hls_mode_banner")}`;
+        }
+        banner.classList.toggle("visible", displayHls);
+      }
+    }
+    for (const [entityId, optState] of Object.entries(this._optimistic)) {
+      const actual = hass.states[entityId]?.state;
+      if (actual && actual === optState) {
+        delete this._optimistic[entityId];
+        if (this._optimisticTimers[entityId]) {
+          clearTimeout(this._optimisticTimers[entityId]);
+          delete this._optimisticTimers[entityId];
+        }
+      }
+    }
+    const titleEl = this.shadowRoot.getElementById("title");
+    if (titleEl) {
+      titleEl.textContent = this._config.title || hass.states[ents.camera]?.attributes?.friendly_name || ents.camera;
+    }
+    const apTitleEl = this.shadowRoot.getElementById("ap-title-text");
+    if (apTitleEl) apTitleEl.textContent = titleEl?.textContent || "Bosch Camera";
+    const pushState = hass.states[ents.push_status];
+    const pushBadge = this.shadowRoot.getElementById("push-badge");
+    const pushLabel = this.shadowRoot.getElementById("push-label");
+    if (pushBadge && pushLabel) {
+      const isFcm = pushState?.state === "fcm_push";
+      pushBadge.className = "push-badge " + (isFcm ? "push" : "poll");
+      pushLabel.textContent = isFcm ? "push" : "poll";
+    }
+    const statusState = String(hass.states[ents.status]?.state || "UNKNOWN").toUpperCase();
+    const statusDot = this.shadowRoot.getElementById("status-dot");
+    const infoStatus = this.shadowRoot.getElementById("info-status");
+    if (statusDot) statusDot.className = "status-dot " + ({
+      ONLINE: "online",
+      OFFLINE: "offline"
+    }[statusState] || "unknown");
+    if (infoStatus) infoStatus.textContent = statusState;
+    const apDot = this.shadowRoot.getElementById("ap-dot");
+    if (apDot) {
+      let dotCls = "ap-dot ";
+      if (statusState === "OFFLINE") dotCls += "offline"; else if (hass.states[ents.privacy]?.state === "on") dotCls += "privacy"; else if (statusState === "ONLINE") dotCls += "online";
+      apDot.className = dotCls;
+    }
+    const camAttrs = hass.states[ents.camera]?.attributes || {};
+    const camConnType = camAttrs.connection_type || "";
+    const bufMs = camAttrs.buffering_time_ms;
+    const infoConn = this.shadowRoot.getElementById("info-connection");
+    const infoBuf = this.shadowRoot.getElementById("info-buffering");
+    if (infoConn) {
+      infoConn.textContent = camConnType === "LOCAL" ? "LAN" : camConnType === "REMOTE" ? "Cloud" : "—";
+    }
+    if (infoBuf) {
+      infoBuf.textContent = typeof bufMs === "number" && bufMs > 0 ? `${bufMs} ms` : "—";
+    }
+    const camState = hass.states[ents.camera]?.state;
+    const entityMissing = !(ents.camera in hass.states);
+    const authOverlay = this.shadowRoot.getElementById("auth-overlay");
+    const _authTitle = this.shadowRoot.getElementById("auth-title");
+    const _authSub = this.shadowRoot.getElementById("auth-subtitle");
+    const _authBtn = this.shadowRoot.getElementById("auth-reauth-btn");
+    if (authOverlay) {
+      authOverlay.classList.toggle("visible", entityMissing);
+      if (entityMissing) {
+        if (_authTitle) _authTitle.textContent = this._t("cam_missing_title");
+        if (_authSub) _authSub.textContent = this._t("cam_missing_sub");
+        if (_authBtn) _authBtn.style.display = "none";
+      }
+    }
+    const offlineOverlay = this.shadowRoot.getElementById("offline-overlay");
+    const isOffline = !entityMissing && (statusState === "OFFLINE" || camState === "unavailable");
+    if (offlineOverlay) {
+      offlineOverlay.classList.toggle("visible", isOffline);
+      if (isOffline) {
+        const titleEl = this.shadowRoot.getElementById("offline-title");
+        if (titleEl) titleEl.textContent = this._t("offline_title");
+        this._waitingForStream = false;
+        this._streamConnecting = false;
+        if (this._connectSteps) {
+          this._connectSteps.forEach(t => clearTimeout(t));
+          this._connectSteps = null;
+        }
+        this._setLoadingOverlay(false);
+        if (this._liveVideoActive) this._stopLiveVideo();
+        if (!this._imageLoaded) this._scheduleImageLoad(0);
+        const lastChanged = hass.states[ents.status]?.last_changed;
+        const camNameEl = this.shadowRoot.getElementById("offline-cam-name");
+        if (camNameEl) {
+          camNameEl.textContent = this._config?.title || hass.states[ents.camera]?.attributes?.friendly_name || ents.camera;
+        }
+        const sub = this.shadowRoot.getElementById("offline-subtitle");
+        if (sub) {
+          let txt = this._t("offline_no_conn");
+          const snapAt = hass.states[ents.camera]?.attributes?.last_snapshot_at;
+          const lastSeen = snapAt || lastChanged;
+          if (lastSeen) {
+            try {
+              const d = new Date(lastSeen);
+              const loc = cardLang(this._hass);
+              txt = `${this._t("offline_last_seen")} ${d.toLocaleString(loc, {
+                day: "2-digit",
+                month: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit"
+              })}`;
+            } catch {}
+          }
+          sub.textContent = txt;
+        }
+      }
+    }
+    if (this._isOffline && !isOffline) this._loadRetries = 0;
+    this._isOffline = isOffline;
+    this.classList.toggle("cam-offline", isOffline);
+    const isStreaming = this._isStreaming();
+    const badge = this.shadowRoot.getElementById("stream-badge");
+    const streamLabel = this.shadowRoot.getElementById("stream-label");
+    const btnStream = this.shadowRoot.getElementById("btn-stream");
+    const btnStreamLbl = this.shadowRoot.getElementById("btn-stream-label");
+    const switchOn = hass.states[ents.switch]?.state === "on";
+    const backendStreamStatus = hass.states[ents.streamStatus]?.state || camAttrs.stream_status || "";
+    const sharedConnecting = switchOn && (backendStreamStatus === "connecting" || backendStreamStatus === "warming_up");
+    const badgePrivacyOn = this._optimistic[ents.privacy] !== undefined ? this._optimistic[ents.privacy] === "on" : this._hass?.states[ents.privacy]?.state === "on";
+    const streamBadgeState = isOffline ? "offline" : badgePrivacyOn ? "idle" : this._liveVideoActive && !this._liveStreamStalled ? "streaming" : isStreaming || this._startingLiveVideo || sharedConnecting || this._liveVideoActive && this._liveStreamStalled ? "connecting" : "idle";
+    if (badge) badge.className = "stream-badge " + streamBadgeState;
+    if (streamLabel && !isStreaming) {
+      streamLabel.textContent = streamBadgeState === "offline" ? "Offline" : streamBadgeState === "streaming" ? "Live" : streamBadgeState === "connecting" ? this._t("badge_connecting") : "";
+    }
+    if (this._liveVideoActive && (this._streamConnecting || this._waitingForStream)) {
+      this._streamConnecting = false;
+      this._waitingForStream = false;
+      if (this._connectSteps) {
+        this._connectSteps.forEach(t => clearTimeout(t));
+        this._connectSteps = null;
+      }
+      this._setLoadingOverlay(false);
+    }
+    const apBadge = this.shadowRoot.getElementById("ap-badge");
+    const apBtnStream = this.shadowRoot.getElementById("ap-btn-stream");
+    const apBtnPrivacy = this.shadowRoot.getElementById("ap-btn-privacy");
+    const apStreamIcon = this.shadowRoot.getElementById("ap-stream-icon");
+    const privActive = this._optimisticActive(ents.privacy, hass);
+    if (apBadge) {
+      if (streamBadgeState === "offline") {
+        apBadge.className = "ap-badge offline";
+        apBadge.textContent = "Offline";
+      } else if (streamBadgeState === "streaming") {
+        apBadge.className = "ap-badge live";
+        apBadge.textContent = "Live";
+      } else if (streamBadgeState === "connecting") {
+        apBadge.className = "ap-badge connecting";
+        apBadge.textContent = this._t("badge_connecting");
+      } else {
+        apBadge.className = "ap-badge hidden";
+        apBadge.textContent = "";
+      }
+    }
+    if (apBtnStream) {
+      apBtnStream.classList.toggle("on", isStreaming);
+      apBtnStream.classList.toggle("connecting", streamBadgeState === "connecting");
+      apBtnStream.setAttribute("aria-pressed", isStreaming ? "true" : "false");
+      apBtnStream.setAttribute("title", isStreaming ? this._t("pill_stream_title_stop") : this._t("pill_stream_title_start"));
+      apBtnStream.disabled = badgePrivacyOn;
+      if (apStreamIcon) {
+        apStreamIcon.innerHTML = isStreaming ? '<rect x="6" y="6" width="12" height="12" rx="2"/>' : '<path d="M8 5v14l11-7L8 5z"/>';
+      }
+    }
+    if (apBtnPrivacy) {
+      apBtnPrivacy.classList.toggle("on", privActive);
+      apBtnPrivacy.classList.remove("danger");
+      apBtnPrivacy.setAttribute("aria-pressed", privActive ? "true" : "false");
+    }
+    const apBtnLight = this.shadowRoot.getElementById("ap-btn-light");
+    const lightActive = this._optimisticActive(ents.light, hass);
+    if (apBtnLight) {
+      apBtnLight.classList.toggle("on", lightActive);
+      apBtnLight.setAttribute("aria-pressed", lightActive ? "true" : "false");
+    }
+    if (apBtnLight) apBtnLight.toggleAttribute("hidden", !hass.states[ents.light]);
+    if (apBtnPrivacy) apBtnPrivacy.toggleAttribute("hidden", !hass.states[ents.privacy]);
+    if (btnStream) {
+      const streamOpt = this._optimistic[ents.switch];
+      const streamPending = streamOpt === "pending";
+      btnStream.className = "btn btn-stream" + (isStreaming ? " active" : "") + (streamPending ? " pending" : "");
+      btnStream.disabled = badgePrivacyOn;
+      this._entityToBtnId[ents.switch] = "btn-stream";
+    }
+    if (btnStreamLbl) btnStreamLbl.textContent = isStreaming ? "Stop Stream" : "Live Stream";
+    const btnSnap = this.shadowRoot.getElementById("btn-snapshot");
+    if (btnSnap && !btnSnap.classList.contains("loading")) btnSnap.disabled = badgePrivacyOn;
+    const apBtnSnap = this.shadowRoot.getElementById("ap-btn-snapshot");
+    if (apBtnSnap) apBtnSnap.disabled = badgePrivacyOn;
+    const connType = hass.states[ents.switch]?.attributes?.connection_type || "";
+    const connBadge = this.shadowRoot.getElementById("conn-badge");
+    if (connBadge) {
+      if (isStreaming && connType === "REMOTE") {
+        connBadge.className = "conn-badge remote";
+        connBadge.textContent = "Cloud";
+      } else {
+        connBadge.className = "conn-badge hidden";
+      }
+    }
+    if (isStreaming && !this._lastStreaming) {
+      this._streamStartTime = Date.now();
+      this._clearTimer(this._uptimeTimer);
+      this._uptimeTimer = this._armInterval(() => {
+        if (!this._streamStartTime) return;
+        const s = Math.floor((Date.now() - this._streamStartTime) / 1e3);
+        const mm = String(Math.floor(s / 60)).padStart(2, "0");
+        const ss = String(s % 60).padStart(2, "0");
+        const label = this.shadowRoot?.getElementById("stream-label");
+        if (label) label.textContent = `${mm}:${ss}`;
+      }, 1e3);
+    }
+    if (!isStreaming) {
+      this._streamStartTime = 0;
+      this._clearTimer(this._uptimeTimer);
+      this._uptimeTimer = null;
+    }
+    const shouldVideo = isStreaming;
+    if (!isStreaming && this._lastStreaming !== null && this._lastStreaming !== isStreaming && !this._isOffline) {
+      this._stopLiveVideo();
+      this._setLoadingOverlay(true, this._t("loading_refreshing_image"));
+      if (this._hass?.services?.bosch_smart_camera?.trigger_snapshot) this._callService("bosch_smart_camera", "trigger_snapshot", {
+        entity_id: this._entities.camera
+      });
+      this._scheduleImageLoad(3500);
+      this._startRefreshTimer();
+    }
+    this._lastStreaming = isStreaming;
+    const backendWaiting = sharedConnecting;
+    this._evaluateGateForStreamTransition();
+    if (this._playGateActive) {
+      this._setLoadingOverlay(false);
+      this._waitingForStream = false;
+      return;
+    }
+    if ((shouldVideo || backendWaiting) && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream && !this._deadStreamRebuildPending) {
+      this._waitingForStream = true;
+      if (this._config.snapshot_during_warmup && !this._imageLoaded && !this._awaitingFresh) {
+        this._triggerFreshSnapshot();
+      }
+      this._setLoadingOverlay(true, this._streamPhaseText());
+      this._waitForStreamReady();
+    }
+    if (!shouldVideo && !backendWaiting) {
+      this._waitingForStream = false;
+    }
+    if (!shouldVideo && this._liveVideoActive) {
+      this._stopLiveVideo();
+    }
+    if (!this._liveVideoActive && !this._startingLiveVideo && !isStreaming) {
+      if (this._timerStreaming !== false) {
+        this._timerStreaming = false;
+        this._startRefreshTimer();
+      }
+    }
+    const lastEventState = hass.states[ents.last_event];
+    const lastEventOverlay = this.shadowRoot.getElementById("last-event-overlay");
+    const curEventVal = lastEventState?.state;
+    if (curEventVal && curEventVal !== "unavailable" && curEventVal !== "unknown" && this._lastEventState !== null && curEventVal !== this._lastEventState && !this._liveVideoActive) {
+      this._scheduleImageLoad(1500);
+    }
+    this._lastEventState = curEventVal || this._lastEventState;
+    let lastEventStr = "—";
+    if (lastEventState?.state && lastEventState.state !== "unavailable") {
+      try {
+        const d = new Date(lastEventState.state);
+        lastEventStr = isNaN(d) ? lastEventState.state : this._formatDatetime(d);
+      } catch (_) {
+        lastEventStr = lastEventState.state;
+      }
+    }
+    if (lastEventStr === "—") {
+      const a = hass.states[ents.camera]?.attributes?.last_event;
+      if (a) lastEventStr = a.slice(0, 16).replace("T", " ");
+    }
+    if (lastEventOverlay) lastEventOverlay.textContent = lastEventStr !== "—" ? `${this._t("last_event_overlay_prefix")} ${lastEventStr}` : "";
+    const apLastEvent = this.shadowRoot.getElementById("ap-last-event");
+    const apLastEventText = this.shadowRoot.getElementById("ap-last-event-text");
+    if (apLastEvent && apLastEventText) {
+      const hasEvent = lastEventStr !== "—";
+      let pretty = lastEventStr;
+      if (hasEvent && lastEventState?.state) {
+        try {
+          const d = new Date(lastEventState.state);
+          if (!isNaN(d)) {
+            const sameDay = d.toDateString() === (new Date).toDateString();
+            const loc = cardLang(this._hass);
+            pretty = sameDay ? d.toLocaleTimeString(loc, {
+              hour: "2-digit",
+              minute: "2-digit"
+            }) : d.toLocaleDateString(loc, {
+              weekday: "short",
+              day: "2-digit",
+              month: "2-digit"
+            });
+          }
+        } catch {}
+      }
+      const evKind = hass.states[ents.last_event_type]?.state;
+      const kindLabel = hasEvent && evKind && EVENT_KIND_LABELS[evKind] ? EVENT_KIND_LABELS[evKind][(cardLang(hass) || "en").slice(0, 2)] || EVENT_KIND_LABELS[evKind].en : "";
+      apLastEventText.textContent = kindLabel ? `${kindLabel} · ${pretty}` : pretty;
+      const camTimestampOverlay = !!hass.states[ents.camera]?.attributes?.camera_timestamp_overlay;
+      apLastEvent.classList.toggle("visible", hasEvent && !camTimestampOverlay && !this._playGateActive);
+      apLastEvent.classList.toggle("hide-during-stream", isStreaming);
+    }
+    const evTodayState = hass.states[ents.events_today];
+    const evOverlay = this.shadowRoot.getElementById("events-overlay");
+    const evCount = evTodayState?.state ?? "—";
+    if (evOverlay) evOverlay.textContent = evCount !== "—" ? `${evCount} Events heute` : "";
+    this._updateToggleBtn("btn-audio", ents.audio, hass.states[ents.audio]);
+    this._updateToggleBtn("btn-light", ents.light, hass.states[ents.light]);
+    this._updateToggleBtn("btn-privacy", ents.privacy, hass.states[ents.privacy]);
+    const privInline = this.shadowRoot.getElementById("btn-privacy-inline");
+    if (privInline) {
+      const ps = hass.states[ents.privacy]?.state;
+      const optVal = this._optimistic[ents.privacy];
+      const isPending = optVal === "pending";
+      const ds = ents.privacy in this._optimistic && !isPending ? optVal : ps;
+      privInline.classList.toggle("on", ds === "on");
+    }
+    this._updateToggleBtn("btn-notifications", ents.notifications, hass.states[ents.notifications]);
+    this._updateToggleBtn("btn-intercom", ents.intercom, hass.states[ents.intercom]);
+    const lightSubControls = this.shadowRoot.getElementById("light-sub-controls");
+    if (lightSubControls) {
+      const hasFront = ents.frontLight && hass.states[ents.frontLight];
+      const hasWall = ents.wallwasher && hass.states[ents.wallwasher];
+      const hasIntensity = ents.frontLightIntensity && hass.states[ents.frontLightIntensity];
+      lightSubControls.style.display = hasFront || hasWall || hasIntensity ? "" : "none";
+      this._updateToggleBtn("btn-front-light", ents.frontLight, hass.states[ents.frontLight]);
+      this._updateToggleBtn("btn-wallwasher", ents.wallwasher, hass.states[ents.wallwasher]);
+      const intensityRow = this.shadowRoot.getElementById("intensity-row");
+      const intensitySlider = this.shadowRoot.getElementById("intensity-slider");
+      const intensityValue = this.shadowRoot.getElementById("intensity-value");
+      if (intensityRow) intensityRow.style.display = hasIntensity ? "flex" : "none";
+      if (hasIntensity && intensitySlider && intensityValue) {
+        const v = parseFloat(hass.states[ents.frontLightIntensity]?.state) || 0;
+        if (!intensitySlider.matches(":active")) {
+          intensitySlider.value = v;
+          intensityValue.textContent = Math.round(v) + "%";
+        }
+      }
+    }
+    const hasGen2 = ents.statusLed && hass.states[ents.statusLed];
+    const hasAutomations = ents.automations?.length > 0;
+    const accAuto = this.shadowRoot.getElementById("acc-gen2-auto");
+    const accLight = this.shadowRoot.getElementById("acc-gen2-light");
+    const accAutomations = this.shadowRoot.getElementById("acc-automations");
+    if (accAuto) accAuto.style.display = hasGen2 ? "" : "none";
+    if (accLight) accLight.style.display = hasGen2 ? "" : "none";
+    if (accAutomations) accAutomations.style.display = hasAutomations ? "" : "none";
+    this._updateToggleBtn("btn-status-led", ents.statusLed, hass.states[ents.statusLed]);
+    this._updateToggleBtn("btn-motion-light", ents.motionLight, hass.states[ents.motionLight]);
+    this._updateToggleBtn("btn-ambient-light", ents.ambientLight, hass.states[ents.ambientLight]);
+    this._updateToggleBtn("btn-intrusion", ents.intrusionDetection, hass.states[ents.intrusionDetection]);
+    const hasAlarmSystem = ents.alarmSystemArm && hass.states[ents.alarmSystemArm];
+    for (const [rowId, entId] of [ [ "btn-alarm-arm", ents.alarmSystemArm ], [ "btn-alarm-mode", ents.alarmMode ], [ "btn-prealarm", ents.preAlarm ] ]) {
+      const row = this.shadowRoot.getElementById(rowId);
+      if (row) row.style.display = hasAlarmSystem && entId && hass.states[entId] ? "flex" : "none";
+    }
+    this._updateToggleBtn("btn-alarm-arm", ents.alarmSystemArm, hass.states[ents.alarmSystemArm]);
+    this._updateToggleBtn("btn-alarm-mode", ents.alarmMode, hass.states[ents.alarmMode]);
+    this._updateToggleBtn("btn-prealarm", ents.preAlarm, hass.states[ents.preAlarm]);
+    const powerLedRow = this.shadowRoot.getElementById("power-led-row");
+    const powerLedEnt = hass.states[ents.powerLedBrightness];
+    if (powerLedRow) powerLedRow.style.display = powerLedEnt ? "flex" : "none";
+    if (powerLedEnt) {
+      const slider = this.shadowRoot.getElementById("power-led-slider");
+      const valEl = this.shadowRoot.getElementById("power-led-value");
+      const val = parseInt(powerLedEnt.state) || 0;
+      if (slider && document.activeElement !== slider) slider.value = val;
+      if (valEl) valEl.textContent = val + "%";
+    }
+    if (ents.automations?.length) {
+      ents.automations.forEach((eid, i) => {
+        const btn = this.shadowRoot.getElementById(`btn-auto-${i}`);
+        if (!btn) return;
+        const state = hass.states[eid];
+        if (!state) {
+          btn.style.display = "none";
+          return;
+        }
+        btn.style.display = "";
+        btn.classList.toggle("on", state.state === "on");
+        const label = btn.querySelector(".auto-label");
+        if (label) label.textContent = state.attributes?.friendly_name || eid.split(".").pop().replace(/_/g, " ");
+      });
+    }
+    const motSensRow = this.shadowRoot.getElementById("motion-sens-row");
+    const motSensEl = this.shadowRoot.getElementById("motion-sens-slider");
+    const motSensVal = this.shadowRoot.getElementById("motion-sens-value");
+    const hasMotSens = ents.motionSensitivity && hass.states[ents.motionSensitivity] && hass.states[ents.motionSensitivity].state !== "unavailable";
+    if (motSensRow) motSensRow.style.display = hasMotSens ? "flex" : "none";
+    if (hasMotSens && motSensEl && motSensVal && !motSensEl.matches(":active")) {
+      const sv = parseFloat(hass.states[ents.motionSensitivity]?.state) || 3;
+      motSensEl.value = Math.round(sv);
+      motSensVal.textContent = Math.round(sv);
+    }
+    const pickBriPct = (lightEnt, numberEnt) => {
+      const lightSt = lightEnt ? hass.states[lightEnt] : null;
+      if (lightSt && lightSt.state === "off") {
+        const lbp = lightSt.attributes?.last_brightness_pct;
+        if (typeof lbp === "number") return lbp;
+      }
+      return parseFloat(hass.states[numberEnt]?.state) || 0;
+    };
+    const topBriRow = this.shadowRoot.getElementById("top-bri-row");
+    const topBriEl = this.shadowRoot.getElementById("top-bri-slider");
+    const topBriVal = this.shadowRoot.getElementById("top-bri-value");
+    const hasTopBri = ents.topBrightness && hass.states[ents.topBrightness] && hass.states[ents.topBrightness].state !== "unavailable" && hass.states[ents.topBrightness].state !== "unknown";
+    if (topBriRow) topBriRow.style.display = hasTopBri ? "flex" : "none";
+    if (hasTopBri && topBriEl && topBriVal && !topBriEl.matches(":active")) {
+      const v = pickBriPct(ents.topLedLight, ents.topBrightness);
+      topBriEl.value = Math.round(v);
+      topBriVal.textContent = Math.round(v) + "%";
+    }
+    const botBriRow = this.shadowRoot.getElementById("bottom-bri-row");
+    const botBriEl = this.shadowRoot.getElementById("bottom-bri-slider");
+    const botBriVal = this.shadowRoot.getElementById("bottom-bri-value");
+    const hasBotBri = ents.bottomBrightness && hass.states[ents.bottomBrightness] && hass.states[ents.bottomBrightness].state !== "unavailable" && hass.states[ents.bottomBrightness].state !== "unknown";
+    if (botBriRow) botBriRow.style.display = hasBotBri ? "flex" : "none";
+    if (hasBotBri && botBriEl && botBriVal && !botBriEl.matches(":active")) {
+      const v = pickBriPct(ents.bottomLedLight, ents.bottomBrightness);
+      botBriEl.value = Math.round(v);
+      botBriVal.textContent = Math.round(v) + "%";
+    }
+    const hasTopLed = ents.topLedLight && hass.states[ents.topLedLight];
+    const hasBotLed = ents.bottomLedLight && hass.states[ents.bottomLedLight];
+    const topLedBtn = this.shadowRoot.getElementById("btn-top-led");
+    const botLedBtn = this.shadowRoot.getElementById("btn-bottom-led");
+    const pickColor = (entId, fallback) => {
+      const attrs = hass.states[entId]?.attributes;
+      if (!attrs) return fallback;
+      const rgb = attrs.rgb_color;
+      if (rgb && Array.isArray(rgb) && rgb.length === 3) return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+      const lrc = attrs.last_rgb_color;
+      if (lrc && Array.isArray(lrc) && lrc.length === 3) return `rgb(${lrc[0]},${lrc[1]},${lrc[2]})`;
+      return fallback;
+    };
+    if (topLedBtn) {
+      topLedBtn.style.display = hasTopLed ? "" : "none";
+      if (hasTopLed) {
+        const isOn = hass.states[ents.topLedLight]?.state === "on";
+        topLedBtn.classList.toggle("on", isOn);
+        const color = pickColor(ents.topLedLight, this._lastTopColor || "rgb(255,180,100)");
+        this._lastTopColor = color;
+        const dot = this.shadowRoot.getElementById("top-led-color-mini");
+        if (dot) dot.style.background = color;
+      }
+    }
+    if (botLedBtn) {
+      botLedBtn.style.display = hasBotLed ? "" : "none";
+      if (hasBotLed) {
+        const isOn = hass.states[ents.bottomLedLight]?.state === "on";
+        botLedBtn.classList.toggle("on", isOn);
+        const color = pickColor(ents.bottomLedLight, this._lastBotColor || "rgb(255,180,100)");
+        this._lastBotColor = color;
+        const dot = this.shadowRoot.getElementById("bottom-led-color-mini");
+        if (dot) dot.style.background = color;
+      }
+    }
+    const rgbRow = this.shadowRoot.getElementById("rgb-lights-row");
+    if (rgbRow) rgbRow.style.display = hasTopLed || hasBotLed ? "" : "none";
+    const topCircle = this.shadowRoot.getElementById("top-led-color");
+    if (topCircle && hasTopLed) {
+      const color = pickColor(ents.topLedLight, this._lastTopColor || "rgb(255,180,100)");
+      this._lastTopColor = color;
+      topCircle.style.background = color;
+    }
+    const botCircle = this.shadowRoot.getElementById("bottom-led-color");
+    if (botCircle && hasBotLed) {
+      const color = pickColor(ents.bottomLedLight, this._lastBotColor || "rgb(255,180,100)");
+      this._lastBotColor = color;
+      botCircle.style.background = color;
+    }
+    const ctRow = this.shadowRoot.getElementById("colortemp-row");
+    const ctSliderEl = this.shadowRoot.getElementById("colortemp-slider");
+    const ctValue = this.shadowRoot.getElementById("colortemp-value");
+    const hasColorTemp = ents.colorTemp && hass.states[ents.colorTemp] && hass.states[ents.colorTemp].state !== "unavailable" && hass.states[ents.colorTemp].state !== "unknown";
+    if (ctRow) ctRow.style.display = hasColorTemp ? "flex" : "none";
+    if (hasColorTemp && ctSliderEl && ctValue && !ctSliderEl.matches(":active")) {
+      const wb = parseFloat(hass.states[ents.colorTemp]?.state) || 0;
+      ctSliderEl.value = Math.round(wb * 100);
+      ctValue.textContent = wb === 0 ? "neutral" : wb < 0 ? "kalt" : "warm";
+    }
+    const micRow = this.shadowRoot.getElementById("mic-level-row");
+    const micSliderEl = this.shadowRoot.getElementById("mic-slider");
+    const micValue = this.shadowRoot.getElementById("mic-value");
+    const hasMic = ents.micLevel && hass.states[ents.micLevel] && hass.states[ents.micLevel].state !== "unavailable";
+    if (micRow) micRow.style.display = hasMic ? "flex" : "none";
+    if (hasMic && micSliderEl && micValue && !micSliderEl.matches(":active")) {
+      const ml = parseFloat(hass.states[ents.micLevel]?.state) || 0;
+      micSliderEl.value = Math.round(ml);
+      micValue.textContent = Math.round(ml) + "%";
+    }
+    const lensRow = this.shadowRoot.getElementById("lens-elev-row");
+    const lensSliderEl = this.shadowRoot.getElementById("lens-slider");
+    const lensValue = this.shadowRoot.getElementById("lens-value");
+    const hasLens = ents.lensElevation && hass.states[ents.lensElevation] && hass.states[ents.lensElevation].state !== "unavailable";
+    if (lensRow) lensRow.style.display = hasLens ? "flex" : "none";
+    if (hasLens && lensSliderEl && lensValue && !lensSliderEl.matches(":active")) {
+      const el = parseFloat(hass.states[ents.lensElevation]?.state) || 2;
+      lensSliderEl.value = Math.round(el * 100);
+      lensValue.textContent = el.toFixed(2) + " m";
+    }
+    this._updateToggleBtn("btn-notif-movement", ents.notifMovement, hass.states[ents.notifMovement]);
+    this._updateToggleBtn("btn-notif-person", ents.notifPerson, hass.states[ents.notifPerson]);
+    this._updateToggleBtn("btn-notif-audio", ents.notifAudio, hass.states[ents.notifAudio]);
+    this._updateToggleBtn("btn-notif-trouble", ents.notifTrouble, hass.states[ents.notifTrouble]);
+    this._updateToggleBtn("btn-notif-alarm", ents.notifAlarm, hass.states[ents.notifAlarm]);
+    this._updateToggleBtn("btn-timestamp", ents.timestamp, hass.states[ents.timestamp]);
+    this._updateToggleBtn("btn-autofollow", ents.autofollow, hass.states[ents.autofollow]);
+    this._updateToggleBtn("btn-motion", ents.motion, hass.states[ents.motion]);
+    this._updateToggleBtn("btn-record-sound", ents.recordSound, hass.states[ents.recordSound]);
+    this._updateToggleBtn("btn-privacy-sound", ents.privacySound, hass.states[ents.privacySound]);
+    const wifiVal = hass.states[ents.wifi];
+    const fwVal = hass.states[ents.firmware];
+    const ambVal = hass.states[ents.ambient];
+    const movVal = hass.states[ents.movementToday];
+    const audVal = hass.states[ents.audioToday];
+    const _dv = (id, st) => {
+      const el = this.shadowRoot.getElementById(id);
+      if (el) el.textContent = st?.state && st.state !== "unavailable" && st.state !== "unknown" ? st.state : "—";
+    };
+    _dv("diag-wifi-val", wifiVal);
+    _dv("diag-firmware-val", fwVal);
+    _dv("diag-ambient-val", ambVal);
+    _dv("diag-movement-today-val", movVal);
+    _dv("diag-audio-today-val", audVal);
+    if (wifiVal?.state && wifiVal.state !== "unavailable") {
+      const el = this.shadowRoot.getElementById("diag-wifi-val");
+      if (el) el.textContent = wifiVal.state + " %";
+    }
+    if (ambVal?.state && ambVal.state !== "unavailable") {
+      const el = this.shadowRoot.getElementById("diag-ambient-val");
+      if (el) el.textContent = ambVal.state + " %";
+    }
+    this._updateSchedulesSection(hass, ents);
+    const _hideAccIf = (accId, entityIds) => {
+      const acc = this.shadowRoot.getElementById(accId);
+      if (!acc) return;
+      const anyExists = entityIds.some(eid => {
+        const st = hass.states[eid];
+        return st && st.state && st.state !== "unavailable" && st.state !== "unknown";
+      });
+      acc.style.display = anyExists ? "" : "none";
+    };
+    _hideAccIf("acc-notif-types", [ ents.notifMovement, ents.notifPerson, ents.notifAudio, ents.notifTrouble, ents.notifAlarm ]);
+    _hideAccIf("acc-advanced", [ ents.timestamp, ents.autofollow, ents.motion, ents.recordSound, ents.privacySound ]);
+    _hideAccIf("acc-diagnostics", [ ents.wifi, ents.firmware, ents.ambient, ents.movementToday, ents.audioToday ]);
+    _hideAccIf("acc-schedules", [ ents.scheduleRules, ents.motionZones ]);
+    const notifState = this._getEffectiveState(ents.notifications);
+    const notifIconOn = this.shadowRoot.getElementById("notif-icon-on");
+    const notifIconOff = this.shadowRoot.getElementById("notif-icon-off");
+    if (notifIconOn && notifIconOff) {
+      notifIconOn.style.display = notifState === "off" ? "none" : "";
+      notifIconOff.style.display = notifState === "off" ? "" : "none";
+    }
+    if (this._liveVideoActive) {
+      const video = this.shadowRoot.getElementById("cam-video");
+      if (video) {
+        if (this._audioDecoupled()) {
+          if (this._androidAudioMuted) video.muted = true;
+        } else {
+          const audioOn = this._getEffectiveState(ents.audio) === "on";
+          this._lastAudioState = audioOn;
+          if (!audioOn || this._androidAudioMuted) {
+            video.muted = true;
+            this._disarmAutoUnmute();
+          } else if (video.muted) {
+            if (!this._isSecondaryAudio()) this._armAutoUnmute();
+          }
+          const volState = this._hass.states[ents.audioVolume]?.state;
+          if (volState !== this._lastVolumeState) {
+            this._lastVolumeState = volState;
+            if (!this._isIOS()) {
+              try {
+                video.volume = this._entityVolume();
+              } catch (_) {}
+            }
+            const slider = this.shadowRoot.getElementById("ap-vol");
+            if (slider) slider.value = String(video.volume);
+          }
+        }
+        this._refreshAudioToggle();
+        this._refreshAudioPill();
+      }
+    }
+    const privacyOptimistic = this._optimistic[ents.privacy];
+    const privacyOn = privacyOptimistic !== undefined ? privacyOptimistic === "on" : ents.privacy in hass.states && hass.states[ents.privacy]?.state === "on";
+    const placeholder = this.shadowRoot.getElementById("privacy-placeholder");
+    if (placeholder) placeholder.classList.toggle("visible", privacyOn);
+    if (privacyOn && !this._imageLoaded) this._scheduleImageLoad(0);
+    const staleBadge = this.shadowRoot.getElementById("privacy-stale-badge");
+    const privLabel = this.shadowRoot.getElementById("privacy-placeholder-label");
+    if (privLabel) privLabel.textContent = this._t("privacy_stale_label").replace(/\s*—.*/, "") || "Privat-Modus aktiv";
+    if (staleBadge) {
+      const fmtStale = d => {
+        if (!d || isNaN(d)) return null;
+        const sameDay = d.toDateString() === (new Date).toDateString();
+        return sameDay ? d.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit"
+        }) : d.toLocaleDateString([], {
+          weekday: "short",
+          day: "2-digit",
+          month: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit"
+        });
+      };
+      let prefix = null, ts = null;
+      const capturedAt = Date.parse(hass.states[ents.camera]?.attributes?.last_snapshot_at);
+      const snapMs = Number.isNaN(capturedAt) ? this._lastSnapshotAt : capturedAt;
+      if (privacyOn && this._config.privacy_stale_source === "snapshot" && snapMs) {
+        ts = fmtStale(new Date(snapMs));
+        if (ts) prefix = this._t("privacy_stale_prefix_snapshot");
+      }
+      if (privacyOn && !ts && lastEventStr !== "—") {
+        ts = fmtStale(lastEventState?.state ? new Date(lastEventState.state) : null) || lastEventStr;
+        prefix = this._t("privacy_stale_prefix");
+      }
+      if (privacyOn && prefix && ts) {
+        staleBadge.textContent = `${prefix} ${ts}`;
+        staleBadge.classList.add("visible");
+      } else {
+        staleBadge.classList.remove("visible");
+        staleBadge.textContent = "";
+      }
+    }
+    if (this._lastPrivacy !== true && privacyOn && (this._liveVideoActive || this._streamConnecting || this._waitingForStream)) {
+      this._stopLiveVideo();
+    }
+    if (privacyOn) this._setLoadingOverlay(false);
+    if (this._lastPrivacy === true && !privacyOn) {
+      this._scheduleImageLoad(6e3);
+      this._scheduleImageLoad(9e3);
+    }
+    this._lastPrivacy = privacyOn;
+    const aiCaptionEl = this.shadowRoot.getElementById("ap-ai-caption");
+    if (aiCaptionEl && this._config.ai_description_overlay && ents.aiDescription) {
+      const aiState = hass.states[ents.aiDescription];
+      const hideInPrivacy = privacyOn && !this._config.ai_description_in_privacy;
+      const validState = aiState && aiState.state && aiState.state !== "unavailable" && aiState.state !== "unknown" && aiState.state !== "";
+      if (validState && !hideInPrivacy) {
+        const desc = aiState.attributes?.description && aiState.attributes.description !== "" ? aiState.attributes.description : aiState.state;
+        let timeStr = "";
+        if (aiState.attributes?.generated_at) {
+          try {
+            const d = new Date(aiState.attributes.generated_at);
+            if (!isNaN(d)) {
+              timeStr = d.toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit"
+              });
+            }
+          } catch {}
+        }
+        const prefix = this._t("ai_caption_prefix");
+        const captionText = timeStr ? `${prefix} ${timeStr} — ${desc}` : `${prefix} ${desc}`;
+        const sig = `${ents.aiDescription}|${aiState.attributes?.generated_at || ""}|${captionText}`;
+        if (sig !== this._aiCaptionSig) {
+          this._aiCaptionSig = sig;
+          aiCaptionEl.textContent = captionText;
+          this._showAiCaption();
+        }
+      } else {
+        this._aiCaptionSig = null;
+        this._hideAiCaption();
+        aiCaptionEl.textContent = "";
+      }
+    } else if (aiCaptionEl) {
+      this._aiCaptionSig = null;
+      this._hideAiCaption();
+      aiCaptionEl.textContent = "";
+    }
+    this._updateMotionZones(hass, ents);
+    this._updatePrivacyMasks(hass, ents);
+    const panState = hass.states[ents.pan];
+    const panSection = this.shadowRoot.getElementById("pan-section");
+    if (panSection) {
+      const hasPan = panState && panState.state && panState.state !== "unavailable" && panState.state !== "unknown";
+      panSection.style.display = hasPan ? "" : "none";
+      const panOverlay = this.shadowRoot.getElementById("pan-overlay");
+      if (panOverlay) {
+        panOverlay.style.display = hasPan ? "" : "none";
+        if (hasPan) {
+          const cur = parseFloat(panState.state) || 0;
+          const edgeL = this.shadowRoot.getElementById("pan-edge-left");
+          const edgeR = this.shadowRoot.getElementById("pan-edge-right");
+          if (edgeL) edgeL.toggleAttribute("disabled", cur <= -120);
+          if (edgeR) edgeR.toggleAttribute("disabled", cur >= 120);
+          const posBadge = this.shadowRoot.getElementById("pan-overlay-pos");
+          if (posBadge && !posBadge.classList.contains("flash")) posBadge.textContent = `${cur > 0 ? "+" : ""}${cur}°`;
+        }
+      }
+      if (hasPan) {
+        const posEl = this.shadowRoot.getElementById("pan-position");
+        if (posEl) posEl.textContent = `${panState.state}°`;
+      }
+    }
+    const qualitySection = this.shadowRoot.getElementById("quality-section");
+    const qualitySel = this.shadowRoot.getElementById("quality-select");
+    if (qualitySection && qualitySel) {
+      const qualityEntityId = ents.quality;
+      const qualityState = qualityEntityId ? hass.states[qualityEntityId] : null;
+      const hasQuality = qualityState && qualityState.state && qualityState.state !== "unavailable" && qualityState.state !== "unknown";
+      qualitySection.style.display = hasQuality ? "" : "none";
+      if (hasQuality && qualitySel.value !== qualityState.state) {
+        qualitySel.value = qualityState.state;
+      }
+      const fallbackHint = this.shadowRoot.getElementById("quality-remote-fallback-hint");
+      if (fallbackHint) {
+        const fallbackActive = hasQuality && qualityState.attributes?.remote_fallback_active === true;
+        fallbackHint.style.display = fallbackActive ? "" : "none";
+      }
+    }
+    if (this._isOffline) {
+      for (const sel of [ ".info-row", ".btn-row", ".switch-rows" ]) {
+        const el = this.shadowRoot.querySelector(sel);
+        if (el) el.style.display = "none";
+      }
+      for (const acc of this.shadowRoot.querySelectorAll(".accordion")) {
+        acc.style.display = "none";
+      }
+      const panSec = this.shadowRoot.getElementById("pan-section");
+      if (panSec) panSec.style.display = "none";
+      const panOv = this.shadowRoot.getElementById("pan-overlay");
+      if (panOv) panOv.style.display = "none";
+      const qualSec = this.shadowRoot.getElementById("quality-section");
+      if (qualSec) qualSec.style.display = "none";
+    }
+  }
+  async _discoverAutomationsViaWs(hass) {
+    try {
+      const reg = await hass.callWS({
+        type: "config/entity_registry/get",
+        entity_id: this._entities.camera
+      });
+      const deviceId = reg?.device_id;
+      if (!deviceId) return;
+      const result = await hass.callWS({
+        type: "search/related",
+        item_type: "device",
+        item_id: deviceId
+      });
+      const autoIds = (result.automation || []).filter(eid => hass.states[eid]).sort();
+      if (autoIds.length) {
+        this._entities.automations = autoIds;
+        this._rebuildAutomationRows();
+      }
+    } catch (e) {
+      const prefix = `automation.${this._base}_`;
+      const fallback = Object.keys(hass.states).filter(eid => eid.startsWith(prefix)).sort();
+      if (fallback.length) {
+        this._entities.automations = fallback;
+        this._rebuildAutomationRows();
+      }
+    }
+  }
+  _rebuildAutomationRows() {
+    const autoContainer = this.shadowRoot?.getElementById("automations-container");
+    const accAutomations = this.shadowRoot?.getElementById("acc-automations");
+    if (!autoContainer) return;
+    const autos = this._entities.automations || [];
+    autoContainer.innerHTML = "";
+    if (!autos.length) {
+      if (accAutomations) accAutomations.style.display = "none";
+      return;
+    }
+    if (accAutomations) accAutomations.style.display = "";
+    autoContainer.innerHTML = "";
+    autos.forEach((eid, i) => {
+      const row = document.createElement("div");
+      row.className = "sw-row";
+      row.id = `btn-auto-${i}`;
+      row.style.padding = "4px 0";
+      row.style.cursor = "pointer";
+      row.innerHTML = `<div class="sw-left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg><span class="auto-label">${eid.split(".").pop().replace(/_/g, " ")}</span></div><button class="sw-toggle" tabindex="-1"><div class="sw-thumb"></div></button>`;
+      row.addEventListener("click", () => {
+        if (!this._hass) return;
+        const st = this._hass.states[eid]?.state;
+        this._callService("automation", st === "on" ? "turn_off" : "turn_on", {
+          entity_id: eid
+        });
+      });
+      const state = this._hass?.states[eid];
+      if (state) {
+        row.classList.toggle("on", state.state === "on");
+        const label = row.querySelector(".auto-label");
+        if (label) label.textContent = state.attributes?.friendly_name || eid.split(".").pop().replace(/_/g, " ");
+      }
+      autoContainer.appendChild(row);
+    });
+  }
+  _updateToggleBtn(id, entityId, entityState) {
+    const btn = this.shadowRoot.getElementById(id);
+    if (!btn) return;
+    if (entityId) this._entityToBtnId[entityId] = id;
+    const state = entityState?.state;
+    if (!entityState || !state || state === "unavailable" || state === "unknown") {
+      btn.style.display = "none";
+      return;
+    }
+    btn.style.display = "";
+    const optVal = this._optimistic[entityId];
+    const isPending = optVal === "pending";
+    const displayState = entityId in this._optimistic && !isPending ? optVal : state;
+    btn.classList.toggle("on", displayState === "on");
+    btn.classList.toggle("pending", isPending);
+    btn.classList.remove("unavailable");
+    btn.disabled = false;
+  }
+  _updateSchedulesSection(hass, ents) {
+    const WEEKDAY_NAMES = [ this._t("weekday_sun"), this._t("weekday_mon"), this._t("weekday_tue"), this._t("weekday_wed"), this._t("weekday_thu"), this._t("weekday_fri"), this._t("weekday_sat") ];
+    const rulesState = hass.states[ents.scheduleRules];
+    const rulesCountEl = this.shadowRoot.getElementById("diag-rules-count");
+    if (rulesCountEl) {
+      rulesCountEl.textContent = rulesState?.state != null && rulesState.state !== "unavailable" ? rulesState.state : "—";
+    }
+    const rulesListEl = this.shadowRoot.getElementById("rules-list");
+    if (rulesListEl && rulesState) {
+      const rules = rulesState.attributes?.rules || [];
+      const camId = hass.states[ents.status]?.attributes?.camera_id || "";
+      if (rules.length === 0) {
+        rulesListEl.innerHTML = `<div style="font-size:11px;color:#666;padding:4px 0">${this._t("schedules_none")}</div>`;
+      } else {
+        const rulesKey = JSON.stringify(rules);
+        if (this._lastRulesKey !== rulesKey) {
+          this._lastRulesKey = rulesKey;
+          rulesListEl.innerHTML = rules.map((r, i) => {
+            const days = (r.weekdays || []).map(d => WEEKDAY_NAMES[d] || d).join(", ");
+            const isActive = r.active ?? r.isActive ?? false;
+            const startT = r.start || r.startTime || "?";
+            const endT = r.end || r.endTime || "?";
+            const activeClass = isActive ? " active" : "";
+            const activeLabel = isActive ? this._t("state_on_short") : this._t("state_off_short");
+            const defaultName = this._t("rule_default_name").replace("{n}", String(i + 1));
+            return `<div class="rule-row" data-rule-idx="${i}">\n              <div class="rule-info">\n                <div class="rule-name">${this._escHtml(r.name || defaultName)}</div>\n                <div class="rule-time">${this._escHtml(startT)} – ${this._escHtml(endT)}</div>\n                <div class="rule-days">${this._escHtml(days)}</div>\n              </div>\n              <button class="rule-toggle${activeClass}" data-rule-id="${this._escAttr(r.id)}" data-cam-id="${this._escAttr(camId)}" data-active="${isActive ? "true" : "false"}">${activeLabel}</button>\n              <button class="rule-delete" data-rule-id="${this._escAttr(r.id)}" data-cam-id="${this._escAttr(camId)}" title="${this._t("delete")}">✕</button>\n            </div>`;
+          }).join("");
+          rulesListEl.querySelectorAll(".rule-toggle").forEach(btn => {
+            btn.addEventListener("click", e => {
+              e.stopPropagation();
+              const ruleId = btn.dataset.ruleId;
+              const cId = btn.dataset.camId;
+              const newActive = btn.dataset.active !== "true";
+              this._callService("bosch_smart_camera", "update_rule", {
+                camera_id: cId,
+                rule_id: ruleId,
+                is_active: newActive
+              });
+              btn.dataset.active = newActive ? "true" : "false";
+              btn.textContent = newActive ? this._t("state_on_short") : this._t("state_off_short");
+              btn.classList.toggle("active", newActive);
+            });
+          });
+          rulesListEl.querySelectorAll(".rule-delete").forEach(btn => {
+            btn.addEventListener("click", e => {
+              e.stopPropagation();
+              const ruleId = btn.dataset.ruleId;
+              const cId = btn.dataset.camId;
+              this._callService("bosch_smart_camera", "delete_rule", {
+                camera_id: cId,
+                rule_id: ruleId
+              });
+              btn.closest(".rule-row")?.remove();
+            });
+          });
+        }
+      }
+    }
+    const zonesToggle = this.shadowRoot.getElementById("btn-show-zones");
+    if (zonesToggle) {
+      zonesToggle.classList.toggle("on", this._showMotionZones);
+      const mzExists = hass.states[ents.motionZones];
+      zonesToggle.style.display = mzExists ? "" : "none";
+    }
+    const zonesCountEl = this.shadowRoot.getElementById("diag-zones-count");
+    const mzState = hass.states[ents.motionZones];
+    const gen2Zones = mzState?.attributes?.gen2_zones || [];
+    const cloudZones = mzState?.attributes?.cloud_zones || [];
+    if (zonesCountEl) {
+      if (gen2Zones.length > 0) zonesCountEl.textContent = `${gen2Zones.length} (Gen2)`; else if (cloudZones.length > 0) zonesCountEl.textContent = String(cloudZones.length); else if (mzState?.state != null && mzState.state !== "unavailable") zonesCountEl.textContent = `${mzState.state} (RCP)`; else zonesCountEl.textContent = "—";
+    }
+    const masksCountEl = this.shadowRoot.getElementById("diag-masks-count");
+    const pmState = hass.states[ents.privacyMasks];
+    const gen2Areas = pmState?.attributes?.gen2_private_areas || [];
+    const cloudMasks = pmState?.attributes?.cloud_privacy_masks || [];
+    if (masksCountEl) {
+      const total = gen2Areas.length || cloudMasks.length;
+      masksCountEl.textContent = total > 0 ? String(total) : pmState?.state != null && pmState.state !== "unavailable" ? pmState.state : "0";
+    }
+    const masksToggle = this.shadowRoot.getElementById("btn-show-masks");
+    if (masksToggle) {
+      masksToggle.classList.toggle("on", this._showPrivacyMasks);
+      const hasMasks = gen2Areas.length > 0 || cloudMasks.length > 0;
+      masksToggle.style.display = hasMasks ? "" : "none";
+    }
+  }
+  _escHtml(str) {
+    const d = document.createElement("div");
+    d.textContent = str;
+    return d.innerHTML;
+  }
+  _escAttr(str) {
+    return this._escHtml(str == null ? "" : String(str)).replace(/"/g, "&quot;");
+  }
+  _showCreateRuleDialog() {
+    return new Promise(resolve => {
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;";
+      overlay.innerHTML = `\n        <form style="background:var(--card-background-color,#fff);color:var(--primary-text-color,#000);border-radius:12px;padding:20px;min-width:260px;max-width:90vw;box-shadow:0 4px 24px rgba(0,0,0,.3);font-family:inherit;">\n          <div style="font-size:16px;font-weight:600;margin-bottom:12px;">${this._t("create_rule_title")}</div>\n          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">${this._t("create_rule_name_label")}</label>\n          <input name="name" type="text" value="${this._escAttr(this._t("create_rule_name_default"))}" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">\n          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">${this._t("create_rule_start_label")}</label>\n          <input name="start" type="time" value="08:00" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:10px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">\n          <label style="display:block;font-size:12px;opacity:.7;margin-bottom:2px;">${this._t("create_rule_end_label")}</label>\n          <input name="end" type="time" value="20:00" required style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:14px;border-radius:6px;border:1px solid var(--divider-color,#ccc);background:transparent;color:inherit;font-size:14px;">\n          <div style="display:flex;gap:8px;justify-content:flex-end;">\n            <button type="button" data-act="cancel" style="padding:8px 16px;border-radius:6px;border:none;background:var(--secondary-background-color,#eee);color:inherit;font-size:14px;">${this._t("create_rule_cancel")}</button>\n            <button type="submit" data-act="ok" style="padding:8px 16px;border-radius:6px;border:none;background:var(--primary-color,#03a9f4);color:#fff;font-size:14px;">${this._t("create_rule_submit")}</button>\n          </div>\n        </form>`;
+      const finish = result => {
+        overlay.remove();
+        resolve(result);
+      };
+      overlay.addEventListener("click", ev => {
+        if (ev.target === overlay) finish(null);
+      });
+      overlay.querySelector('[data-act="cancel"]').addEventListener("click", () => finish(null));
+      overlay.querySelector("form").addEventListener("submit", ev => {
+        ev.preventDefault();
+        const fd = new FormData(ev.target);
+        const name = (fd.get("name") || "").trim();
+        const start = fd.get("start");
+        const end = fd.get("end");
+        if (!name || !start || !end) return;
+        finish({
+          name: name,
+          start: start,
+          end: end
+        });
+      });
+      this.shadowRoot.appendChild(overlay);
+      overlay.querySelector('input[name="name"]').focus();
+    });
+  }
+  _renderServiceButtons() {
+    const grid = this.shadowRoot.getElementById("svc-grid");
+    if (!grid) return;
+    const camId = () => this._hass?.states[this._entities.status]?.attributes?.camera_id || "";
+    const services = [ {
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+      label: this._t("svc_snapshot"),
+      svc: "trigger_snapshot",
+      data: () => ({
+        entity_id: this._entities.camera
+      })
+    }, {
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>',
+      label: this._t("svc_read_zones"),
+      svc: "get_motion_zones",
+      data: () => ({
+        camera_id: camId()
+      })
+    }, {
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',
+      label: this._t("diag_privacy_masks"),
+      svc: "get_privacy_masks",
+      data: () => ({
+        camera_id: camId()
+      })
+    }, {
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>',
+      label: this._t("svc_friends"),
+      svc: "list_friends",
+      data: {}
+    }, {
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+      label: this._t("svc_create_rule"),
+      svc: "_prompt_create_rule",
+      data: null
+    }, {
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>',
+      label: this._t("svc_light_schedule"),
+      svc: "get_lighting_schedule",
+      data: () => ({
+        camera_id: camId()
+      })
+    }, {
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+      label: this._t("info_connection"),
+      svc: "open_live_connection",
+      data: () => ({
+        camera_id: camId()
+      })
+    }, {
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
+      label: this._t("svc_siren"),
+      svc: "_trigger_siren",
+      data: null
+    } ];
+    grid.innerHTML = services.map((s, i) => `<button class="svc-btn" data-svc-idx="${i}">${s.icon}<span>${s.label}</span></button>`).join("");
+    const resultEl = this.shadowRoot.getElementById("svc-result");
+    grid.querySelectorAll(".svc-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const idx = parseInt(btn.dataset.svcIdx);
+        const svc = services[idx];
+        if (!svc || !this._hass) return;
+        if (svc.svc === "_trigger_siren") {
+          if (!confirm(this._t("siren_confirm"))) return;
+          btn.classList.add("running");
+          const sirenEntity = this._entities.siren;
+          if (sirenEntity && this._hass.states[sirenEntity]) {
+            this._hass.callService("button", "press", {
+              entity_id: sirenEntity
+            });
+            if (resultEl) {
+              resultEl.style.display = "";
+              resultEl.textContent = this._t("siren_triggering");
+            }
+          } else {
+            if (resultEl) {
+              resultEl.style.display = "";
+              resultEl.textContent = this._t("siren_unavailable");
+            }
+          }
+          setTimeout(() => {
+            btn.classList.remove("running");
+          }, 3e3);
+          return;
+        }
+        if (svc.svc === "_prompt_create_rule") {
+          const result = await this._showCreateRuleDialog();
+          if (!result) return;
+          const {name: name, start: start, end: end} = result;
+          btn.classList.add("running");
+          this._callService("bosch_smart_camera", "create_rule", {
+            camera_id: camId(),
+            name: name,
+            start_time: start + ":00",
+            end_time: end + ":00",
+            weekdays: [ 0, 1, 2, 3, 4, 5, 6 ],
+            is_active: true
+          });
+          if (resultEl) {
+            resultEl.style.display = "";
+            resultEl.textContent = this._t("svc_rule_creating").replace("{name}", name);
+          }
+          setTimeout(() => {
+            btn.classList.remove("running");
+          }, 3e3);
+          return;
+        }
+        btn.classList.add("running");
+        const data = typeof svc.data === "function" ? svc.data() : svc.data;
+        this._callService("bosch_smart_camera", svc.svc, data);
+        if (resultEl) {
+          resultEl.style.display = "";
+          resultEl.textContent = this._t("svc_running").replace("{label}", svc.label);
+        }
+        setTimeout(() => {
+          btn.classList.remove("running");
+          if (resultEl) {
+            resultEl.textContent = this._t("svc_done").replace("{label}", svc.label);
+            setTimeout(() => {
+              resultEl.style.display = "none";
+            }, 5e3);
+          }
+        }, 3e3);
+      });
+    });
+  }
+  _getEffectiveState(entityId) {
+    if (entityId in this._optimistic) return this._optimistic[entityId];
+    return this._hass?.states[entityId]?.state;
+  }
+  _optimisticActive(entityId, hass) {
+    const opt = this._optimistic[entityId];
+    const isPending = opt === "pending";
+    const displayState = entityId in this._optimistic && !isPending ? opt : hass?.states[entityId]?.state;
+    return displayState === "on";
+  }
+  _streamPhaseText() {
+    const st = this._hass?.states[this._entities.streamStatus]?.state || this._hass?.states[this._entities.camera]?.attributes?.stream_status || "";
+    if (st === "warming_up") return this._t("stream_warming_up");
+    if (st === "connecting") return this._t("stream_connecting");
+    if (st === "streaming" || st === "streaming_remote") return this._t("stream_loading_hls");
+    return this._t("stream_starting");
+  }
+  _waitForStreamReady(attempt = 0) {
+    if (!this._waitingForStream || !this._hass) return;
+    const cam = this._hass.states[this._entities.camera];
+    const camReady = cam?.state === "streaming";
+    if (attempt > 0 && attempt % 5 === 0 && !this._playGateActive) {
+      this._setLoadingOverlay(true, this._streamPhaseText());
+    }
+    if (camReady) {
+      this._waitingForStream = false;
+      this._setLoadingOverlay(true, this._t("stream_loading_hls"));
+      this._startLiveVideo();
+      return;
+    }
+    if (attempt > 90) {
+      this._waitingForStream = false;
+      this._streamConnecting = false;
+      this._startingLiveVideo = false;
+      if (this._connectSteps) {
+        this._connectSteps.forEach(t => clearTimeout(t));
+        this._connectSteps = null;
+      }
+      this._setLoadingOverlay(true, this._t("stream_taking_longer"));
+      this._armTimer(() => this._setLoadingOverlay(false), 2500);
+      this._startRefreshTimer();
+      if (this._waitForStreamRetryTimer) clearTimeout(this._waitForStreamRetryTimer);
+      this._waitForStreamRetryTimer = setTimeout(() => {
+        this._waitForStreamRetryTimer = null;
+        if (!this.isConnected) return;
+        if (this._isStreaming && this._isStreaming() && !this._liveVideoActive && !this._startingLiveVideo && !this._waitingForStream && !this._reconnectingLiveVideo) {
+          this._waitingForStream = true;
+          this._waitForStreamReady();
+        }
+      }, 3e4);
+      return;
+    }
+    setTimeout(() => this._waitForStreamReady(attempt + 1), 1e3);
+  }
+  _showAiCaption() {
+    const el = this.shadowRoot && this.shadowRoot.getElementById("ap-ai-caption");
+    if (!el) return;
+    el.classList.add("visible");
+    this._aiCaptionShownAt = Date.now();
+    this._clearTimer(this._aiCaptionTimer);
+    this._aiCaptionTimer = null;
+    const secs = Number(this._config && this._config.ai_description_overlay_timeout);
+    const timeout = Number.isFinite(secs) ? secs : 12;
+    if (timeout > 0) {
+      this._aiCaptionTimer = this._armTimer(() => {
+        const e = this.shadowRoot && this.shadowRoot.getElementById("ap-ai-caption");
+        if (e) e.classList.remove("visible");
+        this._aiCaptionTimer = null;
+        this._aiCaptionShownAt = 0;
+        this._aiCaptionSig = null;
+      }, timeout * 1e3);
+    }
+  }
+  _hideAiCaption() {
+    this._clearTimer(this._aiCaptionTimer);
+    this._aiCaptionTimer = null;
+    this._aiCaptionShownAt = 0;
+    const el = this.shadowRoot && this.shadowRoot.getElementById("ap-ai-caption");
+    if (el) el.classList.remove("visible");
+  }
+  _updateMotionZones(hass, ents) {
+    const svg = this.shadowRoot.getElementById("motion-zones-overlay");
+    if (!svg) return;
+    const zoneState = hass.states[ents.motionZones];
+    const gen2Zones = zoneState?.attributes?.gen2_zones || [];
+    const cloudZones = zoneState?.attributes?.cloud_zones || [];
+    const hasZones = gen2Zones.length > 0 || cloudZones.length > 0;
+    const showZones = this._showMotionZones && hasZones;
+    svg.classList.toggle("visible", showZones);
+    if (!showZones) return;
+    const coordKey = JSON.stringify(gen2Zones.length > 0 ? gen2Zones : cloudZones);
+    if (this._lastMotionCoordKey === coordKey) return;
+    this._lastMotionCoordKey = coordKey;
+    svg.innerHTML = "";
+    if (gen2Zones.length > 0) {
+      const defaultColors = [ "#0A84FF", "#34C759", "#FF9F0A", "#FF453A", "#AF52DE" ];
+      gen2Zones.forEach((z, i) => {
+        const points = z.points || z.polygon || z.vertices || [];
+        if (points.length < 3) return;
+        const color = z.color || defaultColors[i % defaultColors.length];
+        const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+        const pts = points.map(p => `${(p.x || 0) * 100},${(p.y || 0) * 100}`).join(" ");
+        poly.setAttribute("points", pts);
+        poly.setAttribute("fill", color);
+        poly.setAttribute("stroke", color);
+        svg.appendChild(poly);
+      });
+    } else {
+      for (const z of cloudZones) {
+        if (z.x == null || z.y == null || z.w == null || z.h == null) continue;
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", z.x * 100);
+        rect.setAttribute("y", z.y * 100);
+        rect.setAttribute("width", z.w * 100);
+        rect.setAttribute("height", z.h * 100);
+        svg.appendChild(rect);
+      }
+    }
+  }
+  _updatePrivacyMasks(hass, ents) {
+    const svg = this.shadowRoot.getElementById("privacy-mask-overlay");
+    if (!svg) return;
+    const pmState = hass.states[ents.privacyMasks];
+    const gen2Areas = pmState?.attributes?.gen2_private_areas || [];
+    const cloudMasks = pmState?.attributes?.cloud_privacy_masks || [];
+    const hasMasks = gen2Areas.length > 0 || cloudMasks.length > 0;
+    const showMasks = this._showPrivacyMasks && hasMasks;
+    svg.classList.toggle("visible", showMasks);
+    if (!showMasks) return;
+    const coordKey = JSON.stringify(gen2Areas.length > 0 ? gen2Areas : cloudMasks);
+    if (this._lastPrivacyMaskKey === coordKey) return;
+    this._lastPrivacyMaskKey = coordKey;
+    svg.innerHTML = "";
+    if (gen2Areas.length > 0) {
+      for (const a of gen2Areas) {
+        const points = a.points || a.polygon || a.vertices || [];
+        if (points.length < 3) continue;
+        const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+        const pts = points.map(p => `${(p.x || 0) * 100},${(p.y || 0) * 100}`).join(" ");
+        poly.setAttribute("points", pts);
+        svg.appendChild(poly);
+      }
+    } else {
+      for (const m of cloudMasks) {
+        if (m.x == null || m.y == null || m.w == null || m.h == null) continue;
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", m.x * 100);
+        rect.setAttribute("y", m.y * 100);
+        rect.setAttribute("width", m.w * 100);
+        rect.setAttribute("height", m.h * 100);
+        svg.appendChild(rect);
+      }
+    }
+  }
+  async _toggleStream() {
+    if (!this._isStreaming()) this._armStartUnmute();
+    let serverIsOn = null;
+    if (this._hass && this._entities.switch) {
+      try {
+        const fresh = await this._hass.callApi("GET", `states/${this._entities.switch}`);
+        if (fresh?.state === "unavailable") return;
+        if (fresh && fresh.state) serverIsOn = fresh.state === "on";
+      } catch (e) {}
+    }
+    const cachedIsOn = this._isStreaming();
+    if (serverIsOn !== null && serverIsOn !== cachedIsOn) {
+      console.warn("bosch-camera-card: stale state detected — card thought " + (cachedIsOn ? "streaming" : "idle") + ", server says " + (serverIsOn ? "streaming" : "idle") + ". Refreshing the view; tap again to toggle.");
+      delete this._optimistic[this._entities.switch];
+      this._update();
+      return;
+    }
+    const isOn = serverIsOn !== null ? serverIsOn : cachedIsOn;
+    if (!isOn && Date.now() < this._streamCooldownUntil) return;
+    this._setOptimistic(this._entities.switch, isOn ? "off" : "on");
+    if (isOn) {
+      this._streamConnecting = false;
+      this._waitingForStream = false;
+      if (this._connectSteps) {
+        this._connectSteps.forEach(t => clearTimeout(t));
+        this._connectSteps = null;
+      }
+      this._startStreamCooldown();
+    } else if (!this._streamConnecting) {
+      this._streamConnecting = true;
+      this._setLoadingOverlay(true, this._streamPhaseText());
+      this._connectSteps = [ 3e3, 7e3, 12e3, 2e4, 28e3, 4e4, 52e3, 65e3, 78e3 ].map(ms => setTimeout(() => {
+        if (this._streamConnecting && !this._playGateActive) this._setLoadingOverlay(true, this._streamPhaseText());
+      }, ms));
+    }
+    const prevState = isOn ? "on" : "off";
+    this._entityToBtnId[this._entities.switch] = "btn-stream";
+    this._hass?.callService("switch", isOn ? "turn_off" : "turn_on", {
+      entity_id: this._entities.switch
+    }).catch(err => {
+      console.warn("bosch-camera-card: stream toggle failed:", err);
+      this._setOptimistic(this._entities.switch, prevState);
+      if (!isOn) {
+        this._streamConnecting = false;
+        this._waitingForStream = false;
+        if (this._connectSteps) {
+          this._connectSteps.forEach(t => clearTimeout(t));
+          this._connectSteps = null;
+        }
+        this._setLoadingOverlay(false);
+      } else {
+        this._streamCooldownUntil = 0;
+        this._clearTimer(this._streamCooldownTimer);
+        this._streamCooldownTimer = null;
+        this._renderStreamCooldown();
+      }
+      this._flashEntityError(this._entities.switch);
+    });
+  }
+  _toggleAudio() {
+    const entityId = this._entities.audio;
+    if (!this._hass) return;
+    this._disarmAutoUnmute();
+    const video = this._liveVideoActive ? this.shadowRoot.getElementById("cam-video") : null;
+    if (this._audioDecoupled()) {
+      if (video) {
+        this._androidAudioMuted = false;
+        const unmuting = video.muted;
+        video.muted = this._isSecondaryAudio() ? true : !unmuting;
+        if (unmuting && !video.muted && video.paused) video.play().catch(() => {});
+        if (this._useCardAudio()) this._cardSaveUnmuted(!video.muted);
+        const b = this.shadowRoot.getElementById("btn-audio");
+        if (b) b.classList.toggle("on", !video.muted);
+      }
+      this._refreshAudioPill();
+      return;
+    }
+    if (!entityId) return;
+    const turningOn = video ? video.muted : this._getEffectiveState(entityId) !== "on";
+    const secondary = this._isSecondaryAudio();
+    if (video) {
+      this._androidAudioMuted = false;
+      video.muted = secondary ? true : !turningOn;
+      if (turningOn && !video.muted && video.paused) video.play().catch(() => {});
+      const b = this.shadowRoot.getElementById("btn-audio");
+      if (b) b.classList.toggle("on", !video.muted);
+    }
+    this._setOptimistic(entityId, turningOn ? "on" : "off");
+    this._callService("switch", turningOn ? "turn_on" : "turn_off", {
+      entity_id: entityId
+    });
+    this._refreshAudioPill();
+  }
+  _armAutoUnmute() {
+    if (this._autoUnmuteHandler) return;
+    const handler = e => {
+      if (e.type === "keydown" && e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+      const onAudioCtrl = !!(e.composedPath && e.composedPath().some(el => el && el.id && (el.id === "ap-btn-audio" || el.id === "btn-audio")));
+      this._disarmAutoUnmute();
+      this._androidAudioMuted = false;
+      if (onAudioCtrl) return;
+      this._armStartUnmute();
+      const video = this._liveVideoActive ? this.shadowRoot && this.shadowRoot.getElementById("cam-video") : null;
+      if (video && !video.paused) {
+        this._unmuteOnStart = false;
+        this._tryStartUnmute(video, true);
+      }
+    };
+    this._autoUnmuteHandler = handler;
+    document.addEventListener("pointerdown", handler, {
+      capture: true
+    });
+    document.addEventListener("keydown", handler, {
+      capture: true
+    });
+  }
+  _disarmAutoUnmute() {
+    if (!this._autoUnmuteHandler) return;
+    document.removeEventListener("pointerdown", this._autoUnmuteHandler, {
+      capture: true
+    });
+    document.removeEventListener("keydown", this._autoUnmuteHandler, {
+      capture: true
+    });
+    this._autoUnmuteHandler = null;
+  }
+  _toggleSwitch(entityId) {
+    if (!this._hass || !entityId) return;
+    const state = this._hass.states[entityId]?.state;
+    if (!state || state === "unavailable" || state === "unknown") return;
+    const turningOn = state !== "on";
+    this._setOptimistic(entityId, turningOn ? "on" : "off");
+    this._callService("switch", turningOn ? "turn_on" : "turn_off", {
+      entity_id: entityId
+    });
+  }
+  _toggleSwitchWithRollback(entityId) {
+    if (!this._hass || !entityId) return;
+    const state = this._hass.states[entityId]?.state;
+    if (!state || state === "unavailable" || state === "unknown") return;
+    const turningOn = state !== "on";
+    const prev = turningOn ? "off" : "on";
+    const target = turningOn ? "on" : "off";
+    this._callServiceWithRollback(entityId, prev, target, "switch", turningOn ? "turn_on" : "turn_off", {
+      entity_id: entityId
+    });
+  }
+  _togglePrivacy() {
+    if (!this._hass) return;
+    const pid = this._entities.privacy;
+    if (!pid) return;
+    if (Date.now() < this._privacyCooldownUntil) return;
+    this._toggleSwitchWithRollback(pid);
+    this._startPrivacyCooldown();
+  }
+  _startPrivacyCooldown() {
+    this._privacyCooldownUntil = Date.now() + this._PRIVACY_COOLDOWN_MS;
+    this._clearTimer(this._privacyCooldownTimer);
+    this._renderPrivacyCooldown();
+    this._privacyCooldownTimer = this._armInterval(() => {
+      this._renderPrivacyCooldown();
+      if (Date.now() >= this._privacyCooldownUntil) {
+        this._clearTimer(this._privacyCooldownTimer);
+        this._privacyCooldownTimer = null;
+        this._privacyCooldownUntil = 0;
+        this._renderPrivacyCooldown();
+      }
+    }, 250);
+  }
+  _renderPrivacyCooldown() {
+    if (!this.shadowRoot) return;
+    const remainingMs = this._privacyCooldownUntil - Date.now();
+    const active = remainingMs > 0;
+    const secs = active ? Math.ceil(remainingMs / 1e3) : 0;
+    for (const id of [ "ap-btn-privacy", "btn-privacy", "btn-privacy-inline" ]) {
+      const el = this.shadowRoot.getElementById(id);
+      if (!el) continue;
+      el.classList.toggle("cooldown", active);
+      if (active) {
+        el.setAttribute("aria-disabled", "true");
+        el.setAttribute("data-cd", String(secs));
+        el.setAttribute("title", `Privacy: noch ${secs}s`);
+      } else {
+        el.removeAttribute("aria-disabled");
+        el.removeAttribute("data-cd");
+        el.removeAttribute("title");
+      }
+    }
+  }
+  _startStreamCooldown() {
+    this._streamCooldownUntil = Date.now() + this._STREAM_COOLDOWN_MS;
+    this._clearTimer(this._streamCooldownTimer);
+    this._renderStreamCooldown();
+    this._streamCooldownTimer = this._armInterval(() => {
+      this._renderStreamCooldown();
+      if (Date.now() >= this._streamCooldownUntil) {
+        this._clearTimer(this._streamCooldownTimer);
+        this._streamCooldownTimer = null;
+        this._streamCooldownUntil = 0;
+        this._renderStreamCooldown();
+      }
+    }, 250);
+  }
+  _renderStreamCooldown() {
+    if (!this.shadowRoot) return;
+    const remainingMs = this._streamCooldownUntil - Date.now();
+    const active = remainingMs > 0;
+    const secs = active ? Math.ceil(remainingMs / 1e3) : 0;
+    for (const id of [ "ap-btn-stream", "btn-stream" ]) {
+      const el = this.shadowRoot.getElementById(id);
+      if (!el) continue;
+      el.classList.toggle("cooldown", active);
+      if (active) {
+        el.setAttribute("aria-disabled", "true");
+        el.setAttribute("data-cd", String(secs));
+        el.setAttribute("title", `Stream: noch ${secs}s`);
+      } else {
+        el.removeAttribute("aria-disabled");
+        el.removeAttribute("data-cd");
+        el.removeAttribute("title");
+      }
+    }
+  }
+  async _onQualityChange(option) {
+    const entityId = this._entities.quality;
+    if (!entityId || !this._hass) return;
+    try {
+      await this._hass.callService("select", "select_option", {
+        entity_id: entityId,
+        option: option
+      });
+    } catch (err) {
+      console.warn("bosch-camera-card:", "select", "select_option", err);
+      return;
+    }
+    if (this._liveVideoActive) this._scheduleLiveRecovery("quality changed");
+  }
+  _setOptimistic(entityId, state) {
+    this._optimistic[entityId] = state;
+    if (this._optimisticTimers[entityId]) clearTimeout(this._optimisticTimers[entityId]);
+    this._optimisticTimers[entityId] = setTimeout(() => {
+      delete this._optimistic[entityId];
+      delete this._optimisticTimers[entityId];
+    }, 8e3);
+    this._update();
+  }
+  _requestFullscreen() {
+    if (document.pictureInPictureElement) {
+      document.exitPictureInPicture().catch(() => {});
+    }
+    if (this.classList.contains("fs-active")) {
+      this._exitCssFullscreen();
+      return;
+    }
+    if (Date.now() - _boschFsExitAt < 400) return;
+    const ua = navigator.userAgent || "";
+    const isIOS = /iPhone|iPod|iPad/i.test(ua) || /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+    if (isIOS) {
+      this._enterCssFullscreen();
+      return;
+    }
+    const wrapper = this.shadowRoot.getElementById("img-wrapper");
+    if (this._isNativeFullscreen()) {
+      _boschFsExitAt = Date.now();
+      if (document.exitFullscreen) return document.exitFullscreen();
+      if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+      if (document.mozCancelFullScreen) return document.mozCancelFullScreen();
+      if (document.msExitFullscreen) return document.msExitFullscreen();
+      return;
+    }
+    const el = wrapper || this;
+    const tryNative = () => {
+      if (el.requestFullscreen) return el.requestFullscreen();
+      if (el.webkitRequestFullscreen) return Promise.resolve(el.webkitRequestFullscreen());
+      if (el.mozRequestFullScreen) return Promise.resolve(el.mozRequestFullScreen());
+      if (el.msRequestFullscreen) return Promise.resolve(el.msRequestFullscreen());
+      return Promise.reject("no API");
+    };
+    try {
+      Promise.resolve(tryNative()).catch(() => this._enterCssFullscreen());
+    } catch (_) {
+      this._enterCssFullscreen();
+    }
+  }
+  async _togglePiP() {
+    const video = this.shadowRoot.getElementById("cam-video");
+    if (video && typeof video.webkitSetPresentationMode === "function" && !document.pictureInPictureEnabled) {
+      const entering = video.webkitPresentationMode !== "picture-in-picture";
+      if (video.muted) {
+        this._armStartUnmute();
+        this._tryStartUnmute(video, true);
+      }
+      if (this._zoom?.scale > 1) this._resetZoom();
+      this._setPipMetadata();
+      try {
+        video.webkitSetPresentationMode(entering ? "picture-in-picture" : "inline");
+      } catch (_) {}
+      return;
+    }
+    if (document.pictureInPictureElement) {
+      try {
+        await document.exitPictureInPicture();
+      } catch (_) {}
+      return;
+    }
+    if (!video || !document.pictureInPictureEnabled || video.disablePictureInPicture) {
+      return;
+    }
+    if (video.readyState < 1) {
+      return;
+    }
+    if (video.muted) {
+      this._armStartUnmute();
+      this._tryStartUnmute(video, true);
+    }
+    if (this._zoom?.scale > 1) this._resetZoom();
+    this._setPipMetadata();
+    try {
+      await video.requestPictureInPicture();
+    } catch (_) {}
+  }
+  _ownsNativePresentation(video) {
+    if (!video) return false;
+    if (document.pictureInPictureElement === video) return true;
+    if (_boschPipActive === this) return true;
+    if (video.webkitPresentationMode === "fullscreen") return true;
+    return false;
+  }
+  _reflectPipState() {
+    const btn = this.shadowRoot?.getElementById("ap-btn-pip");
+    if (!btn) return;
+    const mine = _boschPipActive === this;
+    const hasLive = !!this._liveVideoActive || mine;
+    const video = this.shadowRoot?.getElementById("cam-video");
+    const hasPip = document.pictureInPictureEnabled || !!(video && typeof video.webkitSetPresentationMode === "function");
+    if (!hasPip || !hasLive) {
+      btn.hidden = true;
+      return;
+    }
+    btn.hidden = false;
+    const blocked = _boschPipActive !== null && !mine;
+    btn.classList.toggle("on", mine);
+    btn.setAttribute("aria-pressed", String(mine));
+    btn.disabled = blocked;
+    btn.title = blocked ? this._t("pill_pip_blocked_title") : this._t("pill_pip_title");
+  }
+  _setBackgroundKeepAlive(on) {
+    if (on) this._prevSuspendWhenHidden = this._hass?.suspendWhenHidden;
+    if (!on && this._prevSuspendWhenHidden === false) return;
+    this.dispatchEvent(new CustomEvent("hass-suspend-when-hidden", {
+      detail: {
+        suspend: !on
+      },
+      bubbles: true,
+      composed: true
+    }));
+  }
+  _setPipMetadata() {
+    if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
+    try {
+      const ents = this._entities || {};
+      const name = this._config?.title || this._hass?.states?.[ents.camera]?.attributes?.friendly_name || "Bosch Kamera";
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: name,
+        artist: "Bosch Smart Home"
+      });
+      navigator.mediaSession.playbackState = "playing";
+      const keepLive = () => {
+        const v = this.shadowRoot?.getElementById("cam-video");
+        if (v && v.paused) Promise.resolve(v.play()).catch(() => {});
+      };
+      try {
+        navigator.mediaSession.setActionHandler("play", keepLive);
+      } catch (_) {}
+      try {
+        navigator.mediaSession.setActionHandler("pause", () => {});
+      } catch (_) {}
+    } catch (_) {}
+  }
+  _clearPipMetadata() {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      navigator.mediaSession.playbackState = "none";
+      navigator.mediaSession.metadata = null;
+      try {
+        navigator.mediaSession.setActionHandler("play", null);
+      } catch (_) {}
+      try {
+        navigator.mediaSession.setActionHandler("pause", null);
+      } catch (_) {}
+    } catch (_) {}
+  }
+  _enterCssFullscreen() {
+    if (_boschFsOwner && _boschFsOwner !== this && _boschFsOwner.classList?.contains("fs-active")) {
+      _boschFsOwner._exitCssFullscreen();
+    }
+    _boschFsOwner = this;
+    this.classList.add("fs-active");
+    this._updateFullscreenButtonState();
+    document.body.style.overflow = "hidden";
+    this._fsClickOut = e => {
+      const path = e.composedPath ? e.composedPath() : [ e.target ];
+      if (!path.includes(this)) this._exitCssFullscreen();
+    };
+    this._fsKeyDown = e => {
+      if (e.key === "Escape") this._exitCssFullscreen();
+    };
+    this._fsWireTimer = this._armTimer(() => {
+      this._fsWireTimer = null;
+      if (!this.isConnected || !this.classList.contains("fs-active")) return;
+      document.addEventListener("pointerup", this._fsClickOut);
+      document.addEventListener("keydown", this._fsKeyDown);
+    }, 100);
+  }
+  _exitCssFullscreen() {
+    this.classList.remove("fs-active");
+    if (_boschFsOwner === this) _boschFsOwner = null;
+    _boschFsExitAt = Date.now();
+    this._updateFullscreenButtonState();
+    document.body.style.overflow = "";
+    if (this._fsClickOut) {
+      document.removeEventListener("pointerup", this._fsClickOut);
+      this._fsClickOut = null;
+    }
+    if (this._fsKeyDown) {
+      document.removeEventListener("keydown", this._fsKeyDown);
+      this._fsKeyDown = null;
+    }
+    this._resetZoom();
+  }
+  _inFullscreen() {
+    return this.classList.contains("fs-active") || this._isNativeFullscreen();
+  }
+  _applyZoom() {
+    const z = this._zoom;
+    const t = z.scale > 1 ? `translate(${z.tx}px, ${z.ty}px) scale(${z.scale})` : "";
+    for (const id of [ "cam-video", "cam-img" ]) {
+      const el = this.shadowRoot?.getElementById(id);
+      if (el) {
+        el.style.transform = t;
+        el.style.transformOrigin = "center center";
+      }
+    }
+  }
+  _resetZoom() {
+    this._zoom.scale = 1;
+    this._zoom.tx = 0;
+    this._zoom.ty = 0;
+    this._zoom.prevDist = -1;
+    this._zoomPointers.clear();
+    this._applyZoom();
+  }
+  _clampZoomPan(wrap) {
+    const z = this._zoom;
+    const maxX = (z.scale - 1) * wrap.clientWidth / 2;
+    const maxY = (z.scale - 1) * wrap.clientHeight / 2;
+    z.tx = Math.max(-maxX, Math.min(maxX, z.tx));
+    z.ty = Math.max(-maxY, Math.min(maxY, z.ty));
+  }
+  _zoomAnchor(wrap, px, py, oldScale, newScale) {
+    const z = this._zoom;
+    z.tx += (oldScale - newScale) * (px - wrap.clientWidth / 2);
+    z.ty += (oldScale - newScale) * (py - wrap.clientHeight / 2);
+    z.scale = newScale;
+    if (newScale === 1) {
+      z.tx = 0;
+      z.ty = 0;
+    }
+    this._clampZoomPan(wrap);
+    this._applyZoom();
+  }
+  _wireZoom(wrap) {
+    if (!wrap) return;
+    if (this._zoomHandlers) {
+      const {el: el, onDown: onDown, onMove: onMove, onUp: onUp, onWheel: onWheel} = this._zoomHandlers;
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
+      el.removeEventListener("wheel", onWheel);
+      this._zoomHandlers = null;
+    }
+    const rectPt = e => {
+      const r = wrap.getBoundingClientRect();
+      return {
+        x: e.clientX - r.left,
+        y: e.clientY - r.top
+      };
+    };
+    const onDown = e => {
+      if (!this._inFullscreen()) return;
+      if (e.target.closest && e.target.closest("button, input, a, .ap-pill-bar, .pan-overlay, .ap-top, .ap-vol-pop")) return;
+      this._zoomPointers.set(e.pointerId, e);
+      try {
+        wrap.setPointerCapture(e.pointerId);
+      } catch (_) {}
+      if (this._zoomPointers.size === 1) {
+        const now = Date.now();
+        if (now - this._zoom.lastTap < 300) {
+          e.preventDefault();
+          const p = rectPt(e);
+          if (this._zoom.scale > 1) this._resetZoom(); else this._zoomAnchor(wrap, p.x, p.y, 1, 2);
+          this._zoom.lastTap = 0;
+        } else {
+          this._zoom.lastTap = now;
+        }
+      }
+    };
+    const onMove = e => {
+      if (!this._inFullscreen() || !this._zoomPointers.has(e.pointerId)) return;
+      const prev = this._zoomPointers.get(e.pointerId);
+      this._zoomPointers.set(e.pointerId, e);
+      const z = this._zoom;
+      const pts = [ ...this._zoomPointers.values() ];
+      if (pts.length === 2) {
+        const dist = Math.hypot(pts[0].clientX - pts[1].clientX, pts[0].clientY - pts[1].clientY);
+        if (z.prevDist > 0) {
+          const newScale = Math.min(this._ZOOM_MAX, Math.max(1, z.scale * (dist / z.prevDist)));
+          const r = wrap.getBoundingClientRect();
+          const midX = (pts[0].clientX + pts[1].clientX) / 2 - r.left;
+          const midY = (pts[0].clientY + pts[1].clientY) / 2 - r.top;
+          this._zoomAnchor(wrap, midX, midY, z.scale, newScale);
+        }
+        z.prevDist = dist;
+        e.preventDefault();
+      } else if (pts.length === 1 && z.scale > 1) {
+        z.tx += e.clientX - prev.clientX;
+        z.ty += e.clientY - prev.clientY;
+        this._clampZoomPan(wrap);
+        this._applyZoom();
+        e.preventDefault();
+      }
+    };
+    const onUp = e => {
+      this._zoomPointers.delete(e.pointerId);
+      try {
+        wrap.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+      if (this._zoomPointers.size < 2) this._zoom.prevDist = -1;
+    };
+    const onWheel = e => {
+      if (!this._inFullscreen()) return;
+      e.preventDefault();
+      const z = this._zoom;
+      const p = rectPt(e);
+      const newScale = Math.min(this._ZOOM_MAX, Math.max(1, z.scale * (e.deltaY < 0 ? 1.15 : .87)));
+      this._zoomAnchor(wrap, p.x, p.y, z.scale, newScale);
+    };
+    wrap.addEventListener("pointerdown", onDown);
+    wrap.addEventListener("pointermove", onMove);
+    wrap.addEventListener("pointerup", onUp);
+    wrap.addEventListener("pointercancel", onUp);
+    wrap.addEventListener("wheel", onWheel, {
+      passive: false
+    });
+    this._zoomHandlers = {
+      el: wrap,
+      onDown: onDown,
+      onMove: onMove,
+      onUp: onUp,
+      onWheel: onWheel
+    };
+    this._applyZoom();
+  }
+  _syncMoreButton() {
+    const open = this.classList.contains("overflow-open");
+    const more = this.shadowRoot?.getElementById("ap-btn-more");
+    if (more) {
+      more.classList.toggle("on", open);
+      more.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    const legacy = this.shadowRoot?.getElementById("btn-overflow");
+    if (legacy) legacy.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  _isNativeFullscreen() {
+    const sr = this.shadowRoot;
+    const shadowFs = sr && sr.fullscreenElement;
+    const docFs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+    return !!shadowFs || docFs === this;
+  }
+  _updateFullscreenButtonState() {
+    const btn = this.shadowRoot?.getElementById("ap-btn-fullscreen");
+    if (!btn) return;
+    const wrapper = this.shadowRoot?.getElementById("img-wrapper");
+    const nativeFs = this._isNativeFullscreen() || !!(document.fullscreenElement === wrapper || document.webkitFullscreenElement === wrapper || document.mozFullScreenElement === wrapper || document.msFullscreenElement === wrapper);
+    const cssFs = this.classList.contains("fs-active");
+    const active = nativeFs || cssFs;
+    btn.classList.toggle("on", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+    btn.setAttribute("title", active ? this._t("pill_fullscreen_exit_title") : this._t("pill_fullscreen_title"));
+    this._syncFsAutoHide(active);
+  }
+  _syncFsAutoHide(active) {
+    const enabled = this._config?.fullscreen_auto_hide_controls !== false;
+    if (active && enabled && !this._fsAutoHideWired) this._wireFsAutoHide(); else if ((!active || !enabled) && this._fsAutoHideWired) this._unwireFsAutoHide();
+  }
+  _wireFsAutoHide() {
+    const wrapper = this.shadowRoot?.getElementById("img-wrapper");
+    if (!wrapper) return;
+    this._fsAutoHideWired = true;
+    this._fsLastActivityAt = Date.now();
+    this._fsActivityHandler = () => {
+      this._fsLastActivityAt = Date.now();
+      this._showFsControls();
+    };
+    wrapper.addEventListener("pointermove", this._fsActivityHandler);
+    this._fsTouchHandler = e => {
+      if (e.target.closest && e.target.closest(".ap-pill-bar, .ap-top, .ap-vol-pop")) return;
+      this._fsLastActivityAt = Date.now();
+      this._showFsControls();
+    };
+    wrapper.addEventListener("touchstart", this._fsTouchHandler, {
+      passive: true
+    });
+    this._showFsControls();
+    this._fsIdleTimer = this._armInterval(() => {
+      if (Date.now() - this._fsLastActivityAt >= 1e4) this._hideFsControls();
+    }, 1e3);
+  }
+  _unwireFsAutoHide() {
+    const wrapper = this.shadowRoot?.getElementById("img-wrapper");
+    if (wrapper) {
+      if (this._fsActivityHandler) wrapper.removeEventListener("pointermove", this._fsActivityHandler);
+      if (this._fsTouchHandler) wrapper.removeEventListener("touchstart", this._fsTouchHandler);
+    }
+    this._fsActivityHandler = null;
+    this._fsTouchHandler = null;
+    this._clearTimer(this._fsIdleTimer);
+    this._fsIdleTimer = null;
+    this._fsAutoHideWired = false;
+    this._showFsControls();
+  }
+  _hideFsControls() {
+    if (this._fsControlsHidden) return;
+    this._fsControlsHidden = true;
+    this.classList.add("fs-controls-hidden");
+  }
+  _showFsControls() {
+    if (!this._fsControlsHidden) return;
+    this._fsControlsHidden = false;
+    this.classList.remove("fs-controls-hidden");
+  }
+  _callService(domain, service, data) {
+    if (!this._hass) return;
+    this._hass.callService(domain, service, data).catch(err => console.warn("bosch-camera-card:", domain, service, err));
+  }
+  _callServiceWithRollback(entityId, prevState, targetState, domain, service, data) {
+    if (!this._hass) return;
+    this._setOptimistic(entityId, "pending");
+    this._hass.callService(domain, service, data).then(() => {
+      this._setOptimistic(entityId, targetState);
+    }).catch(err => {
+      console.warn("bosch-camera-card:", domain, service, err);
+      this._setOptimistic(entityId, prevState);
+      this._flashEntityError(entityId);
+    });
+  }
+  _flashEntityError(entityId) {
+    const domId = this._entityToBtnId[entityId];
+    if (!domId) {
+      this._update();
+      return;
+    }
+    const el = this.shadowRoot.getElementById(domId);
+    if (!el) return;
+    el.classList.add("error");
+    if (this._errorFeedbackTimers[entityId]) clearTimeout(this._errorFeedbackTimers[entityId]);
+    this._errorFeedbackTimers[entityId] = setTimeout(() => {
+      el.classList.remove("error");
+      delete this._errorFeedbackTimers[entityId];
+    }, 2e3);
+  }
+  _formatDatetime(d) {
+    const p = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  static getStubConfig(hass) {
+    const states = hass && hass.states || {};
+    const ids = Object.keys(states).filter(id => id.startsWith("camera."));
+    const bosch = ids.find(id => id.includes("bosch") || (states[id]?.attributes?.brand || "").toLowerCase().includes("bosch"));
+    return {
+      camera_entity: bosch || ids[0] || ""
+    };
+  }
+  static getConfigElement() {
+    return document.createElement("bosch-camera-card-editor");
+  }
+  getCardSize() {
+    return 4;
+  }
+}
+
+customElements.define("bosch-camera-card", BoschCameraCard);
+
+class BoschCameraCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config || {};
+    if (this.shadowRoot) this._render();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    if (!this.shadowRoot) return;
+    const sig = cardLang(hass) + "|" + this._bosch_cameras().join(",");
+    if (sig === this._lastHassSig) return;
+    this._lastHassSig = sig;
+    this._render();
+  }
+  get hass() {
+    return this._hass;
+  }
+  _t(key) {
+    return cardT(this._hass, key);
+  }
+  connectedCallback() {
+    this._render();
+  }
+  _bosch_cameras() {
+    const out = [];
+    const states = this._hass?.states || {};
+    for (const id of Object.keys(states)) {
+      if (id.startsWith("camera.") && (id.includes("bosch") || (states[id]?.attributes?.brand || "").toLowerCase().includes("bosch"))) {
+        out.push(id);
+      }
+    }
+    if (out.length === 0) {
+      for (const id of Object.keys(states)) {
+        if (id.startsWith("camera.")) out.push(id);
+      }
+    }
+    return out.sort();
+  }
+  _render() {
+    if (!this.shadowRoot) this.attachShadow({
+      mode: "open"
+    });
+    const cfg = this._config || {};
+    const cams = this._bosch_cameras();
+    if (cfg.camera_entity && !cams.includes(cfg.camera_entity)) cams.push(cfg.camera_entity);
+    cams.sort();
+    const sel = (label, name, val, opts) => `\n      <label>${label}\n        <select name="${name}">\n          ${opts.map(([v, l]) => `<option value="${v}" ${val === v ? "selected" : ""}>${l}</option>`).join("")}\n        </select>\n      </label>`;
+    const chk = (key, label, def) => `\n      <label class="inline">\n        <input type="checkbox" name="${key}" ${cfg[key] ?? def ? "checked" : ""} />\n        <span>${label}</span>\n      </label>`;
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .row { display: flex; flex-direction: column; gap: 14px; padding: 18px; }\n        label {\n          font-size: 14px; color: var(--primary-text-color);\n          display: flex; flex-direction: column; gap: 4px;\n        }\n        label.inline { flex-direction: row; align-items: center; gap: 10px; }\n        select, input[type="text"] {\n          padding: 9px 10px; border-radius: 6px;\n          border: 1px solid var(--divider-color, rgba(120,120,128,.2));\n          background: var(--card-background-color, #fff);\n          color: var(--primary-text-color, #1c1c1e);\n          font: inherit; font-size: 14px;\n        }\n        select:focus, input:focus { outline: 2px solid #0a84ff; outline-offset: 1px; }\n        input[type="checkbox"] { width: 18px; height: 18px; accent-color: #0a84ff; }\n        .hint {\n          font-size: 12px; color: var(--secondary-text-color, #6c6c70);\n          margin-top: 2px;\n        }\n        h4 {\n          margin: 12px 0 0; font-size: 11px; font-weight: 700;\n          letter-spacing: .08em; text-transform: uppercase;\n          color: var(--secondary-text-color, #6c6c70);\n        }\n        .help {\n          font-size: 12px;\n          color: var(--secondary-text-color, #6c6c70);\n          background: var(--secondary-background-color, rgba(120,120,128,.08));\n          padding: 8px 10px; border-radius: 6px;\n        }\n      </style>\n      <div class="row">\n        ${cams.length === 0 ? `\n          <div class="help">${this._t("ed_no_cams")}</div>\n        ` : ""}\n        <label>${this._t("ed_cam_entity")}\n          <select name="camera_entity">\n            ${cams.length ? cams.map(id => `<option value="${id}" ${cfg.camera_entity === id ? "selected" : ""}>${id}</option>`).join("") : `<option value="${cfg.camera_entity || ""}" selected>${cfg.camera_entity || this._t("ed_not_set")}</option>`}\n          </select>\n          <span class="hint">${this._t("ed_cam_entity_hint")}</span>\n        </label>\n        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt_single")}</small>\n          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_single")}" />\n        </label>\n\n        <h4>${this._t("ed_h_design")}</h4>\n        ${chk("apple_style", this._t("ed_apple_style"), true)}\n        ${sel(this._t("ed_theme"), "theme", cfg.theme || "ios", [ [ "auto", this._t("ed_theme_auto") ], [ "ios", this._t("ed_theme_ios") ], [ "android", this._t("ed_theme_android") ] ])}\n        ${sel(this._t("ed_mode"), "modus", cfg.mode || "auto", [ [ "auto", this._t("ed_mode_auto") ], [ "day", this._t("ed_mode_day") ], [ "night", this._t("ed_mode_night") ] ])}\n        ${chk("minimal", this._t("ed_minimal_single"), false)}\n        ${chk("compact", this._t("ed_compact_single"), false)}\n        ${chk("show_title", this._t("ed_show_title"), true)}\n        ${chk("show_last_event", this._t("ed_show_last_event"), true)}\n        ${chk("show_audio", this._t("ed_show_audio"), true)}\n        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}\n        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}\n        ${sel(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [ [ "auto", this._t("ed_pan_overlay_auto") ], [ "always", this._t("ed_pan_overlay_always") ], [ "never", this._t("ed_pan_overlay_never") ] ])}\n\n        <h4>${this._t("ed_h_autoplay")}</h4>\n        ${sel(this._t("ed_h_autoplay"), "autoplay", cfg.auto_play || "", [ [ "", this._t("ed_autoplay_default") ], [ "lan", this._t("ed_autoplay_lan") ], [ "always", this._t("ed_autoplay_always") ], [ "never", this._t("ed_autoplay_never") ] ])}\n        <span class="hint">${this._t("ed_autoplay_hint")}</span>\n\n        <h4>${this._t("ed_h_advanced")}</h4>\n        ${chk("show_motion_zones", this._t("ed_show_motion_zones"), false)}\n        ${chk("fullscreen_auto_hide_controls", this._t("ed_fs_auto_hide"), true)}\n        ${chk("motion_overlay", this._t("ed_motion_overlay"), false)}\n        ${chk("motion_overlay_objects", this._t("ed_motion_objects"), false)}\n        <label>${this._t("ed_motion_zones")}\n          <input type="text" name="motion_ignore_zones" value="${(cfg.motion_overlay_ignore_zones || []).map(z => [ z.x, z.y, z.w, z.h ].map(v => Math.round(v * 100)).join(",")).join("; ")}" placeholder="0,0,20,10; 60,40,40,30" />\n        </label>\n        <label>${this._t("ed_border_radius")}\n          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />\n        </label>\n        <label>${this._t("ed_box_shadow")}\n          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />\n        </label>\n        ${chk("disable_webrtc", this._t("ed_disable_webrtc"), false)}\n        <span class="hint">${this._t("ed_disable_webrtc_hint")}</span>\n        <label>${this._t("ed_webrtc_timeout")}\n          <input type="number" name="webrtc_connect_timeout_ms" min="1000" max="30000" step="500" value="${clampWebrtcTimeoutMsForDisplay(cfg.webrtc_connect_timeout_ms)}" />\n          <span class="hint">${this._t("ed_webrtc_timeout_hint")}</span>\n        </label>\n      </div>`;
+    const root = this.shadowRoot;
+    const fire = patch => {
+      this._config = {
+        ...this._config,
+        ...patch
+      };
+      this.dispatchEvent(new CustomEvent("config-changed", {
+        detail: {
+          config: this._config
+        },
+        bubbles: true,
+        composed: true
+      }));
+    };
+    root.querySelector('select[name="camera_entity"]').addEventListener("change", e => fire({
+      camera_entity: e.target.value
+    }));
+    root.querySelector('input[name="title"]').addEventListener("change", e => fire({
+      title: e.target.value || undefined
+    }));
+    root.querySelector('input[name="apple_style"]').addEventListener("change", e => fire({
+      apple_style: e.target.checked
+    }));
+    root.querySelector('select[name="theme"]').addEventListener("change", e => fire({
+      theme: e.target.value
+    }));
+    root.querySelector('select[name="modus"]').addEventListener("change", e => fire({
+      mode: e.target.value
+    }));
+    root.querySelector('input[name="minimal"]').addEventListener("change", e => fire({
+      minimal: e.target.checked
+    }));
+    root.querySelector('input[name="compact"]').addEventListener("change", e => fire({
+      compact: e.target.checked
+    }));
+    root.querySelector('input[name="show_title"]').addEventListener("change", e => fire({
+      show_title: e.target.checked
+    }));
+    root.querySelector('input[name="show_last_event"]').addEventListener("change", e => fire({
+      show_last_event: e.target.checked
+    }));
+    root.querySelector('input[name="show_audio"]')?.addEventListener("change", e => fire({
+      show_audio: e.target.checked
+    }));
+    root.querySelector('input[name="use_card_audio_settings"]')?.addEventListener("change", e => fire({
+      use_card_audio_settings: e.target.checked
+    }));
+    root.querySelector('input[name="hide_redundant_privacy"]')?.addEventListener("change", e => fire({
+      hide_redundant_privacy: e.target.checked
+    }));
+    root.querySelector('select[name="pan_overlay"]')?.addEventListener("change", e => fire({
+      pan_overlay: e.target.value
+    }));
+    root.querySelector('input[name="show_motion_zones"]')?.addEventListener("change", e => fire({
+      show_motion_zones: e.target.checked
+    }));
+    root.querySelector('input[name="fullscreen_auto_hide_controls"]')?.addEventListener("change", e => fire({
+      fullscreen_auto_hide_controls: e.target.checked
+    }));
+    root.querySelector('input[name="motion_overlay"]')?.addEventListener("change", e => fire({
+      motion_overlay: e.target.checked
+    }));
+    root.querySelector('input[name="motion_ignore_zones"]')?.addEventListener("change", e => {
+      const zones = e.target.value.split(";").map(p => p.split(",").map(v => Number(v.trim()) / 100)).filter(a => a.length === 4 && a.every(n => Number.isFinite(n) && n >= 0 && n <= 1) && a[2] > 0 && a[3] > 0).map(([x, y, w, h]) => ({
+        x: x,
+        y: y,
+        w: w,
+        h: h
+      }));
+      fire({
+        motion_overlay_ignore_zones: zones.length ? zones : undefined
+      });
+    });
+    root.querySelector('input[name="motion_overlay_objects"]')?.addEventListener("change", e => fire({
+      motion_overlay_objects: e.target.checked
+    }));
+    root.querySelector('input[name="border_radius"]')?.addEventListener("change", e => fire({
+      border_radius: e.target.value || undefined
+    }));
+    root.querySelector('input[name="box_shadow"]')?.addEventListener("change", e => fire({
+      box_shadow: e.target.value || undefined
+    }));
+    root.querySelector('input[name="disable_webrtc"]')?.addEventListener("change", e => fire({
+      disable_webrtc: e.target.checked
+    }));
+    root.querySelector('input[name="webrtc_connect_timeout_ms"]')?.addEventListener("change", e => {
+      const n = parseInt(e.target.value, 10);
+      fire({
+        webrtc_connect_timeout_ms: Number.isFinite(n) ? n : undefined
+      });
+    });
+    root.querySelector('select[name="autoplay"]').addEventListener("change", e => fire({
+      auto_play: e.target.value || undefined
+    }));
+  }
+}
+
+customElements.define("bosch-camera-card-editor", BoschCameraCardEditor);
+
+window.customCards = window.customCards || [];
+
+const _isBoschCameraEntity = (hass, entityId) => {
+  if (!entityId || entityId.slice(0, 7) !== "camera.") return false;
+  const st = hass && hass.states && hass.states[entityId];
+  return !!(st && st.attributes && st.attributes.brand === "Bosch");
+};
+
+window.customCards.push({
+  type: "bosch-camera-card",
+  name: "Bosch Camera Card",
+  description: "Bosch Smart Home cameras with streaming state, loading indicator and controls",
+  preview: false,
+  getEntitySuggestion: (hass, entityId) => _isBoschCameraEntity(hass, entityId) ? {
+    config: {
+      type: "custom:bosch-camera-card",
+      camera_entity: entityId
+    }
+  } : null
+});
+
+class BoschCameraOverviewCard extends HTMLElement {
+  _t(key) {
+    return cardT(this._hass, key);
+  }
+  constructor() {
+    super();
+    this.attachShadow({
+      mode: "open"
+    });
+    this._cards = new Map;
+    this._lastSig = "";
+    this._lastKnownNames = new Map;
+    this._config = null;
+    this._hass = null;
+    this._rendered = false;
+    this._emptyNode = null;
+  }
+  setConfig(config) {
+    this._config = {
+      online_offline_view: config.online_offline_view !== false,
+      title: config.title || "",
+      min_width: config.min_width || "650px",
+      gap: config.gap || "12px",
+      columns: config.columns ?? "auto",
+      exclude: Array.isArray(config.exclude) ? config.exclude : [],
+      include: Array.isArray(config.include) ? config.include : [],
+      use_bosch_sort: config.use_bosch_sort === true,
+      minimal: config.minimal !== false,
+      apple_style: config.apple_style !== false,
+      theme: [ "ios", "android", "auto" ].includes(config.theme) ? config.theme : "ios",
+      mode: [ "auto", "day", "night" ].includes(config.mode) ? config.mode : "auto",
+      compact: config.compact === true,
+      show_title: config.show_title !== false,
+      show_last_event: config.show_last_event !== false,
+      show_audio: config.show_audio !== false,
+      pan_overlay: [ "auto", "always", "never" ].includes(config.pan_overlay) ? config.pan_overlay : "auto",
+      hide_redundant_privacy: config.hide_redundant_privacy !== false,
+      use_card_audio_settings: config.use_card_audio_settings === true,
+      disable_webrtc: config.disable_webrtc === true,
+      webrtc_connect_timeout_ms: typeof config.webrtc_connect_timeout_ms === "number" ? config.webrtc_connect_timeout_ms : undefined,
+      border_radius: typeof config.border_radius === "string" ? config.border_radius : null,
+      box_shadow: typeof config.box_shadow === "string" ? config.box_shadow : null,
+      overrides: config.overrides && typeof config.overrides === "object" ? config.overrides : {},
+      card_defaults: config.card_defaults && typeof config.card_defaults === "object" ? config.card_defaults : {}
+    };
+    if (this._config.minimal) {
+      this._config.card_defaults = {
+        ...this._config.card_defaults,
+        minimal: true
+      };
+    }
+    if (this._config.border_radius) this.style.setProperty("--bosch-card-radius", this._config.border_radius); else this.style.removeProperty("--bosch-card-radius");
+    if (this._config.box_shadow) this.style.setProperty("--bosch-card-shadow", this._config.box_shadow); else this.style.removeProperty("--bosch-card-shadow");
+    this._config.card_defaults = {
+      apple_style: this._config.apple_style,
+      theme: this._config.theme,
+      mode: this._config.mode,
+      compact: this._config.compact,
+      show_title: this._config.show_title,
+      show_last_event: this._config.show_last_event,
+      show_audio: this._config.show_audio,
+      pan_overlay: this._config.pan_overlay,
+      hide_redundant_privacy: this._config.hide_redundant_privacy,
+      use_card_audio_settings: this._config.use_card_audio_settings,
+      disable_webrtc: this._config.disable_webrtc,
+      webrtc_connect_timeout_ms: this._config.webrtc_connect_timeout_ms,
+      ...this._config.card_defaults
+    };
+    this.classList.toggle("apple-style", this._config.apple_style);
+    this._rendered = false;
+    this._lastSig = "";
+    this._cards.clear();
+    if (this.shadowRoot) this.shadowRoot.innerHTML = "";
+    if (this._hass) this._update();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    this._update();
+  }
+  get hass() {
+    return this._hass;
+  }
+  _renderShell() {
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host { display: block; }\n        .bco-wrap { display: block; padding: 4px; overflow: visible; }\n        .bco-header {\n          display: flex; align-items: center; justify-content: space-between;\n          padding: 0 4px 8px; font-size: 14px; font-weight: 500;\n          color: var(--primary-text-color);\n        }\n        .bco-count {\n          font-size: 12px; font-weight: 400;\n          color: var(--secondary-text-color);\n        }\n        .bco-grid, .bco-lan-tiles {\n          display: grid;\n          gap: ${this._config.gap};\n          grid-template-columns: ${this._config.columns === "auto" || !this._config.columns ? `repeat(auto-fill, minmax(min(${this._config.min_width}, 100%), 1fr))` : `repeat(${Number(this._config.columns)}, minmax(0, 1fr))`};\n        }\n        @media (max-width: 640px) {\n          .bco-grid, .bco-lan-tiles { grid-template-columns: 1fr !important; }\n        }\n        /* Phones in landscape (e.g. iPhone Pro Max ≈ 932 × 430) are wider\n           than 640px but the viewport height collapses below ~500px — at\n           that aspect a 2-column tile grid leaves each tile ~12 lines tall\n           which is unusable. Force single column when any of:\n             - touch device up to small-tablet width (1024px), or\n             - landscape with very short viewport (any device).\n           Desktop browsers resized narrow keep their multi-column layout. */\n        @media (pointer: coarse) and (max-width: 1024px) {\n          .bco-grid, .bco-lan-tiles { grid-template-columns: 1fr !important; }\n        }\n        @media (orientation: landscape) and (max-height: 500px) {\n          .bco-grid, .bco-lan-tiles { grid-template-columns: 1fr !important; }\n        }\n        .bco-cell {\n          min-width: 0;\n          position: relative;\n          border-radius: 14px;\n          border: 2px solid transparent;\n          overflow: hidden;\n          transition: border-color 0.2s ease;\n        }\n        .bco-cell[data-tier="0"] { border-color: rgba(76, 175, 80, 0.55); }\n        .bco-cell[data-tier="1"] { border-color: rgba(255, 152, 0, 0.55); }\n        .bco-cell[data-tier="2"] { border-color: rgba(120, 120, 120, 0.35); opacity: 0.92; }\n        /* Apple-style: drop the saturated tier borders + opacity dim. Tier\n           info already shows in the inner card's glass status dot + badge,\n           so the wrapping border just adds visual noise that clashes with\n           the soft Apple aesthetic. The cell still gets a generous border\n           radius so corner cropping matches the inner card. */\n        :host(.apple-style) .bco-cell,\n        :host(.apple-style) .bco-cell[data-tier="0"],\n        :host(.apple-style) .bco-cell[data-tier="1"],\n        :host(.apple-style) .bco-cell[data-tier="2"] {\n          border: 0;\n          border-radius: var(--bosch-card-radius, var(--ha-card-border-radius, 22px));\n          /* Shadow lives on the CELL, not the inner card: the cell's\n             overflow:hidden (for corner-cropping) would clip the inner card's\n             box-shadow, so a themed ha-card-box-shadow never showed on overview\n             tiles (issue #21, RkcCorian). An element's own outset shadow is not\n             clipped by its own overflow:hidden. Default none = unchanged look. */\n          box-shadow: var(--bosch-card-shadow, var(--ha-card-box-shadow, none));\n          opacity: 1;\n          /* SHADOW-ONLY hover affordance: on pointer devices the tile gains a\n             soft elevation (no scale, no translate), so desktop users still get a\n             clear "this tile is tappable" cue. No geometry change means no\n             sub-pixel edge shimmer (#15, RkcCorian) and — crucially — no\n             transformed ancestor that would become the containing block for the\n             fullscreen/zoom overlay (the scale variant's trade-off, now removed).\n             Touch devices ignore :hover, so mobile is unchanged. */\n          transition: box-shadow .18s ease;\n        }\n        @media (hover: hover) and (pointer: fine) {\n          :host(.apple-style) .bco-cell:hover {\n            /* Plain elevation (not layered on var(...)): a 'none, shadow' list\n               is invalid CSS and would drop the whole rule. The themed base\n               shadow shows at rest; the hover replaces it with the bigger lift. */\n            box-shadow: 0 6px 18px rgba(0,0,0,.32);\n            z-index: 1;\n          }\n        }\n        .bco-cell bosch-camera-card { display: block; min-width: 0; }\n        .bco-section {\n          grid-column: 1 / -1;\n          font-size: 11px;\n          font-weight: 600;\n          letter-spacing: 0.08em;\n          text-transform: uppercase;\n          color: var(--secondary-text-color);\n          padding: 8px 4px 2px;\n          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.1));\n          margin-top: 4px;\n        }\n        .bco-section.first { border-top: none; margin-top: 0; padding-top: 2px; }\n        .bco-empty {\n          grid-column: 1 / -1;\n          padding: 24px 12px;\n          text-align: center;\n          color: var(--secondary-text-color);\n          font-size: 14px;\n        }\n        .bco-empty.bco-empty-outage {\n          padding: 24px 16px;\n          color: var(--primary-text-color);\n        }\n        .bco-empty-title {\n          font-size: 15px;\n          font-weight: 500;\n          margin-bottom: 6px;\n        }\n        .bco-empty-sub {\n          font-size: 13px;\n          color: var(--secondary-text-color);\n          margin-top: 4px;\n        }\n        .bco-empty-link {\n          display: inline-block;\n          margin-top: 10px;\n          color: var(--primary-color);\n          text-decoration: none;\n          font-size: 13px;\n        }\n        .bco-empty-link:hover { text-decoration: underline; }\n        .bco-banner {\n          position: relative;\n          display: flex;\n          flex-direction: column;\n          gap: 4px;\n          padding: 10px 40px 10px 12px;\n          margin-bottom: 8px;\n          border-radius: 8px;\n          background: var(--warning-color, #ffc107);\n          color: #000;\n          font-size: 13px;\n          line-height: 1.35;\n        }\n        .bco-banner-close {\n          position: absolute; top: 6px; inset-inline-end: 8px;\n          /* 26px ≥ WCAG 2.5.8 AA 24px tap-target floor; RTL-safe via logical\n             inset-inline-end; touch-action avoids the iOS synthetic-click delay. */\n          width: 26px; height: 26px; padding: 0;\n          display: flex; align-items: center; justify-content: center;\n          border: none; border-radius: 50%; cursor: pointer;\n          background: rgba(0,0,0,.20); color: inherit;\n          font-size: 18px; line-height: 1; opacity: .85;\n          touch-action: manipulation;\n        }\n        .bco-banner-close:hover { opacity: 1; background: rgba(0,0,0,.32); }\n        .bco-banner.bco-banner-info {\n          background: var(--info-color, var(--primary-color));\n          color: var(--text-primary-color, #fff);\n        }\n        .bco-banner-title { font-weight: 600; }\n        .bco-banner a {\n          color: inherit;\n          text-decoration: underline;\n          font-size: 12px;\n        }\n        /* Column width/gap now shared with .bco-grid above — LAN-fallback\n           tiles render at the same size as the regular camera tiles and are\n           sorted after them (see the template's slot order + the\n           "we had a sort rule" tier convention: live -> privacy -> offline). */\n        #bco-lan-tiles-slot:not(:empty) { margin-top: 10px; }\n        .bco-lan-tile {\n          display: flex;\n          flex-direction: column;\n          gap: 6px;\n          padding: 10px 12px;\n          border-radius: 8px;\n          background: var(--card-background-color, #1c1c1c);\n          border: 1px solid var(--divider-color, rgba(255,255,255,0.1));\n          font-size: 13px;\n        }\n        .bco-lan-tile-header {\n          display: flex;\n          align-items: center;\n          gap: 8px;\n          font-weight: 600;\n        }\n        .bco-lan-dot {\n          width: 10px;\n          height: 10px;\n          border-radius: 50%;\n          background: var(--state-inactive-color, #888);\n          flex-shrink: 0;\n        }\n        .bco-lan-dot.bco-lan-on { background: var(--success-color, #4caf50); }\n        .bco-lan-dot.bco-lan-off { background: var(--error-color, #f44336); }\n        .bco-lan-controls {\n          display: flex;\n          gap: 6px;\n          flex-wrap: wrap;\n        }\n        .bco-lan-btn {\n          flex: 1 1 auto;\n          padding: 6px 10px;\n          border-radius: 6px;\n          border: 1px solid var(--divider-color, rgba(255,255,255,0.1));\n          background: var(--secondary-background-color, #2c2c2c);\n          color: var(--primary-text-color, #fff);\n          font-size: 12px;\n          cursor: pointer;\n          white-space: nowrap;\n        }\n        .bco-lan-btn:hover:not(:disabled) {\n          background: var(--primary-color);\n          color: var(--text-primary-color, #fff);\n        }\n        .bco-lan-btn:disabled {\n          opacity: 0.4;\n          cursor: not-allowed;\n        }\n        .bco-lan-btn.bco-lan-btn-on {\n          background: var(--state-active-color, var(--primary-color));\n          color: var(--text-primary-color, #fff);\n        }\n        bosch-camera-card { display: block; }\n        @media (max-width: 480px) {\n          .bco-grid { gap: 8px; }\n        }\n      </style>\n      <div class="bco-wrap">\n        ${this._config.title ? `\n          <div class="bco-header">\n            <span>${this._escape(this._config.title)}</span>\n            <span class="bco-count" id="bco-count"></span>\n          </div>` : ""}\n        <div id="bco-banner-slot"></div>\n        <div class="bco-grid" id="bco-grid"></div>\n        <div id="bco-lan-tiles-slot"></div>\n      </div>\n    `;
+    this._grid = this.shadowRoot.getElementById("bco-grid");
+    this._countEl = this.shadowRoot.getElementById("bco-count");
+    this._bannerSlot = this.shadowRoot.getElementById("bco-banner-slot");
+    this._lanTilesSlot = this.shadowRoot.getElementById("bco-lan-tiles-slot");
+    this._rendered = true;
+  }
+  _escape(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    }[c]));
+  }
+  _renderLanTiles(coveredEntityIds = new Set) {
+    if (!this._lanTilesSlot) return;
+    const states = this._hass?.states || {};
+    const unavailableBosch = Object.keys(states).filter(eid => eid.startsWith("camera.bosch_") && states[eid]?.state === "unavailable" && !coveredEntityIds.has(eid));
+    if (unavailableBosch.length === 0) {
+      if (this._lanTilesSlot.firstChild) this._lanTilesSlot.innerHTML = "";
+      this._lanTilesSlot.dataset.sig = "";
+      return;
+    }
+    const tiles = [];
+    for (const camEid of unavailableBosch) {
+      const slug = camEid.replace(/^camera\.bosch_/, "");
+      const camFriendly = states[camEid]?.attributes?.friendly_name || `Bosch ${slug}`;
+      const findByFriendlyPrefix = (domain, suffix) => {
+        const direct = states[`${domain}.bosch_${slug}${suffix.entityId}`];
+        if (direct) return direct;
+        const target = `${camFriendly} ${suffix.friendly}`.toLowerCase();
+        return Object.values(states).find(s => {
+          if (!s.entity_id.startsWith(`${domain}.`)) return false;
+          const fn = (s.attributes?.friendly_name || "").toLowerCase();
+          return fn === target || fn.startsWith(target);
+        });
+      };
+      const lan = findByFriendlyPrefix("binary_sensor", {
+        entityId: "_lan_reachable",
+        friendly: "LAN"
+      });
+      const privacy = findByFriendlyPrefix("switch", {
+        entityId: "_privacy_mode",
+        friendly: "Privacy Mode"
+      });
+      const light = findByFriendlyPrefix("light", {
+        entityId: "_front_light",
+        friendly: "Front Light"
+      });
+      tiles.push({
+        camEid: camEid,
+        slug: slug,
+        friendly: camFriendly,
+        lan: lan,
+        privacy: privacy,
+        light: light
+      });
+    }
+    const sig = tiles.map(t => `${t.slug}|${t.lan?.state}|${t.privacy?.state}|${t.privacy?.attributes?.icon}|${t.light?.state}`).join("#");
+    if (this._lanTilesSlot.dataset.sig === sig) return;
+    this._lanTilesSlot.dataset.sig = sig;
+    this._lanTilesSlot.innerHTML = "";
+    const grid = document.createElement("div");
+    grid.className = "bco-lan-tiles";
+    for (const t of tiles) {
+      const tile = document.createElement("div");
+      tile.className = "bco-lan-tile";
+      const header = document.createElement("div");
+      header.className = "bco-lan-tile-header";
+      const dot = document.createElement("span");
+      dot.className = "bco-lan-dot";
+      const lanState = t.lan?.state;
+      if (lanState === "on") dot.classList.add("bco-lan-on"); else if (lanState === "off") dot.classList.add("bco-lan-off");
+      header.appendChild(dot);
+      const nameEl = document.createElement("span");
+      nameEl.textContent = t.friendly.replace(/^Bosch\s+/, "");
+      header.appendChild(nameEl);
+      tile.appendChild(header);
+      const status = document.createElement("div");
+      status.style.cssText = "font-size:11px;color:var(--secondary-text-color);";
+      status.textContent = lanState === "on" ? this._t("lan_reachable") : lanState === "off" ? this._t("lan_not_reachable") : this._t("lan_status_unknown");
+      tile.appendChild(status);
+      const controls = document.createElement("div");
+      controls.className = "bco-lan-controls";
+      const addBtn = (label, entity, domain) => {
+        const btn = document.createElement("button");
+        btn.className = "bco-lan-btn";
+        btn.type = "button";
+        const reachable = lanState === "on";
+        const entOk = entity && entity.state !== "unavailable" && entity.state !== "unknown";
+        const isOn = entity && entity.state === "on";
+        if (isOn) btn.classList.add("bco-lan-btn-on");
+        btn.disabled = !entOk || !reachable;
+        btn.title = !reachable ? this._t("lan_cam_not_reachable") : !entOk ? this._t("lan_status_unknown_cloud") : this._t(isOn ? "lan_turn_off_title" : "lan_turn_on_title").replace("{label}", label);
+        btn.textContent = `${label}${isOn ? " " + this._t("state_on_short") : ""}`;
+        if (entity) {
+          btn.addEventListener("click", () => {
+            this._hass.callService(domain, "toggle", {
+              entity_id: entity.entity_id
+            });
+          });
+        }
+        controls.appendChild(btn);
+      };
+      addBtn(this._t("privacy_short"), t.privacy, "switch");
+      if (t.light) addBtn(this._t("pill_light_title"), t.light, "light");
+      tile.appendChild(controls);
+      grid.appendChild(tile);
+    }
+    this._lanTilesSlot.appendChild(grid);
+  }
+  _renderMaintenanceBanner() {
+    if (!this._bannerSlot) return;
+    const states = this._hass?.states || {};
+    const maint = Object.values(states).find(s => {
+      const src = s?.attributes?.source;
+      return typeof src === "string" && /^(rss|html):/.test(src);
+    });
+    const mState = maint?.state || "";
+    const mAttr = maint?.attributes || {};
+    const show = (mState === "active" || mState === "scheduled") && mAttr.camera_relevant;
+    if (!show) {
+      if (this._bannerSlot.firstChild) this._bannerSlot.innerHTML = "";
+      this._bannerSlot.dataset.sig = "";
+      return;
+    }
+    const isActive = mState === "active";
+    const win = this._formatWindow(mAttr.scheduled_start, mAttr.scheduled_end);
+    const sig = `${mState}|${String(mAttr.title ?? "")}|${win}`;
+    const dismissKey = `${String(mAttr.title ?? "")}|${mAttr.scheduled_start ?? ""}|${mAttr.scheduled_end ?? ""}`;
+    let dismissed = "";
+    try {
+      dismissed = localStorage.getItem("bosch-maint-dismissed") || "";
+    } catch (_) {}
+    if (dismissed === dismissKey) {
+      if (this._bannerSlot.firstChild) this._bannerSlot.innerHTML = "";
+      this._bannerSlot.dataset.sig = "dismissed:" + dismissKey;
+      return;
+    }
+    if (this._bannerSlot.dataset.sig === sig) return;
+    this._bannerSlot.dataset.sig = sig;
+    this._bannerSlot.innerHTML = "";
+    const banner = document.createElement("div");
+    banner.className = isActive ? "bco-banner" : "bco-banner bco-banner-info";
+    const t = document.createElement("div");
+    t.className = "bco-banner-title";
+    t.textContent = isActive ? this._t("maint_title") : this._t("maint_title_planned");
+    const sub = document.createElement("div");
+    sub.textContent = win ? `${mAttr.title || this._t("maint_notice")} · ${win}` : mAttr.title || this._t("maint_notice");
+    banner.appendChild(t);
+    banner.appendChild(sub);
+    const close = document.createElement("button");
+    close.className = "bco-banner-close";
+    close.type = "button";
+    close.setAttribute("aria-label", this._t("maint_dismiss"));
+    close.title = this._t("maint_dismiss");
+    close.textContent = "×";
+    close.addEventListener("click", () => {
+      try {
+        localStorage.setItem("bosch-maint-dismissed", dismissKey);
+      } catch (_) {}
+      this._bannerSlot.innerHTML = "";
+      this._bannerSlot.dataset.sig = "dismissed:" + dismissKey;
+    });
+    banner.appendChild(close);
+    if (isActive) {
+      const note = document.createElement("div");
+      note.textContent = this._t("maint_body");
+      banner.appendChild(note);
+    }
+    if (mAttr.link && /^https:\/\//i.test(mAttr.link)) {
+      const a = document.createElement("a");
+      a.href = mAttr.link;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = this._t("maint_details");
+      banner.appendChild(a);
+    }
+    this._bannerSlot.appendChild(banner);
+  }
+  _formatWindow(startIso, endIso) {
+    if (!startIso || !endIso) return "";
+    try {
+      const s = new Date(startIso);
+      const e = new Date(endIso);
+      if (isNaN(s) || isNaN(e)) return "";
+      const loc = cardLang(this._hass);
+      const date = s.toLocaleDateString(loc, {
+        weekday: "short",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      });
+      const fmt = d => d.toLocaleTimeString(loc, {
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+      return `${date} ${fmt(s)}–${fmt(e)}`;
+    } catch (_) {
+      return "";
+    }
+  }
+  _discover() {
+    if (!this._hass) return [];
+    const states = this._hass.states || {};
+    const explicit = this._config.include.length > 0;
+    const list = [];
+    const candidates = explicit ? this._config.include : Object.keys(states).filter(eid => eid.startsWith("camera."));
+    for (const eid of candidates) {
+      if (this._config.exclude.includes(eid)) continue;
+      const s = states[eid];
+      if (!s) continue;
+      const a = s.attributes || {};
+      if (!explicit && a.brand !== "Bosch" && !eid.startsWith("camera.bosch_")) continue;
+      const status = String(a.status || "").toUpperCase();
+      const online = status === "ONLINE";
+      const base = eid.replace(/^camera\./, "");
+      const privState = states[`switch.${base}_privacy_mode`];
+      const privacyOn = !!(privState && String(privState.state).toLowerCase() === "on");
+      const swState = states[`switch.${base}_live_stream`];
+      const streamingOn = !!(swState && String(swState.state).toLowerCase() === "on");
+      const tier = !online ? 2 : privacyOn ? 1 : 0;
+      const rawPrio = a.bosch_priority;
+      const priority = typeof rawPrio === "number" && isFinite(rawPrio) ? rawPrio : null;
+      if (a.friendly_name) this._lastKnownNames.set(eid, a.friendly_name);
+      list.push({
+        entity_id: eid,
+        name: a.friendly_name || this._lastKnownNames.get(eid) || eid,
+        online: online,
+        privacyOn: privacyOn,
+        streamingOn: streamingOn,
+        tier: tier,
+        priority: priority,
+        status: status || "UNKNOWN",
+        model: a.model_name || ""
+      });
+    }
+    const useBosch = this._config.use_bosch_sort;
+    list.sort((a, b) => {
+      if (a.tier !== b.tier) return a.tier - b.tier;
+      if (a.streamingOn !== b.streamingOn) return a.streamingOn ? -1 : 1;
+      if (useBosch) {
+        const aHas = a.priority !== null;
+        const bHas = b.priority !== null;
+        if (aHas && bHas && a.priority !== b.priority) return a.priority - b.priority;
+        if (aHas !== bHas) return aHas ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name, "de");
+    });
+    return list;
+  }
+  _update() {
+    if (!this._hass || !this._config) return;
+    if (!this._rendered) this._renderShell();
+    this._renderMaintenanceBanner();
+    const discovered = this._discover();
+    let cams = discovered;
+    if (!this._config.online_offline_view) cams = cams.filter(c => c.online);
+    this._renderLanTiles(new Set(discovered.map(c => c.entity_id)));
+    const sig = cams.map(c => `${c.entity_id}:${c.tier}:${c.streamingOn ? "S" : ""}`).join("|");
+    const gridEmpty = this._grid && this._grid.children.length === 0;
+    const needsReorder = sig !== this._lastSig || gridEmpty;
+    this._lastSig = sig;
+    const keep = new Set(cams.map(c => c.entity_id));
+    for (const [eid, el] of [ ...this._cards.entries() ]) {
+      if (!keep.has(eid)) {
+        el.remove();
+        this._cards.delete(eid);
+      }
+    }
+    if (needsReorder) {
+      if (this._emptyNode) {
+        this._emptyNode.remove();
+        this._emptyNode = null;
+      }
+      if (cams.length === 0) {
+        const empty = document.createElement("div");
+        const states = this._hass?.states || {};
+        const unavailableBosch = Object.keys(states).filter(eid => eid.startsWith("camera.bosch_") && states[eid]?.state === "unavailable");
+        if (unavailableBosch.length > 0) {
+          empty.className = "bco-empty bco-empty-outage";
+          const maint = Object.values(states).find(s => {
+            const src = s?.attributes?.source;
+            return typeof src === "string" && /^(rss|html):/.test(src);
+          });
+          const mState = maint?.state || "";
+          const mAttr = maint?.attributes || {};
+          const titleEl = document.createElement("div");
+          titleEl.className = "bco-empty-title";
+          const sub = document.createElement("div");
+          sub.className = "bco-empty-sub";
+          const link = document.createElement("a");
+          link.className = "bco-empty-link";
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          const sub2 = document.createElement("div");
+          sub2.className = "bco-empty-sub";
+          if ((mState === "active" || mState === "scheduled" || mState === "recent") && mAttr.camera_relevant) {
+            titleEl.textContent = mState === "active" ? this._t("maint_title") : mState === "scheduled" ? this._t("maint_title_planned") : this._t("maint_title_recent");
+            const win = this._formatWindow(mAttr.scheduled_start, mAttr.scheduled_end);
+            sub.textContent = win ? `${mAttr.title || this._t("maint_notice")} · ${win}` : mAttr.title || this._t("maint_notice");
+            link.href = mAttr.link && /^https:\/\//i.test(mAttr.link) ? mAttr.link : "https://www.bosch-smarthome.com/service";
+            link.textContent = this._t("maint_details");
+            sub2.textContent = `${unavailableBosch.length} ${unavailableBosch.length === 1 ? this._t("outage_cam_singular") : this._t("outage_cam_plural")} ` + this._t("outage_auto_return_suffix");
+          } else {
+            titleEl.textContent = this._t("outage_cloud_unreachable");
+            sub.textContent = `${unavailableBosch.length} ${unavailableBosch.length === 1 ? this._t("outage_cam_singular") : this._t("outage_cam_plural")} ` + this._t("outage_waiting_for_server");
+            link.href = "https://community.bosch-smarthome.com/t5/wartungsarbeiten/bg-p/Wartungsarbeiten";
+            link.textContent = this._t("maint_check_status");
+            sub2.textContent = this._t("maint_auto_return");
+          }
+          empty.appendChild(titleEl);
+          empty.appendChild(sub);
+          empty.appendChild(link);
+          empty.appendChild(sub2);
+        } else {
+          empty.className = "bco-empty";
+          empty.textContent = this._t("no_bosch_cameras_found");
+        }
+        this._grid.appendChild(empty);
+        this._emptyNode = empty;
+      } else {
+        let _ord = 0;
+        for (const c of cams) {
+          let cell = this._cards.get(c.entity_id);
+          if (!cell) {
+            cell = document.createElement("div");
+            cell.className = "bco-cell";
+            const card = document.createElement("bosch-camera-card");
+            const override = this._config.overrides[c.entity_id] || {};
+            try {
+              card.setConfig({
+                ...this._config.card_defaults,
+                title: c.name.replace(/^Bosch\s+/i, ""),
+                ...override,
+                camera_entity: c.entity_id
+              });
+            } catch (e) {
+              console.error(`bosch-camera-overview-card: setConfig failed for ${c.entity_id}`, e);
+              continue;
+            }
+            cell.appendChild(card);
+            cell._innerCard = card;
+            this._cards.set(c.entity_id, cell);
+          }
+          cell.dataset.tier = String(c.tier);
+          cell.style.order = String(_ord++);
+          if (cell.parentNode !== this._grid) this._grid.appendChild(cell);
+        }
+      }
+    }
+    for (const cell of this._cards.values()) {
+      const inner = cell._innerCard || cell.querySelector?.("bosch-camera-card");
+      if (inner) inner.hass = this._hass;
+    }
+    if (this._countEl) {
+      const live = cams.filter(c => c.tier === 0).length;
+      const priv = cams.filter(c => c.tier === 1).length;
+      const off = cams.filter(c => c.tier === 2).length;
+      const parts = [];
+      if (live) parts.push(`${live} live`);
+      if (priv) parts.push(`${priv} privat`);
+      if (off) parts.push(`${off} offline`);
+      this._countEl.textContent = parts.join(" · ");
+    }
+  }
+  static getStubConfig() {
+    return {
+      online_offline_view: true,
+      title: "Bosch Kameras"
+    };
+  }
+  static getConfigElement() {
+    return document.createElement("bosch-camera-overview-card-editor");
+  }
+  getCardSize() {
+    return Math.max(4, this._cards ? this._cards.size * 3 : 4);
+  }
+}
+
+class BoschCameraOverviewCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config;
+    if (this.shadowRoot) this._render();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    if (!this.shadowRoot) return;
+    const sig = cardLang(hass);
+    if (sig === this._lastHassSig) return;
+    this._lastHassSig = sig;
+    this._render();
+  }
+  get hass() {
+    return this._hass;
+  }
+  _t(key) {
+    return cardT(this._hass, key);
+  }
+  connectedCallback() {
+    this._render();
+  }
+  _render() {
+    if (!this.shadowRoot) this.attachShadow({
+      mode: "open"
+    });
+    const cfg = this._config || {};
+    const sel = v => cfg.columns == v || v === "auto" && (cfg.columns === "auto" || cfg.columns == null) ? "selected" : "";
+    const isAuto = cfg.columns === "auto" || cfg.columns == null;
+    const minW = cfg.min_width || "650px";
+    const minWpx = parseInt(minW) || 650;
+    const seldd = (label, name, val, opts) => `\n      <label>${label}\n        <select name="${name}">\n          ${opts.map(([v, l]) => `<option value="${v}" ${val === v ? "selected" : ""}>${l}</option>`).join("")}\n        </select>\n      </label>`;
+    const chk = (key, label, def) => `\n      <label class="inline">\n        <input type="checkbox" name="${key}" ${cfg[key] ?? def ? "checked" : ""} />\n        <span>${label}</span>\n      </label>`;
+    this.shadowRoot.innerHTML = `\n      <style>\n        .row{display:flex;flex-direction:column;gap:12px;padding:16px}\n        label{font-size:14px;color:var(--primary-text-color);display:flex;flex-direction:column;gap:4px}\n        label.inline{flex-direction:row;align-items:center;gap:10px}\n        select,input[type="text"],input[type="number"]{padding:8px;border-radius:4px;border:1px solid var(--divider-color);\n          background:var(--card-background-color);color:var(--primary-text-color);font-size:14px}\n        input[type="checkbox"]{width:18px;height:18px;accent-color:#0a84ff}\n        .hint{font-size:12px;color:var(--secondary-text-color)}\n        h4{margin:12px 0 0;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--secondary-text-color)}\n        [hidden]{display:none}\n      </style>\n      <div class="row">\n        <label>${this._t("ed_columns")}\n          <select name="columns">\n            <option value="auto" ${sel("auto")}>${this._t("ed_columns_auto")}</option>\n            <option value="1" ${sel(1)}>${this._t("ed_columns_1")}</option>\n            <option value="2" ${sel(2)}>2</option>\n            <option value="3" ${sel(3)}>3</option>\n            <option value="4" ${sel(4)}>4</option>\n          </select>\n        </label>\n        <label id="minw-row" ${isAuto ? "" : "hidden"}>${this._t("ed_breakpoint")}\n          <input type="number" name="min_width" value="${minWpx}" min="200" max="900" step="10" />\n          <span class="hint">${this._t("ed_breakpoint_hint")}</span>\n        </label>\n        <label>${this._t("ed_title")} <small style="color:var(--secondary-text-color)">${this._t("ed_title_opt")}</small>\n          <input type="text" name="title" value="${(cfg.title || "").replace(/"/g, "&quot;")}" placeholder="${this._t("ed_title_ph_overview")}" />\n        </label>\n\n        <h4>${this._t("ed_h_display")}</h4>\n        ${chk("online_offline_view", this._t("ed_show_offline"), true)}\n        ${chk("use_bosch_sort", this._t("ed_bosch_sort"), false)}\n\n        <h4>${this._t("ed_h_design_all")}</h4>\n        ${chk("apple_style", this._t("ed_apple_style"), true)}\n        ${seldd(this._t("ed_theme"), "theme", cfg.theme || "ios", [ [ "auto", this._t("ed_theme_auto") ], [ "ios", this._t("ed_theme_ios") ], [ "android", this._t("ed_theme_android") ] ])}\n        ${seldd(this._t("ed_mode"), "modus", cfg.mode || "auto", [ [ "auto", this._t("ed_mode_auto") ], [ "day", this._t("ed_mode_day") ], [ "night", this._t("ed_mode_night") ] ])}\n        ${chk("compact", this._t("ed_compact_overview"), false)}\n        ${chk("minimal", this._t("ed_minimal_overview"), true)}\n        ${chk("show_title", this._t("ed_show_title"), true)}\n        ${chk("show_last_event", this._t("ed_show_last_event"), true)}\n        ${chk("show_audio", this._t("ed_show_audio"), true)}\n        ${chk("use_card_audio_settings", this._t("ed_use_card_audio"), false)}\n        ${chk("hide_redundant_privacy", this._t("ed_hide_redundant_privacy"), true)}\n        ${seldd(this._t("ed_pan_overlay"), "pan_overlay", cfg.pan_overlay || "auto", [ [ "auto", this._t("ed_pan_overlay_auto") ], [ "always", this._t("ed_pan_overlay_always") ], [ "never", this._t("ed_pan_overlay_never") ] ])}\n\n        <h4>${this._t("ed_h_advanced")}</h4>\n        <label>${this._t("ed_border_radius")}\n          <input type="text" name="border_radius" value="${(cfg.border_radius || "").replace(/"/g, "&quot;")}" placeholder="16px" />\n        </label>\n        <label>${this._t("ed_box_shadow")}\n          <input type="text" name="box_shadow" value="${(cfg.box_shadow || "").replace(/"/g, "&quot;")}" placeholder="0 2px 8px rgba(0,0,0,.3)" />\n        </label>\n        ${chk("disable_webrtc", this._t("ed_disable_webrtc"), false)}\n        <span class="hint">${this._t("ed_disable_webrtc_hint")}</span>\n        <label>${this._t("ed_webrtc_timeout")}\n          <input type="number" name="webrtc_connect_timeout_ms" min="1000" max="30000" step="500" value="${clampWebrtcTimeoutMsForDisplay(cfg.webrtc_connect_timeout_ms)}" />\n          <span class="hint">${this._t("ed_webrtc_timeout_hint")}</span>\n        </label>\n      </div>`;
+    const colSel = this.shadowRoot.querySelector('select[name="columns"]');
+    const minwRow = this.shadowRoot.getElementById("minw-row");
+    colSel.addEventListener("change", e => {
+      const v = e.target.value;
+      minwRow.hidden = v !== "auto";
+      this._fire({
+        ...this._config,
+        columns: v === "auto" ? "auto" : Number(v)
+      });
+    });
+    this.shadowRoot.querySelector('input[name="min_width"]').addEventListener("change", e => {
+      const px = Math.max(200, Math.min(900, Number(e.target.value) || 360));
+      this._fire({
+        ...this._config,
+        min_width: `${px}px`
+      });
+    });
+    this.shadowRoot.querySelector('input[name="title"]').addEventListener("change", e => {
+      this._fire({
+        ...this._config,
+        title: e.target.value
+      });
+    });
+    const onChk = (name, key) => this.shadowRoot.querySelector(`input[name="${name}"]`)?.addEventListener("change", e => this._fire({
+      ...this._config,
+      [key]: e.target.checked
+    }));
+    onChk("online_offline_view", "online_offline_view");
+    onChk("use_bosch_sort", "use_bosch_sort");
+    onChk("apple_style", "apple_style");
+    onChk("compact", "compact");
+    onChk("minimal", "minimal");
+    onChk("show_title", "show_title");
+    onChk("show_last_event", "show_last_event");
+    onChk("show_audio", "show_audio");
+    onChk("use_card_audio_settings", "use_card_audio_settings");
+    onChk("hide_redundant_privacy", "hide_redundant_privacy");
+    this.shadowRoot.querySelector('select[name="pan_overlay"]')?.addEventListener("change", e => this._fire({
+      ...this._config,
+      pan_overlay: e.target.value
+    }));
+    this.shadowRoot.querySelector('input[name="border_radius"]').addEventListener("change", e => this._fire({
+      ...this._config,
+      border_radius: e.target.value || undefined
+    }));
+    this.shadowRoot.querySelector('input[name="box_shadow"]').addEventListener("change", e => this._fire({
+      ...this._config,
+      box_shadow: e.target.value || undefined
+    }));
+    onChk("disable_webrtc", "disable_webrtc");
+    this.shadowRoot.querySelector('input[name="webrtc_connect_timeout_ms"]')?.addEventListener("change", e => {
+      const n = parseInt(e.target.value, 10);
+      this._fire({
+        ...this._config,
+        webrtc_connect_timeout_ms: Number.isFinite(n) ? n : undefined
+      });
+    });
+    this.shadowRoot.querySelector('select[name="theme"]').addEventListener("change", e => this._fire({
+      ...this._config,
+      theme: e.target.value
+    }));
+    this.shadowRoot.querySelector('select[name="modus"]').addEventListener("change", e => this._fire({
+      ...this._config,
+      mode: e.target.value
+    }));
+  }
+  _fire(config) {
+    this._config = config;
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: {
+        config: config
+      },
+      bubbles: true,
+      composed: true
+    }));
+  }
+}
+
+customElements.define("bosch-camera-overview-card-editor", BoschCameraOverviewCardEditor);
+
+customElements.define("bosch-camera-overview-card", BoschCameraOverviewCard);
+
+window.customCards.push({
+  type: "bosch-camera-overview-card",
+  name: "Bosch Camera Overview",
+  description: "Auto-discovers all Bosch Smart Home cameras and renders them in a responsive grid (online first, offline after).",
+  preview: false,
+  getEntitySuggestion: (hass, entityId) => _isBoschCameraEntity(hass, entityId) ? {
+    config: {
+      type: "custom:bosch-camera-overview-card"
+    }
+  } : null
+});
+
+class BoschNvrTimelineCard extends HTMLElement {
+  _t(key) {
+    return cardT(this._hass, key);
+  }
+  setConfig(config) {
+    if (!config.nvr_source_id) throw new Error("nvr_source_id is required");
+    this._config = config;
+    if (this.isConnected) this._init();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._initialized) this._init();
+  }
+  connectedCallback() {
+    if (this._hass && !this._initialized) this._init();
+  }
+  disconnectedCallback() {
+    this._stopCursor();
+  }
+  _init() {
+    if (!this._hass || !this._config) return;
+    this._initialized = true;
+    this._segments = [];
+    this._motionEvents = [];
+    this._currentDate = (new Date).toISOString().slice(0, 10);
+    this._render();
+    this._loadDay(this._currentDate);
+    if (this._config.motion_entity) this._loadMotion(this._currentDate);
+  }
+  _render() {
+    if (!this.shadowRoot) this.attachShadow({
+      mode: "open"
+    });
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host{display:block;background:var(--card-background-color);border-radius:12px;overflow:hidden}\n        .header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;\n          background:var(--primary-color);color:var(--text-primary-color);font-size:14px;font-weight:500}\n        .nav-btn{background:none;border:none;color:inherit;cursor:pointer;font-size:18px;padding:4px 8px}\n        .date-label{flex:1;text-align:center}\n        canvas{width:100%;height:48px;display:block;cursor:pointer;background:#111}\n        video{width:100%;max-height:340px;display:block;background:#000}\n        .status{padding:8px 16px;font-size:12px;color:var(--secondary-text-color)}\n        .no-data{padding:16px;text-align:center;color:var(--secondary-text-color)}\n      </style>\n      <div class="header">\n        <button class="nav-btn" id="prev">&#8249;</button>\n        <span class="date-label" id="date-lbl">${this._currentDate}</span>\n        <button class="nav-btn" id="next">&#8250;</button>\n      </div>\n      <canvas id="timeline" height="48"></canvas>\n      <video id="player" controls preload="none" playsinline></video>\n      <div class="status" id="status">${this._t("nvr_loading_recordings")}</div>`;
+    const canvas = this.shadowRoot.getElementById("timeline");
+    canvas.addEventListener("click", e => this._onCanvasClick(e));
+    this.shadowRoot.getElementById("prev").addEventListener("click", () => this._changeDay(-1));
+    this.shadowRoot.getElementById("next").addEventListener("click", () => this._changeDay(1));
+    const video = this.shadowRoot.getElementById("player");
+    video.addEventListener("timeupdate", () => this._drawTimeline());
+  }
+  _changeDay(delta) {
+    const d = new Date(this._currentDate + "T00:00:00");
+    d.setDate(d.getDate() + delta);
+    this._currentDate = d.toISOString().slice(0, 10);
+    this.shadowRoot.getElementById("date-lbl").textContent = this._currentDate;
+    this._segments = [];
+    this._motionEvents = [];
+    this._loadDay(this._currentDate);
+    if (this._config.motion_entity) this._loadMotion(this._currentDate);
+  }
+  async _loadDay(dateStr) {
+    if (!this._hass) return;
+    const camPart = this._config.nvr_source_id;
+    const mediaId = camPart.replace(/\/\d{4}-\d{2}-\d{2}$/, "") + "/" + dateStr;
+    try {
+      const result = await this._hass.callWS({
+        type: "media_source/browse_media",
+        media_content_id: mediaId
+      });
+      if (dateStr !== this._currentDate) return;
+      this._segments = (result.children || []).filter(c => c.media_class === "video");
+      this._drawTimeline();
+      const status = this.shadowRoot?.getElementById("status");
+      if (status) status.textContent = this._segments.length ? `${this._segments.length} ${this._t("nvr_segments_suffix")}` : this._t("nvr_no_recordings");
+    } catch (err) {
+      const status = this.shadowRoot?.getElementById("status");
+      if (status) status.textContent = this._t("nvr_load_error");
+    }
+  }
+  async _loadMotion(dateStr) {
+    if (!this._hass || !this._config.motion_entity) return;
+    const start = dateStr + "T00:00:00+00:00";
+    const end = dateStr + "T23:59:59+00:00";
+    try {
+      const result = await this._hass.callApi("GET", `history/period/${start}?end_time=${end}&filter_entity_id=${this._config.motion_entity}`);
+      const states = (result || [])[0] || [];
+      this._motionEvents = states.filter(s => s.state === "on").map(s => {
+        const t = new Date(s.last_changed);
+        return (t.getHours() * 3600 + t.getMinutes() * 60 + t.getSeconds()) / 86400;
+      });
+      this._drawTimeline();
+    } catch (_) {}
+  }
+  _drawTimeline() {
+    const canvas = this.shadowRoot && this.shadowRoot.getElementById("timeline");
+    if (!canvas) return;
+    const W = canvas.offsetWidth || canvas.width || 600;
+    canvas.width = W;
+    const H = canvas.height;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, W, H);
+    for (const seg of this._segments) {
+      const pos = this._segmentTimeOffset(seg);
+      if (pos === null) continue;
+      const x = Math.floor(pos.start * W);
+      const w = Math.max(2, Math.floor(pos.duration * W));
+      ctx.fillStyle = "rgba(76,175,80,0.7)";
+      ctx.fillRect(x, 2, w, H - 4);
+    }
+    ctx.fillStyle = "rgba(244,67,54,0.85)";
+    for (const frac of this._motionEvents) {
+      const x = Math.floor(frac * W);
+      ctx.fillRect(x - 1, 0, 2, H);
+    }
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.lineWidth = 1;
+    for (let h = 1; h < 24; h++) {
+      const x = Math.floor(h / 24 * W);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+    const video = this.shadowRoot && this.shadowRoot.getElementById("player");
+    if (video && !isNaN(video.duration) && video.currentTime > 0) {
+      const activeSeg = this._activeSegment;
+      if (activeSeg) {
+        const pos = this._segmentTimeOffset(activeSeg);
+        if (pos) {
+          const frac = pos.start + video.currentTime / 86400;
+          const x = Math.floor(frac * W);
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, H);
+          ctx.stroke();
+        }
+      }
+    }
+  }
+  _segmentTimeOffset(seg) {
+    if (!seg.title) return null;
+    const m = seg.title.match(/(\d{2})[:-](\d{2})/);
+    if (!m) return null;
+    const start = (parseInt(m[1]) * 60 + parseInt(m[2])) * 60 / 86400;
+    const duration = 300 / 86400;
+    return {
+      start: start,
+      duration: duration
+    };
+  }
+  async _onCanvasClick(e) {
+    const canvas = e.currentTarget;
+    const frac = e.offsetX / canvas.offsetWidth;
+    const offsetSeconds = Math.floor(frac * 86400);
+    let best = null;
+    let bestDelta = Infinity;
+    for (const seg of this._segments) {
+      const pos = this._segmentTimeOffset(seg);
+      if (!pos) continue;
+      const segStart = pos.start * 86400;
+      const segEnd = segStart + pos.duration * 86400;
+      if (offsetSeconds >= segStart && offsetSeconds <= segEnd) {
+        best = seg;
+        break;
+      }
+      const delta = Math.abs(segStart - offsetSeconds);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        best = seg;
+      }
+    }
+    if (best) {
+      this._activeSegment = best;
+      await this._playSegment(best.media_content_id);
+    }
+  }
+  async _playSegment(mediaContentId) {
+    if (!this._hass) return;
+    const status = this.shadowRoot?.getElementById("status");
+    if (status) status.textContent = this._t("nvr_loading_stream");
+    try {
+      const result = await this._hass.callWS({
+        type: "media_source/resolve_media",
+        media_content_id: mediaContentId
+      });
+      const video = this.shadowRoot?.getElementById("player");
+      if (video) {
+        video.src = result.url;
+        video.load();
+        video.play().catch(() => {});
+      }
+      if (status) status.textContent = this._t("nvr_playing");
+    } catch (err) {
+      if (status) status.textContent = this._t("nvr_segment_error");
+    }
+  }
+  _stopCursor() {
+    if (this._cursorRaf) {
+      cancelAnimationFrame(this._cursorRaf);
+      this._cursorRaf = null;
+    }
+  }
+  getCardSize() {
+    return 4;
+  }
+}
+
+customElements.define("bosch-nvr-timeline-card", BoschNvrTimelineCard);
+
+window.customCards.push({
+  type: "bosch-nvr-timeline-card",
+  name: "Bosch NVR Timeline",
+  description: "24-hour timeline scrubber for Mini-NVR recordings. Click a segment to play it.",
+  preview: false
+});
+
+class BoschNvrMultiCamCard extends HTMLElement {
+  setConfig(config) {
+    if (!Array.isArray(config.cameras) || !config.cameras.length) {
+      throw new Error("cameras array is required");
+    }
+    this._config = config;
+    if (this.isConnected) this._initRows();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._initialized) this._initRows();
+    if (this._rowCards) {
+      for (const card of this._rowCards) card.hass = hass;
+    }
+  }
+  connectedCallback() {
+    if (this._hass && !this._initialized) this._initRows();
+  }
+  disconnectedCallback() {
+    this._stopDriftCorrection();
+  }
+  _initRows() {
+    if (!this._hass || !this._config) return;
+    this._initialized = true;
+    this._rowCards = [];
+    this._currentDate = (new Date).toISOString().slice(0, 10);
+    if (!this.shadowRoot) this.attachShadow({
+      mode: "open"
+    });
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host{display:block;background:var(--card-background-color);border-radius:12px;overflow:hidden}\n        .multi-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;\n          background:var(--primary-color);color:var(--text-primary-color);font-size:14px;font-weight:500}\n        .nav-btn{background:none;border:none;color:inherit;cursor:pointer;font-size:18px;padding:4px 8px}\n        .date-label{flex:1;text-align:center}\n        .cam-row{border-bottom:1px solid var(--divider-color);padding:8px 0}\n        .cam-label{padding:4px 16px;font-size:12px;font-weight:500;color:var(--secondary-text-color);\n          text-transform:uppercase;letter-spacing:0.05em}\n      </style>\n      <div class="multi-header">\n        <button class="nav-btn" id="prev">&#8249;</button>\n        <span class="date-label" id="date-lbl">${this._currentDate}</span>\n        <button class="nav-btn" id="next">&#8250;</button>\n      </div>\n      <div id="rows"></div>`;
+    this.shadowRoot.getElementById("prev").addEventListener("click", () => this._changeDay(-1));
+    this.shadowRoot.getElementById("next").addEventListener("click", () => this._changeDay(1));
+    const rowsEl = this.shadowRoot.getElementById("rows");
+    for (const camCfg of this._config.cameras) {
+      const rowEl = document.createElement("div");
+      rowEl.className = "cam-row";
+      if (camCfg.label) {
+        const lbl = document.createElement("div");
+        lbl.className = "cam-label";
+        lbl.textContent = camCfg.label;
+        rowEl.appendChild(lbl);
+      }
+      const timelineCard = document.createElement("bosch-nvr-timeline-card");
+      timelineCard.setConfig({
+        camera_entity: camCfg.camera_entity,
+        nvr_source_id: camCfg.nvr_source_id + "/" + this._currentDate,
+        motion_entity: camCfg.motion_entity,
+        show_date: false
+      });
+      timelineCard.hass = this._hass;
+      rowEl.appendChild(timelineCard);
+      rowsEl.appendChild(rowEl);
+      this._rowCards.push(timelineCard);
+    }
+    this._patchSharedSeek();
+    this._startDriftCorrection();
+  }
+  _patchSharedSeek() {
+    for (const card of this._rowCards) {
+      card._onCanvasClick = async e => {
+        const canvas = e.currentTarget;
+        const frac = e.offsetX / canvas.offsetWidth;
+        const offsetSeconds = Math.floor(frac * 86400);
+        await this._seekAll(this._currentDate, offsetSeconds);
+      };
+    }
+  }
+  async _seekAll(dateStr, offsetSeconds) {
+    const promises = this._rowCards.map(card => {
+      let best = null;
+      let bestDelta = Infinity;
+      for (const seg of card._segments || []) {
+        const pos = card._segmentTimeOffset(seg);
+        if (!pos) continue;
+        const segStart = pos.start * 86400;
+        const segEnd = segStart + pos.duration * 86400;
+        if (offsetSeconds >= segStart && offsetSeconds <= segEnd) {
+          best = seg;
+          break;
+        }
+        const delta = Math.abs(segStart - offsetSeconds);
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          best = seg;
+        }
+      }
+      if (best) {
+        card._activeSegment = best;
+        return card._playSegment(best.media_content_id);
+      }
+      return Promise.resolve();
+    });
+    await Promise.all(promises);
+  }
+  _changeDay(delta) {
+    const d = new Date(this._currentDate + "T00:00:00");
+    d.setDate(d.getDate() + delta);
+    this._currentDate = d.toISOString().slice(0, 10);
+    this.shadowRoot.getElementById("date-lbl").textContent = this._currentDate;
+    for (const card of this._rowCards) {
+      card._segments = [];
+      card._motionEvents = [];
+      card._currentDate = this._currentDate;
+      card._loadDay(this._currentDate);
+      if (card._config && card._config.motion_entity) card._loadMotion(this._currentDate);
+    }
+  }
+  _startDriftCorrection() {
+    this._stopDriftCorrection();
+    const TOLERANCE_S = .1;
+    const tick = () => {
+      if (!this._rowCards || this._rowCards.length < 2) {
+        this._driftRaf = requestAnimationFrame(tick);
+        return;
+      }
+      const masterShadow = this._rowCards[0].shadowRoot;
+      const master = masterShadow && masterShadow.getElementById("player");
+      if (!master || master.paused || isNaN(master.currentTime)) {
+        this._driftRaf = requestAnimationFrame(tick);
+        return;
+      }
+      for (let i = 1; i < this._rowCards.length; i++) {
+        const followShadow = this._rowCards[i].shadowRoot;
+        const follower = followShadow && followShadow.getElementById("player");
+        if (!follower || isNaN(follower.currentTime)) continue;
+        const drift = master.currentTime - follower.currentTime;
+        if (Math.abs(drift) > TOLERANCE_S) {
+          follower.currentTime = master.currentTime;
+        }
+        if (master.paused && !follower.paused) follower.pause();
+        if (!master.paused && follower.paused && !follower.ended) {
+          follower.play().catch(() => {});
+        }
+      }
+      this._driftRaf = requestAnimationFrame(tick);
+    };
+    this._driftRaf = requestAnimationFrame(tick);
+  }
+  _stopDriftCorrection() {
+    if (this._driftRaf) {
+      cancelAnimationFrame(this._driftRaf);
+      this._driftRaf = null;
+    }
+  }
+  getCardSize() {
+    return (this._config && this._config.cameras ? this._config.cameras.length : 1) * 4;
+  }
+}
+
+customElements.define("bosch-nvr-multi-cam-card", BoschNvrMultiCamCard);
+
+window.customCards.push({
+  type: "bosch-nvr-multi-cam-card",
+  name: "Bosch NVR Multi-Cam",
+  description: "Stacked NVR timeline view for multiple cameras with shared seek and drift correction.",
+  preview: false
+});
+
+class BoschNotificationsCard extends HTMLElement {
+  setConfig(config) {
+    this._config = {
+      title: config.title ?? "Bosch Cloud",
+      maintenance_entity: config.maintenance_entity ?? null,
+      camera_status_entities: Array.isArray(config.camera_status_entities) ? config.camera_status_entities : null,
+      show_camera_grid: config.show_camera_grid !== false,
+      show_when_clear: config.show_when_clear !== false
+    };
+    if (this.isConnected) this._render();
+  }
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+  connectedCallback() {
+    if (this._hass) this._render();
+  }
+  _maintenanceEntity() {
+    if (this._config.maintenance_entity) {
+      return this._hass.states[this._config.maintenance_entity] || null;
+    }
+    for (const eid in this._hass.states) {
+      if (/^sensor\..*_bosch_cloud_wartung$/.test(eid)) {
+        return this._hass.states[eid];
+      }
+    }
+    return null;
+  }
+  _cameraStatusEntities() {
+    if (this._config.camera_status_entities) {
+      return this._config.camera_status_entities.map(eid => this._hass.states[eid]).filter(Boolean);
+    }
+    const out = [];
+    for (const eid in this._hass.states) {
+      if (!/^sensor\.bosch_[a-z0-9_]+_status$/.test(eid)) continue;
+      if (eid.endsWith("_mini_nvr_status")) continue;
+      if (eid.endsWith("_stream_status")) continue;
+      if (eid.endsWith("_alarm_status")) continue;
+      out.push(this._hass.states[eid]);
+    }
+    return out;
+  }
+  _t(key) {
+    return cardT(this._hass, key);
+  }
+  _maintenanceBanner(maint) {
+    if (!maint) return "";
+    const state = maint.state;
+    const a = maint.attributes || {};
+    const loc = cardLang(this._hass);
+    const fmtTime = ts => ts ? new Date(ts).toLocaleString(loc, {
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    }) : "?";
+    const safeLink = a.link && /^https:\/\//i.test(a.link) ? a.link : null;
+    const link = safeLink ? `<a href="${this._esc(safeLink)}" target="_blank" rel="noopener">${this._t("notif_details_link")}</a>` : "";
+    if (state === "active") {
+      return `\n        <div class="banner banner-active">\n          <div class="banner-icon">⚠️</div>\n          <div class="banner-body">\n            <div class="banner-title">${this._t("notif_maint_active_title")}</div>\n            <div class="banner-sub">${this._esc(a.title || this._t("maint_notice"))}</div>\n            <div class="banner-window">${fmtTime(a.scheduled_start)} – ${fmtTime(a.scheduled_end).split(", ").slice(-1)[0]}</div>\n            <div class="banner-note">${this._t("notif_maint_limited_note")}</div>\n            ${link ? `<div class="banner-link">${link}</div>` : ""}\n          </div>\n        </div>`;
+    }
+    if (state === "scheduled") {
+      return `\n        <div class="banner banner-scheduled">\n          <div class="banner-icon">📅</div>\n          <div class="banner-body">\n            <div class="banner-title">${this._t("notif_maint_scheduled_title")}</div>\n            <div class="banner-sub">${this._esc(a.title || this._t("maint_notice"))}</div>\n            <div class="banner-window">${this._t("notif_maint_begin_label")} ${fmtTime(a.scheduled_start)}<br>${this._t("notif_maint_end_label")} ${fmtTime(a.scheduled_end)}</div>\n            ${link ? `<div class="banner-link">${link}</div>` : ""}\n          </div>\n        </div>`;
+    }
+    if (state === "recent" || state === "past") {
+      return `\n        <div class="banner banner-past">\n          <div class="banner-icon">✅</div>\n          <div class="banner-body">\n            <div class="banner-title">${this._t("notif_maint_past_title")}</div>\n            <div class="banner-sub">${this._esc(a.title || this._t("maint_notice"))}</div>\n            <div class="banner-window">${this._t("notif_maint_ended_prefix")} ${fmtTime(a.scheduled_end)}</div>\n            <div class="banner-note">${this._t("notif_maint_resumed_note")}</div>\n          </div>\n        </div>`;
+    }
+    return "";
+  }
+  _cameraGrid(cams) {
+    if (!cams.length || !this._config.show_camera_grid) return "";
+    const rows = cams.map(c => {
+      const name = c.attributes && c.attributes.friendly_name || c.entity_id;
+      const cleanName = name.replace(/^Bosch\s+/, "").replace(/\s+Status$/, "");
+      const status = c.state || "unknown";
+      const cls = status === "ONLINE" || status === "online" ? "ok" : status === "OFFLINE" || status === "offline" ? "warn" : "muted";
+      return `\n        <div class="cam-row">\n          <span class="cam-dot ${cls}"></span>\n          <span class="cam-name">${this._esc(cleanName)}</span>\n          <span class="cam-state ${cls}">${this._esc(status)}</span>\n        </div>`;
+    }).join("");
+    return `<div class="cam-grid"><div class="cam-header">${this._t("notif_cam_status_header")}</div>${rows}</div>`;
+  }
+  _clearMessage(maint, cams) {
+    if (!this._config.show_when_clear) return "";
+    const hasMaint = maint && [ "active", "scheduled", "recent" ].includes(maint.state);
+    if (hasMaint) return "";
+    const anyOffline = cams.some(c => /OFFLINE|offline/i.test(c.state));
+    if (anyOffline) return "";
+    return `<div class="clear">✓ ${this._t("notif_all_clear")}</div>`;
+  }
+  _esc(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    }[c]));
+  }
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (!this.shadowRoot) this.attachShadow({
+      mode: "open"
+    });
+    const maint = this._maintenanceEntity();
+    const cams = this._cameraStatusEntities();
+    this.shadowRoot.innerHTML = `\n      <style>\n        :host{display:block;background:var(--card-background-color,#1c1c1c);border-radius:12px;\n          padding:16px;color:var(--primary-text-color,#fff);font-family:var(--paper-font-body1_-_font-family,Roboto)}\n        h2{margin:0 0 12px 0;font-size:16px;font-weight:500;color:var(--primary-text-color,#fff)}\n        .banner{display:flex;gap:12px;padding:12px;border-radius:8px;margin-bottom:12px;align-items:flex-start}\n        .banner-active{background:rgba(255,152,0,0.12);border-left:4px solid #ff9800}\n        .banner-scheduled{background:rgba(33,150,243,0.12);border-left:4px solid #2196f3}\n        .banner-past{background:rgba(76,175,80,0.12);border-left:4px solid #4caf50}\n        .banner-icon{font-size:24px;line-height:1}\n        .banner-body{flex:1;font-size:13px}\n        .banner-title{font-weight:600;margin-bottom:4px}\n        .banner-sub{color:var(--secondary-text-color,#aaa);margin-bottom:4px}\n        .banner-window{font-family:var(--paper-font-code1_-_font-family,monospace);font-size:12px;margin-bottom:4px}\n        .banner-note{color:var(--secondary-text-color,#aaa);font-size:12px;margin-bottom:4px}\n        .banner-link a{color:var(--primary-color,#03a9f4);text-decoration:none}\n        .banner-link a:hover{text-decoration:underline}\n        .cam-grid{margin-top:8px}\n        .cam-header{font-size:12px;color:var(--secondary-text-color,#aaa);\n          text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;font-weight:500}\n        .cam-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--divider-color,#333);font-size:13px}\n        .cam-row:last-child{border-bottom:none}\n        .cam-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}\n        .cam-dot.ok{background:#4caf50}\n        .cam-dot.warn{background:#ff9800}\n        .cam-dot.muted{background:#666}\n        .cam-name{flex:1}\n        .cam-state{font-size:11px;color:var(--secondary-text-color,#aaa);text-transform:uppercase;letter-spacing:0.5px}\n        .cam-state.ok{color:#4caf50}\n        .cam-state.warn{color:#ff9800}\n        .clear{padding:12px;text-align:center;color:var(--secondary-text-color,#aaa);font-size:13px}\n      </style>\n      <h2>${this._esc(this._config.title)}</h2>\n      ${this._maintenanceBanner(maint)}\n      ${this._cameraGrid(cams)}\n      ${this._clearMessage(maint, cams)}`;
+  }
+  getCardSize() {
+    return 3;
+  }
+}
+
+customElements.define("bosch-notifications-card", BoschNotificationsCard);
+
+window.customCards.push({
+  type: "bosch-notifications-card",
+  name: "Bosch Notifications",
+  description: "Bosch cloud maintenance + camera status banner. Aggregates active/scheduled/past maintenance windows from the RSS feed and shows online/offline state per camera.",
+  preview: false
+});

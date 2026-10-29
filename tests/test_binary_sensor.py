@@ -31,7 +31,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera.const import ALL_PLATFORMS, DEFAULT_OPTIONS
+from custom_components.bosch_smart_camera.const import ALL_PLATFORMS, DEFAULT_OPTIONS
 from tests.source_match import assert_in_source
 
 CAM_ID = "11111111-1111-1111-1111-111111111111"
@@ -110,7 +110,7 @@ class TestMotionBinarySensor:
     def test_off_when_no_events(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -123,7 +123,7 @@ class TestMotionBinarySensor:
         stub_coord.data[CAM_ID]["events"] = [
             {"eventType": "MOVEMENT", "id": "e1", "timestamp": _now_iso()},
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -137,7 +137,7 @@ class TestMotionBinarySensor:
         stub_coord.data[CAM_ID]["events"] = [
             {"eventType": "MOVEMENT", "id": "e1", "timestamp": _ago_iso(120)},
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -151,7 +151,7 @@ class TestMotionBinarySensor:
         stub_coord.data[CAM_ID]["events"] = [
             {"eventType": "AUDIO_ALARM", "id": "e1", "timestamp": _now_iso()},
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -169,7 +169,7 @@ class TestMotionBinarySensor:
                 "imageUrl": "https://...",
             }
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -181,7 +181,7 @@ class TestMotionBinarySensor:
     def test_attrs_empty_when_no_events(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -192,7 +192,7 @@ class TestMotionBinarySensor:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Binary sensors are hidden until user enables — avoids UI clutter."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -204,7 +204,7 @@ class TestAudioAlarmBinarySensor:
     def test_off_when_no_events(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
 
@@ -217,7 +217,7 @@ class TestAudioAlarmBinarySensor:
         stub_coord.data[CAM_ID]["events"] = [
             {"eventType": "AUDIO_ALARM", "id": "e1", "timestamp": _now_iso()},
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
 
@@ -236,7 +236,7 @@ class TestAudioAlarmBinarySensor:
                 "imageUrl": "http://img",
             },
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
 
@@ -248,7 +248,7 @@ class TestAudioAlarmBinarySensor:
     def test_attrs_empty_when_no_audio_event(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
 
@@ -261,7 +261,7 @@ class TestAudioAlarmBinarySensor:
         stub_coord.data[CAM_ID]["events"] = [
             {"eventType": "MOVEMENT", "id": "e1", "timestamp": _now_iso()},
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
 
@@ -273,7 +273,7 @@ class TestPersonDetectedBinarySensor:
     def test_off_when_no_events(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
@@ -288,7 +288,7 @@ class TestPersonDetectedBinarySensor:
         stub_coord.data[CAM_ID]["events"] = [
             {"eventType": "PERSON", "id": "e1", "timestamp": _now_iso()},
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
@@ -300,7 +300,7 @@ class TestPersonDetectedBinarySensor:
     def test_unique_id_includes_cam_id(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
@@ -319,7 +319,7 @@ class TestPersonDetectedBinarySensor:
                 "imageUrl": "http://pic",
             },
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
@@ -333,7 +333,7 @@ class TestPersonDetectedBinarySensor:
     def test_attrs_empty_when_no_person_event(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
@@ -351,7 +351,7 @@ class TestPersonDetectedDeviceClass:
     ):
         from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
@@ -363,7 +363,7 @@ class TestPersonDetectedDeviceClass:
     ):
         from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -382,7 +382,7 @@ class TestPersonDetectedDeviceClass:
                 "imageUrl": "https://bosch.example.com/signed?token=abc",
             }
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -401,7 +401,7 @@ class TestPersonDetectedDeviceClass:
                 "imageUrl": "https://bosch.example.com/signed?token=xyz",
             }
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
@@ -422,7 +422,7 @@ class TestPersonDetectedDeviceClass:
                 "imageUrl": "https://bosch.example.com/signed?token=def",
             }
         ]
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
 
@@ -434,7 +434,7 @@ class TestEventWindow:
     def test_empty_timestamp_returns_false(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -445,7 +445,7 @@ class TestEventWindow:
     def test_malformed_timestamp_returns_false(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -456,7 +456,7 @@ class TestEventWindow:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """Bosch API may append `.000Z` — we strip to first 19 chars."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -475,7 +475,7 @@ class TestEventWindow:
         i.e. outside the active window, so the motion sensor would never fire
         for users in non-UTC timezones.
         """
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -491,7 +491,7 @@ class TestEventWindow:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """30s-old event in Berlin TZ must also fire — within the 90s window."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -506,8 +506,8 @@ class TestEventWindow:
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ):
         """device_info must include DOMAIN identifier and Bosch manufacturer."""
-        from custom_components.bosch_shc_camera import DOMAIN
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera import DOMAIN
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -525,7 +525,7 @@ class TestEventWindow:
         events appear fresh: a 2h-old UTC event is 2h old in any timezone,
         so it stays outside the 90s window → False.
         """
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -541,7 +541,7 @@ class TestSetupEntry:
     @pytest.mark.asyncio
     async def test_creates_motion_and_person_for_no_sound_cam(self):
         """Camera without sound feature → 2 entities (Motion + PersonDetected)."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
             BoschPersonDetectedBinarySensor,
             async_setup_entry,
@@ -580,7 +580,7 @@ class TestSetupEntry:
         # +1 BoschLanReachableBinarySensor: always-on diagnostic for
         # LAN-fallback paths. Pinning by class set keeps this stable across
         # future additions of unrelated entities.
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschLanReachableBinarySensor,
         )
 
@@ -590,7 +590,7 @@ class TestSetupEntry:
     @pytest.mark.asyncio
     async def test_creates_audio_sensor_when_sound_supported(self):
         """Camera with sound feature → 4 entities (Motion + Person + LanReachable + AudioAlarm)."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
             BoschLanReachableBinarySensor,
             async_setup_entry,
@@ -630,7 +630,7 @@ class TestSetupEntry:
 
     @pytest.mark.asyncio
     async def test_empty_coordinator_yields_no_entities(self):
-        from custom_components.bosch_shc_camera.binary_sensor import async_setup_entry
+        from custom_components.bosch_smart_camera.binary_sensor import async_setup_entry
 
         coord = SimpleNamespace(
             data={},
@@ -655,7 +655,7 @@ class TestSetupEntry:
     @pytest.mark.asyncio
     async def test_new_camera_gets_entities_added_dynamically(self):
         """Quality-Scale Gold `dynamic-devices`."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
             async_setup_entry,
         )
@@ -752,7 +752,7 @@ class TestEnableBinarySensors:
     def test_gate_present_in_source(self):
         """Pin the exact source-level guard so a refactor can't silently remove it."""
         # async_setup_entry is module-level, not a method — inspect the module source.
-        import custom_components.bosch_shc_camera as init_module
+        import custom_components.bosch_smart_camera as init_module
 
         src = inspect.getsource(init_module)
         assert_in_source(  # enable_binary_sensors gate missing from __init__.py async_setup_entry — disabling the option would have no effect
@@ -777,7 +777,7 @@ class TestEnableGo2rtc:
 
     def test_gate_present_in_source(self):
         """Pin the source-level guard so a refactor can't silently remove it."""
-        import custom_components.bosch_shc_camera as init_module
+        import custom_components.bosch_smart_camera as init_module
 
         src = inspect.getsource(init_module)
         assert_in_source(  # enable_go2rtc gate missing from __init__.py async_setup_entry — disabling go2rtc would have no effect
@@ -934,7 +934,7 @@ class TestBinarySensorSetupEntry:
         """With a coordinator that has one camera, setup must add entities."""
         import asyncio
 
-        from custom_components.bosch_shc_camera.binary_sensor import async_setup_entry
+        from custom_components.bosch_smart_camera.binary_sensor import async_setup_entry
 
         cam_id = "TEST-CAM-001"
         coord = SimpleNamespace(
@@ -971,7 +971,7 @@ class TestBinarySensorSetupEntry:
         """Camera with featureSupport.sound=True gets an extra audio alarm sensor."""
         import asyncio
 
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
             async_setup_entry,
         )
@@ -1073,7 +1073,7 @@ def lan_stub_coord() -> SimpleNamespace:
 
 
 def _make_lan_sensor(lan_stub_coord: SimpleNamespace, stub_entry: SimpleNamespace):
-    from custom_components.bosch_shc_camera.binary_sensor import (
+    from custom_components.bosch_smart_camera.binary_sensor import (
         BoschLanReachableBinarySensor,
     )
 
@@ -1211,7 +1211,7 @@ class TestMotionActiveWindowProperty:
     """Unit tests for _BoschBinarySensorBase._motion_active_window."""
 
     def _make_sensor(self, option_value: object = None) -> object:
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -1221,7 +1221,7 @@ class TestMotionActiveWindowProperty:
 
     def test_default_when_option_absent(self) -> None:
         """No option set → _motion_active_window returns DEFAULT_MOTION_ACTIVE_WINDOW (90)."""
-        from custom_components.bosch_shc_camera.const import (
+        from custom_components.bosch_smart_camera.const import (
             DEFAULT_MOTION_ACTIVE_WINDOW,
         )
 
@@ -1245,21 +1245,21 @@ class TestMotionActiveWindowProperty:
 
     def test_garbage_negative_clamped_to_min(self) -> None:
         """Negative value -5 is clamped to MOTION_ACTIVE_WINDOW_MIN (10)."""
-        from custom_components.bosch_shc_camera.const import MOTION_ACTIVE_WINDOW_MIN
+        from custom_components.bosch_smart_camera.const import MOTION_ACTIVE_WINDOW_MIN
 
         sensor = self._make_sensor(-5)
         assert sensor._motion_active_window == MOTION_ACTIVE_WINDOW_MIN
 
     def test_garbage_too_large_clamped_to_max(self) -> None:
         """Value 1000 is clamped to MOTION_ACTIVE_WINDOW_MAX (300)."""
-        from custom_components.bosch_shc_camera.const import MOTION_ACTIVE_WINDOW_MAX
+        from custom_components.bosch_smart_camera.const import MOTION_ACTIVE_WINDOW_MAX
 
         sensor = self._make_sensor(1000)
         assert sensor._motion_active_window == MOTION_ACTIVE_WINDOW_MAX
 
     def test_non_integer_string_falls_back_to_default(self) -> None:
         """Non-numeric string falls back to DEFAULT_MOTION_ACTIVE_WINDOW."""
-        from custom_components.bosch_shc_camera.const import (
+        from custom_components.bosch_smart_camera.const import (
             DEFAULT_MOTION_ACTIVE_WINDOW,
         )
 
@@ -1271,14 +1271,14 @@ class TestMotionActiveWindowProperty:
 
         `_make_entry(None)` stores `options={"motion_active_window": None}`.
         """
-        from custom_components.bosch_shc_camera.const import (
+        from custom_components.bosch_smart_camera.const import (
             DEFAULT_MOTION_ACTIVE_WINDOW,
         )
 
         entry = SimpleNamespace(
             entry_id="01E", data={}, options={"motion_active_window": None}
         )
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -1295,7 +1295,7 @@ class TestMotionSensorIsOnWithWindow:
     """Integration-level: is_on respects the configured active window."""
 
     def _motion_sensor(self, option: object, events: list) -> object:
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -1369,7 +1369,7 @@ class TestAllSensorTypesRespectWindow:
 
     def test_audio_alarm_uses_configured_window(self) -> None:
         """AudioAlarmBinarySensor: 25 s old event with 30 s window is ON."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
 
@@ -1383,7 +1383,7 @@ class TestAllSensorTypesRespectWindow:
 
     def test_audio_alarm_outside_window_is_off(self) -> None:
         """AudioAlarmBinarySensor: 31 s old event with 30 s window is OFF."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
 
@@ -1397,7 +1397,7 @@ class TestAllSensorTypesRespectWindow:
 
     def test_person_detected_uses_configured_window(self) -> None:
         """PersonDetectedBinarySensor: 25 s old event with 30 s window is ON."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
@@ -1411,7 +1411,7 @@ class TestAllSensorTypesRespectWindow:
 
     def test_person_detected_outside_window_is_off(self) -> None:
         """PersonDetectedBinarySensor: 31 s old event with 30 s window is OFF."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
@@ -1426,25 +1426,25 @@ class TestAllSensorTypesRespectWindow:
 
 class TestConstValues:
     def test_default_is_90(self) -> None:
-        from custom_components.bosch_shc_camera.const import (
+        from custom_components.bosch_smart_camera.const import (
             DEFAULT_MOTION_ACTIVE_WINDOW,
         )
 
         assert DEFAULT_MOTION_ACTIVE_WINDOW == 90
 
     def test_min_is_10(self) -> None:
-        from custom_components.bosch_shc_camera.const import MOTION_ACTIVE_WINDOW_MIN
+        from custom_components.bosch_smart_camera.const import MOTION_ACTIVE_WINDOW_MIN
 
         assert MOTION_ACTIVE_WINDOW_MIN == 10
 
     def test_max_is_300(self) -> None:
-        from custom_components.bosch_shc_camera.const import MOTION_ACTIVE_WINDOW_MAX
+        from custom_components.bosch_smart_camera.const import MOTION_ACTIVE_WINDOW_MAX
 
         assert MOTION_ACTIVE_WINDOW_MAX == 300
 
     def test_default_in_default_options(self) -> None:
         """DEFAULT_OPTIONS must carry the motion_active_window key with correct default."""
-        from custom_components.bosch_shc_camera.const import (
+        from custom_components.bosch_smart_camera.const import (
             DEFAULT_MOTION_ACTIVE_WINDOW,
             DEFAULT_OPTIONS,
         )
@@ -1453,7 +1453,7 @@ class TestConstValues:
         assert DEFAULT_OPTIONS["motion_active_window"] == DEFAULT_MOTION_ACTIVE_WINDOW
 
     def test_default_within_bounds(self) -> None:
-        from custom_components.bosch_shc_camera.const import (
+        from custom_components.bosch_smart_camera.const import (
             DEFAULT_MOTION_ACTIVE_WINDOW,
             MOTION_ACTIVE_WINDOW_MAX,
             MOTION_ACTIVE_WINDOW_MIN,
@@ -1469,13 +1469,13 @@ class TestConstValues:
 class TestConfigFlowWiring:
     def test_motion_active_window_in_features_section(self) -> None:
         """motion_active_window must be listed in the 'features' OPTIONS_SECTIONS key."""
-        from custom_components.bosch_shc_camera.config_flow import OPTIONS_SECTIONS
+        from custom_components.bosch_smart_camera.config_flow import OPTIONS_SECTIONS
 
         assert "motion_active_window" in OPTIONS_SECTIONS["features"]
 
     def test_flatten_sections_handles_motion_active_window(self) -> None:
         """_flatten_sections correctly unwraps motion_active_window from features section."""
-        from custom_components.bosch_shc_camera.config_flow import _flatten_sections
+        from custom_components.bosch_smart_camera.config_flow import _flatten_sections
 
         # Build a minimal sectioned user_input that includes motion_active_window
         user_input = {
@@ -1527,7 +1527,7 @@ class TestMotionBinarySensorPrefix:
     def test_name_no_doubled_prefix(
         self, stub_coord_bs: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -1539,7 +1539,7 @@ class TestMotionBinarySensorPrefix:
     def test_has_entity_name(
         self, stub_coord_bs: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -1553,7 +1553,7 @@ class TestAudioAlarmBinarySensorPrefix:
     def test_name_no_doubled_prefix(
         self, stub_coord_bs: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
 
@@ -1565,7 +1565,7 @@ class TestAudioAlarmBinarySensorPrefix:
     def test_has_entity_name(
         self, stub_coord_bs: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAudioAlarmBinarySensor,
         )
 
@@ -1579,7 +1579,7 @@ class TestPersonDetectedBinarySensorPrefix:
     def test_name_no_doubled_prefix(
         self, stub_coord_bs: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
@@ -1591,7 +1591,7 @@ class TestPersonDetectedBinarySensorPrefix:
     def test_has_entity_name(
         self, stub_coord_bs: SimpleNamespace, stub_entry: SimpleNamespace
     ):
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschPersonDetectedBinarySensor,
         )
 
@@ -1620,7 +1620,7 @@ class TestMotionWindowOffset:
 
     def test_stale_offset_event_is_off(self) -> None:
         """Event 5 min old (default window 90s) must be OFF, not stuck on."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -1651,7 +1651,7 @@ class TestMotionWindowOffset:
 
     def test_fresh_offset_event_is_on(self) -> None:
         """A just-now event (offset format) must be ON."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -1698,7 +1698,7 @@ class TestForumIssueBinarySensorMissesEvents:
     def test_window_covers_60s_polling_lag(self):
         """Window must cover the 60s scan_interval + margin; lowering below
         90s reintroduces the missed-trigger bug."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             EVENT_ACTIVE_WINDOW,
         )
 
@@ -1709,7 +1709,7 @@ class TestForumIssueBinarySensorMissesEvents:
         path can be that lagged."""
         from datetime import UTC, datetime, timedelta
 
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschMotionBinarySensor,
         )
 
@@ -1752,7 +1752,7 @@ def _ago_iso_person(seconds: int) -> str:
 
 
 def _make_person_sensor(events: list[dict]):
-    from custom_components.bosch_shc_camera.binary_sensor import (
+    from custom_components.bosch_smart_camera.binary_sensor import (
         BoschPersonDetectedBinarySensor,
     )
 
@@ -1867,7 +1867,7 @@ def _make_ai_alert_sensor(
     coord: SimpleNamespace | None = None,
     entries: list | None = None,
 ) -> Any:
-    from custom_components.bosch_shc_camera.binary_sensor import (
+    from custom_components.bosch_smart_camera.binary_sensor import (
         BoschAiRecentAlertBinarySensor,
     )
 
@@ -1893,7 +1893,7 @@ class TestAiRecentAlertBinarySensor:
         assert sensor.is_on is True
 
     def test_is_off_outside_window(self) -> None:
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             AI_RECENT_ALERT_WINDOW_MINUTES,
         )
 
@@ -1902,7 +1902,7 @@ class TestAiRecentAlertBinarySensor:
         assert sensor.is_on is False
 
     def test_is_on_right_at_window_boundary(self) -> None:
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             AI_RECENT_ALERT_WINDOW_MINUTES,
         )
 
@@ -1951,7 +1951,7 @@ class TestAiRecentAlertBinarySensor:
         changes every coordinator tick while on/off stays put, so it MUST be
         excluded from the recorder via `_unrecorded_attributes` — verified
         directly on the class, not merely assumed from the docstring."""
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAiRecentAlertBinarySensor,
         )
 
@@ -1972,11 +1972,11 @@ class TestAiRecentAlertBinarySensorSetupGating:
 
     @pytest.mark.asyncio
     async def test_entity_created_when_ai_analysis_enabled(self) -> None:
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAiRecentAlertBinarySensor,
             async_setup_entry,
         )
-        from custom_components.bosch_shc_camera.const import CONF_AI_ANALYSIS_ENABLED
+        from custom_components.bosch_smart_camera.const import CONF_AI_ANALYSIS_ENABLED
 
         coord = _make_coord()
         entry = SimpleNamespace(
@@ -1988,7 +1988,7 @@ class TestAiRecentAlertBinarySensorSetupGating:
         )
         added: list[Any] = []
         with patch(
-            "custom_components.bosch_shc_camera.binary_sensor.get_options",
+            "custom_components.bosch_smart_camera.binary_sensor.get_options",
             return_value={CONF_AI_ANALYSIS_ENABLED: True},
         ):
             await async_setup_entry(
@@ -1998,11 +1998,11 @@ class TestAiRecentAlertBinarySensorSetupGating:
 
     @pytest.mark.asyncio
     async def test_entity_not_created_when_ai_analysis_disabled(self) -> None:
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschAiRecentAlertBinarySensor,
             async_setup_entry,
         )
-        from custom_components.bosch_shc_camera.const import CONF_AI_ANALYSIS_ENABLED
+        from custom_components.bosch_smart_camera.const import CONF_AI_ANALYSIS_ENABLED
 
         coord = _make_coord()
         entry = SimpleNamespace(
@@ -2014,7 +2014,7 @@ class TestAiRecentAlertBinarySensorSetupGating:
         )
         added: list[Any] = []
         with patch(
-            "custom_components.bosch_shc_camera.binary_sensor.get_options",
+            "custom_components.bosch_smart_camera.binary_sensor.get_options",
             return_value={CONF_AI_ANALYSIS_ENABLED: False},
         ):
             await async_setup_entry(
@@ -2035,7 +2035,7 @@ class TestGenericBinarySensorEntityWithoutEventLookupFn:
     def test_is_on_raises_without_event_lookup_fn(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschBinarySensorEntity,
             BoschBinarySensorEntityDescription,
         )
@@ -2050,7 +2050,7 @@ class TestGenericBinarySensorEntityWithoutEventLookupFn:
     def test_extra_state_attributes_empty_without_event_lookup_fn(
         self, stub_coord: SimpleNamespace, stub_entry: SimpleNamespace
     ) -> None:
-        from custom_components.bosch_shc_camera.binary_sensor import (
+        from custom_components.bosch_smart_camera.binary_sensor import (
             BoschBinarySensorEntity,
             BoschBinarySensorEntityDescription,
         )

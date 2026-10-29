@@ -20,8 +20,8 @@ import aiohttp
 import pytest
 from yarl import URL
 
-from custom_components.bosch_shc_camera import ldi_go2rtc
-from custom_components.bosch_shc_camera.go2rtc_client import unregister_go2rtc_stream
+from custom_components.bosch_smart_camera import ldi_go2rtc
+from custom_components.bosch_smart_camera.go2rtc_client import unregister_go2rtc_stream
 
 CAM = "11111111-1111-1111-1111-111111111111"
 SRC = "rtsps://localuser:test-pw@10.0.0.50:9554/live"
@@ -642,7 +642,7 @@ class TestUnregister:
         with (
             patch.object(ldi_go2rtc, "unregister_stream", new=AsyncMock()) as ldi,
             patch(
-                "custom_components.bosch_shc_camera.go2rtc_client._go2rtc_client_session",
+                "custom_components.bosch_smart_camera.go2rtc_client._go2rtc_client_session",
                 side_effect=RuntimeError("closed"),
             ),
         ):
@@ -724,7 +724,7 @@ class TestRemoveLeftovers:
 class TestWiring:
     @pytest.mark.asyncio
     async def test_unload_cleanup_error_is_swallowed(self) -> None:
-        from custom_components.bosch_shc_camera import _async_cancel_coordinator_tasks
+        from custom_components.bosch_smart_camera import _async_cancel_coordinator_tasks
         from tests.test_init import _make_minimal_coord
 
         coord = _make_minimal_coord([])
@@ -733,11 +733,11 @@ class TestWiring:
                 ldi_go2rtc, "unregister_all", new=AsyncMock(side_effect=OSError("x"))
             ) as cleanup,
             patch(
-                "custom_components.bosch_shc_camera.nvr_recorder.stop_all",
+                "custom_components.bosch_smart_camera.nvr_recorder.stop_all",
                 new=AsyncMock(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.stop_all_proxies",
+                "custom_components.bosch_smart_camera.stop_all_proxies",
                 new=AsyncMock(),
             ),
         ):
@@ -752,7 +752,7 @@ class TestWiring:
     async def test_startup_cleanup_only_when_a_password_is_stored(
         self, options: dict[str, Any], expected: int
     ) -> None:
-        from custom_components.bosch_shc_camera import async_setup_entry
+        from custom_components.bosch_smart_camera import async_setup_entry
         from tests.test_init import (
             _FakeStore,
             _make_coord_stub_setup_lan_fallback,
@@ -768,11 +768,11 @@ class TestWiring:
         cleanup = AsyncMock()
         with (
             patch(
-                "custom_components.bosch_shc_camera.BoschCameraCoordinator",
+                "custom_components.bosch_smart_camera.BoschCameraCoordinator",
                 return_value=coord,
             ),
             patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
-            patch("custom_components.bosch_shc_camera.cf_unbuffer.register"),
+            patch("custom_components.bosch_smart_camera.cf_unbuffer.register"),
             patch(
                 "homeassistant.helpers.entity_registry.async_get",
                 return_value=ent_reg,

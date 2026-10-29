@@ -34,7 +34,7 @@ class TestCloudSslSession:
     async def test_returns_existing_open_session(self) -> None:
         """An open cached session is returned immediately, without rebuilding
         the SSL context."""
-        from custom_components.bosch_shc_camera import cloud_ssl
+        from custom_components.bosch_smart_camera import cloud_ssl
 
         hass = _make_hass_for_cloud()
         existing = MagicMock()
@@ -54,7 +54,7 @@ class TestCloudSslSession:
 
     async def test_replaces_closed_session(self) -> None:
         """A closed cached session is replaced with a fresh one."""
-        from custom_components.bosch_shc_camera import cloud_ssl
+        from custom_components.bosch_smart_camera import cloud_ssl
 
         hass = _make_hass_for_cloud()
         closed_session = MagicMock()
@@ -73,11 +73,11 @@ class TestCloudSslSession:
                 new=AsyncMock(return_value=fake_ssl_ctx),
             ),
             patch(
-                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.TCPConnector",
+                "custom_components.bosch_smart_camera.cloud_ssl.aiohttp.TCPConnector",
                 return_value=fake_connector,
             ),
             patch(
-                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.ClientSession",
+                "custom_components.bosch_smart_camera.cloud_ssl.aiohttp.ClientSession",
                 return_value=fake_new_session,
             ),
         ):
@@ -87,7 +87,7 @@ class TestCloudSslSession:
 
     async def test_close_session_callback_closes_open_session(self) -> None:
         """The _close_session callback closes the session when not yet closed."""
-        from custom_components.bosch_shc_camera import cloud_ssl
+        from custom_components.bosch_smart_camera import cloud_ssl
 
         hass = _make_hass_for_cloud()
 
@@ -112,11 +112,11 @@ class TestCloudSslSession:
                 new=AsyncMock(return_value=fake_ssl_ctx),
             ),
             patch(
-                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.TCPConnector",
+                "custom_components.bosch_smart_camera.cloud_ssl.aiohttp.TCPConnector",
                 return_value=fake_connector,
             ),
             patch(
-                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.ClientSession",
+                "custom_components.bosch_smart_camera.cloud_ssl.aiohttp.ClientSession",
                 return_value=fake_session,
             ),
         ):
@@ -146,7 +146,7 @@ class TestCloudSslSession:
         """
         from homeassistant.const import EVENT_HOMEASSISTANT_CLOSE
 
-        from custom_components.bosch_shc_camera import cloud_ssl
+        from custom_components.bosch_smart_camera import cloud_ssl
 
         hass = _make_hass_for_cloud()
         hass.data.pop(cloud_ssl._SESSION_DATA_KEY, None)
@@ -161,11 +161,11 @@ class TestCloudSslSession:
                 new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
-                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.TCPConnector",
+                "custom_components.bosch_smart_camera.cloud_ssl.aiohttp.TCPConnector",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.ClientSession",
+                "custom_components.bosch_smart_camera.cloud_ssl.aiohttp.ClientSession",
                 return_value=fake_session,
             ),
         ):
@@ -186,7 +186,7 @@ class TestCloudSslSession:
         open, idle, until HA stop — log noise + wasted connector). Fix:
         mirror the existing _SSL_CONTEXT_LOCK double-checked-locking pattern.
         """
-        from custom_components.bosch_shc_camera import cloud_ssl
+        from custom_components.bosch_smart_camera import cloud_ssl
 
         hass = _make_hass_for_cloud()
         hass.data.pop(cloud_ssl._SESSION_DATA_KEY, None)
@@ -213,11 +213,11 @@ class TestCloudSslSession:
                 cloud_ssl, "async_get_bosch_cloud_ssl_context", new=_slow_ssl_context
             ),
             patch(
-                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.TCPConnector",
+                "custom_components.bosch_smart_camera.cloud_ssl.aiohttp.TCPConnector",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.ClientSession",
+                "custom_components.bosch_smart_camera.cloud_ssl.aiohttp.ClientSession",
                 side_effect=_make_session,
             ),
         ):
@@ -235,7 +235,7 @@ class TestCloudSslSession:
 
     async def test_close_session_callback_skips_already_closed(self) -> None:
         """_close_session does not call close() when the session is already closed."""
-        from custom_components.bosch_shc_camera import cloud_ssl
+        from custom_components.bosch_smart_camera import cloud_ssl
 
         hass = _make_hass_for_cloud()
 
@@ -260,11 +260,11 @@ class TestCloudSslSession:
                 new=AsyncMock(return_value=fake_ssl_ctx),
             ),
             patch(
-                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.TCPConnector",
+                "custom_components.bosch_smart_camera.cloud_ssl.aiohttp.TCPConnector",
                 return_value=fake_connector,
             ),
             patch(
-                "custom_components.bosch_shc_camera.cloud_ssl.aiohttp.ClientSession",
+                "custom_components.bosch_smart_camera.cloud_ssl.aiohttp.ClientSession",
                 return_value=fake_session,
             ),
         ):

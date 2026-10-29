@@ -25,12 +25,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera.frigate_endpoint import (
+from custom_components.bosch_smart_camera.frigate_endpoint import (
     AUTH_NONE,
     FrontDoorConfig,
     FrontDoorRunner,
 )
-from custom_components.bosch_shc_camera.remote_viewing_front_door import (
+from custom_components.bosch_smart_camera.remote_viewing_front_door import (
     RemoteTarget,
     _PathRewriteRelay,
     _remote_relay_factory,

@@ -16,11 +16,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from bosch_shc_camera_client.cloud import CloudPutResult
 
-from custom_components.bosch_shc_camera.light import (
+from custom_components.bosch_smart_camera.light import (
     BoschFrontLight,
     BoschTopLedLight,
 )
-from custom_components.bosch_shc_camera.shc import (
+from custom_components.bosch_smart_camera.shc import (
     async_cloud_set_light_component,
     get_lighting_lock,
 )
@@ -123,7 +123,7 @@ def _light(klass: type, coord: SimpleNamespace) -> Any:
 
 def _patch_light(cam: _FakeCamera):
     return patch(
-        "custom_components.bosch_shc_camera.light.async_get_bosch_cloud_session",
+        "custom_components.bosch_smart_camera.light.async_get_bosch_cloud_session",
         new=AsyncMock(return_value=cam.session()),
     )
 
@@ -131,11 +131,11 @@ def _patch_light(cam: _FakeCamera):
 def _patch_shc(cam: _FakeCamera):
     return (
         patch(
-            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.shc.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=MagicMock()),
         ),
         patch(
-            "custom_components.bosch_shc_camera.shc.cloud_put_json",
+            "custom_components.bosch_smart_camera.shc.cloud_put_json",
             new=cam.cloud_put_json,
         ),
     )

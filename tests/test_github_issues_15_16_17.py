@@ -23,7 +23,7 @@ import pytest
 _REPO = Path(__file__).parent.parent
 _CARD_SRC = _REPO / "src" / "bosch-camera-card.js"
 _CARD_BUNDLE = (
-    _REPO / "custom_components" / "bosch_shc_camera" / "www" / "bosch-camera-card.js"
+    _REPO / "custom_components" / "bosch_smart_camera" / "www" / "bosch-camera-card.js"
 )
 
 

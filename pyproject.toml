@@ -1,7 +1,7 @@
 [tool.mypy]
 python_version = "3.13"
 platform = "linux"  # HA runs on Linux; analyze platform-specific stdlib (socket.TCP_KEEPIDLE etc.) as Linux regardless of host OS (macOS dev vs Linux CI)
-files = ["custom_components/bosch_shc_camera"]
+files = ["custom_components/bosch_smart_camera"]
 strict = true
 warn_unused_configs = true
 warn_redundant_casts = true
@@ -66,10 +66,10 @@ ignore = [
 # before its homeassistant imports (private-CA TLS); __init__.py / config_flow.py
 # import sibling modules lazily after a constant + helper to avoid circular
 # imports; sensor.py defers `import re as _re_inst` to the bottom of the module.
-"custom_components/bosch_shc_camera/__init__.py" = ["E402"]
-"custom_components/bosch_shc_camera/camera.py" = ["E402"]
-"custom_components/bosch_shc_camera/config_flow.py" = ["E402"]
-"custom_components/bosch_shc_camera/sensor.py" = ["E402"]
+"custom_components/bosch_smart_camera/__init__.py" = ["E402"]
+"custom_components/bosch_smart_camera/camera.py" = ["E402"]
+"custom_components/bosch_smart_camera/config_flow.py" = ["E402"]
+"custom_components/bosch_smart_camera/sensor.py" = ["E402"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 40

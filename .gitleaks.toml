@@ -15,7 +15,7 @@ useDefault = true
 # The Bosch Smart Camera app's Firebase API key. It is a PUBLIC client-side app
 # identifier shipped in every copy of the APK, restricted by Firebase project
 # rules (not by secrecy) and vendor-sanctioned for OSS use — see the docstring
-# in custom_components/bosch_shc_camera/fcm.py. gitleaks base64-decodes the
+# in custom_components/bosch_smart_camera/fcm.py. gitleaks base64-decodes the
 # source literal and flags the decoded `AIza…` key; we allowlist by the *encoded*
 # source string (which contains no `AIza…` trigger, so it does not trip the
 # local pre-push grep). Scoped to this one value, so any OTHER key still fires.

@@ -19,8 +19,8 @@ import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.bosch_shc_camera.const import DOMAIN
-from custom_components.bosch_shc_camera.system_health import (
+from custom_components.bosch_smart_camera.const import DOMAIN
+from custom_components.bosch_smart_camera.system_health import (
     CLOUD_HEALTH_URL,
     _first_loaded_coordinator,
     _format_ago,
@@ -133,7 +133,7 @@ def test_async_register_calls_register_info(hass: HomeAssistant) -> None:
     assert args[0] is system_health_info
     manage_url = args[1] if len(args) > 1 else kwargs.get("manage_url")
     assert manage_url is not None
-    assert "bosch_shc_camera" in manage_url
+    assert "bosch_smart_camera" in manage_url
 
 
 async def test_system_health_no_integration(hass: HomeAssistant) -> None:
@@ -143,7 +143,7 @@ async def test_system_health_no_integration(hass: HomeAssistant) -> None:
     with (
         patch.object(hass.config_entries, "async_loaded_entries", return_value=[]),
         patch(
-            "custom_components.bosch_shc_camera.system_health.system_health.async_check_can_reach_url",
+            "custom_components.bosch_smart_camera.system_health.system_health.async_check_can_reach_url",
             return_value=fake_reach,
         ),
     ):
@@ -173,7 +173,7 @@ async def test_system_health_fcm_healthy(hass: HomeAssistant) -> None:
     with (
         patch.object(hass.config_entries, "async_loaded_entries", return_value=[entry]),
         patch(
-            "custom_components.bosch_shc_camera.system_health.system_health.async_check_can_reach_url",
+            "custom_components.bosch_smart_camera.system_health.system_health.async_check_can_reach_url",
             return_value=fake_reach,
         ),
     ):
@@ -197,7 +197,7 @@ async def test_system_health_fcm_degraded(hass: HomeAssistant) -> None:
     with (
         patch.object(hass.config_entries, "async_loaded_entries", return_value=[entry]),
         patch(
-            "custom_components.bosch_shc_camera.system_health.system_health.async_check_can_reach_url",
+            "custom_components.bosch_smart_camera.system_health.system_health.async_check_can_reach_url",
             return_value=fake_reach,
         ),
     ):
@@ -218,7 +218,7 @@ async def test_system_health_fcm_last_push_never(hass: HomeAssistant) -> None:
     with (
         patch.object(hass.config_entries, "async_loaded_entries", return_value=[entry]),
         patch(
-            "custom_components.bosch_shc_camera.system_health.system_health.async_check_can_reach_url",
+            "custom_components.bosch_smart_camera.system_health.system_health.async_check_can_reach_url",
             return_value=fake_reach,
         ),
     ):
@@ -241,7 +241,7 @@ async def test_system_health_fcm_last_push_recent(hass: HomeAssistant) -> None:
     with (
         patch.object(hass.config_entries, "async_loaded_entries", return_value=[entry]),
         patch(
-            "custom_components.bosch_shc_camera.system_health.system_health.async_check_can_reach_url",
+            "custom_components.bosch_smart_camera.system_health.system_health.async_check_can_reach_url",
             return_value=fake_reach,
         ),
     ):
@@ -274,7 +274,7 @@ async def test_system_health_cloud_url_check_is_awaitable(
     with (
         patch.object(hass.config_entries, "async_loaded_entries", return_value=[entry]),
         patch(
-            "custom_components.bosch_shc_camera.system_health.system_health.async_check_can_reach_url",
+            "custom_components.bosch_smart_camera.system_health.system_health.async_check_can_reach_url",
             mock_check,
         ),
     ):
@@ -302,7 +302,7 @@ async def test_system_health_coord_missing_fcm_last_push(
     with (
         patch.object(hass.config_entries, "async_loaded_entries", return_value=[entry]),
         patch(
-            "custom_components.bosch_shc_camera.system_health.system_health.async_check_can_reach_url",
+            "custom_components.bosch_smart_camera.system_health.system_health.async_check_can_reach_url",
             return_value=fake_reach,
         ),
     ):
@@ -327,7 +327,7 @@ async def test_system_health_coord_missing_data_attr(hass: HomeAssistant) -> Non
     with (
         patch.object(hass.config_entries, "async_loaded_entries", return_value=[entry]),
         patch(
-            "custom_components.bosch_shc_camera.system_health.system_health.async_check_can_reach_url",
+            "custom_components.bosch_smart_camera.system_health.system_health.async_check_can_reach_url",
             return_value=fake_reach,
         ),
     ):

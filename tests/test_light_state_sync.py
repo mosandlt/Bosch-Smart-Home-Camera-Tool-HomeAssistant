@@ -17,11 +17,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera.shc import (
+from custom_components.bosch_smart_camera.shc import (
     _refresh_lighting_switch_after_on,
     async_cloud_set_camera_light,
 )
-from custom_components.bosch_shc_camera.slow_tier import (
+from custom_components.bosch_smart_camera.slow_tier import (
     CamContext,
     _poll_cam_control,
     _poll_cam_info_caches,
@@ -158,28 +158,28 @@ async def test_camera_light_on_write_schedules_confirm_refresh_gen2_only() -> No
     session = MagicMock()
     with (
         patch(
-            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.shc.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ),
         patch(
-            "custom_components.bosch_shc_camera.shc.cloud_set_camera_light",
+            "custom_components.bosch_smart_camera.shc.cloud_set_camera_light",
             new=AsyncMock(
                 return_value=SimpleNamespace(ok=True, status=204, topdown_status=204)
             ),
         ),
     ):
         with patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2", return_value=True
+            "custom_components.bosch_smart_camera.shc._is_gen2", return_value=True
         ):
             assert await async_cloud_set_camera_light(coord, CAM, True)
         assert coord.spawn_tracked.call_count == 1
         # OFF and Gen1 do not schedule it
         with patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2", return_value=True
+            "custom_components.bosch_smart_camera.shc._is_gen2", return_value=True
         ):
             await async_cloud_set_camera_light(coord, CAM, False)
         with patch(
-            "custom_components.bosch_shc_camera.shc._is_gen2", return_value=False
+            "custom_components.bosch_smart_camera.shc._is_gen2", return_value=False
         ):
             await async_cloud_set_camera_light(coord, CAM, True)
         assert coord.spawn_tracked.call_count == 1
@@ -192,10 +192,11 @@ async def test_confirm_refresh_stops_once_lights_reported_on() -> None:
     session.get.side_effect = [_resp(200, OFF), _resp(200, ON)]
     with (
         patch(
-            "custom_components.bosch_shc_camera.shc._LIGHT_ON_CONFIRM_DELAYS", (0, 0, 0)
+            "custom_components.bosch_smart_camera.shc._LIGHT_ON_CONFIRM_DELAYS",
+            (0, 0, 0),
         ),
         patch(
-            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.shc.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ),
     ):
@@ -210,13 +211,15 @@ async def test_confirm_refresh_survives_library_value_error() -> None:
     """An endpoint/camera-id rejected by the library is logged, not raised."""
     coord = _coord(OFF)
     with (
-        patch("custom_components.bosch_shc_camera.shc._LIGHT_ON_CONFIRM_DELAYS", (0,)),
         patch(
-            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.shc._LIGHT_ON_CONFIRM_DELAYS", (0,)
+        ),
+        patch(
+            "custom_components.bosch_smart_camera.shc.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=MagicMock()),
         ),
         patch(
-            "custom_components.bosch_shc_camera.shc.get_setting_raw",
+            "custom_components.bosch_smart_camera.shc.get_setting_raw",
             new=AsyncMock(side_effect=ValueError("invalid camera id")),
         ),
     ):
@@ -236,10 +239,11 @@ async def test_confirm_refresh_survives_errors_and_bad_payloads() -> None:
     ]
     with (
         patch(
-            "custom_components.bosch_shc_camera.shc._LIGHT_ON_CONFIRM_DELAYS", (0, 0, 0)
+            "custom_components.bosch_smart_camera.shc._LIGHT_ON_CONFIRM_DELAYS",
+            (0, 0, 0),
         ),
         patch(
-            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.shc.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ),
     ):
@@ -256,10 +260,10 @@ async def test_confirm_discarded_when_a_newer_write_happened_before_fetch() -> N
     session = MagicMock()
     with (
         patch(
-            "custom_components.bosch_shc_camera.shc._LIGHT_ON_CONFIRM_DELAYS", (0, 0)
+            "custom_components.bosch_smart_camera.shc._LIGHT_ON_CONFIRM_DELAYS", (0, 0)
         ),
         patch(
-            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.shc.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ),
     ):
@@ -281,10 +285,10 @@ async def test_confirm_discarded_when_a_light_put_ran_during_the_fetch() -> None
     session.get.side_effect = get
     with (
         patch(
-            "custom_components.bosch_shc_camera.shc._LIGHT_ON_CONFIRM_DELAYS", (0, 0)
+            "custom_components.bosch_smart_camera.shc._LIGHT_ON_CONFIRM_DELAYS", (0, 0)
         ),
         patch(
-            "custom_components.bosch_shc_camera.shc.async_get_bosch_cloud_session",
+            "custom_components.bosch_smart_camera.shc.async_get_bosch_cloud_session",
             new=AsyncMock(return_value=session),
         ),
     ):
@@ -301,7 +305,7 @@ async def test_confirm_is_cancellable_and_delays_are_absolute() -> None:
     task.cancel()  # unload cancels tracked tasks
     with pytest.raises(asyncio.CancelledError):
         await task
-    from custom_components.bosch_shc_camera import shc
+    from custom_components.bosch_smart_camera import shc
 
     assert shc._LIGHT_ON_CONFIRM_DELAYS == (4.0, 12.0)
 

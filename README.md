@@ -158,21 +158,30 @@ For more help with camera setup, see:
 If you don't use HACS, copy the integration folder into your HA config:
 
 1. Download the latest release tarball from [Releases](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases/latest) (or `git clone` this repo).
-2. Copy `custom_components/bosch_shc_camera/` into your HA config directory so the final path is:
+2. Copy `custom_components/bosch_smart_camera/` into your HA config directory so the final path is:
    ```
-   /config/custom_components/bosch_shc_camera/
+   /config/custom_components/bosch_smart_camera/
    ```
 3. Restart Home Assistant.
 4. Continue with [Setup](#setup) below.
 
 > **Lovelace card** is auto-registered since **v10.3.19** — the integration serves it from its own bundled `www/` folder. No need to copy `bosch-camera-card.js` to `/config/www/` separately. If you have an old copy from a pre-v10.3.19 install, you can leave it (harmless) or delete it manually: `rm /config/www/bosch-camera-card.js`.
 
+### Upgrading from v17 (rename to `bosch_smart_camera`)
+
+v18 renames the integration domain from `bosch_shc_camera` to `bosch_smart_camera` to match Home Assistant core. Home Assistant cannot rename a domain in place, so the setup is carried over once:
+
+1. Update through HACS and restart Home Assistant.
+2. **Settings → Devices & services → Add integration → Bosch Smart Home Camera → Migrate the existing setup.**
+
+Login, options, AI alert targets, entity IDs, history, areas and dashboards are kept. Automations that call `bosch_shc_camera.<service>` keep working for now (with a deprecation warning in the log); switch them to `bosch_smart_camera.<service>`. Event names and entity unique IDs are unchanged. If HACS leaves the old folder `custom_components/bosch_shc_camera` behind, a repair hint asks you to delete it.
+
 ### Removal
 
 To uninstall the integration cleanly:
 
 1. **Settings → Devices & Services → Bosch Smart Home Camera → ⋮ → Delete** — removes the config entry, all camera entities, the device registry, and the auto-registered Lovelace resource.
-2. **HACS → Integrations → Bosch Smart Home Camera → ⋮ → Remove** — deletes `custom_components/bosch_shc_camera/`. (For manual installs: `rm -rf /config/custom_components/bosch_shc_camera/`.)
+2. **HACS → Integrations → Bosch Smart Home Camera → ⋮ → Remove** — deletes `custom_components/bosch_smart_camera/`. (For manual installs: `rm -rf /config/custom_components/bosch_smart_camera/`.)
 3. **Restart Home Assistant.**
 
 The integration leaves no orphan files in `/config/www/`, no leftover entries in `configuration.yaml`, and no system services running. Downloaded event snapshots/videos in `/config/bosch_events/` (or your configured `download_path`) are **not** auto-deleted — remove them manually if no longer needed.
@@ -554,7 +563,7 @@ Renewals after the initial startup take **roughly 2/3** of the `min_total_wait` 
 
 **Encoder-readiness confirmation (v16.1.1-beta-6+):** `min_total_wait` above is a blind ceiling, not a fixed wait — a single successful RTSP DESCRIBE during pre-warm only proves the RTSP/TLS session stack answered, not that the H.264 encoder is producing valid frames yet. A second, independent confirmation DESCRIBE a few seconds after the first success is much stronger evidence; when it also succeeds, the wait is cut to a short fixed buffer (2–3 s) instead of running out the full ceiling. On any confirmation failure or timeout it falls back to the exact original blind wait, unchanged — so this can only make stream starts faster or identical, never slower. Live-verified against all 4 camera model variants on real hardware: Gen2 Eyes Outdoor II 35 s → ~10.2 s, Gen2 Eyes Indoor II 25 s → ~7.4 s, Gen1 Eyes Outdoor 35 s → ~17.7 s all confirmed and shortened in testing; the Gen1 360° Indoor camera did not confirm on that particular run and correctly fell back to its full 25 s ceiling with no added latency, demonstrating the fallback path is genuinely safe rather than just faster on paper.
 
-Values are configurable per model in `custom_components/bosch_shc_camera/models.py` if you need to tune them for a slower network or a specific firmware; the defaults above are empirically measured and known-good.
+Values are configurable per model in `custom_components/bosch_smart_camera/models.py` if you need to tune them for a slower network or a specific firmware; the defaults above are empirically measured and known-good.
 
 ### WebRTC / go2rtc
 
@@ -744,7 +753,7 @@ Copy the exact `rtsp://…` from the sensor (the port is assigned per camera). B
 
 ## Quality Scale: Platinum
 
-Verified rule-by-rule against the [Home Assistant Integration Quality Scale](https://developers.home-assistant.io/docs/core/integration-quality-scale/) — all 52 rules across Bronze, Silver, Gold, and Platinum tiers satisfied. The full per-rule breakdown lives in [`custom_components/bosch_shc_camera/quality_scale.yaml`](custom_components/bosch_shc_camera/quality_scale.yaml).
+Verified rule-by-rule against the [Home Assistant Integration Quality Scale](https://developers.home-assistant.io/docs/core/integration-quality-scale/) — all 52 rules across Bronze, Silver, Gold, and Platinum tiers satisfied. The full per-rule breakdown lives in [`custom_components/bosch_smart_camera/quality_scale.yaml`](custom_components/bosch_smart_camera/quality_scale.yaml).
 
 ```mermaid
 graph LR
@@ -1066,7 +1075,7 @@ The gates exist to keep the feature **cheap and quiet**: a per-camera **cooldown
 Returns the text in the response, so you can use it anywhere (a dashboard, a TTS announcement, your own automation):
 
 ```yaml
-action: bosch_shc_camera.describe_snapshot
+action: bosch_smart_camera.describe_snapshot
 data:
   camera_id: bosch_terrasse        # or: entity_id: camera.bosch_terrasse
   # optional per-call overrides:
@@ -1175,7 +1184,7 @@ Payload posted for every event (10 s timeout, non-2xx/4xx/5xx responses and conn
 }
 ```
 
-Use the `bosch_shc_camera.send_event_webhook` service (see [Developer Tools — Services](#developer-tools--services)) to fire a one-off test POST against your endpoint without waiting for a real camera event.
+Use the `bosch_smart_camera.send_event_webhook` service (see [Developer Tools — Services](#developer-tools--services)) to fire a one-off test POST against your endpoint without waiting for a real camera event.
 
 ### SMB/NAS Upload
 
@@ -1531,49 +1540,49 @@ All services are available in **Developer Tools → Services** (or via automatio
 
 | Service | Description | Fields |
 |---------|-------------|--------|
-| `bosch_shc_camera.trigger_snapshot` | Force immediate snapshot refresh for all cameras | — |
-| `bosch_shc_camera.open_live_connection` | Open live stream for a specific camera | `camera_id` |
-| `bosch_shc_camera.rename_camera` | Rename a camera (appears in Bosch app + HA) | `camera_id`, `new_name` |
-| `bosch_shc_camera.invite_friend` | Send camera sharing invitation by email | `email` |
-| `bosch_shc_camera.list_friends` | List all friends and camera shares (persistent notification) | — |
-| `bosch_shc_camera.remove_friend` | Remove a friend and revoke all camera shares | `friend_id` |
-| `bosch_shc_camera.get_lighting_schedule` | Read full lighting schedule (persistent notification). Outdoor cameras only. | `camera_id` |
-| `bosch_shc_camera.set_lighting_schedule` | Set the LED on/off time, motion trigger, and darkness threshold. Outdoor cameras only; empty fields keep their current value. | `camera_id`, `on_time`?, `off_time`?, `motion`?, `darkness_threshold`? |
-| `bosch_shc_camera.send_event_webhook` | Manually fire a webhook POST for a camera — handy for testing an endpoint without waiting for a real event. Requires **Webhook delivery** enabled and a URL configured (see [Webhook Delivery](#webhook-delivery)). | `entity_id`? |
-| `bosch_shc_camera.delete_motion_zone` | Delete a single motion zone by index | `camera_id`, `zone_index` |
-| `bosch_shc_camera.get_privacy_masks` | Read privacy mask zones (persistent notification) | `camera_id` |
-| `bosch_shc_camera.set_privacy_masks` | Set/clear privacy mask zones (0.0–1.0 coordinates) | `camera_id`, `masks` |
-| `bosch_shc_camera.create_rule` | Create a cloud-side schedule rule | `camera_id`, `name`, `start_time`, `end_time`, `weekdays`, `is_active` |
-| `bosch_shc_camera.update_rule` | Update a schedule rule (change name, times, activate/deactivate) | `camera_id`, `rule_id`, `name`?, `start_time`?, `end_time`?, `weekdays`?, `is_active`? |
-| `bosch_shc_camera.delete_rule` | Delete a schedule rule | `camera_id`, `rule_id` |
-| `bosch_shc_camera.set_motion_zones` | Set motion detection zones (normalized 0.0–1.0 coordinates) | `camera_id`, `zones` |
-| `bosch_shc_camera.get_motion_zones` | Read motion zones from cloud API (persistent notification) | `camera_id` |
-| `bosch_shc_camera.share_camera` | Share cameras with a friend (time-limited) | `friend_id`, `camera_ids`, `days`? |
+| `bosch_smart_camera.trigger_snapshot` | Force immediate snapshot refresh for all cameras | — |
+| `bosch_smart_camera.open_live_connection` | Open live stream for a specific camera | `camera_id` |
+| `bosch_smart_camera.rename_camera` | Rename a camera (appears in Bosch app + HA) | `camera_id`, `new_name` |
+| `bosch_smart_camera.invite_friend` | Send camera sharing invitation by email | `email` |
+| `bosch_smart_camera.list_friends` | List all friends and camera shares (persistent notification) | — |
+| `bosch_smart_camera.remove_friend` | Remove a friend and revoke all camera shares | `friend_id` |
+| `bosch_smart_camera.get_lighting_schedule` | Read full lighting schedule (persistent notification). Outdoor cameras only. | `camera_id` |
+| `bosch_smart_camera.set_lighting_schedule` | Set the LED on/off time, motion trigger, and darkness threshold. Outdoor cameras only; empty fields keep their current value. | `camera_id`, `on_time`?, `off_time`?, `motion`?, `darkness_threshold`? |
+| `bosch_smart_camera.send_event_webhook` | Manually fire a webhook POST for a camera — handy for testing an endpoint without waiting for a real event. Requires **Webhook delivery** enabled and a URL configured (see [Webhook Delivery](#webhook-delivery)). | `entity_id`? |
+| `bosch_smart_camera.delete_motion_zone` | Delete a single motion zone by index | `camera_id`, `zone_index` |
+| `bosch_smart_camera.get_privacy_masks` | Read privacy mask zones (persistent notification) | `camera_id` |
+| `bosch_smart_camera.set_privacy_masks` | Set/clear privacy mask zones (0.0–1.0 coordinates) | `camera_id`, `masks` |
+| `bosch_smart_camera.create_rule` | Create a cloud-side schedule rule | `camera_id`, `name`, `start_time`, `end_time`, `weekdays`, `is_active` |
+| `bosch_smart_camera.update_rule` | Update a schedule rule (change name, times, activate/deactivate) | `camera_id`, `rule_id`, `name`?, `start_time`?, `end_time`?, `weekdays`?, `is_active`? |
+| `bosch_smart_camera.delete_rule` | Delete a schedule rule | `camera_id`, `rule_id` |
+| `bosch_smart_camera.set_motion_zones` | Set motion detection zones (normalized 0.0–1.0 coordinates) | `camera_id`, `zones` |
+| `bosch_smart_camera.get_motion_zones` | Read motion zones from cloud API (persistent notification) | `camera_id` |
+| `bosch_smart_camera.share_camera` | Share cameras with a friend (time-limited) | `friend_id`, `camera_ids`, `days`? |
 
 **Examples:**
 
 ```yaml
 # Rename a camera
-service: bosch_shc_camera.rename_camera
+service: bosch_smart_camera.rename_camera
 data:
   camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
   new_name: "Garden Camera"
 
 # Invite a friend to share cameras
-service: bosch_shc_camera.invite_friend
+service: bosch_smart_camera.invite_friend
 data:
   email: "friend@example.com"
 
 # List all camera shares
-service: bosch_shc_camera.list_friends
+service: bosch_smart_camera.list_friends
 
 # Remove a friend (get friend_id from list_friends)
-service: bosch_shc_camera.remove_friend
+service: bosch_smart_camera.remove_friend
 data:
   friend_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
 # Create a schedule rule (notifications active 8am-8pm weekdays)
-service: bosch_shc_camera.create_rule
+service: bosch_smart_camera.create_rule
 data:
   camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
   name: "Weekday Schedule"
@@ -1583,14 +1592,14 @@ data:
   is_active: true
 
 # Update a rule (deactivate it)
-service: bosch_shc_camera.update_rule
+service: bosch_smart_camera.update_rule
 data:
   camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
   rule_id: "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"
   is_active: false
 
 # Set motion detection zones (list of normalized rectangles)
-service: bosch_shc_camera.set_motion_zones
+service: bosch_smart_camera.set_motion_zones
 data:
   camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
   zones:
@@ -1598,7 +1607,7 @@ data:
     - { x: 0.63, y: 0.42, w: 0.28, h: 0.58 }
 
 # Share cameras with a friend for 30 days
-service: bosch_shc_camera.share_camera
+service: bosch_smart_camera.share_camera
 data:
   friend_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
   camera_ids:
@@ -1607,7 +1616,7 @@ data:
   days: 30
 
 # Set an outdoor camera's LED lighting schedule
-service: bosch_shc_camera.set_lighting_schedule
+service: bosch_smart_camera.set_lighting_schedule
 data:
   camera_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
   on_time: "18:00"
@@ -1615,7 +1624,7 @@ data:
   motion: true
 
 # Fire a test webhook POST without waiting for a real event
-service: bosch_shc_camera.send_event_webhook
+service: bosch_smart_camera.send_event_webhook
 data:
   entity_id: camera.bosch_terrasse
 ```
@@ -2465,8 +2474,8 @@ Latest stable: **v17.2.2** — see the GitHub release page for full notes:
 |---|---|
 | **All releases** | [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/releases) — every tagged version with notes + downloadable assets |
 | **Full history** | [`CHANGELOG.md`](CHANGELOG.md) — same notes, browseable inside the repo |
-| **Card version** | tracked in `src/bosch-camera-card.js` (`CARD_VERSION`) and mirrored in `custom_components/bosch_shc_camera/const.py` (`CARD_VERSION`) |
-| **Integration version** | `custom_components/bosch_shc_camera/manifest.json` (`version`) |
+| **Card version** | tracked in `src/bosch-camera-card.js` (`CARD_VERSION`) and mirrored in `custom_components/bosch_smart_camera/const.py` (`CARD_VERSION`) |
+| **Integration version** | `custom_components/bosch_smart_camera/manifest.json` (`version`) |
 
 ## Integration Comparison
 

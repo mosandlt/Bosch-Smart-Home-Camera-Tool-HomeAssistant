@@ -21,7 +21,7 @@ no real network I/O. `urllib.request.urlopen` is patched (not `requests`,
 which this module never uses). Filesystem tests use `tmp_path` so nothing
 escapes the per-test sandbox.
 
-NOTE: `custom_components.bosch_shc_camera.smb` imports are done lazily inside
+NOTE: `custom_components.bosch_smart_camera.smb` imports are done lazily inside
 each test body (HA test-isolation convention used throughout this codebase),
 not hoisted to module level.
 """
@@ -41,7 +41,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-MODULE = "custom_components.bosch_shc_camera.smb"
+MODULE = "custom_components.bosch_smart_camera.smb"
 CAM_ID = "11111111-1111-1111-1111-111111111111"
 URLOPEN = "urllib.request.urlopen"
 
@@ -172,23 +172,23 @@ _FILE_RE = re.compile(
 
 class TestSafeName:
     def test_normal_name_passes_through(self):
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         assert _safe_name("Terrasse") == "Terrasse"
 
     def test_spaces_and_hyphens_allowed(self):
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         assert _safe_name("Bosch Terrasse-Kamera") == "Bosch Terrasse-Kamera"
 
     def test_dots_allowed(self):
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         assert _safe_name("Cam.Front") == "Cam.Front"
 
     def test_double_dot_replaced(self):
         """Path-traversal sequence must be defanged."""
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         result = _safe_name("../etc/passwd")
         assert ".." not in result
@@ -196,20 +196,20 @@ class TestSafeName:
         assert "/" not in result
 
     def test_slashes_replaced(self):
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         result = _safe_name("evil/path/here")
         assert "/" not in result
 
     def test_backslash_replaced(self):
         """Windows path separator must also be sanitized."""
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         result = _safe_name("evil\\path")
         assert "\\" not in result
 
     def test_special_chars_replaced(self):
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         result = _safe_name("name<with>special|chars*")
         for ch in "<>|*":
@@ -217,25 +217,25 @@ class TestSafeName:
 
     def test_unicode_replaced(self):
         """Non-word characters become `_` — keeps fs-safe."""
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         result = _safe_name("Außenkamera")
         # `ß` is `\w` in Python regex so it stays — both fine for filesystem
         assert len(result) > 0
 
     def test_truncates_to_64_chars(self):
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         long_name = "x" * 100
         assert len(_safe_name(long_name)) == 64
 
     def test_empty_string_returns_empty(self):
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         assert _safe_name("") == ""
 
     def test_only_unsafe_chars_yields_underscores(self):
-        from custom_components.bosch_shc_camera.smb import _safe_name
+        from custom_components.bosch_smart_camera.smb import _safe_name
 
         result = _safe_name("///***")
         assert all(c == "_" for c in result)
@@ -256,7 +256,7 @@ class TestSmbSafeBoschUrl:
         ],
     )
     def test_legit_urls_allowed(self, url: str) -> None:
-        from custom_components.bosch_shc_camera.smb import _is_safe_bosch_url
+        from custom_components.bosch_smart_camera.smb import _is_safe_bosch_url
 
         assert _is_safe_bosch_url(url) is True
 
@@ -270,7 +270,7 @@ class TestSmbSafeBoschUrl:
         ],
     )
     def test_unsafe_urls_rejected(self, url: str) -> None:
-        from custom_components.bosch_shc_camera.smb import _is_safe_bosch_url
+        from custom_components.bosch_smart_camera.smb import _is_safe_bosch_url
 
         assert _is_safe_bosch_url(url) is False
 
@@ -278,7 +278,7 @@ class TestSmbSafeBoschUrl:
         """urlparse() can raise ValueError on malformed input — fail closed
         (backported from the Core PR's Copilot review round 18, 2026-08-04).
         """
-        from custom_components.bosch_shc_camera.smb import _is_safe_bosch_url
+        from custom_components.bosch_smart_camera.smb import _is_safe_bosch_url
 
         assert _is_safe_bosch_url("https://[::1") is False
 
@@ -290,7 +290,7 @@ class TestBoschSslCtxVerifies:
     CERT_NONE / check_hostname=False which left the token MITM-exposed."""
 
     def test_ssl_ctx_verifies_and_pins_bosch_ca(self):
-        from custom_components.bosch_shc_camera import smb
+        from custom_components.bosch_smart_camera import smb
 
         smb._SSL_CTX = None  # reset module cache for a deterministic build
         try:
@@ -303,12 +303,12 @@ class TestBoschSslCtxVerifies:
         assert ctx.verify_flags & ssl.VERIFY_X509_PARTIAL_CHAIN
 
     def test_ssl_ctx_reuses_cloud_ssl_builder_and_caches(self):
-        from custom_components.bosch_shc_camera import smb
+        from custom_components.bosch_smart_camera import smb
 
         sentinel = object()
         smb._SSL_CTX = None
         with patch(
-            "custom_components.bosch_shc_camera.cloud_ssl._build_ssl_context",
+            "custom_components.bosch_smart_camera.cloud_ssl._build_ssl_context",
             return_value=sentinel,
         ) as mock_build:
             try:
@@ -343,7 +343,7 @@ class TestSyncLocalSaveBasics:
         camera prefix — causing list_dates() to silently return [] and the Media
         Browser to appear empty.
         """
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _make_coordinator(tmp_path)
         ev = _make_ev()
@@ -359,7 +359,7 @@ class TestSyncLocalSaveBasics:
 
     def test_camera_subdir_created(self, tmp_path: Path) -> None:
         """Camera name subdirectory is created inside download_path."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _make_coordinator(tmp_path)
         resp = self._make_urlopen_resp(b"FAKE")
@@ -369,7 +369,7 @@ class TestSyncLocalSaveBasics:
 
     def test_clip_skipped_when_status_not_done(self, tmp_path: Path) -> None:
         """MP4 not saved when videoClipUploadStatus != Done."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _make_coordinator(tmp_path)
         ev = _make_ev(clip_status="Pending")
@@ -381,7 +381,7 @@ class TestSyncLocalSaveBasics:
 
     def test_unsafe_url_not_fetched(self, tmp_path: Path) -> None:
         """SSRF guard: URLs not on bosch domains must be skipped."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _make_coordinator(tmp_path)
         ev = _make_ev(image_url="https://attacker.com/evil.jpg", clip_url="")
@@ -391,7 +391,7 @@ class TestSyncLocalSaveBasics:
 
     def test_empty_download_path_is_noop(self, tmp_path: Path) -> None:
         """Empty download_path → function returns immediately, no files saved."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = SimpleNamespace(options={"download_path": ""})
         with patch("urllib.request.urlopen") as mock_get:
@@ -400,7 +400,7 @@ class TestSyncLocalSaveBasics:
 
     def test_existing_file_not_redownloaded(self, tmp_path: Path) -> None:
         """Files that already exist are skipped (idempotent on FCM duplicates)."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _make_coordinator(tmp_path)
         ev = _make_ev()
@@ -424,7 +424,7 @@ class TestSyncLocalSaveEmptyDownloadPath:
 
     def test_empty_download_path_returns_without_urlopen(self):
         """`download_path` stripped to empty (whitespace-only) → early return."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord(
             {
@@ -443,7 +443,7 @@ class TestSyncLocalSaveTimestampGuards:
 
     def test_short_timestamp_returns_early(self, tmp_path: Path) -> None:
         """Timestamp shorter than 19 chars → return without writing any file."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord({"download_path": str(tmp_path)})
         ev = {
@@ -458,7 +458,7 @@ class TestSyncLocalSaveTimestampGuards:
 
     def test_empty_timestamp_returns_early(self, tmp_path: Path) -> None:
         """Empty timestamp → return without writing."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord({"download_path": str(tmp_path)})
         ev = {"timestamp": "", "eventType": "MOVEMENT"}
@@ -471,7 +471,7 @@ class TestSyncLocalSaveTimestampGuards:
         """Timestamp with month=0 causes ValueError in strptime → the except
         swallows it, and the download proceeds normally anyway.
         """
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord({"download_path": str(tmp_path)})
         # Set _download_started_at so the timestamp comparison is attempted
@@ -499,7 +499,7 @@ class TestSyncLocalSaveTimestampGuards:
         """Timestamp predating session start → skipped (ev_epoch < started_at - 60).
         This is the normal gate that the malformed-timestamp test bypasses via except.
         """
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord({"download_path": str(tmp_path)})
         coord._download_started_at = time.time()  # now
@@ -530,7 +530,7 @@ class TestSyncLocalSaveTimestampGuards:
         NOT be skipped."""
         from datetime import UTC, datetime, timedelta
 
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord({"download_path": str(tmp_path)})
         coord._download_started_at = time.time()  # session just started
@@ -558,7 +558,7 @@ class TestSyncLocalSavePatternFormatErrors:
 
     def test_folder_pattern_unknown_key_falls_back_to_cam(self, tmp_path: Path) -> None:
         """`{nonexistent}` in folder_pattern → KeyError caught → sub = cam_safe."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord(
             {
@@ -578,7 +578,7 @@ class TestSyncLocalSavePatternFormatErrors:
 
     def test_file_pattern_unknown_key_falls_back(self, tmp_path: Path) -> None:
         """`{nonexistent}` in file_pattern → KeyError caught → default stem."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord(
             {
@@ -604,7 +604,7 @@ class TestSyncLocalSaveMp4Gate:
 
     def test_mp4_skipped_when_status_not_done(self, tmp_path: Path) -> None:
         """MP4 url present but videoClipUploadStatus != 'Done' → MP4 not downloaded."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord({"download_path": str(tmp_path)})
         ev = {
@@ -623,7 +623,7 @@ class TestSyncLocalSaveMp4Gate:
 
     def test_download_exception_logged_not_raised(self, tmp_path: Path) -> None:
         """urlopen raising an exception must be swallowed — no crash."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord({"download_path": str(tmp_path)})
         ev = {
@@ -638,7 +638,7 @@ class TestSyncLocalSaveMp4Gate:
 
     def test_image_downloaded_and_written(self, tmp_path: Path) -> None:
         """HTTP 200 image response → file written to download_path/camera/stem.jpg."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord({"download_path": str(tmp_path)})
         ev = {
@@ -659,7 +659,7 @@ class TestSyncLocalSaveMp4Gate:
 class TestSyncLocalSaveToggleGuard:
     def test_sync_local_save_skips_when_toggle_off(self):
         """sync_local_save must return immediately when enable_local_save=False."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         coord = _coord(
             {
@@ -680,7 +680,7 @@ class TestSyncLocalSaveToggleGuard:
 
     def test_sync_local_save_runs_when_toggle_on(self):
         """sync_local_save must proceed when enable_local_save=True."""
-        from custom_components.bosch_shc_camera.smb import sync_local_save
+        from custom_components.bosch_smart_camera.smb import sync_local_save
 
         with tempfile.TemporaryDirectory() as tmpdir:
             coord = _coord(
@@ -708,7 +708,7 @@ class TestSyncLocalSaveToggleGuard:
 class TestSyncSmbUploadEarlyExits:
     def test_no_server_returns_early(self):
         """Empty smb_server → return before any network calls."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _coord({"smb_server": "", "smb_share": "SHARE"})
         # Should not raise even if smbclient is missing
@@ -716,14 +716,14 @@ class TestSyncSmbUploadEarlyExits:
 
     def test_no_share_returns_early(self):
         """Empty smb_share → return before any network calls."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _coord({"smb_server": "192.168.1.1", "smb_share": ""})
         sync_smb_upload(coord, {}, "tok")
 
     def test_smbclient_import_error_logs_warning(self):
         """smbclient not installed → log warning and return gracefully."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _coord({"smb_server": "192.168.1.1", "smb_share": "SHARE"})
 
@@ -737,7 +737,7 @@ class TestSyncSmbUploadEarlyExits:
 
     def test_ftp_protocol_delegates_to_ftp(self):
         """upload_protocol='ftp' → delegates to _sync_ftp_upload."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _coord({"upload_protocol": "ftp", "smb_server": ""})
 
@@ -748,7 +748,7 @@ class TestSyncSmbUploadEarlyExits:
 
     def test_smb_session_failure_returns_gracefully(self):
         """register_session raising → log warning and return."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _coord({"smb_server": "192.168.1.1", "smb_share": "SHARE"})
 
@@ -774,8 +774,8 @@ class TestSmbTransferSocketTimeout:
         """setdefaulttimeout sequence must be: 10 (connect) -> None -> the
         transfer timeout -> None (final reset), even on a fully successful
         upload with no errors."""
-        from custom_components.bosch_shc_camera import smb
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera import smb
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         ev = _smb_event()
@@ -801,8 +801,8 @@ class TestSmbTransferSocketTimeout:
         """A hard failure inside the transfer loop must still reset the
         socket default timeout afterward (no leaked global state for the
         next executor job on the same thread)."""
-        from custom_components.bosch_shc_camera import smb
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera import smb
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -837,7 +837,7 @@ class TestEnableToggleGuards:
 
     def test_sync_smb_upload_skips_when_toggle_off(self):
         """sync_smb_upload must return immediately when enable_smb_upload=False."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _coord(
             {
@@ -862,7 +862,7 @@ class TestEnableToggleGuards:
 
     def test_sync_smb_cleanup_skips_when_toggle_off(self):
         """sync_smb_cleanup must return immediately when enable_smb_upload=False."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {
@@ -881,7 +881,7 @@ class TestEnableToggleGuards:
 
     def test_ftp_cleanup_skips_when_toggle_off(self):
         """_sync_ftp_cleanup must return immediately when enable_smb_upload=False."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -903,7 +903,7 @@ class TestEnableToggleGuards:
 class TestSyncSmbUploadMainLoop:
     def test_uploads_image_when_http_200(self):
         """Valid event with imageUrl + HTTP 200 → open_file called (image written to SMB)."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
 
@@ -945,7 +945,7 @@ class TestSyncSmbUploadMainLoop:
 
     def test_skips_video_clip_when_status_not_done(self):
         """videoClipUploadStatus != 'Done' → mp4 not uploaded."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _coord(
             {
@@ -984,7 +984,7 @@ class TestSyncSmbUploadMainLoop:
 
     def test_skips_event_with_short_timestamp(self):
         """Timestamp shorter than 19 chars → event skipped entirely."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _coord(
             {
@@ -1015,7 +1015,7 @@ class TestSmbMkdirError:
 
     def test_mkdir_error_logs_warning_and_continues(self):
         """smb_makedirs raises Exception → warning + continue (no upload attempted)."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -1044,7 +1044,7 @@ class TestSmbStatSkip:
 
     def test_image_skipped_when_stat_succeeds(self):
         """smb_stat returns without error → file already on share → no open_file call."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -1075,7 +1075,7 @@ class TestSmbSnapshotHttpBranches:
 
     def test_snapshot_non200_logs_warning(self):
         """HTTP 404 on snapshot → _LOGGER.warning, open_file NOT called."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -1103,7 +1103,7 @@ class TestSmbSnapshotHttpBranches:
 
     def test_snapshot_urlopen_exception_logged_no_crash(self):
         """ConnectionError on snapshot urlopen → except branch → no upload, no exception."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _coord(
             {
@@ -1139,7 +1139,7 @@ class TestSmbClipUpload:
 
     def test_clip_skipped_when_stat_succeeds(self):
         """Clip: stat does NOT raise for the clip path → file exists → skip upload."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -1175,7 +1175,7 @@ class TestSmbClipUpload:
 
     def test_clip_uploaded_when_stat_raises(self):
         """Clip: stat raises OSError → file missing → upload (HTTP 200)."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -1212,7 +1212,7 @@ class TestSmbClipUpload:
 
     def test_clip_download_request_pins_bearer_timeout_and_ssl_context(self):
         """Clip download keeps Bearer auth, 60 s timeout and the pinned context."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -1242,7 +1242,7 @@ class TestSmbClipUpload:
 
     def test_clip_non200_logs_warning(self):
         """Clip: HTTP 503 → warning, open_file NOT called."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -1271,7 +1271,7 @@ class TestSmbClipUpload:
         real `.mp4` name still raises OSError on the NEXT sync pass and the
         upload retries cleanly instead of treating the corrupt partial as
         already-uploaded forever (the exact regression this fix closes)."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -1299,7 +1299,7 @@ class TestSmbClipUpload:
 
     def test_clip_urlopen_exception_logged_no_crash(self):
         """Timeout on clip urlopen → warning, no open_file for .mp4."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _coord(
             {
@@ -1340,7 +1340,7 @@ class TestSmbImageUrlSafetyGuard:
     """
 
     def test_non_bosch_image_url_is_not_fetched(self):
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -1367,7 +1367,7 @@ class TestSmbImageUrlSafetyGuard:
 
     def test_bosch_image_url_is_fetched(self):
         """Control: a legitimate *.bosch.com imageUrl still uploads normally."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -1394,7 +1394,7 @@ class TestSmbImageUrlSafetyGuard:
 
     def test_unsafe_smb_clip_url_skipped(self):
         """Non-Bosch videoClipUrl in SMB upload is warned + skipped."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = _smb_upload_coord()
         fake_smb = _fake_smb()
@@ -1426,7 +1426,7 @@ class TestSmbImageUrlSafetyGuard:
 class TestSmbMakedirs:
     def test_makedirs_creates_each_path_segment(self):
         """mkdir called for each segment of base_path + folder_parts."""
-        from custom_components.bosch_shc_camera.smb import smb_makedirs
+        from custom_components.bosch_smart_camera.smb import smb_makedirs
 
         fake_smb = MagicMock()
         fake_smb.stat.side_effect = OSError("not found")  # nothing exists yet
@@ -1448,7 +1448,7 @@ class TestSmbMakedirs:
 
     def test_makedirs_swallows_existing_dir_error(self):
         """mkdir raising OSError (already exists) is silently ignored."""
-        from custom_components.bosch_shc_camera.smb import smb_makedirs
+        from custom_components.bosch_smart_camera.smb import smb_makedirs
 
         fake_smb = MagicMock()
         # stat raises → directory appears missing → mkdir called but raises OSError
@@ -1467,7 +1467,7 @@ class TestSmbMakedirs:
 
     def test_makedirs_skips_stat_success_segments(self):
         """If stat succeeds (dir exists), mkdir is not called for that segment."""
-        from custom_components.bosch_shc_camera.smb import smb_makedirs
+        from custom_components.bosch_smart_camera.smb import smb_makedirs
 
         fake_smb = MagicMock()
         fake_smb.stat.return_value = MagicMock()  # dir exists — no OSError
@@ -1491,7 +1491,7 @@ class TestSmbMakedirs:
 class TestSyncSmbCleanupEarlyExits:
     def test_no_server_returns_early(self):
         """Empty smb_server → return without any SMB calls."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {"smb_server": "", "smb_share": "SHARE", "smb_retention_days": 30}
@@ -1500,7 +1500,7 @@ class TestSyncSmbCleanupEarlyExits:
 
     def test_retention_zero_returns_early(self):
         """smb_retention_days=0 → keep forever, no deletion."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {"smb_server": "192.168.1.1", "smb_share": "SHARE", "smb_retention_days": 0}
@@ -1509,7 +1509,7 @@ class TestSyncSmbCleanupEarlyExits:
 
     def test_session_failure_returns_gracefully(self):
         """register_session raising → log warning and return without crash."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {
@@ -1528,7 +1528,7 @@ class TestSyncSmbCleanupEarlyExits:
 
     def test_smbclient_import_error_returns_silently(self):
         """smbclient ImportError inside sync_smb_cleanup → silent return."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {
@@ -1547,7 +1547,7 @@ class TestSyncSmbCleanupEarlyExits:
     def test_zero_retention_disables_cleanup(self):
         """retention_days <= 0 must skip cleanup entirely (don't delete
         all files!). Pinned via the `if retention_days <= 0: return` guard."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         # Build a stub coordinator that would otherwise enter the loop
         coord = SimpleNamespace(
@@ -1570,7 +1570,7 @@ class TestSyncSmbCleanupFtpEarlyReturn:
 
     def test_ftp_protocol_delegates_to_ftp_cleanup(self):
         """upload_protocol=ftp → _sync_ftp_cleanup called, not the SMB path."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {"upload_protocol": "ftp", "smb_server": "", "smb_retention_days": "30"}
@@ -1588,7 +1588,7 @@ class TestWalkAndDeleteRetention:
 
     def test_walk_and_delete_removes_old_files(self):
         """scandir returns one old file → remove called."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {
@@ -1625,7 +1625,7 @@ class TestWalkAndDeleteRetention:
     def test_nvr_subtree_is_not_walked_or_deleted(self, sub_opt):
         """Mini-NVR recordings live under {base}/{nvr_smb_subpath}; they have
         their own retention job, so the event-file cleanup must skip them."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         opts = {
             "smb_server": "192.168.1.1",
@@ -1672,7 +1672,7 @@ class TestWalkAndDeleteRetention:
 
     def test_walk_and_delete_skips_recent_files(self):
         """File newer than cutoff → not deleted."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {
@@ -1703,7 +1703,7 @@ class TestWalkAndDeleteRetention:
 
     def test_walk_recurses_into_subdirectory(self):
         """scandir returns a directory → recurse into it."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {
@@ -1749,7 +1749,7 @@ class TestWalkAndDeleteRecurseDeepDelete:
     def test_recurses_into_subdirectory_and_deletes(self):
         """A directory entry triggers recursive _walk_and_delete which then
         deletes an old file found one level down."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {
@@ -1796,7 +1796,7 @@ class TestSmbCleanupScandirException:
 
     def test_scandir_exception_returns_no_delete(self):
         """PermissionError on scandir → except branch returns, no remove() call."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {
@@ -1834,7 +1834,7 @@ class TestSyncSmbCleanupNvrSubtreeExcluded:
     """
 
     def test_nvr_subdir_and_its_contents_are_never_touched(self):
-        from custom_components.bosch_shc_camera.smb import sync_smb_cleanup
+        from custom_components.bosch_smart_camera.smb import sync_smb_cleanup
 
         coord = _coord(
             {
@@ -1906,7 +1906,7 @@ class TestFtpExists:
     must convert both to a clean True/False without leaking ftplib."""
 
     def test_existing_file_returns_true(self):
-        from custom_components.bosch_shc_camera.smb import _ftp_exists
+        from custom_components.bosch_smart_camera.smb import _ftp_exists
 
         ftp = MagicMock()
         ftp.size.return_value = 1024
@@ -1915,7 +1915,7 @@ class TestFtpExists:
     def test_missing_file_error_perm_returns_false(self):
         """`SIZE` on missing file raises `error_perm` ('550 No such file').
         Wrapper must catch and return False (not propagate the FTP exc)."""
-        from custom_components.bosch_shc_camera.smb import _ftp_exists
+        from custom_components.bosch_smart_camera.smb import _ftp_exists
 
         ftp = MagicMock()
         ftp.size.side_effect = ftplib.error_perm("550 No such file")
@@ -1925,7 +1925,7 @@ class TestFtpExists:
         """Connection drop / timeout during SIZE must also return False
         — never raise. Caller decides what to do (typically: try upload
         anyway and let STOR fail with a clearer error)."""
-        from custom_components.bosch_shc_camera.smb import _ftp_exists
+        from custom_components.bosch_smart_camera.smb import _ftp_exists
 
         ftp = MagicMock()
         ftp.size.side_effect = ConnectionResetError()
@@ -1936,7 +1936,7 @@ class TestFtpMakedirs:
     def test_creates_each_path_segment(self):
         """Path /a/b/c → 3 mkd calls: /a, /a/b, /a/b/c. Some FTP servers
         reject a single deep mkd, so we walk segment by segment."""
-        from custom_components.bosch_shc_camera.smb import _ftp_makedirs
+        from custom_components.bosch_smart_camera.smb import _ftp_makedirs
 
         ftp = MagicMock()
         _ftp_makedirs(ftp, "/Bosch-Kameras/2026/05/06")
@@ -1954,7 +1954,7 @@ class TestFtpMakedirs:
         """`error_perm` on mkd usually means 'already exists' (550) —
         the cleanup function should NOT raise; it must continue creating
         deeper segments."""
-        from custom_components.bosch_shc_camera.smb import _ftp_makedirs
+        from custom_components.bosch_smart_camera.smb import _ftp_makedirs
 
         ftp = MagicMock()
         ftp.mkd.side_effect = ftplib.error_perm("550 already exists")
@@ -1965,7 +1965,7 @@ class TestFtpMakedirs:
     def test_collapses_double_slashes(self):
         """Path with `//` (e.g. base_path empty) must not produce empty
         segments which would create invalid FTP commands."""
-        from custom_components.bosch_shc_camera.smb import _ftp_makedirs
+        from custom_components.bosch_smart_camera.smb import _ftp_makedirs
 
         ftp = MagicMock()
         _ftp_makedirs(ftp, "/a//b//c/")
@@ -1978,7 +1978,7 @@ class TestFtpMakedirs:
 
     def test_root_only_no_calls(self):
         """`/` alone has no segments → no calls (idempotent for root)."""
-        from custom_components.bosch_shc_camera.smb import _ftp_makedirs
+        from custom_components.bosch_smart_camera.smb import _ftp_makedirs
 
         ftp = MagicMock()
         _ftp_makedirs(ftp, "/")
@@ -2005,7 +2005,7 @@ class TestFtpConnect:
                 captured["pasv"] = on
 
         monkeypatch.setattr(ftplib, "FTP", _StubFTP)
-        from custom_components.bosch_shc_camera.smb import _ftp_connect
+        from custom_components.bosch_smart_camera.smb import _ftp_connect
 
         ftp = _ftp_connect("fritz.box", "user", "secret")
         assert captured["server"] == "fritz.box"
@@ -2024,14 +2024,14 @@ class TestFtpConnect:
 class TestSyncFtpUploadEarlyExits:
     def test_no_server_returns_early(self):
         """Empty smb_server → return without FTP call."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord({"smb_server": ""})
         _sync_ftp_upload(coord, {}, "tok")  # must not raise
 
     def test_ftp_connect_failure_returns_gracefully(self):
         """FTP login failure → log warning, return without crash."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {"smb_server": "192.168.1.1", "smb_username": "user", "smb_password": "pw"}
@@ -2042,7 +2042,7 @@ class TestSyncFtpUploadEarlyExits:
 
     def test_empty_events_completes_without_upload(self):
         """No events for camera → no FTP stor calls, quit() still called in finally."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2064,7 +2064,7 @@ class TestSyncFtpUploadEarlyExits:
 
     def test_short_timestamp_event_skipped(self):
         """Event with timestamp shorter than 19 chars → skip without crash."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2091,7 +2091,7 @@ class TestSyncFtpUploadEarlyExits:
 
     def test_image_uploaded_successfully(self):
         """Valid event with JPEG URL → storbinary called with .jpg path."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2133,7 +2133,7 @@ class TestSyncFtpUploadEarlyExits:
 
     def test_file_already_exists_skipped(self):
         """File already on FTP server → skip storbinary."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2170,7 +2170,7 @@ class TestSyncFtpUploadEarlyExits:
 
     def test_ftp_quit_called_on_exception(self):
         """Exception mid-upload propagates through finally → ftp.quit() still called."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2215,7 +2215,7 @@ class TestFtpUploadMainLoop:
 
     def test_uploads_image_via_ftp_storbinary(self):
         """Valid event + HTTP 200 → storbinary called with .jpg STOR command."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2257,7 +2257,7 @@ class TestFtpUploadMainLoop:
 
     def test_skips_mp4_when_status_not_done(self):
         """videoClipUploadStatus != 'Done' → mp4 not uploaded."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2299,7 +2299,7 @@ class TestFtpSnapshotHttpBranches:
 
     def test_ftp_snapshot_non200_logs_warning(self):
         """FTP upload path: image HTTP 404 → warning, ftp.storbinary NOT called."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2335,7 +2335,7 @@ class TestFtpSnapshotHttpBranches:
 
     def test_ftp_snapshot_exception_logged_no_crash(self):
         """ConnectionError on FTP snapshot urlopen → except branch, no storbinary."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2368,7 +2368,7 @@ class TestFtpClipUpload:
 
     def test_ftp_clip_skipped_when_exists(self):
         """FTP path: clip exists → skip, storbinary NOT called."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2398,7 +2398,7 @@ class TestFtpClipUpload:
 
     def test_ftp_clip_uploaded_200(self):
         """FTP path: clip missing → HTTP 200 → storbinary called."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2428,7 +2428,7 @@ class TestFtpClipUpload:
 
     def test_ftp_clip_non200_logs_warning(self):
         """FTP path: clip HTTP 502 → warning, storbinary NOT called."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2458,7 +2458,7 @@ class TestFtpClipUpload:
 
     def test_ftp_clip_urlopen_exception_logged_no_crash(self):
         """TimeoutError on clip urlopen → except branch, no storbinary."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2491,7 +2491,7 @@ class TestFtpSafeUrlGuard:
 
     def test_unsafe_image_url_skipped(self):
         """Non-Bosch imageUrl is rejected by _is_safe_bosch_url → no HTTP request."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2530,7 +2530,7 @@ class TestFtpFinallyQuitClose:
 
     def test_ftp_quit_called_on_success(self):
         """Normal path: ftp.quit() called in finally."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2554,7 +2554,7 @@ class TestFtpFinallyQuitClose:
 
     def test_ftp_close_called_when_quit_raises(self):
         """ftp.quit() raises → ftp.close() called as fallback."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2580,7 +2580,7 @@ class TestFtpFinallyQuitClose:
 
     def test_quit_and_close_both_fail(self, tmp_path: Path) -> None:
         """quit() + close() both raise → outer caller sees no exception."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = _coord(
             {
@@ -2612,21 +2612,21 @@ class TestFtpFinallyQuitClose:
 class TestSyncFtpCleanupEarlyExits:
     def test_no_server_returns_early(self):
         """Empty smb_server → return without any FTP call."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord({"smb_server": "", "smb_retention_days": 30})
         _sync_ftp_cleanup(coord)  # must not raise
 
     def test_retention_zero_returns_early(self):
         """smb_retention_days=0 → skip cleanup."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord({"smb_server": "192.168.1.1", "smb_retention_days": 0})
         _sync_ftp_cleanup(coord)
 
     def test_ftp_connect_failure_returns_gracefully(self):
         """FTP login failure → log warning, return without crash."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -2642,7 +2642,7 @@ class TestSyncFtpCleanupEarlyExits:
 
     def test_empty_directory_completes_without_deletion(self):
         """Empty FTP directory → no DELE commands."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -2665,7 +2665,7 @@ class TestSyncFtpCleanupEarlyExits:
 
     def test_mlsd_exception_falls_back_to_nlst(self):
         """mlsd() raising → fall back to nlst() for listing."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -2696,7 +2696,7 @@ class TestFtpCleanupWalkAndDelete:
 
     def test_walk_and_delete_deletes_old_files(self):
         """LIST returns a file with old MDTM timestamp → delete called."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -2726,7 +2726,7 @@ class TestFtpCleanupWalkAndDelete:
 
     def test_walk_and_delete_skips_recent_files(self):
         """FILE with MDTM timestamp within retention → not deleted."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -2756,7 +2756,7 @@ class TestFtpCleanupWalkAndDelete:
 
     def test_walk_recurses_into_subdirectories(self):
         """LIST returns a directory entry → cwd into it and LIST again."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -2791,7 +2791,7 @@ class TestFtpCleanupWalkAndDelete:
 
     def test_ftp_quit_called_on_completion(self):
         """ftp.quit() called in finally after cleanup walk."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -2819,7 +2819,7 @@ class TestFtpCleanupDeepWalk:
 
     def test_cwd_error_perm_returns_silently(self):
         """ftp.cwd raises ftplib.error_perm → _walk_and_delete returns without listing."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -2843,7 +2843,7 @@ class TestFtpCleanupDeepWalk:
 
     def test_retrlines_exception_returns_silently(self):
         """ftp.retrlines raises → _walk_and_delete returns, no delete attempted."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -2869,7 +2869,7 @@ class TestFtpCleanupDeepWalk:
         self, lines: list[str], fake_ftp: MagicMock, coord
     ) -> None:
         """Helper: run _sync_ftp_cleanup with a faked LIST output."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         def fake_retrlines(cmd, callback):
             for line in lines:
@@ -2925,7 +2925,7 @@ class TestFtpCleanupDeepWalk:
 
     def test_mdtm_failure_skips_file(self):
         """sendcmd("MDTM ...") raises → file is not deleted (continue)."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -2956,7 +2956,7 @@ class TestFtpCleanupDeepWalk:
 
     def test_delete_failure_logged_as_debug(self):
         """ftp.delete raises → debug log, execution continues."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -2990,7 +2990,7 @@ class TestFtpCleanupDeepWalk:
 
     def test_subdir_cwd_back_fails_continues(self):
         """After recursing into a subdir, cwd(parent) fails → pass, loop continues."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -3031,7 +3031,7 @@ class TestFtpCleanupDeepWalk:
 
     def test_cleanup_quit_exception_no_crash(self):
         """ftp.quit() raises in finally of _sync_ftp_cleanup → no crash."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_cleanup
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_cleanup
 
         coord = _coord(
             {
@@ -3062,7 +3062,7 @@ class TestCleanupAlert:
 
     def test_no_notify_service_skips_alert(self):
         """No alert_notify_system and no alert_notify_service → call_soon_threadsafe not called."""
-        from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+        from custom_components.bosch_smart_camera.smb import _fire_cleanup_alert
 
         coord = _coord({})
         _fire_cleanup_alert(coord, 5, 180, "\\\\nas\\share\\Bosch-Kameras")
@@ -3070,7 +3070,7 @@ class TestCleanupAlert:
 
     def test_system_service_schedules_alert(self):
         """alert_notify_system set → call_soon_threadsafe called once."""
-        from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+        from custom_components.bosch_smart_camera.smb import _fire_cleanup_alert
 
         coord = _coord({"alert_notify_system": "notify.test_user"})
         _fire_cleanup_alert(coord, 3, 90, "\\\\nas\\share\\Bosch")
@@ -3078,7 +3078,7 @@ class TestCleanupAlert:
 
     def test_fallback_to_alert_notify_service(self):
         """No system service configured → falls back to alert_notify_service."""
-        from custom_components.bosch_shc_camera.smb import _fire_cleanup_alert
+        from custom_components.bosch_smart_camera.smb import _fire_cleanup_alert
 
         coord = _coord({"alert_notify_service": "notify.signal"})
         _fire_cleanup_alert(coord, 1, 180, "nas/Bosch")
@@ -3087,7 +3087,7 @@ class TestCleanupAlert:
     @pytest.mark.asyncio
     async def test_async_alert_calls_service(self):
         """_async_cleanup_alert calls the notify service when it exists."""
-        from custom_components.bosch_shc_camera.smb import _async_cleanup_alert
+        from custom_components.bosch_smart_camera.smb import _async_cleanup_alert
 
         coord = _coord()
         coord.hass.services.has_service = MagicMock(return_value=True)
@@ -3098,7 +3098,7 @@ class TestCleanupAlert:
     @pytest.mark.asyncio
     async def test_async_alert_no_service_no_call(self):
         """_async_cleanup_alert: service not registered → no call, no exception."""
-        from custom_components.bosch_shc_camera.smb import _async_cleanup_alert
+        from custom_components.bosch_smart_camera.smb import _async_cleanup_alert
 
         coord = _coord()
         coord.hass.services.has_service = MagicMock(return_value=False)
@@ -3110,7 +3110,7 @@ class TestCleanupAlert:
     async def test_notify_service_exception_swallowed(self):
         """If the notify service exists but its async_call raises, the alert
         must not crash the cleanup task — logged at DEBUG, no propagation."""
-        from custom_components.bosch_shc_camera.smb import _async_cleanup_alert
+        from custom_components.bosch_smart_camera.smb import _async_cleanup_alert
 
         coord = SimpleNamespace(hass=MagicMock())
         coord.hass.services.has_service = MagicMock(return_value=True)
@@ -3239,7 +3239,7 @@ class TestHttpGetChunked:
     def test_builds_bearer_request_and_urlopens(self):
         """`_http_get_chunked` must build a Request with `Authorization:
         Bearer <token>` and pass the SSL context + timeout to urlopen."""
-        from custom_components.bosch_shc_camera import smb
+        from custom_components.bosch_smart_camera import smb
 
         captured_req = {}
         sentinel = object()
@@ -3273,8 +3273,8 @@ class TestLocalSaveFilenaming:
     right camera in the Media Browser."""
 
     def test_saved_filename_includes_camera_prefix(self, tmp_path: Path) -> None:
-        from custom_components.bosch_shc_camera.const import DEFAULT_OPTIONS
-        from custom_components.bosch_shc_camera.smb import _safe_name, sync_local_save
+        from custom_components.bosch_smart_camera.const import DEFAULT_OPTIONS
+        from custom_components.bosch_smart_camera.smb import _safe_name, sync_local_save
 
         hass = MagicMock()
         hass.config.config_dir = "/tmp/test-ha"
@@ -3312,7 +3312,7 @@ class TestLocalSaveFilenaming:
             return_value=mock_resp,
         ):
             with patch(
-                "custom_components.bosch_shc_camera.smb._is_safe_bosch_url",
+                "custom_components.bosch_smart_camera.smb._is_safe_bosch_url",
                 return_value=True,
             ):
                 sync_local_save(coord, ev, "tok", cam_name)
@@ -3377,7 +3377,7 @@ class TestSmbPrefetchedImage:
 
     def test_prefetched_image_bypasses_http_get(self) -> None:
         """When prefetched_image is provided, _http_get must NOT be called."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = self._make_coord()
         data = self._smb_data(
@@ -3389,23 +3389,23 @@ class TestSmbPrefetchedImage:
         mock_open_file.return_value.__exit__ = MagicMock(return_value=False)
 
         with (
-            patch("custom_components.bosch_shc_camera.smb.smbclient", create=True),
+            patch("custom_components.bosch_smart_camera.smb.smbclient", create=True),
             patch(
-                "custom_components.bosch_shc_camera.smb.register_session",
+                "custom_components.bosch_smart_camera.smb.register_session",
                 create=True,
             ),
             patch(
-                "custom_components.bosch_shc_camera.smb.open_file",
+                "custom_components.bosch_smart_camera.smb.open_file",
                 mock_open_file,
                 create=True,
             ),
             patch(
-                "custom_components.bosch_shc_camera.smb.smb_stat",
+                "custom_components.bosch_smart_camera.smb.smb_stat",
                 side_effect=OSError("not found"),
                 create=True,
             ),
-            patch("custom_components.bosch_shc_camera.smb.smb_makedirs"),
-            patch("custom_components.bosch_shc_camera.smb._http_get") as mock_get,
+            patch("custom_components.bosch_smart_camera.smb.smb_makedirs"),
+            patch("custom_components.bosch_smart_camera.smb._http_get") as mock_get,
         ):
             import sys
 
@@ -3422,7 +3422,7 @@ class TestSmbPrefetchedImage:
 
     def test_no_prefetch_calls_http_get(self) -> None:
         """When prefetched_image=None, _http_get IS called (backward compat)."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = self._make_coord()
         img_url = "https://residential.cbs.boschsecurity.com/img.jpg"
@@ -3443,9 +3443,9 @@ class TestSmbPrefetchedImage:
         sys.modules["smbclient"] = fake_smb
 
         with (
-            patch("custom_components.bosch_shc_camera.smb.smb_makedirs"),
+            patch("custom_components.bosch_smart_camera.smb.smb_makedirs"),
             patch(
-                "custom_components.bosch_shc_camera.smb._http_get",
+                "custom_components.bosch_smart_camera.smb._http_get",
                 return_value=(200, _JPEG_BYTES_MOTION),
             ) as mock_get,
         ):
@@ -3458,7 +3458,7 @@ class TestSmbPrefetchedImage:
         no cloud fetch. Uses unconditional `sys.modules` assignment for the
         fake smbclient (not `setdefault`) so it's reliable regardless of
         test execution order."""
-        from custom_components.bosch_shc_camera.smb import sync_smb_upload
+        from custom_components.bosch_smart_camera.smb import sync_smb_upload
 
         coord = self._make_coord()
         data = self._smb_data(
@@ -3491,8 +3491,8 @@ class TestSmbPrefetchedImage:
         sys.modules["smbclient"] = fake_smb
 
         with (
-            patch("custom_components.bosch_shc_camera.smb.smb_makedirs"),
-            patch("custom_components.bosch_shc_camera.smb._http_get") as mock_get,
+            patch("custom_components.bosch_smart_camera.smb.smb_makedirs"),
+            patch("custom_components.bosch_smart_camera.smb._http_get") as mock_get,
         ):
             sync_smb_upload(coord, data, "tok", prefetched_image=_JPEG_BYTES_MOTION)
 
@@ -3542,7 +3542,7 @@ class TestFtpPrefetchedImage:
 
     def test_ftp_prefetched_bypasses_http_get(self) -> None:
         """FTP upload: prefetched_image → no _http_get call."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = self._make_coord()
         img_url = "https://residential.cbs.boschsecurity.com/img.jpg"
@@ -3555,15 +3555,15 @@ class TestFtpPrefetchedImage:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_connect",
+                "custom_components.bosch_smart_camera.smb._ftp_connect",
                 return_value=fake_ftp,
             ),
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_exists",
+                "custom_components.bosch_smart_camera.smb._ftp_exists",
                 return_value=False,
             ),
-            patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"),
-            patch("custom_components.bosch_shc_camera.smb._http_get") as mock_get,
+            patch("custom_components.bosch_smart_camera.smb._ftp_makedirs"),
+            patch("custom_components.bosch_smart_camera.smb._http_get") as mock_get,
         ):
             _sync_ftp_upload(coord, data, "tok", prefetched_image=_JPEG_BYTES_MOTION)
 
@@ -3575,7 +3575,7 @@ class TestFtpPrefetchedImage:
 
     def test_ftp_no_prefetch_calls_http_get(self) -> None:
         """FTP upload: no prefetch → _http_get IS called (backward compat)."""
-        from custom_components.bosch_shc_camera.smb import _sync_ftp_upload
+        from custom_components.bosch_smart_camera.smb import _sync_ftp_upload
 
         coord = self._make_coord()
         img_url = "https://residential.cbs.boschsecurity.com/img.jpg"
@@ -3587,16 +3587,16 @@ class TestFtpPrefetchedImage:
 
         with (
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_connect",
+                "custom_components.bosch_smart_camera.smb._ftp_connect",
                 return_value=fake_ftp,
             ),
             patch(
-                "custom_components.bosch_shc_camera.smb._ftp_exists",
+                "custom_components.bosch_smart_camera.smb._ftp_exists",
                 return_value=False,
             ),
-            patch("custom_components.bosch_shc_camera.smb._ftp_makedirs"),
+            patch("custom_components.bosch_smart_camera.smb._ftp_makedirs"),
             patch(
-                "custom_components.bosch_shc_camera.smb._http_get",
+                "custom_components.bosch_smart_camera.smb._http_get",
                 return_value=(200, _JPEG_BYTES_MOTION),
             ) as mock_get,
         ):
@@ -3617,14 +3617,14 @@ class TestFtpPrefetchedImage:
 
 class TestSmbAvailable:
     def test_returns_true_when_smbclient_importable(self) -> None:
-        from custom_components.bosch_shc_camera.smb import smb_available
+        from custom_components.bosch_smart_camera.smb import smb_available
 
         fake_smb = MagicMock()
         with patch.dict(sys.modules, {"smbclient": fake_smb}):
             assert smb_available() is True
 
     def test_returns_false_when_smbclient_absent(self) -> None:
-        from custom_components.bosch_shc_camera.smb import smb_available
+        from custom_components.bosch_smart_camera.smb import smb_available
 
         with patch.dict(sys.modules, {"smbclient": None}):
             assert smb_available() is False

@@ -15,7 +15,10 @@ import pytest
 
 CARD_SRC = Path(__file__).parent.parent / "src" / "bosch-camera-card.js"
 CONST_PY = (
-    Path(__file__).parent.parent / "custom_components" / "bosch_shc_camera" / "const.py"
+    Path(__file__).parent.parent
+    / "custom_components"
+    / "bosch_smart_camera"
+    / "const.py"
 )
 
 

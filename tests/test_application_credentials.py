@@ -1,4 +1,4 @@
-"""Tests for custom_components/bosch_shc_camera/application_credentials.py.
+"""Tests for custom_components/bosch_smart_camera/application_credentials.py.
 
 Covers the `async_get_auth_implementation` platform hook that
 homeassistant.components.application_credentials calls to build the OAuth2
@@ -20,10 +20,10 @@ class TestAsyncGetAuthImplementation:
     async def test_returns_bosch_oauth2_implementation(self) -> None:
         from homeassistant.components.application_credentials import ClientCredential
 
-        from custom_components.bosch_shc_camera.application_credentials import (
+        from custom_components.bosch_smart_camera.application_credentials import (
             async_get_auth_implementation,
         )
-        from custom_components.bosch_shc_camera.config_flow import (
+        from custom_components.bosch_smart_camera.config_flow import (
             BoschOAuth2Implementation,
         )
 
@@ -44,7 +44,7 @@ class TestAsyncGetAuthImplementation:
         silently ignored (see application_credentials.py docstring)."""
         from homeassistant.components.application_credentials import ClientCredential
 
-        from custom_components.bosch_shc_camera.application_credentials import (
+        from custom_components.bosch_smart_camera.application_credentials import (
             async_get_auth_implementation,
         )
 
@@ -62,7 +62,7 @@ class TestAsyncGetAuthImplementation:
     async def test_implementation_receives_hass(self) -> None:
         from homeassistant.components.application_credentials import ClientCredential
 
-        from custom_components.bosch_shc_camera.application_credentials import (
+        from custom_components.bosch_smart_camera.application_credentials import (
             async_get_auth_implementation,
         )
 
@@ -80,7 +80,7 @@ class TestAsyncGetAuthImplementation:
         without erroring for any auth_domain value."""
         from homeassistant.components.application_credentials import ClientCredential
 
-        from custom_components.bosch_shc_camera.application_credentials import (
+        from custom_components.bosch_smart_camera.application_credentials import (
             async_get_auth_implementation,
         )
 

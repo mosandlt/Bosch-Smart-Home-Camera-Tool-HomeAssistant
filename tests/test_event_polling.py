@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.bosch_shc_camera.event_polling import (
+from custom_components.bosch_smart_camera.event_polling import (
     _fetch_one_camera_events,
     poll_events,
 )
@@ -248,7 +248,7 @@ class TestPollEvents:
             coordinator.cached_events[cam_id] = [{"id": "evt-2-from-fcm"}]
             return (cam_id, snapshot, True, True)  # ok=True, skip_full_fetch=True
 
-        import custom_components.bosch_shc_camera.event_polling as ep
+        import custom_components.bosch_smart_camera.event_polling as ep
 
         original = ep._fetch_one_camera_events
         ep._fetch_one_camera_events = _flaky_fetch
@@ -290,7 +290,7 @@ class TestPollEvents:
                 raise asyncio.CancelledError()
             return (cam_id, [{"id": "evt-b"}], True, False)
 
-        import custom_components.bosch_shc_camera.event_polling as ep
+        import custom_components.bosch_smart_camera.event_polling as ep
 
         original = ep._fetch_one_camera_events
         ep._fetch_one_camera_events = _flaky_fetch

@@ -10,8 +10,8 @@ import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.bosch_shc_camera.const import DOMAIN
-from custom_components.bosch_shc_camera.diagnostics import (
+from custom_components.bosch_smart_camera.const import DOMAIN
+from custom_components.bosch_smart_camera.diagnostics import (
     TO_REDACT,
     async_get_config_entry_diagnostics,
 )
@@ -116,7 +116,7 @@ def test_camera_summary_excludes_full_uuid(hass: HomeAssistant) -> None:
     The full UUID is a Bosch cloud identifier that can be cross-referenced;
     the 8-char prefix is enough for log correlation without leaking the ID.
     """
-    from custom_components.bosch_shc_camera.diagnostics import (
+    from custom_components.bosch_smart_camera.diagnostics import (
         async_get_config_entry_diagnostics,
     )
 
@@ -218,7 +218,7 @@ async def test_coordinator_section_exposes_health_signals(
     facade (found live by a THREE_PER_ISSUE_PER_CHANGE bug-hunt agent), so
     this constructs the actual facade against a real `_sessions` dict.
     """
-    from custom_components.bosch_shc_camera.session_state import (
+    from custom_components.bosch_smart_camera.session_state import (
         CameraSessionState,
         StreamWarmingView,
     )
@@ -265,7 +265,7 @@ async def test_integration_version_exposed(hass: HomeAssistant) -> None:
     This is the first thing support needs to know — without it every bug report
     requires a follow-up question.
     """
-    from custom_components.bosch_shc_camera.diagnostics import INTEGRATION_VERSION
+    from custom_components.bosch_smart_camera.diagnostics import INTEGRATION_VERSION
 
     entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
     entry.add_to_hass(hass)

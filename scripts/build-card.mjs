@@ -74,9 +74,9 @@ console.log(`bosch-camera-card.js:          ${card.srcBytes} -> ${card.outBytes}
 // and __init__.py registers it via add_extra_js_url (no manual resource needed).
 copyFileSync(
   resolve(repoRoot, "www/bosch-camera-card.js"),
-  resolve(repoRoot, "custom_components/bosch_shc_camera/www/bosch-camera-card.js"),
+  resolve(repoRoot, "custom_components/bosch_smart_camera/www/bosch-camera-card.js"),
 );
-console.log("Mirrored to custom_components/bosch_shc_camera/www/");
+console.log("Mirrored to custom_components/bosch_smart_camera/www/");
 
 // AI Alert Timeline card: same strip-and-mirror pattern as the main card,
 // but its own standalone bundle (separate src file, separate custom element,
@@ -90,9 +90,9 @@ console.log(`ai-alert-timeline-card.js:     ${aiTimeline.srcBytes} -> ${aiTimeli
 
 copyFileSync(
   resolve(repoRoot, "www/ai-alert-timeline-card.js"),
-  resolve(repoRoot, "custom_components/bosch_shc_camera/www/ai-alert-timeline-card.js"),
+  resolve(repoRoot, "custom_components/bosch_smart_camera/www/ai-alert-timeline-card.js"),
 );
-console.log("Mirrored to custom_components/bosch_shc_camera/www/");
+console.log("Mirrored to custom_components/bosch_smart_camera/www/");
 
 // Autoplay fix: strip in place (no src/ version — it's small and doesn't
 // need the same build workflow, but we still strip comments for consistency)

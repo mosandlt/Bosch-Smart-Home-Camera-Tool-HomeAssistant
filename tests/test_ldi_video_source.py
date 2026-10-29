@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from custom_components.bosch_shc_camera.ldi_local import (
+from custom_components.bosch_smart_camera.ldi_local import (
     LDI_PASSWORDS_OPTION,
     SOURCE_CLOUD,
     SOURCE_CLOUD_UNCONFIGURED,
@@ -21,7 +21,7 @@ from custom_components.bosch_shc_camera.ldi_local import (
     VIDEO_SOURCE_OPTIONS,
     ldi_video_source,
 )
-from custom_components.bosch_shc_camera.sensor import (
+from custom_components.bosch_smart_camera.sensor import (
     VIDEO_SOURCE_DESCRIPTION,
     BoschVideoSourceSensor,
 )

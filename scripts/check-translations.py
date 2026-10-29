@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
-STRINGS = ROOT / "custom_components/bosch_shc_camera/strings.json"
-TRANSLATIONS = ROOT / "custom_components/bosch_shc_camera/translations"
+STRINGS = ROOT / "custom_components/bosch_smart_camera/strings.json"
+TRANSLATIONS = ROOT / "custom_components/bosch_smart_camera/translations"
 
 
 def flatten(obj: object, prefix: str = "") -> dict[str, str]:

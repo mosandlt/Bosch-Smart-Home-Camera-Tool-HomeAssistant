@@ -122,7 +122,7 @@ jobs:
           git checkout --detach "$BETA_SHA"
           python3 - "$VERSION" <<'PYEOF'
           import json, sys
-          path = "custom_components/bosch_shc_camera/manifest.json"
+          path = "custom_components/bosch_smart_camera/manifest.json"
           with open(path) as f:
               data = json.load(f)
           data["version"] = sys.argv[1]
@@ -135,7 +135,7 @@ jobs:
             NEW_SHA="$BETA_SHA"
             echo "manifest.json already at $VERSION (no -beta suffix to strip) — tagging the beta commit as-is."
           else
-            git add custom_components/bosch_shc_camera/manifest.json
+            git add custom_components/bosch_smart_camera/manifest.json
             git commit -m "$STABLE_TAG: promote tested beta $BETA_TAG to stable
 
           Manual promotion (promote-beta.yml, workflow_dispatch). Strips

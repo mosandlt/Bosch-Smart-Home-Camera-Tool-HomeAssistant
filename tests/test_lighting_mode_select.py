@@ -15,12 +15,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.bosch_shc_camera.lighting_options import (
+from custom_components.bosch_smart_camera.lighting_options import (
     SCHEDULE_STATUS_OPTIONS,
     async_set_schedule_status,
     lighting_write_lock,
 )
-from custom_components.bosch_shc_camera.select import BoschLightingModeSelect
+from custom_components.bosch_smart_camera.select import BoschLightingModeSelect
 
 CAM = "11111111-1111-1111-1111-111111111111"
 CURRENT = {
@@ -60,7 +60,7 @@ def _coord(cache: dict[str, Any] | None = None) -> SimpleNamespace:
 
 def _patch_session(session: MagicMock):
     return patch(
-        "custom_components.bosch_shc_camera.async_get_bosch_cloud_session",
+        "custom_components.bosch_smart_camera.async_get_bosch_cloud_session",
         AsyncMock(return_value=session),
     )
 
@@ -214,7 +214,7 @@ async def test_select_option_delegates_to_helper() -> None:
     ent = _entity(CURRENT)
     ent.async_write_ha_state = MagicMock()
     with patch(
-        "custom_components.bosch_shc_camera.select.async_set_schedule_status",
+        "custom_components.bosch_smart_camera.select.async_set_schedule_status",
         AsyncMock(),
     ) as setter:
         await ent.async_select_option("always_off")
@@ -304,7 +304,7 @@ async def test_service_and_select_share_the_lock() -> None:
 
 @pytest.mark.asyncio
 async def test_setup_creates_select_only_for_gen1_with_light() -> None:
-    from custom_components.bosch_shc_camera import select as sel
+    from custom_components.bosch_smart_camera import select as sel
 
     async def build(hw: str, light: bool) -> list[Any]:
         coord = _coord(CURRENT)

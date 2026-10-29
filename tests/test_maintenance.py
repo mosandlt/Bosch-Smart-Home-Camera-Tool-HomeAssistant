@@ -30,8 +30,8 @@ from zoneinfo import ZoneInfo
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 
-from custom_components.bosch_shc_camera import BoschCameraCoordinator
-from custom_components.bosch_shc_camera.maintenance import (
+from custom_components.bosch_smart_camera import BoschCameraCoordinator
+from custom_components.bosch_smart_camera.maintenance import (
     MaintenanceWindow,
     _is_camera_relevant,
     _parse_feed_body,
@@ -417,7 +417,7 @@ class TestCloudStateAnnounce:
     async def test_first_success_is_silent(self):
         coord = _make_cloud_state_coord()
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1000.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, True)
         coord.hass.services.async_call.assert_not_called()
@@ -426,7 +426,7 @@ class TestCloudStateAnnounce:
         """Single failed tick must never fire — could be a transient blip."""
         coord = _make_cloud_state_coord()
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1000.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         coord.hass.services.async_call.assert_not_called()
@@ -436,11 +436,11 @@ class TestCloudStateAnnounce:
     async def test_failure_under_threshold_stays_silent(self):
         coord = _make_cloud_state_coord()
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1000.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1030.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1030.0
         ):  # +30s
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         coord.hass.services.async_call.assert_not_called()
@@ -449,11 +449,11 @@ class TestCloudStateAnnounce:
     async def test_failure_past_threshold_fires_once(self):
         coord = _make_cloud_state_coord()
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1000.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1070.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1070.0
         ):  # +70s
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         coord.hass.services.async_call.assert_called_once()
@@ -464,7 +464,7 @@ class TestCloudStateAnnounce:
         assert coord.cloud_outage_notified is True
         # Subsequent failed ticks don't re-fire.
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1200.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1200.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         assert coord.hass.services.async_call.await_count == 1
@@ -473,11 +473,11 @@ class TestCloudStateAnnounce:
         """One failed tick followed by a success must not announce anything."""
         coord = _make_cloud_state_coord()
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1000.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1010.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1010.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, True)
         coord.hass.services.async_call.assert_not_called()
@@ -489,7 +489,7 @@ class TestCloudStateAnnounce:
         coord._cloud_outage_started_at = 1000.0
         coord.cloud_outage_notified = True
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1500.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1500.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, True)
         coord.hass.services.async_call.assert_called_once()
@@ -502,14 +502,17 @@ class TestCloudStateAnnounce:
         coord = _make_cloud_state_coord(maintenance=_active_maintenance())
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+                "custom_components.bosch_smart_camera.time.monotonic",
+                return_value=1000.0,
             ),
-            patch("custom_components.bosch_shc_camera.maintenance.datetime") as dt_mock,
+            patch(
+                "custom_components.bosch_smart_camera.maintenance.datetime"
+            ) as dt_mock,
         ):
             dt_mock.now.return_value = datetime(2026, 5, 19, 7, 30, tzinfo=UTC)
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1080.0
         ):
             with patch.object(
                 MaintenanceWindow,
@@ -538,11 +541,11 @@ class TestCloudStateAnnounce:
     async def test_no_service_configured_still_tracks_state(self):
         coord = _make_cloud_state_coord(notify_service="")
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1000.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1080.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         coord.hass.services.async_call.assert_not_called()
@@ -554,11 +557,11 @@ class TestCloudStateAnnounce:
         coord = _make_cloud_state_coord()
         coord.hass.services.async_call = AsyncMock(side_effect=RuntimeError("svc down"))
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1000.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1080.0
         ):
             # Must not raise.
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
@@ -568,11 +571,11 @@ class TestCloudStateAnnounce:
     async def test_multiple_services_all_called(self):
         coord = _make_cloud_state_coord(notify_service="thomas, signalhome")
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1000.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1080.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         assert coord.hass.services.async_call.await_count == 2
@@ -588,11 +591,11 @@ class TestCloudStateAnnounce:
         `domain="notify"`, `service="<name>"`."""
         coord = _make_cloud_state_coord(notify_service="notify.thomas")
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1000.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         with patch(
-            "custom_components.bosch_shc_camera.time.monotonic", return_value=1080.0
+            "custom_components.bosch_smart_camera.time.monotonic", return_value=1080.0
         ):
             await BoschCameraCoordinator._async_maybe_announce_cloud_state(coord, False)
         coord.hass.services.async_call.assert_called_once()
@@ -869,14 +872,15 @@ class TestAsyncRefreshMaintenance:
         new_mw = _mw_for_refresh()
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+                "custom_components.bosch_smart_camera.time.monotonic",
+                return_value=1000.0,
             ),
             patch(
-                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                "custom_components.bosch_smart_camera.maintenance.async_fetch_maintenance",
                 new=AsyncMock(return_value=new_mw),
             ),
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
+                "custom_components.bosch_smart_camera.async_get_clientsession",
                 return_value=object(),
             ),
         ):
@@ -892,10 +896,11 @@ class TestAsyncRefreshMaintenance:
         fetch_mock = AsyncMock(return_value=_mw_for_refresh())
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+                "custom_components.bosch_smart_camera.time.monotonic",
+                return_value=1000.0,
             ),
             patch(
-                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                "custom_components.bosch_smart_camera.maintenance.async_fetch_maintenance",
                 new=fetch_mock,
             ),
         ):
@@ -912,14 +917,15 @@ class TestAsyncRefreshMaintenance:
         new_mw = _mw_for_refresh()
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+                "custom_components.bosch_smart_camera.time.monotonic",
+                return_value=1000.0,
             ),
             patch(
-                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                "custom_components.bosch_smart_camera.maintenance.async_fetch_maintenance",
                 new=AsyncMock(return_value=new_mw),
             ),
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
+                "custom_components.bosch_smart_camera.async_get_clientsession",
                 return_value=object(),
             ),
         ):
@@ -935,14 +941,15 @@ class TestAsyncRefreshMaintenance:
         new_mw = _mw_for_refresh()
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+                "custom_components.bosch_smart_camera.time.monotonic",
+                return_value=1000.0,
             ),
             patch(
-                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                "custom_components.bosch_smart_camera.maintenance.async_fetch_maintenance",
                 new=AsyncMock(return_value=new_mw),
             ),
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
+                "custom_components.bosch_smart_camera.async_get_clientsession",
                 return_value=object(),
             ),
         ):
@@ -956,14 +963,15 @@ class TestAsyncRefreshMaintenance:
         coord = _make_refresh_coord(cache=previous)
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+                "custom_components.bosch_smart_camera.time.monotonic",
+                return_value=1000.0,
             ),
             patch(
-                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                "custom_components.bosch_smart_camera.maintenance.async_fetch_maintenance",
                 new=AsyncMock(side_effect=RuntimeError("network broken")),
             ),
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
+                "custom_components.bosch_smart_camera.async_get_clientsession",
                 return_value=object(),
             ),
         ):
@@ -980,14 +988,15 @@ class TestAsyncRefreshMaintenance:
         coord = _make_refresh_coord(cache=previous)
         with (
             patch(
-                "custom_components.bosch_shc_camera.time.monotonic", return_value=1000.0
+                "custom_components.bosch_smart_camera.time.monotonic",
+                return_value=1000.0,
             ),
             patch(
-                "custom_components.bosch_shc_camera.maintenance.async_fetch_maintenance",
+                "custom_components.bosch_smart_camera.maintenance.async_fetch_maintenance",
                 new=AsyncMock(return_value=None),
             ),
             patch(
-                "custom_components.bosch_shc_camera.async_get_clientsession",
+                "custom_components.bosch_smart_camera.async_get_clientsession",
                 return_value=object(),
             ),
         ):
@@ -1006,7 +1015,7 @@ class TestMaintenanceParserEdges:
     def test_invalid_date_returns_none_pair(self):
         """`_parse_window` swallows a ValueError from invalid date components
         (e.g. 30. Februar) and returns (None, None)."""
-        from custom_components.bosch_shc_camera.maintenance import _parse_window
+        from custom_components.bosch_smart_camera.maintenance import _parse_window
 
         # 30. Februar is unparseable — the datetime constructor raises.
         text = "Wartung am 30.02.2026 von 07:00 bis 10:00 Uhr MESZ"
@@ -1018,7 +1027,7 @@ class TestMaintenanceParserEdges:
     async def test_empty_title_entry_is_skipped(self):
         """RSS items without a title must be skipped instead of crashing on
         the empty string."""
-        from custom_components.bosch_shc_camera import maintenance
+        from custom_components.bosch_smart_camera import maintenance
 
         rss = b"""<?xml version="1.0"?>
         <rss><channel>

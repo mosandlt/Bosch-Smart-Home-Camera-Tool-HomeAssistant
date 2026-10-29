@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.bosch_shc_camera.slow_tier import (
+from custom_components.bosch_smart_camera.slow_tier import (
     CamContext,
     _compute_cam_context,
     _poll_cam_control,

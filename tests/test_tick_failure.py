@@ -13,7 +13,7 @@ import aiohttp
 import pytest
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.bosch_shc_camera.tick_failure import (
+from custom_components.bosch_smart_camera.tick_failure import (
     dispatch_client_error,
     dispatch_timeout,
     dispatch_update_failed,

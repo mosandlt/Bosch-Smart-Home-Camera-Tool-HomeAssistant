@@ -16,13 +16,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.bosch_shc_camera import BoschCameraCoordinator, ldi_go2rtc
-from custom_components.bosch_shc_camera import recorder as nvr_recorder
-from custom_components.bosch_shc_camera.repairs import (
+from custom_components.bosch_smart_camera import BoschCameraCoordinator, ldi_go2rtc
+from custom_components.bosch_smart_camera import recorder as nvr_recorder
+from custom_components.bosch_smart_camera.repairs import (
     LDI_NO_GO2RTC_GRACE_SEC,
     refresh_local_data_interface_auth_issue,
 )
-from custom_components.bosch_shc_camera.stream_lifecycle import (
+from custom_components.bosch_smart_camera.stream_lifecycle import (
     go2rtc_consumer_count,
     has_active_consumer,
 )
@@ -30,7 +30,7 @@ from tests.test_ldi_lifecycle import _repairs_coord
 from tests.test_ldi_local import CAM, RESTREAM
 from tests.test_recorder import CAM_ID_SHORT, _make_phase_coord
 
-MODULE = "custom_components.bosch_shc_camera"
+MODULE = "custom_components.bosch_smart_camera"
 LDI_LIVE: dict[str, Any] = {
     "_connection_type": "LOCAL",
     "_ldi": True,
@@ -42,7 +42,7 @@ LDI_LIVE: dict[str, Any] = {
 # ── camera stream source ────────────────────────────────────────────────────
 class TestStreamSource:
     def _camera(self, live: dict[str, Any]) -> Any:
-        from custom_components.bosch_shc_camera.camera import BoschCamera
+        from custom_components.bosch_smart_camera.camera import BoschCamera
 
         cam = BoschCamera.__new__(BoschCamera)
         cam.coordinator = SimpleNamespace(live_connections={CAM: live})
