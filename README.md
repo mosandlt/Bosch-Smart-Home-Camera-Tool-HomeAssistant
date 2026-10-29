@@ -171,7 +171,7 @@ If you don't use HACS, copy the integration folder into your HA config:
 
 v18 renames the integration domain from `bosch_shc_camera` to `bosch_smart_camera` to match Home Assistant core. Home Assistant cannot rename a domain in place, so the setup is carried over once:
 
-1. Update through HACS and restart Home Assistant.
+1. Update through HACS and restart Home Assistant. If the first update attempt fails with `No manifest.json file found ... bosch_shc_camera`, restart Home Assistant and press update again (HACS keeps the old folder name until it restarts).
 2. **Settings → Devices & services → Add integration → Bosch Smart Home Camera → Migrate the existing setup.**
 
 Login, options, AI alert targets, entity IDs, history, areas and dashboards are kept. Automations that call `bosch_shc_camera.<service>` keep working for now (with a deprecation warning in the log); switch them to `bosch_smart_camera.<service>`. Event names and entity unique IDs are unchanged. If HACS leaves the old folder `custom_components/bosch_shc_camera` behind, a repair hint asks you to delete it.

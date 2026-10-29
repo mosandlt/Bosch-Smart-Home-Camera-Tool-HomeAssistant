@@ -3471,7 +3471,7 @@ test("the card targets its own camera in trigger_snapshot calls", async ({ page 
     card.hass = { config: {}, language: "en", localize: () => "", callService: () => {},
       callApi: async () => ({}), callWS: async () => ({}), connected: true,
       connection: { connected: true },
-      services: { bosch_shc_camera: { trigger_snapshot: {} } },
+      services: { bosch_smart_camera: { trigger_snapshot: {} } },
       states: { "camera.test": { state: "idle", attributes: { friendly_name: "T" }, last_updated: "2026-01-01T00:00:00Z" } } };
     document.body.appendChild(card);
     await new Promise((res) => setTimeout(res, 150));
