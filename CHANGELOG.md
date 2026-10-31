@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v17.2.9] - 2026-10-31
+
+### Added
+
+- **Bridge to v18: the setup moves to the renamed integration on its own.** Version 18 renames the integration to `bosch_smart_camera`. Once v18 is installed next to this version, this version starts the migration once after Home Assistant has started: login, options, AI alert targets, entity IDs, history, areas and dashboards are kept, no click needed. If the migration does not start, **Settings → Devices & services → Add integration → Bosch Smart Home Camera → Migrate the existing setup** still works.
+
 ## [v17.2.8] - 2026-10-28
 
 ### Changed

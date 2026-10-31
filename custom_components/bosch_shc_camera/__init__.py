@@ -69,6 +69,7 @@ from .coordinator import _is_safe_local_camera_host
 from .coordinator import (
     get_options as get_options,  # re-export: mypy --no-implicit-reexport (button.py/image.py/sensor.py/switch.py import it via `from . import`)
 )
+from .handover import async_schedule_handover
 from .local_data_interface import STATE_ACTIVE
 from .services import _register_services
 
@@ -655,6 +656,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    async_schedule_handover(hass, entry)
     coordinator = BoschCameraCoordinator(hass, entry)
 
     # Post-update feedback prompt — one-time per integration version. When the
