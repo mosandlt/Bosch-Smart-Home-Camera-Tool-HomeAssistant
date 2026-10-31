@@ -92,3 +92,30 @@ def test_scheduled_only_once_per_run() -> None:
         handover.async_schedule_handover(hass, entry)
         handover.async_schedule_handover(hass, entry)
     at_started.assert_called_once()
+
+
+def test_new_integration_installed_checks_manifest(tmp_path) -> None:
+    hass = MagicMock()
+    hass.config.path = lambda *parts: str(tmp_path.joinpath(*parts))
+    assert handover._new_integration_installed(hass) is False
+    manifest = tmp_path / "custom_components" / "bosch_smart_camera" / "manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{}")
+    assert handover._new_integration_installed(hass) is True
+
+
+@pytest.mark.asyncio
+async def test_started_callback_creates_background_task() -> None:
+    hass = _hass([], installed=True)
+    entry = MagicMock()
+    entry.disabled_by = None
+    entry.domain = "bosch_shc_camera"
+    with (
+        patch(f"{MOD}.async_at_started") as at_started,
+        patch(f"{MOD}._async_run_handover", new=MagicMock(return_value="coro")),
+    ):
+        handover.async_schedule_handover(hass, entry)
+        await at_started.call_args.args[1](hass)
+    hass.async_create_background_task.assert_called_once_with(
+        "coro", "bosch_shc_camera hand-over"
+    )
