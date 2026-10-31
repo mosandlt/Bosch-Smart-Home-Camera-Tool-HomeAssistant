@@ -15,6 +15,10 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 - Service calls of the form `bosch_shc_camera.<service>` keep working for now and log a deprecation warning. Please switch automations and scripts to `bosch_smart_camera.<service>`. Event names (`bosch_shc_camera_motion` and friends) and entity unique IDs are unchanged.
 - The Lovelace card is served from `/bosch_smart_camera/` now; the old resource entry is removed automatically. Dashboards using `custom:bosch-camera-card` need no change.
 
+### Added
+
+- **Automatic migration from v17.2.9.** The new `import` step of the setup flow carries login, options and AI alert targets over without a click. Version 17.2.9 starts it once after Home Assistant has started, as soon as this version is installed. The manual step **Migrate the existing setup** stays available.
+
 ### How to update from v17 (HACS)
 
 1. In HACS, download the new version. If it fails with `No manifest.json file found ... bosch_shc_camera`, that is expected: HACS still remembers the old folder name. **Restart Home Assistant** and download the version again.
