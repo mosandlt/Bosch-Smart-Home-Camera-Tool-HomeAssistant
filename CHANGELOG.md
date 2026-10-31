@@ -11,9 +11,16 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ### Changed (breaking)
 
-- **The integration is now called `bosch_smart_camera`** (was `bosch_shc_camera`), matching the Home Assistant core integration. The name in the UI is unchanged. After updating, restart Home Assistant, open **Settings → Devices & services → Add integration → Bosch Smart Home Camera** and choose **Migrate the existing setup**. The login, all options, the AI alert targets, entity IDs, history, areas and dashboards are kept; no new Bosch login is needed. If the first update attempt in HACS fails with `No manifest.json file found ... bosch_shc_camera`, restart Home Assistant and update again (HACS keeps the old folder name until it restarts). The previous entry is removed by the migration. If HACS leaves the old folder `custom_components/bosch_shc_camera` behind, Home Assistant shows a repair hint; delete the folder and restart.
+- **The integration is now called `bosch_smart_camera`** (was `bosch_shc_camera`), matching the Home Assistant core integration. The name in the UI is unchanged. The migration steps are listed under **How to update from v17** below. The login, all options, the AI alert targets, entity IDs, history, areas and dashboards are kept.
 - Service calls of the form `bosch_shc_camera.<service>` keep working for now and log a deprecation warning. Please switch automations and scripts to `bosch_smart_camera.<service>`. Event names (`bosch_shc_camera_motion` and friends) and entity unique IDs are unchanged.
 - The Lovelace card is served from `/bosch_smart_camera/` now; the old resource entry is removed automatically. Dashboards using `custom:bosch-camera-card` need no change.
+
+### How to update from v17 (HACS)
+
+1. In HACS, download the new version. If it fails with `No manifest.json file found ... bosch_shc_camera`, that is expected: HACS still remembers the old folder name. **Restart Home Assistant** and download the version again.
+2. **Restart Home Assistant** once more.
+3. Open **Settings → Devices & services → Add integration → Bosch Smart Home Camera** and choose **Migrate the existing setup**. Login, options, entity IDs, history, areas and dashboards are kept; no new Bosch login is needed.
+4. HACS leaves the old folder `custom_components/bosch_shc_camera` behind. Home Assistant shows a repair hint; delete the folder and restart.
 
 ## [v17.2.8] - 2026-10-28
 
