@@ -7,6 +7,7 @@ files the old remove hook would delete.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -496,3 +497,50 @@ async def test_older_home_assistant_keeps_the_device_and_adds_the_entry(
         "camera.terrasse", DOMAIN, new_config_entry_id=new.entry_id
     )
     ent_reg.async_update_entity.assert_not_called()
+
+
+def _legacy_folder(tmp_path: Path, domain: str = LEGACY_DOMAIN) -> Path:
+    folder = tmp_path / "custom_components" / LEGACY_DOMAIN
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text(json.dumps({"domain": domain}))
+    return folder
+
+
+async def test_leftover_folder_is_removed_without_legacy_entry(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    folder = _legacy_folder(tmp_path)
+    with patch.object(hass.config, "config_dir", str(tmp_path)):
+        await async_update_legacy_folder_issue(hass)
+    assert not folder.exists()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, LEGACY_FOLDER_ISSUE) is None
+
+
+async def test_leftover_folder_kept_in_the_migration_run(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    folder = _legacy_folder(tmp_path)
+    with patch.object(hass.config, "config_dir", str(tmp_path)):
+        await async_update_legacy_folder_issue(hass, remove=False)
+    assert folder.exists()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, LEGACY_FOLDER_ISSUE) is not None
+
+
+async def test_leftover_folder_kept_while_legacy_entry_exists(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    folder = _legacy_folder(tmp_path)
+    MockConfigEntry(domain=LEGACY_DOMAIN).add_to_hass(hass)
+    with patch.object(hass.config, "config_dir", str(tmp_path)):
+        await async_update_legacy_folder_issue(hass)
+    assert folder.exists()
+
+
+async def test_leftover_folder_with_foreign_manifest_is_kept(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    folder = _legacy_folder(tmp_path, domain="something_else")
+    with patch.object(hass.config, "config_dir", str(tmp_path)):
+        await async_update_legacy_folder_issue(hass)
+    assert folder.exists()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, LEGACY_FOLDER_ISSUE) is not None

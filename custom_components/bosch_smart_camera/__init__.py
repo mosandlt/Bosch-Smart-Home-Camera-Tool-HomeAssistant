@@ -668,9 +668,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Must run before any platform loads: the entities of a pre-v18 setup are
     # re-linked to this entry first, so they keep their entity IDs.
-    if await async_migrate_legacy_entry(hass, entry):
+    migrated = await async_migrate_legacy_entry(hass, entry)
+    if migrated:
         register_legacy_service_aliases(hass, force=True)
-    await async_update_legacy_folder_issue(hass)
+    await async_update_legacy_folder_issue(hass, remove=not migrated)
 
     coordinator = BoschCameraCoordinator(hass, entry)
 

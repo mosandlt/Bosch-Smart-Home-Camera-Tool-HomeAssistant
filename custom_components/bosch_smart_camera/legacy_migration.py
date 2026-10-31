@@ -9,7 +9,9 @@ entry. Storage keys and unique IDs keep their legacy names on purpose.
 from __future__ import annotations
 
 import inspect
+import json
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -215,10 +217,39 @@ async def async_migrate_legacy_entry(hass: HomeAssistant, entry: ConfigEntry) ->
     return True
 
 
-async def async_update_legacy_folder_issue(hass: HomeAssistant) -> None:
-    """Tell the user to delete a leftover `bosch_shc_camera` folder, once."""
+def _remove_legacy_folder(folder: Path) -> bool:
+    """Delete the leftover legacy folder; False when it is not safe or fails."""
+    try:
+        manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+        if manifest.get("domain") != LEGACY_DOMAIN:
+            return False
+        shutil.rmtree(folder)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+async def async_update_legacy_folder_issue(
+    hass: HomeAssistant, *, remove: bool = True
+) -> None:
+    """Delete a leftover `bosch_shc_camera` folder, or tell the user to.
+
+    Deleted only when no legacy entry is left and `remove` is set (not in the
+    run that just migrated: the legacy code is still loaded then). When the
+    deletion fails the user gets a repair hint instead.
+    """
     folder = Path(hass.config.path("custom_components", LEGACY_DOMAIN))
     if await hass.async_add_executor_job(folder.is_dir):
+        if (
+            remove
+            and not hass.config_entries.async_entries(LEGACY_DOMAIN)
+            and await hass.async_add_executor_job(_remove_legacy_folder, folder)
+        ):
+            _LOGGER.info(
+                "Removed the unused folder custom_components/%s", LEGACY_DOMAIN
+            )
+            ir.async_delete_issue(hass, DOMAIN, LEGACY_FOLDER_ISSUE)
+            return
         ir.async_create_issue(
             hass,
             DOMAIN,

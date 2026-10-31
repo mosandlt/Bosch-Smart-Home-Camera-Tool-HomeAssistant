@@ -760,7 +760,7 @@ class TestGo2rtcAutoCreate:
 
         migrate.assert_awaited_once_with(hass, entry)
         aliases.assert_called_once_with(hass, force=True)
-        folder_issue.assert_awaited_once_with(hass)
+        folder_issue.assert_awaited_once_with(hass, remove=False)
 
     @pytest.mark.asyncio
     async def test_existing_entry_skips_flow_init(self):
