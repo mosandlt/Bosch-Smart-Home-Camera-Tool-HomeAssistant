@@ -4270,3 +4270,69 @@ class TestClassRenamesConfigFlow:
         assert not hasattr(mod, "BoschSHCCameraOptionsFlow"), (
             "BoschSHCCameraOptionsFlow still exists — remove the old name"
         )
+
+
+class TestAsyncStepImportMigratesLegacy:
+    """v18 import step: the old copy starts it, no user click.
+
+    Pins: no legacy entry -> abort; usable legacy entry -> new entry carries
+    data (+ marker), options and subentries; duplicate guard runs first.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_legacy_entry_aborts(self) -> None:
+        flow = _make_flow(source="import")
+        with patch(
+            "custom_components.bosch_smart_camera.config_flow.get_legacy_entry",
+            return_value=None,
+        ):
+            await flow.async_step_import({})
+        flow._abort_if_unique_id_configured.assert_called_once()
+        flow.async_abort.assert_called_once_with(reason="no_legacy_entry")
+        flow.async_create_entry.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_legacy_entry_creates_marked_entry(self) -> None:
+        from custom_components.bosch_smart_camera.config_flow import (
+            BoschCameraConfigFlow,
+        )
+        from custom_components.bosch_smart_camera.legacy_migration import (
+            LEGACY_ENTRY_KEY,
+        )
+
+        flow = _make_flow(source="import")
+        legacy = MagicMock()
+        legacy.version = BoschCameraConfigFlow.VERSION
+        legacy.title = "Bosch"
+        legacy.entry_id = "old-id"
+        legacy.data = {"token": "t"}
+        legacy.options = {"a": 1}
+        with (
+            patch(
+                "custom_components.bosch_smart_camera.config_flow.get_legacy_entry",
+                return_value=legacy,
+            ),
+            patch(
+                "custom_components.bosch_smart_camera.config_flow.legacy_subentries",
+                return_value=[],
+            ),
+        ):
+            await flow.async_step_import({})
+        flow.async_create_entry.assert_called_once_with(
+            title="Bosch",
+            data={"token": "t", LEGACY_ENTRY_KEY: "old-id"},
+            options={"a": 1},
+            subentries=[],
+        )
+
+    @pytest.mark.asyncio
+    async def test_legacy_entry_with_other_version_aborts(self) -> None:
+        flow = _make_flow(source="import")
+        legacy = MagicMock()
+        legacy.version = -1
+        with patch(
+            "custom_components.bosch_smart_camera.config_flow.get_legacy_entry",
+            return_value=legacy,
+        ):
+            await flow.async_step_import({})
+        flow.async_abort.assert_called_once_with(reason="no_legacy_entry")

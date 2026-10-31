@@ -708,6 +708,23 @@ class BoschCameraConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):  # type: 
             return self.async_abort(reason="no_legacy_entry")
         if user_input is None:
             return self.async_show_form(step_id="migrate_legacy")
+        return self._create_migrated_entry(legacy)
+
+    async def async_step_import(
+        self, import_data: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Migrate the pre-v18 setup without a click (started by the old copy)."""
+        await self.async_set_unique_id(DOMAIN)
+        self._abort_if_unique_id_configured(reload_on_update=False)
+        legacy = self._usable_legacy_entry()
+        if legacy is None:
+            return self.async_abort(reason="no_legacy_entry")
+        return self._create_migrated_entry(legacy)
+
+    def _create_migrated_entry(
+        self, legacy: config_entries.ConfigEntry
+    ) -> config_entries.ConfigFlowResult:
+        """Create the new entry carrying the legacy entry's data and options."""
         return self.async_create_entry(
             title=legacy.title,
             data={**legacy.data, LEGACY_ENTRY_KEY: legacy.entry_id},
