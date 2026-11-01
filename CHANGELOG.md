@@ -15,6 +15,11 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 - Service calls of the form `bosch_shc_camera.<service>` keep working for now and log a deprecation warning. Please switch automations and scripts to `bosch_smart_camera.<service>`. Event names (`bosch_shc_camera_motion` and friends) and entity unique IDs are unchanged.
 - The Lovelace card is served from `/bosch_smart_camera/` now; the old resource entry is removed automatically. Dashboards using `custom:bosch-camera-card` need no change.
 
+### Fixed
+
+- **Two cameras of the same model could show different model names** ([#85](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues/85)). Some entities wrote the raw API value (`HOME_Eyes_Outdoor`) as the device model, others the product name (`Eyes Außenkamera II`), and the entity registered last won. All entities now use the product name.
+- **Snapshot button sometimes needed several clicks, mostly on mobile.** The card gave up after 6 s and showed the old image when the Bosch cloud answered slowly. It now waits up to 12 s, ignores clicks while a snapshot is running (which the backend dropped silently), and no longer hangs if the page was suspended mid-refresh. Card 14.2.1.1.
+
 ### Added
 
 - **Automatic migration from v17.2.9.** The new `import` step of the setup flow carries login, options and AI alert targets over without a click. Version 17.2.9 starts it once after Home Assistant has started, as soon as this version is installed. The manual step **Migrate the existing setup** stays available.

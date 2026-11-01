@@ -37,7 +37,7 @@ const EVENT_KIND_LABELS = {
   }
 };
 
-const CARD_VERSION = "14.2.1";
+const CARD_VERSION = "14.2.1.1";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
@@ -3632,6 +3632,7 @@ class BoschCameraCard extends HTMLElement {
     if (this._fsAutoHideWired) this._unwireFsAutoHide();
     this._clearTimer(this._loadingTimeout);
     this._clearTimer(this._snapshotPollTimer);
+    this._snapshotBusy = 0;
     Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
     this._clearTimer(this._privacyCooldownTimer);
     this._privacyCooldownTimer = null;
@@ -5784,6 +5785,8 @@ class BoschCameraCard extends HTMLElement {
     this._refreshAudioToggle();
   }
   _onSnapshotClick() {
+    if (this._snapshotBusy && Date.now() - this._snapshotBusy < 2e4) return;
+    this._snapshotBusy = Date.now();
     const btn = this.shadowRoot.getElementById("btn-snapshot");
     const label = this.shadowRoot.getElementById("btn-snapshot-label");
     if (btn) {
@@ -5799,6 +5802,7 @@ class BoschCameraCard extends HTMLElement {
     const privStates = this._hass?.states;
     const privacyOn = privStates && this._entities.privacy in privStates && privStates[this._entities.privacy]?.state === "on";
     if (privacyOn) {
+      this._snapshotBusy = 0;
       if (label) label.textContent = "Snapshot";
       if (btn) {
         btn.disabled = false;
@@ -5819,10 +5823,12 @@ class BoschCameraCard extends HTMLElement {
       const startTime = Date.now();
       this._snapshotPollTimer = this._armTimer(() => this._pollSnapshotImage(prevBytes, startTime), 500);
     };
-    fetch(currUrl).then(r => r.ok ? r.blob() : null).then(blob => startPoll(blob ? blob.size : 0)).catch(() => startPoll(0));
+    fetch(currUrl, typeof AbortSignal !== "undefined" && AbortSignal.timeout ? {
+      signal: AbortSignal.timeout(5e3)
+    } : undefined).then(r => r.ok ? r.blob() : null).then(blob => startPoll(blob ? blob.size : 0)).catch(() => startPoll(0));
   }
   _pollSnapshotImage(prevBytes, startTime) {
-    const TIMEOUT = 6e3;
+    const TIMEOUT = 12e3;
     const INTERVAL = 1e3;
     const elapsed = Date.now() - startTime;
     if (!this._hass) {
@@ -5875,6 +5881,7 @@ class BoschCameraCard extends HTMLElement {
     reader.readAsDataURL(blob);
   }
   _finishSnapshot() {
+    this._snapshotBusy = 0;
     this._clearTimer(this._snapshotPollTimer);
     this._snapshotPollTimer = null;
     const btn = this.shadowRoot.getElementById("btn-snapshot");

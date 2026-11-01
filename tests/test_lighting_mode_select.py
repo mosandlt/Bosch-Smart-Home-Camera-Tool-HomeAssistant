@@ -206,7 +206,7 @@ def test_device_info_and_ids() -> None:
     ent = _entity(CURRENT)
     assert ent.unique_id == f"bosch_shc_camera_{CAM}_lighting_mode_select"
     assert ent.device_info["name"] == "Bosch Terrasse"
-    assert ent.device_info["model"] == "CAMERA_EYES"
+    assert ent.device_info["model"] == "Eyes Außenkamera"  # display name (#85)
 
 
 @pytest.mark.asyncio

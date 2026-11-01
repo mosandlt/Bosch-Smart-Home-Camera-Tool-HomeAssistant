@@ -385,7 +385,7 @@ class TestNvrModeSelectBasic:
         info = sel.device_info
         assert (DOMAIN, CAM_ID) in info["identifiers"]
         assert info["manufacturer"] == "Bosch"
-        assert info["model"] == "HOME_Eyes_Outdoor"
+        assert info["model"] == "Eyes Außenkamera II"  # display name, not raw hw (#85)
 
     def test_options_are_continuous_and_event_buffered_only(
         self, stub_coord_nvr_mode: SimpleNamespace, stub_entry: SimpleNamespace

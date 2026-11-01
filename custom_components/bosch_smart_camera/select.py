@@ -29,6 +29,7 @@ from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _is_gen2_indoor, _warn_if_privacy_on
 from .ldi_local import ldi_serviceable
 from .lighting_options import SCHEDULE_STATUS_OPTIONS, async_set_schedule_status
+from .models import get_display_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -190,7 +191,9 @@ class BoschVideoQualitySelect(CoordinatorEntity, SelectEntity, RestoreEntity):  
             "identifiers": {(DOMAIN, self._cam_id)},
             "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "model": get_display_name(
+                cam_info.get("hardwareVersion") or "Smart Home Camera"
+            ),
             "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
@@ -383,7 +386,9 @@ class BoschNvrModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):  # typ
             "identifiers": {(DOMAIN, self._cam_id)},
             "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "model": get_display_name(
+                cam_info.get("hardwareVersion") or "Smart Home Camera"
+            ),
             "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
@@ -458,7 +463,9 @@ class BoschMotionSensitivitySelect(CoordinatorEntity, SelectEntity):  # type: ig
             "identifiers": {(DOMAIN, self._cam_id)},
             "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "model": get_display_name(
+                cam_info.get("hardwareVersion") or "Smart Home Camera"
+            ),
             "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
@@ -552,7 +559,9 @@ class BoschLightingModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[
             "identifiers": {(DOMAIN, self._cam_id)},
             "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "model": get_display_name(
+                cam_info.get("hardwareVersion") or "Smart Home Camera"
+            ),
             "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
@@ -609,7 +618,9 @@ class BoschFcmPushModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[m
             "identifiers": {(DOMAIN, self._cam_id)},
             "name": f"Bosch {cam_title}",
             "manufacturer": "Bosch",
-            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "model": get_display_name(
+                cam_info.get("hardwareVersion") or "Smart Home Camera"
+            ),
             "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
@@ -697,7 +708,9 @@ class BoschStreamModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mi
             "identifiers": {(DOMAIN, self._cam_id)},
             "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "model": get_display_name(
+                cam_info.get("hardwareVersion") or "Smart Home Camera"
+            ),
             "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
@@ -755,7 +768,9 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
             "identifiers": {(DOMAIN, self._cam_id)},
             "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "model": get_display_name(
+                cam_info.get("hardwareVersion") or "Smart Home Camera"
+            ),
             "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
@@ -850,7 +865,9 @@ class BoschPanPresetSelect(CoordinatorEntity, SelectEntity):  # type: ignore[mis
             "identifiers": {(DOMAIN, self._cam_id)},
             "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "model": get_display_name(
+                cam_info.get("hardwareVersion") or "Smart Home Camera"
+            ),
             "sw_version": cam_info.get("firmwareVersion", ""),
         }
 

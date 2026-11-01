@@ -156,7 +156,7 @@ const EVENT_KIND_LABELS = {
   person: { en: "Person", de: "Person", es: "Persona", fr: "Personne", it: "Persona", nl: "Persoon", pl: "Osoba", pt: "Pessoa", ru: "Человек", uk: "Людина", zh: "人员" },
   audio_alarm: { en: "Sound", de: "Geräusch", es: "Sonido", fr: "Son", it: "Suono", nl: "Geluid", pl: "Dźwięk", pt: "Som", ru: "Звук", uk: "Звук", zh: "声音" },
 };
-const CARD_VERSION = "14.2.1";
+const CARD_VERSION = "14.2.1.1";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -4475,6 +4475,7 @@ class BoschCameraCard extends HTMLElement {
     if (this._fsAutoHideWired) this._unwireFsAutoHide();
     this._clearTimer(this._loadingTimeout);
     this._clearTimer(this._snapshotPollTimer);
+    this._snapshotBusy = 0;
     Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
     this._clearTimer(this._privacyCooldownTimer); this._privacyCooldownTimer = null;
     this._clearTimer(this._streamCooldownTimer); this._streamCooldownTimer = null;
@@ -10062,6 +10063,13 @@ class BoschCameraCard extends HTMLElement {
 
   // ── Snapshot button ───────────────────────────────────────────────────────
   _onSnapshotClick() {
+    // Ignore clicks while a snapshot refresh is running: the backend drops a
+    // second refresh while one is in flight, and a second poll loop would
+    // overwrite _snapshotPollTimer (leaking the first one).
+    // Busy flag expires after 20 s: on mobile the page can be suspended mid-poll
+    // (app switch, screen lock), which would otherwise leave it stuck forever.
+    if (this._snapshotBusy && Date.now() - this._snapshotBusy < 20000) return;
+    this._snapshotBusy = Date.now();
     const btn   = this.shadowRoot.getElementById("btn-snapshot");
     const label = this.shadowRoot.getElementById("btn-snapshot-label");
 
@@ -10082,6 +10090,7 @@ class BoschCameraCard extends HTMLElement {
     const privacyOn  = privStates && this._entities.privacy in privStates
                        && privStates[this._entities.privacy]?.state === "on";
     if (privacyOn) {
+      this._snapshotBusy = 0;
       if (label) label.textContent = "Snapshot";
       if (btn) { btn.disabled = false; btn.classList.remove("loading"); const sp = btn.querySelector("#snapshot-spinner"); if (sp) sp.remove(); }
       this._setLoadingOverlay(false);
@@ -10109,18 +10118,19 @@ class BoschCameraCard extends HTMLElement {
     };
 
     // Get current byte count (best-effort), then fire service + start polling
-    fetch(currUrl)
+    fetch(currUrl, typeof AbortSignal !== "undefined" && AbortSignal.timeout ? { signal: AbortSignal.timeout(5000) } : undefined)
       .then(r => r.ok ? r.blob() : null)
       .then(blob => startPoll(blob ? blob.size : 0))
       .catch(() => startPoll(0));
   }
 
   _pollSnapshotImage(prevBytes, startTime) {
-    // 6 s total: REMOTE fetch completes in ~3 s, LOCAL snap.jpg in ~1.4 s; the
+    // 12 s total (was 6 s: a slow Bosch cloud answered after the card had given
+    // up and showed the stale frame). REMOTE fetch ~3 s, LOCAL snap.jpg ~1.4 s; the
     // previous 15 s value was only needed when byte-comparison accidentally
     // baselined against an already-fresh image (fixed above). Shorter timeout
     // means the spinner resolves faster when a change isn't detected.
-    const TIMEOUT  = 6000;
+    const TIMEOUT  = 12000;
     const INTERVAL = 1000;
     const elapsed  = Date.now() - startTime;
 
@@ -10178,6 +10188,7 @@ class BoschCameraCard extends HTMLElement {
   }
 
   _finishSnapshot() {
+    this._snapshotBusy = 0;
     this._clearTimer(this._snapshotPollTimer); this._snapshotPollTimer = null;
     const btn   = this.shadowRoot.getElementById("btn-snapshot");
     const label = this.shadowRoot.getElementById("btn-snapshot-label");

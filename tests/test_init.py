@@ -31825,7 +31825,7 @@ class TestPanPresetDeviceInfo:
         info = sel.device_info
         assert (DOMAIN, CAM_A) in info["identifiers"]
         assert info["manufacturer"] == "Bosch"
-        assert info["model"] == "CAMERA_360"
+        assert info["model"] == "360 Innenkamera"  # display name (#85)
         assert info["sw_version"] == "7.91.56"
 
     def test_device_info_fallback_model(self) -> None:

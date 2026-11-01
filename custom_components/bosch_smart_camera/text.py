@@ -33,6 +33,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import BoschCameraCoordinator
 from .const import DOMAIN
 from .dynamic_devices import register_dynamic_camera_listener
+from .models import get_display_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,7 +121,9 @@ class BoschAiSceneContextText(CoordinatorEntity, TextEntity, RestoreEntity):  # 
             "identifiers": {(DOMAIN, self._cam_id)},
             "name": f"Bosch {self._cam_title}",
             "manufacturer": "Bosch",
-            "model": cam_info.get("hardwareVersion", "Smart Home Camera"),
+            "model": get_display_name(
+                cam_info.get("hardwareVersion") or "Smart Home Camera"
+            ),
             "sw_version": cam_info.get("firmwareVersion", ""),
         }
 
