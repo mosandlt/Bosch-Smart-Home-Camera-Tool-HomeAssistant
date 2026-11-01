@@ -156,7 +156,7 @@ const EVENT_KIND_LABELS = {
   person: { en: "Person", de: "Person", es: "Persona", fr: "Personne", it: "Persona", nl: "Persoon", pl: "Osoba", pt: "Pessoa", ru: "Человек", uk: "Людина", zh: "人员" },
   audio_alarm: { en: "Sound", de: "Geräusch", es: "Sonido", fr: "Son", it: "Suono", nl: "Geluid", pl: "Dźwięk", pt: "Som", ru: "Звук", uk: "Звук", zh: "声音" },
 };
-const CARD_VERSION = "14.2.1.1";
+const CARD_VERSION = "14.2.1.2";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -4476,6 +4476,7 @@ class BoschCameraCard extends HTMLElement {
     this._clearTimer(this._loadingTimeout);
     this._clearTimer(this._snapshotPollTimer);
     this._snapshotBusy = 0;
+    this._snapshotRun = (this._snapshotRun || 0) + 1;  // invalidate in-flight fetches
     Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
     this._clearTimer(this._privacyCooldownTimer); this._privacyCooldownTimer = null;
     this._clearTimer(this._streamCooldownTimer); this._streamCooldownTimer = null;
@@ -10068,8 +10069,11 @@ class BoschCameraCard extends HTMLElement {
     // overwrite _snapshotPollTimer (leaking the first one).
     // Busy flag expires after 20 s: on mobile the page can be suspended mid-poll
     // (app switch, screen lock), which would otherwise leave it stuck forever.
-    if (this._snapshotBusy && Date.now() - this._snapshotBusy < 20000) return;
+    // 30 s > worst case (5 s pre-fetch + 12 s poll + last fetch).
+    if (this._snapshotBusy && Date.now() - this._snapshotBusy < 30000) return;
     this._snapshotBusy = Date.now();
+    // Run id: results of an older (expired/torn-down) run are ignored.
+    const run = (this._snapshotRun = (this._snapshotRun || 0) + 1);
     const btn   = this.shadowRoot.getElementById("btn-snapshot");
     const label = this.shadowRoot.getElementById("btn-snapshot-label");
 
@@ -10107,13 +10111,14 @@ class BoschCameraCard extends HTMLElement {
     const currUrl = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}&width=${dispW}`;
 
     const startPoll = (prevBytes) => {
+      if (run !== this._snapshotRun) return;
       // Fire backend refresh AFTER prevBytes capture — see above.
       if (this._hass?.services?.bosch_smart_camera?.trigger_snapshot)
         this._callService("bosch_smart_camera", "trigger_snapshot", { entity_id: this._entities.camera });
       // First poll after 500ms — RCP refresh completes in ~100ms, so 500ms is plenty
       const startTime = Date.now();
       this._snapshotPollTimer = this._armTimer(
-        () => this._pollSnapshotImage(prevBytes, startTime), 500
+        () => this._pollSnapshotImage(prevBytes, startTime, run), 500
       );
     };
 
@@ -10121,10 +10126,11 @@ class BoschCameraCard extends HTMLElement {
     fetch(currUrl, typeof AbortSignal !== "undefined" && AbortSignal.timeout ? { signal: AbortSignal.timeout(5000) } : undefined)
       .then(r => r.ok ? r.blob() : null)
       .then(blob => startPoll(blob ? blob.size : 0))
-      .catch(() => startPoll(0));
+      .catch(() => startPoll(0));  // 0 = baseline unknown, see _pollSnapshotImage
   }
 
-  _pollSnapshotImage(prevBytes, startTime) {
+  _pollSnapshotImage(prevBytes, startTime, run) {
+    if (run !== this._snapshotRun) return;
     // 12 s total (was 6 s: a slow Bosch cloud answered after the card had given
     // up and showed the stale frame). REMOTE fetch ~3 s, LOCAL snap.jpg ~1.4 s; the
     // previous 15 s value was only needed when byte-comparison accidentally
@@ -10141,22 +10147,26 @@ class BoschCameraCard extends HTMLElement {
     const dispW2 = Math.round(this.offsetWidth || 640);
     const url   = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}&width=${dispW2}`;
 
-    fetch(url)
+    fetch(url, typeof AbortSignal !== "undefined" && AbortSignal.timeout ? { signal: AbortSignal.timeout(5000) } : undefined)
       .then(r => r.ok ? r.blob() : Promise.reject(r.status))
       .then(blob => {
-        const changed = prevBytes === 0 || Math.abs(blob.size - prevBytes) > 200;
+        if (run !== this._snapshotRun) return;
+        // prevBytes === 0: baseline unknown (pre-fetch failed). Don't accept the
+        // first frame as "fresh" — that is still the pre-refresh image. Wait 3 s.
+        const changed = prevBytes === 0 ? elapsed >= 3000 : Math.abs(blob.size - prevBytes) > 200;
         if (changed || elapsed >= TIMEOUT) {
           this._showSnapshotBlob(blob);
         } else {
           this._snapshotPollTimer = this._armTimer(
-            () => this._pollSnapshotImage(prevBytes, startTime), INTERVAL
+            () => this._pollSnapshotImage(prevBytes, startTime, run), INTERVAL
           );
         }
       })
       .catch(() => {
+        if (run !== this._snapshotRun) return;
         if (elapsed < TIMEOUT) {
           this._snapshotPollTimer = this._armTimer(
-            () => this._pollSnapshotImage(prevBytes, startTime), INTERVAL
+            () => this._pollSnapshotImage(prevBytes, startTime, run), INTERVAL
           );
         } else {
           this._finishSnapshot();

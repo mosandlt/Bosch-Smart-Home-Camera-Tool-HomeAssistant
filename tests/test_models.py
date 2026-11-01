@@ -247,3 +247,9 @@ def test_gh3_gen2_outdoor_model_config_exists():
 
     cfg = get_model_config("HOME_Eyes_Outdoor")
     assert cfg.generation == 2
+
+
+@pytest.mark.parametrize("missing", [None, ""])
+def test_get_display_name_missing_hardware_version(missing: str | None) -> None:
+    """Missing/null hardwareVersion must not crash and gives the default name (#85)."""
+    assert get_display_name(missing) == DEFAULT_MODEL.display_name

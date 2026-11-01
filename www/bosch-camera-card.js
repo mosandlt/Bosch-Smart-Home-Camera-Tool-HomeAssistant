@@ -37,7 +37,7 @@ const EVENT_KIND_LABELS = {
   }
 };
 
-const CARD_VERSION = "14.2.1.1";
+const CARD_VERSION = "14.2.1.2";
 
 function clampWebrtcTimeoutMsForDisplay(raw) {
   const n = Number(raw);
@@ -3633,6 +3633,7 @@ class BoschCameraCard extends HTMLElement {
     this._clearTimer(this._loadingTimeout);
     this._clearTimer(this._snapshotPollTimer);
     this._snapshotBusy = 0;
+    this._snapshotRun = (this._snapshotRun || 0) + 1;
     Object.values(this._optimisticTimers).forEach(t => clearTimeout(t));
     this._clearTimer(this._privacyCooldownTimer);
     this._privacyCooldownTimer = null;
@@ -5785,8 +5786,9 @@ class BoschCameraCard extends HTMLElement {
     this._refreshAudioToggle();
   }
   _onSnapshotClick() {
-    if (this._snapshotBusy && Date.now() - this._snapshotBusy < 2e4) return;
+    if (this._snapshotBusy && Date.now() - this._snapshotBusy < 3e4) return;
     this._snapshotBusy = Date.now();
+    const run = this._snapshotRun = (this._snapshotRun || 0) + 1;
     const btn = this.shadowRoot.getElementById("btn-snapshot");
     const label = this.shadowRoot.getElementById("btn-snapshot-label");
     if (btn) {
@@ -5817,17 +5819,19 @@ class BoschCameraCard extends HTMLElement {
     const dispW = Math.round(this.offsetWidth || 640);
     const currUrl = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}&width=${dispW}`;
     const startPoll = prevBytes => {
+      if (run !== this._snapshotRun) return;
       if (this._hass?.services?.bosch_smart_camera?.trigger_snapshot) this._callService("bosch_smart_camera", "trigger_snapshot", {
         entity_id: this._entities.camera
       });
       const startTime = Date.now();
-      this._snapshotPollTimer = this._armTimer(() => this._pollSnapshotImage(prevBytes, startTime), 500);
+      this._snapshotPollTimer = this._armTimer(() => this._pollSnapshotImage(prevBytes, startTime, run), 500);
     };
     fetch(currUrl, typeof AbortSignal !== "undefined" && AbortSignal.timeout ? {
       signal: AbortSignal.timeout(5e3)
     } : undefined).then(r => r.ok ? r.blob() : null).then(blob => startPoll(blob ? blob.size : 0)).catch(() => startPoll(0));
   }
-  _pollSnapshotImage(prevBytes, startTime) {
+  _pollSnapshotImage(prevBytes, startTime, run) {
+    if (run !== this._snapshotRun) return;
     const TIMEOUT = 12e3;
     const INTERVAL = 1e3;
     const elapsed = Date.now() - startTime;
@@ -5838,16 +5842,20 @@ class BoschCameraCard extends HTMLElement {
     const token = this._hass.states[this._entities.camera]?.attributes?.access_token || "";
     const dispW2 = Math.round(this.offsetWidth || 640);
     const url = `/api/camera_proxy/${this._entities.camera}?token=${token}&t=${Date.now()}&width=${dispW2}`;
-    fetch(url).then(r => r.ok ? r.blob() : Promise.reject(r.status)).then(blob => {
-      const changed = prevBytes === 0 || Math.abs(blob.size - prevBytes) > 200;
+    fetch(url, typeof AbortSignal !== "undefined" && AbortSignal.timeout ? {
+      signal: AbortSignal.timeout(5e3)
+    } : undefined).then(r => r.ok ? r.blob() : Promise.reject(r.status)).then(blob => {
+      if (run !== this._snapshotRun) return;
+      const changed = prevBytes === 0 ? elapsed >= 3e3 : Math.abs(blob.size - prevBytes) > 200;
       if (changed || elapsed >= TIMEOUT) {
         this._showSnapshotBlob(blob);
       } else {
-        this._snapshotPollTimer = this._armTimer(() => this._pollSnapshotImage(prevBytes, startTime), INTERVAL);
+        this._snapshotPollTimer = this._armTimer(() => this._pollSnapshotImage(prevBytes, startTime, run), INTERVAL);
       }
     }).catch(() => {
+      if (run !== this._snapshotRun) return;
       if (elapsed < TIMEOUT) {
-        this._snapshotPollTimer = this._armTimer(() => this._pollSnapshotImage(prevBytes, startTime), INTERVAL);
+        this._snapshotPollTimer = this._armTimer(() => this._pollSnapshotImage(prevBytes, startTime, run), INTERVAL);
       } else {
         this._finishSnapshot();
       }

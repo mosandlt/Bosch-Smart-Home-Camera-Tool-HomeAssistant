@@ -217,8 +217,14 @@ def get_model_config(hw_version: str) -> CameraModelConfig:
     return MODELS.get(hw_version, DEFAULT_MODEL)
 
 
-def get_display_name(hw_version: str) -> str:
-    """Return human-readable model name for a hardwareVersion string."""
+def get_display_name(hw_version: str | None) -> str:
+    """Return human-readable model name for a hardwareVersion string.
+
+    Missing/empty/None (API field absent or null) → the default name, so every
+    platform's device_info agrees instead of the last-registered one winning.
+    """
+    if not hw_version:
+        return DEFAULT_MODEL.display_name
     cfg = MODELS.get(hw_version)
     if cfg:
         return cfg.display_name
