@@ -7,6 +7,8 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v18.0.1] - 2026-11-01
+
 ### Fixed
 
 - **Snapshot button on slow connections/mobile, follow-up.** Every click now has its own run id, so a stale refresh (page suspended, card re-attached) can no longer overwrite or end a newer one. The status fetch during the refresh has a timeout, and an unknown baseline no longer accepts the old image as the new one. Card 14.2.1.2.
