@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v18.0.2] - 2026-11-06
+
+### Changed
+
+- The Authentication section of the Configure dialog now says where to enter the local data interface passwords: tick "Set local data interface passwords" and a second step shows one field per camera (English and German).
+
 ## [v18.0.1] - 2026-11-01
 
 ### Fixed

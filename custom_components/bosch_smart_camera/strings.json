@@ -340,7 +340,7 @@
           },
           "auth": {
             "name": "Authentication",
-            "description": "Force a fresh browser login or migrate to the OSS OAuth client.",
+            "description": "Re-authenticate, migrate to the OSS OAuth client, or tick \"Set local data interface passwords\" to enter the password printed on each camera (a second step follows).",
             "data": {
               "force_relogin": "Re-authenticate (browser login)",
               "migrate_to_oss_client": "Switch to OSS OAuth client",

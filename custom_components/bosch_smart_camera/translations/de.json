@@ -340,7 +340,7 @@
           },
           "auth": {
             "name": "Authentifizierung",
-            "description": "Frische Browser-Anmeldung erzwingen oder zum OSS-OAuth-Client migrieren.",
+            "description": "Neu anmelden, zum OSS-OAuth-Client migrieren oder \"Passwörter der lokalen Datenschnittstelle setzen\" ankreuzen, um das auf jeder Kamera aufgedruckte Passwort einzugeben (danach folgt ein zweiter Schritt).",
             "data": {
               "force_relogin": "Neu anmelden (Browser-Login)",
               "migrate_to_oss_client": "Zu OSS-OAuth-Client wechseln",
