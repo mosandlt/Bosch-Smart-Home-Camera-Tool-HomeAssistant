@@ -9,6 +9,10 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [v18.0.2] - 2026-11-06
 
+### Security
+
+- **Smart Home Controller connection now verifies the controller's certificate** (CWE-295, [GHSA-pqpv-xgfh-pmg9](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/security/advisories/GHSA-pqpv-xgfh-pmg9)). The optional local controller link previously accepted any certificate, so someone on the same network could impersonate the controller. The controller's certificate is now pinned on first connection (stored as `shc_server_cert_<ip>.pem` next to your client certificate) and every later connection must present exactly it. After resetting the controller, delete that file to pin again. Update recommended for everyone who configured the controller.
+
 ### Changed
 
 - The Authentication section of the Configure dialog now says where to enter the local data interface passwords: tick "Set local data interface passwords" and a second step shows one field per camera (English and German).

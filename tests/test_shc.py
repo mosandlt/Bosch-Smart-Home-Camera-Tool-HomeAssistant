@@ -692,6 +692,15 @@ def _mock_resp(status: int, json_data=None, text: str = ""):
     return _mock_response(status, json_data, text)
 
 
+async def _run_inline(func, *args):
+    """Stand-in for hass.async_add_executor_job (pin loader patched out)."""
+    with patch(
+        "custom_components.bosch_smart_camera.shc._load_or_pin_shc_server_cert",
+        return_value="PEM",
+    ):
+        return func(*args)
+
+
 def _stub_coord_round6(
     *, gen2: bool = True, with_token: bool = True, shc_ip: str = "192.0.2.103"
 ):
@@ -707,6 +716,7 @@ def _stub_coord_round6(
         options=opts,
         hass=SimpleNamespace(
             async_create_task=lambda coro: coro.close(),
+            async_add_executor_job=_run_inline,
             services=SimpleNamespace(async_call=AsyncMock()),
         ),
         shc_state_cache={
@@ -941,6 +951,7 @@ class TestAsyncShcRequest:
         stale_connector.closed = False
         coord.shc_connector = stale_connector
         coord.shc_connector_key = (
+            coord.options["shc_ip"],
             coord.options["shc_cert_path"],
             coord.options["shc_key_path"],
         )
@@ -4786,3 +4797,96 @@ class TestNonFiniteBrightness:
                 shc_state_cache={CAM_ID: {"front_light_intensity": bad}}
             )
             assert front_restore_brightness(coord, CAM_ID) == 100
+
+
+class TestShcServerCertPinning:
+    """GHSA-pqpv-xgfh-pmg9 (CWE-295): SHC server cert must be verified (pinned)."""
+
+    def test_ctx_requires_verification_and_loads_pin(self):
+        import ssl
+
+        from custom_components.bosch_smart_camera import shc
+
+        shc._SHC_SSL_CONTEXTS.clear()
+        with (
+            patch.object(
+                shc, "_load_or_pin_shc_server_cert", return_value="PEM"
+            ) as pin,
+            patch("ssl.SSLContext") as mock_ssl,
+        ):
+            ctx = shc._get_shc_ssl_ctx("192.0.2.103", "/c.pem", "/k.pem")
+        pin.assert_called_once_with("192.0.2.103", "/c.pem")
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        ctx.load_verify_locations.assert_called_once_with(cadata="PEM")
+        mock_ssl.return_value.load_cert_chain.assert_called_once()
+        shc._SHC_SSL_CONTEXTS.clear()
+
+    def test_first_use_pins_then_reuses(self, tmp_path):
+        from custom_components.bosch_smart_camera import shc
+
+        cert = str(tmp_path / "c.pem")
+        with patch(
+            "ssl.get_server_certificate", return_value="-----BEGIN CERTIFICATE-----\nA"
+        ) as g:
+            first = shc._load_or_pin_shc_server_cert("192.0.2.103", cert)
+            second = shc._load_or_pin_shc_server_cert("192.0.2.103", cert)
+        assert first == second
+        g.assert_called_once()
+        assert (
+            tmp_path / "shc_server_cert_192.0.2.103.pem"
+        ).stat().st_mode & 0o777 == 0o600
+
+    def test_presented_cert_mismatch_is_rejected(self, tmp_path):
+        """A different cert than the pinned one must fail the TLS handshake."""
+        import ssl
+        import subprocess
+
+        from custom_components.bosch_smart_camera import shc
+
+        def mk(name):
+            c, k = tmp_path / f"{name}.crt", tmp_path / f"{name}.key"
+            subprocess.run(
+                [
+                    "openssl",
+                    "req",
+                    "-x509",
+                    "-newkey",
+                    "rsa:2048",
+                    "-nodes",
+                    "-days",
+                    "1",
+                    "-subj",
+                    f"/CN={name}",
+                    "-keyout",
+                    str(k),
+                    "-out",
+                    str(c),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            return c, k
+
+        good, _ = mk("good")
+        evil, evil_key = mk("evil")
+        client_c, client_k = mk("client")
+        pin = tmp_path / "shc_server_cert_127.0.0.1.pem"
+        pin.write_text(good.read_text())
+
+        srv = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        srv.load_cert_chain(evil, evil_key)
+        shc._SHC_SSL_CONTEXTS.clear()
+        ctx = shc._get_shc_ssl_ctx("127.0.0.1", str(client_c), str(client_k))
+        c_in, c_out, s_in, s_out = (ssl.MemoryBIO() for _ in range(4))
+        cli = ctx.wrap_bio(c_in, c_out, server_hostname=None)
+        tls_srv = srv.wrap_bio(s_in, s_out, server_side=True)
+        with pytest.raises(ssl.SSLCertVerificationError):
+            for _ in range(10):  # in-memory handshake, no sockets
+                for obj in (cli, tls_srv):
+                    try:
+                        obj.do_handshake()
+                    except ssl.SSLWantReadError:
+                        pass
+                s_in.write(c_out.read())
+                c_in.write(s_out.read())
+        shc._SHC_SSL_CONTEXTS.clear()

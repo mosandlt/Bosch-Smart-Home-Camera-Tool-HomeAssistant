@@ -32,7 +32,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import os
+import re
 import ssl
+import threading
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -57,15 +60,70 @@ _LOGGER = logging.getLogger(__name__)
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 # SSLContext is stateless after init — safe to cache and share across requests
-_SHC_SSL_CONTEXTS: dict[tuple[str, str], ssl.SSLContext] = {}
+_SHC_SSL_CONTEXTS: dict[tuple[str, str, str], ssl.SSLContext] = {}
+
+SHC_PORT = 8444
+_SHC_PIN_LOCK = threading.Lock()
 
 
-def _get_shc_ssl_ctx(cert_path: str, key_path: str) -> ssl.SSLContext:
-    key = (cert_path, key_path)
+def _shc_pin_path(shc_ip: str, cert_path: str) -> str:
+    """Pinned SHC server certificate, one file per controller IP (next to the client cert)."""
+    safe_ip = re.sub(r"[^0-9A-Za-z.-]", "_", shc_ip)
+    return os.path.join(
+        os.path.dirname(cert_path) or ".", f"shc_server_cert_{safe_ip}.pem"
+    )
+
+
+def _load_or_pin_shc_server_cert(shc_ip: str, cert_path: str) -> str:
+    """Return the pinned SHC server certificate (PEM), pinning it on first use.
+
+    The controller presents a per-device self-signed certificate, so there is no
+    CA to validate against. Trust-on-first-use: the certificate seen on the first
+    connection is stored and every later connection must present exactly it
+    (CWE-295: a LAN attacker can no longer impersonate the controller afterwards).
+    Delete the file to re-pin after the controller was reset. Blocking I/O.
+    """
+    pin_path = _shc_pin_path(shc_ip, cert_path)
+    with _SHC_PIN_LOCK:
+        try:
+            with open(pin_path, encoding="ascii") as fh:
+                pem = fh.read()
+            if "BEGIN CERTIFICATE" in pem:
+                return pem
+        except FileNotFoundError:
+            pass
+        pem = ssl.get_server_certificate((shc_ip, SHC_PORT), timeout=10)
+        # Never overwrite an existing pin (O_EXCL); a corrupt file must be deleted by hand.
+        fd = os.open(pin_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii") as fh:
+            fh.write(pem)
+    _LOGGER.warning(
+        "SHC server certificate pinned on first use (%s); delete this file to "
+        "re-pin after a controller reset",
+        pin_path,
+    )
+    return pem
+
+
+def _get_shc_ssl_ctx(shc_ip: str, cert_path: str, key_path: str) -> ssl.SSLContext:
+    """Mutual-TLS context that only trusts the pinned SHC server certificate.
+
+    Blocking (file + first-use network I/O): call from an executor.
+    """
+    key = (shc_ip, cert_path, key_path)
+    if key in _SHC_SSL_CONTEXTS and not os.path.exists(
+        _shc_pin_path(shc_ip, cert_path)
+    ):
+        del _SHC_SSL_CONTEXTS[key]  # pin deleted by the user -> re-pin
     if key not in _SHC_SSL_CONTEXTS:
+        pem = _load_or_pin_shc_server_cert(shc_ip, cert_path)
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        # The pinned self-signed certificate is its own (only) trust anchor;
+        # hostname check stays off because the SHC is addressed by LAN IP.
         ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.load_verify_locations(cadata=pem)
         ctx.load_cert_chain(cert_path, key_path)  # may raise; not cached on failure
         _SHC_SSL_CONTEXTS[key] = ctx
     return _SHC_SSL_CONTEXTS[key]
@@ -149,10 +207,12 @@ async def async_shc_request(
         return None
 
     try:
-        ctx = _get_shc_ssl_ctx(cert_path, key_path)
+        ctx = await coordinator.hass.async_add_executor_job(
+            _get_shc_ssl_ctx, shc_ip, cert_path, key_path
+        )
     except Exception as err:
         _LOGGER.warning("SHC TLS setup failed (check cert/key paths): %s", err)
-        _SHC_SSL_CONTEXTS.pop((cert_path, key_path), None)
+        _SHC_SSL_CONTEXTS.pop((shc_ip, cert_path, key_path), None)
         _shc_mark_failure(coordinator)
         return None
 
@@ -163,7 +223,7 @@ async def async_shc_request(
     # `connector_owner=False` on the session (kept from before this fix)
     # means the session's own close() never touches the connector, but the
     # session itself is now long-lived like the connector, not per-call.
-    _connector_key = (cert_path, key_path)
+    _connector_key = (shc_ip, cert_path, key_path)
     _cached_conn: aiohttp.TCPConnector | None = getattr(
         coordinator, "shc_connector", None
     )
@@ -185,7 +245,7 @@ async def async_shc_request(
         coordinator.shc_connector_key = _connector_key
         coordinator.shc_session = _cached_sess
 
-    url = f"https://{shc_ip}:8444/smarthome{path}"
+    url = f"https://{shc_ip}:{SHC_PORT}/smarthome{path}"
     headers = {"api-version": "3.2", "Content-Type": "application/json"}
     try:
         async with asyncio.timeout(10):
