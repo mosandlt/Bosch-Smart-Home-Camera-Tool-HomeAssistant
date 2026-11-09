@@ -10,7 +10,7 @@ STORAGE_PREFIX = LEGACY_DOMAIN
 # Lovelace card version — must match CARD_VERSION in src/bosch-camera-card.js.
 # Bumped here alongside every card release so the auto-registered resource URL
 # changes and browsers fetch the new file (HA serves www/ with max-age=31 days).
-CARD_VERSION = "14.2.1.2"
+CARD_VERSION = "14.3.0"
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
 
 # Delivery-death detection. When the periodic /v11/events poll finds

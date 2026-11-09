@@ -1885,6 +1885,7 @@ title: Cameras                  # optional header
 online_offline_view: true       # default true; false = hide offline tier
 columns: auto                   # "auto" | 1 | 2 | 3 | 4   (default "auto")
 min_width: 650px                # cell min-width when columns: auto (default 650px)
+mobile_columns: 1                # 1 (default) | 2 = two tiles side by side on phones (tiles go compact there)
 gap: 12px                       # grid gap (default 12px)
 use_bosch_sort: true            # default false; true = follow Bosch-app priority
 minimal: false                  # default false; true = compact tiles for the whole grid
@@ -1909,6 +1910,7 @@ card_defaults:                  # base options applied to every tile (overrides 
 | `online_offline_view` | `true` | `false` hides the offline tier — only online (green/orange) tiles render. |
 | `columns` | `auto` | `auto` packs as many cells as fit `min_width`; `1`/`2`/`3`/`4` forces that count. |
 | `min_width` | `650px` | Cell min-width when `columns: auto`. |
+| `mobile_columns` | `1` | `2` shows two tiles side by side on phones, touch tablets and short landscape screens (where the grid is otherwise forced to one column). Tiles there turn compact (video + title only). Anything other than `2` keeps one column. |
 | `gap` | `12px` | Grid gap between tiles (shrinks to 8 px on phones). |
 | `use_bosch_sort` | `false` | `true` orders each tier by the `bosch_priority` attribute (Bosch-app order); `false` = German-collated alphabetic. |
 | `exclude` | `[]` | List of entity_ids to skip from auto-discovery. |
@@ -1927,7 +1929,7 @@ card_defaults:                  # base options applied to every tile (overrides 
 #### Responsive behavior
 
 * **Viewports > 640 px** — `columns: auto` packs as many cells as fit `min_width` per row; explicit `columns: 1|2|3|4` forces that count.
-* **Viewports ≤ 640 px** — always one column regardless of `columns`, so cards stay legible on phones. The grid `gap` shrinks to 8 px in this mode.
+* **Viewports ≤ 640 px** — one column regardless of `columns`, so cards stay legible on phones; set `mobile_columns: 2` to show two tiles side by side instead (they switch to the compact look there). The grid `gap` shrinks to 8 px in this mode.
 * **Full-width dashboards** — to escape the sections-view max-width clamp (which limits standard dashboards to ~870 px), put the overview card in a view with `panel: true`. It then uses the full browser width.
 
 #### Behavior notes

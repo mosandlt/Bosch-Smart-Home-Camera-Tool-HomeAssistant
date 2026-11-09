@@ -156,7 +156,7 @@ const EVENT_KIND_LABELS = {
   person: { en: "Person", de: "Person", es: "Persona", fr: "Personne", it: "Persona", nl: "Persoon", pl: "Osoba", pt: "Pessoa", ru: "Человек", uk: "Людина", zh: "人员" },
   audio_alarm: { en: "Sound", de: "Geräusch", es: "Sonido", fr: "Son", it: "Suono", nl: "Geluid", pl: "Dźwięk", pt: "Som", ru: "Звук", uk: "Звук", zh: "声音" },
 };
-const CARD_VERSION = "14.2.1.2";
+const CARD_VERSION = "14.3.0";
 
 // Shared clamp for `webrtc_connect_timeout_ms`, used both by the runtime
 // (_webrtcConnectTimeoutMs) and by both editors' display value — so the
@@ -13239,7 +13239,58 @@ class BoschCameraOverviewCard extends HTMLElement {
     this._hass      = null;
     this._rendered  = false;
     this._emptyNode = null;        // the empty-state <div>, tracked so re-sort removes it without touching cells
+    this._phoneMq   = null;        // MediaQueryList matching the "phone" layouts (mobile_columns)
+    this._onPhoneMq = () => this._applyPhoneCompact();
   }
+
+  // The three screens the grid is forced narrow on (see the @media rules in
+  // _renderShell): phones, touch tablets up to 1024px, short landscape viewports.
+  static get PHONE_QUERY() {
+    return "(max-width: 640px), (pointer: coarse) and (max-width: 1024px), (orientation: landscape) and (max-height: 500px)";
+  }
+
+  // mobile_columns: 2 → tiles are video + title only on those screens. Toggled
+  // as a host class on the tile (no setConfig → the live stream is not re-mounted),
+  // idempotent, run on every hass pass and on media-query changes.
+  _applyPhoneCompact() {
+    if (!this._config) return;
+    const want = this._config.mobile_columns === 2 && !!this._phoneMq && this._phoneMq.matches;
+    for (const cell of this._cards.values()) {
+      const inner = cell._innerCard || cell.querySelector?.("bosch-camera-card");
+      if (!inner) continue;
+      // Only ever undo what this logic added: a tile that is compact through its
+      // own config (compact / card_defaults / overrides) keeps its class.
+      if (want && !inner.classList.contains("compact")) {
+        inner.classList.add("compact");
+        // The tile computed these two for a non-compact layout (pill bar + ⋮
+        // visible); with the pill bar gone they would leave an expanded control
+        // block that cannot be closed, so drop them and put them back on undo.
+        const dropped = ["overflow-open", "dedupe-privacy"].filter((k) => inner.classList.contains(k));
+        dropped.forEach((k) => inner.classList.remove(k));
+        inner.dataset.bcoPhoneCompact = dropped.join(",") || "1";
+      } else if (!want && inner.dataset.bcoPhoneCompact) {
+        inner.classList.remove("compact");
+        inner.dataset.bcoPhoneCompact.split(",").filter((k) => k && k !== "1").forEach((k) => inner.classList.add(k));
+        delete inner.dataset.bcoPhoneCompact;
+      }
+    }
+  }
+
+  _bindPhoneMq() {
+    this._unbindPhoneMq();
+    if (!this._config || this._config.mobile_columns !== 2) return;
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    this._phoneMq = window.matchMedia(BoschCameraOverviewCard.PHONE_QUERY);
+    this._phoneMq.addEventListener?.("change", this._onPhoneMq);
+  }
+
+  _unbindPhoneMq() {
+    if (this._phoneMq) this._phoneMq.removeEventListener?.("change", this._onPhoneMq);
+    this._phoneMq = null;
+  }
+
+  connectedCallback() { this._bindPhoneMq(); this._applyPhoneCompact(); }
+  disconnectedCallback() { this._unbindPhoneMq(); }
 
   setConfig(config) {
     this._config = {
@@ -13248,6 +13299,10 @@ class BoschCameraOverviewCard extends HTMLElement {
       min_width: config.min_width || "650px",
       gap:       config.gap       || "12px",
       columns:   config.columns   ?? "auto",  // "auto" | 1 | 2 | 3 | 4
+      // Phones/touch tablets are forced to ONE column by default (a tile is only
+      // ~12 lines tall at 2-up). mobile_columns: 2 opts into two tiles side by
+      // side there; tiles then go compact (video + title only) on those screens.
+      mobile_columns: Number(config.mobile_columns) === 2 ? 2 : 1,
       exclude:   Array.isArray(config.exclude) ? config.exclude : [],
       include:   Array.isArray(config.include) ? config.include : [],
       // When true, sort cameras inside each tier (live → privacy → offline)
@@ -13342,6 +13397,7 @@ class BoschCameraOverviewCard extends HTMLElement {
     this._rendered = false;
     this._lastSig  = "";
     this._cards.clear();
+    if (this.isConnected) this._bindPhoneMq();
     if (this.shadowRoot) this.shadowRoot.innerHTML = "";
     if (this._hass) this._update();
   }
@@ -13353,6 +13409,7 @@ class BoschCameraOverviewCard extends HTMLElement {
   get hass() { return this._hass; }
 
   _renderShell() {
+    const phoneCols = this._config.mobile_columns === 2 ? "repeat(2, minmax(0, 1fr))" : "1fr";
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
@@ -13376,7 +13433,7 @@ class BoschCameraOverviewCard extends HTMLElement {
           };
         }
         @media (max-width: 640px) {
-          .bco-grid, .bco-lan-tiles { grid-template-columns: 1fr !important; }
+          .bco-grid, .bco-lan-tiles { grid-template-columns: ${phoneCols} !important; }
         }
         /* Phones in landscape (e.g. iPhone Pro Max ≈ 932 × 430) are wider
            than 640px but the viewport height collapses below ~500px — at
@@ -13386,10 +13443,10 @@ class BoschCameraOverviewCard extends HTMLElement {
              - landscape with very short viewport (any device).
            Desktop browsers resized narrow keep their multi-column layout. */
         @media (pointer: coarse) and (max-width: 1024px) {
-          .bco-grid, .bco-lan-tiles { grid-template-columns: 1fr !important; }
+          .bco-grid, .bco-lan-tiles { grid-template-columns: ${phoneCols} !important; }
         }
         @media (orientation: landscape) and (max-height: 500px) {
-          .bco-grid, .bco-lan-tiles { grid-template-columns: 1fr !important; }
+          .bco-grid, .bco-lan-tiles { grid-template-columns: ${phoneCols} !important; }
         }
         .bco-cell {
           min-width: 0;
@@ -14061,6 +14118,7 @@ class BoschCameraOverviewCard extends HTMLElement {
       const inner = cell._innerCard || cell.querySelector?.("bosch-camera-card");
       if (inner) inner.hass = this._hass;
     }
+    this._applyPhoneCompact();
 
     // update count in header
     if (this._countEl) {

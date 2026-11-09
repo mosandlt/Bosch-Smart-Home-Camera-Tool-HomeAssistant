@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v18.1.0] - 2026-11-09
+
+### Added
+
+- **Two camera streams side by side on the phone.** The overview card has a new option `mobile_columns` (default `1`, unchanged). With `mobile_columns: 2`, phones, touch tablets and short landscape screens show two tiles per row instead of one, and the tiles switch to the compact look (video and title) on those screens only. Desktop layout and live streams are not touched when the screen size changes. Card 14.3.0.
+
 ## [v18.0.2] - 2026-11-06
 
 ### Security
