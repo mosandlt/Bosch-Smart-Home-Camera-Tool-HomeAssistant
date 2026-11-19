@@ -72,6 +72,20 @@ _FULL = {
     ),
     "/sh/data/privacyMode/jingle": _Resp(200, '{"enable": false}'),
     "/sh/data/lighting/iconLed/brightness": _Resp(200, '{"value": 0}'),
+    "/sh/data/lighting/motion": _Resp(
+        200,
+        '{"enable": false, "uptime": 60, "top": {"brightness": 0},'
+        ' "zoneMap": [], "sensitivity": 3}',
+    ),
+    "/sh/data/lighting/ambient": _Resp(
+        200,
+        '{"enable": true, "trigger": "ENVIRONMENT", "onTime": "18:00:00+0200"}',
+    ),
+    "/sh/data/lighting/config": _Resp(
+        200, '{"environmentalBrightnessThreshold": 0.67, "fadingEnabled": true}'
+    ),
+    "/sh/data/audio/volumeLevel": _Resp(200, '{"volumeLevel": 50}'),
+    "/sh/data/calibration/extrinsic": _Resp(200, '{"elevation": 1.85}'),
 }
 
 _ALL_PATHS = [path for path, _ in ldi_rest.SETTINGS_ENDPOINTS]
@@ -113,6 +127,13 @@ class TestGetSettings:
             "pre_alarm_delay": 30.5,
             "privacy_sound": False,
             "icon_led_brightness": 0,
+            "motion_light_enabled": False,
+            "motion_light_sensitivity": 3,
+            "ambient_light_enabled": True,
+            "darkness_threshold": 0.67,
+            "light_fading": True,
+            "speaker_level": 50,
+            "lens_elevation": 1.85,
         }
         assert batch.missing_paths == frozenset()
 

@@ -12,6 +12,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 ### Changed
 
 - **More settings are read from the camera itself.** For cameras with a stored local data interface password, the state of the status LED, record sound, glass-break and smoke/fire alarm detection, intrusion detection (on/off, sensitivity, distance), alarm and pre-alarm (on/off and their delays), the privacy sound and the power LED brightness now comes from the camera's local interface (read every two minutes). The cloud value is used as fallback when the camera does not answer, has no such setting, or right after a change. Changing a setting still goes through the cloud. Cameras without a local password are unchanged.
+- **Light, speaker and lens settings read locally too (beta-2).** Motion-triggered light (on/off and sensitivity), ambient light on/off, soft light fading, darkness threshold, speaker level and lens mounting height are now also read from the camera's local interface first, with the cloud value as fallback. Indoor cameras without lighting simply keep using the cloud for those. Changes still go through the cloud; when a change rewrites a whole settings block, its other fields now take the camera's own current values. The light on/off state and the light brightness/colour stay on the cloud for now.
 
 ## [v18.1.0] - 2026-11-09
 

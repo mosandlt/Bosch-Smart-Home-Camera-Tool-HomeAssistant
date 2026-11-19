@@ -264,6 +264,13 @@ SETTING_ALARM_ACTIVATION_DELAY = "alarm_activation_delay"
 SETTING_PRE_ALARM_DELAY = "pre_alarm_delay"
 SETTING_PRIVACY_SOUND = "privacy_sound"
 SETTING_ICON_LED_BRIGHTNESS = "icon_led_brightness"
+SETTING_MOTION_LIGHT_ENABLED = "motion_light_enabled"
+SETTING_MOTION_LIGHT_SENSITIVITY = "motion_light_sensitivity"
+SETTING_AMBIENT_LIGHT_ENABLED = "ambient_light_enabled"
+SETTING_DARKNESS_THRESHOLD = "darkness_threshold"
+SETTING_LIGHT_FADING = "light_fading"
+SETTING_SPEAKER_LEVEL = "speaker_level"
+SETTING_LENS_ELEVATION = "lens_elevation"
 
 FIELD_OK = "ok"
 FIELD_UNAVAILABLE = "unavailable"  # 404: the model has no such endpoint
@@ -310,9 +317,41 @@ SETTINGS_ENDPOINTS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
         "/sh/data/lighting/iconLed/brightness",
         ((SETTING_ICON_LED_BRIGHTNESS, "value", _KIND_INT),),
     ),
+    # Indoor models answer 404 to the lighting endpoints.
+    (
+        "/sh/data/lighting/motion",
+        (
+            (SETTING_MOTION_LIGHT_ENABLED, "enable", _KIND_BOOL),
+            (SETTING_MOTION_LIGHT_SENSITIVITY, "sensitivity", _KIND_INT),
+        ),
+    ),
+    (
+        "/sh/data/lighting/ambient",
+        ((SETTING_AMBIENT_LIGHT_ENABLED, "enable", _KIND_BOOL),),
+    ),
+    (
+        "/sh/data/lighting/config",
+        (
+            (
+                SETTING_DARKNESS_THRESHOLD,
+                "environmentalBrightnessThreshold",
+                _KIND_NUMBER,
+            ),
+            (SETTING_LIGHT_FADING, "fadingEnabled", _KIND_BOOL),
+        ),
+    ),
+    (
+        "/sh/data/audio/volumeLevel",
+        ((SETTING_SPEAKER_LEVEL, "volumeLevel", _KIND_NUMBER),),
+    ),
+    (
+        "/sh/data/calibration/extrinsic",
+        ((SETTING_LENS_ELEVATION, "elevation", _KIND_NUMBER),),
+    ),
 )
 
-LDI_SETTINGS_DEADLINE = 20.0
+# Twelve sequential GETs; a camera on a busy 2.4 GHz channel answers slowly.
+LDI_SETTINGS_DEADLINE = 30.0
 
 
 @dataclass(frozen=True)

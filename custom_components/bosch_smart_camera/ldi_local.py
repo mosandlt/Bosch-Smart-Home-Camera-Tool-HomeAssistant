@@ -74,6 +74,17 @@ _CLOUD_WRITE_SETTINGS: dict[str, tuple[str, ...]] = {
     ),
     "privacy_sound_override": (ldi_rest.SETTING_PRIVACY_SOUND,),
     "iconLedBrightness": (ldi_rest.SETTING_ICON_LED_BRIGHTNESS,),
+    "lighting/motion": (
+        ldi_rest.SETTING_MOTION_LIGHT_ENABLED,
+        ldi_rest.SETTING_MOTION_LIGHT_SENSITIVITY,
+    ),
+    "lighting/ambient": (ldi_rest.SETTING_AMBIENT_LIGHT_ENABLED,),
+    "lighting": (
+        ldi_rest.SETTING_DARKNESS_THRESHOLD,
+        ldi_rest.SETTING_LIGHT_FADING,
+    ),
+    "audio": (ldi_rest.SETTING_SPEAKER_LEVEL,),
+    "lens_elevation": (ldi_rest.SETTING_LENS_ELEVATION,),
 }
 
 _STALE_STREAM_STOP_TIMEOUT = 5
@@ -500,6 +511,15 @@ CFG_LOCAL_KEYS: dict[str, dict[str, str]] = {
         "alarmActivationDelaySeconds": ldi_rest.SETTING_ALARM_ACTIVATION_DELAY,
         "preAlarmDelayInSeconds": ldi_rest.SETTING_PRE_ALARM_DELAY,
     },
+    "lighting/motion": {
+        "lightOnMotionEnabled": ldi_rest.SETTING_MOTION_LIGHT_ENABLED,
+        "motionLightSensitivity": ldi_rest.SETTING_MOTION_LIGHT_SENSITIVITY,
+    },
+    "lighting": {
+        "darknessThreshold": ldi_rest.SETTING_DARKNESS_THRESHOLD,
+        "softLightFading": ldi_rest.SETTING_LIGHT_FADING,
+    },
+    "audio": {"speakerLevel": ldi_rest.SETTING_SPEAKER_LEVEL},
 }
 
 
@@ -510,7 +530,13 @@ _CFG_NUMBER_RANGES: dict[str, tuple[float, float]] = {
     ldi_rest.SETTING_ALARM_DELAY: (10, 300),
     ldi_rest.SETTING_ALARM_ACTIVATION_DELAY: (0, 600),
     ldi_rest.SETTING_PRE_ALARM_DELAY: (0, 300),
+    ldi_rest.SETTING_MOTION_LIGHT_SENSITIVITY: (1, 5),
+    ldi_rest.SETTING_DARKNESS_THRESHOLD: (0, 1),
+    ldi_rest.SETTING_SPEAKER_LEVEL: (0, 100),
 }
+
+# Fractions: rounding them to the cloud field's int type would change the value.
+_CFG_FRACTION_KEYS = frozenset({ldi_rest.SETTING_DARKNESS_THRESHOLD})
 
 
 def merge_local_into_cfg(
@@ -542,7 +568,8 @@ def merge_local_into_cfg(
         elif isinstance(current, int | float) and not isinstance(current, bool):
             lo, hi = _CFG_NUMBER_RANGES.get(key, (float("-inf"), float("inf")))
             if lo <= local <= hi:
-                merged[field] = round(local) if isinstance(current, int) else local
+                keep = isinstance(current, float) or key in _CFG_FRACTION_KEYS
+                merged[field] = local if keep else round(local)
     return merged
 
 

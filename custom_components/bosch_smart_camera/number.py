@@ -324,6 +324,9 @@ class BoschPanNumber(BoschNumberEntity):
 # concurrent write to a sibling field can't be clobbered by a stale snapshot
 # taken before the lock.
 def _speaker_level_value(entity: BoschNumberEntity) -> float | None:
+    local = _local_number(entity, ldi_rest.SETTING_SPEAKER_LEVEL)
+    if local is not None:
+        return local
     audio = entity.coordinator.audio_cache.get(entity._cam_id, {})
     val = audio.get("speakerLevel")
     return float(val) if val is not None else None
@@ -521,6 +524,9 @@ class BoschFrontLightIntensityNumber(BoschNumberEntity):
 # Writes via PUT /v11/video_inputs/{id}/lens_elevation → {"elevation": value}
 # Used by camera for perspective correction in person detection.
 def _lens_elevation_value(entity: BoschNumberEntity) -> float | None:
+    local = _local_number(entity, ldi_rest.SETTING_LENS_ELEVATION)
+    if local is not None:
+        return local
     val = entity.coordinator.lens_elevation_cache.get(entity._cam_id)
     return float(val) if val is not None else None
 
@@ -594,16 +600,20 @@ async def _microphone_level_set(entity: BoschNumberEntity, value: float) -> None
     # BoschIntercomSwitch — see that description's comment.
     lock = _get_cam_lock(entity.coordinator, "_audio_config_locks", entity._cam_id)
     async with lock:
-        audio = dict(entity.coordinator.audio_cache.get(entity._cam_id, {}))
+        audio = merge_local_into_cfg(
+            entity.coordinator,
+            entity._cam_id,
+            dict(entity.coordinator.audio_cache.get(entity._cam_id, {})),
+            "audio",
+        )
         audio["microphoneLevel"] = level
         success = await entity.coordinator.async_put_camera(
             entity._cam_id, "audio", audio
         )
         if success:
-            # Merge only the changed field (see speaker-level note).
-            entity.coordinator.audio_cache.setdefault(entity._cam_id, {})[
-                "microphoneLevel"
-            ] = level
+            # The lock serializes audio writes; keep the whole sent block so the
+            # next write does not fall back to a stale cached speaker level.
+            entity.coordinator.audio_cache.setdefault(entity._cam_id, {}).update(audio)
     entity.async_write_ha_state()
 
 
@@ -918,6 +928,9 @@ class BoschBottomLedBrightnessNumber(BoschNumberEntity):
 # Writes via PUT /v11/video_inputs/{id}/lighting/motion with full body.
 # 1 = low sensitivity, 5 = high sensitivity.
 def _motion_light_sensitivity_value(entity: BoschNumberEntity) -> float | None:
+    local = _local_number(entity, ldi_rest.SETTING_MOTION_LIGHT_SENSITIVITY)
+    if local is not None:
+        return local
     cache = entity.coordinator.motion_light_cache.get(entity._cam_id, {})
     val = cache.get("motionLightSensitivity")
     return float(val) if val is not None else None
@@ -932,7 +945,12 @@ def _motion_light_sensitivity_available(entity: BoschNumberEntity) -> bool:
 async def _motion_light_sensitivity_set(
     entity: BoschNumberEntity, value: float
 ) -> None:
-    cache = dict(entity.coordinator.motion_light_cache.get(entity._cam_id, {}))
+    cache = merge_local_into_cfg(
+        entity.coordinator,
+        entity._cam_id,
+        dict(entity.coordinator.motion_light_cache.get(entity._cam_id, {})),
+        "lighting/motion",
+    )
     if not cache:
         return
     cache["motionLightSensitivity"] = round(value)
@@ -979,6 +997,15 @@ class BoschMotionLightSensitivityNumber(BoschNumberEntity):
 # Reads from GET /v11/video_inputs/{id}/lighting → {"darknessThreshold": 0.47, "softLightFading": bool}
 # Writes via PUT /v11/video_inputs/{id}/lighting with full body.
 def _darkness_threshold_value(entity: BoschNumberEntity) -> float | None:
+    local = ldi_setting(
+        entity.coordinator, entity._cam_id, ldi_rest.SETTING_DARKNESS_THRESHOLD
+    )
+    if (
+        not isinstance(local, bool)
+        and isinstance(local, int | float)
+        and 0 <= local <= 1
+    ):
+        return round(float(local) * 100, 0)
     cache = entity.coordinator.global_lighting_cache.get(entity._cam_id, {})
     val = cache.get("darknessThreshold")
     return round(float(val) * 100, 0) if val is not None else None
@@ -992,11 +1019,13 @@ def _darkness_threshold_available(entity: BoschNumberEntity) -> bool:
 
 async def _darkness_threshold_set(entity: BoschNumberEntity, value: float) -> None:
     cache = entity.coordinator.global_lighting_cache.get(entity._cam_id, {})
-    soft_fading = cache.get("softLightFading", True)
-    body = {
-        "darknessThreshold": round(value / 100, 4),
-        "softLightFading": soft_fading,
-    }
+    body = merge_local_into_cfg(
+        entity.coordinator,
+        entity._cam_id,
+        {"softLightFading": cache.get("softLightFading", True)},
+        "lighting",
+    )
+    body["darknessThreshold"] = round(value / 100, 4)
     success = await entity.coordinator.async_put_camera(
         entity._cam_id, "lighting", body
     )

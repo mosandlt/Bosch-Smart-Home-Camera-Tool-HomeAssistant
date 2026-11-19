@@ -71,6 +71,7 @@ from .ldi_local import (
     ldi_setting,
     ldi_wanted,
     merge_local_into_cfg,
+    note_cloud_write,
 )
 from .session_state import FloatFieldView
 
@@ -1646,7 +1647,12 @@ class BoschIntercomSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc
         """Read-modify-write the shared /audio body under the shared lock."""
         lock = _get_cam_lock(self.coordinator, "_audio_config_locks", self._cam_id)
         async with lock:
-            audio = dict(self.coordinator.audio_cache.get(self._cam_id, {}))
+            audio = merge_local_into_cfg(
+                self.coordinator,
+                self._cam_id,
+                dict(self.coordinator.audio_cache.get(self._cam_id, {})),
+                "audio",
+            )
             audio["audioEnabled"] = enabled
             if enabled:
                 audio["speakerLevel"] = 50
@@ -1655,10 +1661,7 @@ class BoschIntercomSwitch(_BoschSwitchBase, RestoreEntity):  # type: ignore[misc
             )
             if success:
                 self._is_on = enabled
-                cache = self.coordinator.audio_cache.setdefault(self._cam_id, {})
-                cache["audioEnabled"] = enabled
-                if enabled:
-                    cache["speakerLevel"] = 50
+                self.coordinator.audio_cache.setdefault(self._cam_id, {}).update(audio)
                 _LOGGER.info(
                     "Intercom %s for %s", "ON" if enabled else "OFF", self._cam_title
                 )
@@ -1935,6 +1938,9 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
         # is the source of truth and reflects changes made in the Bosch app. Read
         # it fresh each time; _is_on is only the optimistic value before the cache
         # has ever been filled (else a frozen _is_on hid external changes forever).
+        local = self._local_bool(ldi_rest.SETTING_MOTION_LIGHT_ENABLED)
+        if local is not None:
+            return local
         cache = self.coordinator.motion_light_cache.get(self._cam_id, {})
         if cache:
             return bool(cache.get("lightOnMotionEnabled", False))
@@ -1979,7 +1985,9 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
                 _LOGGER.exception("Motion light GET error for %s", self._cam_id[:8])
                 return
         # Update the enabled flag and write back
-        data = dict(cache)
+        data = merge_local_into_cfg(
+            self.coordinator, self._cam_id, dict(cache), "lighting/motion"
+        )
         data["lightOnMotionEnabled"] = enabled
         success = await self.coordinator.async_put_camera(
             self._cam_id, "lighting/motion", data
@@ -2023,6 +2031,9 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
     def is_on(self) -> bool | None:
         # Cache is the source of truth (slow-tier re-poll reflects Bosch-app
         # changes); _is_on is only the optimistic pre-cache fallback.
+        local = self._local_bool(ldi_rest.SETTING_AMBIENT_LIGHT_ENABLED)
+        if local is not None:
+            return local
         cache = self.coordinator.ambient_lighting_cache.get(self._cam_id, {})
         if cache:
             return bool(cache.get("ambientLightEnabled", False))
@@ -2082,6 +2093,7 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
             else:
                 self._is_on = enabled
                 self.coordinator.ambient_lighting_cache[self._cam_id] = data
+                note_cloud_write(self.coordinator, self._cam_id, "lighting/ambient")
         except Exception:
             _LOGGER.exception("Ambient light error for %s", self._cam_id[:8])
         self.async_write_ha_state()
@@ -2113,6 +2125,9 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
 
     @property
     def is_on(self) -> bool | None:
+        local = self._local_bool(ldi_rest.SETTING_LIGHT_FADING)
+        if local is not None:
+            return local
         cache = self.coordinator.global_lighting_cache.get(self._cam_id, {})
         return cache.get("softLightFading") if cache else None
 
@@ -2129,9 +2144,13 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
         if not token:
             return
         cache = self.coordinator.global_lighting_cache.get(self._cam_id, {})
-        # Preserve existing darknessThreshold
-        threshold = cache.get("darknessThreshold", 0.5)
-        body = {"darknessThreshold": threshold, "softLightFading": enabled}
+        body = merge_local_into_cfg(
+            self.coordinator,
+            self._cam_id,
+            {"darknessThreshold": cache.get("darknessThreshold", 0.5)},
+            "lighting",
+        )
+        body["softLightFading"] = enabled
         session = await async_get_bosch_cloud_session(self.hass)
         try:
             result = await put_setting(
@@ -2151,6 +2170,7 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
             self.coordinator.global_lighting_cache[self._cam_id] = (
                 body if result.response is None else result.response
             )
+            note_cloud_write(self.coordinator, self._cam_id, "lighting")
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
