@@ -339,6 +339,14 @@ class TestAvailability:
         c = SimpleNamespace(ldi_rest_state=store, ldi_open_status=None)
         assert ldi_probe_ok(c, CAM) is False  # type: ignore[arg-type]
 
+    def test_probe_ok_never_raises_on_a_broken_store(self) -> None:
+        class _Broken(dict):  # type: ignore[type-arg]
+            def get(self, *_a: Any, **_k: Any) -> Any:
+                raise TypeError("boom")
+
+        c = SimpleNamespace(ldi_rest_state=_Broken(), ldi_open_status=None)
+        assert ldi_probe_ok(c, CAM) is False  # type: ignore[arg-type]
+
 
 # ── writers with no cloud copy ──────────────────────────────────────────────
 def _write_coord(attr: str, *, privacy: str) -> SimpleNamespace:
