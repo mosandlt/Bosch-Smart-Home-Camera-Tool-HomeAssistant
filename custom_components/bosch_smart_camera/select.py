@@ -27,7 +27,7 @@ from . import BoschCameraCoordinator
 from .const import CONF_ENABLE_PTZ_CONTROLS, DOMAIN, STREAM_START_SKIPPED
 from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _is_gen2_indoor, _warn_if_privacy_on
-from .ldi_local import ldi_serviceable
+from .ldi_local import ldi_serviceable, merge_local_into_cfg
 from .lighting_options import SCHEDULE_STATUS_OPTIONS, async_set_schedule_status
 from .models import get_display_name
 
@@ -801,7 +801,12 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
         if await _warn_if_privacy_on(self, "Detection Mode"):
             return
         api_value = DETECTION_TO_API[option]
-        cfg = dict(self.coordinator.intrusion_config_cache.get(self._cam_id, {}))
+        cfg = merge_local_into_cfg(
+            self.coordinator,
+            self._cam_id,
+            dict(self.coordinator.intrusion_config_cache.get(self._cam_id, {})),
+            "intrusionDetectionConfig",
+        )
         if not cfg:
             return
         cfg["detectionMode"] = api_value

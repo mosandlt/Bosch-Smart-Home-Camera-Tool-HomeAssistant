@@ -19,6 +19,7 @@ import asyncio
 import base64
 import json
 import logging
+import math
 import ssl
 from dataclasses import dataclass
 from typing import Any
@@ -30,6 +31,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 _LOGGER = logging.getLogger(__name__)
 
 LDI_REST_TIMEOUT = 5.0
+# The camera's answers are tiny; anything larger is not a valid body.
+_MAX_BODY_BYTES = 65536
 
 # Published root CA for the camera's local interface (RSA Root CA G1 Prod).
 # SHA-256 fingerprint:
@@ -156,6 +159,16 @@ def _basic_auth(user: str, password: str) -> str:
     return f"Basic {token}"
 
 
+async def _read_capped(resp: aiohttp.ClientResponse) -> str:
+    """Body text, or "" when it exceeds the cap (not a valid camera answer)."""
+    raw = bytearray()
+    async for chunk in resp.content.iter_chunked(4096):
+        raw += chunk
+        if len(raw) > _MAX_BODY_BYTES:
+            return ""
+    return raw.decode("utf-8", errors="replace")
+
+
 async def _get(
     hass: HomeAssistant, ip: str, user: str, password: str, path: str
 ) -> LdiRestResponse:
@@ -171,7 +184,7 @@ async def _get(
                 allow_redirects=False,  # never forward the password elsewhere
             ) as resp:
                 status = resp.status
-                body = await resp.text() if status == 200 else ""
+                body = await _read_capped(resp) if status == 200 else ""
     except _CONNECT_ERRORS as err:
         _LOGGER.debug("local REST %s failed: %s", path, type(err).__name__)
         return LdiRestResponse(None)
@@ -179,7 +192,7 @@ async def _get(
     if body.strip():
         try:
             data = json.loads(body)
-        except ValueError:
+        except (ValueError, RecursionError):
             data = None
     return LdiRestResponse(status, data)
 
@@ -233,6 +246,164 @@ def firmware_from(data: object) -> str | None:
     """Firmware string from a version body, None when absent or malformed."""
     value = data.get("firmwareVersion") if isinstance(data, dict) else None
     return value if isinstance(value, str) and value.strip() else None
+
+
+# Settings read locally for entity states (see `get_settings`). Keys are
+# stable names the entities ask for; the JSON field names are the camera's.
+SETTING_STATUS_LED = "status_led"
+SETTING_RECORD_SOUND = "record_sound"
+SETTING_GLASS_BREAK = "glass_break"
+SETTING_FIRE_ALARM = "fire_alarm"
+SETTING_INTRUSION_ENABLED = "intrusion_enabled"
+SETTING_INTRUSION_SENSITIVITY = "intrusion_sensitivity"
+SETTING_INTRUSION_DISTANCE = "intrusion_distance"
+SETTING_ALARM_ENABLE = "alarm_enable"
+SETTING_PRE_ALARM_ENABLE = "pre_alarm_enable"
+SETTING_ALARM_DELAY = "alarm_delay"
+SETTING_ALARM_ACTIVATION_DELAY = "alarm_activation_delay"
+SETTING_PRE_ALARM_DELAY = "pre_alarm_delay"
+SETTING_PRIVACY_SOUND = "privacy_sound"
+SETTING_ICON_LED_BRIGHTNESS = "icon_led_brightness"
+
+FIELD_OK = "ok"
+FIELD_UNAVAILABLE = "unavailable"  # 404: the model has no such endpoint
+FIELD_INVALID = "invalid"  # 200 but missing or wrongly typed value
+FIELD_ERROR = "error"  # any other HTTP status
+
+_KIND_BOOL = "bool"
+_KIND_INT = "int"
+_KIND_NUMBER = "number"
+
+SETTINGS_ENDPOINTS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
+    ("/sh/data/statusLed", ((SETTING_STATUS_LED, "enable", _KIND_BOOL),)),
+    (
+        "/sh/data/recording/audioRecording",
+        ((SETTING_RECORD_SOUND, "enable", _KIND_BOOL),),
+    ),
+    (
+        "/sh/data/alarm/audioDetection/config",
+        (
+            (SETTING_GLASS_BREAK, "detectGlassBreak", _KIND_BOOL),
+            (SETTING_FIRE_ALARM, "detectFireAlarm", _KIND_BOOL),
+        ),
+    ),
+    (
+        "/sh/data/intrusionSystem/config",
+        (
+            (SETTING_INTRUSION_ENABLED, "enabled", _KIND_BOOL),
+            (SETTING_INTRUSION_SENSITIVITY, "sensitivity", _KIND_INT),
+            (SETTING_INTRUSION_DISTANCE, "distance", _KIND_INT),
+        ),
+    ),
+    (
+        "/sh/data/alarm/config",
+        (
+            (SETTING_ALARM_ENABLE, "enable", _KIND_BOOL),
+            (SETTING_PRE_ALARM_ENABLE, "enablePreAlarm", _KIND_BOOL),
+            (SETTING_ALARM_DELAY, "alarmDelay", _KIND_NUMBER),
+            (SETTING_ALARM_ACTIVATION_DELAY, "alarmActivationDelay", _KIND_NUMBER),
+            (SETTING_PRE_ALARM_DELAY, "preAlarmDelay", _KIND_NUMBER),
+        ),
+    ),
+    ("/sh/data/privacyMode/jingle", ((SETTING_PRIVACY_SOUND, "enable", _KIND_BOOL),)),
+    (
+        "/sh/data/lighting/iconLed/brightness",
+        ((SETTING_ICON_LED_BRIGHTNESS, "value", _KIND_INT),),
+    ),
+)
+
+LDI_SETTINGS_DEADLINE = 20.0
+
+
+@dataclass(frozen=True)
+class LdiSetting:
+    """One field of a settings read; `value` is set only when status is ok."""
+
+    status: str
+    value: bool | int | float | None = None
+
+
+@dataclass(frozen=True)
+class LdiSettings:
+    """Outcome of `get_settings`.
+
+    `result` is a PROBE_* class for the whole batch: only PROBE_OK carries
+    fields. `missing_paths` are the endpoints that answered 404.
+    """
+
+    result: str
+    fields: dict[str, LdiSetting]
+    missing_paths: frozenset[str] = frozenset()
+
+
+def _typed(value: object, kind: str) -> bool | int | float | None:
+    """`value` when it has the expected JSON type (bool is no number here)."""
+    if isinstance(value, bool):
+        return value if kind == _KIND_BOOL else None
+    if kind == _KIND_INT and isinstance(value, int):
+        return value
+    if kind == _KIND_NUMBER and isinstance(value, int | float):
+        try:
+            return value if math.isfinite(value) else None  # json allows NaN
+        except OverflowError:  # int too large for float
+            return None
+    return None
+
+
+def _fields_from(
+    resp: LdiRestResponse, specs: tuple[tuple[str, str, str], ...]
+) -> dict[str, LdiSetting]:
+    if resp.unavailable:
+        return {key: LdiSetting(FIELD_UNAVAILABLE) for key, _, _ in specs}
+    if not resp.ok:
+        return {key: LdiSetting(FIELD_ERROR) for key, _, _ in specs}
+    body = resp.data if isinstance(resp.data, dict) else {}
+    out: dict[str, LdiSetting] = {}
+    for key, field, kind in specs:
+        value = _typed(body.get(field), kind)
+        out[key] = (
+            LdiSetting(FIELD_INVALID) if value is None else LdiSetting(FIELD_OK, value)
+        )
+    return out
+
+
+async def get_settings(
+    hass: HomeAssistant,
+    ip: str,
+    user: str,
+    password: str,
+    *,
+    skip: frozenset[str] = frozenset(),
+) -> LdiSettings:
+    """Read the settings entities show, one endpoint after the other.
+
+    A 404 or a bad body affects only its own fields. A rejected password or a
+    camera that stops answering ends the batch: the result then carries no
+    fields, so nothing half-read is mistaken for the camera's state. `skip`
+    paths (known 404s) are not asked and reported unavailable. Never raises.
+    """
+    fields: dict[str, LdiSetting] = {}
+    missing: set[str] = set()
+    try:
+        async with asyncio.timeout(LDI_SETTINGS_DEADLINE):
+            for path, specs in SETTINGS_ENDPOINTS:
+                if path in skip:
+                    fields.update(
+                        {key: LdiSetting(FIELD_UNAVAILABLE) for key, _, _ in specs}
+                    )
+                    continue
+                resp = await _get(hass, ip, user, password, path)
+                if resp.unauthorized:
+                    return LdiSettings(PROBE_AUTH, {})
+                if resp.unreachable:
+                    return LdiSettings(PROBE_UNREACHABLE, {})
+                if resp.unavailable:
+                    missing.add(path)
+                fields.update(_fields_from(resp, specs))
+    except TimeoutError:
+        _LOGGER.debug("local REST settings read exceeded its deadline")
+        return LdiSettings(PROBE_UNREACHABLE, {})
+    return LdiSettings(PROBE_OK, fields, frozenset(missing))
 
 
 def _classify(resp: LdiRestResponse) -> str:

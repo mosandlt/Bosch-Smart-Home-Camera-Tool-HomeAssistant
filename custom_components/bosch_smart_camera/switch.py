@@ -54,7 +54,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import BoschCameraCoordinator, get_options
+from . import BoschCameraCoordinator, get_options, ldi_rest
 from .cloud_ssl import async_get_bosch_cloud_session
 from .const import CLOUD_API, DOMAIN, STREAM_START_SKIPPED
 from .dynamic_devices import register_dynamic_camera_listener
@@ -65,7 +65,13 @@ from .guards import (
     _warn_if_privacy_on,
     async_require_admin,
 )
-from .ldi_local import ldi_privacy_on, ldi_serviceable, ldi_wanted
+from .ldi_local import (
+    ldi_privacy_on,
+    ldi_serviceable,
+    ldi_setting,
+    ldi_wanted,
+    merge_local_into_cfg,
+)
 from .session_state import FloatFieldView
 
 _LOGGER = logging.getLogger(__name__)
@@ -121,6 +127,13 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
         self._model_name = get_display_name(self._model)
         self._fw = info.get("firmwareVersion", "")
         self._mac = info.get("macAddress", "")
+
+    def _local_bool(self, key: str | None) -> bool | None:
+        """The camera's own value for `key` (local interface), else None."""
+        if key is None:
+            return None
+        value = ldi_setting(self.coordinator, self._cam_id, key)
+        return value if isinstance(value, bool) else None
 
     async def _async_apply_toggle(
         self,
@@ -1525,6 +1538,9 @@ class BoschRecordSoundSwitch(_BoschSwitchBase):
 
     @property
     def is_on(self) -> bool | None:
+        local = self._local_bool(ldi_rest.SETTING_RECORD_SOUND)
+        if local is not None:
+            return local
         opts = self.coordinator.recording_options(self._cam_id)
         if not opts:
             return None
@@ -1697,6 +1713,7 @@ class BoschSwitchEntityDescription(SwitchEntityDescription):  # type: ignore[mis
     require_cache_for_available: bool = True
     extra_attributes_fn: Callable[[BoschSwitchEntity], dict[str, Any]] | None = None
     requires_admin: bool = False
+    ldi_key: str | None = None
 
 
 class BoschSwitchEntity(_BoschSwitchBase):
@@ -1736,6 +1753,9 @@ class BoschSwitchEntity(_BoschSwitchBase):
     def is_on(self) -> bool | None:
         if self.entity_description.cache_fn is None:
             raise NotImplementedError
+        local = self._local_bool(self.entity_description.ldi_key)
+        if local is not None:
+            return local
         return self.entity_description.cache_fn(self.coordinator).get(self._cam_id)
 
     @property
@@ -1748,6 +1768,8 @@ class BoschSwitchEntity(_BoschSwitchBase):
         if not self.entity_description.require_cache_for_available:
             return True
         if self.entity_description.cache_fn is None:
+            return True
+        if self._local_bool(self.entity_description.ldi_key) is not None:
             return True
         return (
             self.entity_description.cache_fn(self.coordinator).get(self._cam_id)
@@ -1792,6 +1814,7 @@ PRIVACY_SOUND_DESCRIPTION = BoschSwitchEntityDescription(
     off_body=(("result", False),),
     cache_fn=lambda c: c.privacy_sound_cache,
     set_at_fn=lambda c: c.privacy_sound_set_at,
+    ldi_key=ldi_rest.SETTING_PRIVACY_SOUND,
 )
 
 TIMESTAMP_DESCRIPTION = BoschSwitchEntityDescription(
@@ -1817,6 +1840,7 @@ STATUS_LED_DESCRIPTION = BoschSwitchEntityDescription(
     off_body=(("state", "OFF"),),
     cache_fn=lambda c: c.ledlights_cache,
     set_at_fn=lambda c: c.ledlights_set_at,
+    ldi_key=ldi_rest.SETTING_STATUS_LED,
 )
 
 ALARM_SYSTEM_ARM_DESCRIPTION = BoschSwitchEntityDescription(
@@ -2160,6 +2184,9 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
 
     @property
     def is_on(self) -> bool | None:
+        local = self._local_bool(ldi_rest.SETTING_INTRUSION_ENABLED)
+        if local is not None:
+            return local
         return self._config.get("enabled")
 
     @property
@@ -2184,7 +2211,12 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
         # visibly instead of failing silently in the logs.
         if await _warn_if_privacy_on(self, "Intrusion Detection"):
             return
-        cfg = dict(self._config)
+        cfg = merge_local_into_cfg(
+            self.coordinator,
+            self._cam_id,
+            dict(self._config),
+            "intrusionDetectionConfig",
+        )
         if not cfg:
             return
         cfg["enabled"] = enabled
@@ -2216,6 +2248,7 @@ class _BoschAudioDetectionSwitchBase(_BoschSwitchBase):
 
     _attr_entity_category = EntityCategory.CONFIG
     _field: str = ""  # "detectGlassBreak" | "detectFireAlarm" (set by subclass)
+    _ldi_key: str | None = None
 
     @property
     def _config(self) -> dict[str, Any]:
@@ -2223,6 +2256,9 @@ class _BoschAudioDetectionSwitchBase(_BoschSwitchBase):
 
     @property
     def is_on(self) -> bool | None:
+        local = self._local_bool(self._ldi_key)
+        if local is not None:
+            return local
         val = self._config.get(self._field)
         return bool(val) if val is not None else None
 
@@ -2257,7 +2293,12 @@ class _BoschAudioDetectionSwitchBase(_BoschSwitchBase):
         async with lock:
             # Snapshot INSIDE the lock so it reflects a sibling write that just
             # completed.
-            cfg = dict(self._config)
+            cfg = merge_local_into_cfg(
+                self.coordinator,
+                self._cam_id,
+                dict(self._config),
+                "audioDetectionConfig",
+            )
             if not cfg:
                 return
             cfg[self._field] = value
@@ -2265,13 +2306,12 @@ class _BoschAudioDetectionSwitchBase(_BoschSwitchBase):
                 self._cam_id, "audioDetectionConfig", cfg
             )
             if success:
-                # Merge only our own field into the live cache rather than
-                # overwriting the whole entry, so a concurrent sibling toggle
-                # isn't clobbered.
+                # The snapshot was taken inside the lock, so the sibling field
+                # in `cfg` is what was just sent; keep the cache in step.
                 cur = self.coordinator.audio_detection_cache.setdefault(
                     self._cam_id, {}
                 )
-                cur[self._field] = value
+                cur.update(cfg)
                 # Guard the next slow-tier poll from reverting the optimistic
                 # value while the cloud write is still propagating.
                 self.coordinator.audio_detection_set_at[self._cam_id] = time.monotonic()
@@ -2288,6 +2328,7 @@ class BoschGlassBreakDetectionSwitch(_BoschAudioDetectionSwitchBase):
     """Switch: glass-break sound detection (Gen2 Audio-Plus)."""
 
     _field = "detectGlassBreak"
+    _ldi_key = ldi_rest.SETTING_GLASS_BREAK
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
@@ -2301,6 +2342,7 @@ class BoschFireAlarmDetectionSwitch(_BoschAudioDetectionSwitchBase):
     """Switch: smoke/fire-alarm sound detection (Gen2 Audio-Plus)."""
 
     _field = "detectFireAlarm"
+    _ldi_key = ldi_rest.SETTING_FIRE_ALARM
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
@@ -2415,6 +2457,7 @@ class _BoschAlarmSettingsSwitchBase(_BoschSwitchBase):
     """Shared base for alarm_settings boolean toggles (alarmMode / preAlarmMode)."""
 
     _field: str = ""  # field to toggle (alarmMode / preAlarmMode)
+    _ldi_key: str | None = None
 
     @property
     def _settings(self) -> dict[str, Any]:
@@ -2422,6 +2465,9 @@ class _BoschAlarmSettingsSwitchBase(_BoschSwitchBase):
 
     @property
     def is_on(self) -> bool | None:
+        local = self._local_bool(self._ldi_key)
+        if local is not None:
+            return local
         val = self._settings.get(self._field)
         if val is None:
             return None
@@ -2436,7 +2482,9 @@ class _BoschAlarmSettingsSwitchBase(_BoschSwitchBase):
         )
 
     async def _set(self, enabled: bool) -> None:
-        cfg = dict(self._settings)
+        cfg = merge_local_into_cfg(
+            self.coordinator, self._cam_id, dict(self._settings), "alarm_settings"
+        )
         if not cfg:
             return
         cfg[self._field] = "ON" if enabled else "OFF"
@@ -2458,6 +2506,7 @@ class BoschAlarmModeSwitch(_BoschAlarmSettingsSwitchBase):
     """Switch: main alarm (75 dB siren) ON/OFF — alarm_settings.alarmMode."""
 
     _field = "alarmMode"
+    _ldi_key = ldi_rest.SETTING_ALARM_ENABLE
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry
@@ -2472,6 +2521,7 @@ class BoschPreAlarmSwitch(_BoschAlarmSettingsSwitchBase):
     """Switch: Pre-Alarm (LED warning before siren) ON/OFF — alarm_settings.preAlarmMode."""
 
     _field = "preAlarmMode"
+    _ldi_key = ldi_rest.SETTING_PRE_ALARM_ENABLE
 
     def __init__(
         self, coordinator: BoschCameraCoordinator, cam_id: str, entry: ConfigEntry

@@ -46,10 +46,11 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import ldi_rest
 from .base import _BoschEntityBase
 from .dynamic_devices import register_dynamic_camera_listener
 from .guards import _get_cam_lock, _is_gen2_indoor, _warn_if_privacy_on
-from .ldi_local import ldi_serviceable
+from .ldi_local import ldi_serviceable, ldi_setting, merge_local_into_cfg
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1041,7 +1042,29 @@ class BoschDarknessThresholdNumber(BoschNumberEntity):
 # Confirmed live: writing value=5 → HTTP 400
 # "must be less than or equal to 4". The iOS app shows this as a percent
 # slider but internally maps to 5 discrete positions (0 = off, 4 = max).
+def _local_number(entity: BoschNumberEntity, key: str | None) -> float | None:
+    """The camera's own value for `key` (local interface), else None.
+
+    A value outside the entity's range is not taken: it would mean the local
+    field does not use the cloud's scale, so the cloud value is shown instead.
+    """
+    if key is None:
+        return None
+    value = ldi_setting(entity.coordinator, entity._cam_id, key)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    description = getattr(entity, "entity_description", None)
+    lo = getattr(description, "native_min_value", None)
+    hi = getattr(description, "native_max_value", None)
+    if (lo is not None and value < lo) or (hi is not None and value > hi):
+        return None
+    return float(value)
+
+
 def _power_led_brightness_value(entity: BoschNumberEntity) -> float | None:
+    local = _local_number(entity, ldi_rest.SETTING_ICON_LED_BRIGHTNESS)
+    if local is not None:
+        return local
     val = entity.coordinator.icon_led_brightness_cache.get(entity._cam_id)
     return float(val) if val is not None else None
 
@@ -1094,7 +1117,17 @@ class BoschPowerLedBrightnessNumber(BoschNumberEntity):
 # /alarm_settings PUT with HTTP 443 on Gen2 Indoor cameras — without this
 # guard the write silently fails, the cache isn't updated, and native_value
 # re-reads the old value while HA's verify-timeout fires.
+_ALARM_LDI_KEYS: dict[str, str] = {
+    "alarmDelayInSeconds": ldi_rest.SETTING_ALARM_DELAY,
+    "alarmActivationDelaySeconds": ldi_rest.SETTING_ALARM_ACTIVATION_DELAY,
+    "preAlarmDelayInSeconds": ldi_rest.SETTING_PRE_ALARM_DELAY,
+}
+
+
 def _alarm_delay_value(entity: BoschNumberEntity) -> float | None:
+    local = _local_number(entity, _ALARM_LDI_KEYS.get(entity._field))
+    if local is not None:
+        return local
     val = entity.coordinator.alarm_settings_cache.get(entity._cam_id, {}).get(
         entity._field
     )
@@ -1108,7 +1141,12 @@ def _alarm_delay_available(entity: BoschNumberEntity) -> bool:
 
 
 async def _alarm_delay_set(entity: BoschNumberEntity, value: float) -> None:
-    cfg = dict(entity.coordinator.alarm_settings_cache.get(entity._cam_id, {}))
+    cfg = merge_local_into_cfg(
+        entity.coordinator,
+        entity._cam_id,
+        dict(entity.coordinator.alarm_settings_cache.get(entity._cam_id, {})),
+        "alarm_settings",
+    )
     if not cfg:
         return
     if _is_gen2_indoor(entity) and await _warn_if_privacy_on(entity, "Alarm Settings"):
@@ -1230,7 +1268,16 @@ class BoschPreAlarmDelayNumber(BoschNumberEntity):
 # both Gen2 Indoor II (HOME_Eyes_Indoor) and Gen2 Outdoor II
 # (HOME_Eyes_Outdoor) — intrusion detection is present on both hardware
 # variants.
+_INTRUSION_LDI_KEYS: dict[str, str] = {
+    "sensitivity": ldi_rest.SETTING_INTRUSION_SENSITIVITY,
+    "distance": ldi_rest.SETTING_INTRUSION_DISTANCE,
+}
+
+
 def _intrusion_value(entity: BoschNumberEntity) -> float | None:
+    local = _local_number(entity, _INTRUSION_LDI_KEYS.get(entity._field))
+    if local is not None:
+        return local
     cfg = entity.coordinator.intrusion_config_cache.get(entity._cam_id, {})
     val = cfg.get(entity._field)
     return float(val) if val is not None else None
@@ -1243,7 +1290,12 @@ def _intrusion_available(entity: BoschNumberEntity) -> bool:
 
 
 async def _intrusion_set(entity: BoschNumberEntity, value: float) -> None:
-    cfg = dict(entity.coordinator.intrusion_config_cache.get(entity._cam_id, {}))
+    cfg = merge_local_into_cfg(
+        entity.coordinator,
+        entity._cam_id,
+        dict(entity.coordinator.intrusion_config_cache.get(entity._cam_id, {})),
+        "intrusionDetectionConfig",
+    )
     if not cfg:
         return
     lo = entity.entity_description.native_min_value

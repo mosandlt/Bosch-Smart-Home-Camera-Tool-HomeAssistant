@@ -13,7 +13,9 @@ few concurrent sessions. Without go2rtc there is no stream. Failure leaves
 the camera without a stream until the next local attempt.
 
 Reachability, the password check and the privacy state come from the local
-REST interface (ldi_rest.py), polled at most once a minute per camera.
+REST interface (ldi_rest.py), polled at most once a minute per camera. A few
+settings shown by entities are read there too (every two minutes); writes
+stay on the cloud.
 """
 
 from __future__ import annotations
@@ -44,6 +46,35 @@ VARIANT_SNAP = "snap"
 LDI_REST_POLL_SEC = 60.0
 _LDI_VERSION_POLL_SEC = 3600.0
 _LDI_VERSION_RETRIES = 3
+LDI_SETTINGS_POLL_SEC = 120.0
+LDI_SETTINGS_MAX_AGE_SEC = 300.0
+# The camera may lag behind a cloud write; its own value is ignored meanwhile.
+LDI_WRITE_HOLD_SEC = 30.0
+_LDI_MISSING_RECHECK_SEC = 3600.0
+
+# Cloud endpoint written -> local settings that write changes.
+_CLOUD_WRITE_SETTINGS: dict[str, tuple[str, ...]] = {
+    "ledlights": (ldi_rest.SETTING_STATUS_LED,),
+    "recording_options": (ldi_rest.SETTING_RECORD_SOUND,),
+    "audioDetectionConfig": (
+        ldi_rest.SETTING_GLASS_BREAK,
+        ldi_rest.SETTING_FIRE_ALARM,
+    ),
+    "intrusionDetectionConfig": (
+        ldi_rest.SETTING_INTRUSION_ENABLED,
+        ldi_rest.SETTING_INTRUSION_SENSITIVITY,
+        ldi_rest.SETTING_INTRUSION_DISTANCE,
+    ),
+    "alarm_settings": (
+        ldi_rest.SETTING_ALARM_ENABLE,
+        ldi_rest.SETTING_PRE_ALARM_ENABLE,
+        ldi_rest.SETTING_ALARM_DELAY,
+        ldi_rest.SETTING_ALARM_ACTIVATION_DELAY,
+        ldi_rest.SETTING_PRE_ALARM_DELAY,
+    ),
+    "privacy_sound_override": (ldi_rest.SETTING_PRIVACY_SOUND,),
+    "iconLedBrightness": (ldi_rest.SETTING_ICON_LED_BRIGHTNESS,),
+}
 
 _STALE_STREAM_STOP_TIMEOUT = 5
 _PROBE_ATTEMPTS = 2
@@ -286,11 +317,15 @@ def _apply_probe(
     """Store a REST probe and mirror its reachability into the open status."""
     entry = _rest_entry(coordinator, cam_id)
     entry["result"] = probe.result
+    if probe.result != ldi_rest.PROBE_OK:
+        entry["probe_fail_seq"] = entry.get("probe_fail_seq", 0) + 1
     # Without an answer the privacy state is unknown again (the cloud flag
     # takes over), so a stale "on" cannot hide an unreachable camera.
     entry["privacy_on"] = (
         probe.privacy_on if probe.result == ldi_rest.PROBE_OK else None
     )
+    if probe.result != ldi_rest.PROBE_OK:
+        _clear_settings(coordinator, cam_id)
     if probe.result == ldi_rest.PROBE_OK and probe.firmware is not None:
         entry["firmware"] = probe.firmware
     status: dict[str, dict[str, Any]] = (
@@ -339,6 +374,213 @@ async def refresh_ldi_rest(
     )
     _apply_probe(coordinator, cam_id, probe)
     return probe
+
+
+def _clear_settings(coordinator: BoschCameraCoordinator, cam_id: str) -> None:
+    """Forget the local settings, so entities fall back to the cloud cache."""
+    store = getattr(coordinator, "ldi_rest_state", None)
+    entry = store.get(cam_id) if isinstance(store, dict) else None
+    if not isinstance(entry, dict) or entry.get("settings") is None:
+        return
+    entry["settings"] = None
+    coordinator.async_update_listeners()
+
+
+async def refresh_ldi_settings(
+    coordinator: BoschCameraCoordinator, cam_id: str, *, force: bool = False
+) -> bool:
+    """Read the camera's settings locally; at most every two minutes.
+
+    Runs only after a successful probe and never twice at once per camera.
+    The stamp is taken before the request. A failed batch or a camera that
+    cannot be addressed clears the settings. Endpoints the model lacks (404)
+    are asked again only hourly. True when a batch ran.
+    """
+    source = ldi_source(coordinator, cam_id)
+    if source is None:
+        _clear_settings(coordinator, cam_id)
+        return False
+    entry = _rest_entry(coordinator, cam_id)
+    if entry.get("result") != ldi_rest.PROBE_OK or entry.get("settings_busy"):
+        return False
+    now = time.monotonic()
+    due = now - entry.get(
+        "settings_checked_at", float("-inf")
+    ) >= LDI_SETTINGS_POLL_SEC or now >= entry.get("settings_due", float("inf"))
+    if not (force or due):
+        return False
+    entry["settings_checked_at"] = now
+    # A regular poll inside the write hold must not cancel the re-read that
+    # follows the hold: its value could still be the pre-write one.
+    if now >= entry.get("settings_due", float("inf")):
+        entry["settings_due"] = float("inf")
+    entry["settings_busy"] = True
+    fail_seq = entry.get("probe_fail_seq", 0)
+    missing: dict[str, float] = entry.setdefault("settings_missing", {})
+    skip = frozenset(
+        path for path, at in missing.items() if now - at < _LDI_MISSING_RECHECK_SEC
+    )
+    ip, user, password = source
+    try:
+        batch = await ldi_rest.get_settings(
+            coordinator.hass, ip, user, password, skip=skip
+        )
+    finally:
+        entry["settings_busy"] = False
+    if (
+        batch.result != ldi_rest.PROBE_OK
+        or entry.get("result") != ldi_rest.PROBE_OK
+        or entry.get("probe_fail_seq", 0) != fail_seq
+    ):
+        # A probe that failed while the batch ran already cleared the settings;
+        # the batch must not bring them back.
+        _clear_settings(coordinator, cam_id)
+        return True
+    for path, _specs in ldi_rest.SETTINGS_ENDPOINTS:
+        if path in batch.missing_paths:
+            missing[path] = now
+        elif path not in skip:
+            missing.pop(path, None)
+    entry["settings"] = {
+        "at": now,
+        "fields": {
+            key: field.value
+            for key, field in batch.fields.items()
+            if field.status == ldi_rest.FIELD_OK
+        },
+    }
+    coordinator.async_update_listeners()
+    return True
+
+
+async def poll_ldi_local(coordinator: BoschCameraCoordinator, cam_id: str) -> None:
+    """One coordinator tick for a local-only camera: probe, then settings."""
+    await refresh_ldi_rest(coordinator, cam_id)
+    await refresh_ldi_settings(coordinator, cam_id)
+
+
+def note_cloud_write(
+    coordinator: BoschCameraCoordinator, cam_id: str, endpoint: str
+) -> None:
+    """Hold back the local value of settings a cloud write just changed.
+
+    Also asks for a fresh local read right after the hold ends. Never raises:
+    it runs inside every cloud write.
+    """
+    keys = _CLOUD_WRITE_SETTINGS.get(endpoint)
+    if not keys or not isinstance(getattr(coordinator, "ldi_rest_state", None), dict):
+        return
+    try:
+        entry = _rest_entry(coordinator, cam_id)
+        now = time.monotonic()
+        writes: dict[str, float] = entry.setdefault("writes", {})
+        for key in keys:
+            writes[key] = now
+        # The newest write decides: a read before its hold ends would be hidden.
+        entry["settings_due"] = now + LDI_WRITE_HOLD_SEC + 1
+    except (AttributeError, TypeError, ValueError) as err:
+        _LOGGER.debug("local settings write note for %s: %s", cam_id[:8], err)
+
+
+# Cloud body field -> local setting key, per whole-block cloud endpoint.
+CFG_LOCAL_KEYS: dict[str, dict[str, str]] = {
+    "audioDetectionConfig": {
+        "detectGlassBreak": ldi_rest.SETTING_GLASS_BREAK,
+        "detectFireAlarm": ldi_rest.SETTING_FIRE_ALARM,
+    },
+    "intrusionDetectionConfig": {
+        "enabled": ldi_rest.SETTING_INTRUSION_ENABLED,
+        "sensitivity": ldi_rest.SETTING_INTRUSION_SENSITIVITY,
+        "distance": ldi_rest.SETTING_INTRUSION_DISTANCE,
+    },
+    "alarm_settings": {
+        "alarmMode": ldi_rest.SETTING_ALARM_ENABLE,
+        "preAlarmMode": ldi_rest.SETTING_PRE_ALARM_ENABLE,
+        "alarmDelayInSeconds": ldi_rest.SETTING_ALARM_DELAY,
+        "alarmActivationDelaySeconds": ldi_rest.SETTING_ALARM_ACTIVATION_DELAY,
+        "preAlarmDelayInSeconds": ldi_rest.SETTING_PRE_ALARM_DELAY,
+    },
+}
+
+
+# Value ranges the entities accept; a local number outside is not merged.
+_CFG_NUMBER_RANGES: dict[str, tuple[float, float]] = {
+    ldi_rest.SETTING_INTRUSION_SENSITIVITY: (0, 7),
+    ldi_rest.SETTING_INTRUSION_DISTANCE: (1, 8),
+    ldi_rest.SETTING_ALARM_DELAY: (10, 300),
+    ldi_rest.SETTING_ALARM_ACTIVATION_DELAY: (0, 600),
+    ldi_rest.SETTING_PRE_ALARM_DELAY: (0, 300),
+}
+
+
+def merge_local_into_cfg(
+    coordinator: BoschCameraCoordinator,
+    cam_id: str,
+    cfg: dict[str, Any],
+    endpoint: str,
+) -> dict[str, Any]:
+    """`cfg` with the camera's own values filled in before a whole-block write.
+
+    The cloud PUT bodies carry every field of the block. The cached cloud copy
+    can lag behind what the camera reports locally, and a stale sibling field
+    would then overwrite the camera's value. Call this before changing the one
+    field the caller means to write.
+    """
+    merged = dict(cfg)
+    for field, key in CFG_LOCAL_KEYS.get(endpoint, {}).items():
+        if field not in merged:
+            continue
+        local = ldi_setting(coordinator, cam_id, key)
+        if local is None:
+            continue
+        current = merged[field]
+        if isinstance(local, bool):
+            if isinstance(current, str):
+                merged[field] = "ON" if local else "OFF"
+            elif isinstance(current, bool):
+                merged[field] = local
+        elif isinstance(current, int | float) and not isinstance(current, bool):
+            lo, hi = _CFG_NUMBER_RANGES.get(key, (float("-inf"), float("inf")))
+            if lo <= local <= hi:
+                merged[field] = round(local) if isinstance(current, int) else local
+    return merged
+
+
+def ldi_setting(
+    coordinator: BoschCameraCoordinator, cam_id: str, key: str
+) -> bool | int | float | None:
+    """A setting as the camera reported it locally, None when not usable.
+
+    None when the camera has no local password, the value is older than
+    `LDI_SETTINGS_MAX_AGE_SEC`, or a cloud write to it is still settling
+    (inside the hold, or the read started before the write). Callers then
+    use their cloud cache. Never raises: it is read on every state update.
+    """
+    try:
+        store = getattr(coordinator, "ldi_rest_state", None)
+        entry = store.get(cam_id) if isinstance(store, dict) else None
+        if not isinstance(entry, dict):
+            return None
+        settings = entry.get("settings")
+        if not isinstance(settings, dict):
+            return None
+        at = settings.get("at")
+        if isinstance(at, bool) or not isinstance(at, int | float):
+            return None
+        now = time.monotonic()
+        if now - at > LDI_SETTINGS_MAX_AGE_SEC:
+            return None
+        written = (entry.get("writes") or {}).get(key)
+        if isinstance(written, int | float) and (
+            now - written < LDI_WRITE_HOLD_SEC or at < written + LDI_WRITE_HOLD_SEC
+        ):
+            return None
+        if not ldi_wanted(coordinator, cam_id):
+            return None
+        value = (settings.get("fields") or {}).get(key)
+        return value if isinstance(value, bool | int | float) else None
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 async def _drop_stale_stream(coordinator: BoschCameraCoordinator, cam_id: str) -> None:

@@ -85,7 +85,7 @@ from .go2rtc_client import (
     ensure_go2rtc_schemes_fresh,
     unregister_go2rtc_stream,
 )
-from .ldi_local import ensure_ldi_stream, ldi_wanted, refresh_ldi_rest
+from .ldi_local import ensure_ldi_stream, ldi_wanted, note_cloud_write, poll_ldi_local
 from .ldi_snapshot import fetch_snapshot as fetch_ldi_snapshot
 from .live_connection import try_live_connection_inner
 from .lock_utils import get_or_create_lock
@@ -2241,12 +2241,12 @@ class BoschCameraCoordinator(
 
         Only cameras reached over the local data interface are asked; a camera
         on the cloud path never is. `refresh_ldi_rest` holds the once-a-minute
-        limit, so a tick that comes earlier does nothing.
+        limit (settings: every two minutes), so an earlier tick does nothing.
         """
         for cam_id in list(self.data or {}):
             if ldi_wanted(self, cam_id):
                 self.spawn_tracked(
-                    refresh_ldi_rest(self, cam_id),
+                    poll_ldi_local(self, cam_id),
                     name=f"bosch_shc_camera_ldi_rest_{cam_id[:8]}",
                 )
 
@@ -4153,6 +4153,9 @@ class BoschCameraCoordinator(
         )
 
         session = await async_get_bosch_cloud_session(self.hass)
-        return await _put_camera_via_lib(self, session, cam_id, endpoint, payload)
+        success = await _put_camera_via_lib(self, session, cam_id, endpoint, payload)
+        if success:
+            note_cloud_write(self, cam_id, endpoint)
+        return success
 
     # SMB/NAS upload, download, cleanup, and disk-check functions are in smb.py

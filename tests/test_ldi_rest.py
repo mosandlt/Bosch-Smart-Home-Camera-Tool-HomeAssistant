@@ -49,6 +49,19 @@ class _Resp:
     async def text(self) -> str:
         return self._text
 
+    @property
+    def content(self) -> _Content:
+        return _Content(self._text)
+
+
+class _Content:
+    def __init__(self, text: str) -> None:
+        self._raw = text.encode()
+
+    async def iter_chunked(self, size: int) -> Any:
+        for i in range(0, len(self._raw), size):
+            yield self._raw[i : i + size]
+
 
 class _Session:
     def __init__(self, reply: Any) -> None:
@@ -474,3 +487,39 @@ class TestTls:
         finally:
             await runner.cleanup()
         assert result.unreachable
+
+
+class TestHostileBodies:
+    """The camera's answers are tiny JSON; anything else is an invalid body."""
+
+    @staticmethod
+    async def _status_for(body: str) -> ldi_rest.LdiRestResponse:
+        hass = MagicMock()
+        session = _Session(_Resp(200, body))
+        with (
+            patch.object(ldi_rest, "async_get_clientsession", return_value=session),
+            patch.object(
+                ldi_rest, "async_get_camera_ssl_context", AsyncMock(return_value=None)
+            ),
+        ):
+            return await ldi_rest.get_privacy_state(hass, "192.0.2.1", "u", "p")
+
+    async def test_oversized_body_is_dropped(self) -> None:
+        resp = await self._status_for('{"a": "' + "x" * 70000 + '"}')
+        assert resp.status == 200
+        assert resp.data is None
+
+    async def test_deeply_nested_body_does_not_raise(self) -> None:
+        resp = await self._status_for("[" * 60000 + "]" * 60000)
+        assert resp.status == 200
+        assert resp.data is None
+
+    async def test_normal_body_is_parsed(self) -> None:
+        resp = await self._status_for('{"privacyModeState": "ON"}')
+        assert resp.data == {"privacyModeState": "ON"}
+
+
+def test_huge_integer_is_not_a_number() -> None:
+    """math.isfinite overflows on ints beyond float range."""
+    assert ldi_rest._typed(10**400, ldi_rest._KIND_NUMBER) is None
+    assert ldi_rest._typed(5, ldi_rest._KIND_NUMBER) == 5

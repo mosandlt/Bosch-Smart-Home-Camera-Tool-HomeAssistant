@@ -7,6 +7,12 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v18.2.0] - 2026-11-19
+
+### Changed
+
+- **More settings are read from the camera itself.** For cameras with a stored local data interface password, the state of the status LED, record sound, glass-break and smoke/fire alarm detection, intrusion detection (on/off, sensitivity, distance), alarm and pre-alarm (on/off and their delays), the privacy sound and the power LED brightness now comes from the camera's local interface (read every two minutes). The cloud value is used as fallback when the camera does not answer, has no such setting, or right after a change. Changing a setting still goes through the cloud. Cameras without a local password are unchanged.
+
 ## [v18.1.0] - 2026-11-09
 
 ### Added
