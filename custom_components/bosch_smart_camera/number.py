@@ -49,8 +49,18 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import ldi_rest
 from .base import _BoschEntityBase
 from .dynamic_devices import register_dynamic_camera_listener
-from .guards import _get_cam_lock, _is_gen2_indoor, _warn_if_privacy_on
-from .ldi_local import ldi_serviceable, ldi_setting, merge_local_into_cfg
+from .guards import (
+    _get_cam_lock,
+    _is_gen2_indoor,
+    _warn_if_privacy_on,
+    skip_write_without_cloud_block,
+)
+from .ldi_local import (
+    ldi_probe_ok,
+    ldi_serviceable,
+    ldi_setting,
+    merge_local_into_cfg,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -333,6 +343,8 @@ def _speaker_level_value(entity: BoschNumberEntity) -> float | None:
 
 
 def _speaker_level_available(entity: BoschNumberEntity) -> bool:
+    if _local_available(entity, ldi_rest.SETTING_SPEAKER_LEVEL):
+        return True
     return entity.coordinator.last_update_success and (
         entity.coordinator.audio_cache.get(entity._cam_id) is not None
     )
@@ -343,6 +355,9 @@ async def _speaker_level_set(entity: BoschNumberEntity, value: float) -> None:
     lock = _get_cam_lock(entity.coordinator, "_audio_config_locks", entity._cam_id)
     async with lock:
         audio = dict(entity.coordinator.audio_cache.get(entity._cam_id, {}))
+        if not audio:
+            await skip_write_without_cloud_block(entity, "Speaker level")
+            return
         audio["speakerLevel"] = level
         success = await entity.coordinator.async_put_camera(
             entity._cam_id, "audio", audio
@@ -532,6 +547,8 @@ def _lens_elevation_value(entity: BoschNumberEntity) -> float | None:
 
 
 def _lens_elevation_available(entity: BoschNumberEntity) -> bool:
+    if _local_available(entity, ldi_rest.SETTING_LENS_ELEVATION):
+        return True
     return (
         bool(entity.coordinator.last_update_success)
         and entity.coordinator.lens_elevation_cache.get(entity._cam_id) is not None
@@ -937,6 +954,8 @@ def _motion_light_sensitivity_value(entity: BoschNumberEntity) -> float | None:
 
 
 def _motion_light_sensitivity_available(entity: BoschNumberEntity) -> bool:
+    if _local_available(entity, ldi_rest.SETTING_MOTION_LIGHT_SENSITIVITY):
+        return True
     return entity.coordinator.last_update_success and bool(
         entity.coordinator.motion_light_cache.get(entity._cam_id)
     )
@@ -945,20 +964,24 @@ def _motion_light_sensitivity_available(entity: BoschNumberEntity) -> bool:
 async def _motion_light_sensitivity_set(
     entity: BoschNumberEntity, value: float
 ) -> None:
-    cache = merge_local_into_cfg(
-        entity.coordinator,
-        entity._cam_id,
-        dict(entity.coordinator.motion_light_cache.get(entity._cam_id, {})),
-        "lighting/motion",
-    )
-    if not cache:
-        return
-    cache["motionLightSensitivity"] = round(value)
-    success = await entity.coordinator.async_put_camera(
-        entity._cam_id, "lighting/motion", cache
-    )
-    if success:
-        entity.coordinator.motion_light_cache[entity._cam_id] = cache
+    # Shared with the motion light switch: same whole-block PUT.
+    lock = _get_cam_lock(entity.coordinator, "_lighting_motion_locks", entity._cam_id)
+    async with lock:
+        cache = merge_local_into_cfg(
+            entity.coordinator,
+            entity._cam_id,
+            dict(entity.coordinator.motion_light_cache.get(entity._cam_id, {})),
+            "lighting/motion",
+        )
+        if not cache:
+            await skip_write_without_cloud_block(entity, "Motion light sensitivity")
+            return
+        cache["motionLightSensitivity"] = round(value)
+        success = await entity.coordinator.async_put_camera(
+            entity._cam_id, "lighting/motion", cache
+        )
+        if success:
+            entity.coordinator.motion_light_cache[entity._cam_id] = cache
     entity.async_write_ha_state()
 
 
@@ -996,7 +1019,8 @@ class BoschMotionLightSensitivityNumber(BoschNumberEntity):
 # 0 = always day, 100 = always night.
 # Reads from GET /v11/video_inputs/{id}/lighting → {"darknessThreshold": 0.47, "softLightFading": bool}
 # Writes via PUT /v11/video_inputs/{id}/lighting with full body.
-def _darkness_threshold_value(entity: BoschNumberEntity) -> float | None:
+def _local_darkness(entity: BoschNumberEntity) -> float | None:
+    """Local threshold (a 0-1 fraction) as the entity's percent, else None."""
     local = ldi_setting(
         entity.coordinator, entity._cam_id, ldi_rest.SETTING_DARKNESS_THRESHOLD
     )
@@ -1006,31 +1030,48 @@ def _darkness_threshold_value(entity: BoschNumberEntity) -> float | None:
         and 0 <= local <= 1
     ):
         return round(float(local) * 100, 0)
+    return None
+
+
+def _darkness_threshold_value(entity: BoschNumberEntity) -> float | None:
+    local = _local_darkness(entity)
+    if local is not None:
+        return local
     cache = entity.coordinator.global_lighting_cache.get(entity._cam_id, {})
     val = cache.get("darknessThreshold")
     return round(float(val) * 100, 0) if val is not None else None
 
 
 def _darkness_threshold_available(entity: BoschNumberEntity) -> bool:
+    if _local_darkness(entity) is not None and ldi_probe_ok(
+        entity.coordinator, entity._cam_id
+    ):
+        return True
     return entity.coordinator.last_update_success and bool(
         entity.coordinator.global_lighting_cache.get(entity._cam_id)
     )
 
 
 async def _darkness_threshold_set(entity: BoschNumberEntity, value: float) -> None:
-    cache = entity.coordinator.global_lighting_cache.get(entity._cam_id, {})
-    body = merge_local_into_cfg(
-        entity.coordinator,
-        entity._cam_id,
-        {"softLightFading": cache.get("softLightFading", True)},
-        "lighting",
-    )
-    body["darknessThreshold"] = round(value / 100, 4)
-    success = await entity.coordinator.async_put_camera(
-        entity._cam_id, "lighting", body
-    )
-    if success:
-        entity.coordinator.global_lighting_cache[entity._cam_id] = body
+    # Shared with the soft light fading switch: same whole-block PUT.
+    lock = _get_cam_lock(entity.coordinator, "_lighting_config_locks", entity._cam_id)
+    async with lock:
+        cache = entity.coordinator.global_lighting_cache.get(entity._cam_id, {})
+        if not cache:
+            await skip_write_without_cloud_block(entity, "Darkness threshold")
+            return
+        body = merge_local_into_cfg(
+            entity.coordinator,
+            entity._cam_id,
+            {"softLightFading": cache.get("softLightFading", True)},
+            "lighting",
+        )
+        body["darknessThreshold"] = round(value / 100, 4)
+        success = await entity.coordinator.async_put_camera(
+            entity._cam_id, "lighting", body
+        )
+        if success:
+            entity.coordinator.global_lighting_cache[entity._cam_id] = body
     entity.async_write_ha_state()
 
 
@@ -1090,6 +1131,17 @@ def _local_number(entity: BoschNumberEntity, key: str | None) -> float | None:
     return float(value)
 
 
+def _local_available(entity: BoschNumberEntity, key: str | None) -> bool:
+    """True when the camera answers locally with an in-range value for `key`.
+
+    Keeps a setting visible while the cloud copy is missing (privacy mode,
+    cloud outage).
+    """
+    return _local_number(entity, key) is not None and ldi_probe_ok(
+        entity.coordinator, entity._cam_id
+    )
+
+
 def _power_led_brightness_value(entity: BoschNumberEntity) -> float | None:
     local = _local_number(entity, ldi_rest.SETTING_ICON_LED_BRIGHTNESS)
     if local is not None:
@@ -1099,6 +1151,8 @@ def _power_led_brightness_value(entity: BoschNumberEntity) -> float | None:
 
 
 def _power_led_brightness_available(entity: BoschNumberEntity) -> bool:
+    if _local_available(entity, ldi_rest.SETTING_ICON_LED_BRIGHTNESS):
+        return True
     return (
         bool(entity.coordinator.last_update_success)
         and entity.coordinator.icon_led_brightness_cache.get(entity._cam_id) is not None
@@ -1164,12 +1218,16 @@ def _alarm_delay_value(entity: BoschNumberEntity) -> float | None:
 
 
 def _alarm_delay_available(entity: BoschNumberEntity) -> bool:
+    if _local_available(entity, _ALARM_LDI_KEYS.get(entity._field)):
+        return True
     return entity.coordinator.last_update_success and bool(
         entity.coordinator.alarm_settings_cache.get(entity._cam_id, {})
     )
 
 
 async def _alarm_delay_set(entity: BoschNumberEntity, value: float) -> None:
+    if _is_gen2_indoor(entity) and await _warn_if_privacy_on(entity, "Alarm Settings"):
+        return
     cfg = merge_local_into_cfg(
         entity.coordinator,
         entity._cam_id,
@@ -1177,8 +1235,7 @@ async def _alarm_delay_set(entity: BoschNumberEntity, value: float) -> None:
         "alarm_settings",
     )
     if not cfg:
-        return
-    if _is_gen2_indoor(entity) and await _warn_if_privacy_on(entity, "Alarm Settings"):
+        await skip_write_without_cloud_block(entity, "Alarm Settings")
         return
     cfg[entity._field] = round(value)
     success = await entity.coordinator.async_put_camera(
@@ -1313,12 +1370,17 @@ def _intrusion_value(entity: BoschNumberEntity) -> float | None:
 
 
 def _intrusion_available(entity: BoschNumberEntity) -> bool:
+    if _local_available(entity, _INTRUSION_LDI_KEYS.get(entity._field)):
+        return True
     return entity.coordinator.last_update_success and bool(
         entity.coordinator.intrusion_config_cache.get(entity._cam_id)
     )
 
 
 async def _intrusion_set(entity: BoschNumberEntity, value: float) -> None:
+    # The cloud answers 443 on this endpoint while privacy is on.
+    if await _warn_if_privacy_on(entity, "Intrusion Detection"):
+        return
     cfg = merge_local_into_cfg(
         entity.coordinator,
         entity._cam_id,
@@ -1326,6 +1388,7 @@ async def _intrusion_set(entity: BoschNumberEntity, value: float) -> None:
         "intrusionDetectionConfig",
     )
     if not cfg:
+        await skip_write_without_cloud_block(entity, "Intrusion Detection")
         return
     lo = entity.entity_description.native_min_value
     hi = entity.entity_description.native_max_value

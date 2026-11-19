@@ -610,6 +610,26 @@ def ldi_setting(
         return None
 
 
+def ldi_probe_ok(coordinator: BoschCameraCoordinator, cam_id: str) -> bool:
+    """True when the last local probe reached the camera with its password.
+
+    Lets an entity stay available on its local value while the cloud copy is
+    missing (privacy mode, cloud outage), but never for a camera the local
+    path itself knows as offline or locked out. Never raises.
+    """
+    try:
+        store = getattr(coordinator, "ldi_rest_state", None)
+        entry = store.get(cam_id) if isinstance(store, dict) else None
+        if not isinstance(entry, dict) or entry.get("result") != ldi_rest.PROBE_OK:
+            return False
+        status = getattr(coordinator, "ldi_open_status", None)
+        failure = status.get(cam_id) if isinstance(status, dict) else None
+        reason = failure.get("reason") if isinstance(failure, dict) else None
+        return reason not in (RESULT_AUTH, RESULT_UNREACHABLE)
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
 async def _drop_stale_stream(coordinator: BoschCameraCoordinator, cam_id: str) -> None:
     """Invalidate HA's cached Stream so it is rebuilt against the new URL."""
     cam_ent = coordinator.camera_entities.get(cam_id)

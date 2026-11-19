@@ -17,6 +17,7 @@ from bosch_shc_camera_client.cameras import BoschCameraError
 from homeassistant.exceptions import HomeAssistantError, Unauthorized
 
 from .const import DOMAIN
+from .ldi_local import ldi_privacy_on
 
 if TYPE_CHECKING:
     from homeassistant.core import Context, HomeAssistant, ServiceCall
@@ -120,9 +121,9 @@ async def _warn_if_privacy_on(entity: Any, feature_name: str) -> bool:
     """
     coordinator = entity.coordinator
     cam_id = entity._cam_id
-    cache = coordinator.shc_state_cache.get(cam_id, {})
-    privacy_on = bool(cache.get("privacy_mode"))
-    if not privacy_on:
+    # The camera's own answer first: the cloud flag can be stale while the
+    # cloud is unreachable.
+    if ldi_privacy_on(coordinator, cam_id) is not True:
         return False
     cam_title = coordinator.data.get(cam_id, {}).get("info", {}).get("title", cam_id)
     _LOGGER.warning(
@@ -150,6 +151,22 @@ async def _warn_if_privacy_on(entity: Any, feature_name: str) -> bool:
     except Exception as err:
         _LOGGER.debug("persistent_notification create failed: %s", err)
     return True
+
+
+async def skip_write_without_cloud_block(entity: Any, feature_name: str) -> None:
+    """No PUT for a whole-block setting whose cloud copy is missing.
+
+    The block's other fields are then unknown, and a body with guessed or
+    missing fields would reset them on the camera. Privacy mode is the usual
+    cause (the cloud answers 443), so it is shown; otherwise only logged.
+    """
+    if await _warn_if_privacy_on(entity, feature_name):
+        return
+    _LOGGER.debug(
+        "%s write for %s skipped: the cloud copy of its settings is not loaded",
+        feature_name,
+        str(entity._cam_id)[:8],
+    )
 
 
 @contextmanager

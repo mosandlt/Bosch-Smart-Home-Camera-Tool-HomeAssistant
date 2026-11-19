@@ -26,7 +26,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import BoschCameraCoordinator
 from .const import CONF_ENABLE_PTZ_CONTROLS, DOMAIN, STREAM_START_SKIPPED
 from .dynamic_devices import register_dynamic_camera_listener
-from .guards import _is_gen2_indoor, _warn_if_privacy_on
+from .guards import (
+    _is_gen2_indoor,
+    _warn_if_privacy_on,
+    skip_write_without_cloud_block,
+)
 from .ldi_local import ldi_serviceable, merge_local_into_cfg
 from .lighting_options import SCHEDULE_STATUS_OPTIONS, async_set_schedule_status
 from .models import get_display_name
@@ -808,6 +812,7 @@ class BoschDetectionModeSelect(CoordinatorEntity, SelectEntity):  # type: ignore
             "intrusionDetectionConfig",
         )
         if not cfg:
+            await skip_write_without_cloud_block(self, "Detection Mode")
             return
         cfg["detectionMode"] = api_value
         success = await self.coordinator.async_put_camera(

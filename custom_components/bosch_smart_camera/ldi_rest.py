@@ -276,6 +276,7 @@ FIELD_OK = "ok"
 FIELD_UNAVAILABLE = "unavailable"  # 404: the model has no such endpoint
 FIELD_INVALID = "invalid"  # 200 but missing or wrongly typed value
 FIELD_ERROR = "error"  # any other HTTP status
+FIELD_UNREACHABLE = "unreachable"  # not asked: the batch deadline ran out
 
 _KIND_BOOL = "bool"
 _KIND_INT = "int"
@@ -367,12 +368,14 @@ class LdiSettings:
     """Outcome of `get_settings`.
 
     `result` is a PROBE_* class for the whole batch: only PROBE_OK carries
-    fields. `missing_paths` are the endpoints that answered 404.
+    fields. `missing_paths` are the endpoints that answered 404. `partial`
+    marks a batch cut short by its deadline.
     """
 
     result: str
     fields: dict[str, LdiSetting]
     missing_paths: frozenset[str] = frozenset()
+    partial: bool = False
 
 
 def _typed(value: object, kind: str) -> bool | int | float | None:
@@ -418,8 +421,12 @@ async def get_settings(
 
     A 404 or a bad body affects only its own fields. A rejected password or a
     camera that stops answering ends the batch: the result then carries no
-    fields, so nothing half-read is mistaken for the camera's state. `skip`
-    paths (known 404s) are not asked and reported unavailable. Never raises.
+    fields, so nothing half-read is mistaken for the camera's state. A slow
+    camera that runs into the overall deadline keeps the fields it already
+    answered (each a complete answer of its own endpoint); the rest are
+    reported unreachable, and with no field read at all the batch counts as
+    unreachable. `skip` paths (known 404s) are not asked and reported
+    unavailable. Never raises.
     """
     fields: dict[str, LdiSetting] = {}
     missing: set[str] = set()
@@ -440,8 +447,15 @@ async def get_settings(
                     missing.add(path)
                 fields.update(_fields_from(resp, specs))
     except TimeoutError:
-        _LOGGER.debug("local REST settings read exceeded its deadline")
-        return LdiSettings(PROBE_UNREACHABLE, {})
+        if not any(f.status == FIELD_OK for f in fields.values()):
+            _LOGGER.debug("local REST settings read exceeded its deadline")
+            return LdiSettings(PROBE_UNREACHABLE, {})
+        for path, specs in SETTINGS_ENDPOINTS:
+            status = FIELD_UNAVAILABLE if path in skip else FIELD_UNREACHABLE
+            for key, _, _ in specs:
+                fields.setdefault(key, LdiSetting(status))
+        _LOGGER.debug("local REST settings read cut short by its deadline")
+        return LdiSettings(PROBE_OK, fields, frozenset(missing), partial=True)
     return LdiSettings(PROBE_OK, fields, frozenset(missing))
 
 

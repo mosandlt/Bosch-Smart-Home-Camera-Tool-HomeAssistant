@@ -64,9 +64,11 @@ from .guards import (
     _is_gen2_indoor,
     _warn_if_privacy_on,
     async_require_admin,
+    skip_write_without_cloud_block,
 )
 from .ldi_local import (
     ldi_privacy_on,
+    ldi_probe_ok,
     ldi_serviceable,
     ldi_setting,
     ldi_wanted,
@@ -135,6 +137,16 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
             return None
         value = ldi_setting(self.coordinator, self._cam_id, key)
         return value if isinstance(value, bool) else None
+
+    def _local_available(self, key: str | None) -> bool:
+        """True when the camera answers locally with its own value for `key`.
+
+        Keeps a setting visible while the cloud copy is missing (privacy
+        mode, cloud outage).
+        """
+        return self._local_bool(key) is not None and ldi_probe_ok(
+            self.coordinator, self._cam_id
+        )
 
     async def _async_apply_toggle(
         self,
@@ -1948,6 +1960,8 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
+        if self._local_available(ldi_rest.SETTING_MOTION_LIGHT_ENABLED):
+            return True
         return (  # type: ignore[no-any-return]
             self.coordinator.last_update_success
             and self.coordinator.is_camera_online(self._cam_id)
@@ -1955,6 +1969,12 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
 
     async def _set_motion_light(self, enabled: bool) -> None:
         """Read current motion light config, toggle enabled, write back."""
+        lock = _get_cam_lock(self.coordinator, "_lighting_motion_locks", self._cam_id)
+        async with lock:
+            await self._set_motion_light_locked(enabled)
+        self.async_write_ha_state()
+
+    async def _set_motion_light_locked(self, enabled: bool) -> None:
         # Read current config from cache or API
         cache = self.coordinator.motion_light_cache.get(self._cam_id, {})
         if not cache:
@@ -2000,7 +2020,6 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
             )
         else:
             _LOGGER.warning("Motion light PUT failed for %s", self._cam_id[:8])
-        self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._set_motion_light(True)
@@ -2041,12 +2060,20 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
+        if self._local_available(ldi_rest.SETTING_AMBIENT_LIGHT_ENABLED):
+            return True
         return (  # type: ignore[no-any-return]
             self.coordinator.last_update_success
             and self.coordinator.is_camera_online(self._cam_id)
         )
 
     async def _set_ambient_light(self, enabled: bool) -> None:
+        lock = _get_cam_lock(self.coordinator, "_lighting_ambient_locks", self._cam_id)
+        async with lock:
+            await self._set_ambient_light_locked(enabled)
+        self.async_write_ha_state()
+
+    async def _set_ambient_light_locked(self, enabled: bool) -> None:
         token = self.coordinator.token
         if not token:
             return
@@ -2096,7 +2123,6 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
                 note_cloud_write(self.coordinator, self._cam_id, "lighting/ambient")
         except Exception:
             _LOGGER.exception("Ambient light error for %s", self._cam_id[:8])
-        self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._set_ambient_light(True)
@@ -2133,6 +2159,8 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
+        if self._local_available(ldi_rest.SETTING_LIGHT_FADING):
+            return True
         return (
             self.coordinator.last_update_success
             and self.coordinator.is_camera_online(self._cam_id)
@@ -2140,10 +2168,19 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
         )
 
     async def _put_global_lighting(self, enabled: bool) -> None:
+        lock = _get_cam_lock(self.coordinator, "_lighting_config_locks", self._cam_id)
+        async with lock:
+            await self._put_global_lighting_locked(enabled)
+        self.async_write_ha_state()
+
+    async def _put_global_lighting_locked(self, enabled: bool) -> None:
         token = self.coordinator.token
         if not token:
             return
         cache = self.coordinator.global_lighting_cache.get(self._cam_id, {})
+        if not cache:
+            await skip_write_without_cloud_block(self, "Soft light fading")
+            return
         body = merge_local_into_cfg(
             self.coordinator,
             self._cam_id,
@@ -2171,7 +2208,6 @@ class BoschSoftLightFadingSwitch(_BoschSwitchBase):
                 body if result.response is None else result.response
             )
             note_cloud_write(self.coordinator, self._cam_id, "lighting")
-        self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._put_global_lighting(True)
@@ -2211,6 +2247,8 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
+        if self._local_available(ldi_rest.SETTING_INTRUSION_ENABLED):
+            return True
         return (
             self.coordinator.last_update_success
             and self.coordinator.is_camera_online(self._cam_id)
@@ -2238,6 +2276,7 @@ class BoschIntrusionDetectionSwitch(_BoschSwitchBase):
             "intrusionDetectionConfig",
         )
         if not cfg:
+            await skip_write_without_cloud_block(self, "Intrusion Detection")
             return
         cfg["enabled"] = enabled
         success = await self.coordinator.async_put_camera(
@@ -2284,6 +2323,8 @@ class _BoschAudioDetectionSwitchBase(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
+        if self._local_available(self._ldi_key):
+            return True
         return (
             self.coordinator.last_update_success
             and self.coordinator.is_camera_online(self._cam_id)
@@ -2320,6 +2361,7 @@ class _BoschAudioDetectionSwitchBase(_BoschSwitchBase):
                 "audioDetectionConfig",
             )
             if not cfg:
+                await skip_write_without_cloud_block(self, "Audio detection")
                 return
             cfg[self._field] = value
             success = await self.coordinator.async_put_camera(
@@ -2495,6 +2537,8 @@ class _BoschAlarmSettingsSwitchBase(_BoschSwitchBase):
 
     @property
     def available(self) -> bool:
+        if self._local_available(self._ldi_key):
+            return True
         return (
             self.coordinator.last_update_success
             and self.coordinator.is_camera_online(self._cam_id)
@@ -2502,10 +2546,15 @@ class _BoschAlarmSettingsSwitchBase(_BoschSwitchBase):
         )
 
     async def _set(self, enabled: bool) -> None:
+        # Same guard as the alarm delay numbers: the cloud answers 443 here
+        # while privacy is on.
+        if _is_gen2_indoor(self) and await _warn_if_privacy_on(self, "Alarm Settings"):
+            return
         cfg = merge_local_into_cfg(
             self.coordinator, self._cam_id, dict(self._settings), "alarm_settings"
         )
         if not cfg:
+            await skip_write_without_cloud_block(self, "Alarm Settings")
             return
         cfg[self._field] = "ON" if enabled else "OFF"
         success = await self.coordinator.async_put_camera(
