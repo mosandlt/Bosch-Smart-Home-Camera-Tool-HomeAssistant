@@ -106,3 +106,43 @@ class TestSpeakerAvailability:
         c.audio_cache = {}
         c.last_update_success = True
         assert BoschSpeakerLevelNumber(c, CAM, _ENTRY).available is False
+
+
+class TestFailedLanTestIsRetriedSoon:
+    """A failed LAN test must not hold a camera unavailable for a whole interval."""
+
+    @staticmethod
+    def _due(
+        lan: Any, now: float, last: float = 1000.0, local_only: bool = True
+    ) -> bool:
+        from types import SimpleNamespace
+
+        from custom_components.bosch_smart_camera import BoschCameraCoordinator
+
+        coord = SimpleNamespace(
+            per_cam_status_at={CAM: last},
+            lan_tcp_reachable={} if lan is None else {CAM: lan},
+            offline_since={},
+            _OFFLINE_EXTENDED_INTERVAL=900.0,
+        )
+        with patch(
+            "custom_components.bosch_smart_camera.coordinator.ldi_wanted",
+            return_value=local_only,
+        ):
+            return BoschCameraCoordinator.should_check_status(coord, CAM, now, 300)  # type: ignore[arg-type]
+
+    def test_failure_is_retested_after_thirty_seconds(self) -> None:
+        assert self._due((False, 1000.0), now=1031.0) is True
+
+    def test_failure_is_not_retested_before_thirty_seconds(self) -> None:
+        assert self._due((False, 1000.0), now=1020.0) is False
+
+    def test_success_keeps_the_normal_interval(self) -> None:
+        assert self._due((True, 1000.0), now=1100.0) is False
+        assert self._due((True, 1000.0), now=1301.0) is True
+
+    def test_unknown_keeps_the_normal_interval(self) -> None:
+        assert self._due(None, now=1100.0) is False
+
+    def test_cloud_only_camera_keeps_the_normal_interval(self) -> None:
+        assert self._due((False, 1000.0), now=1031.0, local_only=False) is False

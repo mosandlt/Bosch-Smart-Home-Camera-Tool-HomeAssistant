@@ -330,6 +330,10 @@ async def _put_camera_via_lib(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Re-test a camera that failed its LAN test after this long (monotonic seconds).
+_LAN_RETRY_SEC = 30.0
+
+
 class BoschCameraCoordinator(
     DataUpdateCoordinator,  # type: ignore[misc]
     FCMCoordinatorMixin,
@@ -1720,7 +1724,7 @@ class BoschCameraCoordinator(
         """
         return bool(self.firmware_cache.get(cam_id, {}).get("updating", False))
 
-    async def async_local_tcp_ping(self, cam_id: str, timeout: float = 1.5) -> bool:
+    async def async_local_tcp_ping(self, cam_id: str, timeout: float = 3.0) -> bool:
         """Quick TCP connect to camera port 443 on LAN — returns True if reachable.
 
         Tries rcp_lan_ip_cache first, falls back to local_creds_cache.
@@ -1836,6 +1840,16 @@ class BoschCameraCoordinator(
         if offline_since and (now - offline_since) > self._OFFLINE_EXTENDED_INTERVAL:
             # Camera has been offline for a while — use extended interval
             return (now - per_cam_last) >= self._OFFLINE_EXTENDED_INTERVAL
+        lan = self.lan_tcp_reachable.get(cam_id)
+        if (
+            lan is not None
+            and lan[0] is False
+            and (now - lan[1]) >= _LAN_RETRY_SEC
+            and ldi_wanted(self, cam_id)
+        ):
+            # A failed LAN test must not keep a local-only camera unavailable
+            # for a whole status interval (a Wi-Fi hiccup is over in seconds).
+            return True
         return (now - per_cam_last) >= interval_status
 
     # ── Main update ───────────────────────────────────────────────────────────

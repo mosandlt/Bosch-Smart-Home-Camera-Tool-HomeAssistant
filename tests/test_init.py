@@ -11270,6 +11270,7 @@ def _make_coord_coordinator_pure_helpers(**overrides) -> SimpleNamespace:
         _last_status=0.0,
         offline_since={},
         per_cam_status_at={},
+        lan_tcp_reachable={},
         privacy_set_at={},
         light_set_at={},
         WRITE_LOCK_SECS=30.0,
