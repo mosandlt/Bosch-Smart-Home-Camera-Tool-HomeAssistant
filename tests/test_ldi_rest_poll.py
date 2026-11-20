@@ -262,6 +262,14 @@ class TestCoordinatorTick:
         coord = SimpleNamespace(data={CAM: {}})
         assert self._tick(coord, set()) == []
 
+    def test_camera_that_left_the_local_path_forgets_local_state(self) -> None:
+        coord = SimpleNamespace(
+            data={CAM: {}},
+            ldi_rest_state={CAM: {"privacy_on": True, "settings": None}},
+        )
+        assert self._tick(coord, set()) == []
+        assert ldi_privacy_on(coord, CAM) is None  # type: ignore[arg-type]
+
     def test_no_data_yet(self) -> None:
         assert self._tick(SimpleNamespace(data=None), {CAM}) == []
 

@@ -363,6 +363,9 @@ async def refresh_ldi_rest(
     """
     source = ldi_source(coordinator, cam_id)
     if source is None:
+        # Not addressable (no IP or password any more): the last local
+        # answers are stale, so the cloud flag and cache take over again.
+        forget_ldi_local_state(coordinator, cam_id)
         return None
     entry = _rest_entry(coordinator, cam_id)
     now = time.monotonic()
@@ -385,6 +388,16 @@ async def refresh_ldi_rest(
     )
     _apply_probe(coordinator, cam_id, probe)
     return probe
+
+
+def forget_ldi_local_state(coordinator: BoschCameraCoordinator, cam_id: str) -> None:
+    """Drop the cached local privacy flag and settings of an unaddressable camera."""
+    store = getattr(coordinator, "ldi_rest_state", None)
+    entry = store.get(cam_id) if isinstance(store, dict) else None
+    if not isinstance(entry, dict):
+        return
+    entry["privacy_on"] = None
+    _clear_settings(coordinator, cam_id)
 
 
 def _clear_settings(coordinator: BoschCameraCoordinator, cam_id: str) -> None:

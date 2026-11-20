@@ -345,8 +345,9 @@ def _speaker_level_value(entity: BoschNumberEntity) -> float | None:
 def _speaker_level_available(entity: BoschNumberEntity) -> bool:
     if _local_available(entity, ldi_rest.SETTING_SPEAKER_LEVEL):
         return True
+    audio = entity.coordinator.audio_cache.get(entity._cam_id) or {}
     return entity.coordinator.last_update_success and (
-        entity.coordinator.audio_cache.get(entity._cam_id) is not None
+        audio.get("speakerLevel") is not None
     )
 
 

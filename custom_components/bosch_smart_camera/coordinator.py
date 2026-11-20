@@ -85,7 +85,13 @@ from .go2rtc_client import (
     ensure_go2rtc_schemes_fresh,
     unregister_go2rtc_stream,
 )
-from .ldi_local import ensure_ldi_stream, ldi_wanted, note_cloud_write, poll_ldi_local
+from .ldi_local import (
+    ensure_ldi_stream,
+    forget_ldi_local_state,
+    ldi_wanted,
+    note_cloud_write,
+    poll_ldi_local,
+)
 from .ldi_snapshot import fetch_snapshot as fetch_ldi_snapshot
 from .live_connection import try_live_connection_inner
 from .lock_utils import get_or_create_lock
@@ -2249,6 +2255,9 @@ class BoschCameraCoordinator(
                     poll_ldi_local(self, cam_id),
                     name=f"bosch_shc_camera_ldi_rest_{cam_id[:8]}",
                 )
+            else:
+                # Interface off or password gone: drop stale local answers.
+                forget_ldi_local_state(self, cam_id)
 
     def _refresh_local_data_interface_password_hint(self) -> None:
         """Hint that an active interface has no stored password (thin delegator)."""

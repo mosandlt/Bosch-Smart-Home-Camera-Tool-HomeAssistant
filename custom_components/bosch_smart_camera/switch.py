@@ -2004,6 +2004,10 @@ class BoschMotionLightSwitch(_BoschSwitchBase):
             except Exception:
                 _LOGGER.exception("Motion light GET error for %s", self._cam_id[:8])
                 return
+        if not cache:
+            # 200 with an empty body: no block to write back into.
+            await skip_write_without_cloud_block(self, "Motion light")
+            return
         # Update the enabled flag and write back
         data = merge_local_into_cfg(
             self.coordinator, self._cam_id, dict(cache), "lighting/motion"
@@ -2102,6 +2106,10 @@ class BoschAmbientLightSwitch(_BoschSwitchBase):
                     err.status,
                     self._cam_id[:8],
                 )
+                return
+            if not data:
+                # 200 with an empty body: no block to write back into.
+                await skip_write_without_cloud_block(self, "Ambient light")
                 return
             data["ambientLightEnabled"] = enabled
             try:
