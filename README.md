@@ -46,6 +46,7 @@ Adds your Bosch Smart Home cameras (Eyes Outdoor, 360 Indoor) as fully featured 
   - [Release Channels — Stable vs. Beta](#release-channels--stable-vs-beta) — how to opt in to beta versions via HACS
 - [Setup](#setup)
   - [I don't see any image / video](#i-dont-see-any-image--video) — troubleshooting for the most common "it's not working" report
+  - [Video lags, stutters or drops (Wi-Fi)](#video-lags-stutters-or-drops-wifi) — 2.4 GHz channel, width and WPA2 checklist
 - [Architecture](#architecture)
   - [Network Connectivity](#network-connectivity) — required ports, VLAN/subnet pitfalls
 - [Streaming & Reliability](#streaming--reliability)
@@ -320,6 +321,19 @@ Work through this list in order — it covers the setups reported so far:
 4. **Video still stays black after tapping into it?** Every view (the custom card, Home Assistant's own native camera view, the Companion app) opens the live connection automatically on demand — you never have to flip a switch by hand. If it's still black after ~10-15 s, check the per-camera **"Live Stream"** switch entity: turning it ON manually forces a session open and is a useful test to isolate whether the problem is the connection itself or just the view.
 5. **Only one camera affected, others work fine?** That's almost always the camera itself (offline / rebooting / Wi-Fi issue), not the integration — power-cycle it and check it in the Bosch app.
 6. **Still stuck?** Enable debug logging (Step 2 table above), reproduce the issue, and open a [GitHub issue](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant/issues) with the log excerpt for your camera plus its model/generation.
+
+### Video lags, stutters or drops (Wi-Fi)
+
+The Eyes Indoor/Outdoor II cameras only use the **2.4 GHz** band. A busy or badly chosen 2.4 GHz channel is the most common cause of a stream that lags or stops while the camera still shows a strong signal. Typical signs: `read ...:9554: i/o timeout` in the go2rtc log, a camera that flips to unavailable for a moment, or a ping from the Home Assistant host to the camera that averages hundreds of milliseconds with spikes above one second.
+
+1. **Measure first.** Ping the camera from the Home Assistant host (not from your PC, it may be on another network): `ping -c 60 -i 0.5 <camera-ip>`. A healthy camera averages well under 100 ms. An idle camera that alternates between ~2 ms and ~100 ms is just saving power and is fine. A steady 300 ms or more is a bad radio link.
+2. **Check the link rate in your router** (for a FRITZ!Box: Home Network → Mesh → the camera). A strong signal with a rate of only 5-20 Mbit/s means retransmissions and interference, not weak reception.
+3. **Use a fixed, clean 2.4 GHz channel.** Pick 1, 6 or 11 instead of automatic or 12/13. If you run Zigbee, keep the Wi-Fi channel away from your Zigbee channel (for example Zigbee 11 sits next to Wi-Fi 1, so Wi-Fi 6 is a safe choice).
+4. **Prefer a 20 MHz channel width in the 2.4 GHz band.** 40 MHz channels overlap with many neighbouring networks. On a FRITZ!Box 7590 AX the width is not selectable directly; enabling *WLAN coexistence (2.4 GHz)* lets the box fall back to 20 MHz. Changing the channel makes all 2.4 GHz devices reconnect briefly.
+5. **WPA2 instead of WPA3 for the cameras.** The camera's system requirements ask for WPA2. If the cameras joined through WPA3 or a mixed SSID and stay unstable, give them their own 2.4 GHz network with WPA2 only.
+6. **Stopgap while you fix the Wi-Fi:** set the camera's **Video quality** select to `low` (704x400). It needs far less bandwidth. Set it back to `auto` afterwards.
+
+After a Wi-Fi change a local-only camera may show as unavailable for a short time; since v18.2.0-beta-6 it is retested after about 30 seconds.
 
 ---
 
