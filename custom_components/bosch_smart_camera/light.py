@@ -101,7 +101,7 @@ async def async_setup_entry(
 
         cam_entities: list[Any] = []
         if get_model_config(hw).generation >= 2:
-            has_light = cam_info.get("featureSupport", {}).get("light", False)
+            has_light = (cam_info.get("featureSupport") or {}).get("light", False)
             # ONLY Outdoor II has controllable lights (RGB top + bottom + color-
             # temp front spotlight). Indoor II has NO visible light hardware —
             # only the IR night-vision LEDs which are not user-controllable.

@@ -103,7 +103,7 @@ async def async_setup_entry(
         ]
         # LED Dimmer via RCP — only for cameras with a physical light (featureSupport.light)
         cam_info = coordinator.data.get(cam_id, {}).get("info", {})
-        has_light = cam_info.get("featureSupport", {}).get("light", False)
+        has_light = (cam_info.get("featureSupport") or {}).get("light", False)
         if has_light:
             cam_entities.append(BoschLedDimmerSensor(coordinator, cam_id, config_entry))
         # Commissioned status (diagnostic, disabled by default)
@@ -570,7 +570,7 @@ def _firmware_version_attrs(entity: BoschSensorEntity) -> dict[str, Any]:
     # upToDate may be a top-level field or inside featureSupport
     up_to_date = info.get("upToDate")
     if up_to_date is None:
-        up_to_date = info.get("featureSupport", {}).get("upToDate")
+        up_to_date = (info.get("featureSupport") or {}).get("upToDate")
     attrs: dict[str, Any] = {
         "up_to_date": up_to_date,
         "hardware_version": info.get("hardwareVersion", ""),

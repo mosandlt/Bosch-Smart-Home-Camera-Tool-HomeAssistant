@@ -110,7 +110,7 @@ def _compute_cam_context(
 
     hw = cam_raw.get("hardwareVersion", "")
     is_gen2 = get_model_config(hw).generation >= 2
-    feat_support = cam_raw.get("featureSupport", {})
+    feat_support = cam_raw.get("featureSupport") or {}
     pan_limit = feat_support.get("panLimit", 0)
     has_light = feat_support.get("light", False)
 
@@ -274,7 +274,7 @@ def _poll_cam_info_caches(
     status) — no network I/O, unlike every later slow-tier sub-function.
     """
     privacy_str = cam_raw.get("privacyMode", "")
-    feat_support = cam_raw.get("featureSupport", {})
+    feat_support = cam_raw.get("featureSupport") or {}
     has_light = feat_support.get("light", False)
     feat_status = cam_raw.get("featureStatus", {})
     light_on = feat_status.get("frontIlluminatorInGeneralLightOn")

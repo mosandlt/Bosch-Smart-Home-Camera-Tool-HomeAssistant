@@ -72,7 +72,7 @@ async def async_setup_entry(
 
     def _build_entities_for_cam(cam_id: str) -> list[Any]:
         cam_info = coordinator.data.get(cam_id, {}).get("info", {})
-        has_sound = cam_info.get("featureSupport", {}).get("sound", False)
+        has_sound = (cam_info.get("featureSupport") or {}).get("sound", False)
         cam_entities: list[Any] = [
             BoschMotionBinarySensor(coordinator, cam_id, config_entry),
             BoschPersonDetectedBinarySensor(coordinator, cam_id, config_entry),

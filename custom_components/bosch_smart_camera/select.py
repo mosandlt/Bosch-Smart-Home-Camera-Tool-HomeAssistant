@@ -98,14 +98,14 @@ async def async_setup_entry(
             )
         # PTZ preset select — only for cameras with panLimit > 0 (CAMERA_360 indoor)
         # AND opt-in via options. Default off so non-PTZ users see no extra entity.
-        pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
+        pan_limit = (cam_info.get("featureSupport") or {}).get("panLimit", 0)
         ptz_enabled = config_entry.options.get(CONF_ENABLE_PTZ_CONTROLS, False)
         if pan_limit and ptz_enabled:
             cam_entities.append(
                 BoschPanPresetSelect(coordinator, cam_id, config_entry, pan_limit)
             )
         # Gen1 Eyes Outdoor: lighting_options only exists there (Gen2 answers 442).
-        if hw in GEN1_OUTDOOR_HARDWARE and cam_info.get("featureSupport", {}).get(
+        if hw in GEN1_OUTDOOR_HARDWARE and (cam_info.get("featureSupport") or {}).get(
             "light", False
         ):
             cam_entities.append(

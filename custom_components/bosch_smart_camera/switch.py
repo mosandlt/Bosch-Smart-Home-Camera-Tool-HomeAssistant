@@ -274,7 +274,7 @@ async def async_setup_entry(
         # Camera light — only if cloud API reports featureSupport.light = True.
         # Do NOT fall back to "SHC configured" — cameras without a physical light
         # (e.g. CAMERA_360 indoor) would otherwise get a spurious light switch.
-        has_light = cam_info.get("featureSupport", {}).get("light", False)
+        has_light = (cam_info.get("featureSupport") or {}).get("light", False)
         if has_light:
             cam_entities.append(
                 BoschCameraLightSwitch(coordinator, cam_id, config_entry)
@@ -292,7 +292,7 @@ async def async_setup_entry(
         # Record sound toggle — available for all cameras via cloud API
         cam_entities.append(BoschRecordSoundSwitch(coordinator, cam_id, config_entry))
         # Auto-follow — only for cameras with panLimit > 0 (CAMERA_360)
-        pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
+        pan_limit = (cam_info.get("featureSupport") or {}).get("panLimit", 0)
         if pan_limit:
             cam_entities.append(
                 BoschAutoFollowSwitch(coordinator, cam_id, config_entry)
@@ -341,7 +341,7 @@ async def async_setup_entry(
             )
         # Notification type toggles — person is cloud AI (all cameras);
         # audio gated on featureSupport.sound (API-reported, not hardcoded by model).
-        has_sound = cam_info.get("featureSupport", {}).get("sound", False)
+        has_sound = (cam_info.get("featureSupport") or {}).get("sound", False)
         for ntype in ("movement", "person", "trouble", "cameraAlarm", "troubleEmail"):
             cam_entities.append(
                 BoschNotificationTypeSwitch(coordinator, cam_id, config_entry, ntype)

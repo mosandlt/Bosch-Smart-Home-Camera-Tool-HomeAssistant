@@ -1637,3 +1637,23 @@ class TestPollCamControlInFlightWrite:
         assert coord.lighting_switch_cache[CAM_A] == {
             "frontLightSettings": {"brightness": 0}
         }
+
+
+class TestNullFeatureSupport:
+    """GitHub #87: Gen1 Eyes Outdoor returns `"featureSupport": null`, which
+    made `.get("featureSupport", {})` yield None and crash setup with
+    AttributeError."""
+
+    def test_compute_cam_context_null_feature_support(self):
+        coord = _make_coord()
+        raw = _cam_raw(featureSupport=None)
+        ctx = _compute_cam_context(
+            coord, CAM_A, raw, {CAM_A: {"status": "ONLINE"}}, {}, False
+        )
+        assert ctx.is_online is True
+
+    def test_poll_cam_info_caches_null_feature_support(self):
+        coord = _make_info_coord()
+        _poll_cam_info_caches(
+            coord, CAM_A, _cam_raw(featureSupport=None, privacyMode="ON")
+        )

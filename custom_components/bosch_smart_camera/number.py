@@ -77,7 +77,7 @@ async def async_setup_entry(
     def _build_entities_for_cam(cam_id: str) -> list[Any]:
         cam_info = coordinator.data.get(cam_id, {}).get("info", {})
         cam_entities: list[Any] = []
-        pan_limit = cam_info.get("featureSupport", {}).get("panLimit", 0)
+        pan_limit = (cam_info.get("featureSupport") or {}).get("panLimit", 0)
         if pan_limit:
             cam_entities.append(
                 BoschPanNumber(coordinator, cam_id, config_entry, pan_limit)
@@ -86,7 +86,7 @@ async def async_setup_entry(
         # Card playback volume — paired with the audio switch (registered for
         # every camera), the automatable source of truth for the card's volume.
         cam_entities.append(BoschAudioVolumeNumber(coordinator, cam_id, config_entry))
-        has_light = cam_info.get("featureSupport", {}).get("light", False)
+        has_light = (cam_info.get("featureSupport") or {}).get("light", False)
         if has_light:
             cam_entities.append(
                 BoschFrontLightIntensityNumber(coordinator, cam_id, config_entry)
