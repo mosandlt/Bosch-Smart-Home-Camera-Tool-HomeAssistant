@@ -3554,7 +3554,7 @@ class BoschCameraCoordinator(
 
         user = result.get("user")
         password = result.get("password")
-        urls = result.get("urls", [])
+        urls = result.get("urls") or []
         if not user or not password or not urls:
             _LOGGER.debug(
                 "fetch_live_snapshot_local: missing credentials/urls for %s "

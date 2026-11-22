@@ -1657,3 +1657,10 @@ class TestNullFeatureSupport:
         _poll_cam_info_caches(
             coord, CAM_A, _cam_raw(featureSupport=None, privacyMode="ON")
         )
+
+    def test_poll_cam_info_caches_null_feature_status(self):
+        """Same null pattern for `featureStatus` (sibling of #87)."""
+        coord = _make_info_coord()
+        _poll_cam_info_caches(
+            coord, CAM_A, _cam_raw(featureStatus=None, privacyMode="ON")
+        )

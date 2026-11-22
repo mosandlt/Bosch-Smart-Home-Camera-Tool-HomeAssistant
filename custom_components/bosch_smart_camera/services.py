@@ -1114,7 +1114,7 @@ def _register_services(hass: HomeAssistant) -> None:
                                             "status", f.get("invitationStatus", "?")
                                         )
                                         fid = f.get("id", "?")
-                                        shares = f.get("sharedVideoInputs", [])
+                                        shares = f.get("sharedVideoInputs") or []
                                         lines.append(
                                             f"• {email} (Status: {status}, ID: {fid}, Kameras: {len(shares)})"
                                         )

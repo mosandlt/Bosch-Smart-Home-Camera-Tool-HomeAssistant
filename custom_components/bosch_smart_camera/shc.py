@@ -295,6 +295,19 @@ _ALL_LIGHTING_GROUPS = (
 _FRONT = "frontLightSettings"
 
 
+def normalize_lighting_switch(body: dict[str, Any]) -> dict[str, Any]:
+    """Replace a null/non-dict LED group with the full-shape default.
+
+    The cloud can send ``"topLedLightSettings": null`` for a group the camera
+    lacks; ``.get(key, {})`` then yields None and every reader that chains
+    ``.get("brightness")`` (or ``**``-spreads it into a PUT body) crashes.
+    """
+    for key in _ALL_LIGHTING_GROUPS:
+        if key in body and not isinstance(body[key], dict):
+            body[key] = _default_lighting_group()
+    return body
+
+
 def get_lighting_lock(coordinator: Any, cam_id: str) -> asyncio.Lock:
     """Per-camera lock shared by every /lighting/switch read-modify-write.
 
@@ -986,7 +999,7 @@ async def _refresh_lighting_switch_after_on(
             # A light PUT that ran while we were fetching has moved the stamp.
             if coordinator.light_set_at.get(cam_id) != write_stamp:
                 return
-            coordinator.lighting_switch_cache[cam_id] = data
+            coordinator.lighting_switch_cache[cam_id] = normalize_lighting_switch(data)
         coordinator.async_update_listeners()
         if any(
             (data.get(key) or {}).get("brightness", 0) > 0

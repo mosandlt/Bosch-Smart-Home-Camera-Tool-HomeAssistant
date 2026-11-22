@@ -220,7 +220,7 @@ def _compute_cam_context(
         cam_id in coordinator.live_connections
         and coordinator.live_connections[cam_id].get("_connection_type") == "LOCAL"
     )
-    privacy_on = cam_raw.get("privacyMode", "").upper() == "ON"
+    privacy_on = str(cam_raw.get("privacyMode") or "").upper() == "ON"
 
     return CamContext(
         hw=hw,
@@ -276,7 +276,7 @@ def _poll_cam_info_caches(
     privacy_str = cam_raw.get("privacyMode", "")
     feat_support = cam_raw.get("featureSupport") or {}
     has_light = feat_support.get("light", False)
-    feat_status = cam_raw.get("featureStatus", {})
+    feat_status = cam_raw.get("featureStatus") or {}
     light_on = feat_status.get("frontIlluminatorInGeneralLightOn")
 
     cache = coordinator.shc_state_cache.setdefault(
@@ -466,7 +466,11 @@ async def _poll_cam_control(
                 and ls.body is not None
                 and coordinator.light_set_at.get(cam_id) == ls_stamp
             ):
-                coordinator.lighting_switch_cache[cam_id] = ls.body
+                from .shc import normalize_lighting_switch
+
+                coordinator.lighting_switch_cache[cam_id] = normalize_lighting_switch(
+                    ls.body
+                )
                 sync_gen2_light_cache(coordinator, cam_id)
         except Exception as err:
             _LOGGER.debug(
