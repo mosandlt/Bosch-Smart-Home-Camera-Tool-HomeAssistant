@@ -155,3 +155,41 @@ async def test_every_platform_sets_up(hass: HomeAssistant, variant: str) -> None
     # Platforms that add coordinator listeners arm the refresh timer.
     coord._unschedule_refresh()
     assert not errors
+
+
+@pytest.mark.asyncio
+async def test_shc_state_update_tolerates_null_title_and_device_name():
+    """GitHub #87 follow-up: a null camera title / SHC device name must not
+    raise AttributeError on `.lower()`; the camera simply has no SHC match."""
+    from types import SimpleNamespace
+
+    from custom_components.bosch_smart_camera.shc import _update_one_camera_shc_state
+
+    coord = SimpleNamespace(shc_state_cache={})
+    cam = {"info": {"title": None}}
+    await _update_one_camera_shc_state(
+        coord, "11111111-1111-1111-1111-111111111111", cam, [{"name": None, "id": "x"}]
+    )
+    assert coord.shc_state_cache == {}
+    await _update_one_camera_shc_state(
+        coord, "11111111-1111-1111-1111-111111111111", {"info": None}, []
+    )
+    assert coord.shc_state_cache == {}
+
+
+@pytest.mark.asyncio
+async def test_shc_state_update_skips_null_device_entries() -> None:
+    """A null / nameless entry in the SHC /devices list is skipped, not fatal."""
+    from types import SimpleNamespace
+
+    from custom_components.bosch_smart_camera.shc import _update_one_camera_shc_state
+
+    coord = SimpleNamespace(shc_state_cache={})
+    cam = {"info": {"title": "Terrasse"}}
+    await _update_one_camera_shc_state(
+        coord,
+        "11111111-1111-1111-1111-111111111111",
+        cam,
+        [None, {"name": None, "id": "x"}],
+    )
+    assert coord.shc_state_cache == {}

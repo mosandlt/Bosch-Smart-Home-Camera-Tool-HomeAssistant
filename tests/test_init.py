@@ -1234,6 +1234,60 @@ class TestCloudDegradedStartup:
             with pytest.raises(ConfigEntryNotReady):
                 await async_setup_entry(hass, entry)
 
+    @pytest.mark.asyncio
+    async def test_bad_json_cause_still_degrades_like_a_cloud_outage(self):
+        """A ValueError (e.g. JSONDecodeError from a broken 200 response) is a
+        transient cloud problem, not a code bug: degraded startup still applies."""
+        from custom_components.bosch_smart_camera import async_setup_entry
+
+        hass = _make_hass_setup_lan_fallback()
+        entry = _make_entry_setup_lan_fallback()
+        err = ConfigEntryNotReady("bad json")
+        err.__cause__ = ValueError("Expecting value")
+        coord_stub = _make_coord_stub_setup_lan_fallback([], first_refresh_raises=err)
+        ent_reg = MagicMock()
+        ent_reg.async_get_entity_id = MagicMock(return_value=None)
+
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(
+                f"{MODULE}._rehydrate_cams_from_registry",
+                return_value=({CAM_A}, {CAM_A: "Terrasse"}),
+            ),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+            patch(
+                "homeassistant.helpers.entity_registry.async_get", return_value=ent_reg
+            ),
+        ):
+            assert await async_setup_entry(hass, entry) is True
+
+    @pytest.mark.asyncio
+    async def test_code_error_cause_is_not_masked_as_cloud_outage(self):
+        """GitHub #87: HA wraps an unexpected coordinator error (AttributeError)
+        in ConfigEntryNotReady. That is a bug, not a cloud outage, so the
+        degraded startup must not swallow it even with a populated registry."""
+        from custom_components.bosch_smart_camera import async_setup_entry
+
+        hass = _make_hass_setup_lan_fallback()
+        entry = _make_entry_setup_lan_fallback()
+        err = ConfigEntryNotReady("boom")
+        err.__cause__ = AttributeError("'NoneType' object has no attribute 'get'")
+        coord_stub = _make_coord_stub_setup_lan_fallback([], first_refresh_raises=err)
+
+        with (
+            patch(f"{MODULE}.BoschCameraCoordinator", return_value=coord_stub),
+            patch("homeassistant.helpers.storage.Store", return_value=_FakeStore(None)),
+            patch(
+                f"{MODULE}._rehydrate_cams_from_registry",
+                return_value=({CAM_A}, {CAM_A: "Terrasse"}),
+            ),
+            patch(f"{MODULE}.cf_unbuffer.register"),
+        ):
+            with pytest.raises(ConfigEntryNotReady):
+                await async_setup_entry(hass, entry)
+        coord_stub.async_outage_ping_all.assert_not_called()
+
 
 class TestPersistedLanIps:
     @pytest.mark.asyncio

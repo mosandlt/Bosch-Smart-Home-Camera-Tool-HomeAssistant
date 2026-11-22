@@ -79,6 +79,10 @@ from .services import _register_services
 
 _LOGGER = logging.getLogger(__name__)
 
+# Errors that indicate a bug / unexpected payload shape rather than a network
+# or cloud failure; never treated as "cloud unreachable".
+_PROGRAMMING_ERRORS = (AttributeError, TypeError, KeyError, IndexError)
+
 # FCM_DELIVERY_DEAD_AFTER_SEC moved to const.py — shared with event_dispatch.py.
 
 # SLOW_TIER_MAX_DEFER_SEC moved to const.py — shared with slow_tier.py.
@@ -920,6 +924,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady as exc:
+        if isinstance(exc.__cause__, _PROGRAMMING_ERRORS):
+            # HA wraps ANY unexpected coordinator error in ConfigEntryNotReady;
+            # a code/data-shape bug is not a cloud outage and must not be
+            # masked by the degraded startup (it would fail on every refresh).
+            raise
         _LOGGER.warning(
             "Bosch cloud unreachable on startup (%s) — bringing up integration "
             "with LAN-only entities; cloud-driven data will arrive on next refresh",

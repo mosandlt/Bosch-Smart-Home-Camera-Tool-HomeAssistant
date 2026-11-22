@@ -514,11 +514,16 @@ async def _update_one_camera_shc_state(
     shc_devices: list[dict[str, Any]],
 ) -> None:
     """Fetch and cache SHC CameraLight + PrivacyMode state for a single camera."""
-    title = cam.get("info", {}).get("title", "").lower().strip()
+    title = str((cam.get("info") or {}).get("title") or "").lower().strip()
+
+    if not title:
+        return
 
     device_id = None
     for dev in shc_devices:
-        if dev.get("name", "").lower().strip() == title:
+        if not isinstance(dev, dict):
+            continue
+        if str(dev.get("name") or "").lower().strip() == title:
             device_id = dev.get("id")
             break
     if not device_id:
