@@ -284,6 +284,28 @@ class TestCheckOneCameraStatusCloudPath:
         }
 
     @pytest.mark.asyncio
+    async def test_status_check_logs_raw_answers(self, caplog):
+        """Debug log shows what the cloud answered, also when it is OFFLINE (#88)."""
+        coord = _make_coord()
+        session = _make_session(
+            {
+                "/ping": _make_resp(500),
+                "/commissioned": _make_resp(200, {"configured": True}),
+            }
+        )
+        with caplog.at_level("DEBUG"):
+            _cam, status = await _check_one_camera_status(
+                coord, CAM_A, session, HEADERS, NOW, INTERVAL
+            )
+        assert status == "OFFLINE"
+        text = caplog.text
+        assert "ping answered=False" in text
+        assert (
+            "commissioned HTTP 200 connected=None commissioned=None configured=True"
+            in text
+        )
+
+    @pytest.mark.asyncio
     async def test_ping_444_does_not_fall_back_to_commissioned(self):
         """ping_ok=True is set even for SESSION_LIMIT — the commissioned
         fallback must NOT also run (it's a fallback for a FAILED ping, not

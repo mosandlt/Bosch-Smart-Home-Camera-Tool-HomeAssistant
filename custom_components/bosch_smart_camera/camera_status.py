@@ -141,6 +141,12 @@ async def _check_one_camera_status(
         ping_status, ping_ok = await ping_raw(session, token, cam_id, api_url=CLOUD_API)
     except Exception as err:
         _LOGGER.debug("Ping check error for %s: %s", cam_id, err)
+    _LOGGER.debug(
+        "Status check %s: ping answered=%s status=%r",
+        cam_id[:8],
+        ping_ok,
+        ping_status,
+    )
     if ping_ok:
         status = ping_status
         if status == "SESSION_LIMIT":
@@ -158,6 +164,15 @@ async def _check_one_camera_status(
         except Exception as err:
             _LOGGER.debug("Commissioned fallback error for %s: %s", cam_id, err)
         else:
+            _LOGGER.debug(
+                "Status check %s: commissioned HTTP %s connected=%r "
+                "commissioned=%r configured=%r",
+                cam_id[:8],
+                raw.status,
+                raw.body.get("connected") if isinstance(raw.body, dict) else None,
+                raw.body.get("commissioned") if isinstance(raw.body, dict) else None,
+                raw.body.get("configured") if isinstance(raw.body, dict) else None,
+            )
             if raw.status == 200 and isinstance(raw.body, dict):
                 comm = raw.body
                 coordinator.commissioned_cache[cam_id] = comm
