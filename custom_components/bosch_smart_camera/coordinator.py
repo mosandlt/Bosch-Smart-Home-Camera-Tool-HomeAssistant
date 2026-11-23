@@ -53,7 +53,7 @@ from . import (
 )
 from . import recorder as nvr_recorder
 from .camera_list import fetch_camera_list
-from .camera_status import poll_statuses
+from .camera_status import log_list_connection_status, poll_statuses
 from .cloud_ssl import async_bosch_cloud_session_cm
 from .const import (
     CLOUD_API,
@@ -1989,6 +1989,7 @@ class BoschCameraCoordinator(
             for cam_id_key, cam_entry in data.items():
                 cam_raw = cam_entry.get("info", {})
                 _poll_cam_info_caches(self, cam_id_key, cam_raw)
+                log_list_connection_status(cam_id_key, cam_raw, cam_entry.get("status"))
 
                 # ── Per-camera context: hw/is_gen2/is_online/stream state/
                 # slow-tier defer gate — computed once, shared by every

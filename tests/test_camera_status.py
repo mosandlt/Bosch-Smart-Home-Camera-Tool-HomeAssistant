@@ -305,6 +305,18 @@ class TestCheckOneCameraStatusCloudPath:
             in text
         )
 
+    def test_list_connection_status_logged_next_to_ping(self, caplog):
+        """The list's connectionStatus is logged beside /ping (#88)."""
+        from custom_components.bosch_smart_camera.camera_status import (
+            log_list_connection_status,
+        )
+
+        with caplog.at_level("DEBUG"):
+            log_list_connection_status(CAM_A, {"connectionStatus": "ONLINE"}, "OFFLINE")
+            log_list_connection_status(CAM_A, {}, None)
+        assert "connectionStatus='ONLINE', ping status='OFFLINE'" in caplog.text
+        assert "connectionStatus=None, ping status=None" in caplog.text
+
     @pytest.mark.asyncio
     async def test_ping_444_does_not_fall_back_to_commissioned(self):
         """ping_ok=True is set even for SESSION_LIMIT — the commissioned

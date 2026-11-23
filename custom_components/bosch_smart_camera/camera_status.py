@@ -54,6 +54,21 @@ def _get_options(entry: Any) -> dict[str, Any]:
     return opts
 
 
+def log_list_connection_status(
+    cam_id: str, cam_raw: dict[str, Any], ping_status: Any
+) -> None:
+    """Debug-log the list's `connectionStatus` next to the `/ping` status.
+
+    The two can differ, and the Bosch app may show the list value.
+    """
+    _LOGGER.debug(
+        "Status check %s: video_inputs connectionStatus=%r, ping status=%r",
+        cam_id[:8],
+        cam_raw.get("connectionStatus"),
+        ping_status,
+    )
+
+
 async def _check_one_camera_status(
     coordinator: BoschCameraCoordinator,
     cam_id: str,
