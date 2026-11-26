@@ -185,26 +185,23 @@ class _BoschSwitchBase(CoordinatorEntity, SwitchEntity):  # type: ignore[misc]
         right before the service call reaches here, so it reflects the
         actual calling user for this call — not stale state.
 
-        Fails closed unconditionally (hacs/default#8181 review, round 2):
-        no context, no user_id, an unresolvable user_id, or a resolved
-        non-admin user are ALL rejected — including the no-user_id case
-        (automations/scripts), even though HA's own
-        `helpers.service.async_register_admin_service` treats a missing
-        user_id as implicitly trusted (automation/script-originated) and
-        lets it through. That's deliberately not good enough here: an
-        automation calling these two specifically should be traceable to an
-        admin the same way a direct call is, since the consequence is a
-        real physical siren or disarming the intrusion system, not a
-        config-style action. An automation that needs to arm/disarm or
-        trigger the siren still can — it just has to run as an admin
-        context (e.g. via a script/scene an admin owns), same as every
-        other admin-gated action in HA. Delegates to the shared
-        `guards.async_require_admin` (also used to gate the account/
-        destructive services in `services.py`) so both surfaces fail
-        closed the exact same way.
+        Calls with a context but no user_id (automations, scripts, scenes)
+        are rejected by default. The opt-in option `allow_automation_siren`
+        (GitHub #89, vibration sensor → siren) lets them through, the way
+        HA core's own admin-service helper does. Always rejected: no
+        context at all, an unresolvable user_id, and a resolved non-admin
+        user. Services in `services.py` keep the strict guard.
         """
         try:
-            await async_require_admin(self.hass, self._context)
+            await async_require_admin(
+                self.hass,
+                self._context,
+                allow_system_origin=bool(
+                    (getattr(self.coordinator, "options", None) or {}).get(
+                        "allow_automation_siren", False
+                    )
+                ),
+            )
         except Unauthorized as err:
             err.entity_id = self.entity_id
             raise

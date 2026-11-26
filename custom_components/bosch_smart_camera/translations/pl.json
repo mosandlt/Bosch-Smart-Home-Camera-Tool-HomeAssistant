@@ -97,6 +97,7 @@
               "enable_snapshot_button": "Przełączniki i przyciski (Stream, Prywatność, Światło)",
               "enable_binary_sensors": "Czujniki ruchu / alarmu dźwiękowego",
               "enable_intercom": "Domofon (dwukierunkowy dźwięk)",
+              "allow_automation_siren": "Allow automations to trigger siren / alarm arm",
               "motion_active_window": "Czujnik ruchu: aktywne okno (sekundy)",
               "auto_play_default": "Domyślne automatyczne odtwarzanie karty"
             },
@@ -106,6 +107,7 @@
               "enable_snapshot_button": "Twórz encje przełączników i przycisków: Live Stream, Audio, Privacy Mode, Camera Light, Powiadomienia, Odśwież.",
               "enable_binary_sensors": "Twórz czujniki binarne, które włączają się na 30 sekund po zdarzeniu ruchu lub alarmu dźwiękowego. Przydatne do automatyzacji.",
               "enable_intercom": "Włącz encję przełącznika domofonu (dwukierunkowy dźwięk). Domyślnie wyłączony. Umożliwia wysyłanie dźwięku do głośnika kamery.",
+              "allow_automation_siren": "Let automations, scripts and scenes (calls without a user) switch the panic siren and the alarm arm/disarm switch. Off (default) = only admin users can.",
               "motion_active_window": "Jak długo (sekundy) binarny czujnik ruchu pozostaje WŁĄCZONY po zdarzeniu. Zakres 10-300, domyślnie 90.",
               "auto_play_default": "Kontroluje, czy strumień na żywo pojawia się automatycznie po załadowaniu karty. `auto_play` w YAML karty ma pierwszeństwo.\n• **Tylko LAN** (zalecane): autoodtwarzanie w sieci domowej; zdalnie strumień jest wstępnie inicjowany, a overlay zakrywa wideo do dotknięcia.\n• **Zawsze**: autoodtwarzanie w każdej sesji.\n• **Dotknij, aby pokazać**: wstępna inicjalizacja i overlay w każdej sesji — dotykasz raz, aby pokazać wideo."
             }

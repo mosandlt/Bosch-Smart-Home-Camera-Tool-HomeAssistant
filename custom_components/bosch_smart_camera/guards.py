@@ -25,7 +25,12 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_require_admin(hass: HomeAssistant, context: Context | None) -> None:
+async def async_require_admin(
+    hass: HomeAssistant,
+    context: Context | None,
+    *,
+    allow_system_origin: bool = False,
+) -> None:
     """Raise Unauthorized unless ``context`` resolves to an admin user.
 
     Shared by the switch-entity admin gate (`_BoschSwitchBase._require_admin`)
@@ -40,6 +45,10 @@ async def async_require_admin(hass: HomeAssistant, context: Context | None) -> N
     user, the same way a direct frontend call is.
     """
     user_id = context.user_id if context is not None else None
+    if allow_system_origin and context is not None and user_id is None:
+        # Automation/script/scene-originated call: HA gives it a context
+        # without a user_id. Opt-in only (siren/arm switches, issue #89).
+        return
     user = await hass.auth.async_get_user(user_id) if user_id else None
     if user is None or not user.is_admin:
         raise Unauthorized(context=context)

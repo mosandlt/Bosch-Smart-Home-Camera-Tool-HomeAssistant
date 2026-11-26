@@ -97,6 +97,7 @@
               "enable_snapshot_button": "Перемикачі та кнопки (Stream, Конфіденційність, Світло)",
               "enable_binary_sensors": "Датчики руху / звукового сигналу",
               "enable_intercom": "Домофон (двосторонній звук)",
+              "allow_automation_siren": "Allow automations to trigger siren / alarm arm",
               "motion_active_window": "Датчик руху: активне вікно (секунди)",
               "auto_play_default": "Автовідтворення картки (типове)"
             },
@@ -106,6 +107,7 @@
               "enable_snapshot_button": "Створювати перемикачі та кнопки: Live Stream, Audio, Privacy Mode, Camera Light, Сповіщення, Оновити.",
               "enable_binary_sensors": "Створювати бінарні датчики, які вмикаються на 30 секунд після події руху або звукового сигналу. Корисно для автоматизацій.",
               "enable_intercom": "Увімкнути об'єкт-перемикач домофона (двосторонній звук). За замовчуванням вимкнено. Дозволяє надсилати звук на динамік камери.",
+              "allow_automation_siren": "Let automations, scripts and scenes (calls without a user) switch the panic siren and the alarm arm/disarm switch. Off (default) = only admin users can.",
               "motion_active_window": "Скільки секунд бінарний датчик руху залишається УВІМКНЕНИМ після події. Діапазон 10-300, за замовчуванням 90.",
               "auto_play_default": "Керує автоматичним показом прямого ефіру при завантаженні картки. `auto_play` у YAML картки має пріоритет.\n• **Тільки LAN** (рекомендовано): автозапуск у домашній мережі; віддалено потік попередньо ініціалізується, а overlay закриває відео до дотику.\n• **Завжди**: автозапуск у кожній сесії.\n• **Торкніться для показу**: попередня ініціалізація та overlay у кожній сесії — один дотик показує відео."
             }

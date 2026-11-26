@@ -2206,18 +2206,48 @@ class TestSafetyCriticalSwitchAdminGate:
         )
 
     @pytest.mark.asyncio
-    async def test_panic_alarm_rejects_call_with_no_user_id(
+    async def test_panic_alarm_rejects_automation_by_default(
         self, coord: SimpleNamespace, entry: SimpleNamespace
     ):
-        """A context with no user_id (automation/script) must now be
-        rejected too — round 2 of the review explicitly called out that
-        the previous pass-through behavior did not fail closed for the
-        case an unauthenticated/context-less caller produces."""
+        """Default (allow_automation_siren off): context without user_id
+        is rejected."""
         from homeassistant.exceptions import Unauthorized
 
         sw = self._panic(coord, entry)
         _bind_hass_modepins(sw)
         sw._context = SimpleNamespace(user_id=None)
+        with pytest.raises(Unauthorized):
+            await sw.async_turn_on()
+        coord.async_put_camera.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_panic_alarm_allows_automation_when_option_on(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
+        """GitHub #89: with allow_automation_siren on, automation/script
+        calls (context, user_id=None) reach the siren."""
+        coord.options = {"allow_automation_siren": True}
+        sw = self._panic(coord, entry)
+        _bind_hass_modepins(sw)
+        sw._context = SimpleNamespace(user_id=None)
+        await sw.async_turn_on()
+        coord.async_put_camera.assert_awaited_once_with(
+            CAM_ID, "panic_alarm", {"status": "ON"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_panic_alarm_option_on_still_rejects_non_admin(
+        self, coord: SimpleNamespace, entry: SimpleNamespace
+    ):
+        from homeassistant.exceptions import Unauthorized
+
+        coord.options = {"allow_automation_siren": True}
+        sw = self._panic(coord, entry)
+        _bind_hass_modepins(sw)
+        sw.hass.auth = SimpleNamespace(
+            async_get_user=AsyncMock(return_value=SimpleNamespace(is_admin=False))
+        )
+        sw._context = SimpleNamespace(user_id="non-admin-user")
         with pytest.raises(Unauthorized):
             await sw.async_turn_on()
         coord.async_put_camera.assert_not_called()

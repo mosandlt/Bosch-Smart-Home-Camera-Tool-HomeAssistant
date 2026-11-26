@@ -135,6 +135,7 @@ OPTIONS_SECTIONS: dict[str, list[str]] = {
         "motion_active_window",
         "enable_snapshot_button",
         "enable_intercom",
+        "allow_automation_siren",
         "auto_play_default",
     ],
     "stream": [
@@ -1390,6 +1391,10 @@ class BoschCameraOptionsFlow(config_entries.OptionsFlow):  # type: ignore[misc]
                     vol.Optional(
                         "enable_intercom",
                         default=bool(opts.get("enable_intercom", False)),
+                    ): bool,
+                    vol.Optional(
+                        "allow_automation_siren",
+                        default=bool(opts.get("allow_automation_siren", False)),
                     ): bool,
                     vol.Optional(
                         "auto_play_default",

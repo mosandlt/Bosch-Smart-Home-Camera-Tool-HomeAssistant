@@ -98,6 +98,7 @@
               "enable_binary_sensors": "Bewegungs-/Audio-Sensoren",
               "motion_active_window": "Bewegungssensor: Aktiv-Fenster (Sekunden)",
               "enable_intercom": "Gegensprechanlage (Zwei-Wege-Audio)",
+              "allow_automation_siren": "Automationen dürfen Sirene / Alarm schalten",
               "auto_play_default": "Card-Autoplay (Standard)"
             },
             "data_description": {
@@ -107,6 +108,7 @@
               "enable_binary_sensors": "Binärsensoren die nach Bewegung oder Audio-Alarm für das konfigurierte Aktiv-Fenster EIN werden. Nützlich für Automationen.",
               "motion_active_window": "Wie viele Sekunden die Bewegungs-/Audio-/Person-Binärsensoren nach einem Ereignis EIN bleiben. Standard: 90 s. Bereich: 10–300 s.",
               "enable_intercom": "Aktiviert den Gegensprechanlage-Schalter (Zwei-Wege-Audio). Standardmäßig deaktiviert. Ermöglicht Audio an den Kamera-Lautsprecher zu senden.",
+              "allow_automation_siren": "Erlaubt Automationen, Skripten und Szenen (Aufrufe ohne Benutzer), die Panik-Sirene und das Scharf-/Unscharfschalten zu bedienen. Aus (Standard) = nur Admin-Benutzer.",
               "auto_play_default": "Legt fest, ob das Live-Bild beim Öffnen der Karte automatisch angezeigt wird. Pro Karte überschreibbar via YAML `auto_play`.\n• **Nur im LAN** (Empfehlung): automatisch im Heimnetzwerk; remote wird der Stream im Hintergrund initialisiert und ein Overlay verdeckt das Video, bis du antippst.\n• **Immer**: automatisch in jeder Sitzung.\n• **Immer Overlay**: Stream wird vorab initialisiert und das Overlay erscheint immer — du tippst einmal an, um das Video zu zeigen."
             }
           },

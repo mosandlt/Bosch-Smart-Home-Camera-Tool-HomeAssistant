@@ -97,6 +97,7 @@
               "enable_snapshot_button": "Interruptores y botones (Stream, Privacidad, Luz)",
               "enable_binary_sensors": "Sensores de alarma de movimiento / audio",
               "enable_intercom": "Interfono (audio bidireccional)",
+              "allow_automation_siren": "Allow automations to trigger siren / alarm arm",
               "motion_active_window": "Sensor de movimiento: ventana activa (segundos)",
               "auto_play_default": "Reproducción automática de la tarjeta"
             },
@@ -106,6 +107,7 @@
               "enable_snapshot_button": "Crea entidades de interruptor y botón: Live Stream, Audio, Modo Privacidad, Luz de cámara, Notificaciones, Actualizar.",
               "enable_binary_sensors": "Crea sensores binarios que se activan durante 30 segundos tras un evento de movimiento o alarma de audio. Útil para automatizaciones.",
               "enable_intercom": "Activa la entidad de interruptor del interfono (audio bidireccional). Desactivado por defecto. Permite enviar audio al altavoz de la cámara.",
+              "allow_automation_siren": "Let automations, scripts and scenes (calls without a user) switch the panic siren and the alarm arm/disarm switch. Off (default) = only admin users can.",
               "motion_active_window": "Cuántos segundos permanece ACTIVADO el sensor binario de movimiento tras un evento. Rango 10-300, por defecto 90.",
               "auto_play_default": "Controla si el stream en vivo se revela automáticamente al cargar la tarjeta. `auto_play` en YAML por tarjeta tiene prioridad.\n• **Solo LAN** (recomendado): auto-revelar en la red doméstica; en remoto el stream se pre-inicializa y un overlay cubre el vídeo hasta que tocas.\n• **Siempre**: auto-revelar en cada sesión.\n• **Tocar para mostrar**: pre-inicializa el stream y muestra el overlay en cada sesión — siempre tocas una vez para mostrar el vídeo."
             }

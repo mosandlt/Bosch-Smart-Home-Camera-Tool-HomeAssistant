@@ -291,6 +291,7 @@ DEFAULT_OPTIONS = {
     "mark_events_read": False,
     "fcm_push_mode": "auto",
     "enable_intercom": False,
+    "allow_automation_siren": False,
     "enable_smb_upload": False,
     "upload_protocol": "smb",
     "smb_server": "",

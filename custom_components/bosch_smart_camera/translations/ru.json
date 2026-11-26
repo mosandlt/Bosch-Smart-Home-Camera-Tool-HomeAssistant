@@ -97,6 +97,7 @@
               "enable_snapshot_button": "Переключатели и кнопки (Stream, Конфиденциальность, Свет)",
               "enable_binary_sensors": "Датчики движения / звукового сигнала",
               "enable_intercom": "Домофон (двусторонний звук)",
+              "allow_automation_siren": "Allow automations to trigger siren / alarm arm",
               "motion_active_window": "Датчик движения: активное окно (секунды)",
               "auto_play_default": "Автозапуск карточки по умолчанию"
             },
@@ -106,6 +107,7 @@
               "enable_snapshot_button": "Создавать переключатели и кнопки: Live Stream, Audio, Privacy Mode, Camera Light, Уведомления, Обновить.",
               "enable_binary_sensors": "Создавать бинарные датчики, которые включаются на 30 секунд после события движения или звукового сигнала. Полезно для автоматизаций.",
               "enable_intercom": "Включить объект-переключатель домофона (двусторонний звук). По умолчанию отключён. Позволяет отправлять звук на динамик камеры.",
+              "allow_automation_siren": "Let automations, scripts and scenes (calls without a user) switch the panic siren and the alarm arm/disarm switch. Off (default) = only admin users can.",
               "motion_active_window": "Сколько секунд бинарный датчик движения остаётся ВКЛЮЧЁННЫМ после события. Диапазон 10-300, по умолчанию 90.",
               "auto_play_default": "Управляет автоматическим показом прямого эфира при загрузке карточки. `auto_play` в YAML карточки имеет приоритет.\n• **Только LAN** (рекомендуется): автозапуск в домашней сети; удалённо поток предзагружается, а overlay закрывает видео до касания.\n• **Всегда**: автозапуск в каждой сессии.\n• **Коснитесь для показа**: предзагрузка и overlay в каждой сессии — одно касание показывает видео."
             }
