@@ -93,7 +93,6 @@ async def async_setup_entry(
             BoschCameraEventsTodaySensor(coordinator, cam_id, config_entry),
             BoschWifiSignalSensor(coordinator, cam_id, config_entry),
             BoschFirmwareVersionSensor(coordinator, cam_id, config_entry),
-            BoschAmbientLightSensor(coordinator, cam_id, config_entry),
             BoschClockOffsetSensor(coordinator, cam_id, config_entry),
             BoschMotionSensitivitySensor(coordinator, cam_id, config_entry),
             BoschLastEventTypeSensor(coordinator, cam_id, config_entry),
@@ -124,7 +123,14 @@ async def async_setup_entry(
         from .models import get_model_config as _gmc_setup
 
         hw_setup = cam_info.get("hardwareVersion", "")
-        if _gmc_setup(hw_setup).generation >= 2:
+        # Ambient-light level: kept for every camera except Gen2 without light
+        # hardware (Indoor II), where it stayed permanently unknown.
+        _cfg_setup = _gmc_setup(hw_setup)
+        if _cfg_setup.generation < 2 or _cfg_setup.has_light:
+            cam_entities.append(
+                BoschAmbientLightSensor(coordinator, cam_id, config_entry)
+            )
+        if _cfg_setup.generation >= 2:
             # Ambient-light schedule is Outdoor-only (Indoor II has no RGB lights)
             if hw_setup not in ("HOME_Eyes_Indoor", "CAMERA_INDOOR_GEN2"):
                 cam_entities.append(

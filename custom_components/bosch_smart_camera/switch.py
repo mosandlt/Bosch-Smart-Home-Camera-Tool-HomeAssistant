@@ -328,6 +328,13 @@ async def async_setup_entry(
         if get_model_config(hw_version).generation >= 2:
             cam_entities.append(BoschStatusLedSwitch(coordinator, cam_id, config_entry))
             cam_entities.append(
+                BoschIntrusionDetectionSwitch(coordinator, cam_id, config_entry)
+            )
+        # Light switches — Gen2 cameras with light hardware only (Outdoor II).
+        # Indoor II has no controllable light, so these could never work.
+        _model_cfg = get_model_config(hw_version)
+        if _model_cfg.generation >= 2 and _model_cfg.has_light:
+            cam_entities.append(
                 BoschMotionLightSwitch(coordinator, cam_id, config_entry)
             )
             cam_entities.append(
@@ -335,9 +342,6 @@ async def async_setup_entry(
             )
             cam_entities.append(
                 BoschSoftLightFadingSwitch(coordinator, cam_id, config_entry)
-            )
-            cam_entities.append(
-                BoschIntrusionDetectionSwitch(coordinator, cam_id, config_entry)
             )
         # Notification type toggles — person is cloud AI (all cameras);
         # audio gated on featureSupport.sound (API-reported, not hardcoded by model).

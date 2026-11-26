@@ -25,6 +25,10 @@ class CameraModelConfig:
     # ── Display ──────────────────────────────────────────────────────────
     display_name: str  # Official Bosch product name
     generation: int = 1  # Hardware generation (1 or 2)
+    # Camera has user-controllable light hardware (spotlight / LED groups).
+    # Gates the Gen2 light switches (motion light, ambient light, soft fading);
+    # False for the indoor models, which only have non-controllable IR LEDs.
+    has_light: bool = True
 
     # ── Pre-warm (RTSP DESCRIBE to wake H.264 encoder) ───────────────────
     pre_warm_delay: int = (
@@ -89,6 +93,7 @@ MODELS: dict[str, CameraModelConfig] = {
     "INDOOR": CameraModelConfig(
         display_name="360 Innenkamera",
         generation=1,
+        has_light=False,
         pre_warm_delay=1,
         pre_warm_retries=3,
         pre_warm_retry_wait=3,
@@ -180,6 +185,7 @@ MODELS["CAMERA_OUTDOOR_GEN2"] = MODELS["HOME_Eyes_Outdoor"]
 MODELS["HOME_Eyes_Indoor"] = CameraModelConfig(
     display_name="Eyes Innenkamera II",
     generation=2,
+    has_light=False,
     pre_warm_delay=1,
     pre_warm_retries=3,
     pre_warm_retry_wait=3,
