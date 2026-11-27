@@ -7,6 +7,8 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v18.2.1] - 2026-11-27
+
 ### Fixed
 
 - **No more `Failed to load services.yaml for integration: bosch_shc_camera` error on new installs.** The old `bosch_shc_camera.*` action names are kept only for setups that came from the old domain (migrated or created before 2026-11-27); fresh installs register the actions under `bosch_smart_camera` alone (#90).
