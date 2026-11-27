@@ -1199,6 +1199,10 @@
     "legacy_folder": {
       "title": "Leftover folder from the previous version",
       "description": "Your setup was moved to the new `bosch_smart_camera` integration. The old folder `{folder}` is no longer used. Delete it and restart Home Assistant."
+    },
+    "legacy_services": {
+      "title": "Old action names were removed",
+      "description": "The actions `bosch_shc_camera.*` no longer exist. Call `bosch_smart_camera.*` in your automations, scripts and dashboards instead (same names and fields)."
     }
   },
   "system_health": {

@@ -730,9 +730,9 @@ class TestGo2rtcAutoCreate:
         assert kwargs["context"] == {"source": "system"}
 
     @pytest.mark.asyncio
-    async def test_adopted_legacy_entry_forces_service_aliases(self):
-        """After a pre-v18 entry was adopted the legacy service aliases replace
-        handlers of a still-installed legacy copy, and the folder hint is refreshed."""
+    async def test_adopted_legacy_entry_refreshes_legacy_hints(self):
+        """After a pre-v18 entry was adopted, the folder and removed-actions
+        hints are refreshed (the aliases no longer exist, GitHub #90)."""
         from custom_components.bosch_smart_camera import async_setup_entry
 
         hass = _make_hass(go2rtc_entries=[])
@@ -751,7 +751,7 @@ class TestGo2rtcAutoCreate:
                 f"{MODULE}.async_migrate_legacy_entry",
                 new=AsyncMock(return_value=True),
             ) as migrate,
-            patch(f"{MODULE}.register_legacy_service_aliases") as aliases,
+            patch(f"{MODULE}.async_update_legacy_services_issue") as services_issue,
             patch(
                 f"{MODULE}.async_update_legacy_folder_issue", new=AsyncMock()
             ) as folder_issue,
@@ -759,7 +759,7 @@ class TestGo2rtcAutoCreate:
             assert await async_setup_entry(hass, entry) is True
 
         migrate.assert_awaited_once_with(hass, entry)
-        aliases.assert_called_once_with(hass, force=True)
+        services_issue.assert_called_once_with(hass, entry)
         folder_issue.assert_awaited_once_with(hass, remove=False)
 
     @pytest.mark.asyncio
@@ -19150,40 +19150,6 @@ class TestAsyncSetup:
 
         mock_reg.assert_called_once_with(hass)
         assert result is True
-
-    @pytest.mark.asyncio
-    async def test_async_setup_registers_legacy_service_aliases(self):
-        """Automations that still call bosch_shc_camera.<service> keep working."""
-        from custom_components.bosch_smart_camera import async_setup
-
-        hass = self._make_lovelace_hass(is_running=True)
-
-        with (
-            patch(f"{MODULE}._register_services"),
-            patch(f"{MODULE}.register_legacy_service_aliases") as aliases,
-            patch(f"{MODULE}.should_register_legacy_aliases", return_value=True),
-            patch(f"{MODULE}.async_import_client_credential", new=AsyncMock()),
-        ):
-            await async_setup(hass, {})
-
-        aliases.assert_called_once_with(hass)
-
-    @pytest.mark.asyncio
-    async def test_async_setup_skips_legacy_aliases_on_fresh_install(self):
-        """GitHub #90: no alias domain without integration (services.yaml error)."""
-        from custom_components.bosch_smart_camera import async_setup
-
-        hass = self._make_lovelace_hass(is_running=True)
-
-        with (
-            patch(f"{MODULE}._register_services"),
-            patch(f"{MODULE}.register_legacy_service_aliases") as aliases,
-            patch(f"{MODULE}.should_register_legacy_aliases", return_value=False),
-            patch(f"{MODULE}.async_import_client_credential", new=AsyncMock()),
-        ):
-            await async_setup(hass, {})
-
-        aliases.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_async_setup_not_running_registers_listener(self):

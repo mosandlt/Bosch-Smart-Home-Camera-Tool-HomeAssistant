@@ -31,13 +31,13 @@ from custom_components.bosch_smart_camera.const import (
 from custom_components.bosch_smart_camera.legacy_migration import (
     LEGACY_ENTRY_KEY,
     LEGACY_FOLDER_ISSUE,
+    LEGACY_SERVICES_ISSUE,
     _move_registry_entries,
     async_migrate_legacy_entry,
     async_update_legacy_folder_issue,
+    async_update_legacy_services_issue,
     get_legacy_entry,
     legacy_subentries,
-    register_legacy_service_aliases,
-    should_register_legacy_aliases,
 )
 
 CAM = "11111111-2222-3333-4444-555555555555"
@@ -325,56 +325,6 @@ async def test_folder_issue_follows_the_leftover_folder(
     assert ir.async_get(hass).async_get_issue(DOMAIN, LEGACY_FOLDER_ISSUE) is None
 
 
-async def test_service_alias_forwards_and_warns(
-    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
-) -> None:
-    seen: list[dict] = []
-
-    async def handler(call: ServiceCall) -> dict:
-        seen.append(dict(call.data))
-        return {"ok": True}
-
-    hass.services.async_register(
-        DOMAIN, "ping", handler, supports_response=SupportsResponse.OPTIONAL
-    )
-    register_legacy_service_aliases(hass)
-
-    with caplog.at_level(logging.WARNING):
-        result = await hass.services.async_call(
-            LEGACY_DOMAIN,
-            "ping",
-            {"camera_id": CAM},
-            blocking=True,
-            return_response=True,
-        )
-    assert seen == [{"camera_id": CAM}]
-    assert result == {"ok": True}
-    assert f"{LEGACY_DOMAIN}.ping is deprecated" in caplog.text
-
-
-async def test_service_alias_does_not_replace_unless_forced(
-    hass: HomeAssistant,
-) -> None:
-    calls: list[str] = []
-
-    async def new_handler(call: ServiceCall) -> None:
-        calls.append("new")
-
-    async def old_handler(call: ServiceCall) -> None:
-        calls.append("old")
-
-    hass.services.async_register(DOMAIN, "ping", new_handler)
-    hass.services.async_register(LEGACY_DOMAIN, "ping", old_handler)
-
-    register_legacy_service_aliases(hass)
-    await hass.services.async_call(LEGACY_DOMAIN, "ping", blocking=True)
-    assert calls == ["old"]
-
-    register_legacy_service_aliases(hass, force=True)
-    await hass.services.async_call(LEGACY_DOMAIN, "ping", blocking=True)
-    assert calls == ["old", "new"]
-
-
 async def test_flow_offers_migration_and_copies_the_setup(
     hass: HomeAssistant,
 ) -> None:
@@ -552,25 +502,30 @@ async def test_leftover_folder_with_foreign_manifest_is_kept(
     assert ir.async_get(hass).async_get_issue(DOMAIN, LEGACY_FOLDER_ISSUE) is not None
 
 
-async def test_fresh_install_gets_no_legacy_alias_domain(hass: HomeAssistant) -> None:
-    """GitHub #90: an alias domain without integration logs a services.yaml error."""
-    fresh = MockConfigEntry(domain=DOMAIN, data={})
-    object.__setattr__(fresh, "created_at", datetime(2026, 12, 1, tzinfo=UTC))
-    fresh.add_to_hass(hass)
-    assert should_register_legacy_aliases(hass) is False
+def _entry(created: datetime, data: dict | None = None) -> MockConfigEntry:
+    entry = MockConfigEntry(domain=DOMAIN, data=data or {})
+    object.__setattr__(entry, "created_at", created)
+    return entry
 
 
-async def test_pre_cutoff_and_migrated_entries_keep_aliases(
+async def test_pre_cutoff_setup_gets_the_removed_actions_hint(
     hass: HomeAssistant,
 ) -> None:
-    old = MockConfigEntry(domain=DOMAIN, data={})
-    object.__setattr__(old, "created_at", datetime(2026, 11, 10, tzinfo=UTC))
-    old.add_to_hass(hass)
-    assert should_register_legacy_aliases(hass) is True
+    """GitHub #90: the aliases are gone; old set-ups are told once."""
+    async_update_legacy_services_issue(hass, _entry(datetime(2026, 11, 10, tzinfo=UTC)))
+    assert ir.async_get(hass).async_get_issue(DOMAIN, LEGACY_SERVICES_ISSUE)
 
 
-async def test_migrated_flag_beats_creation_date(hass: HomeAssistant) -> None:
-    new = MockConfigEntry(domain=DOMAIN, data={"legacy_service_aliases": True})
-    object.__setattr__(new, "created_at", datetime(2026, 12, 1, tzinfo=UTC))
-    new.add_to_hass(hass)
-    assert should_register_legacy_aliases(hass) is True
+async def test_migrated_setup_gets_the_hint_even_when_new(hass: HomeAssistant) -> None:
+    entry = _entry(datetime(2026, 12, 1, tzinfo=UTC), {"legacy_service_aliases": True})
+    async_update_legacy_services_issue(hass, entry)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, LEGACY_SERVICES_ISSUE)
+
+
+async def test_fresh_install_gets_no_hint(hass: HomeAssistant) -> None:
+    async_update_legacy_services_issue(hass, _entry(datetime(2026, 12, 1, tzinfo=UTC)))
+    assert ir.async_get(hass).async_get_issue(DOMAIN, LEGACY_SERVICES_ISSUE) is None
+
+
+async def test_legacy_alias_domain_is_not_registered(hass: HomeAssistant) -> None:
+    assert not hass.services.async_services_for_domain(LEGACY_DOMAIN)

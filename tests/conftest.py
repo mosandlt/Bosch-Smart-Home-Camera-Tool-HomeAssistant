@@ -78,6 +78,9 @@ def auto_stub_legacy_migration():
             "custom_components.bosch_smart_camera.async_update_legacy_folder_issue",
             new=AsyncMock(),
         ),
+        patch(
+            "custom_components.bosch_smart_camera.async_update_legacy_services_issue"
+        ),
     ):
         yield
 

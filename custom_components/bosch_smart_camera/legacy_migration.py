@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentryData
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -29,6 +29,7 @@ from .const import DOMAIN, LEGACY_DOMAIN, STORAGE_PREFIX
 _LOGGER = logging.getLogger(__name__)
 
 LEGACY_FOLDER_ISSUE = "legacy_folder"
+LEGACY_SERVICES_ISSUE = "legacy_services"
 
 # Marks an entry created by the "migrate" flow step; only such an entry adopts the
 # legacy setup (a fresh login with another account must not take it over).
@@ -267,8 +268,8 @@ async def async_update_legacy_folder_issue(
 
 
 LEGACY_ALIASES_KEY = "legacy_service_aliases"
-# Entries created before this day predate the alias cut-off and keep the
-# `bosch_shc_camera.*` aliases; newer plain installs never had that domain.
+# Entries created before this day may still have automations that call the
+# removed `bosch_shc_camera.*` actions; newer plain installs never had them.
 _ALIAS_CUTOFF = datetime(2026, 11, 27, tzinfo=UTC)
 
 
@@ -280,52 +281,20 @@ def entry_wants_legacy_aliases(entry: ConfigEntry) -> bool:
     return bool(entry.created_at < _ALIAS_CUTOFF)
 
 
-def should_register_legacy_aliases(hass: HomeAssistant) -> bool:
-    """Aliases only exist for set-ups that came from the old domain.
+def async_update_legacy_services_issue(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Tell set-ups from the old domain that `bosch_shc_camera.*` actions are gone.
 
-    HA logs `Failed to load services.yaml` for every service domain without an
-    integration, so a fresh install must not get the alias domain at all.
+    The aliases were removed: HA logs `Failed to load services.yaml` for every
+    service domain that has no integration behind it (GitHub #90).
     """
-    return any(
-        entry_wants_legacy_aliases(entry)
-        for entry in hass.config_entries.async_entries(DOMAIN)
-    )
-
-
-def register_legacy_service_aliases(
-    hass: HomeAssistant, *, force: bool = False
-) -> None:
-    """Keep `bosch_shc_camera.<service>` working for automations that call it.
-
-    `force` replaces handlers a still-installed legacy copy registered itself.
-    """
-    for name, service in hass.services.async_services_for_domain(DOMAIN).items():
-        if hass.services.has_service(LEGACY_DOMAIN, name):
-            if not force:
-                continue
-            hass.services.async_remove(LEGACY_DOMAIN, name)
-
-        async def _alias(call: ServiceCall, _name: str = name) -> Any:
-            _LOGGER.warning(
-                "Service %s.%s is deprecated, use %s.%s",
-                LEGACY_DOMAIN,
-                _name,
-                DOMAIN,
-                _name,
-            )
-            return await hass.services.async_call(
-                DOMAIN,
-                _name,
-                dict(call.data),
-                blocking=True,
-                context=call.context,
-                return_response=call.return_response,
-            )
-
-        hass.services.async_register(
-            LEGACY_DOMAIN,
-            name,
-            _alias,
-            schema=None,
-            supports_response=service.supports_response,
+    if entry_wants_legacy_aliases(entry):
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            LEGACY_SERVICES_ISSUE,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=LEGACY_SERVICES_ISSUE,
         )
+    else:
+        ir.async_delete_issue(hass, DOMAIN, LEGACY_SERVICES_ISSUE)

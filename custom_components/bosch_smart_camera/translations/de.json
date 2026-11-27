@@ -1199,6 +1199,10 @@
     "legacy_folder": {
       "title": "Übrig gebliebener Ordner der Vorversion",
       "description": "Deine Einrichtung wurde in die neue Integration `bosch_smart_camera` übernommen. Der alte Ordner `{folder}` wird nicht mehr verwendet. Lösche ihn und starte Home Assistant neu."
+    },
+    "legacy_services": {
+      "title": "Alte Aktionsnamen entfernt",
+      "description": "Die Aktionen `bosch_shc_camera.*` gibt es nicht mehr. Rufe in Automationen, Skripten und Dashboards stattdessen `bosch_smart_camera.*` auf (gleiche Namen und Felder)."
     }
   },
   "system_health": {
