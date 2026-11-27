@@ -19161,11 +19161,29 @@ class TestAsyncSetup:
         with (
             patch(f"{MODULE}._register_services"),
             patch(f"{MODULE}.register_legacy_service_aliases") as aliases,
+            patch(f"{MODULE}.should_register_legacy_aliases", return_value=True),
             patch(f"{MODULE}.async_import_client_credential", new=AsyncMock()),
         ):
             await async_setup(hass, {})
 
         aliases.assert_called_once_with(hass)
+
+    @pytest.mark.asyncio
+    async def test_async_setup_skips_legacy_aliases_on_fresh_install(self):
+        """GitHub #90: no alias domain without integration (services.yaml error)."""
+        from custom_components.bosch_smart_camera import async_setup
+
+        hass = self._make_lovelace_hass(is_running=True)
+
+        with (
+            patch(f"{MODULE}._register_services"),
+            patch(f"{MODULE}.register_legacy_service_aliases") as aliases,
+            patch(f"{MODULE}.should_register_legacy_aliases", return_value=False),
+            patch(f"{MODULE}.async_import_client_credential", new=AsyncMock()),
+        ):
+            await async_setup(hass, {})
+
+        aliases.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_async_setup_not_running_registers_listener(self):

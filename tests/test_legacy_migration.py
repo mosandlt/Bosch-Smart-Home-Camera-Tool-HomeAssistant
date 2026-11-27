@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -36,6 +37,7 @@ from custom_components.bosch_smart_camera.legacy_migration import (
     get_legacy_entry,
     legacy_subentries,
     register_legacy_service_aliases,
+    should_register_legacy_aliases,
 )
 
 CAM = "11111111-2222-3333-4444-555555555555"
@@ -132,7 +134,11 @@ async def test_legacy_entry_is_unloaded_first_and_data_taken_over(
         assert await async_migrate_legacy_entry(hass, new) is True
 
     assert calls[:2] == ["unload", "move"]
-    assert new.data == {"bearer_token": "rotated", "refresh_token": "new-r"}
+    assert new.data == {
+        "bearer_token": "rotated",
+        "refresh_token": "new-r",
+        "legacy_service_aliases": True,
+    }
 
 
 async def test_failed_unload_keeps_the_legacy_entry(
@@ -544,3 +550,27 @@ async def test_leftover_folder_with_foreign_manifest_is_kept(
         await async_update_legacy_folder_issue(hass)
     assert folder.exists()
     assert ir.async_get(hass).async_get_issue(DOMAIN, LEGACY_FOLDER_ISSUE) is not None
+
+
+async def test_fresh_install_gets_no_legacy_alias_domain(hass: HomeAssistant) -> None:
+    """GitHub #90: an alias domain without integration logs a services.yaml error."""
+    fresh = MockConfigEntry(domain=DOMAIN, data={})
+    object.__setattr__(fresh, "created_at", datetime(2026, 12, 1, tzinfo=UTC))
+    fresh.add_to_hass(hass)
+    assert should_register_legacy_aliases(hass) is False
+
+
+async def test_pre_cutoff_and_migrated_entries_keep_aliases(
+    hass: HomeAssistant,
+) -> None:
+    old = MockConfigEntry(domain=DOMAIN, data={})
+    object.__setattr__(old, "created_at", datetime(2026, 11, 10, tzinfo=UTC))
+    old.add_to_hass(hass)
+    assert should_register_legacy_aliases(hass) is True
+
+
+async def test_migrated_flag_beats_creation_date(hass: HomeAssistant) -> None:
+    new = MockConfigEntry(domain=DOMAIN, data={"legacy_service_aliases": True})
+    object.__setattr__(new, "created_at", datetime(2026, 12, 1, tzinfo=UTC))
+    new.add_to_hass(hass)
+    assert should_register_legacy_aliases(hass) is True

@@ -73,6 +73,7 @@ from .legacy_migration import (
     async_migrate_legacy_entry,
     async_update_legacy_folder_issue,
     register_legacy_service_aliases,
+    should_register_legacy_aliases,
 )
 from .local_data_interface import STATE_ACTIVE
 from .services import _register_services
@@ -388,7 +389,8 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     # the config entry is in setup_retry (e.g. token expired).
     # Without this, the Lovelace card shows "action not found" errors.
     _register_services(hass)
-    register_legacy_service_aliases(hass)
+    if should_register_legacy_aliases(hass):
+        register_legacy_service_aliases(hass)
 
     # Auto-import Bosch's fixed public OAuth2 client (identical in every
     # Android APK, not a per-user secret) as the default application

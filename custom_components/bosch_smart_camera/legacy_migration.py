@@ -12,6 +12,7 @@ import inspect
 import json
 import logging
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -172,6 +173,8 @@ def _clear_marker(
     """Drop the migrate marker, taking over the legacy entry's current data."""
     data = {**entry.data, **(dict(legacy.data) if legacy else {})}
     data.pop(LEGACY_ENTRY_KEY, None)
+    if legacy is not None:
+        data[LEGACY_ALIASES_KEY] = True
     hass.config_entries.async_update_entry(entry, data=data)
 
 
@@ -261,6 +264,32 @@ async def async_update_legacy_folder_issue(
         )
     else:
         ir.async_delete_issue(hass, DOMAIN, LEGACY_FOLDER_ISSUE)
+
+
+LEGACY_ALIASES_KEY = "legacy_service_aliases"
+# Entries created before this day predate the alias cut-off and keep the
+# `bosch_shc_camera.*` aliases; newer plain installs never had that domain.
+_ALIAS_CUTOFF = datetime(2026, 11, 27, tzinfo=UTC)
+
+
+def entry_wants_legacy_aliases(entry: ConfigEntry) -> bool:
+    """True when this entry's owner may still call `bosch_shc_camera.*`."""
+    flag = entry.data.get(LEGACY_ALIASES_KEY)
+    if flag is not None:
+        return bool(flag)
+    return bool(entry.created_at < _ALIAS_CUTOFF)
+
+
+def should_register_legacy_aliases(hass: HomeAssistant) -> bool:
+    """Aliases only exist for set-ups that came from the old domain.
+
+    HA logs `Failed to load services.yaml` for every service domain without an
+    integration, so a fresh install must not get the alias domain at all.
+    """
+    return any(
+        entry_wants_legacy_aliases(entry)
+        for entry in hass.config_entries.async_entries(DOMAIN)
+    )
 
 
 def register_legacy_service_aliases(
