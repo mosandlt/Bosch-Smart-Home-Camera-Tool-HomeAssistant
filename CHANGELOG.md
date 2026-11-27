@@ -7,6 +7,7 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v18.3.0] - 2026-11-27
 ### Changed
 
 - **The old `bosch_shc_camera.*` actions are removed.** They were compatibility aliases for the pre-v18 domain; Home Assistant logged `Failed to load services.yaml for integration: bosch_shc_camera` because no integration stands behind that name. Call `bosch_smart_camera.*` instead (same names and fields). Setups that came from the old domain get a repair hint (#90).
