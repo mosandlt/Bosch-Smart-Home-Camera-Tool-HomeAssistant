@@ -2461,7 +2461,7 @@ def _make_motion_light_sens_r2(motion_light_cache=None):
 class TestMotionLightSensitivityNumber:
     def test_native_value(self):
         sw = _make_motion_light_sens_r2({CAM_ID: {"motionLightSensitivity": 3}})
-        assert sw.native_value == 3.0
+        assert sw.native_value == 4.0
 
     def test_available_false_when_cache_empty(self):
         sw = _make_motion_light_sens_r2({})
@@ -2481,7 +2481,7 @@ class TestMotionLightSensitivityNumber:
         await sw.async_set_native_value(4.0)
         sw.coordinator.async_put_camera.assert_awaited_once()
         body = sw.coordinator.async_put_camera.call_args[0][2]
-        assert body["motionLightSensitivity"] == 4
+        assert body["motionLightSensitivity"] == 3
 
 
 def _make_darkness_threshold_r2(global_lighting_cache=None):
@@ -3004,3 +3004,24 @@ def test_motion_light_sensitivity_covers_all_eight_app_levels() -> None:
     assert (description.native_min_value, description.native_max_value) == (0, 7)
     assert description.native_step == 1
     assert _CFG_NUMBER_RANGES[SETTING_MOTION_LIGHT_SENSITIVITY] == (0, 7)
+
+
+@pytest.mark.parametrize(("camera_value", "shown"), [(0, 7.0), (7, 0.0), (6, 1.0)])
+def test_motion_light_sensitivity_follows_the_app_scale(
+    camera_value: int, shown: float
+) -> None:
+    """GitHub #91: the camera stores 7 for low and 0 for high; the entity shows
+    the app's scale (0 low, 7 high)."""
+    sw = _make_motion_light_sens_r2({CAM_ID: {"motionLightSensitivity": camera_value}})
+    assert sw.native_value == shown
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("entity_value", "sent"), [(0.0, 7), (7.0, 0), (1.0, 6)])
+async def test_motion_light_sensitivity_write_converts_back(
+    entity_value: float, sent: int
+) -> None:
+    sw = _make_motion_light_sens_r2({CAM_ID: {"motionLightSensitivity": 3}})
+    await sw.async_set_native_value(entity_value)
+    body = sw.coordinator.async_put_camera.call_args[0][2]
+    assert body["motionLightSensitivity"] == sent

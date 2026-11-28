@@ -197,8 +197,8 @@ _NUMBER_CASES = [
     (BoschSpeakerLevelNumber, "speaker_level", 50, 50.0, 80.0),
     (BoschSpeakerLevelNumber, "speaker_level", 0, 0.0, 80.0),
     (BoschLensElevationNumber, "lens_elevation", 1.85, 1.85, 2.0),
-    (BoschMotionLightSensitivityNumber, "motion_light_sensitivity", 3, 3.0, 5.0),
-    (BoschMotionLightSensitivityNumber, "motion_light_sensitivity", 1, 1.0, 5.0),
+    (BoschMotionLightSensitivityNumber, "motion_light_sensitivity", 3, 4.0, 2.0),
+    (BoschMotionLightSensitivityNumber, "motion_light_sensitivity", 1, 6.0, 2.0),
     (BoschDarknessThresholdNumber, "darkness_threshold", 0.67, 67.0, 47.0),
     (BoschDarknessThresholdNumber, "darkness_threshold", 0, 0.0, 47.0),
     (BoschDarknessThresholdNumber, "darkness_threshold", 1, 100.0, 47.0),
@@ -315,7 +315,7 @@ class TestWrites:
         n.async_write_ha_state = MagicMock()
         await n.async_set_native_value(4)
         body = c.async_put_camera.await_args.args[2]
-        assert body["motionLightSensitivity"] == 4
+        assert body["motionLightSensitivity"] == 3
         assert body["lightOnMotionEnabled"] is False
 
     @pytest.mark.asyncio

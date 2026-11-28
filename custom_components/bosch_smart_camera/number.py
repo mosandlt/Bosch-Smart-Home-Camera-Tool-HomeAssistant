@@ -944,14 +944,21 @@ class BoschBottomLedBrightnessNumber(BoschNumberEntity):
 #
 # Reads from GET /v11/video_inputs/{id}/lighting/motion → motionLightSensitivity
 # Writes via PUT /v11/video_inputs/{id}/lighting/motion with full body.
-# The app's slider maps its 8 positions onto the values 0-7 (GitHub #91).
+# The camera stores 7 for the lowest and 0 for the highest sensitivity (the
+# app lists its slider positions as 7..0); the entity shows the app's scale,
+# so 7 is high, and converts on read and write (GitHub #91).
+_MOTION_LIGHT_SENSITIVITY_MAX = 7
+
+
 def _motion_light_sensitivity_value(entity: BoschNumberEntity) -> float | None:
     local = _local_number(entity, ldi_rest.SETTING_MOTION_LIGHT_SENSITIVITY)
     if local is not None:
-        return local
+        return _MOTION_LIGHT_SENSITIVITY_MAX - local
     cache = entity.coordinator.motion_light_cache.get(entity._cam_id, {})
     val = cache.get("motionLightSensitivity")
-    return float(val) if val is not None else None
+    if val is None:
+        return None
+    return float(_MOTION_LIGHT_SENSITIVITY_MAX - val)
 
 
 def _motion_light_sensitivity_available(entity: BoschNumberEntity) -> bool:
@@ -977,7 +984,7 @@ async def _motion_light_sensitivity_set(
         if not cache:
             await skip_write_without_cloud_block(entity, "Motion light sensitivity")
             return
-        cache["motionLightSensitivity"] = round(value)
+        cache["motionLightSensitivity"] = _MOTION_LIGHT_SENSITIVITY_MAX - round(value)
         success = await entity.coordinator.async_put_camera(
             entity._cam_id, "lighting/motion", cache
         )

@@ -142,7 +142,7 @@ _NUMBERS = [
         BoschMotionLightSensitivityNumber,
         "motion_light_sensitivity",
         3,
-        3.0,
+        4.0,
         "motion_light_cache",
     ),
     (
@@ -506,7 +506,7 @@ class TestWritersWithoutCloudCopy:
                     "lightOnMotionEnabled": True,
                     "lightOnMotionFollowUpTimeSeconds": 60,
                     "frontLightSettings": {"brightness": 0},
-                    "motionLightSensitivity": 1,
+                    "motionLightSensitivity": 6,
                 },
             ),
             (
@@ -560,7 +560,7 @@ class TestLightingWriteLocks:
         assert [ep for ep, _ in bodies] == ["lighting/motion", "lighting/motion"]
         last = bodies[-1][1]
         assert last["lightOnMotionEnabled"] is False
-        assert last["motionLightSensitivity"] == 2
+        assert last["motionLightSensitivity"] == 5
         assert c.motion_light_cache[CAM] == last
 
     @pytest.mark.asyncio
