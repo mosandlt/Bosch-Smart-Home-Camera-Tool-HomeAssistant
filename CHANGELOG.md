@@ -7,6 +7,8 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+## [v18.3.2] - 2026-11-28
+
 ### Fixed
 
 - **Motion light sensitivity now runs in the same direction as the Bosch app.** The camera stores 7 for the lowest and 0 for the highest sensitivity; the entity showed those raw numbers, so it read backwards compared with the app. It now shows the app's scale (0 = low, 7 = high). Automations that set this number need their values mirrored (`7 - old value`) (#91).
