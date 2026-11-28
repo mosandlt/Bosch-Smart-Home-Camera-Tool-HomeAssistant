@@ -3025,3 +3025,8 @@ async def test_motion_light_sensitivity_write_converts_back(
     await sw.async_set_native_value(entity_value)
     body = sw.coordinator.async_put_camera.call_args[0][2]
     assert body["motionLightSensitivity"] == sent
+
+
+def test_motion_light_sensitivity_none_when_the_cloud_block_has_no_value() -> None:
+    sw = _make_motion_light_sens_r2({CAM_ID: {"duration": 30}})
+    assert sw.native_value is None
