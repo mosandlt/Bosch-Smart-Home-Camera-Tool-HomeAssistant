@@ -263,7 +263,7 @@ class TestEntities:
             (BoschSpeakerLevelNumber, "speaker_level", True),
             (BoschLensElevationNumber, "lens_elevation", 10.0),
             (BoschLensElevationNumber, "lens_elevation", 0.0),
-            (BoschMotionLightSensitivityNumber, "motion_light_sensitivity", 0),
+            (BoschMotionLightSensitivityNumber, "motion_light_sensitivity", -1),
             (BoschMotionLightSensitivityNumber, "motion_light_sensitivity", 9),
             (BoschDarknessThresholdNumber, "darkness_threshold", 1.5),
             (BoschDarknessThresholdNumber, "darkness_threshold", -0.1),
@@ -489,7 +489,7 @@ class TestWriteHoldsAndMerge:
             _light_coord(),
             darkness_threshold=1.5,
             speaker_level=101,
-            motion_light_sensitivity=0,
+            motion_light_sensitivity=8,
         )
         assert merge_local_into_cfg(c, CAM, {"darknessThreshold": 0.4}, "lighting") == {
             "darknessThreshold": 0.4

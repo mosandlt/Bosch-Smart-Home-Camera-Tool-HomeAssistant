@@ -7,6 +7,10 @@ versions see this file or the [GitHub Releases page](https://github.com/mosandlt
 
 ## [Unreleased]
 
+### Fixed
+
+- **Motion light sensitivity covers all 8 levels of the Bosch app.** The number entity was limited to 1–5, so the values the app sets (0–7) were out of range: levels above 5 could not be set from Home Assistant, and a value the camera reported locally outside 1–5 was ignored in favour of the slower cloud copy, so changes made in the app showed up late. The range is now 0–7 (#91).
+
 ## [v18.3.0] - 2026-11-27
 
 ### Changed

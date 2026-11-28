@@ -2988,3 +2988,19 @@ class TestWhiteBalanceSingleLockBlock:
         await e.async_set_native_value(0.0)
         assert CAM_ID in coord.light_set_at
         coord.async_update_listeners.assert_called_once()
+
+
+def test_motion_light_sensitivity_covers_all_eight_app_levels() -> None:
+    """GitHub #91: the app's slider has 8 positions, mapped onto the values 0-7."""
+    from custom_components.bosch_smart_camera.ldi_local import _CFG_NUMBER_RANGES
+    from custom_components.bosch_smart_camera.ldi_rest import (
+        SETTING_MOTION_LIGHT_SENSITIVITY,
+    )
+    from custom_components.bosch_smart_camera.number import (
+        MOTION_LIGHT_SENSITIVITY_DESCRIPTION,
+    )
+
+    description = MOTION_LIGHT_SENSITIVITY_DESCRIPTION
+    assert (description.native_min_value, description.native_max_value) == (0, 7)
+    assert description.native_step == 1
+    assert _CFG_NUMBER_RANGES[SETTING_MOTION_LIGHT_SENSITIVITY] == (0, 7)

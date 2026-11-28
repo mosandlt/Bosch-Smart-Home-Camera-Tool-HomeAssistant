@@ -543,7 +543,7 @@ _CFG_NUMBER_RANGES: dict[str, tuple[float, float]] = {
     ldi_rest.SETTING_ALARM_DELAY: (10, 300),
     ldi_rest.SETTING_ALARM_ACTIVATION_DELAY: (0, 600),
     ldi_rest.SETTING_PRE_ALARM_DELAY: (0, 300),
-    ldi_rest.SETTING_MOTION_LIGHT_SENSITIVITY: (1, 5),
+    ldi_rest.SETTING_MOTION_LIGHT_SENSITIVITY: (0, 7),
     ldi_rest.SETTING_DARKNESS_THRESHOLD: (0, 1),
     ldi_rest.SETTING_SPEAKER_LEVEL: (0, 100),
 }

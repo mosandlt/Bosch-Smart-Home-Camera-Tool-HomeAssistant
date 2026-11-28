@@ -506,7 +506,7 @@ class TestWritersWithoutCloudCopy:
                     "lightOnMotionEnabled": True,
                     "lightOnMotionFollowUpTimeSeconds": 60,
                     "frontLightSettings": {"brightness": 0},
-                    "motionLightSensitivity": 2,
+                    "motionLightSensitivity": 1,
                 },
             ),
             (

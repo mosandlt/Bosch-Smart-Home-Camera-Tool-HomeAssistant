@@ -940,11 +940,11 @@ class BoschBottomLedBrightnessNumber(BoschNumberEntity):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Motion-triggered light sensitivity 1-5 (Gen2 only).
+# Motion-triggered light sensitivity 0-7, 8 levels like the Bosch app (Gen2 only).
 #
 # Reads from GET /v11/video_inputs/{id}/lighting/motion → motionLightSensitivity
 # Writes via PUT /v11/video_inputs/{id}/lighting/motion with full body.
-# 1 = low sensitivity, 5 = high sensitivity.
+# The app's slider maps its 8 positions onto the values 0-7 (GitHub #91).
 def _motion_light_sensitivity_value(entity: BoschNumberEntity) -> float | None:
     local = _local_number(entity, ldi_rest.SETTING_MOTION_LIGHT_SENSITIVITY)
     if local is not None:
@@ -989,8 +989,8 @@ async def _motion_light_sensitivity_set(
 MOTION_LIGHT_SENSITIVITY_DESCRIPTION = BoschNumberEntityDescription(
     key="motion_light_sensitivity",
     translation_key="motion_light_sensitivity",
-    native_min_value=1,
-    native_max_value=5,
+    native_min_value=0,
+    native_max_value=7,
     native_step=1,
     mode=NumberMode.SLIDER,
     entity_category=EntityCategory.CONFIG,
@@ -1003,7 +1003,7 @@ MOTION_LIGHT_SENSITIVITY_DESCRIPTION = BoschNumberEntityDescription(
 
 
 class BoschMotionLightSensitivityNumber(BoschNumberEntity):
-    """Number entity: motion-triggered light sensitivity 1-5 (Gen2 only)."""
+    """Number entity: motion-triggered light sensitivity 0-7 (Gen2 only)."""
 
     entity_description = MOTION_LIGHT_SENSITIVITY_DESCRIPTION
 
