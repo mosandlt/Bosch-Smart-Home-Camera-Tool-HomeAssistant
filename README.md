@@ -989,7 +989,7 @@ sequenceDiagram
 | Front light color temperature | `number` | Gen2 only |
 | Top LED brightness (0–100%) | `number` | Gen2 only |
 | Bottom LED brightness (0–100%) | `number` | Gen2 only |
-| Motion light sensitivity (1–5) | `number` | Gen2 only |
+| Motion light sensitivity (0–7) | `number` | Gen2 only |
 
 > **RCP diagnostic sensors** are disabled by default. Enable them in entity settings to inspect camera firmware capabilities. Gen2 cameras will automatically expose new alarm types and analytics modules.
 
